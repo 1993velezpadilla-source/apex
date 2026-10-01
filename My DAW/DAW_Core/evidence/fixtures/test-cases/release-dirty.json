@@ -1,0 +1,44 @@
+﻿{
+    "source":  {
+                   "outerCommit":  "0000000000000000000000000000000000000000",
+                   "outerDirty":  true,
+                   "applicationDirty":  false,
+                   "applicationCommit":  "0000000000000000000000000000000000000000"
+               },
+    "runId":  "x",
+    "environment":  {
+                        "locale":  "en-US",
+                        "cpu":  "x",
+                        "os":  "x",
+                        "powerMode":  "x"
+                    },
+    "execution":  {
+                      "exitCode":  0,
+                      "command":  [
+                                      "x"
+                                  ],
+                      "startedUtc":  "2026-01-01T00:00:00Z",
+                      "seed":  0,
+                      "durationMs":  0
+                  },
+    "build":  {
+                  "configuration":  "Debug",
+                  "platform":  "x64",
+                  "binarySha256":  "0000000000000000000000000000000000000000000000000000000000000000",
+                  "toolset":  "v145"
+              },
+    "evidenceGrade":  "release",
+    "results":  {
+                    "resultGroups":  0,
+                    "assertionsPassed":  0,
+                    "assertionsFailed":  0
+                },
+    "dependencies":  {
+                         "juceVersion":  "8.0.12"
+                     },
+    "artifacts":  [
+
+                  ],
+    "schemaVersion":  1,
+    "suiteId":  "x"
+}

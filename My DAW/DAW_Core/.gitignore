@@ -1,0 +1,81 @@
+# Visual Studio and MSBuild outputs
+.vs/
+**/.vs/
+Builds/VisualStudio2026/x64/
+Builds/VisualStudio2026/*/x64/
+Builds/VisualStudio2026/DAW_Core_App/Debug/
+Builds/VisualStudio2026/DAW_Core_App/Release/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+*.recipe
+*.exp
+*.lib
+*.dll
+*.exe
+*.iobj
+*.ipdb
+*.suo
+*.user
+*.VC.db
+
+# Generated logs and local diagnostics
+*.log
+build_err.txt
+build_errors.txt
+build_warnings.txt
+build_warnings2.txt
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+*.tmp
+*.bak
+*.swp
+
+# CMake outputs in vendored projects
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake-build-*/
+
+# Retained unmanaged dependency copies
+/Source/ThirdParty/signalsmith-stretch2/
+
+# APEX generated diagnostics and test evidence
+.apex-debug/
+Builds/VisualStudio2026/crash-reports/
+Builds/VisualStudio2026/*_results.txt
+evidence/runs/
+TestResults/
+*.trx
+*.dmp
+*.pch
+Builds/VisualStudio2026/dumpbin_release.txt
+
+# Runtime project media and recovery output
+Recordings/
+**/Recordings/
+.apex_autosaves/
+**/.apex_autosaves/
+.backups/
+**/.backups/
+
+# Local secrets and signing material
+.env
+.env.*
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Generated .NET bridge outputs
+tools/VisualStudioBridge/bin/
+tools/VisualStudioBridge/obj/
+
+# Canonical DAW Brain lives at the official workspace root
+/DAW_BRAIN.md

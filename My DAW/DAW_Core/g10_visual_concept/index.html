@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>APEX G10 — Concepto visual v2 (faders finos + analyzer curva real)</title>
+<style>
+/* ============================================================================
+   APEX G10 — CONCEPTO VISUAL v2
+   ----------------------------------------------------------------------------
+   Cambios respecto a v1:
+   1. FADERS MÁS PEQUEÑOS: track de 2px, ojo reducido (aura 14px, shell 9px,
+      iris 4x5.2, pupil 1.6, rune 2.2) — el handle ya no domina la interfaz.
+   2. ANALYZER CURVA: trazo continuo suave + fill tenue + glow discreto.
+      NADA de barras. Los datos son REALES (Web Audio API: AnalyserNode
+      después de 10 filtros peaking controlados por los faders).
+   3. AUDIO REAL: boost/cut de un fader cambia la curva de verdad; silencio
+      => la curva cae; bypass => respuesta plana real.
+   4. Contrato de colores de bandas intacto (violeta/fuchsia/plum/gold/
+      pepsi blue/lavender). Analyzer maroon ONLY.
+   5. Todo JUCE-translatable: la curva se dibuja con Path + PathStrokeType
+      (glow = 3 strokes de ancho creciente y alpha decreciente, sin
+      shadowBlur caro); el fill es un Path cerrado con gradiente vertical.
+   ============================================================================ */
+
+:root {
+  --shell-outer: #030305;
+  --shell-inner: #060609;
+  --panel: #0A0A0F;
+  --panel-line: #1A1A22;
+  --text-primary: #F2F2F7;
+  --text-secondary: #8A8A99;
+  --text-dim: #5A5A68;
+  --accent: #FD3F92;
+  --accent-core: #FD3F92;
+  --maroon-core: #800000;
+  --maroon-glow: #B03030;
+  --maroon-deep: #4A0000;
+  --grid: #1E1E28;
+  --track: #14141B;
+  --track-active: #2A2A34;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  background: #000;
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 24px 0 48px;
+}
+
+/* ============================================================================
+   SHELL 1600x980 (escala del blueprint; el editor JUCE es 1000x612 = x0.625)
+   ============================================================================ */
+.g10-shell {
+  width: 1600px;
+  height: 980px;
+  position: relative;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--shell-outer) 100%);
+  border: 1px solid var(--panel-line);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 0 60px rgba(128, 0, 0, 0.12), 0 30px 60px rgba(0, 0, 0, 0.6);
+  flex-shrink: 0;
+}
+
+/* ============================================================================
+   HEADER
+   ============================================================================ */
+.g10-header {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 100px;
+  border-bottom: 1px solid var(--panel-line);
+  display: flex;
+  align-items: center;
+  padding: 0 42px;
+  gap: 22px;
+}
+.g10-logo {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #FF7AB0, var(--accent-core) 60%, #7A1F4A);
+  box-shadow: 0 0 18px rgba(253, 63, 146, 0.45);
+}
+.g10-title {
+  font-size: 40px; font-weight: 800; letter-spacing: 1px;
+}
+.g10-subtitle {
+  font-size: 14px; color: var(--text-secondary);
+  letter-spacing: 3px; margin-top: 2px;
+}
+.g10-header-right {
+  margin-left: auto;
+  font-size: 12px; color: var(--text-dim);
+  letter-spacing: 2px; text-align: right;
+  line-height: 1.7;
+}
+
+/* ============================================================================
+   ANALYZER PANEL (curva real)
+   ============================================================================ */
+.analyzer-panel {
+  position: absolute;
+  left: 42px; top: 110px;
+  width: 1517px; height: 340px;
+  background: linear-gradient(180deg, #0C0C12 0%, #08080D 100%);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+#spectrum {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+}
+.analyzer-labels {
+  position: absolute;
+  left: 0; right: 0; bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 14px;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+.analyzer-badge {
+  position: absolute;
+  top: 10px; right: 12px;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; letter-spacing: 2px;
+  color: var(--maroon-glow);
+  pointer-events: none;
+}
+.analyzer-badge .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--maroon-glow);
+  box-shadow: 0 0 8px var(--maroon-glow);
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ============================================================================
+   FADER COLUMNS (más finos y elegantes)
+   ============================================================================ */
+.fader-row {
+  position: absolute;
+  left: 42px; top: 470px;
+  width: 1517px; height: 340px;
+  display: flex;
+  justify-content: space-between;
+}
+.fader {
+  position: relative;
+  width: 147px; height: 100%;
+  cursor: ns-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.fader .freq-label {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  text-align: center;
+  font-size: 17px; font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.fader .name-label {
+  position: absolute;
+  top: 26px; left: 0; right: 0;
+  text-align: center;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+.fader .gain-label {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  text-align: center;
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  transition: color 0.12s;
+}
+.fader.dragging .gain-label { color: var(--text-primary); }
+
+/* Track: 2px, sutil */
+.fader .track {
+  position: absolute;
+  left: 50%; top: 52px; bottom: 34px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, var(--track-active), var(--track) 30%, var(--track) 70%, var(--track-active));
+  border-radius: 1px;
+}
+/* Fill de ganancia (sutil, color de banda con alpha bajo) */
+.fader .track .fill {
+  position: absolute;
+  left: 0; width: 100%;
+  background: var(--band-core);
+  opacity: 0.35;
+  border-radius: 1px;
+}
+/* Ticks +12 / 0 / -12 */
+.fader .tick {
+  position: absolute;
+  left: 50%; width: 10px; height: 1px;
+  transform: translateX(-50%);
+  background: var(--panel-line);
+}
+.fader .tick.t0 { background: var(--text-dim); }
+
+/* ============================================================================
+   EYE (handle pequeño y elegante)
+   Geometría v2: aura 34px, shell 18px, iris 4x5.2, pupil 1.6, rune 2.2
+   ============================================================================ */
+.eye {
+  position: absolute;
+  left: 50%; top: 0;
+  width: 34px; height: 34px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.eye .aura {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--band-halo) 0%, transparent 68%);
+  opacity: 0.5;
+}
+.eye .shell {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 22px; height: 22px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, var(--band-core-light), var(--band-core) 55%, var(--band-core-dark));
+  box-shadow: 0 0 10px var(--band-halo), inset 0 0 4px rgba(255,255,255,0.18);
+}
+.eye .iris {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 4px; height: 5.2px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.92);
+}
+.eye .pupil {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 1.6px; height: 1.6px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.85);
+}
+.eye .rune {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 3.1px; height: 3.1px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--band-halo);
+  opacity: 0.9;
+}
+/* Blink: squash vertical del shell/iris/pupil (220ms, como el JUCE real) */
+.eye.blinking .shell,
+.eye.blinking .iris,
+.eye.blinking .pupil,
+.eye.blinking .rune {
+  animation: eyeSquash 0.22s ease-in-out;
+}
+@keyframes eyeSquash {
+  0%   { transform: translate(-50%, -50%) scaleY(1); }
+  50%  { transform: translate(-50%, -50%) scaleY(0.08); }
+  100% { transform: translate(-50%, -50%) scaleY(1); }
+}
+
+/* ============================================================================
+   CONTROL STRIP
+   ============================================================================ */
+.control-strip {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 130px;
+  border-top: 1px solid var(--panel-line);
+  display: flex;
+  align-items: center;
+  padding: 0 96px;
+  gap: 24px;
+}
+.knob {
+  width: 96px; height: 96px;
+  position: relative;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.knob .knob-body {
+  position: absolute; inset: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #2E2E3A, #14141B 60%, #0A0A0F);
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.knob .knob-pointer {
+  position: absolute;
+  left: 50%; top: 14px;
+  width: 3px; height: 26px;
+  transform-origin: 50% 34px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #F2F2F7, #8A8A99);
+  box-shadow: 0 0 6px rgba(242,242,247,0.35);
+}
+.knob .knob-label-text {
+  position: absolute;
+  left: 0; right: 0; bottom: -2px;
+  text-align: center;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+.knob .knob-value {
+  position: absolute;
+  left: 0; right: 0; top: -14px;
+  text-align: center;
+  font-size: 12px; font-weight: 700;
+  color: var(--text-primary);
+}
+.strip-buttons {
+  display: flex;
+  gap: 14px;
+  margin: 0 auto;
+}
+.strip-btn {
+  min-width: 130px;
+  padding: 14px 20px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--track);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.strip-btn:hover { border-color: var(--text-dim); color: var(--text-primary); }
+.strip-btn.on {
+  background: var(--accent-core);
+  border-color: var(--accent-core);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(253, 63, 146, 0.35);
+}
+.strip-btn.sound.on {
+  background: var(--maroon-glow);
+  border-color: var(--maroon-glow);
+  box-shadow: 0 0 18px rgba(176, 48, 48, 0.35);
+}
+
+/* ============================================================================
+   OVERLAY DE ARRANQUE (autoplay policy del navegador)
+   ============================================================================ */
+.start-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: rgba(3, 3, 5, 0.82);
+  backdrop-filter: blur(6px);
+  border-radius: 18px;
+}
+.start-overlay h2 {
+  font-size: 26px; font-weight: 800; letter-spacing: 2px;
+  color: var(--text-primary);
+}
+.start-overlay p {
+  font-size: 14px; color: var(--text-secondary);
+  max-width: 620px; text-align: center; line-height: 1.7;
+}
+.start-overlay .btn {
+  padding: 16px 44px;
+  border: none; border-radius: 10px;
+  background: linear-gradient(180deg, #B03030, #800000);
+  color: #fff;
+  font-family: inherit;
+  font-size: 16px; font-weight: 800;
+  letter-spacing: 2px;
+  cursor: pointer;
+  box-shadow: 0 0 30px rgba(176, 48, 48, 0.4);
+  transition: transform 0.12s;
+}
+.start-overlay .btn:hover { transform: scale(1.04); }
+
+/* ============================================================================
+   PANEL DE TRADUCCIÓN JUCE (referencia, no parte del plugin)
+   ============================================================================ */
+.juce-map {
+  width: 1600px;
+  margin-top: 26px;
+  background: #0A0A0F;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  padding: 22px 26px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.juce-map summary {
+  cursor: pointer;
+  font-size: 15px; font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+}
+.juce-map table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+}
+.juce-map th, .juce-map td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-line);
+  vertical-align: top;
+}
+.juce-map th {
+  color: var(--text-primary);
+  font-size: 12px; letter-spacing: 1px;
+}
+.juce-map code {
+  color: #FFB3C7;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<div class="g10-shell" id="shell">
+
+  <!-- ================= HEADER ================= -->
+  <header class="g10-header">
+    <div class="g10-logo"></div>
+    <div>
+      <div class="g10-title">G10</div>
+      <div class="g10-subtitle">APEX GRAPHIC EQUALIZER</div>
+    </div>
+    <div class="g10-header-right">
+      10-BAND ANALOG-STYLE EQ<br />
+      POST-EQ ANALYZER · REAL AUDIO
+    </div>
+  </header>
+
+  <!-- ================= ANALYZER (curva real) ================= -->
+  <div class="analyzer-panel">
+    <canvas id="spectrum"></canvas>
+    <div class="analyzer-badge"><span class="dot"></span>LIVE · POST-EQ</div>
+    <div class="analyzer-labels">
+      <span>20</span><span>50</span><span>100</span><span>200</span>
+      <span>500</span><span>1k</span><span>2k</span><span>5k</span>
+      <span>10k</span><span>20k</span>
+    </div>
+  </div>
+
+  <!-- ================= FADERS ================= -->
+  <div class="fader-row" id="faderRow"></div>
+
+  <!-- ================= CONTROL STRIP ================= -->
+  <div class="control-strip">
+    <div class="knob" id="knobIn">
+      <div class="knob-value" id="knobInVal">0.0</div>
+      <div class="knob-body"></div>
+      <div class="knob-pointer"></div>
+      <div class="knob-label-text">INPUT</div>
+    </div>
+
+    <div class="strip-buttons">
+      <button class="strip-btn" id="btnAnalog">ANALOG</button>
+      <button class="strip-btn" id="btnQuality">QUALITY</button>
+      <button class="strip-btn" id="btnBypass">BYPASS</button>
+      <button class="strip-btn sound" id="btnSound">SOUND ON</button>
+    </div>
+
+    <div class="knob" id="knobOut">
+      <div class="knob-value" id="knobOutVal">0.0</div>
+      <div class="knob-body"></div>
+      <div class="knob-pointer"></div>
+      <div class="knob-label-text">OUTPUT</div>
+    </div>
+  </div>
+
+  <!-- ================= START OVERLAY ================= -->
+  <div class="start-overlay" id="startOverlay">
+    <h2>APEX G10 — CONCEPTO v2</h2>
+    <p>
+      Este mockup usa <b>audio real</b> (Web Audio API): los faders controlan
+      10 filtros peaking biquad reales y la curva sale de un AnalyserNode
+      <b>después</b> de los filtros. Boostea 2 kHz y la curva sube de verdad;
+      silencia y la curva cae; BYPASS y la curva se aplana.
+    </p>
+    <button class="btn" id="btnStart">▶ INICIAR AUDIO REAL</button>
+  </div>
+
+</div>
+
+<!-- ================= TRADUCCIÓN A JUCE ================= -->
+<details class="juce-map">
+  <summary>📐 Cómo se traduce este concepto a JUCE real (G10SpectrumAnalyzerComponent / G10BandFaderComponent / G10EyeHandleComponent)</summary>
+  <table>
+    <tr><th>Concepto HTML</th><th>Implementación JUCE</th></tr>
+    <tr>
+      <td>Curva de trazo + fill + glow (canvas)</td>
+      <td><code>G10SpectrumAnalyzerComponent::paint()</code>: construir un <code>juce::Path</code> con los 140 puntos log (20 Hz–20 kHz, dBFS 0..-60), <code>path.lineTo()</code> por punto; glow = 3 <code>g.strokePath()</code> con <code>PathStrokeType</code> de ancho 6/3/1.5 y alpha 0.10/0.35/0.9 (sin shadowBlur — barato); fill = cerrar el path a la baseline y <code>g.fillPath()</code> con gradiente vertical maroon→transparente.</td>
+    </tr>
+    <tr>
+      <td>Datos reales (AnalyserNode post-filtros)</td>
+      <td>Ya implementado: <code>G10AnalyzerFifo</code> (audio thread) → <code>tick()</code> ~30 Hz (GUI thread) → FFT 2048 → <code>barTargetDb_</code> → <code>onPresentationTick()</code> (60–144 Hz) suaviza en dB (attack 0.05 s / release 0.40 s) → <code>barLevels_</code>. Solo cambia el <b>render</b>: de <code>fillRect</code> por barra a un <code>Path</code> continuo.</td>
+    </tr>
+    <tr>
+      <td>Ojo pequeño (aura 34 / shell 22 / iris 4x5.2 / pupil 1.6 / rune 2.2)</td>
+      <td><code>G10EyeHandleComponent::paint()</code>: reducir las constantes de geometría (aura 50→34, shell 42→22, iris 6.2x8.2→4x5.2, pupil 2.7→1.6, rune 3.2→2.2) y el <code>setBounds</code> del handle en <code>G10BandFaderComponent::refreshFromParameter()</code> (54→34 px). El blink squash ya existe (scaleY en <code>onPresentationTick</code>).</td>
+    </tr>
+    <tr>
+      <td>Track de 2px + fill de ganancia</td>
+      <td><code>G10BandFaderComponent::paint()</code>: track <code>addRoundedRectangle</code> de 4px→2px; añadir un rect de fill entre 0 dB y el handle con <code>bandCore().withAlpha(0.35f)</code>.</td>
+    </tr>
+    <tr>
+      <td>Faders arrastrables → filtros reales</td>
+      <td>Ya implementado: <code>mouseDown/Drag/Up</code> → <code>G10Parameter::setValueNotifyingHost</code> → DSP real. El mockup demuestra el mismo contrato con biquads Web Audio.</td>
+    </tr>
+    <tr>
+      <td>Blink squash (CSS animation 0.22 s)</td>
+      <td>Ya implementado: <code>startBlink()</code> (scheduler ~7.4 s) → <code>onPresentationTick()</code> anima el squash 220 ms con wall-clock; repaint solo del ojo.</td>
+    </tr>
+    <tr>
+      <td>Colores de banda</td>
+      <td>Sin cambios: <code>G10Colors::bandCore/bandHalo</code> (contrato intacto).</td>
+    </tr>
+    <tr>
+      <td>Maroon del analyzer</td>
+      <td>Sin cambios: <code>analyzerCore #800000 / analyzerGlow #B03030 / analyzerDeep #4A0000</code>.</td>
+    </tr>
+  </table>
+</details>
+
+<script>
+"use strict";
+
+/* ============================================================================
+   CONFIG — geometría (escala 1600x980, blueprint original)
+   ============================================================================ */
+const BANDS = [
+  { f: 31,    name: "DEEP",     label: "31 Hz",  core: "#191235", coreLight: "#2A2150", coreDark: "#0D0A20", halo: "#6653B8" },
+  { f: 63,    name: "PUNCH",    label: "63 Hz",  core: "#FD3F92", coreLight: "#FF7AB0", coreDark: "#8A1F4A", halo: "#FF8BC0" },
+  { f: 125,   name: "BODY",     label: "125 Hz", core: "#B34EC8", coreLight: "#D98AE8", coreDark: "#5A1F66", halo: "#F1A7FF" },
+  { f: 250,   name: "WARMTH",   label: "250 Hz", core: "#FFE27A", coreLight: "#FFF2B8", coreDark: "#B38A2A", halo: "#F17B3B" },
+  { f: 500,   name: "WOOD",     label: "500 Hz", core: "#FD3F92", coreLight: "#FF7AB0", coreDark: "#8A1F4A", halo: "#FF8BC0" },
+  { f: 1000,  name: "FOCUS",    label: "1 kHz",  core: "#FFE27A", coreLight: "#FFF2B8", coreDark: "#B38A2A", halo: "#F17B3B" },
+  { f: 2000,  name: "ATTACK",   label: "2 kHz",  core: "#33B5FF", coreLight: "#8AD4FF", coreDark: "#005CB9", halo: "#005CB9" },
+  { f: 4000,  name: "PRESENCE", label: "4 kHz",  core: "#FFE27A", coreLight: "#FFF2B8", coreDark: "#B38A2A", halo: "#F17B3B" },
+  { f: 8000,  name: "SHINE",    label: "8 kHz",  core: "#B34EC8", coreLight: "#D98AE8", coreDark: "#5A1F66", halo: "#F1A7FF" },
+  { f: 16000, name: "AIR",      label: "16 kHz", core: "#191360", coreLight: "#2A2560", coreDark: "#0A0A20", halo: "#6653B8" },
+];
+
+const FADER_TOP    = 52;   // +12 dB (y local del fader)
+const FADER_ZERO   = 52 + 128; // 0 dB
+const FADER_BOTTOM = 306;  // -12 dB
+const DB_RANGE     = 12;
+
+/* ============================================================================
+   AUDIO REAL (Web Audio API)
+   ============================================================================ */
+let audioCtx = null;
+let analyser = null;
+let filters = [];
+let chainOut = null;   // salida de la cadena de filtros
+let bypassOut = null;  // salida directa (bypass)
+let sourceGain = null;
+let soundOn = true;
+let muted = false;
+let engineOn = false;
+
+function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // ---- Fuente: bajo + acorde + ruido (contenido en todo el espectro) ----
+  const master = audioCtx.createGain();
+  master.gain.value = 0.5;
+  master.connect(audioCtx.destination);
+
+  sourceGain = audioCtx.createGain();
+  sourceGain.gain.value = 0.6;
+  sourceGain.connect(master);
+
+  // Bajo (sawtooth 55 Hz)
+  const bass = audioCtx.createOscillator();
+  bass.type = "sawtooth";
+  bass.frequency.value = 55;
+  const bassGain = audioCtx.createGain();
+  bassGain.gain.value = 0.5;
+  bass.connect(bassGain);
+  bassGain.connect(sourceGain);
+  bass.start();
+
+  // Acorde (triángulo 220 + 277 + 330)
+  [220, 277, 330].forEach(f => {
+    const o = audioCtx.createOscillator();
+    o.type = "triangle";
+    o.frequency.value = f;
+    const g = audioCtx.createGain();
+    g.gain.value = 0.22;
+    o.connect(g);
+    g.connect(sourceGain);
+    o.start();
+  });
+
+  // Ruido blanco (altas frecuencias)
+  const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = noiseBuf;
+  noise.loop = true;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0.10;
+  noise.connect(noiseGain);
+  noiseGain.connect(sourceGain);
+  noise.start();
+
+  // --- Cadena de 10 filtros peaking (los faders los controlan) ----
+  chainOut = audioCtx.createGain();
+  chainOut.gain.value = 1;
+  bypassOut = audioCtx.createGain();
+  bypassOut.gain.value = 0;
+
+  let prev = sourceGain;
+  filters = BANDS.map(b => {
+    const f = audioCtx.createBiquadFilter();
+    f.type = "peaking";
+    f.frequency.value = b.f;
+    f.Q.value = 1.0;
+    f.gain.value = 0;
+    prev.connect(f);
+    prev = f;
+    return f;
+  });
+  prev.connect(chainOut);
+  sourceGain.connect(bypassOut);
+
+  // --- AnalyserNode REAL post-filtros (lo que dibuja la curva) ---
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0;
+  chainOut.connect(analyser);
+  bypassOut.connect(analyser);
+}
+
+function setBypass(on) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  chainOut.gain.setTargetAtTime(on ? 0 : 1, t, 0.02);
+  bypassOut.gain.setTargetAtTime(on ? 1 : 0, t, 0.02);
+}
+
+function setSound(on) {
+  if (!audioCtx) return;
+  soundOn = on;
+  const t = audioCtx.currentTime;
+  sourceGain.gain.setTargetAtTime(on ? 0.6 : 0, t, 0.05);
+}
+
+/* ============================================================================
+   ANALYZER — curva real (misma matemática que el JUCE: 140 puntos log,
+   peak por rango de bins, suavizado dB con attack/release por tiempo)
+   ============================================================================ */
+const NUM_POINTS = 140;
+const F_MIN = 20, F_MAX = 20000;
+const DISPLAY_DB = 60; // 0..-60 dBFS
+const ATTACK_TAU = 0.05, RELEASE_TAU = 0.40;
+
+const levels = new Float32Array(NUM_POINTS).fill(-DISPLAY_DB);
+const targets = new Float32Array(NUM_POINTS).fill(-DISPLAY_DB);
+const binDb = new Float32Array(1024).fill(-300);
+
+function analyze(delta) {
+  if (!analyser) return;
+
+  // FFT real del AnalyserNode (1024 bins, dBFS)
+  const freq = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(freq);
+  const binHz = audioCtx.sampleRate / analyser.fftSize;
+  for (let k = 0; k < freq.length; k++) {
+    // 0..255 -> -100..0 dBFS (escala estándar de getByteFrequencyData)
+    binDb[k] = (freq[k] / 255) * 100 - 100;
+  }
+
+  // 140 puntos log-espaciados 20 Hz..20 kHz, peak por rango (como el JUCE)
+  const logMin = Math.log(F_MIN), logMax = Math.log(F_MAX);
+  for (let b = 0; b < NUM_POINTS; b++) {
+    const f0 = Math.exp(logMin + (logMax - logMin) * b / NUM_POINTS);
+    const f1 = Math.exp(logMin + (logMax - logMin) * (b + 1) / NUM_POINTS);
+    const k0 = Math.max(1, Math.floor(f0 / binHz));
+    const k1 = Math.min(freq.length - 1, Math.ceil(f1 / binHz));
+    let maxDb = -300;
+    for (let k = k0; k <= k1; k++) maxDb = Math.max(maxDb, binDb[k]);
+    targets[b] = maxDb;
+  }
+
+  // Suavizado en dB (attack rápido / release lento, por tiempo)
+  const attack = 1 - Math.exp(-delta / ATTACK_TAU);
+  const release = 1 - Math.exp(-delta / RELEASE_TAU);
+  for (let b = 0; b < NUM_POINTS; b++) {
+    const t = targets[b];
+    levels[b] += (t - levels[b]) * (t > levels[b] ? attack : release);
+  }
+}
+
+/* ============================================================================
+   DIBUJO DE LA CURVA (trazo + glow + fill tenue)
+   ============================================================================ */
+const canvas = document.getElementById("spectrum");
+const ctx = canvas.getContext("2d");
+const DPR = window.devicePixelRatio || 1;
+
+function sizeCanvas() {
+  const r = canvas.getBoundingClientRect();
+  canvas.width = r.width * DPR;
+  canvas.height = r.height * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+sizeCanvas();
+window.addEventListener("resize", sizeCanvas);
+
+function xForF(f) {
+  const logMin = Math.log(F_MIN), logMax = Math.log(F_MAX);
+  return 14 + (Math.log(f) - logMin) / (logMax - logMin) * (canvas.clientWidth - 28);
+}
+function yForDb(db) {
+  const h = canvas.clientHeight;
+  return h - 22 - (db + DISPLAY_DB) / DISPLAY_DB * (h - 34);
+}
+
+function drawCurve() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+
+  // ---- Grid sutil (10 divisiones + baseline) ----
+  ctx.strokeStyle = "#1E1E28";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 10; i++) {
+    const x = w * i / 10;
+    ctx.beginPath();
+    ctx.moveTo(x, 0); ctx.lineTo(x, h - 14);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(0, h - 14); ctx.lineTo(w, h - 14);
+  ctx.stroke();
+
+  // ---- Path de la curva (140 puntos) ----
+  const pts = [];
+  for (let b = 0; b < NUM_POINTS; b++) {
+    const f = Math.exp(Math.log(F_MIN) + (Math.log(F_MAX) - Math.log(F_MIN)) * b / NUM_POINTS);
+    pts.push({ x: xForF(f), y: yForDb(levels[b]) });
+  }
+
+  // ---- Fill tenue (gradiente maroon -> transparente) ----
+  const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
+  fillGrad.addColorStop(0, "rgba(128, 0, 0, 0.28)");
+  fillGrad.addColorStop(0.55, "rgba(128, 0, 0, 0.08)");
+  fillGrad.addColorStop(1, "rgba(128, 0, 0, 0)");
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, h - 14);
+  for (const p of pts) ctx.lineTo(p.x, p.y);
+  ctx.lineTo(pts[pts.length - 1].x, h - 14);
+  ctx.closePath();
+  ctx.fillStyle = fillGrad;
+  ctx.fill();
+
+  // ---- Glow discreto (3 strokes, sin shadowBlur — barato) ----
+  const stroke = (width, alpha, color) => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i], prev = pts[i - 1];
+      const mx = (prev.x + p.x) / 2;
+      ctx.quadraticCurveTo(prev.x, prev.y, mx, (prev.y + p.y) / 2);
+    }
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+  stroke(5, 0.10, "#B03030");
+  stroke(2.5, 0.28, "#B03030");
+  stroke(1.4, 0.95, "#800000");
+}
+
+/* ============================================================================
+   FADERS (construcción + drag)
+   ============================================================================ */
+const faderRow = document.getElementById("faderRow");
+const faderEls = [];
+
+BANDS.forEach((b, i) => {
+  const el = document.createElement("div");
+  el.className = "fader";
+  el.style.setProperty("--band-core", b.core);
+  el.style.setProperty("--band-core-light", b.coreLight);
+  el.style.setProperty("--band-core-dark", b.coreDark);
+  el.style.setProperty("--band-halo", b.halo);
+  el.innerHTML = `
+    <div class="freq-label" style="color:${b.core}">${b.label}</div>
+    <div class="name-label">${b.name}</div>
+    <div class="track">
+      <div class="fill"></div>
+      <div class="tick" style="top:0"></div>
+      <div class="tick t0" style="top:128px"></div>
+      <div class="tick" style="top:254px"></div>
+    </div>
+    <div class="eye">
+      <div class="aura"></div>
+      <div class="shell"><div class="iris"></div><div class="pupil"></div><div class="rune"></div></div>
+    </div>
+    <div class="gain-label">0.0 dB</div>
+  `;
+  faderRow.appendChild(el);
+  faderEls.push(el);
+});
+
+function yForDbLocal(db) {
+  return FADER_TOP + (1 - (db + DB_RANGE) / (2 * DB_RANGE)) * (FADER_BOTTOM - FADER_TOP);
+}
+function dbForYLocal(y) {
+  return DB_RANGE - (y - FADER_TOP) / (FADER_BOTTOM - FADER_TOP) * 2 * DB_RANGE;
+}
+
+function updateFaderUI(i, db) {
+  const el = faderEls[i];
+  const eye = el.querySelector(".eye");
+  const fill = el.querySelector(".fill");
+  const gain = el.querySelector(".gain-label");
+  const y = yForDbLocal(db);
+  eye.style.top = y + "px";
+  const zeroY = yForDbLocal(0);
+  // El fill vive DENTRO del track (que empieza en FADER_TOP), por eso -FADER_TOP
+  if (db >= 0) {
+    fill.style.top = (y - FADER_TOP) + "px";
+    fill.style.height = (zeroY - y) + "px";
+  } else {
+    fill.style.top = (zeroY - FADER_TOP) + "px";
+    fill.style.height = (y - zeroY) + "px";
+  }
+  gain.textContent = db.toFixed(1) + " dB";
+}
+
+function setBandDb(i, db) {
+  db = Math.max(-DB_RANGE, Math.min(DB_RANGE, db));
+  updateFaderUI(i, db);
+  if (audioCtx && filters[i]) {
+    filters[i].gain.setTargetAtTime(db, audioCtx.currentTime, 0.02);
+  }
+}
+
+// Drag con Pointer Events (mouse + touch)
+faderEls.forEach((el, i) => {
+  let dragging = false;
+  el.addEventListener("pointerdown", e => {
+    dragging = true;
+    el.classList.add("dragging");
+    el.setPointerCapture(e.pointerId);
+    const rect = el.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    setBandDb(i, dbForYLocal(y));
+  });
+  el.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    const rect = el.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    setBandDb(i, dbForYLocal(y));
+  });
+  el.addEventListener("pointerup", () => {
+    dragging = false;
+    el.classList.remove("dragging");
+  });
+  el.addEventListener("dblclick", () => setBandDb(i, 0));
+});
+
+/* ============================================================================
+   BLINK (sparse, staggered — igual que el scheduler JUCE)
+   ============================================================================ */
+function scheduleBlink() {
+  const i = Math.floor(Math.random() * faderEls.length);
+  const eye = faderEls[i].querySelector(".eye");
+  eye.classList.remove("blinking");
+  void eye.offsetWidth; // reinicia la animación
+  eye.classList.add("blinking");
+  setTimeout(() => eye.classList.remove("blinking"), 260);
+  setTimeout(scheduleBlink, 7400 + Math.random() * 1200);
+}
+setTimeout(scheduleBlink, 800);
+
+/* ============================================================================
+   KNOBS (INPUT / OUTPUT — visuales)
+   ============================================================================ */
+function bindKnob(id, valId, min, max, unit) {
+  const el = document.getElementById(id);
+  const val = document.getElementById(valId);
+  const ptr = el.querySelector(".knob-pointer");
+  let v = 0, dragging = false;
+  const update = () => {
+    const angle = -135 + (v - min) / (max - min) * 270;
+    ptr.style.transform = `rotate(${angle}deg)`;
+    val.textContent = v.toFixed(1) + (unit || "");
+  };
+  el.addEventListener("pointerdown", e => {
+    dragging = true;
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    const rect = el.getBoundingClientRect();
+    v = clamp(min, max, min + (1 - (e.clientY - rect.top) / rect.height) * (max - min));
+    update();
+  });
+  el.addEventListener("pointerup", () => dragging = false);
+  update();
+}
+bindKnob("knobIn", "knobInVal", -12, 12, " dB");
+bindKnob("knobOut", "knobOutVal", -12, 12, " dB");
+
+/* ============================================================================
+   BOTONES
+   ============================================================================ */
+const btnAnalog = document.getElementById("btnAnalog");
+const btnQuality = document.getElementById("btnQuality");
+const btnBypass = document.getElementById("btnBypass");
+const btnSound = document.getElementById("btnSound");
+
+btnAnalog.addEventListener("click", () => btnAnalog.classList.toggle("on"));
+btnQuality.addEventListener("click", () => btnQuality.classList.toggle("on"));
+btnBypass.addEventListener("click", () => {
+  const on = btnBypass.classList.toggle("on");
+  setBypass(on);
+});
+btnSound.addEventListener("click", () => {
+  const on = btnSound.classList.toggle("on");
+  btnSound.textContent = on ? "SOUND ON" : "SOUND OFF";
+  setSound(on);
+});
+
+/* ============================================================================
+   START + LOOP
+   ============================================================================ */
+document.getElementById("btnStart").addEventListener("click", () => {
+  initAudio();
+  engineOn = true;
+  document.getElementById("startOverlay").style.display = "none";
+});
+
+let lastT = performance.now();
+function loop(t) {
+  const delta = clamp(0.0005, 0.1, (t - lastT) / 1000);
+  lastT = t;
+  if (engineOn) analyze(delta);
+  drawCurve();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function clamp(min, max, v) { return Math.max(min, Math.min(max, v)); }
+</script>
+</body>
+</html>

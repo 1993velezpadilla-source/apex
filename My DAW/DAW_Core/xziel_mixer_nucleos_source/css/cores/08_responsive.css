@@ -1,0 +1,11 @@
+@media (max-width: 860px) {
+  body { padding: 10px; }
+  .mixer-layout { overflow-x: auto; }
+  .strip { flex: 0 0 84px; }
+  .strip.master { flex-basis: 112px; }
+}
+
+@media (max-width: 560px) {
+  :root { --strip-min-height: 470px; }
+  .mixer-layout { padding: 10px; }
+}

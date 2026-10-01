@@ -1,0 +1,150 @@
+════════════════════════════════════════════════════════════════════
+APEX — CREATE SEQUENCE v3 (PLAYGROUND EDITION)
+Full Replacement + New Modules
+════════════════════════════════════════════════════════════════════
+
+OVERVIEW
+--------
+This replaces all existing Create Sequence files and adds three new
+ones. After this update the dialog has:
+
+  • 82 shape modes across 11 categories
+  • 7 random-pattern flavors (Melodic, Rhythmic, Glitch, Organic,
+    Mathematical, Surprise, Full Chaos)
+  • Non-repeating randomization — every random seed is persisted to
+    disk so the user literally cannot generate the same pattern twice
+    across sessions
+  • Pattern Library — save patterns with names; persisted as XML
+    under userAppData/APEX/Sequences/  (follows the user across
+    projects on the same machine)
+  • 8 knobs (added Chaos, Repeat)
+  • Library browser popup with live curve thumbnails
+  • Dialog grows to 880×660
+
+The PUBLIC API of AutomationSequenceDialogComponent is UNCHANGED:
+  • Same constructor signature: (onAccept callback, onCancel callback)
+  • Same onAccept payload: (GeneratedCurve, SequenceParams)
+  • Same GeneratedCurve.samples[512] for downstream consumers
+So MainComponent.cpp and TrackList.h require NO changes.
+
+
+DO NOT TOUCH
+------------
+  • Anything in Source/Bubblegum/ or Source/BubblegumCable/
+  • Source/AutomationCore/* (manager, lane, snapshot, etc.)
+  • RoutingGraph*, FolderBus*, BubblegumCable*, TrackSelectionVisualCore
+  • AudioEngine.h or any audio-thread code
+  • The MainComponent.cpp onCreateSequenceRequested lambda
+  • TrackList.h showAutomationMenu() — leave it alone
+  • The .vcxproj for files other than the AutomationSequence folder
+
+
+FILES TO REPLACE (4 existing)
+-----------------------------
+Replace these existing files in Source/AutomationSequence/ with the
+new versions provided in the accompanying message:
+
+  1. AutomationSequenceTypes.h               (356 lines, was ~92)
+  2. AutomationSequenceGeneratorCore.h       (860 lines, was ~218)
+  3. AutomationSequenceDialogComponent.h     (259 lines, was ~224)
+  4. AutomationSequenceDialogComponent.cpp   (891 lines, was ~761)
+
+
+FILES TO ADD (3 new)
+--------------------
+Create these NEW files in Source/AutomationSequence/ and add them
+to the DAW_Core_App.vcxproj and .filters:
+
+  5. AutomationSequenceHistoryCore.h         (289 lines) — header-only
+  6. AutomationSequenceRandomizerCore.h      (252 lines) — header-only
+  7. AutomationSequenceLibraryComponent.h    (283 lines) — header-only
+
+All three new files are header-only with inline implementations.
+No new .cpp files are needed.
+
+When adding to the .filters file, place all three under the same
+"Source\AutomationSequence" filter that the existing four files live
+in.
+
+
+ARCHITECTURE
+------------
+Same nucleo discipline as v1/v2:
+
+  Types.h            — POD enums and structs only, no logic
+  GeneratorCore.h    — pure static math, 82 shape evaluators
+  HistoryCore.h      — message-thread file I/O, seed history + saved
+                       patterns. Mutex-guarded. NEVER call from audio
+                       thread. Uses inline static singletons (C++17).
+  RandomizerCore.h   — 7 random flavors, pulls seeds from HistoryCore
+                       so non-repetition is guaranteed.
+  LibraryComponent.h — saved-pattern browser, opens in its own
+                       DialogWindow. Uses GeneratorCore::generate to
+                       render live thumbnails per row.
+  DialogComponent.h  — main dialog declarations
+  DialogComponent.cpp — main dialog implementations
+
+
+FILE I/O LOCATIONS (created automatically on first use)
+-------------------------------------------------------
+  Windows:  C:\Users\<user>\AppData\Roaming\APEX\
+              SeedHistory.dat              (binary uint32 list)
+              Sequences\<name>.apexseq     (one XML file per pattern)
+
+The folders are auto-created on first save. No installer changes needed.
+
+
+BUILD STEPS
+-----------
+  1. Replace the 4 existing files (overwrite).
+  2. Create the 3 new files.
+  3. Re-save the .jucer (if Projucer is used), OR manually add the
+     3 new header files to:
+       - DAW_Core_App.vcxproj (under <ClInclude Include=…/>)
+       - DAW_Core_App.vcxproj.filters (under the same
+         "Source\AutomationSequence" filter as the others)
+  4. Close any running instance of DAW_Core.exe (avoid LNK1104).
+  5. Build Debug x64.
+  6. Report:
+       • "Build OK" — done
+       • OR paste verbatim compile/link errors
+
+EXPECTED WARNINGS (none should appear)
+The new code uses (void) casts on RNG advance calls — same pattern
+that resolved the C4834 warnings last time. If you see any new
+[[nodiscard]] warnings, paste them rather than suppressing.
+
+
+AFTER A SUCCESSFUL BUILD
+------------------------
+  Right-click the A button on any track with an active automation
+  target → Create Sequence... should now open the new 880×660 dialog
+  with:
+    • 11 colored category pills at top-right
+    • 8 shape pills below for the selected category
+    • 8 rotary knobs in 2 columns
+    • Bottom-left: Reset / Randomize / Library / Save
+    • Bottom-right: large green Accept button
+    • Title bar shows "N unique patterns generated" counter
+
+  Clicking Randomize opens a popup menu with 7 flavors plus a "Clear
+  seed history" item. Clicking Library opens the saved-patterns
+  browser. Clicking Save prompts for a name and writes
+  <name>.apexseq to userAppData/APEX/Sequences/.
+
+  The Accept callback to MainComponent is unchanged — the existing
+  threshold-filtered point write to AutomationManagerCore still works.
+
+
+REPORTING FORMAT
+----------------
+After build, send back:
+  • Build result (OK or errors verbatim)
+  • Files modified count
+  • Any unexpected warnings
+  • Confirm: did not touch Bubblegum, routing, audio-engine, or
+    MainComponent.cpp / TrackList.h
+
+════════════════════════════════════════════════════════════════════
+END OF INSTRUCTIONS
+════════════════════════════════════════════════════════════════════

@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio Version 18
+
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3Automation - VST3", "APEXTestVST3Automation_VST3.vcxproj", "{3C0307DC-52ED-6CF0-166A-9E9919B5B840}"
+	ProjectSection(ProjectDependencies) = postProject
+		{FA48D135-6F13-DE17-429C-D8FE86ACFA79} = {FA48D135-6F13-DE17-429C-D8FE86ACFA79}
+		{9ACF166F-7EFD-78F5-0479-79191F4E4017} = {9ACF166F-7EFD-78F5-0479-79191F4E4017}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3Automation - Shared Code", "APEXTestVST3Automation_SharedCode.vcxproj", "{FA48D135-6F13-DE17-429C-D8FE86ACFA79}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3Automation - VST3 Manifest Helper", "APEXTestVST3Automation_VST3ManifestHelper.vcxproj", "{9ACF166F-7EFD-78F5-0479-79191F4E4017}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3C0307DC-52ED-6CF0-166A-9E9919B5B840}.Debug|x64.ActiveCfg = Debug|x64
+		{3C0307DC-52ED-6CF0-166A-9E9919B5B840}.Debug|x64.Build.0 = Debug|x64
+		{3C0307DC-52ED-6CF0-166A-9E9919B5B840}.Release|x64.ActiveCfg = Release|x64
+		{3C0307DC-52ED-6CF0-166A-9E9919B5B840}.Release|x64.Build.0 = Release|x64
+		{FA48D135-6F13-DE17-429C-D8FE86ACFA79}.Debug|x64.ActiveCfg = Debug|x64
+		{FA48D135-6F13-DE17-429C-D8FE86ACFA79}.Debug|x64.Build.0 = Debug|x64
+		{FA48D135-6F13-DE17-429C-D8FE86ACFA79}.Release|x64.ActiveCfg = Release|x64
+		{FA48D135-6F13-DE17-429C-D8FE86ACFA79}.Release|x64.Build.0 = Release|x64
+		{9ACF166F-7EFD-78F5-0479-79191F4E4017}.Debug|x64.ActiveCfg = Debug|x64
+		{9ACF166F-7EFD-78F5-0479-79191F4E4017}.Debug|x64.Build.0 = Debug|x64
+		{9ACF166F-7EFD-78F5-0479-79191F4E4017}.Release|x64.ActiveCfg = Release|x64
+		{9ACF166F-7EFD-78F5-0479-79191F4E4017}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

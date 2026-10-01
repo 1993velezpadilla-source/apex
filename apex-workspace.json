@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "applicationRepository": "My DAW/DAW_Core",
+  "outerBranch": "master",
+  "applicationBranch": "main",
+  "buildScript": "My DAW/DAW_Core/Scripts/build_apex.ps1",
+  "testScript": "My DAW/DAW_Core/Scripts/run_apex_tests.ps1"
+}

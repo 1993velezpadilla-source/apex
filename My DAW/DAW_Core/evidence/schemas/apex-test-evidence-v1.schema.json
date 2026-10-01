@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://apex.local/schemas/apex-test-evidence-v1.schema.json",
+  "title": "APEX test evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "evidenceGrade", "runId", "suiteId", "source", "build", "dependencies", "environment", "execution", "results", "artifacts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "evidenceGrade": { "enum": ["diagnostic", "release"] },
+    "runId": { "type": "string", "minLength": 1 },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outerCommit", "outerDirty", "applicationCommit", "applicationDirty"],
+      "properties": {
+        "outerCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "outerDirty": { "type": "boolean" },
+        "applicationCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "applicationDirty": { "type": "boolean" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configuration", "platform", "toolset", "binarySha256"],
+      "properties": {
+        "configuration": { "enum": ["Debug", "Release"] },
+        "platform": { "const": "x64" },
+        "toolset": { "const": "v145" },
+        "compiler": { "type": "string" },
+        "windowsSdk": { "type": "string" },
+        "binaryPath": { "type": "string" },
+        "binarySha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["juceVersion"],
+      "properties": { "juceVersion": { "const": "8.0.12" } }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "cpu", "powerMode", "locale"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "cpu": { "type": "string", "minLength": 1 },
+        "powerMode": { "type": "string", "minLength": 1 },
+        "locale": { "type": "string", "minLength": 1 },
+        "audioDriver": { "type": ["string", "null"] },
+        "audioDevice": { "type": ["string", "null"] },
+        "sampleRate": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "blockSize": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "startedUtc", "seed", "exitCode", "durationMs"],
+      "properties": {
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "startedUtc": { "type": "string", "format": "date-time" },
+        "seed": { "type": "integer" },
+        "exitCode": { "type": "integer" },
+        "durationMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resultGroups", "assertionsPassed", "assertionsFailed"],
+      "properties": {
+        "resultGroups": { "type": "integer", "minimum": 0 },
+        "assertionsPassed": { "type": "integer", "minimum": 0 },
+        "assertionsFailed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+        }
+      }
+    }
+  }
+}

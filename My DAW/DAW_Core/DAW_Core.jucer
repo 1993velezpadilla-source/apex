@@ -1,0 +1,1133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="SM4V7O" name="DAW_Core" projectType="guiapp" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
+              defines="JUCE_ASIO=1 JUCE_PLUGINHOST_VST3=1">
+  <MAINGROUP id="jbD8r4" name="DAW_Core">
+    <GROUP id="{76F8C13A-9DB7-C0DF-C6DB-61E091DFB695}" name="Source">
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000001}" name="AppCore">
+        <FILE id="AC_H001" name="ApplicationCore.h" compile="0" resource="0"
+              file="Source/AppCore/ApplicationCore.h"/>
+        <FILE id="AC_CPP1" name="ApplicationCore.cpp" compile="1" resource="0"
+              file="Source/AppCore/ApplicationCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000002}" name="StateCore">
+        <FILE id="ST_H001" name="ApplicationState.h" compile="0" resource="0"
+              file="Source/StateCore/ApplicationState.h"/>
+        <FILE id="ST_CPP1" name="ApplicationState.cpp" compile="1" resource="0"
+              file="Source/StateCore/ApplicationState.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000003}" name="TransportCore">
+        <FILE id="TR_H001" name="TransportController.h" compile="0" resource="0"
+              file="Source/TransportCore/TransportController.h"/>
+        <FILE id="TR_CPP1" name="TransportController.cpp" compile="1" resource="0"
+              file="Source/TransportCore/TransportController.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000004}" name="TrackCore">
+        <FILE id="TK_H001" name="Track.h" compile="0" resource="0"
+              file="Source/TrackCore/Track.h"/>
+        <FILE id="TK_CPP1" name="Track.cpp" compile="1" resource="0"
+              file="Source/TrackCore/Track.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000005}" name="ClipCore">
+        <FILE id="CL_H001" name="Clip.h" compile="0" resource="0"
+              file="Source/ClipCore/Clip.h"/>
+        <FILE id="CL_CPP1" name="Clip.cpp" compile="1" resource="0"
+              file="Source/ClipCore/Clip.cpp"/>
+        <FILE id="CL_H002" name="PatternClip.h" compile="0" resource="0"
+              file="Source/ClipCore/PatternClip.h"/>
+        <FILE id="CL_CPP2" name="PatternClip.cpp" compile="1" resource="0"
+              file="Source/ClipCore/PatternClip.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000099}" name="MidiCore">
+        <FILE id="MD_H001" name="PianoRollClipModel.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollClipModel.h"/>
+        <FILE id="MD_CPP1" name="PianoRollClipModel.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollClipModel.cpp"/>
+        <FILE id="MD_H002" name="MidiClip.h" compile="0" resource="0"
+              file="Source/MidiCore/MidiClip.h"/>
+        <FILE id="MD_CPP2" name="MidiClip.cpp" compile="1" resource="0"
+              file="Source/MidiCore/MidiClip.cpp"/>
+        <FILE id="MD_H004" name="MidiTrackCore.h" compile="0" resource="0"
+              file="Source/MidiCore/MidiTrackCore.h"/>
+        <FILE id="MD_CPP3" name="MidiTrackCore.cpp" compile="1" resource="0"
+              file="Source/MidiCore/MidiTrackCore.cpp"/>
+        <FILE id="MD_H005" name="PianoRollGridRenderer.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollGridRenderer.h"/>
+        <FILE id="MD_CPP4" name="PianoRollGridRenderer.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollGridRenderer.cpp"/>
+        <FILE id="MD_H009" name="PianoRollNoteRenderer.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollNoteRenderer.h"/>
+        <FILE id="MD_CPP8" name="PianoRollNoteRenderer.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollNoteRenderer.cpp"/>
+        <FILE id="MD_H010" name="PianoRollSelectionRenderer.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollSelectionRenderer.h"/>
+        <FILE id="MD_CPP9" name="PianoRollSelectionRenderer.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollSelectionRenderer.cpp"/>
+        <FILE id="MD_H011" name="PianoRollToolbarComponent.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollToolbarComponent.h"/>
+        <FILE id="MD_CPP10" name="PianoRollToolbarComponent.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollToolbarComponent.cpp"/>
+        <FILE id="MD_H012" name="PianoRollScaleHelper.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollScaleHelper.h"/>
+        <FILE id="MD_CPP11" name="PianoRollScaleHelper.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollScaleHelper.cpp"/>
+        <FILE id="MD_H013" name="PianoRollPlaybackCore.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollPlaybackCore.h"/>
+        <FILE id="MD_CPP12" name="PianoRollPlaybackCore.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollPlaybackCore.cpp"/>
+        <FILE id="MD_H006" name="PianoRollKeyboardComponent.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollKeyboardComponent.h"/>
+        <FILE id="MD_CPP5" name="PianoRollKeyboardComponent.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollKeyboardComponent.cpp"/>
+        <FILE id="MD_H007" name="PianoRollRulerComponent.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollRulerComponent.h"/>
+        <FILE id="MD_CPP6" name="PianoRollRulerComponent.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollRulerComponent.cpp"/>
+        <FILE id="MD_H008" name="PianoRollComponent.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollComponent.h"/>
+        <FILE id="MD_CPP7" name="PianoRollComponent.cpp" compile="1" resource="0"
+              file="Source/MidiCore/PianoRollComponent.cpp"/>
+        <FILE id="MD_H003" name="PianoRollSmokeTest.h" compile="0" resource="0"
+              file="Source/MidiCore/PianoRollSmokeTest.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000006}" name="ThemeCore">
+        <FILE id="TH_H001" name="Theme.h" compile="0" resource="0"
+              file="Source/ThemeCore/Theme.h"/>
+        <FILE id="TH_CPP1" name="Theme.cpp" compile="1" resource="0"
+              file="Source/ThemeCore/Theme.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000007}" name="UtilityCore">
+        <FILE id="UT_H001" name="Types.h" compile="0" resource="0"
+              file="Source/UtilityCore/Types.h"/>
+        <FILE id="UT_CPP1" name="Types.cpp" compile="1" resource="0"
+              file="Source/UtilityCore/Types.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000007D}" name="DiagnosticsCore">
+        <FILE id="DC_H001" name="CallbackAuditCore.h" compile="0" resource="0"
+              file="Source/DiagnosticsCore/CallbackAuditCore.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000008}" name="GamepadCore">
+        <FILE id="GP_H001" name="GamepadManager.h" compile="0" resource="0"
+              file="Source/GamepadCore/GamepadManager.h"/>
+        <FILE id="GP_CPP1" name="GamepadManager.cpp" compile="1" resource="0"
+              file="Source/GamepadCore/GamepadManager.cpp"/>
+        <FILE id="GP_H002" name="GamepadMapper.h" compile="0" resource="0"
+              file="Source/GamepadCore/GamepadMapper.h"/>
+        <FILE id="GP_CPP2" name="GamepadMapper.cpp" compile="1" resource="0"
+              file="Source/GamepadCore/GamepadMapper.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000009}" name="ControlsCore">
+        <FILE id="CC_H001" name="ModernControls.h" compile="0" resource="0"
+              file="Source/ControlsCore/ModernControls.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000B}" name="InteractionModeCore">
+        <FILE id="IM_H001" name="InteractionModeManager.h" compile="0" resource="0"
+              file="Source/InteractionModeCore/InteractionModeManager.h"/>
+        <FILE id="IM_CPP1" name="InteractionModeManager.cpp" compile="1" resource="0"
+              file="Source/InteractionModeCore/InteractionModeManager.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000C}" name="FloatingWindowCore">
+        <FILE id="FW_H001" name="FloatingWindowBase.h" compile="0" resource="0"
+              file="Source/FloatingWindowCore/FloatingWindowBase.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000D}" name="CursorCore">
+        <FILE id="CU_H001" name="VirtualCursor.h" compile="0" resource="0"
+              file="Source/CursorCore/VirtualCursor.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000E}" name="BubbleCore">
+        <FILE id="BU_H001" name="BubbleTaskbar.h" compile="0" resource="0"
+              file="Source/BubbleCore/BubbleTaskbar.h"/>
+        <FILE id="BU_H002" name="MixerBubble.h" compile="0" resource="0"
+              file="Source/BubbleCore/MixerBubble.h"/>
+        <FILE id="BU_H003" name="MasterBubble.h" compile="0" resource="0"
+              file="Source/BubbleCore/MasterBubble.h"/>
+        <FILE id="BU_H004" name="MarkerBubble.h" compile="0" resource="0"
+              file="Source/BubbleCore/MarkerBubble.h"/>
+        <FILE id="BU_H005" name="BubbleOrchestrator.h" compile="0" resource="0"
+              file="Source/BubbleCore/BubbleOrchestrator.h"/>
+        <FILE id="BU_H006" name="BubbleMergeOverlay.h" compile="0" resource="0"
+              file="Source/BubbleCore/BubbleMergeOverlay.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000F}" name="GestureCore">
+        <FILE id="GC_H001" name="GestureRecognizer.h" compile="0" resource="0"
+              file="Source/GestureCore/GestureRecognizer.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000010}" name="ActionCore">
+        <FILE id="AK_H001" name="ActionID.h" compile="0" resource="0"
+              file="Source/ActionCore/ActionID.h"/>
+        <FILE id="AK_H002" name="ActionManager.h" compile="0" resource="0"
+              file="Source/ActionCore/ActionManager.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000011}" name="MarkerCore">
+        <FILE id="MK_H001" name="SectionMarker.h" compile="0" resource="0"
+              file="Source/MarkerCore/SectionMarker.h"/>
+        <FILE id="MK_H002" name="MarkerManager.h" compile="0" resource="0"
+              file="Source/MarkerCore/MarkerManager.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000012}" name="KeyBindingCore">
+        <FILE id="KB_H001" name="KeyBindingProfile.h" compile="0" resource="0"
+              file="Source/KeyBindingCore/KeyBindingProfile.h"/>
+        <FILE id="KB_H002" name="KeyBindingManager.h" compile="0" resource="0"
+              file="Source/KeyBindingCore/KeyBindingManager.h"/>
+        <FILE id="KB_H003" name="GlobalTransportSpaceHook.h" compile="0" resource="0"
+              file="Source/KeyBindingCore/GlobalTransportSpaceHook.h"/>
+        <FILE id="KB_CPP1" name="GlobalTransportSpaceHook.cpp" compile="1" resource="0"
+              file="Source/KeyBindingCore/GlobalTransportSpaceHook.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000013}" name="CommandCore">
+        <FILE id="CM_H001" name="Command.h" compile="0" resource="0"
+              file="Source/CommandCore/Command.h"/>
+        <FILE id="CM_H002" name="CommandManager.h" compile="0" resource="0"
+              file="Source/CommandCore/CommandManager.h"/>
+        <FILE id="CM_H003" name="ClipCommands.h" compile="0" resource="0"
+              file="Source/CommandCore/ClipCommands.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000014}" name="RoutingCore">
+        <FILE id="RT_H001" name="RoutingNode.h" compile="0" resource="0"
+              file="Source/RoutingCore/RoutingNode.h"/>
+        <FILE id="RT_H002" name="RoutingConnection.h" compile="0" resource="0"
+              file="Source/RoutingCore/RoutingConnection.h"/>
+        <FILE id="RT_H003" name="RoutingGraph.h" compile="0" resource="0"
+              file="Source/RoutingCore/RoutingGraph.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000015}" name="ProjectCore">
+        <FILE id="PJ_H001" name="ProjectManager.h" compile="0" resource="0"
+              file="Source/ProjectCore/ProjectManager.h"/>
+        <FILE id="PJ_CPP2" name="ProjectManager.cpp" compile="1" resource="0"
+              file="Source/ProjectCore/ProjectManager.cpp"/>
+        <FILE id="PJ_H002" name="AutosaveManagerCore.h" compile="0" resource="0"
+              file="Source/ProjectCore/AutosaveManagerCore.h"/>
+        <FILE id="PJ_CPP3" name="AutosaveManagerCore.cpp" compile="1" resource="0"
+              file="Source/ProjectCore/AutosaveManagerCore.cpp"/>
+        <FILE id="PJ_H003" name="CrashRecoveryCore.h" compile="0" resource="0"
+              file="Source/ProjectCore/CrashRecoveryCore.h"/>
+        <FILE id="PJ_CPP4" name="CrashRecoveryCore.cpp" compile="1" resource="0"
+              file="Source/ProjectCore/CrashRecoveryCore.cpp"/>
+        <FILE id="PJ_H004" name="RecoverySessionCore.h" compile="0" resource="0"
+              file="Source/ProjectCore/RecoverySessionCore.h"/>
+        <FILE id="PJ_CPP5" name="RecoverySessionCore.cpp" compile="1" resource="0"
+              file="Source/ProjectCore/RecoverySessionCore.cpp"/>
+        <FILE id="PJ_H005" name="FilePublicationCore.h" compile="0" resource="0"
+              file="Source/ProjectCore/FilePublicationCore.h"/>
+        <FILE id="PJ_H006" name="AutosaveWriteJobCore.h" compile="0" resource="0"
+              file="Source/ProjectCore/AutosaveWriteJobCore.h"/>
+        <FILE id="PJ_H007" name="AutosavePublicationAuthority.h" compile="0" resource="0"
+              file="Source/ProjectCore/AutosavePublicationAuthority.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000016}" name="AudioEngineCore">
+        <FILE id="AE_H001" name="AudioEngine.h" compile="0" resource="0"
+              file="Source/AudioEngineCore/AudioEngine.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000017}" name="ChannelStripCore">
+        <FILE id="CS_H001" name="LevelMeter.h" compile="0" resource="0"
+              file="Source/ChannelStripCore/LevelMeter.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000000A}" name="UICore">
+        <FILE id="UI_H001" name="TransportBar.h" compile="0" resource="0"
+              file="Source/UICore/TransportBar.h"/>
+        <FILE id="UI_H002" name="SettingsPanel.h" compile="0" resource="0"
+              file="Source/UICore/SettingsPanel.h"/>
+        <FILE id="UI_H003" name="TrackList.h" compile="0" resource="0"
+              file="Source/UICore/TrackList.h"/>
+        <FILE id="UI_H004" name="DAWMenuBar.h" compile="0" resource="0"
+              file="Source/UICore/DAWMenuBar.h"/>
+        <FILE id="UI_H005" name="ArrangementView.h" compile="0" resource="0"
+              file="Source/UICore/ArrangementView.h"/>
+        <FILE id="UI_H006" name="MixerPanel.h" compile="0" resource="0"
+              file="Source/UICore/MixerPanel.h"/>
+        <FILE id="UI_H007" name="TrackListWindow.h" compile="0" resource="0"
+              file="Source/UICore/TrackListWindow.h"/>
+           <FILE id="UI_H008" name="MixerWindow.h" compile="0" resource="0"
+                 file="Source/UICore/MixerWindow.h"/>
+        <FILE id="UI_H010" name="PianoRollWindow.h" compile="0" resource="0"
+                file="Source/UICore/PianoRollWindow.h"/>
+          <FILE id="UI_H009" name="TrackColorPalette.h" compile="0" resource="0"
+                file="Source/UICore/TrackColorPalette.h"/>
+          <FILE id="UI_H011" name="CrashRecoveryDialogComponent.h" compile="0" resource="0"
+                file="Source/UICore/CrashRecoveryDialogComponent.h"/>
+          <FILE id="UI_CPP1" name="CrashRecoveryDialogComponent.cpp" compile="1" resource="0"
+                file="Source/UICore/CrashRecoveryDialogComponent.cpp"/>
+          <FILE id="UI_H012" name="SlimeSidePanel.h" compile="0" resource="0"
+                file="Source/UICore/SlimeSidePanel.h"/>
+          <FILE id="UI_H013" name="BubblegumCableOverlayComponent.h" compile="0" resource="0"
+                file="Source/UICore/BubblegumCableOverlayComponent.h"/>
+          <FILE id="UI_CPP2" name="BubblegumCableOverlayComponent.cpp" compile="1" resource="0"
+                file="Source/UICore/BubblegumCableOverlayComponent.cpp"/>
+          <FILE id="UI_H014" name="MixerDragStateMachine.h" compile="0" resource="0"
+                file="Source/UICore/MixerDragStateMachine.h"/>
+          <FILE id="UI_CPP3" name="MixerDragStateMachine.cpp" compile="1" resource="0"
+                file="Source/UICore/MixerDragStateMachine.cpp"/>
+        </GROUP>
+        <GROUP id="{A1A1A1A1-0000-0000-0000-000000000030}" name="PluginHostCore">
+          <FILE id="PH_H001" name="PluginScannerCore.h" compile="0" resource="0"
+                file="Source/PluginHostCore/PluginScannerCore.h"/>
+          <FILE id="PH_H002" name="PluginInstanceCore.h" compile="0" resource="0"
+                file="Source/PluginHostCore/PluginInstanceCore.h"/>
+          <FILE id="PH_H003" name="PluginChainCore.h" compile="0" resource="0"
+                file="Source/PluginHostCore/PluginChainCore.h"/>
+          <FILE id="PH_CPP4" name="PluginInstanceCore.cpp" compile="1" resource="0"
+                file="Source/PluginHostCore/PluginInstanceCore.cpp"/>
+          <FILE id="PH_CPP5" name="PluginChainCore.cpp" compile="1" resource="0"
+                file="Source/PluginHostCore/PluginChainCore.cpp"/>
+          <FILE id="PH_H004" name="PluginSlotUI.h" compile="0" resource="0"
+                file="Source/PluginHostCore/PluginSlotUI.h"/>
+          <FILE id="PH_H005" name="HostPlayheadCore.h" compile="0" resource="0"
+                file="Source/PluginHostCore/HostPlayheadCore.h"/>
+          <FILE id="PH_CPP1" name="HostPlayheadCore.cpp" compile="1" resource="0"
+                file="Source/PluginHostCore/HostPlayheadCore.cpp"/>
+          <FILE id="PH_CPP2" name="PluginEditorWindowWin32Patch.cpp" compile="1" resource="0"
+                file="Source/PluginHostCore/PluginEditorWindowWin32Patch.cpp"/>
+          <FILE id="PH_H007" name="PluginPlayheadInfoCore.h" compile="0" resource="0"
+                file="Source/PluginHostCore/PluginPlayheadInfoCore.h"/>
+          <FILE id="PH_CPP3" name="PluginPlayheadInfoCore.cpp" compile="1" resource="0"
+                file="Source/PluginHostCore/PluginPlayheadInfoCore.cpp"/>
+          <FILE id="PH_H008" name="MixerPluginSidePanel.h" compile="0" resource="0"
+                file="Source/PluginHostCore/MixerPluginSidePanel.h"/>
+        </GROUP>
+        <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003A}" name="PluginSandboxCore">
+          <FILE id="PS_H001" name="PluginSandboxProtocolCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxProtocolCore.h"/>
+          <FILE id="PS_H002" name="PluginSandboxProcessCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxProcessCore.h"/>
+          <FILE id="PS_H003" name="PluginWorkerMainCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginWorkerMainCore.h"/>
+          <FILE id="PS_H004" name="PluginSandboxSelfTestCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxSelfTestCore.h"/>
+          <FILE id="PS_H005" name="PluginSandboxAudioTransportShared.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxAudioTransportShared.h"/>
+          <FILE id="PS_H006" name="PluginSandboxAudioTransportCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxAudioTransportCore.h"/>
+          <FILE id="PS_H007" name="PluginWorkerAudioTransportCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginWorkerAudioTransportCore.h"/>
+          <FILE id="PS_H008" name="SandboxedPluginProxyCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/SandboxedPluginProxyCore.h"/>
+          <FILE id="PS_H009" name="PluginSandboxFixedQuantumReblockerCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxFixedQuantumReblockerCore.h"/>
+          <FILE id="PS_H010" name="PluginSandboxPreparationCore.h" compile="0" resource="0"
+                file="Source/PluginSandboxCore/PluginSandboxPreparationCore.h"/>
+        </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000031}" name="AutomationCore">
+        <FILE id="AC2_H001" name="AutomationArticulatorToolsCore.h" compile="0" resource="0"
+              file="Source/AutomationCore/AutomationArticulatorToolsCore.h"/>
+        <FILE id="AC2_CPP1" name="AutomationArticulatorToolsCore.cpp" compile="1" resource="0"
+              file="Source/AutomationCore/AutomationArticulatorToolsCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000032}" name="AutomationSequence">
+        <FILE id="AS_H001" name="AutomationSequenceDialogComponent.h" compile="0" resource="0"
+              file="Source/AutomationSequence/AutomationSequenceDialogComponent.h"/>
+        <FILE id="AS_CPP1" name="AutomationSequenceDialogComponent.cpp" compile="1" resource="0"
+              file="Source/AutomationSequence/AutomationSequenceDialogComponent.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000033}" name="Bubblegum">
+        <FILE id="BG_H001" name="BubblegumCableRenderCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableRenderCore.h"/>
+        <FILE id="BG_CPP1" name="BubblegumCableRenderCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableRenderCore.cpp"/>
+        <FILE id="BG_H002" name="BubblegumCableMotionStabilityCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableMotionStabilityCore.h"/>
+        <FILE id="BG_CPP2" name="BubblegumCableMotionStabilityCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableMotionStabilityCore.cpp"/>
+        <FILE id="BG_H003" name="BubblegumCableSurfaceShaderCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableSurfaceShaderCore.h"/>
+        <FILE id="BG_CPP3" name="BubblegumCableSurfaceShaderCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableSurfaceShaderCore.cpp"/>
+        <FILE id="BG_H004" name="BubblegumCableAudioReactiveCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableAudioReactiveCore.h"/>
+        <FILE id="BG_CPP4" name="BubblegumCableAudioReactiveCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableAudioReactiveCore.cpp"/>
+        <FILE id="BG_H005" name="BubblegumCableHangingCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableHangingCore.h"/>
+        <FILE id="BG_CPP5" name="BubblegumCableHangingCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableHangingCore.cpp"/>
+        <FILE id="BG_H006" name="BubblegumCableVisibilityCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableVisibilityCore.h"/>
+        <FILE id="BG_CPP6" name="BubblegumCableVisibilityCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableVisibilityCore.cpp"/>
+        <FILE id="BG_H007" name="BubblegumAnchorResolver.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumAnchorResolver.h"/>
+        <FILE id="BG_CPP7" name="BubblegumAnchorResolver.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumAnchorResolver.cpp"/>
+        <FILE id="BG_H008" name="BubblegumCableGeometryCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableGeometryCore.h"/>
+        <FILE id="BG_CPP8" name="BubblegumCableGeometryCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableGeometryCore.cpp"/>
+        <FILE id="BG_H009" name="BubblegumCableImpactSplashCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableImpactSplashCore.h"/>
+        <FILE id="BG_CPP9" name="BubblegumCableImpactSplashCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableImpactSplashCore.cpp"/>
+        <FILE id="BG_H010" name="BubblegumCableStyleSettingsCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumCableStyleSettingsCore.h"/>
+        <FILE id="BG_CPP10" name="BubblegumCableStyleSettingsCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumCableStyleSettingsCore.cpp"/>
+        <FILE id="BG_H011" name="BubblegumDropletCore.h" compile="0" resource="0"
+              file="Source/Bubblegum/BubblegumDropletCore.h"/>
+        <FILE id="BG_CPP11" name="BubblegumDropletCore.cpp" compile="1" resource="0"
+              file="Source/Bubblegum/BubblegumDropletCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000034}" name="BubblegumCable">
+        <FILE id="BC_H001" name="SidechainCableRenderer.h" compile="0" resource="0"
+              file="Source/BubblegumCable/SidechainCableRenderer.h"/>
+        <FILE id="BC_CPP1" name="SidechainCableRenderer.cpp" compile="1" resource="0"
+              file="Source/BubblegumCable/SidechainCableRenderer.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000035}" name="BubblegumSelectionCore">
+        <FILE id="BS_H001" name="BubblegumSelectionOverlayComponent.h" compile="0" resource="0"
+              file="Source/BubblegumSelectionCore/BubblegumSelectionOverlayComponent.h"/>
+        <FILE id="BS_CPP1" name="BubblegumSelectionOverlayComponent.cpp" compile="1" resource="0"
+              file="Source/BubblegumSelectionCore/BubblegumSelectionOverlayComponent.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000036}" name="DeviceCore">
+        <FILE id="DC_H001" name="SafeAsioDeviceTypeCore.h" compile="0" resource="0"
+              file="Source/DeviceCore/SafeAsioDeviceTypeCore.h"/>
+        <FILE id="DC_CPP1" name="SafeAsioDeviceTypeCore.cpp" compile="1" resource="0"
+              file="Source/DeviceCore/SafeAsioDeviceTypeCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000037}" name="MixerFolderCore">
+        <FILE id="MF_H001" name="MixerFolderAnimationCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderAnimationCore.h"/>
+        <FILE id="MF_CPP1" name="MixerFolderAnimationCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderAnimationCore.cpp"/>
+        <FILE id="MF_H002" name="MixerFolderHierarchyStateCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderHierarchyStateCore.h"/>
+        <FILE id="MF_CPP2" name="MixerFolderHierarchyStateCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderHierarchyStateCore.cpp"/>
+        <FILE id="MF_H003" name="MixerFolderIntegrationCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderIntegrationCore.h"/>
+        <FILE id="MF_CPP3" name="MixerFolderIntegrationCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderIntegrationCore.cpp"/>
+        <FILE id="MF_H004" name="MixerFolderInteractionCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderInteractionCore.h"/>
+        <FILE id="MF_CPP4" name="MixerFolderInteractionCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderInteractionCore.cpp"/>
+        <FILE id="MF_H005" name="MixerFolderLayoutCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderLayoutCore.h"/>
+        <FILE id="MF_CPP5" name="MixerFolderLayoutCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderLayoutCore.cpp"/>
+        <FILE id="MF_H006" name="MixerFolderPaintCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderPaintCore.h"/>
+        <FILE id="MF_CPP6" name="MixerFolderPaintCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderPaintCore.cpp"/>
+        <FILE id="MF_H007" name="MixerFolderPersistenceCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderPersistenceCore.h"/>
+        <FILE id="MF_CPP7" name="MixerFolderPersistenceCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderPersistenceCore.cpp"/>
+        <FILE id="MF_H008" name="MixerFolderVisualStyleCore.h" compile="0" resource="0"
+              file="Source/MixerFolderCore/MixerFolderVisualStyleCore.h"/>
+        <FILE id="MF_CPP8" name="MixerFolderVisualStyleCore.cpp" compile="1" resource="0"
+              file="Source/MixerFolderCore/MixerFolderVisualStyleCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000038}" name="PluginSecurityCore">
+        <FILE id="PS_H001" name="PluginRuntimeDependencyFailureCore.h" compile="0" resource="0"
+              file="Source/PluginSecurityCore/PluginRuntimeDependencyFailureCore.h"/>
+        <FILE id="PS_CPP1" name="PluginRuntimeDependencyFailureCore.cpp" compile="1" resource="0"
+              file="Source/PluginSecurityCore/PluginRuntimeDependencyFailureCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000043}" name="PluginSafetyCore">
+        <FILE id="PSC_H001" name="PluginSehGuardCore.h" compile="0" resource="0"
+              file="Source/PluginSafetyCore/PluginSehGuardCore.h"/>
+        <FILE id="PSC_CPP1" name="PluginSehGuardCore.cpp" compile="1" resource="0"
+              file="Source/PluginSafetyCore/PluginSehGuardCore.cpp"/>
+        <FILE id="PSC_H002" name="PluginCrashGuardCore.h" compile="0" resource="0"
+              file="Source/PluginSafetyCore/PluginCrashGuardCore.h"/>
+        <FILE id="PSC_CPP2" name="PluginCrashGuardCore.cpp" compile="1" resource="0"
+              file="Source/PluginSafetyCore/PluginCrashGuardCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000039}" name="RenderCore">
+        <FILE id="RC_H001" name="ExportRenderCore.h" compile="0" resource="0"
+              file="Source/RenderCore/ExportRenderCore.h"/>
+        <FILE id="RC_CPP1" name="ExportRenderCore.cpp" compile="1" resource="0"
+              file="Source/RenderCore/ExportRenderCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003A}" name="SelectionCore">
+        <FILE id="SC_H001" name="MultiSelectionCore.h" compile="0" resource="0"
+              file="Source/SelectionCore/MultiSelectionCore.h"/>
+        <FILE id="SC_CPP1" name="MultiSelectionCore.cpp" compile="1" resource="0"
+              file="Source/SelectionCore/MultiSelectionCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003B}" name="TapeStop">
+        <FILE id="TS_H001" name="TapeStopAutomationCore.h" compile="0" resource="0"
+              file="Source/TapeStop/TapeStopAutomationCore.h"/>
+        <FILE id="TS_CPP1" name="TapeStopAutomationCore.cpp" compile="1" resource="0"
+              file="Source/TapeStop/TapeStopAutomationCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003C}" name="VocalTuneCore">
+        <FILE id="VT_H001" name="ApexTuneIntegrationCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexTuneIntegrationCore.h"/>
+        <FILE id="VT_CPP1" name="ApexTuneIntegrationCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexTuneIntegrationCore.cpp"/>
+        <FILE id="VT_H002" name="ApexTuneProjectStateCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexTuneProjectStateCore.h"/>
+        <FILE id="VT_CPP2" name="ApexTuneProjectStateCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexTuneProjectStateCore.cpp"/>
+        <FILE id="VT_H003" name="ApexTuneRenderCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexTuneRenderCore.h"/>
+        <FILE id="VT_CPP3" name="ApexTuneRenderCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexTuneRenderCore.cpp"/>
+        <FILE id="VT_H004" name="ApexTuneSessionCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexTuneSessionCore.h"/>
+        <FILE id="VT_CPP4" name="ApexTuneSessionCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexTuneSessionCore.cpp"/>
+        <FILE id="VT_H005" name="ApexSibilantDetectorCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexSibilantDetectorCore.h"/>
+        <FILE id="VT_CPP5" name="ApexSibilantDetectorCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexSibilantDetectorCore.cpp"/>
+        <FILE id="VT_H006" name="ApexPitchDetectionCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexPitchDetectionCore.h"/>
+        <FILE id="VT_CPP6" name="ApexPitchDetectionCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexPitchDetectionCore.cpp"/>
+        <FILE id="VT_H007" name="ApexFormantCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexFormantCore.h"/>
+        <FILE id="VT_CPP7" name="ApexFormantCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexFormantCore.cpp"/>
+        <FILE id="VT_H008" name="ApexNoteSegmentationCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexNoteSegmentationCore.h"/>
+        <FILE id="VT_CPP8" name="ApexNoteSegmentationCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexNoteSegmentationCore.cpp"/>
+        <FILE id="VT_H009" name="ApexPitchCurveCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexPitchCurveCore.h"/>
+        <FILE id="VT_CPP9" name="ApexPitchCurveCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexPitchCurveCore.cpp"/>
+        <FILE id="VT_H010" name="ApexScaleSnapCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexScaleSnapCore.h"/>
+        <FILE id="VT_CPP10" name="ApexScaleSnapCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexScaleSnapCore.cpp"/>
+        <FILE id="VT_H011" name="ApexTuneCacheCore.h" compile="0" resource="0"
+              file="Source/VocalTuneCore/ApexTuneCacheCore.h"/>
+        <FILE id="VT_CPP11" name="ApexTuneCacheCore.cpp" compile="1" resource="0"
+              file="Source/VocalTuneCore/ApexTuneCacheCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003D}" name="VocalTuneUI">
+        <FILE id="VU_H001" name="ApexTuneEditorComponent.h" compile="0" resource="0"
+              file="Source/VocalTuneUI/ApexTuneEditorComponent.h"/>
+        <FILE id="VU_CPP1" name="ApexTuneEditorComponent.cpp" compile="1" resource="0"
+              file="Source/VocalTuneUI/ApexTuneEditorComponent.cpp"/>
+        <FILE id="VU_H002" name="ApexTunePianoGridComponent.h" compile="0" resource="0"
+              file="Source/VocalTuneUI/ApexTunePianoGridComponent.h"/>
+        <FILE id="VU_CPP2" name="ApexTunePianoGridComponent.cpp" compile="1" resource="0"
+              file="Source/VocalTuneUI/ApexTunePianoGridComponent.cpp"/>
+        <FILE id="VU_H003" name="ApexTunePitchTraceComponent.h" compile="0" resource="0"
+              file="Source/VocalTuneUI/ApexTunePitchTraceComponent.h"/>
+        <FILE id="VU_CPP3" name="ApexTunePitchTraceComponent.cpp" compile="1" resource="0"
+              file="Source/VocalTuneUI/ApexTunePitchTraceComponent.cpp"/>
+        <FILE id="VU_H004" name="ApexTuneStandaloneLauncher.h" compile="0" resource="0"
+              file="Source/VocalTuneUI/ApexTuneStandaloneLauncher.h"/>
+        <FILE id="VU_CPP4" name="ApexTuneStandaloneLauncher.cpp" compile="1" resource="0"
+              file="Source/VocalTuneUI/ApexTuneStandaloneLauncher.cpp"/>
+        <FILE id="VU_H005" name="ApexTuneToolBarComponent.h" compile="0" resource="0"
+              file="Source/VocalTuneUI/ApexTuneToolBarComponent.h"/>
+        <FILE id="VU_CPP5" name="ApexTuneToolBarComponent.cpp" compile="1" resource="0"
+              file="Source/VocalTuneUI/ApexTuneToolBarComponent.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003E}" name="ArrangementEditor">
+        <FILE id="AE_H002" name="ArrangementViewCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h"/>
+        <FILE id="AE_CPP1" name="ArrangementViewCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp"/>
+        <FILE id="AE_H003" name="ArrangementClipStateCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementClipStateCore.h"/>
+        <FILE id="AE_CPP2" name="ArrangementClipStateCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementClipStateCore.cpp"/>
+      
+        <FILE id="AE_H004" name="ArrangementClipModel.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementClipModel.h"/>
+
+        <FILE id="AE_H005" name="ArrangementDebugLogCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementDebugLogCore.h"/>
+
+        <FILE id="AE_H006" name="ArrangementDebugPanelCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementDebugPanelCore.h"/>
+
+        <FILE id="AE_H007" name="ArrangementRulerCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.h"/>
+
+        <FILE id="AE_H008" name="ArrangementSelectionCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementSelectionCore.h"/>
+
+        <FILE id="AE_H009" name="ArrangementSnapCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementSnapCore.h"/>
+
+        <FILE id="AE_H010" name="ArrangementToolbarCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementToolbarCore.h"/>
+
+        <FILE id="AE_H011" name="ArrangementUndoCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementUndoCore.h"/>
+
+        <FILE id="AE_H012" name="ArrangementZoomCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h"/>
+
+        <FILE id="AE_H013" name="AutomationIntegrationExample.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationIntegrationExample.h"/>
+
+        <FILE id="AE_H014" name="AutomationLaneComponent.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationLaneComponent.h"/>
+
+        <FILE id="AE_H015" name="AutomationLaneContainerComponent.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationLaneContainerComponent.h"/>
+
+        <FILE id="AE_H016" name="AutomationNowVisible.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationNowVisible.h"/>
+
+        <FILE id="AE_H017" name="AutomationPhase1Guide.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationPhase1Guide.h"/>
+
+        <FILE id="AE_H018" name="AutomationSystemIntegrated.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationSystemIntegrated.h"/>
+
+        <FILE id="AE_H019" name="AutomationUndoRedoCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationUndoRedoCore.h"/>
+
+        <FILE id="AE_H020" name="AutomationVisibilityDiagnostic.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationVisibilityDiagnostic.h"/>
+
+        <FILE id="AE_H021" name="ClipAutomationPanel.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipAutomationPanel.h"/>
+
+        <FILE id="AE_H022" name="ClipColourPickerCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipColourPickerCore.h"/>
+
+        <FILE id="AE_H023" name="ClipContextMenuCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipContextMenuCore.h"/>
+
+        <FILE id="AE_H024" name="ClipEdgeHandleCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipEdgeHandleCore.h"/>
+
+        <FILE id="AE_H025" name="ClipEraseOverlayCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipEraseOverlayCore.h"/>
+
+        <FILE id="AE_H026" name="ClipEraserCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipEraserCore.h"/>
+
+        <FILE id="AE_H027" name="ClipFadeCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipFadeCore.h"/>
+
+        <FILE id="AE_H028" name="ClipFadeHandleCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipFadeHandleCore.h"/>
+
+        <FILE id="AE_H029" name="ClipFadeRenderCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipFadeRenderCore.h"/>
+
+        <FILE id="AE_H030" name="ClipFreezeState.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipFreezeState.h"/>
+
+        <FILE id="AE_H031" name="ClipGainCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipGainCore.h"/>
+
+        <FILE id="AE_H032" name="ClipGainHandleCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipGainHandleCore.h"/>
+
+        <FILE id="AE_H033" name="ClipGlueCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipGlueCore.h"/>
+
+        <FILE id="AE_H034" name="ClipIndependentPitchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipIndependentPitchCore.h"/>
+
+        <FILE id="AE_H035" name="ClipMuteCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipMuteCore.h"/>
+
+        <FILE id="AE_H036" name="ClipMuteOverlayCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipMuteOverlayCore.h"/>
+
+        <FILE id="AE_H037" name="ClipPanelKnobBridgeCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPanelKnobBridgeCore.h"/>
+
+        <FILE id="AE_H038" name="ClipPitchBadgeCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPitchBadgeCore.h"/>
+
+        <FILE id="AE_H039" name="ClipPitchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPitchCore.h"/>
+
+        <FILE id="AE_H040" name="ClipPitchRenderPathCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPitchRenderPathCore.h"/>
+
+        <FILE id="AE_H041" name="ClipPluginCategoryCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPluginCategoryCore.h"/>
+
+        <FILE id="AE_H042" name="ClipPluginScanCoreUnlimited.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPluginScanCoreUnlimited.h"/>
+
+        <FILE id="AE_H043" name="ClipPluginSlotModel.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPluginSlotModel.h"/>
+
+        <FILE id="AE_H044" name="ClipPropertiesWindowCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPropertiesWindowCore.h"/>
+
+        <FILE id="AE_H045" name="ClipRegionPluginApplyCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipRegionPluginApplyCore.h"/>
+
+        <FILE id="AE_H046" name="ClipRenderCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.h"/>
+
+        <FILE id="AE_H047" name="ClipSplitCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipSplitCore.h"/>
+
+        <FILE id="AE_H047B" name="BladeSplitPlanCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/BladeSplitPlanCore.h"/>
+
+        <FILE id="AE_H048" name="ClipSplitIndicatorCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipSplitIndicatorCore.h"/>
+
+        <FILE id="AE_H049" name="ClipStretchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipStretchCore.h"/>
+
+        <FILE id="AE_H050" name="ClipTimePitchBridgeCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipTimePitchBridgeCore.h"/>
+
+        <FILE id="AE_H051" name="ClipWaveformCacheCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.h"/>
+
+        <FILE id="AE_H052" name="CryptReverbCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/CryptReverbCore.h"/>
+
+        <FILE id="AE_H053" name="DarkVoiceBodyCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/DarkVoiceBodyCore.h"/>
+
+        <FILE id="AE_H054" name="DemonAtmosphereCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/DemonAtmosphereCore.h"/>
+
+        <FILE id="AE_H055" name="EchoTapCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EchoTapCore.h"/>
+
+        <FILE id="AE_H056" name="EditorToolButtonCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EditorToolButtonCore.h"/>
+
+        <FILE id="AE_H057" name="EditorToolCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EditorToolCore.h"/>
+
+        <FILE id="AE_H058" name="EditorToolSelectorCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EditorToolSelectorCore.h"/>
+
+        <FILE id="AE_H059" name="FormantShiftCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/FormantShiftCore.h"/>
+
+        <FILE id="AE_H060" name="FormantValueCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/FormantValueCore.h"/>
+
+        <FILE id="AE_H061" name="GranularStretchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/GranularStretchCore.h"/>
+
+        <FILE id="AE_H062" name="HowlNoiseCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/HowlNoiseCore.h"/>
+
+        <FILE id="AE_H063" name="IndependentPitchEngineCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/IndependentPitchEngineCore.h"/>
+
+        <FILE id="AE_H064" name="MakingAutomationVisible.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/MakingAutomationVisible.h"/>
+
+        <FILE id="AE_H065" name="OfflineHQTimePitchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/OfflineHQTimePitchCore.h"/>
+
+        <FILE id="AE_H066" name="PercussionStretchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PercussionStretchCore.h"/>
+
+        <FILE id="AE_H067" name="Phase1Step1Complete_Step2Prep.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase1Step1Complete_Step2Prep.h"/>
+
+        <FILE id="AE_H068" name="Phase1Step3Complete.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase1Step3Complete.h"/>
+
+        <FILE id="AE_H069" name="Phase1Step3Guide.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase1Step3Guide.h"/>
+
+        <FILE id="AE_H070" name="Phase1TestHelper.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase1TestHelper.h"/>
+
+        <FILE id="AE_H071" name="Phase2Complete.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase2Complete.h"/>
+
+        <FILE id="AE_H072" name="Phase2Guide.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase2Guide.h"/>
+
+        <FILE id="AE_H073" name="Phase2Step1Complete.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase2Step1Complete.h"/>
+
+        <FILE id="AE_H074" name="Phase2Step2Complete.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase2Step2Complete.h"/>
+
+        <FILE id="AE_H075" name="Phase3Guide.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase3Guide.h"/>
+
+        <FILE id="AE_H076" name="Phase3Step1Complete.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/Phase3Step1Complete.h"/>
+
+        <FILE id="AE_H077" name="PhaseVocoderStretchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PhaseVocoderStretchCore.h"/>
+
+        <FILE id="AE_H078" name="PianoRollButtonCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PianoRollButtonCore.h"/>
+
+        <FILE id="AE_H079" name="PitchBypassCrossfaderCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchBypassCrossfaderCore.h"/>
+
+        <FILE id="AE_H080" name="PitchEngineBlendCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchEngineBlendCore.h"/>
+
+        <FILE id="AE_H081" name="PitchForensicAuditCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchForensicAuditCore.h"/>
+
+        <FILE id="AE_H082" name="PitchScaleMathCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchScaleMathCore.h"/>
+
+        <FILE id="AE_H083" name="PitchSmootherCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchSmootherCore.h"/>
+
+        <FILE id="AE_H084" name="PitchTimelineCompensationCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchTimelineCompensationCore.h"/>
+
+        <FILE id="AE_H085" name="PitchValueCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchValueCore.h"/>
+
+        <FILE id="AE_H086" name="PitchWaveformInvalidationCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchWaveformInvalidationCore.h"/>
+
+        <FILE id="AE_H087" name="PitchZoneClassifierCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchZoneClassifierCore.h"/>
+
+        <FILE id="AE_H088" name="ResampleEngineCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ResampleEngineCore.h"/>
+
+        <FILE id="AE_H089" name="RubberBandSelectCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/RubberBandSelectCore.h"/>
+
+        <FILE id="AE_H090" name="StretchModeRegistryCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/StretchModeRegistryCore.h"/>
+
+        <FILE id="AE_H091" name="StretchValueCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/StretchValueCore.h"/>
+
+        <FILE id="AE_H092" name="TapeResamplePitchEngineCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TapeResamplePitchEngineCore.h"/>
+
+        <FILE id="AE_H093" name="TimePitchArtifactControl.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchArtifactControl.h"/>
+
+        <FILE id="AE_H094" name="TimePitchAutomationCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchAutomationCore.h"/>
+
+        <FILE id="AE_H095" name="TimePitchBackgroundRenderCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchBackgroundRenderCore.h"/>
+
+        <FILE id="AE_H096" name="TimePitchBounceCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchBounceCore.h"/>
+
+        <FILE id="AE_H097" name="TimePitchCPUSafetyCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchCPUSafetyCore.h"/>
+
+        <FILE id="AE_H098" name="TimePitchDSPCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchDSPCore.h"/>
+
+        <FILE id="AE_H099" name="TimePitchExportCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchExportCore.h"/>
+
+        <FILE id="AE_H100" name="TimePitchKnobMappingCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchKnobMappingCore.h"/>
+
+        <FILE id="AE_H101" name="TimePitchPresetsCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchPresetsCore.h"/>
+
+        <FILE id="AE_H102" name="TimePitchQualityCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchQualityCore.h"/>
+
+        <FILE id="AE_H103" name="TimePitchQualitySelectorCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchQualitySelectorCore.h"/>
+
+        <FILE id="AE_H104" name="TimePitchRenderCacheCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchRenderCacheCore.h"/>
+
+        <FILE id="AE_H105" name="TimePitchSerializationCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchSerializationCore.h"/>
+
+        <FILE id="AE_H106" name="TimePitchTypesCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchTypesCore.h"/>
+
+        <FILE id="AE_H107" name="TimePitchUICore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchUICore.h"/>
+
+        <FILE id="AE_H108" name="TimePitchUndoActions.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchUndoActions.h"/>
+
+        <FILE id="AE_H109" name="TransientDetectorCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TransientDetectorCore.h"/>
+
+        <FILE id="AE_H110" name="UnifiedPitchKnobMappingCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchKnobMappingCore.h"/>
+
+        <FILE id="AE_H111" name="UnifiedPitchStateCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchStateCore.h"/>
+
+        <FILE id="AE_H112" name="VocalPitchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VocalPitchCore.h"/>
+
+        <FILE id="AE_H113" name="VoiceReactiveAnalyzerCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VoiceReactiveAnalyzerCore.h"/>
+
+        <FILE id="AE_H114" name="VoiceTransformDSPCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VoiceTransformDSPCore.h"/>
+
+        <FILE id="AE_H115" name="VoiceTransformMapperCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VoiceTransformMapperCore.h"/>
+
+        <FILE id="AE_H116" name="VoiceTransformTypesCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VoiceTransformTypesCore.h"/>
+
+        <FILE id="AE_H117" name="VoiceTransformUICore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/VoiceTransformUICore.h"/>
+
+        <FILE id="AE_H118" name="WailModulationCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/WailModulationCore.h"/>
+
+        <FILE id="AE_H119" name="WhyAutomationNotShowing.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/WhyAutomationNotShowing.h"/>
+
+        <FILE id="AE_H120" name="WSOLAStretchCore.h" compile="0" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/WSOLAStretchCore.h"/>
+
+        <FILE id="AE_CPP3" name="ArrangementRulerCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.cpp"/>
+
+        <FILE id="AE_CPP4" name="ArrangementToolbarCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ArrangementToolbarCore.cpp"/>
+
+        <FILE id="AE_CPP5" name="AutomationImplementations.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/AutomationImplementations.cpp"/>
+
+        <FILE id="AE_CPP6" name="ClipColourPickerCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipColourPickerCore.cpp"/>
+
+        <FILE id="AE_CPP7" name="ClipEdgeHandleCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipEdgeHandleCore.cpp"/>
+
+        <FILE id="AE_CPP8" name="ClipEraseOverlayCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipEraseOverlayCore.cpp"/>
+
+        <FILE id="AE_CPP9" name="ClipFadeHandleCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipFadeHandleCore.cpp"/>
+
+        <FILE id="AE_CPP10" name="ClipGainHandleCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipGainHandleCore.cpp"/>
+
+        <FILE id="AE_CPP11" name="ClipMuteOverlayCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipMuteOverlayCore.cpp"/>
+
+        <FILE id="AE_CPP12" name="ClipPitchBadgeCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPitchBadgeCore.cpp"/>
+
+        <FILE id="AE_CPP13" name="ClipPitchRenderPathCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPitchRenderPathCore.cpp"/>
+
+        <FILE id="AE_CPP14" name="ClipPluginScanCoreUnlimited.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipPluginScanCoreUnlimited.cpp"/>
+
+        <FILE id="AE_CPP15" name="ClipRenderCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp"/>
+
+        <FILE id="AE_CPP16" name="ClipSplitIndicatorCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipSplitIndicatorCore.cpp"/>
+
+        <FILE id="AE_CPP17" name="ClipWaveformCacheCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp"/>
+
+        <FILE id="AE_CPP18" name="CryptReverbCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/CryptReverbCore.cpp"/>
+
+        <FILE id="AE_CPP19" name="DemonAtmosphereCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/DemonAtmosphereCore.cpp"/>
+
+        <FILE id="AE_CPP20" name="EchoTapCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EchoTapCore.cpp"/>
+
+        <FILE id="AE_CPP21" name="EditorToolButtonCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EditorToolButtonCore.cpp"/>
+
+        <FILE id="AE_CPP22" name="EditorToolSelectorCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/EditorToolSelectorCore.cpp"/>
+
+        <FILE id="AE_CPP23" name="HowlNoiseCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/HowlNoiseCore.cpp"/>
+
+        <FILE id="AE_CPP24" name="IndependentPitchEngineCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/IndependentPitchEngineCore.cpp"/>
+
+        <FILE id="AE_CPP25" name="PianoRollButtonCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PianoRollButtonCore.cpp"/>
+
+        <FILE id="AE_CPP26" name="PitchBypassCrossfaderCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchBypassCrossfaderCore.cpp"/>
+
+        <FILE id="AE_CPP27" name="PitchEngineBlendCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchEngineBlendCore.cpp"/>
+
+        <FILE id="AE_CPP28" name="PitchForensicAuditCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchForensicAuditCore.cpp"/>
+
+        <FILE id="AE_CPP29" name="PitchScaleMathCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchScaleMathCore.cpp"/>
+
+        <FILE id="AE_CPP30" name="PitchSmootherCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchSmootherCore.cpp"/>
+
+        <FILE id="AE_CPP31" name="PitchTimelineCompensationCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchTimelineCompensationCore.cpp"/>
+
+        <FILE id="AE_CPP32" name="PitchWaveformInvalidationCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchWaveformInvalidationCore.cpp"/>
+
+        <FILE id="AE_CPP33" name="PitchZoneClassifierCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/PitchZoneClassifierCore.cpp"/>
+
+        <FILE id="AE_CPP34" name="RubberBandSelectCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/RubberBandSelectCore.cpp"/>
+
+        <FILE id="AE_CPP35" name="TimePitchTestsCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/TimePitchTestsCore.cpp"/>
+
+        <FILE id="AE_CPP36" name="UnifiedPitchKnobMappingCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchKnobMappingCore.cpp"/>
+
+        <FILE id="AE_CPP37" name="UnifiedPitchStateCore.cpp" compile="1" resource="0"
+              file="Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchStateCore.cpp"/>
+      </GROUP>
+      <FILE id="ZoUFIh" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+      <FILE id="WxpI8J" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+      <FILE id="lSmvB3" name="MainComponent.cpp" compile="1" resource="0"
+            file="Source/MainComponent.cpp"/>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000003F}" name="StepSequencerCore">
+        <FILE id="SS_H001" name="StepSequencerTypes.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerTypes.h"/>
+        <FILE id="SS_H002" name="StepSequencerModel.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerModel.h"/>
+        <FILE id="SS_CPP1" name="StepSequencerModel.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerModel.cpp"/>
+        <FILE id="SS_H003" name="StepSequencerLookAndFeel.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerLookAndFeel.h"/>
+        <FILE id="SS_CPP2" name="StepSequencerLookAndFeel.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerLookAndFeel.cpp"/>
+        <FILE id="SS_H004" name="StepSequencerStepGrid.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerStepGrid.h"/>
+        <FILE id="SS_CPP3" name="StepSequencerStepGrid.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerStepGrid.cpp"/>
+        <FILE id="SS_H005" name="StepSequencerChannelStrip.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerChannelStrip.h"/>
+        <FILE id="SS_CPP4" name="StepSequencerChannelStrip.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerChannelStrip.cpp"/>
+        <FILE id="SS_H006" name="StepSequencerHeader.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerHeader.h"/>
+        <FILE id="SS_CPP5" name="StepSequencerHeader.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerHeader.cpp"/>
+        <FILE id="SS_H007" name="StepSequencerComponent.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerComponent.h"/>
+        <FILE id="SS_CPP6" name="StepSequencerComponent.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerComponent.cpp"/>
+        <FILE id="SS_H008" name="StepSequencerWindow.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerWindow.h"/>
+        <FILE id="SS_CPP7" name="StepSequencerWindow.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerWindow.cpp"/>
+        <FILE id="SS_H009" name="StepSequencerPlaybackCore.h" compile="0" resource="0" file="Source/StepSequencerCore/StepSequencerPlaybackCore.h"/>
+        <FILE id="SS_CPP8" name="StepSequencerPlaybackCore.cpp" compile="1" resource="0" file="Source/StepSequencerCore/StepSequencerPlaybackCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000040}" name="DrumSamplerCore">
+        <FILE id="DS_H001" name="DrumSamplerTypes.h" compile="0" resource="0" file="Source/DrumSamplerCore/DrumSamplerTypes.h"/>
+        <FILE id="DS_H002" name="DrumSamplerVoice.h" compile="0" resource="0" file="Source/DrumSamplerCore/DrumSamplerVoice.h"/>
+        <FILE id="DS_CPP1" name="DrumSamplerVoice.cpp" compile="1" resource="0" file="Source/DrumSamplerCore/DrumSamplerVoice.cpp"/>
+        <FILE id="DS_H003" name="DrumSamplerVoicePool.h" compile="0" resource="0" file="Source/DrumSamplerCore/DrumSamplerVoicePool.h"/>
+        <FILE id="DS_CPP2" name="DrumSamplerVoicePool.cpp" compile="1" resource="0" file="Source/DrumSamplerCore/DrumSamplerVoicePool.cpp"/>
+        <FILE id="DS_H004" name="DrumSamplerEngine.h" compile="0" resource="0" file="Source/DrumSamplerCore/DrumSamplerEngine.h"/>
+        <FILE id="DS_CPP3" name="DrumSamplerEngine.cpp" compile="1" resource="0" file="Source/DrumSamplerCore/DrumSamplerEngine.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000041}" name="PatternManagerCore">
+        <FILE id="PM_H001" name="PatternManagerTypes.h" compile="0" resource="0" file="Source/PatternManagerCore/PatternManagerTypes.h"/>
+        <FILE id="PM_H002" name="PatternManagerCore.h" compile="0" resource="0" file="Source/PatternManagerCore/PatternManagerCore.h"/>
+        <FILE id="PM_CPP1" name="PatternManagerCore.cpp" compile="1" resource="0" file="Source/PatternManagerCore/PatternManagerCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000042}" name="G10Core">
+        <FILE id="G10_H001" name="G10Types.h" compile="0" resource="0" file="Source/G10Core/G10Types.h"/>
+        <FILE id="G10_H002" name="G10CurveEngineCore.h" compile="0" resource="0" file="Source/G10Core/G10CurveEngineCore.h"/>
+        <FILE id="G10_H003" name="G10Processor.h" compile="0" resource="0" file="Source/G10Core/G10Processor.h"/>
+        <FILE id="G10_H004" name="G10NativePluginFormat.h" compile="0" resource="0" file="Source/G10Core/G10NativePluginFormat.h"/>
+        <FILE id="G10_CPP1" name="G10Processor.cpp" compile="1" resource="0" file="Source/G10Core/G10Processor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000043}" name="G10UI">
+        <FILE id="G10U_H01" name="G10AnalyzerFifo.h" compile="0" resource="0" file="Source/G10UI/G10AnalyzerFifo.h"/>
+        <FILE id="G10U_H02" name="G10LookAndFeel.h" compile="0" resource="0" file="Source/G10UI/G10LookAndFeel.h"/>
+        <FILE id="G10U_H03" name="G10EyeHandleComponent.h" compile="0" resource="0" file="Source/G10UI/G10EyeHandleComponent.h"/>
+        <FILE id="G10U_CPP1" name="G10EyeHandleComponent.cpp" compile="1" resource="0" file="Source/G10UI/G10EyeHandleComponent.cpp"/>
+        <FILE id="G10U_H04" name="G10BandFaderComponent.h" compile="0" resource="0" file="Source/G10UI/G10BandFaderComponent.h"/>
+        <FILE id="G10U_CPP2" name="G10BandFaderComponent.cpp" compile="1" resource="0" file="Source/G10UI/G10BandFaderComponent.cpp"/>
+        <FILE id="G10U_H05" name="G10SpectrumAnalyzerComponent.h" compile="0" resource="0" file="Source/G10UI/G10SpectrumAnalyzerComponent.h"/>
+        <FILE id="G10U_CPP3" name="G10SpectrumAnalyzerComponent.cpp" compile="1" resource="0" file="Source/G10UI/G10SpectrumAnalyzerComponent.cpp"/>
+        <FILE id="G10U_H06" name="G10RotaryKnobComponent.h" compile="0" resource="0" file="Source/G10UI/G10RotaryKnobComponent.h"/>
+        <FILE id="G10U_CPP4" name="G10RotaryKnobComponent.cpp" compile="1" resource="0" file="Source/G10UI/G10RotaryKnobComponent.cpp"/>
+        <FILE id="G10U_H07" name="G10Editor.h" compile="0" resource="0" file="Source/G10UI/G10Editor.h"/>
+        <FILE id="G10U_CPP5" name="G10Editor.cpp" compile="1" resource="0" file="Source/G10UI/G10Editor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000046}" name="C4Core">
+        <FILE id="C4_H001" name="C4Types.h" compile="0" resource="0" file="Source/C4Core/C4Types.h"/>
+        <FILE id="C4_H002" name="C4TuningProfile.h" compile="0" resource="0" file="Source/C4Core/C4TuningProfile.h"/>
+        <FILE id="C4_H003" name="C4FilterCore.h" compile="0" resource="0" file="Source/C4Core/C4FilterCore.h"/>
+        <FILE id="C4_H004" name="C4BandCore.h" compile="0" resource="0" file="Source/C4Core/C4BandCore.h"/>
+        <FILE id="C4_H005" name="C4EngineCore.h" compile="0" resource="0" file="Source/C4Core/C4EngineCore.h"/>
+        <FILE id="C4_H006" name="C4Processor.h" compile="0" resource="0" file="Source/C4Core/C4Processor.h"/>
+        <FILE id="C4_H007" name="C4NativePluginFormat.h" compile="0" resource="0" file="Source/C4Core/C4NativePluginFormat.h"/>
+        <FILE id="C4_H008" name="C4HaloShelfMapper.h" compile="0" resource="0" file="Source/C4Core/C4HaloShelfMapper.h"/>
+        <FILE id="C4_H009" name="C4ResidualBankCore.h" compile="0" resource="0" file="Source/C4Core/C4ResidualBankCore.h"/>
+        <FILE id="C4_H010" name="C4SpectrumCore.h" compile="0" resource="0" file="Source/C4Core/C4SpectrumCore.h"/>
+        <FILE id="C4_H011" name="C4ResponseCurveCore.h" compile="0" resource="0" file="Source/C4Core/C4ResponseCurveCore.h"/>
+        <FILE id="C4_H012" name="C4Editor.h" compile="0" resource="0" file="Source/C4UI/C4Editor.h"/>
+        <FILE id="C4_CPP1" name="C4Processor.cpp" compile="1" resource="0" file="Source/C4Core/C4Processor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000049}" name="AnalysisCore">
+        <FILE id="AN_H001" name="ApexSpectrumAnalyzerCore.h" compile="0" resource="0" file="Source/AnalysisCore/ApexSpectrumAnalyzerCore.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000051}" name="DynamicsCore">
+        <FILE id="DYN_H001" name="ApexDynamicsCore.h" compile="0" resource="0" file="Source/DynamicsCore/ApexDynamicsCore.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000052}" name="LinearPhase">
+        <FILE id="PEQ_LP01" name="ParametricEQLinearPhase.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQLinearPhase.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000048}" name="ParametricEQCore">
+        <FILE id="PEQ_H001" name="ParametricEQTypes.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQTypes.h"/>
+        <FILE id="PEQ_H002" name="ParametricEQBiquad.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQBiquad.h"/>
+        <FILE id="PEQ_H003" name="ParametricEQEngine.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQEngine.h"/>
+        <FILE id="PEQ_H004" name="ParametricEQResponseCore.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQResponseCore.h"/>
+        <FILE id="PEQ_H005" name="ParametricEQProcessor.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQProcessor.h"/>
+        <FILE id="PEQ_CPP1" name="ParametricEQProcessor.cpp" compile="1" resource="0" file="Source/ParametricEQCore/ParametricEQProcessor.cpp"/>
+        <FILE id="PEQ_H006" name="ParametricEQNativePluginFormat.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQNativePluginFormat.h"/>
+        <FILE id="PEQ_H007" name="ParametricEQAuditionCore.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQAuditionCore.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000049}" name="ParametricEQUI">
+        <FILE id="PEQUI_H01" name="ParametricEQEditor.h" compile="0" resource="0" file="Source/ParametricEQUI/ParametricEQEditor.h"/>
+        <FILE id="PEQUI_CPP1" name="ParametricEQEditor.cpp" compile="1" resource="0" file="Source/ParametricEQUI/ParametricEQEditor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000047}" name="NativePlugins">
+        <FILE id="NP_H01" name="ApexNativePluginFormat.h" compile="0" resource="0" file="Source/PluginHostCore/ApexNativePluginFormat.h"/>
+      </GROUP>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1"/>
+  <EXPORTFORMATS>
+    <VS2026 targetFolder="Builds/VisualStudio2026">
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+      </MODULEPATHS>
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="DAW_Core"
+                        extraCompilerFlags="/utf-8 /bigobj /I&quot;..\..\Source\ThirdParty&quot; /I&quot;..\..\Source\ThirdParty\signalsmith-stretch&quot; /I&quot;..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK&quot;"
+                        postbuildCommand="powershell -ExecutionPolicy Bypass -File &quot;$(SolutionDir)..\..\Scripts\sign_build.ps1&quot; &quot;$(TargetPath)&quot;"/>
+         <CONFIGURATION isDebug="0" name="Release" targetName="DAW_Core"
+                        extraCompilerFlags="/utf-8 /bigobj /I&quot;..\..\Source\ThirdParty&quot; /I&quot;..\..\Source\ThirdParty\signalsmith-stretch&quot; /I&quot;..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK&quot;"
+                       postbuildCommand="powershell -ExecutionPolicy Bypass -File &quot;$(SolutionDir)..\..\Scripts\sign_build.ps1&quot; &quot;$(TargetPath)&quot;"/>
+      </CONFIGURATIONS>
+    </VS2026>
+  </EXPORTFORMATS>
+</JUCERPROJECT>

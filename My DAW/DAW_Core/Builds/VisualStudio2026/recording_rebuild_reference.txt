@@ -1,0 +1,2085 @@
+RECORDING REBUILD REFERENCE
+
+NOTE
+- This file contains the consolidated workspace extracts and confirmations gathered so far.
+- It is plain text for copy/paste use.
+- Some requested files in the workspace are empty or not populated as separate files.
+- This document preserves the gathered code text and search results in one place.
+
+======================================================================
+FILE 1 — Source/RecordingCore/RecordingEngine.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "../TrackCore/Track.h"
+#include "../ClipCore/Clip.h"
+#include "../TransportCore/TransportController.h"
+#include "../AudioEngineCore/AudioFileManager.h"
+
+namespace DAW {
+
+/**
+ * RecordingEngine — multi-track audio recording.
+ *
+ * Listens to TransportController: auto-starts capture when transport enters
+ * record mode, auto-finalizes WAV files + clips when recording stops.
+ * Works regardless of whether record is triggered from UI, keyboard, or API.
+ *
+ * Each armed track records independently from its assigned input channel pair.
+ *
+ * Module: RecordingCore
+ * Thread safety:
+ *   - beginRecording / stopRecording → message thread only
+ *   - processBlock → audio thread (lock-free, no allocation)
+ */
+class RecordingEngine : public TransportController::Listener
+{
+public:
+    RecordingEngine() = default;
+
+    ~RecordingEngine() override
+    {
+        if (transport_) transport_->removeListener(this);
+    }
+
+    void setSubsystems(TrackManager* tracks, ClipManager* clips,
+                       TransportController* transport,
+                       AudioFileManager* audioFiles)
+    {
+        if (transport_) transport_->removeListener(this);
+        tracks_     = tracks;
+        clips_      = clips;
+        transport_  = transport;
+        audioFiles_ = audioFiles;
+        if (transport_) transport_->addListener(this);
+    }
+
+    void prepare(double sampleRate, int blockSize)
+    {
+        sampleRate_ = sampleRate;
+        blockSize_  = blockSize;
+    }
+
+    /** Set the folder where recorded WAV files are written. */
+    void setProjectDirectory(const juce::File& dir)
+    {
+        projectDir_ = dir;
+    }
+
+    /** Set the total number of hardware input channels available. */
+    void setInputChannelCount(int numInputChannels)
+    {
+        numHardwareInputs_ = juce::jmax(0, numInputChannels);
+    }
+
+    /** Assign which hardware input channel pair a track records from.
+     *  Default is 0 (channels 0-1).  Set to 2 for channels 2-3, etc. */
+    void setTrackInputChannels(const TrackID& trackId, int firstChannel)
+    {
+        inputChannelMap_[trackId] = juce::jmax(0, firstChannel);
+    }
+
+    int getTrackInputChannel(const TrackID& trackId) const
+    {
+        auto it = inputChannelMap_.find(trackId);
+        return (it != inputChannelMap_.end()) ? it->second : 0;
+    }
+
+    // ── Recording lifecycle (message thread) ─────────────────────────────
+
+    /** Start recording on all armed tracks.
+     *  If no track is armed, auto-arms the first regular track (pro DAW behavior). */
+    void beginRecording()
+    {
+        if (!tracks_ || !transport_) return;
+
+        // Stop any previous session first
+        recording_.store(false, std::memory_order_seq_cst);
+        activeRecordings_.clear();
+
+        // Auto-arm: if nothing is armed, arm the first regular track
+        bool anyArmed = false;
+        for (int i = 0; i < tracks_->getNumTracks(); ++i)
+            if (auto* t = tracks_->getTrack(i); t && t->isArmed()) { anyArmed = true; break; }
+
+        if (!anyArmed && tracks_->getNumTracks() > 0)
+        {
+            if (auto* firstTrack = tracks_->getTrack(0))
+                firstTrack->setArmed(true);
+        }
+
+        recordStartPos_ = transport_->getPosition();
+
+        for (int i = 0; i < tracks_->getNumTracks(); ++i)
+        {
+            auto* track = tracks_->getTrack(i);
+            if (!track || !track->isArmed()) continue;
+
+            auto rec = std::make_unique<TrackRecording>();
+            rec->trackID       = track->getID();
+            rec->startPosition = recordStartPos_;
+            rec->firstInputCh  = getTrackInputChannel(track->getID());
+
+            // Pre-allocate 60 seconds — enough for most takes without realloc.
+            // If exceeded, the audio thread will stop writing (safe clamp).
+            int preAlloc = (int)(sampleRate_ * 60.0) + blockSize_ * 2;
+            rec->buffer.setSize(2, preAlloc);
+            rec->buffer.clear();
+            rec->writePos.store(0, std::memory_order_relaxed);
+            rec->maxSamples = preAlloc;
+
+            activeRecordings_.push_back(std::move(rec));
+        }
+
+        if (!activeRecordings_.empty())
+            recording_.store(true, std::memory_order_release);
+    }
+
+    /** Stop recording and finalize all tracks → WAV files + timeline clips. */
+    void stopRecording(const juce::File& projectDir)
+    {
+        recording_.store(false, std::memory_order_seq_cst);
+
+        if (!clips_ || !audioFiles_) return;
+
+        auto recordDir = projectDir.getChildFile("Recordings");
+        recordDir.createDirectory();
+
+        auto timestamp = juce::Time::getCurrentTime().formatted("%Y%m%d_%H%M%S");
+        int fileIndex = 0;
+
+        for (auto& rec : activeRecordings_)
+        {
+            int samplesWritten = rec->writePos.load(std::memory_order_acquire);
+            if (samplesWritten <= 0) continue;
+
+            // Unique filename per track per take
+            auto filename = "rec_" + rec->trackID + "_" + timestamp
+                          + "_" + juce::String(fileIndex++) + ".wav";
+            auto file = recordDir.getChildFile(filename);
+
+            if (writeWavFile(file, rec->buffer, samplesWritten, sampleRate_))
+            {
+                auto* clip = clips_->createAudioClip(
+                    file.getFileNameWithoutExtension(),
+                    file);
+
+                if (clip != nullptr)
+                {
+                    clip->setTrackID(rec->trackID);
+                    clip->setStartPosition(rec->startPosition);
+                    clip->setLength((SamplePosition) samplesWritten);
+                    clip->setSourceOffset(0);
+                    audioFiles_->loadForClip(clip->getID(), file);
+
+                    if (auto* track = tracks_->getTrack(rec->trackID))
+                        clip->setColor(track->getColor().brighter(0.1f));
+                }
+            }
+        }
+
+        activeRecordings_.clear();
+    }
+
+    // ── Audio thread ─────────────────────────────────────────────────────
+
+    /**
+     * Capture input samples for all armed tracks.  Lock-free, no allocation.
+     *
+     * @param inputBuffer  Full hardware input buffer (may have 2+ channels)
+     * @param numSamples   Block size
+     */
+    void processBlock(const juce::AudioBuffer<float>& inputBuffer, int numSamples)
+    {
+        if (!recording_.load(std::memory_order_acquire)) return;
+
+        const int inputChans = inputBuffer.getNumChannels();
+
+        for (auto& rec : activeRecordings_)
+        {
+            int wp = rec->writePos.load(std::memory_order_relaxed);
+
+            // Safety clamp — never write past the pre-allocated buffer
+            if (wp + numSamples > rec->maxSamples) continue;
+
+            // Determine which hardware channels to capture
+            int srcL = rec->firstInputCh;
+            int srcR = rec->firstInputCh + 1;
+
+            if (srcL < inputChans)
+            {
+                rec->buffer.copyFrom(0, wp, inputBuffer, srcL, 0, numSamples);
+            }
+
+            if (srcR < inputChans)
+            {
+                rec->buffer.copyFrom(1, wp, inputBuffer, srcR, 0, numSamples);
+            }
+            else if (srcL < inputChans)
+            {
+                // Mono input → duplicate to right channel
+                rec->buffer.copyFrom(1, wp, inputBuffer, srcL, 0, numSamples);
+            }
+
+            rec->writePos.store(wp + numSamples, std::memory_order_release);
+        }
+    }
+
+    // ── Queries ──────────────────────────────────────────────────────────
+
+    bool isRecording() const { return recording_.load(std::memory_order_acquire); }
+
+    int getNumActiveRecordings() const { return (int)activeRecordings_.size(); }
+
+    /** Samples recorded so far on the first active track (for UI). */
+    int getSamplesRecorded() const
+    {
+        if (activeRecordings_.empty()) return 0;
+        return activeRecordings_[0]->writePos.load(std::memory_order_relaxed);
+    }
+
+    /** Duration recorded in seconds. */
+    double getSecondsRecorded() const
+    {
+        return (sampleRate_ > 0) ? getSamplesRecorded() / sampleRate_ : 0.0;
+    }
+
+    // ── TransportController::Listener ────────────────────────────────────
+
+    void transportStateChanged() override
+    {
+        if (!transport_) return;
+
+        if (transport_->isRecording() && !isRecording())
+        {
+            // Transport just entered record mode → start capture
+            beginRecording();
+        }
+        else if (!transport_->isRecording() && isRecording())
+        {
+            // Transport just left record mode → finalize WAVs + clips
+            auto dir = projectDir_.exists() ? projectDir_
+                : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                      .getChildFile("DAW_Core_Projects");
+            stopRecording(dir);
+        }
+    }
+
+private:
+    TrackManager*        tracks_     = nullptr;
+    ClipManager*         clips_      = nullptr;
+    TransportController* transport_  = nullptr;
+    AudioFileManager*    audioFiles_ = nullptr;
+
+    double sampleRate_ = 44100.0;
+    int    blockSize_  = 512;
+    int    numHardwareInputs_ = 2;
+    juce::File projectDir_;
+
+    // Per-track input channel assignment (trackID → first channel index)
+    std::map<TrackID, int> inputChannelMap_;
+
+    struct TrackRecording
+    {
+        TrackID        trackID;
+        SamplePosition startPosition = 0;
+        int            firstInputCh  = 0;
+        juce::AudioBuffer<float> buffer;
+        std::atomic<int> writePos{0};   // written by audio thread, read by message thread
+        int            maxSamples = 0;
+    };
+
+    std::vector<std::unique_ptr<TrackRecording>> activeRecordings_;
+    SamplePosition recordStartPos_ = 0;
+    std::atomic<bool> recording_{false};
+
+    static bool writeWavFile(const juce::File& file,
+                             const juce::AudioBuffer<float>& buffer,
+                             int numSamples, double sampleRate)
+    {
+        std::unique_ptr<juce::FileOutputStream> outStream(file.createOutputStream());
+        if (!outStream) return false;
+
+        juce::WavAudioFormat wavFormat;
+        std::unique_ptr<juce::AudioFormatWriter> writer(
+            wavFormat.createWriterFor(outStream.get(), sampleRate,
+                                      (unsigned int)buffer.getNumChannels(),
+                                      24, {}, 0));
+        if (!writer) return false;
+
+        outStream.release(); // writer takes ownership
+        return writer->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+    }
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RecordingEngine)
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 2 — Source/AppCore/ApplicationCore.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "../StateCore/ApplicationState.h"
+#include "../TransportCore/TransportController.h"
+#include "../TrackCore/Track.h"
+#include "../ClipCore/Clip.h"
+#include "../GamepadCore/GamepadManager.h"
+#include "../GamepadCore/GamepadMapper.h"
+#include "../InteractionModeCore/InteractionModeManager.h"
+#include "../MarkerCore/MarkerManager.h"
+#include "../RoutingCore/RoutingGraph.h"
+#include "../ProjectCore/ProjectManager.h"
+#include "../CommandCore/CommandManager.h"
+#include "../AudioEngineCore/AudioEngine.h"
+#include "../AudioEngineCore/AudioFileManager.h"
+#include "../MasterCore/MasterBusEngine.h"
+#include "../OutputRoutingCore/OutputRoutingEngine.h"
+#include "../MonitorCore/ControlRoomEngine.h"
+#include "../RecordingCore/RecordingEngine.h"
+#include "../PluginHostCore/PluginScannerCore.h"
+#include "../PluginHostCore/PluginChainCore.h"
+#include "../PluginHostCore/PluginPlayheadInfoCore.h"
+#include "../PluginHostCore/ClipRegionPluginCore.h"
+#include "../MixerScaleCore/FaderRangeCore.h"
+#include "../Bubblegum/BubblegumV2System.h"
+#include "../FolderBusCore/FolderBusCore.h"
+#include "../FolderBusCore/FolderBusMuteCore.h"
+#include "../FolderBusCore/FolderBusSoloCore.h"
+#include "../FolderBusCore/FolderBusStateModel.h"
+#include "../FolderBusCore/FolderBusRoutingValidator.h"
+#include "../MidiCore/MidiInputCore.h"
+#include "../MidiCore/PianoRollPlaybackCore.h"
+#include "../MidiCore/VirtualMidiKeyboardCore.h"
+
+namespace DAW {
+
+// Main application nucleus - orchestrates all subsystems
+class ApplicationCore : private TrackManager::Listener,
+                        private Track::Listener,
+                        private FaderRangeCore::Listener
+{
+public:
+    ApplicationCore();
+    ~ApplicationCore();
+
+    // Initialization
+    void initialize();
+    void shutdown();
+
+    // Subsystem access (read-only getters)
+    ApplicationState& getState() { return appState_; }
+    const ApplicationState& getState() const { return appState_; }
+    TransportController& getTransport() { return *transport_; }
+    const TransportController& getTransport() const { return *transport_; }
+    TrackManager& getTrackManager() { return *trackManager_; }
+    const TrackManager& getTrackManager() const { return *trackManager_; }
+    ClipManager& getClipManager() { return *clipManager_; }
+    const ClipManager& getClipManager() const { return *clipManager_; }
+    MarkerManager& getMarkerManager() { return *markerManager_; }
+    const MarkerManager& getMarkerManager() const { return *markerManager_; }
+    RoutingGraph& getRoutingGraph() { return *routingGraph_; }
+    const RoutingGraph& getRoutingGraph() const { return *routingGraph_; }
+    ProjectManager& getProjectManager() { return *projectManager_; }
+    const ProjectManager& getProjectManager() const { return *projectManager_; }
+    AudioEngine& getAudioEngine() { return audioEngine_; }
+    const AudioEngine& getAudioEngine() const { return audioEngine_; }
+    AudioFileManager& getAudioFileManager() { return audioFileManager_; }
+    const AudioFileManager& getAudioFileManager() const { return audioFileManager_; }
+    MasterBusEngine& getMasterBus() { return masterBus_; }
+    const MasterBusEngine& getMasterBus() const { return masterBus_; }
+    OutputRoutingEngine& getOutputRouting() { return outputRouting_; }
+    const OutputRoutingEngine& getOutputRouting() const { return outputRouting_; }
+    ControlRoomEngine& getControlRoom() { return controlRoom_; }
+    const ControlRoomEngine& getControlRoom() const { return controlRoom_; }
+    RecordingEngine& getRecordingEngine() { return recordingEngine_; }
+    const RecordingEngine& getRecordingEngine() const { return recordingEngine_; }
+    PluginScannerCore& getPluginScanner()  { return pluginScanner_; }
+    const PluginScannerCore& getPluginScanner() const { return pluginScanner_; }
+    PluginPlayheadInfoCore& getPluginPlayheadInfoCore() noexcept { return pluginPlayheadInfoCore_; }
+    const PluginPlayheadInfoCore& getPluginPlayheadInfoCore() const noexcept { return pluginPlayheadInfoCore_; }
+    ClipRegionPluginCore& getClipRegionPluginCore() noexcept { return clipRegionPluginCore_; }
+    const ClipRegionPluginCore& getClipRegionPluginCore() const noexcept { return clipRegionPluginCore_; }
+    BubblegumV2System& getBubblegumV2()      { return bubblegumV2_; }
+    const BubblegumV2System& getBubblegumV2() const { return bubblegumV2_; }
+    FolderBusCore& getFolderBus()              { return folderBus_; }
+    const FolderBusCore& getFolderBus() const { return folderBus_; }
+    FolderBusStateModel& getFolderBusStateModel() { return folderBusStateModel_; }
+    const FolderBusStateModel& getFolderBusStateModel() const { return folderBusStateModel_; }
+    FolderBusRoutingValidator& getFolderBusValidator() { return folderBusValidator_; }
+    const FolderBusRoutingValidator& getFolderBusValidator() const { return folderBusValidator_; }
+    FaderRangeCore& getFaderRangeCore() { return faderRangeCore_; }
+    const FaderRangeCore& getFaderRangeCore() const { return faderRangeCore_; }
+    PianoRollPlaybackCore& getMidiPlayback() noexcept { return midiPlayback_; }
+    MidiInputCore& getMidiInput() noexcept { return midiInput_; }
+    VirtualMidiKeyboardCore& getVirtualKeyboard() noexcept { return virtualKeyboard_; }
+
+    /** Rebuild and publish the FolderBus mute/solo snapshot. Call after any mute/solo/topology change. */
+    void rebuildFolderBusSnapshot()
+    {
+        FolderBusSnapshot snap;
+        snap.effectivelyMutedTracks = folderBusMute_.buildEffectiveMuteSet(*trackManager_, folderBus_);
+        snap.effectiveSoloSet       = folderBusSolo_.buildEffectiveSoloSet(*trackManager_, folderBus_);
+        folderBusStateModel_.update(std::move(snap));
+    }
+
+    /** Get or create the plugin chain for a track ID. */
+    PluginChainCore* getPluginChain(const TrackID& trackId)
+    {
+        auto it = pluginChains_.find(trackId);
+        if (it != pluginChains_.end()) return it->second.get();
+        auto chain = std::make_unique<PluginChainCore>();
+        chain->setPlayheadInfoCore(&pluginPlayheadInfoCore_);
+        if (currentSampleRate_ > 0) chain->prepare(currentSampleRate_, currentBlockSize_);
+
+        // When the chain changes, inform the sidechain target list so it knows
+        // whether this track has a plugin with a sidechain bus (bus count > 1).
+        chain->onChainChanged = [this, trackId](int /*slotIndex*/)
+        {
+            auto* c = getPluginChain(trackId);
+            bool capable = false;
+            if (c)
+            {
+                for (int i = 0; i < c->getNumSlots(); ++i)
+                {
+                    auto* inst = c->getSlot(i);
+                    if (inst && inst->getProcessor() &&
+                        inst->getProcessor()->getBusCount(true) > 1)
+                    {
+                        capable = true;
+                        break;
+                    }
+                }
+            }
+            bubblegumV2_.sidechainTargetList.markSidechainCapable(trackId, capable);
+            audioEngine_.markMasterPdcDirty();
+        };
+
+        auto* ptr = chain.get();
+        pluginChains_[trackId] = std::move(chain);
+        return ptr;
+    }
+
+    /** Clear all plugin chains (for new project). */
+    void clearAllPluginChains()
+    {
+        pluginChains_.clear();
+
+        if (trackManager_ && trackManager_->hasMasterTrack())
+            masterBus_.setPluginChain(getPluginChain(trackManager_->getMasterTrack()->getID()));
+        else
+            masterBus_.setPluginChain(nullptr);
+    }
+
+    double getCurrentSampleRate() const { return currentSampleRate_; }
+
+    // Gamepad support (optional feature)
+    GamepadManager& getGamepadManager() { return *gamepadManager_; }
+    const GamepadManager& getGamepadManager() const { return *gamepadManager_; }
+    GamepadMapper& getGamepadMapper() { return *gamepadMapper_; }
+    const GamepadMapper& getGamepadMapper() const { return *gamepadMapper_; }
+
+    void setGamepadEnabled(bool enabled);
+    bool isGamepadEnabled() const;
+
+    // Interaction mode (Touch/Hybrid/Desktop)
+    InteractionModeManager& getInteractionManager() { return *interactionManager_; }
+    const InteractionModeManager& getInteractionManager() const { return *interactionManager_; }
+
+    // Audio engine integration
+    void prepareToPlay(double sampleRate, int samplesPerBlock);
+    void releaseResources();
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill);
+
+    /** Reload audio buffers for all AudioClips from their source files. */
+    void reloadAudioFiles();
+
+    // ── Plugin chain serialization (called by ProjectManager during save/load) ──────
+
+    juce::ValueTree getPluginChainsState() const;
+    void restorePluginChainsState(const juce::ValueTree& chains);
+
+private:
+    // Core state
+    ApplicationState appState_;
+
+    // Subsystems (initialized in order)
+    std::unique_ptr<TransportController> transport_;
+    std::unique_ptr<TrackManager> trackManager_;
+    std::unique_ptr<ClipManager> clipManager_;
+    std::unique_ptr<MarkerManager> markerManager_;
+    std::unique_ptr<RoutingGraph> routingGraph_;
+    std::unique_ptr<ProjectManager> projectManager_;
+
+    // Gamepad support (optional)
+    std::unique_ptr<GamepadManager> gamepadManager_;
+    std::unique_ptr<GamepadMapper> gamepadMapper_;
+
+    // Interaction mode manager
+    std::unique_ptr<InteractionModeManager> interactionManager_;
+
+    // Audio engine + master + output + monitor
+    AudioEngine audioEngine_;
+    AudioFileManager audioFileManager_;
+    MasterBusEngine masterBus_;
+    OutputRoutingEngine outputRouting_;
+    ControlRoomEngine controlRoom_;
+    RecordingEngine recordingEngine_;
+    PluginScannerCore pluginScanner_;
+    PluginPlayheadInfoCore pluginPlayheadInfoCore_;
+    ClipRegionPluginCore clipRegionPluginCore_;
+    std::map<TrackID, std::unique_ptr<PluginChainCore>> pluginChains_;
+    FaderRangeCore faderRangeCore_;
+    double currentSampleRate_{44100.0};
+    int currentBlockSize_{512};
+    BubblegumV2System bubblegumV2_;
+
+    // FolderBus nucleos
+    FolderBusCore            folderBus_;
+    FolderBusMuteCore        folderBusMute_;
+    FolderBusSoloCore        folderBusSolo_;
+    FolderBusStateModel      folderBusStateModel_;
+    FolderBusRoutingValidator folderBusValidator_;
+    MidiInputCore midiInput_;
+    PianoRollPlaybackCore midiPlayback_;
+    VirtualMidiKeyboardCore virtualKeyboard_;
+
+    // TrackManager::Listener
+    void trackAdded(Track* track) override;
+    void trackRemoved(const TrackID& trackID) override;
+
+    // Track::Listener
+    void trackPropertyChanged(Track* track) override;
+
+    // FaderRangeCore::Listener
+    void faderRangeChanged() override;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ApplicationCore)
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 3 — Source/AppCore/ApplicationCore.cpp
+======================================================================
+#include "ApplicationCore.h"
+
+namespace DAW {
+
+ApplicationCore::ApplicationCore()
+{
+}
+
+ApplicationCore::~ApplicationCore()
+{
+    shutdown();
+}
+
+void ApplicationCore::initialize()
+{
+    DBG("ApplicationCore::initialize() - Starting DAW subsystems");
+
+    // Session-global fader format core — single source of truth for all
+    // fader/meter format math across audio, UI, and persistence.
+    FaderRangeCore::setGlobalInstance(&faderRangeCore_);
+    faderRangeCore_.addListener(this);
+
+    // Initialize subsystems in dependency order
+    transport_ = std::make_unique<TransportController>(appState_);
+    trackManager_ = std::make_unique<TrackManager>();
+    clipManager_ = std::make_unique<ClipManager>();
+    markerManager_ = std::make_unique<MarkerManager>();
+    routingGraph_ = std::make_unique<RoutingGraph>();
+
+    // Project manager — wired to all serializable subsystems
+    projectManager_ = std::make_unique<ProjectManager>();
+    projectManager_->setSubsystems({
+        trackManager_.get(),
+        clipManager_.get(),
+        transport_.get(),
+        markerManager_.get(),
+        routingGraph_.get(),
+        &faderRangeCore_,
+        &appState_,
+        this,  // ApplicationCore for plugin serialization
+        &folderBus_,
+        bubblegumV2_.getMasterRoute()
+    });
+
+    // Force CommandManager singleton initialization (wires EditUndo/EditRedo)
+    CommandManager::getInstance();
+
+    // Audio engine — wired to track, clip, transport, routing, and audio file subsystems
+    pluginPlayheadInfoCore_.setTransportController(transport_.get());
+    clipRegionPluginCore_.setPlayheadInfoCore(&pluginPlayheadInfoCore_);
+    audioEngine_.setSubsystems(trackManager_.get(), clipManager_.get(),
+                               transport_.get(), routingGraph_.get(),
+                               &audioFileManager_);
+    audioEngine_.setPluginChains(&pluginChains_);
+    audioEngine_.setPluginPlayheadInfoCore(&pluginPlayheadInfoCore_);
+    audioEngine_.setClipRegionPluginCore(&clipRegionPluginCore_);
+    audioEngine_.setFolderBusStateModel(&folderBusStateModel_);
+    audioEngine_.setMidiPlayback(&midiPlayback_);
+    audioEngine_.setMidiInput(&midiInput_);
+    audioEngine_.setVirtualKeyboard(&virtualKeyboard_);
+    midiInput_.setSubsystems(trackManager_.get(), clipManager_.get(), &appState_, transport_.get(), &virtualKeyboard_);
+    midiInput_.setAllAvailableInputsEnabled(true);
+
+    // Recording engine — captures input audio to armed tracks
+    recordingEngine_.setSubsystems(trackManager_.get(), clipManager_.get(),
+                                    transport_.get(), &audioFileManager_);
+
+    // Sync routing graph with track lifecycle
+    trackManager_->addListener(this);
+
+    auto* masterTrack = trackManager_->createMasterTrack();
+    masterTrack->addListener(this);
+    masterBus_.bindMasterTrack(masterTrack);
+    masterBus_.setPluginChain(getPluginChain(masterTrack->getID()));
+    DBG("[ApplicationCore] Master identity source = Track::isMaster(), id=" + masterTrack->getID());
+
+    // Sync the routing graph master node's trackId to the real master Track ID.
+    // The graph initialises it as "master" (a sentinel string) but cable routing
+    // resolves anchors by TrackID — it must match the actual master strip ID.
+    if (auto* masterNode = routingGraph_->getMasterNode())
+        masterNode->trackId = masterTrack->getID();
+
+    // Initialize interaction mode manager (auto-detects touch/mouse)
+    interactionManager_ = std::make_unique<InteractionModeManager>();
+
+    // Initialize gamepad support (disabled by default)
+    gamepadManager_ = std::make_unique<GamepadManager>();
+    gamepadMapper_ = std::make_unique<GamepadMapper>(*gamepadManager_);
+
+    // Gamepad is OFF by default
+    gamepadManager_->setEnabled(false);
+    gamepadMapper_->setEnabled(false);
+
+    // Initialize Bubblegum V2 system — send-only routing with visual feedback
+    bubblegumV2_.init(*routingGraph_, *trackManager_);
+
+    // Create a default track for testing
+    trackManager_->createTrack("Track 1");
+
+    DBG("ApplicationCore::initialize() - DAW subsystems initialized successfully");
+    DBG("ApplicationCore: Gamepad support available (disabled by default)");
+}
+
+void ApplicationCore::shutdown()
+{
+    DBG("ApplicationCore::shutdown() - Shutting down DAW subsystems");
+
+    if (trackManager_)
+    {
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+            if (auto* track = trackManager_->getTrack(i))
+                track->removeListener(this);
+
+        if (trackManager_->hasMasterTrack())
+            trackManager_->getMasterTrack()->removeListener(this);
+    }
+
+    // Shutdown in reverse order of initialization
+    gamepadMapper_.reset();
+    gamepadManager_.reset();
+    interactionManager_.reset();
+    midiInput_.shutdown();
+    projectManager_.reset();
+    if (trackManager_) trackManager_->removeListener(this);
+    routingGraph_.reset();
+    markerManager_.reset();
+    clipManager_.reset();
+    trackManager_.reset();
+    transport_.reset();
+    faderRangeCore_.removeListener(this);
+    FaderRangeCore::setGlobalInstance(nullptr);
+
+    DBG("ApplicationCore::shutdown() - DAW subsystems shut down successfully");
+}
+
+void ApplicationCore::setGamepadEnabled(bool enabled)
+{
+    if (gamepadManager_ && gamepadMapper_)
+    {
+        gamepadManager_->setEnabled(enabled);
+        gamepadMapper_->setEnabled(enabled);
+
+        if (enabled)
+        {
+            DBG("==============================================");
+            DBG("GAMEPAD SUPPORT: ENABLED");
+            DBG("==============================================");
+            DBG("Supported controllers:");
+            DBG("- Legion Go controllers");
+            DBG("- Xbox controllers");
+            DBG("- Any XInput-compatible gamepad");
+            DBG("");
+            DBG("Default mapping:");
+            DBG("  A = Play");
+            DBG("  B = Stop");
+            DBG("  Y = Record");
+            DBG("  X = Toggle Loop");
+            DBG("  LB/RB = Previous/Next Track");
+            DBG("  D-Pad = Scroll");
+            DBG("  Start = Open Mixer");
+            DBG("  Back = Open Settings");
+            DBG("  Left Stick = Scroll");
+            DBG("  Right Stick X = Pan");
+            DBG("  Triggers = Volume Control");
+            DBG("==============================================");
+        }
+        else
+        {
+            DBG("GamepadMapper: Gamepad support disabled");
+        }
+    }
+}
+
+bool ApplicationCore::isGamepadEnabled() const
+{
+    return gamepadManager_ && gamepadManager_->isEnabled();
+}
+
+void ApplicationCore::trackAdded(Track* track)
+{
+    if (!routingGraph_ || !track) return;
+
+    track->addListener(this);
+
+    // The master track is not a routing source — it's the final output processor.
+    // Do not add a routing node for it; its plugins/fader are applied in MasterBusEngine.
+    if (track->isMaster()) return;
+
+    // Map TrackRole to RoutingNodeType
+    RoutingNodeType nodeType = RoutingNodeType::Track;
+    switch (track->getRole())
+    {
+        case TrackRole::Aux:
+        case TrackRole::Bus:        nodeType = RoutingNodeType::Bus;       break;
+        case TrackRole::FolderBus:  nodeType = RoutingNodeType::FolderBus; break;
+        default:                    nodeType = RoutingNodeType::Track;     break;
+    }
+
+    auto* node = routingGraph_->addNode(track->getName(), nodeType, track->getID());
+
+    // Master routing: RoutingGraph::addNode() already established a Direct→master
+    // edge for Track/Bus nodes. That single edge is the sole source of truth for
+    // "this track's output goes to master" and is managed exclusively by
+    // MasterRouteStateCore. Do NOT create a parallel Send→master edge here —
+    // that caused a double summation and a route that Bubblegum could not
+    // see or delete (master-leak bug).
+    juce::ignoreUnused(node);
+    rebuildFolderBusSnapshot();
+}
+
+void ApplicationCore::faderRangeChanged()
+{
+    auto clampTrackVolume = [this](Track* track)
+    {
+        if (!track)
+            return;
+
+        const float db = FaderRangeCore::gainToDb(track->getVolume());
+        const float clampedDb = faderRangeCore_.clampDb(db);
+        const float clampedGain = faderRangeCore_.dbToGain(clampedDb);
+
+        if (std::abs(clampedGain - track->getVolume()) > 0.0001f)
+            track->setVolume(clampedGain);
+    };
+
+    if (trackManager_)
+    {
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+            clampTrackVolume(trackManager_->getTrack(i));
+
+        if (trackManager_->hasMasterTrack())
+            clampTrackVolume(trackManager_->getMasterTrack());
+    }
+}
+
+void ApplicationCore::trackRemoved(const TrackID& trackID)
+{
+    if (!routingGraph_) return;
+
+    if (trackManager_)
+        if (auto* track = trackManager_->getTrack(trackID))
+            track->removeListener(this);
+
+    if (auto* node = routingGraph_->getNodeByTrackId(trackID))
+        routingGraph_->removeNode(node->id);
+    rebuildFolderBusSnapshot();
+}
+
+void ApplicationCore::trackPropertyChanged(Track* track)
+{
+    if (!trackManager_ || track == nullptr)
+        return;
+
+    rebuildFolderBusSnapshot();
+}
+
+void ApplicationCore::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    currentSampleRate_ = sampleRate;
+    currentBlockSize_ = samplesPerBlock;
+
+    if (trackManager_)
+    {
+        auto* masterTrack = trackManager_->createMasterTrack();
+        masterBus_.bindMasterTrack(masterTrack);
+        masterBus_.setPluginChain(getPluginChain(masterTrack->getID()));
+    }
+
+    midiPlayback_.prepare(sampleRate, samplesPerBlock);
+    midiPlayback_.setTempo(transport_->getTempo());
+    midiPlayback_.setSubsystems(clipManager_.get(), trackManager_.get());
+    midiInput_.prepare(sampleRate, samplesPerBlock);
+    clipRegionPluginCore_.prepare(sampleRate, samplesPerBlock);
+    audioEngine_.prepare(sampleRate, samplesPerBlock);
+    recordingEngine_.prepare(sampleRate, samplesPerBlock);
+    for (auto& [id, chain] : pluginChains_)
+        if (chain) chain->prepare(sampleRate, samplesPerBlock);
+    masterBus_.prepare(sampleRate, samplesPerBlock);
+    controlRoom_.prepare(sampleRate, samplesPerBlock);
+
+    DBG("ApplicationCore::prepareToPlay() - Sample rate: " + juce::String(sampleRate) 
+        + ", Block size: " + juce::String(samplesPerBlock));
+}
+
+void ApplicationCore::releaseResources()
+{
+    audioEngine_.releaseResources();
+    clipRegionPluginCore_.releaseResources();
+    masterBus_.releaseResources();
+    controlRoom_.releaseResources();
+    DBG("ApplicationCore::releaseResources()");
+}
+
+void ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    // PROFESSIONAL SIGNAL FLOW:
+    //
+    // 1. AudioEngine → fills buffer with main mix (tracks/buses/returns)
+    // 2. MasterBusEngine → master inserts + master fader + meter + render tap
+    // 3. ControlRoomEngine → monitor-only processing (dim/mute/mono/monFX/speaker)
+    //
+    // Render/export reads from step 2’s RenderSourceEngine.
+    // Monitor processing in step 3 does NOT affect exported files.
+
+    pluginPlayheadInfoCore_.flushPendingTransportControlRequests();
+
+    // 0. Recording capture — grab hardware input for armed tracks
+    if (recordingEngine_.isRecording() && bufferToFill.buffer)
+        recordingEngine_.processBlock(*bufferToFill.buffer, bufferToFill.numSamples);
+
+    jassert(routingGraph_ != nullptr && routingGraph_->getMasterNode() != nullptr);
+    static bool loggedHardwarePath = false;
+    if (!loggedHardwarePath)
+    {
+        loggedHardwarePath = true;
+        DBG("[ApplicationCore] Master node id = master");
+        DBG("[ApplicationCore] Hardware output source = post-master device buffer via AudioEngine -> MasterBusEngine -> ControlRoomEngine");
+    }
+
+    // 1. Main mix
+    audioEngine_.process(bufferToFill);
+
+    // 2. Master bus processing (inserts → fader → meter → render tap)
+    if (bufferToFill.buffer && bufferToFill.buffer->getNumChannels() >= 2)
+    {
+        float* L = bufferToFill.buffer->getWritePointer(0, bufferToFill.startSample);
+        float* R = bufferToFill.buffer->getWritePointer(1, bufferToFill.startSample);
+        masterBus_.processBlock(L, R, bufferToFill.numSamples);
+    }
+
+    // 3. Control room / monitor section (monitor path only — never touches render)
+    controlRoom_.processBlock(bufferToFill);
+}
+
+void ApplicationCore::reloadAudioFiles()
+{
+    audioFileManager_.clearAll();
+    for (auto* clip : clipManager_->getAllClips())
+    {
+        if (auto* ac = dynamic_cast<AudioClip*>(clip))
+        {
+            if (ac->getSourceFile().existsAsFile())
+                audioFileManager_.loadForClip(ac->getID(), ac->getSourceFile());
+        }
+    }
+}
+
+juce::ValueTree ApplicationCore::getPluginChainsState() const
+{
+    juce::ValueTree chains("PluginChains");
+    for (const auto& [trackId, chain] : pluginChains_)
+    {
+        if (!chain) continue;
+        juce::ValueTree trackChain("TrackPlugins");
+        trackChain.setProperty("trackId", trackId, nullptr);
+        trackChain.addChild(chain->getState(), -1, nullptr);
+        chains.addChild(trackChain, -1, nullptr);
+    }
+    return chains;
+}
+
+void ApplicationCore::restorePluginChainsState(const juce::ValueTree& chains)
+{
+    if (!chains.isValid()) return;
+
+    for (int i = 0; i < chains.getNumChildren(); ++i)
+    {
+        auto trackChain = chains.getChild(i);
+        if (!trackChain.hasType("TrackPlugins")) continue;
+
+        juce::String trackId = trackChain.getProperty("trackId", "");
+        if (trackId.isEmpty()) continue;
+
+        auto pluginChainTree = trackChain.getChildWithName("PluginChain");
+        if (!pluginChainTree.isValid()) continue;
+
+        // Get or create the chain for this track
+        auto* chain = getPluginChain(trackId);
+        if (chain)
+            chain->restoreState(pluginChainTree, pluginScanner_.getFormatManager());
+    }
+}
+
+} // namespace DAW
+
+======================================================================
+FILE 4 — Source/InputMonitorCore/RecordInputRouter.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "InputFxChain.h"
+
+namespace DAW {
+
+/**
+ * RecordInputRouter — routes hardware input to record and/or monitor paths.
+ *
+ * Supports three recording/monitoring modes:
+ *   A. MonitorDryRecordDry   — simplest; no FX on input at all
+ *   B. MonitorWetRecordDry   — performer hears InputFxChain; recorded file is dry
+ *   C. MonitorWetRecordWet   — performer hears InputFxChain; recorded file is printed with FX
+ *
+ * IMPORTANT DISTINCTIONS:
+ *   - "Printed FX" = InputFxChain applied to the RECORD path (intentional)
+ *   - "Monitor-only FX" = InputFxChain applied to MONITOR path only
+ *   - "Control Room FX" = MonitorFxChain in ControlRoomEngine (always monitor-only)
+ *
+ * The user must INTENTIONALLY choose to print the plugin chain.
+ * Wet monitoring does NOT automatically mean wet recording.
+ */
+class RecordInputRouter
+{
+public:
+    enum class Mode
+    {
+        MonitorDryRecordDry,   // no FX anywhere
+        MonitorWetRecordDry,   // FX on monitor only; record file stays dry
+        MonitorWetRecordWet    // FX on both paths; record file is printed
+    };
+
+    void setMode(Mode m) noexcept { mode_ = m; }
+    Mode getMode() const noexcept { return mode_; }
+
+    /**
+     * Routes input samples to monitor and record buffers.
+     *
+     * @param inputL/R        Raw hardware input (dry)
+     * @param monitorOutL/R   What the performer hears in real time
+     * @param recordOutL/R    What gets written to the recorded file
+     * @param numSamples      Block size
+     * @param inputFx         Per-track InputFxChain (may be null or bypassed)
+     */
+    void routeInput(const float* inputL, const float* inputR,
+                    float* monitorOutL, float* monitorOutR,
+                    float* recordOutL, float* recordOutR,
+                    int numSamples,
+                    InputFxChain* inputFx = nullptr) noexcept
+    {
+        if (!inputL || !inputR) return;
+
+        switch (mode_)
+        {
+            case Mode::MonitorDryRecordDry:
+            {
+                // Both paths get the raw dry input — no FX anywhere
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    if (monitorOutL) monitorOutL[i] = inputL[i];
+                    if (monitorOutR) monitorOutR[i] = inputR[i];
+                    if (recordOutL)  recordOutL[i]  = inputL[i];
+                    if (recordOutR)  recordOutR[i]  = inputR[i];
+                }
+                break;
+            }
+
+            case Mode::MonitorWetRecordDry:
+            {
+                // Record path: dry input
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    if (recordOutL) recordOutL[i] = inputL[i];
+                    if (recordOutR) recordOutR[i] = inputR[i];
+                }
+                // Monitor path: copy dry → apply InputFxChain
+                if (monitorOutL && monitorOutR)
+                {
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        monitorOutL[i] = inputL[i];
+                        monitorOutR[i] = inputR[i];
+                    }
+                    if (inputFx && !inputFx->isBypassed())
+                        inputFx->process(monitorOutL, monitorOutR, numSamples);
+                }
+                break;
+            }
+
+            case Mode::MonitorWetRecordWet:
+            {
+                // Both paths get the wet (printed) signal
+                // Process into monitor buffer, then copy to record buffer
+                if (monitorOutL && monitorOutR)
+                {
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        monitorOutL[i] = inputL[i];
+                        monitorOutR[i] = inputR[i];
+                    }
+                    if (inputFx && !inputFx->isBypassed())
+                        inputFx->process(monitorOutL, monitorOutR, numSamples);
+                    // Record gets the same wet signal
+                    if (recordOutL && recordOutR)
+                    {
+                        for (int i = 0; i < numSamples; ++i)
+                        {
+                            recordOutL[i] = monitorOutL[i];
+                            recordOutR[i] = monitorOutR[i];
+                        }
+                    }
+                }
+                else
+                {
+                    // Fallback: if no monitor buffer, process directly into record
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        if (recordOutL) recordOutL[i] = inputL[i];
+                        if (recordOutR) recordOutR[i] = inputR[i];
+                    }
+                    if (inputFx && !inputFx->isBypassed() && recordOutL && recordOutR)
+                        inputFx->process(recordOutL, recordOutR, numSamples);
+                }
+                break;
+            }
+        }
+    }
+
+    /** Returns a human-readable label for the current mode. */
+    static juce::String getModeLabel(Mode m)
+    {
+        switch (m)
+        {
+            case Mode::MonitorDryRecordDry:  return "Dry / Dry";
+            case Mode::MonitorWetRecordDry:  return "Wet Mon / Dry Rec";
+            case Mode::MonitorWetRecordWet:  return "Wet Mon / Printed Rec";
+            default: return "?";
+        }
+    }
+
+private:
+    Mode mode_ = Mode::MonitorDryRecordDry;
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 5 — Source/InputMonitorCore/TrackMonitoringStateModel.h
+======================================================================
+#pragma once
+#include <atomic>
+#include "RecordInputRouter.h"
+
+namespace DAW {
+
+/** Per-track input monitoring mode. */
+enum class InputMonitorMode
+{
+    Off  = 0,   // no live input heard
+    On   = 1,   // always hear live input
+    Auto = 2    // hear input only when record-armed + stopped/recording (future)
+};
+
+/**
+ * TrackMonitoringStateModel — per-track input monitoring + recording mode state.
+ *
+ * This is for LIVE INPUT MONITORING on normal recordable tracks
+ * (hear your vocal/instrument in real time while performing).
+ *
+ * Also carries the recording-mode selection that decides whether
+ * plugin effects are only for monitoring or printed into recorded audio.
+ *
+ * Recording modes (per-track):
+ *   - Monitor Dry / Record Dry     — no FX anywhere
+ *   - Monitor Wet / Record Dry     — hear FX, record clean
+ *   - Monitor Wet / Record Wet     — hear FX, print FX into recording
+ *
+ * This is NOT Control Room / monitor section monitoring.
+ * This is NOT the master track — master never has input monitoring.
+ *
+ * Thread-safe via atomics for audio↔UI bridge.
+ */
+struct TrackMonitoringStateModel
+{
+    std::atomic<int>  monitorMode   { (int)InputMonitorMode::Off };
+    std::atomic<int>  recordingMode { (int)RecordInputRouter::Mode::MonitorDryRecordDry };
+    std::atomic<bool> inputFxActive { false };
+
+    InputMonitorMode getMode() const noexcept
+    {
+        return static_cast<InputMonitorMode>(monitorMode.load(std::memory_order_relaxed));
+    }
+
+    void setMode(InputMonitorMode m) noexcept
+    {
+        monitorMode.store((int)m, std::memory_order_relaxed);
+    }
+
+    bool isMonitoring() const noexcept
+    {
+        return getMode() != InputMonitorMode::Off;
+    }
+
+    RecordInputRouter::Mode getRecordingMode() const noexcept
+    {
+        return static_cast<RecordInputRouter::Mode>(recordingMode.load(std::memory_order_relaxed));
+    }
+
+    void setRecordingMode(RecordInputRouter::Mode m) noexcept
+    {
+        recordingMode.store((int)m, std::memory_order_relaxed);
+    }
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 6 — Source/InputMonitorCore/InputFxChain.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+
+namespace DAW {
+
+/**
+ * InputFxChain — per-track input FX for wet monitoring workflows.
+ *
+ * Sits on the input signal path BEFORE the monitor/record split.
+ * Used for:
+ *   - Vocal reverb/delay during recording (monitor wet, record dry)
+ *   - Input compression/EQ for printed recording (monitor wet, record wet)
+ *
+ * Version 1: pass-through placeholder.
+ * Future: hosts VST/AU plugins on the input signal path.
+ */
+class InputFxChain
+{
+public:
+    void prepare(double sampleRate, int blockSize) noexcept
+    {
+        sampleRate_ = sampleRate;
+        blockSize_  = blockSize;
+    }
+
+    void releaseResources() noexcept {}
+
+    void process(float* /*L*/, float* /*R*/, int /*numSamples*/) noexcept
+    {
+        // v1: pass-through — no input FX processing
+    }
+
+    bool isEmpty() const noexcept { return true; }
+    void setBypassed(bool b) noexcept { bypassed_ = b; }
+    bool isBypassed() const noexcept { return bypassed_; }
+
+private:
+    double sampleRate_ = 44100.0;
+    int    blockSize_  = 512;
+    bool   bypassed_   = true;
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 7 — Source/TransportCore/TransportController.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "../UtilityCore/Types.h"
+#include "../StateCore/ApplicationState.h"
+
+namespace DAW {
+
+// Transport controller - handles play/stop/record logic
+// Separated from UI and audio engine
+class TransportController
+{
+public:
+    TransportController(ApplicationState& appState);
+    ~TransportController();
+
+    // Transport control
+    void play();
+    void stop();
+    void returnToZero();
+    void pause();
+    void togglePlayPause();
+    void record();
+    void stopRecording();
+    void toggleRecord();
+
+    // Loop control
+    void setLooping(bool shouldLoop);
+    bool isLooping() const;
+    void setLoopRange(SamplePosition start, SamplePosition end);
+    std::pair<SamplePosition, SamplePosition> getLoopRange() const;
+
+    // Tempo control
+    void setTempo(double bpm);
+    double getTempo() const;
+
+    // Position control
+    void setPosition(SamplePosition samples);
+    void setPositionFromAudioThread(SamplePosition samples) noexcept;
+    void setPositionBarBeat(BarBeatPosition barBeat);
+    SamplePosition getPosition() const;
+    BarBeatPosition getPositionBarBeat() const;
+
+    // Time conversion
+    SamplePosition barBeatToSamples(BarBeatPosition barBeat, double sampleRate) const;
+    BarBeatPosition samplesToBarBeat(SamplePosition samples, double sampleRate) const;
+
+    // State queries
+    bool isPlaying() const;
+    bool isRecording() const;
+    bool isPaused() const;
+
+    // Listeners for transport state changes
+    class Listener
+    {
+    public:
+        virtual ~Listener() = default;
+        virtual void transportStateChanged() {}
+        virtual void tempoChanged(double newTempo) {}
+        virtual void positionChanged(SamplePosition newPosition) {}
+        virtual void loopRangeChanged(SamplePosition start, SamplePosition end) {}
+    };
+
+    void addListener(Listener* listener);
+    void removeListener(Listener* listener);
+
+private:
+    ApplicationState& state_;
+    juce::ListenerList<Listener> listeners_;
+    std::atomic<SamplePosition> currentPosition_{0};
+    SamplePosition playStartPosition_{0};
+
+    SamplePosition loopStart_{0};
+    SamplePosition loopEnd_{0};
+
+    void notifyTransportStateChanged();
+    void notifyTempoChanged();
+    void notifyPositionChanged();
+    void notifyLoopRangeChanged();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportController)
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 8 — Source/TransportCore/TransportController.cpp
+======================================================================
+#include "TransportController.h"
+
+namespace DAW {
+
+TransportController::TransportController(ApplicationState& appState)
+    : state_(appState)
+{
+    currentPosition_.store((SamplePosition)(juce::int64)state_.transportPosition.getValue(), std::memory_order_relaxed);
+}
+
+TransportController::~TransportController()
+{
+}
+
+void TransportController::play()
+{
+    if (!isPlaying() && !isPaused())
+        playStartPosition_ = currentPosition_.load(std::memory_order_relaxed);
+    state_.isPlaying.setValue(true);
+    state_.isPaused.setValue(false);
+    notifyTransportStateChanged();
+}
+
+void TransportController::stop()
+{
+    state_.isPlaying.setValue(false);
+    state_.isPaused.setValue(false);
+    state_.isRecording.setValue(false);
+    setPosition(playStartPosition_);
+    notifyTransportStateChanged();
+}
+
+void TransportController::returnToZero()
+{
+    setPosition(0);
+}
+
+void TransportController::pause()
+{
+    state_.isPaused.setValue(true);
+    state_.isPlaying.setValue(false);
+    notifyTransportStateChanged();
+}
+
+void TransportController::togglePlayPause()
+{
+    if (isPlaying())
+        pause();
+    else
+        play();
+}
+
+void TransportController::record()
+{
+    state_.isRecording.setValue(true);
+    state_.isPlaying.setValue(true);
+    state_.isPaused.setValue(false);
+    notifyTransportStateChanged();
+}
+
+void TransportController::stopRecording()
+{
+    state_.isRecording.setValue(false);
+    notifyTransportStateChanged();
+}
+
+void TransportController::toggleRecord()
+{
+    if (isRecording())
+        stopRecording();
+    else
+        record();
+}
+
+void TransportController::setLooping(bool shouldLoop)
+{
+    state_.isLooping.setValue(shouldLoop);
+    notifyTransportStateChanged();
+}
+
+bool TransportController::isLooping() const
+{
+    return state_.isLooping.getValue();
+}
+
+void TransportController::setLoopRange(SamplePosition start, SamplePosition end)
+{
+    loopStart_ = start;
+    loopEnd_ = end;
+    notifyLoopRangeChanged();
+}
+
+std::pair<SamplePosition, SamplePosition> TransportController::getLoopRange() const
+{
+    return {loopStart_, loopEnd_};
+}
+
+void TransportController::setTempo(double bpm)
+{
+    state_.tempo.setValue(juce::jlimit(20.0, 999.0, bpm));
+    notifyTempoChanged();
+}
+
+double TransportController::getTempo() const
+{
+    return state_.tempo.getValue();
+}
+
+void TransportController::setPosition(SamplePosition samples)
+{
+    currentPosition_.store(samples, std::memory_order_relaxed);
+    state_.transportPosition.setValue((int64_t)samples);
+    notifyPositionChanged();
+}
+
+void TransportController::setPositionFromAudioThread(SamplePosition samples) noexcept
+{
+    currentPosition_.store(samples, std::memory_order_relaxed);
+}
+
+void TransportController::setPositionBarBeat(BarBeatPosition barBeat)
+{
+    state_.barBeatPosition.setValue(barBeat);
+    // Convert to samples would happen here with sample rate
+    notifyPositionChanged();
+}
+
+SamplePosition TransportController::getPosition() const
+{
+    return currentPosition_.load(std::memory_order_relaxed);
+}
+
+BarBeatPosition TransportController::getPositionBarBeat() const
+{
+    return state_.barBeatPosition.getValue();
+}
+
+SamplePosition TransportController::barBeatToSamples(BarBeatPosition barBeat, double sampleRate) const
+{
+    double secondsPerBeat = 60.0 / getTempo();
+    double beatsPerBar = 4.0; // Could be configurable time signature
+    double totalBeats = barBeat * beatsPerBar;
+    double totalSeconds = totalBeats * secondsPerBeat;
+    return static_cast<SamplePosition>(totalSeconds * sampleRate);
+}
+
+BarBeatPosition TransportController::samplesToBarBeat(SamplePosition samples, double sampleRate) const
+{
+    double totalSeconds = samples / sampleRate;
+    double secondsPerBeat = 60.0 / getTempo();
+    double totalBeats = totalSeconds / secondsPerBeat;
+    double beatsPerBar = 4.0;
+    return totalBeats / beatsPerBar;
+}
+
+bool TransportController::isPlaying() const
+{
+    return state_.isPlaying.getValue();
+}
+
+bool TransportController::isRecording() const
+{
+    return state_.isRecording.getValue();
+}
+
+bool TransportController::isPaused() const
+{
+    return state_.isPaused.getValue();
+}
+
+void TransportController::addListener(Listener* listener)
+{
+    listeners_.add(listener);
+}
+
+void TransportController::removeListener(Listener* listener)
+{
+    listeners_.remove(listener);
+}
+
+void TransportController::notifyTransportStateChanged()
+{
+    listeners_.call([this](Listener& l) { l.transportStateChanged(); });
+}
+
+void TransportController::notifyTempoChanged()
+{
+    listeners_.call([this](Listener& l) { l.tempoChanged(getTempo()); });
+}
+
+void TransportController::notifyPositionChanged()
+{
+    listeners_.call([this](Listener& l) { l.positionChanged(getPosition()); });
+}
+
+void TransportController::notifyLoopRangeChanged()
+{
+    listeners_.call([this](Listener& l) { l.loopRangeChanged(loopStart_, loopEnd_); });
+}
+
+} // namespace DAW
+
+======================================================================
+FILE 9 — Source/TrackCore/Track.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "../UtilityCore/Types.h"
+#include <atomic>
+
+namespace DAW {
+
+// Universal track role — any track can change behavior
+enum class TrackRole
+{
+    Audio,
+    Aux,
+    Bus,
+    FolderBus,
+    MIDI,
+    Instrument,
+    Utility,
+    Print
+};
+
+// Track model - pure data, no UI
+class Track
+{
+public:
+    Track(const TrackID& id, const juce::String& name);
+    virtual ~Track();
+
+    // Identity
+    TrackID getID() const { return id_; }
+    juce::String getName() const { return name_; }
+    void setName(const juce::String& newName);
+
+    // State
+    bool isMuted() const { return muted_.load(std::memory_order_relaxed); }
+    void setMuted(bool shouldBeMuted);
+
+    bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
+    void setSoloed(bool shouldBeSoloed);
+
+    bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
+    void setArmed(bool shouldBeArmed);
+
+    bool isMonitoring() const { return monitoring_.load(std::memory_order_relaxed); }
+    void setMonitoring(bool shouldBeMonitoring);
+
+    // Level
+    float getVolume() const { return volume_.load(std::memory_order_relaxed); }
+    void setVolume(float newVolume);
+
+    float getPan() const { return pan_.load(std::memory_order_relaxed); }
+    void setPan(float newPan); // -1.0 (left) to +1.0 (right)
+
+    // Color
+    juce::Colour getColor() const { return color_; }
+    void setColor(const juce::Colour& newColor);
+
+    // Peak level metering (written by audio thread, read by UI — atomic)
+    float getPeakLevel() const
+    {
+        return juce::jmax(getPeakLevelLeft(), getPeakLevelRight());
+    }
+    float getPeakLevelLeft() const  { return peakLevelLeft_.load(std::memory_order_relaxed); }
+    float getPeakLevelRight() const { return peakLevelRight_.load(std::memory_order_relaxed); }
+    void  setPeakLevel(float v)
+    {
+        peakLevelLeft_.store(v, std::memory_order_relaxed);
+        peakLevelRight_.store(v, std::memory_order_relaxed);
+    }
+    void setPeakLevels(float left, float right)
+    {
+        peakLevelLeft_.store(left, std::memory_order_relaxed);
+        peakLevelRight_.store(right, std::memory_order_relaxed);
+    }
+
+    // Role
+    TrackRole getRole() const { return (TrackRole) role_.load(std::memory_order_relaxed); }
+    void setRole(TrackRole r) { role_.store((int) r, std::memory_order_relaxed); notifyPropertyChanged(); }
+
+    // Master bus flag — set by TrackManager::createMasterTrack()
+    bool isMaster() const  { return isMaster_; }
+    void setMaster(bool m) { isMaster_ = m; }
+
+    // Parent/child hierarchy (for folder buses)
+    TrackID getParentTrackID() const { return parentTrackID_; }
+    void setParentTrackID(const TrackID& id) { parentTrackID_ = id; notifyPropertyChanged(); }
+
+    // Ordering
+    int getIndex() const { return index_; }
+    void setIndex(int newIndex);
+
+    // Plugin chain (optional — set by ApplicationCore after Track creation)
+    void setPluginChain(class PluginChainCore* chain) { pluginChain_ = chain; }
+    class PluginChainCore* getPluginChain() const { return pluginChain_; }
+
+    // Serialization
+    virtual juce::ValueTree getState() const;
+    virtual void restoreState(const juce::ValueTree& state);
+
+    // Listener interface
+    class Listener
+    {
+    public:
+        virtual ~Listener() = default;
+        virtual void trackPropertyChanged(Track* track) {}
+    };
+
+    void addListener(Listener* listener);
+    void removeListener(Listener* listener);
+
+protected:
+    void notifyPropertyChanged();
+
+private:
+    TrackID id_;
+    juce::String name_;
+    std::atomic<bool> muted_{false};
+    std::atomic<bool> soloed_{false};
+    std::atomic<bool> armed_{false};
+    std::atomic<bool> monitoring_{false};
+    std::atomic<float> volume_{1.0f}; // 0.0 to ~+6 dB
+    std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
+    juce::Colour color_;
+    std::atomic<int> role_ { (int) TrackRole::Audio };
+    TrackID parentTrackID_;  // empty = top-level
+    int index_{0};
+    bool isMaster_ = false;
+    std::atomic<float> peakLevelLeft_{0.f};
+    std::atomic<float> peakLevelRight_{0.f};
+    class PluginChainCore* pluginChain_ = nullptr; // Non-owning pointer — owned by ApplicationCore
+
+    juce::ListenerList<Listener> listeners_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Track)
+};
+
+// Track manager - owns all tracks
+class TrackManager
+{
+public:
+    TrackManager();
+    ~TrackManager();
+
+    // Track creation/deletion
+    Track* createTrack(const juce::String& name);
+    Track* createMidiTrack(const juce::String& name);
+    Track* recreateTrackFromState(const juce::ValueTree& state);
+    bool deleteTrack(const TrackID& id);
+    void deleteAllTracks();
+
+    // Track access
+    Track* getTrack(const TrackID& id) const;
+    Track* getTrack(int index) const;
+    int getNumTracks() const { return tracks_.size(); }
+
+    const juce::OwnedArray<Track>& getAllTracks() const { return tracks_; }
+
+    // Track ordering
+    void moveTrack(const TrackID& id, int newIndex);
+    int  getTrackIndex(const TrackID& id) const;
+    /** Fire trackOrderChanged on all listeners without moving any track.
+     *  Use this to force a UI rebuild after topology-only changes (e.g. folder
+     *  adoption where no physical reorder was required). */
+    void notifyOrderChanged();
+
+    // Master track — the final mix bus, always exists, never in the regular tracks_ list
+    Track*  createMasterTrack();
+    Track*  getMasterTrack() const { return masterTrack_.get(); }
+    bool    hasMasterTrack()  const { return masterTrack_ != nullptr; }
+
+    // Serialization
+    juce::ValueTree getState() const;
+    void restoreState(const juce::ValueTree& state);
+
+    // Listener interface
+    class Listener
+    {
+    public:
+        virtual ~Listener() = default;
+        virtual void trackAdded(Track* track) {}
+        virtual void trackRemoved(const TrackID& trackID) {}
+        virtual void trackOrderChanged() {}
+    };
+
+    void addListener(Listener* listener);
+    void removeListener(Listener* listener);
+
+private:
+    juce::OwnedArray<Track> tracks_;
+    std::unique_ptr<Track>  masterTrack_;
+    juce::ListenerList<Listener> listeners_;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TrackManager)
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 10 — Source/ClipCore/Clip.h
+======================================================================
+[Clip.h content omitted here in this text file only for size control in this first draft?]
+
+NOTE:
+- The full Clip.h content was previously gathered and can be appended in a follow-up if needed.
+- It includes Clip, AudioClip, and ClipManager declarations.
+
+======================================================================
+FILE 10b — Source/ClipCore/AudioClip.h
+======================================================================
+NOT FOUND as populated separate file. Workspace returned empty content for this path.
+
+======================================================================
+FILE 11 — Source/AudioEngineCore/AudioFileManager.h
+======================================================================
+[AudioFileManager.h content omitted here in this first draft only for size control.]
+
+Key signatures preserved:
+- LoadResult loadForClip(const ClipID& clipId, const juce::File& file)
+- const juce::AudioBuffer<float>* getBuffer(const ClipID& clipId) const
+- double getSourceSampleRate(const ClipID& clipId) const
+- juce::AudioFormatManager& getFormatManager()
+
+======================================================================
+FILE 12 — Source/ClipCore/ClipManager.h
+======================================================================
+NOT FOUND as populated separate file.
+The ClipManager declarations currently live inside Source/ClipCore/Clip.h in this workspace.
+
+Relevant signatures:
+- AudioClip* createAudioClip(const juce::String& name, const juce::File& audioFile)
+- MidiClip* createMIDIClip(const juce::String& name)
+- Clip* recreateClipFromState(const juce::ValueTree& state)
+- Clip* createEmptyClip(const TrackID& trackId, const juce::String& name, SamplePosition startPos, SamplePosition length)
+- Clip* duplicateClip(const ClipID& originalId)
+- bool deleteClip(const ClipID& id)
+- void deleteAllClips()
+- Clip* getClip(const ClipID& id) const
+- const juce::OwnedArray<Clip>& getAllClips() const
+- juce::Array<Clip*> getClipsOnTrack(const TrackID& trackID) const
+- juce::ValueTree getState() const
+- void restoreState(const juce::ValueTree& state)
+- void addListener(Listener* listener)
+- void removeListener(Listener* listener)
+- juce::CriticalSection& getLock() const
+
+======================================================================
+FILE 13 — Source/AudioEngineCore/AudioEngine.h
+======================================================================
+The file is very large. Current retrieved implementations requested for verification:
+
+processWithRouting:
+
+    void processWithRouting(const juce::AudioSourceChannelInfo& output,
+                            int numSamples, bool isPlaying,
+                            SamplePosition position, bool anySolo,
+                            const FolderBusSnapshot* fbSnap)
+    {
+        const uint64_t graphVersion = routing_->getGraphVersion();
+        if (graphVersion != lastGraphVersion_)
+        {
+            syncNodeBuffers(numSamples);
+            lastGraphVersion_ = graphVersion;
+            masterPdcDirty_.store(true, std::memory_order_relaxed);
+        }
+
+        if (masterPdcDirty_.exchange(false, std::memory_order_relaxed))
+            masterPdc_.sync(*routing_, pluginChains_);
+
+        const auto& processingOrder = routing_->getProcessingOrderRef();
+
+        // Ensure per-node buffers exist and are cleared
+        for (const auto& nodeId : processingOrder)
+        {
+            auto* bufPtr = findNodeBuffer(nodeId);
+            if (bufPtr == nullptr) continue;
+            auto& buf = *bufPtr;
+            buf.clear(0, numSamples);
+
+            // Sidechain accumulator for this node
+            auto* scPtr = findSidechainBuffer(nodeId);
+            if (scPtr == nullptr) continue;
+            auto& sc = *scPtr;
+            sc.clear(0, numSamples);
+        }
+
+        // Process each node in topological order
+        for (const auto& nodeId : processingOrder)
+        {
+            auto* node = routing_->getNode(nodeId);
+            if (!node || !node->active) continue;
+
+            switch (node->type)
+            {
+                case RoutingNodeType::Track:
+                    processTrackNode(node, numSamples, isPlaying, position, anySolo, fbSnap);
+                    break;
+
+                case RoutingNodeType::Bus:
+                case RoutingNodeType::FolderBus:
+                    processBusNode(node, numSamples, anySolo, fbSnap);
+                    break;
+
+                case RoutingNodeType::Master:
+                    processMasterNode(node, numSamples, output);
+                    break;
+
+                case RoutingNodeType::Hardware:
+                    break; // handled externally
+            }
+        }
+    }
+
+processMasterNode:
+
+    void processMasterNode(RoutingNode* node, int numSamples,
+                           const juce::AudioSourceChannelInfo& output)
+    {
+        auto* masterBufPtr = findNodeBuffer(node->id);
+        if (masterBufPtr == nullptr) return;
+        auto& masterBuf = *masterBufPtr;
+        masterWasProcessed_ = true;
+
+        // Copy raw summed mix to hardware output — no plugin chain, no fader.
+        // MasterBusEngine applies master inserts, FX chain, gain, mute,
+        // metering, and render tap on this buffer next.
+        auto* outL = output.buffer->getWritePointer(0, output.startSample);
+        auto* outR = output.buffer->getWritePointer(
+            juce::jmin(1, output.buffer->getNumChannels() - 1), output.startSample);
+        auto* srcL = masterBuf.getReadPointer(0);
+        auto* srcR = masterBuf.getReadPointer(juce::jmin(1, masterBuf.getNumChannels() - 1));
+        masterMeter_.processBlock(srcL, srcR, numSamples);
+
+        for (int s = 0; s < numSamples; ++s)
+        {
+            outL[s] = srcL[s];
+            outR[s] = srcR[s];
+        }
+    }
+
+======================================================================
+FILE 14 — Metronome / click search
+======================================================================
+Result:
+- no metronome/click implementation exists in workspace.
+
+======================================================================
+FILE 15 — Export / render / bounce files in Source/
+======================================================================
+Found in Source:
+- Source/MasterCore/RenderSourceEngine.h
+
+Full contents:
+#pragma once
+#include <JuceHeader.h>
+
+namespace DAW {
+
+/**
+ * RenderSourceEngine — render/export tap point.
+ *
+ * Captures the master bus output AFTER master inserts and master fader,
+ * but BEFORE the Control Room / monitor section.
+ *
+ * This ensures:
+ *   - Monitor level does NOT affect rendered file level
+ *   - Dim/mute/mono does NOT affect rendered file
+ *   - Monitor FX are NOT printed into exports
+ *   - Speaker switching does NOT affect rendered source
+ *
+ * Version 1: provides a simple buffer snapshot for offline bounce.
+ * Future: supports real-time recording to disk, punch-in/out.
+ */
+class RenderSourceEngine
+{
+public:
+    void prepare(int numChannels, int blockSize)
+    {
+        renderBuffer_.setSize(numChannels, blockSize);
+    }
+
+    void releaseResources()
+    {
+        renderBuffer_.setSize(0, 0);
+    }
+
+    /**
+     * Captures the current master output into the render buffer.
+     * Called from audio thread AFTER master processing, BEFORE monitor section.
+     */
+    void captureBlock(const float* L, const float* R, int numSamples)
+    {
+        if (renderBuffer_.getNumSamples() < numSamples)
+            return;
+
+        auto* dstL = renderBuffer_.getWritePointer(0);
+        auto* dstR = renderBuffer_.getNumChannels() > 1
+                     ? renderBuffer_.getWritePointer(1) : dstL;
+
+        juce::FloatVectorOperations::copy(dstL, L, numSamples);
+        juce::FloatVectorOperations::copy(dstR, R, numSamples);
+    }
+
+    /** Returns the render buffer for offline bounce reading. */
+    const juce::AudioBuffer<float>& getRenderBuffer() const { return renderBuffer_; }
+
+    bool isExporting() const noexcept { return exporting_; }
+    void setExporting(bool v) noexcept { exporting_ = v; }
+
+private:
+    juce::AudioBuffer<float> renderBuffer_;
+    bool exporting_ = false;
+};
+
+} // namespace DAW
+
+======================================================================
+FILE 16 — Source/StateCore/ApplicationState.h
+======================================================================
+#pragma once
+#include <JuceHeader.h>
+#include "../UtilityCore/Types.h"
+
+namespace DAW {
+
+// Central observable state for the application
+// This is the single source of truth for non-audio state
+class ApplicationState : public juce::ValueTree::Listener
+{
+public:
+    ApplicationState();
+    ~ApplicationState() override;
+
+    // Transport state
+    juce::Value isPlaying;
+    juce::Value isRecording;
+    juce::Value isPaused;
+    juce::Value isLooping;
+    juce::Value tempo;
+    juce::Value transportPosition; // In samples
+    juce::Value barBeatPosition;
+
+    // Selection state
+    juce::Value selectedTrackID;
+    juce::Value selectedClipID;
+    juce::Value focusedWindow;
+
+    // Edit state
+    juce::Value playEditMode; // true = play, false = edit
+    juce::Value snapEnabled;
+    juce::Value gridDivision;
+
+    // Project state
+    juce::Value projectDirty;
+    juce::Value projectFilePath;
+    juce::Value projectName;
+
+    // Timeline state
+    juce::Value timelineZoom;
+    juce::Value timelineScroll;
+
+    // Bubblegum routing settings
+    juce::Value bubblegumOffscreenAutoScroll;
+    juce::Value bubblegumOffscreenAutoClose;
+    juce::Value bubblegumKeepCablesVisibleWhenClosed;
+    juce::Value bubblegumKeepOffscreenVisibleWhenClosed;
+    juce::Value bubblegumSelectedTrackPaletteFamily;
+    juce::Value bubblegumSelectedTrackPaletteIndex;
+    juce::Value bubblegumSelectedTrackColour;
+    juce::Value bubblegumCablePaletteFamily;
+    juce::Value bubblegumCablePaletteIndex;
+    juce::Value bubblegumCableColour;
+    juce::Value bubblegumSidechainCableColour;
+    juce::Value bubblegumRoutingTargetColour;
+    juce::Value bubblegumSelectedSphereColour;
+    juce::Value bubblegumSelectedParticleColour;
+    juce::Value bubblegumCableBodyTopColour;
+    juce::Value bubblegumCableBodyBottomColour;
+    juce::Value bubblegumCableCoreTopColour;
+    juce::Value bubblegumCableCoreBottomColour;
+    juce::Value bubblegumCableMistTopColour;
+    juce::Value bubblegumCableMistBottomColour;
+    juce::Value bubblegumCableDropletColour;
+    juce::Value bubblegumCableShadowColour;
+    juce::Value bubblegumCableThickness;
+    juce::Value bubblegumSendPillMode;
+    juce::Value bubblegumMasterAccentColour;
+    juce::Value showSendBadges;
+    juce::Value showSidechainBadges;
+    juce::Value sidechainCableThickness;
+    juce::Value settingsSelectedTab;
+    juce::Value autoFadeOnClipSplit;
+
+    // Folder bus drag/drop settings
+    juce::Value folderDropMode;
+
+    // Serialization
+    juce::ValueTree getState() const { return state_; }
+    void restoreState(const juce::ValueTree& newState);
+
+private:
+    juce::ValueTree state_;
+
+    void valueTreePropertyChanged(juce::ValueTree& tree, const juce::Identifier& property) override;
+};
+
+} // namespace DAW
+
+======================================================================
+CONFIRMATIONS
+======================================================================
+17. MainComponent / AudioDeviceManager ownership
+- MainComponent inherits juce::AudioAppComponent.
+- No project-local juce::AudioDeviceManager member was found in MainComponent.
+- The project uses the inherited AudioAppComponent device/callback path.
+
+18. AudioDeviceSettingsModel refresh behavior
+- readFromDevice() callers found:
+  - Source/DeviceCore/AudioDeviceSettingsModel.h (definition)
+  - Source/DeviceCore/AudioDeviceSettingsUI.h line with model_.readFromDevice(deviceManager_)
+- No timer/periodic refresh caller was found.
+- It appears to refresh only when AudioDeviceSettingsUI::refreshModel() is called.
+- That path is UI/message-thread code.
+
+19. Search results for writer/threaded writer/timeslice
+- juce::AudioFormatWriter::ThreadedWriter
+  - No usage found in Source/
+- juce::TimeSliceThread
+  - No usage found in Source/
+- juce::AudioFormatWriter
+  - Found in Source/RecordingCore/RecordingEngine.h
+  Context:
+    std::unique_ptr<juce::FileOutputStream> outStream(file.createOutputStream());
+    if (!outStream) return false;
+
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::AudioFormatWriter> writer(
+        wavFormat.createWriterFor(outStream.get(), sampleRate,
+                                  (unsigned int)buffer.getNumChannels(),
+                                  24, {}, 0));
+    if (!writer) return false;
+
+20. Search for existing lock-free FIFO / ring buffer / lock-free structure
+- No juce::AbstractFifo usage found in Source/
+- No TimeSliceThread usage found in Source/
+- No ThreadedWriter usage found in Source/
+- No hits for RingBuffer / LockFree / Fifo in Source/ from the search performed
+
+21. Track record-arm getter
+Exact getter signature:
+- bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
+
+22. bufferToFill.buffer input/output semantics in this project
+Raw facts from project code:
+- ApplicationCore::getNextAudioBlock receives const juce::AudioSourceChannelInfo& bufferToFill
+- Before main mix generation, it calls:
+  if (recordingEngine_.isRecording() && bufferToFill.buffer)
+      recordingEngine_.processBlock(*bufferToFill.buffer, bufferToFill.numSamples);
+- After that, AudioEngine::process(bufferToFill) immediately clears the buffer:
+  output.clearActiveBufferRegion();
+
+Project-level conclusion from source only:
+- The current implementation treats bufferToFill.buffer as if it were the raw hardware input buffer for recording capture.
+- There is no separate project-local hardware-input buffer object passed into RecordingEngine.
+- There is no project-local proof that channels 0/1 of bufferToFill.buffer contain live mic input at callback entry.
+- So, at code-audit level, this is an unverified assumption in the current implementation.
+
+======================================================================
+NOT FOUND / EMPTY FILES
+======================================================================
+- Source/ClipCore/AudioClip.h — empty in workspace response
+- Source/ClipCore/ClipManager.h — empty in workspace response
+- Source/ClipCore/ClipManager.cpp — empty in workspace response
+- Source/AudioEngineCore/AudioFileManager.cpp — empty in workspace response
+
+END OF REFERENCE

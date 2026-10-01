@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DAWProject version="8" name="PurePlateSandboxControl" savedAt="2026-09-08T01:00:00Z" projectSampleRate="48000.0">
+  <Tracks>
+    <Track id="TRK_PURE_PLATE_CONTROL" name="Pure Plate Sandbox Control"
+           muted="0" soloed="0" armed="0" monitoring="0" volume="1.0" pan="0.0"
+           automationVisible="0" automationMuted="0" snapToGrid="1"
+           automationActiveParameter="track.volume"
+           automationParameterOrder="track.volume|track.pan|track.mute|track.solo|track.tape_stop|instrument.main|plugin.0.__slot_mix__"
+           color="ff88ddff" index="0" role="0" parentTrackID="" isMaster="0"
+           inputMonitorMode="0" inputTrimDb="0.0" inputFirstChannel="0"
+           inputMono="0" hasPlugins="1"/>
+    <MasterTrack>
+      <Track id="master" name="MASTER" muted="0" soloed="0" armed="0" monitoring="0"
+             volume="1.0" pan="0.0" automationVisible="0" automationMuted="0"
+             snapToGrid="1" automationActiveParameter="track.volume"
+             automationParameterOrder="track.volume|track.pan|track.mute|track.solo|track.tape_stop|instrument.main|plugin.0.__slot_mix__"
+             color="ffcc9900" index="0" role="0" parentTrackID="" isMaster="1"
+             inputMonitorMode="2" inputTrimDb="0.0" inputFirstChannel="0"
+             inputMono="0" hasPlugins="0"/>
+    </MasterTrack>
+  </Tracks>
+  <PluginChains>
+    <TrackPlugins trackId="TRK_PURE_PLATE_CONTROL">
+      <PluginChain chainOutputMixNormalized="1.0">
+        <Slot index="0" bypassed="0" slotMixNormalized="1.0" slotMixBypass="0"
+              pluginInstanceId="pure-plate-sandbox-control" executionMode="sandboxed">
+          <Description identitySchemaVersion="2" name="UADx Pure Plate Reverb"
+                       descriptiveName="UADx Pure Plate Reverb"
+                       pluginFormatName="VST3" category="Fx|Reverb"
+                       manufacturerName="Universal Audio (UADx)" version="1.4.16"
+                       fileOrIdentifier="C:\Program Files\Common Files\VST3\uaudio_pure_plate.vst3\Contents\x86_64-win\uaudio_pure_plate.vst3"
+                       uniqueId="-159211708" deprecatedUid="1142595479"
+                       isInstrument="0" numInputChannels="2" numOutputChannels="2"
+                       hasSharedContainer="0"/>
+        </Slot>
+      </PluginChain>
+    </TrackPlugins>
+  </PluginChains>
+  <Transport tempo="120.0" position="0" looping="0"/>
+</DAWProject>

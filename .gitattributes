@@ -1,0 +1,19 @@
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.jucer text eol=lf
+*.ps1 text eol=crlf
+*.cpp text eol=crlf
+*.h text eol=crlf
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.filters text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wav binary
+*.flac binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.dmp binary

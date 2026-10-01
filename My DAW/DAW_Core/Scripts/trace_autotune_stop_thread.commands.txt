@@ -1,0 +1,7 @@
+.echo === AUTO-TUNE VENDOR stopThread TRACE ARMED ===
+.reload /f
+sxi 80000003
+sxi 80000004
+bu Auto_Tune_EFX_!GetPluginFactory+0x32300 ".echo; .echo === AUTO-TUNE stopThread ENTRY ===; .printf \"STOPPER_TID=%x THIS=%p TIMEOUT_MS=%d VTABLE=%p NATIVE_HANDLE=%p TARGET_TID=%x\\n\", @$tid, @rcx, @edx, poi(@rcx), poi(@rcx+0x10), poi(@rcx+0x18); .echo === THREAD NAME ===; da poi(@rcx+0x8); r @$t0=poi(@rcx); r @$t1=poi(@$t0-0x8); .printf \"RTTI_COL=%p\\n\", @$t1; dd @$t1 L6; .echo === CALLER / OWNER STACK ===; kv 40; gc"
+bu Auto_Tune_EFX_!GetPluginFactory+0x3238d ".echo; .echo === AUTO-TUNE FORCE BRANCH REACHED ===; .printf \"STOPPER_TID=%x THIS=%p VTABLE=%p NATIVE_HANDLE=%p TARGET_TID=%x\\n\", @$tid, @rbx, poi(@rbx), poi(@rbx+0x10), poi(@rbx+0x18); da poi(@rbx+0x8); .echo === ALL LIVE THREADS BEFORE TerminateThread ===; ~; ~* kv 100; .dump /ma C:\Users\1993v\OneDrive\Desktop\Apex backup\crash-reports\APEX_AUTOTUNE_VENDOR_STOPTHREAD_PREKILL.dmp; q"
+g

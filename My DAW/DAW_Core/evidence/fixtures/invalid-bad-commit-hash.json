@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "evidenceGrade": "diagnostic",
+  "runId": "fixture-bad-hash",
+  "suiteId": "runner-smoke",
+  "source": {
+    "outerCommit": "not-a-hash",
+    "outerDirty": true,
+    "applicationCommit": "0000000000000000000000000000000000000000",
+    "applicationDirty": true
+  },
+  "build": {
+    "configuration": "Debug",
+    "platform": "x64",
+    "toolset": "v145",
+    "binarySha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "dependencies": { "juceVersion": "8.0.12" },
+  "environment": { "os": "fixture", "cpu": "fixture", "powerMode": "fixture", "locale": "en-US" },
+  "execution": {
+    "command": ["APEXTests.exe"],
+    "startedUtc": "2026-07-17T00:00:00.0000000Z",
+    "seed": 0,
+    "exitCode": 0,
+    "durationMs": 1
+  },
+  "results": { "resultGroups": 1, "assertionsPassed": 1, "assertionsFailed": 0 },
+  "artifacts": []
+}

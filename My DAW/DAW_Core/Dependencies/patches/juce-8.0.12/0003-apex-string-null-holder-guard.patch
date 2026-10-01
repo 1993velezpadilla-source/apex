@@ -1,0 +1,22 @@
+diff --git a/JUCE/modules/juce_core/text/juce_String.cpp b/JUCE/modules/juce_core/text/juce_String.cpp
+--- a/JUCE/modules/juce_core/text/juce_String.cpp
++++ b/JUCE/modules/juce_core/text/juce_String.cpp
+@@ -163,5 +163,8 @@ struct StringHolderUtils
+     static void retain (const CharPointerType text) noexcept
+     {
++        if (text.getAddress() == nullptr)
++            return;
++
+         auto* b = bufferFromText (text);
+ 
+         if (! isEmptyString (b))
+@@ -176,6 +179,9 @@ struct StringHolderUtils
+ 
+     static void release (const CharPointerType text) noexcept
+     {
++        if (text.getAddress() == nullptr)
++            return;
++
+         release (bufferFromText (text));
+     }
+ 

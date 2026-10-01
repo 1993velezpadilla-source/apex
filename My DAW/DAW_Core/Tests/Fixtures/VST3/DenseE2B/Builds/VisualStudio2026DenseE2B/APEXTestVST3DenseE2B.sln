@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio Version 18
+
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3DenseE2B - VST3", "APEXTestVST3DenseE2B_VST3.vcxproj", "{1514B325-0B1C-C6A9-8FBF-E36306EC5169}"
+	ProjectSection(ProjectDependencies) = postProject
+		{2A10A47F-49F1-5825-5900-EB7765CD3AA4} = {2A10A47F-49F1-5825-5900-EB7765CD3AA4}
+		{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4} = {CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3DenseE2B - Shared Code", "APEXTestVST3DenseE2B_SharedCode.vcxproj", "{2A10A47F-49F1-5825-5900-EB7765CD3AA4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "APEXTestVST3DenseE2B - VST3 Manifest Helper", "APEXTestVST3DenseE2B_VST3ManifestHelper.vcxproj", "{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1514B325-0B1C-C6A9-8FBF-E36306EC5169}.Debug|x64.ActiveCfg = Debug|x64
+		{1514B325-0B1C-C6A9-8FBF-E36306EC5169}.Debug|x64.Build.0 = Debug|x64
+		{1514B325-0B1C-C6A9-8FBF-E36306EC5169}.Release|x64.ActiveCfg = Release|x64
+		{1514B325-0B1C-C6A9-8FBF-E36306EC5169}.Release|x64.Build.0 = Release|x64
+		{2A10A47F-49F1-5825-5900-EB7765CD3AA4}.Debug|x64.ActiveCfg = Debug|x64
+		{2A10A47F-49F1-5825-5900-EB7765CD3AA4}.Debug|x64.Build.0 = Debug|x64
+		{2A10A47F-49F1-5825-5900-EB7765CD3AA4}.Release|x64.ActiveCfg = Release|x64
+		{2A10A47F-49F1-5825-5900-EB7765CD3AA4}.Release|x64.Build.0 = Release|x64
+		{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}.Debug|x64.ActiveCfg = Debug|x64
+		{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}.Debug|x64.Build.0 = Debug|x64
+		{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}.Release|x64.ActiveCfg = Release|x64
+		{CB3720C2-030B-FA8D-874C-D6BC5DBE8EA4}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

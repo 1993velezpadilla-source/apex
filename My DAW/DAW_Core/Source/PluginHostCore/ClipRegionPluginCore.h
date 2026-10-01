@@ -1,0 +1,518 @@
+#pragma once
+#include <JuceHeader.h>
+#include "PluginPlayheadInfoCore.h"
+#include "HostedPluginIsolationCore.h"
+#include "../ClipCore/Clip.h"
+#include "../PluginSafetyCore/PluginSafeLoadWrapperCore.h"
+#include <map>
+#include <memory>
+#include <limits>
+#include <unordered_map>
+#include <vector>
+
+namespace DAW {
+
+class ClipRegionPluginCore
+{
+public:
+    ClipRegionPluginCore() = default;
+
+    struct LoadResult
+    {
+        bool success = false;
+        juce::String message;
+        juce::AudioPluginInstance* instance = nullptr;
+        bool reusedExisting = false;
+    };
+
+    struct Entry
+    {
+        juce::String instanceId;
+        ClipID clipId;
+        juce::PluginDescription description;
+        std::unique_ptr<juce::AudioPluginInstance> instance;
+        std::unique_ptr<juce::AudioProcessorEditor> editor;
+        double sampleRate = 44100.0;
+        int blockSize = 512;
+        std::atomic<bool> bypassed { false };   // atomic: read on the audio thread via the published snapshot
+    };
+
+    struct EntryInfo
+    {
+        juce::String instanceId;
+        juce::String name;
+        juce::String manufacturer;
+        juce::String format;
+        bool bypassed = false;
+    };
+
+    struct EntryStateSnapshot
+    {
+        juce::String instanceId;
+        juce::PluginDescription description;
+        juce::MemoryBlock state;
+        bool bypassed = false;
+    };
+
+    using ClipStateSnapshot = std::vector<EntryStateSnapshot>;
+
+    void setPlayheadInfoCore(PluginPlayheadInfoCore* playheadInfo) noexcept
+    {
+        playheadInfo_ = playheadInfo;
+        for (auto& [id, entries] : entriesByClip_)
+            for (auto& entry : entries)
+                if (entry && entry->instance)
+                    entry->instance->setPlayHead(playheadInfo_ ? playheadInfo_->getPlayhead() : nullptr);
+    }
+
+    void prepare(double sampleRate, int blockSize)
+    {
+        sampleRate_ = sampleRate;
+        blockSize_ = blockSize;
+        offlinePrepared_ = false;
+        scratchMidi_.clear();
+
+        for (auto& [id, entries] : entriesByClip_)
+        {
+            for (auto& entry : entries)
+            {
+                if (!entry || !entry->instance) continue;
+                entry->sampleRate = sampleRate_;
+                entry->blockSize = blockSize_;
+                entry->instance->setRateAndBufferSizeDetails(sampleRate_, blockSize_);
+                DBG("[APEX-DIAG-PREPARE] plugin=" << entry->instance->getName()
+                    << " sampleRate=" << sampleRate_
+                    << " blockSize=" << blockSize_
+                    << " calledFrom=" << __FUNCTION__);
+                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+            }
+        }
+    }
+
+    void prepareForOffline(double sampleRate, int blockSize)
+    {
+        if (sampleRate <= 0.0 || blockSize <= 0)
+        {
+            jassertfalse;
+            return;
+        }
+
+        sampleRate_ = sampleRate;
+        blockSize_ = blockSize;
+        offlinePrepared_ = true;
+        scratchMidi_.clear();
+
+        for (auto& [id, entries] : entriesByClip_)
+        {
+            juce::ignoreUnused(id);
+            for (auto& entry : entries)
+            {
+                if (!entry || !entry->instance) continue;
+                entry->sampleRate = sampleRate_;
+                entry->blockSize = blockSize_;
+                entry->instance->releaseResources();
+                entry->instance->setNonRealtime(true);
+                entry->instance->setRateAndBufferSizeDetails(sampleRate_, blockSize_);
+                DBG("[APEX-DIAG-PREPARE] plugin=" << entry->instance->getName()
+                    << " sampleRate=" << sampleRate_
+                    << " blockSize=" << blockSize_
+                    << " calledFrom=" << __FUNCTION__);
+                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+            }
+        }
+    }
+
+    void restoreRealtimePrepare(double sampleRate, int blockSize)
+    {
+        if (sampleRate <= 0.0 || blockSize <= 0)
+            return;
+
+        sampleRate_ = sampleRate;
+        blockSize_ = blockSize;
+        offlinePrepared_ = false;
+        scratchMidi_.clear();
+
+        for (auto& [id, entries] : entriesByClip_)
+        {
+            juce::ignoreUnused(id);
+            for (auto& entry : entries)
+            {
+                if (!entry || !entry->instance) continue;
+                entry->sampleRate = sampleRate_;
+                entry->blockSize = blockSize_;
+                entry->instance->releaseResources();
+                entry->instance->setNonRealtime(false);
+                entry->instance->setRateAndBufferSizeDetails(sampleRate_, blockSize_);
+                DBG("[APEX-DIAG-PREPARE] plugin=" << entry->instance->getName()
+                    << " sampleRate=" << sampleRate_
+                    << " blockSize=" << blockSize_
+                    << " calledFrom=" << __FUNCTION__);
+                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+            }
+        }
+    }
+
+    void releaseResources()
+    {
+        for (auto& [id, entries] : entriesByClip_)
+            for (auto& entry : entries)
+                if (entry && entry->instance)
+                    entry->instance->releaseResources();
+    }
+
+    LoadResult loadForClip(const ClipID& clipId,
+                           const juce::PluginDescription& desc,
+                           juce::AudioPluginFormatManager& formatManager)
+    {
+        jassert(sampleRate_ > 0.0 && "sampleRate_ read before prepareToPlay");
+        jassert(blockSize_  > 0   && "blockSize_ read before prepareToPlay");
+        if (sampleRate_ <= 0.0 || blockSize_ <= 0)
+            return { false, "Audio engine is not prepared yet.", nullptr, false };
+
+        auto loaded = PluginSafeLoadWrapperCore::createPluginInstance(
+            formatManager, desc, sampleRate_, blockSize_, "clip_region_plugin");
+
+        if (!loaded.instance)
+            return { false,
+                     loaded.userFacingMessage.isNotEmpty() ? loaded.userFacingMessage : "Could not load clip-region plugin.",
+                     nullptr,
+                     false };
+
+        loaded.instance->setPlayHead(playheadInfo_ ? playheadInfo_->getPlayhead() : nullptr);
+        loaded.instance->setRateAndBufferSizeDetails(sampleRate_, blockSize_);
+        DBG("[APEX-DIAG-INSTANTIATE] track=" << clipId
+            << " isMaster=NO"
+            << " plugin=" << loaded.instance->getName()
+            << " ptr=0x" << juce::String::toHexString((juce::pointer_sized_int)loaded.instance.get())
+            << " inputChannels=" << loaded.instance->getTotalNumInputChannels()
+            << " outputChannels=" << loaded.instance->getTotalNumOutputChannels()
+            << " mainInputLayout=" << loaded.instance->getChannelLayoutOfBus(true, 0).getDescription()
+            << " mainOutputLayout=" << loaded.instance->getChannelLayoutOfBus(false, 0).getDescription());
+        DBG("[APEX-DIAG-PREPARE] plugin=" << loaded.instance->getName()
+            << " sampleRate=" << sampleRate_
+            << " blockSize=" << blockSize_
+            << " calledFrom=" << __FUNCTION__);
+        loaded.instance->prepareToPlay(sampleRate_, blockSize_);
+
+        auto entry = std::make_shared<Entry>();
+        entry->instanceId = makeInstanceId(clipId);
+        entry->clipId = clipId;
+        entry->description = desc;
+        entry->sampleRate = sampleRate_;
+        entry->blockSize = blockSize_;
+        entry->instance = std::move(loaded.instance);
+
+        auto* raw = entry.get();
+        entriesByClip_[clipId].push_back(std::move(entry));
+        publishEntries();
+
+        DBG("[ClipRegionPlugin] loaded dedicated plugin=" << desc.name << " clipId=" << clipId);
+        return { true, {}, raw->instance.get(), false };
+    }
+
+    Entry* findEntryById(const ClipID& clipId, const juce::String& instanceId)
+    {
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end()) return nullptr;
+
+        for (auto& entry : it->second)
+            if (entry != nullptr && entry->instanceId == instanceId)
+                return entry.get();
+
+        return nullptr;
+    }
+
+    std::vector<EntryInfo> getEntriesForClip(const ClipID& clipId) const
+    {
+        std::vector<EntryInfo> result;
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end()) return result;
+
+        for (const auto& entry : it->second)
+        {
+            if (!entry) continue;
+            result.push_back({ entry->instanceId,
+                               entry->description.name,
+                               entry->description.manufacturerName,
+                               entry->description.pluginFormatName,
+                               entry->bypassed.load (std::memory_order_acquire) });
+        }
+
+        return result;
+    }
+
+    /** Capture a detached message-thread snapshot of one clip's plugin chain. */
+    ClipStateSnapshot captureClipState(const ClipID& clipId) const
+    {
+        ClipStateSnapshot snapshot;
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end())
+            return snapshot;
+
+        snapshot.reserve(it->second.size());
+        for (const auto& entry : it->second)
+        {
+            if (!entry || !entry->instance)
+                continue;
+
+            EntryStateSnapshot saved;
+            saved.instanceId = entry->instanceId;
+            saved.description = entry->description;
+            saved.bypassed = entry->bypassed.load(std::memory_order_acquire);
+            entry->instance->getStateInformation(saved.state);
+            snapshot.push_back(std::move(saved));
+        }
+        return snapshot;
+    }
+
+    /** Remove the complete runtime chain for one clip. */
+    void removeAllEntriesForClip(const ClipID& clipId)
+    {
+        if (entriesByClip_.erase(clipId) > 0)
+            publishEntries();
+    }
+
+    /** Restore one clip's chain from a detached snapshot. */
+    bool restoreClipState(const ClipID& clipId,
+                          const ClipStateSnapshot& snapshot,
+                          juce::AudioPluginFormatManager& formatManager)
+    {
+        const auto previous = captureClipState(clipId);
+        removeAllEntriesForClip(clipId);
+
+        if (appendSnapshotEntries(clipId, snapshot, formatManager))
+            return true;
+
+        removeAllEntriesForClip(clipId);
+        (void) appendSnapshotEntries(clipId, previous, formatManager);
+        return false;
+    }
+
+    /** Clone a chain into a distinct clip-keyed runtime chain. */
+    bool cloneClipState(const ClipID& sourceClipId,
+                        const ClipID& targetClipId,
+                        juce::AudioPluginFormatManager& formatManager)
+    {
+        return restoreClipState(targetClipId, captureClipState(sourceClipId), formatManager);
+    }
+
+    /** Return source-instance to target-instance IDs in chain order. */
+    std::vector<std::pair<juce::String, juce::String>> getInstanceIdMapping(
+        const ClipStateSnapshot& sourceSnapshot,
+        const ClipID& targetClipId) const
+    {
+        std::vector<std::pair<juce::String, juce::String>> mapping;
+        const auto targetEntries = getEntriesForClip(targetClipId);
+        const auto count = juce::jmin(sourceSnapshot.size(), targetEntries.size());
+        mapping.reserve(count);
+        for (size_t i = 0; i < count; ++i)
+            mapping.emplace_back(sourceSnapshot[i].instanceId, targetEntries[i].instanceId);
+        return mapping;
+    }
+
+    void setBypassed(const ClipID& clipId, const juce::String& instanceId, bool bypassed)
+    {
+        if (auto* entry = findEntryById(clipId, instanceId))
+            entry->bypassed.store (bypassed, std::memory_order_release);
+    }
+
+    void removeEntry(const ClipID& clipId, const juce::String& instanceId)
+    {
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end()) return;
+
+        auto& entries = it->second;
+        entries.erase(std::remove_if(entries.begin(), entries.end(),
+            [&instanceId](const std::shared_ptr<Entry>& entry)
+            {
+                return entry != nullptr && entry->instanceId == instanceId;
+            }), entries.end());
+
+        if (entries.empty())
+            entriesByClip_.erase(it);
+        publishEntries();
+    }
+
+    Entry* findEntry(const ClipID& clipId, const juce::PluginDescription& desc)
+    {
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end()) return nullptr;
+
+        for (auto& entry : it->second)
+        {
+            if (entry != nullptr
+                && entry->description.name == desc.name
+                && entry->description.pluginFormatName == desc.pluginFormatName
+                && entry->description.fileOrIdentifier == desc.fileOrIdentifier)
+                return entry.get();
+        }
+
+        return nullptr;
+    }
+
+    /** C4: audio-thread entry query — reads the published immutable snapshot
+     *  (lock-free, allocation-free), never the live map. */
+    bool hasPluginsForClip(const ClipID& clipId) const
+    {
+        auto snap = std::atomic_load_explicit (&publishedEntries_, std::memory_order_acquire);
+        if (snap == nullptr)
+            return false;
+        auto it = snap->find (clipId);
+        return it != snap->end() && ! it->second.empty();
+    }
+
+    void processClipBlock(const ClipID& clipId, juce::AudioBuffer<float>& buffer, int numSamples)
+    {
+        if (buffer.getNumChannels() <= 0 || numSamples <= 0 || buffer.getNumSamples() < numSamples)
+        {
+            jassertfalse;
+            return;
+        }
+
+        if (HostedPluginIsolationCore::shouldBypassHostedDsp())
+            return;
+
+        // Hold the published snapshot for the duration of the block — entries
+        // stay alive even if the message thread removes them concurrently.
+        auto snap = std::atomic_load_explicit (&publishedEntries_, std::memory_order_acquire);
+        if (snap == nullptr)
+            return;
+        auto it = snap->find (clipId);
+        if (it == snap->end()) return;
+
+        if (offlinePrepared_ && numSamples > blockSize_)
+        {
+            jassertfalse;
+            juce::Logger::writeToLog("[EXPORT CHAIN][WARN] clip-region plugin not prepared for export block clipId=" + clipId
+                + " preparedBlock=" + juce::String(blockSize_)
+                + " processSamples=" + juce::String(numSamples));
+            return;
+        }
+
+        scratchMidi_.clear();
+        for (auto& entry : it->second)
+        {
+            if (!entry || !entry->instance || entry->bypassed.load (std::memory_order_acquire)) continue;
+            DBG("[ClipRegionPlugin] processing clipId=" << clipId
+                << " plugin=" << entry->description.name
+                << " numSamples=" << buffer.getNumSamples()
+                << " chans=" << buffer.getNumChannels());
+            logProcessBlockDiag(entry->instance.get(), buffer);
+            // Contract (PluginInstanceCore::processBlock): the plugin must never
+            // receive inactive storage beyond the frame count used to prepare
+            // and schedule this quantum. The host buffer is worst-case capacity
+            // (engine clipRegionPluginBuffer_), so present only the active
+            // callback range via a zero-copy view sharing the same channels.
+            juce::AudioBuffer<float> activeView(buffer.getArrayOfWritePointers(),
+                                                buffer.getNumChannels(), numSamples);
+            entry->instance->processBlock(activeView, scratchMidi_);
+        }
+    }
+
+private:
+    PluginPlayheadInfoCore* playheadInfo_ = nullptr;
+    double sampleRate_ = 0.0;
+    int blockSize_ = 0;
+    bool offlinePrepared_ = false;
+    std::map<ClipID, std::vector<std::shared_ptr<Entry>>> entriesByClip_;
+    juce::MidiBuffer scratchMidi_;
+    uint64_t nextInstanceId_ = 1;
+
+    // ── C4: published immutable entries for the audio thread ─────────────
+    using EntriesSnapshot = std::map<ClipID, std::vector<std::shared_ptr<Entry>>>;
+    std::shared_ptr<const EntriesSnapshot> publishedEntries_;
+    // Retired snapshot destroyed at the NEXT publish (message thread), so the
+    // audio thread is never the last owner of a replaced snapshot.
+    std::shared_ptr<const EntriesSnapshot> retiredEntriesSnapshot_;
+
+    /** MESSAGE THREAD only. Publishes the current entries as an immutable
+     *  snapshot (shared ownership keeps entries alive for in-flight blocks). */
+    void publishEntries()
+    {
+        auto snap = std::make_shared<EntriesSnapshot>();
+        for (const auto& [clipId, entries] : entriesByClip_)
+        {
+            auto& vec = (*snap)[clipId];
+            vec.reserve (entries.size());
+            for (const auto& e : entries)
+                if (e) vec.push_back (e);
+        }
+        std::shared_ptr<const EntriesSnapshot> immutable = std::move (snap);
+        auto old = std::atomic_exchange_explicit (&publishedEntries_, immutable, std::memory_order_acq_rel);
+        retiredEntriesSnapshot_ = std::move (old);
+    }
+
+    Entry* findEntryByInstance(const ClipID& clipId,
+                               juce::AudioPluginInstance* instance) noexcept
+    {
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end())
+            return nullptr;
+
+        for (auto& entry : it->second)
+            if (entry != nullptr && entry->instance.get() == instance)
+                return entry.get();
+        return nullptr;
+    }
+
+    bool appendSnapshotEntries(const ClipID& clipId,
+                               const ClipStateSnapshot& snapshot,
+                               juce::AudioPluginFormatManager& formatManager)
+    {
+        for (const auto& saved : snapshot)
+        {
+            auto loaded = loadForClip(clipId, saved.description, formatManager);
+            if (!loaded.success || loaded.instance == nullptr)
+                return false;
+
+            const auto stateSize = juce::jmin<size_t>(saved.state.getSize(),
+                                                       static_cast<size_t>(std::numeric_limits<int>::max()));
+            if (stateSize > 0)
+                loaded.instance->setStateInformation(saved.state.getData(), static_cast<int>(stateSize));
+
+            if (auto* entry = findEntryByInstance(clipId, loaded.instance))
+                entry->bypassed.store(saved.bypassed, std::memory_order_release);
+        }
+
+        publishEntries();
+        return true;
+    }
+
+    void logProcessBlockDiag(juce::AudioPluginInstance* pluginInstance, const juce::AudioBuffer<float>& buffer) const
+    {
+#if APEX_AUDIO_DEBUG_LOGS
+        static std::unordered_map<void*, int> apexDiagLastChannelCount;
+        void* pluginKey = (void*)pluginInstance;
+        const int currentChannels = buffer.getNumChannels();
+        auto it = apexDiagLastChannelCount.find(pluginKey);
+        if (it == apexDiagLastChannelCount.end())
+        {
+            apexDiagLastChannelCount.emplace(pluginKey, currentChannels);
+            DBG("[APEX-DIAG-PROCESSBLOCK] plugin=" << (pluginInstance != nullptr ? pluginInstance->getName() : juce::String("null"))
+                << " ptr=0x" << juce::String::toHexString((juce::pointer_sized_int)pluginKey)
+                << " bufferChannels=" << currentChannels
+                << " bufferSamples=" << buffer.getNumSamples());
+        }
+        else if (it->second != currentChannels)
+        {
+            DBG("[APEX-DIAG-PROCESSBLOCK] plugin=" << (pluginInstance != nullptr ? pluginInstance->getName() : juce::String("null"))
+                << " ptr=0x" << juce::String::toHexString((juce::pointer_sized_int)pluginKey)
+                << " bufferChannels=" << currentChannels
+                << " bufferSamples=" << buffer.getNumSamples());
+            it->second = currentChannels;
+        }
+#else
+        (void) pluginInstance;
+        (void) buffer;
+#endif
+    }
+
+    juce::String makeInstanceId(const ClipID& clipId)
+    {
+        return clipId + "_clipfx_" + juce::String((juce::int64) nextInstanceId_++);
+    }
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipRegionPluginCore)
+};
+
+} // namespace DAW

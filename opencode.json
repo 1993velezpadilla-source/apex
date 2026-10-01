@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "daw-brain-v6",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "share": "disabled",
+  "snapshot": true
+}

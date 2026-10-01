@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "languageStandard": "c++17",
+  "toolchain": {
+    "visualStudioMajor": 18,
+    "platformToolset": "v145",
+    "windowsSdkProperty": "10.0"
+  },
+  "juce": {
+    "version": "8.0.12",
+    "upstreamCommit": "29396c22c93392d6738e021b83196283d6e4d850",
+    "archiveFileName": "juce-8.0.12-windows.zip",
+    "archiveSha256": "15B4ED8302127138DFEE98E61A2B5AE1481B39649B139E02E77BFC29462B7EFB",
+    "rootRelativeToRepository": "../Sdk setups/juce-8.0.12-windows/JUCE",
+    "compatibilityPatch": {
+      "relativePath": "Dependencies/patches/juce-8.0.12/0001-apex-asio4all-compatibility.patch",
+      "sha256": 
+"88C03F5BE28A026FC074B51A3E0E9E57840C57435ECEEE700235B0BEF77E257E",
+      "targetRelativePath": "JUCE/modules/juce_audio_devices/native/juce_ASIO_windows.cpp",
+      "pristineTargetSha256": "A681161DEEDCBC341C4649C5A35EDE4847FFDA8B49AB9A0ED43878DB22A51E14",
+      "patchedTargetSha256": "93355E3422CB4C329823FD980D01CCB4F6315809D118C6463204CD893BAADD10",
+      "validationStatus": "provisional-hardware-validation-required",
+      "rationale": "Preserves the investigated APEX ASIO4ALL zero-buffer and delayed-callback compatibility behavior pending the required hardware matrix.",
+      "hardwareValidationRequired": true
+    },
+    "compatibilityPatch2": {
+      "relativePath": "Dependencies/patches/juce-8.0.12/0002-apex-vst3-null-editcontroller-guard.patch",
+      "sha256": "04209CF9DF38633A9667D63B3E34A90E9B400B7C21486BF3A01EA794BEA0FD32",
+      "targetRelativePath": "JUCE/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatImpl.h",
+      "pristineTargetSha256": "DC03C6BD92E1373C3EE0B183847B867FD1A5A131DF6A7C46FCEA0DFE2BFDAD64",
+      "patchedTargetSha256": "7209A49408B06E5CFF8B413420A42ABC13C89B4FE476DD2915413BB3973B9562",
+      "validationStatus": "verified-by-audit-2026-07-27",
+      "rationale": "Guards against null editController in VST3 plugin view creation. Prevents AV crash when plugins like Antares Auto-Tune EFX+ fail to fully initialise.",
+      "hardwareValidationRequired": false
+    },
+    "compatibilityPatch3": {
+      "relativePath": "Dependencies/patches/juce-8.0.12/0003-apex-string-null-holder-guard.patch",
+      "sha256": "F2E8617B9907E5206E7393557E42EA1B782B296A883C25E59958CB64DA83C029",
+      "targetRelativePath": "JUCE/modules/juce_core/text/juce_String.cpp",
+      "pristineTargetSha256": "8FEDFC941C4E1073EA096B6AFE06118D42571294FAEF96015278B00C8F67A047",
+      "patchedTargetSha256": "F8F8D9A78459808B292E58BBB00F9AC8B3AF08A177536611E8E61C0BBD804852",
+      "validationStatus": "verified-by-cdb-2026-07-28",
+      "rationale": "Prevents null String holder pointers from being converted into invalid buffer headers during retain or release after observed lifetime corruption.",
+      "hardwareValidationRequired": false
+    }
+  },
+  "signalsmithStretch": {
+    "url": "https://github.com/Signalsmith-Audio/signalsmith-stretch.git",
+    "commit": "57b93f4e9206a089a45387eaa39bdc9f310d3308",
+    "path": "Source/ThirdParty/signalsmith-stretch"
+  },
+  "signalsmithLinear": {
+    "url": "https://github.com/Signalsmith-Audio/linear.git",
+    "commit": "88c701ce8d581946de5ee587848cde4a572ed6b5",
+    "path": "Source/ThirdParty/signalsmith-linear"
+  }
+}

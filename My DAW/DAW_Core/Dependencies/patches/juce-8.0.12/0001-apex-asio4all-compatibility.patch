@@ -1,0 +1,84 @@
+diff --git a/JUCE/modules/juce_audio_devices/native/juce_ASIO_windows.cpp b/JUCE/modules/juce_audio_devices/native/juce_ASIO_windows.cpp
+index 66c38a8..12aa1b7 100644
+--- a/JUCE/modules/juce_audio_devices/native/juce_ASIO_windows.cpp
++++ b/JUCE/modules/juce_audio_devices/native/juce_ASIO_windows.cpp
+@@ -488,7 +488,10 @@ public:
+ 
+         if (err != ASE_OK)
+         {
+-            currentBlockSizeSamples = preferredBufferSize;
++            // Guard: if preferredBufferSize is zero (e.g. ASIO4ALL initialising while the
++            // WDM device is still held by the previous driver) the retry would also pass
++            // zero to createBuffers and crash on ASIO4ALL's callback thread.
++            currentBlockSizeSamples = preferredBufferSize > 0 ? (int) preferredBufferSize : 512;
+             JUCE_ASIO_LOG_ERROR ("create buffers 2", err);
+ 
+             asioObject->disposeBuffers();
+@@ -577,7 +580,8 @@ public:
+             }
+             else
+             {
+-                int count = 300;
++                const bool tolerateDelayedCallbacks = getName().containsIgnoreCase ("asio4all");
++                int count = tolerateDelayedCallbacks ? 1000 : 300;
+                 while (--count > 0 && ! calledback)
+                     Thread::sleep (10);
+ 
+@@ -585,9 +589,16 @@ public:
+ 
+                 if (! calledback)
+                 {
+-                    error = "Device didn't start correctly";
+-                    JUCE_ASIO_LOG ("no callbacks - stopping");
+-                    asioObject->stop();
++                    if (tolerateDelayedCallbacks)
++                    {
++                        JUCE_ASIO_LOG ("no callbacks during startup probe for ASIO4ALL - keeping device running for delayed callback");
++                    }
++                    else
++                    {
++                        error = "Device didn't start correctly";
++                        JUCE_ASIO_LOG ("no callbacks - stopping");
++                        asioObject->stop();
++                    }
+                 }
+             }
+         }
+@@ -868,6 +879,13 @@ private:
+             if (err == ASE_OK)
+             {
+                 bufferSizeSamples = (int) preferredBufferSize;
++
++                // Guard: some drivers (e.g. ASIO4ALL initialising while the
++                // WDM device is still held by the previous driver) report
++                // preferredBufferSize==0.  A zero passed to createBuffers()
++                // causes ASIO4ALL's callback thread to divide by zero.
++                if (bufferSizeSamples <= 0)
++                    bufferSizeSamples = 512;
+             }
+             else
+             {
+@@ -1246,12 +1264,18 @@ private:
+                         readLatencies();
+ 
+                         // start and stop because cubase does it
+-                        err = asioObject->start();
+-                        // ignore an error here, as it might start later after setting other stuff up
+-                        JUCE_ASIO_LOG_ERROR ("start", err);
++                        // Guard: only start if createDummyBuffers actually created buffers
++                        // (preferredBufferSize==0 skips createBuffers; calling start() then
++                        // causes ASIO4ALL's callback thread to divide by zero internally).
++                        if (preferredBufferSize > 0)
++                        {
++                            err = asioObject->start();
++                            // ignore an error here, as it might start later after setting other stuff up
++                            JUCE_ASIO_LOG_ERROR ("start", err);
+ 
+-                        Thread::sleep (80);
+-                        asioObject->stop();
++                            Thread::sleep (80);
++                            asioObject->stop();
++                        }
+                     }
+                     else
+                     {

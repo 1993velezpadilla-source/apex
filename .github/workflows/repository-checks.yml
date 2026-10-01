@@ -1,0 +1,26 @@
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repository-policy:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Check repository policy
+        run: .\Scripts\test_repository_policy.ps1
+      - name: Check evidence validation
+        run: .\Scripts\test_validate_test_evidence.ps1

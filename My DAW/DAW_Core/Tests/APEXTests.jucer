@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="ApexTests01" name="APEXTests" projectType="consoleapp" bundleIdentifier="com.apex.APEXTests"
+              companyName="Apex" companyCopyright="Apex" useAppConfig="0" addUsingNamespaceToJuceHeader="0"
+              jucerFormatVersion="1" defines="JUCE_ENABLE_ALLOCATION_HOOKS=1 JUCE_STRICT_REFCOUNTEDPOINTER=1 APEX_ENABLE_TEST_HOOKS=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1">
+  <MAINGROUP id="ApexTestsMG" name="APEXTests">
+    <GROUP id="{A1A1A1A1-0000-0000-0000-000000000001}" name="Source">
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000010}" name="Smoke">
+        <FILE id="SM_CPP1" name="RunnerSmokeTests.cpp" compile="1" resource="0"
+              file="Source/Smoke/RunnerSmokeTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000020}" name="Arrangement">
+        <FILE id="AT_CPP1" name="ClipSplitCoreTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/ClipSplitCoreTests.cpp"/>
+        <FILE id="AT_CPP10" name="ClipCrossfadeCoreTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/ClipCrossfadeCoreTests.cpp"/>
+        <FILE id="AT_CPP2" name="BladeSplitPlanCoreTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/BladeSplitPlanCoreTests.cpp"/>
+        <FILE id="AT_CPP3" name="BladeUndoPersistenceTests.cpp" compile="1"
+              resource="0" file="Source/Arrangement/BladeUndoPersistenceTests.cpp"/>
+        <FILE id="AT_CPP4" name="AudioFileManagerShareTests.cpp" compile="1"
+              resource="0" file="Source/Arrangement/AudioFileManagerShareTests.cpp"/>
+        <FILE id="AT_CPP5" name="BladeSourceRenderContractTests.cpp" compile="1"
+              resource="0" file="Source/Arrangement/BladeSourceRenderContractTests.cpp"/>
+        <FILE id="AT_CPP6" name="PlayheadDirtyRectTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/PlayheadDirtyRectTests.cpp"/>
+        <FILE id="AT_CPP7" name="GridLodPolicyTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/GridLodPolicyTests.cpp"/>
+        <FILE id="AT_CPP8" name="WaveformColorTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/WaveformColorTests.cpp"/>
+        <FILE id="AT_CPP9" name="ClipBodyColorTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/ClipBodyColorTests.cpp"/>
+        <FILE id="AT_CPP11" name="AutomationPolishTests.cpp" compile="1" resource="0"
+              file="Source/Arrangement/AutomationPolishTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000025}" name="Diagnostics">
+        <FILE id="DI_CPP1" name="CallbackAuditCoreTests.cpp" compile="1" resource="0"
+              file="Source/Diagnostics/CallbackAuditCoreTests.cpp"/>
+        <FILE id="DI_CPP2" name="LufsMeterCoreTests.cpp" compile="1" resource="0"
+              file="Source/Diagnostics/LufsMeterCoreTests.cpp"/>
+        <FILE id="DI_CPP3" name="AutomationRtAccessTests.cpp" compile="1" resource="0"
+              file="Source/Diagnostics/AutomationRtAccessTests.cpp"/>
+        <FILE id="DI_CPP4" name="PdcClickRtTests.cpp" compile="1" resource="0"
+              file="Source/Diagnostics/PdcClickRtTests.cpp"/>
+        <FILE id="DI_CPP5" name="PluginIdentityPersistenceTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/PluginIdentityPersistenceTests.cpp"/>
+        <FILE id="DI_CPP6" name="PluginEmptyTrackSilenceTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/PluginEmptyTrackSilenceTests.cpp"/>
+<FILE id="DI_CPP7" name="PluginEditorLifecycleTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/PluginEditorLifecycleTests.cpp"/>
+        <FILE id="DI_CPP8" name="UiPresentationRateTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/UiPresentationRateTests.cpp"/>
+        <FILE id="DI_CPP9" name="RoutingFolderRegressionTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/RoutingFolderRegressionTests.cpp"/>
+        <FILE id="DI_CPP10" name="ProjectReloadRoutingIdentityTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/ProjectReloadRoutingIdentityTests.cpp"/>
+        <FILE id="DI_CPP11" name="MixerRevealScrollTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/MixerRevealScrollTests.cpp"/>
+        <FILE id="DI_CPP12" name="RoutingBufferPrepareTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/RoutingBufferPrepareTests.cpp"/>
+        <FILE id="DI_CPP13" name="AutomationSmootherCoreTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/AutomationSmootherCoreTests.cpp"/>
+        <FILE id="DI_CPP14" name="DspBlockInvarianceTests.cpp" compile="1"
+              resource="0" file="Source/Diagnostics/DspBlockInvarianceTests.cpp"/>
+         <FILE id="DI_CPP15" name="TrackReprepareHarnessTests.cpp" compile="1"
+               resource="0" file="Source/Diagnostics/TrackReprepareHarnessTests.cpp"/>
+          <FILE id="DI_CPP16" name="ProjectPersistenceTransactionTests.cpp" compile="1"
+                resource="0" file="Source/Diagnostics/ProjectPersistenceTransactionTests.cpp"/>
+           <FILE id="DI_CPP17" name="AutosaveManagerCore.cpp" compile="1"
+                 resource="0" file="../Source/ProjectCore/AutosaveManagerCore.cpp"/>
+           <FILE id="DI_CPP18" name="MixerResponsiveTests.cpp" compile="1"
+                 resource="0" file="Source/Diagnostics/MixerResponsiveTests.cpp"/>
+         </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000045}" name="PluginHost">
+        <FILE id="PH_CPP1" name="SidechainRoutingRegressionTests.cpp" compile="1"
+              resource="0" file="Source/PluginHost/SidechainRoutingRegressionTests.cpp"/>
+        <FILE id="PH_CPP2" name="PluginScanPersistenceTests.cpp" compile="1"
+              resource="0" file="Source/PluginHost/PluginScanPersistenceTests.cpp"/>
+        <FILE id="PH_CPP3" name="PluginBusLayoutMatrixTests.cpp" compile="1"
+              resource="0" file="Source/PluginHost/PluginBusLayoutMatrixTests.cpp"/>
+       </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000046}" name="PluginSandbox">
+        <FILE id="PS_CPP1" name="PluginSandboxPhaseATests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseATests.cpp"/>
+        <FILE id="PS_CPP2" name="PluginSandboxPhaseBTests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseBTests.cpp"/>
+        <FILE id="PS_CPP3" name="PluginSandboxPhaseCTests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseCTests.cpp"/>
+        <FILE id="PS_CPP4" name="PluginSandboxReblockingTests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxReblockingTests.cpp"/>
+        <FILE id="PS_CPP5" name="PluginSandboxChainTests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxChainTests.cpp"/>
+        <FILE id="PS_CPP8" name="PluginSandboxPhaseDTests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseDTests.cpp"/>
+        <FILE id="PS_CPP9" name="PluginSandboxPhaseE1Tests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseE1Tests.cpp"/>
+        <FILE id="PS_CPP10" name="PluginSandboxPhaseE2ATests.cpp" compile="1"
+              resource="0" file="Source/PluginSandbox/PluginSandboxPhaseE2ATests.cpp"/>
+         <FILE id="PS_CPP11" name="PluginSandboxPhaseE2BTests.cpp" compile="1"
+               resource="0" file="Source/PluginSandbox/PluginSandboxPhaseE2BTests.cpp"/>
+          <FILE id="PS_CPP12" name="PluginSandboxPhaseE2CTests.cpp" compile="1"
+                resource="0" file="Source/PluginSandbox/PluginSandboxPhaseE2CTests.cpp"/>
+           <FILE id="PS_CPP13" name="PluginSandboxPhaseF1Tests.cpp" compile="1"
+                 resource="0" file="Source/PluginSandbox/PluginSandboxPhaseF1Tests.cpp"/>
+           <FILE id="PS_CPP14" name="PluginSandboxPhaseF2Tests.cpp" compile="1"
+                 resource="0" file="Source/PluginSandbox/PluginSandboxPhaseF2Tests.cpp"/>
+           <FILE id="PS_CPP15" name="PluginSandboxPhaseF3Tests.cpp" compile="1"
+                 resource="0" file="Source/PluginSandbox/PluginSandboxPhaseF3Tests.cpp"/>
+           <FILE id="PS_CPP6" name="PluginInstanceCore.cpp" compile="1"
+               resource="0" file="../Source/PluginHostCore/PluginInstanceCore.cpp"/>
+        <FILE id="PS_CPP7" name="PluginChainCore.cpp" compile="1"
+              resource="0" file="../Source/PluginHostCore/PluginChainCore.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000035}" name="Recording">
+        <FILE id="RC_CPP1" name="RecordingWriterIntegrityTests.cpp" compile="1"
+              resource="0" file="Source/Recording/RecordingWriterIntegrityTests.cpp"/>
+        <FILE id="RC_CPP2" name="RecordingIdentityRegressionTests.cpp" compile="1"
+              resource="0" file="Source/Recording/RecordingIdentityRegressionTests.cpp"/>
+        <FILE id="RC_CPP3" name="LiveRecordWaveformRegressionTests.cpp" compile="1"
+              resource="0" file="Source/Recording/LiveRecordWaveformRegressionTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000028}" name="Theme">
+        <FILE id="TH_CPP1" name="ApexPaletteTests.cpp" compile="1" resource="0"
+              file="Source/Theme/ApexPaletteTests.cpp"/>
+        <FILE id="TH_CPP2" name="ApexPrimitivesTests.cpp" compile="1" resource="0"
+              file="Source/Theme/ApexPrimitivesTests.cpp"/>
+        <FILE id="TH_CPP3" name="ApexLivingSealTests.cpp" compile="1" resource="0"
+              file="Source/Theme/ApexLivingSealTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000030}" name="EngineDeps">
+        <FILE id="ED_CPP1" name="ArrangementClipStateCore.cpp" compile="1"
+              resource="0" file="../Builds/VisualStudio2026/ArrangementEditor/ArrangementClipStateCore.cpp"/>
+        <FILE id="ED_CPP2" name="Clip.cpp" compile="1" resource="0" file="../Source/ClipCore/Clip.cpp"/>
+        <FILE id="ED_CPP3" name="MidiClip.cpp" compile="1" resource="0" file="../Source/MidiCore/MidiClip.cpp"/>
+        <FILE id="ED_CPP4" name="Types.cpp" compile="1" resource="0" file="../Source/UtilityCore/Types.cpp"/>
+        <FILE id="ED_CPP5" name="PianoRollClipModel.cpp" compile="1" resource="0"
+              file="../Source/MidiCore/PianoRollClipModel.cpp"/>
+        <FILE id="ED_CPP6" name="Theme.cpp" compile="1" resource="0" file="../Source/ThemeCore/Theme.cpp"/>
+        <FILE id="ED_CPP7" name="PatternClip.cpp" compile="1" resource="0"
+              file="../Source/ClipCore/PatternClip.cpp"/>
+        <FILE id="ED_CPP8" name="PluginSehGuardCore.cpp" compile="1" resource="0"
+              file="../Source/PluginSafetyCore/PluginSehGuardCore.cpp"/>
+        <FILE id="ED_CPP9" name="PluginEditorWindowWin32Patch.cpp" compile="1" resource="0"
+              file="../Source/PluginHostCore/PluginEditorWindowWin32Patch.cpp"/>
+        <FILE id="ED_CPP10" name="Track.cpp" compile="1" resource="0"
+              file="../Source/TrackCore/Track.cpp"/>
+                <FILE id="ED_CPP11" name="MidiTrackCore.cpp" compile="1" resource="0"
+              file="../Source/MidiCore/MidiTrackCore.cpp"/>
+        <FILE id="ED_CPP12" name="ApplicationState.cpp" compile="1" resource="0"
+              file="../Source/StateCore/ApplicationState.cpp"/>
+        <FILE id="ED_CPP13" name="TransportController.cpp" compile="1" resource="0"
+              file="../Source/TransportCore/TransportController.cpp"/>
+        <FILE id="ED_CPP14" name="ArrangementViewCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp"/>
+        <FILE id="ED_CPP15" name="ArrangementToolbarCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ArrangementToolbarCore.cpp"/>
+        <FILE id="ED_CPP16" name="ArrangementRulerCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.cpp"/>
+        <FILE id="ED_CPP17" name="RubberBandSelectCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/RubberBandSelectCore.cpp"/>
+        <FILE id="ED_CPP18" name="ClipSplitIndicatorCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipSplitIndicatorCore.cpp"/>
+        <FILE id="ED_CPP19" name="PianoRollButtonCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/PianoRollButtonCore.cpp"/>
+        <FILE id="ED_CPP20" name="ClipRenderCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp"/>
+        <FILE id="ED_CPP21" name="AutomationImplementations.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/AutomationImplementations.cpp"/>
+        <FILE id="ED_CPP22" name="ClipEdgeHandleCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipEdgeHandleCore.cpp"/>
+        <FILE id="ED_CPP23" name="ClipFadeHandleCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipFadeHandleCore.cpp"/>
+        <FILE id="ED_CPP24" name="ClipGainHandleCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipGainHandleCore.cpp"/>
+        <FILE id="ED_CPP25" name="ClipMuteOverlayCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipMuteOverlayCore.cpp"/>
+        <FILE id="ED_CPP26" name="ClipEraseOverlayCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipEraseOverlayCore.cpp"/>
+        <FILE id="ED_CPP27" name="ClipPitchBadgeCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipPitchBadgeCore.cpp"/>
+        <FILE id="ED_CPP28" name="ClipPitchRenderPathCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipPitchRenderPathCore.cpp"/>
+        <FILE id="ED_CPP29" name="ClipWaveformCacheCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp"/>
+        <FILE id="ED_CPP30" name="ClipColourPickerCore.cpp" compile="1" resource="0"
+              file="../Builds/VisualStudio2026/ArrangementEditor/ClipColourPickerCore.cpp"/>
+        <FILE id="ED_CPP32" name="PianoRollPlaybackCore.cpp" compile="1" resource="0"
+              file="../Source/MidiCore/PianoRollPlaybackCore.cpp"/>
+        <FILE id="ED_CPP33" name="StepSequencerPlaybackCore.cpp" compile="1" resource="0"
+              file="../Source/StepSequencerCore/StepSequencerPlaybackCore.cpp"/>
+
+
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000040}" name="G10">
+        <FILE id="G10_H1" name="G10TestUtils.h" compile="0" resource="0"
+              file="Source/G10/G10TestUtils.h"/>
+        <FILE id="G10_CPP1" name="G10EngineTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10EngineTests.cpp"/>
+        <FILE id="G10_CPP2" name="G10ProcessorTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10ProcessorTests.cpp"/>
+        <FILE id="G10_CPP3" name="G10FormatHostTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10FormatHostTests.cpp"/>
+        <FILE id="G10_CPP4" name="G10RtAllocationTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10RtAllocationTests.cpp"/>
+        <FILE id="G10_CPP5" name="G10CpuGateTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10CpuGateTests.cpp"/>
+        <FILE id="G10_CPP6" name="G10AnalogTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10AnalogTests.cpp"/>
+        <FILE id="G10_CPP7" name="G10EditorHookTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10EditorHookTests.cpp"/>
+        <FILE id="G10_CPP8" name="G10Processor.cpp" compile="1" resource="0"
+              file="../Source/G10Core/G10Processor.cpp"/>
+        <FILE id="G10_CPP9" name="G10AnalyzerTests.cpp" compile="1" resource="0"
+              file="Source/G10/G10AnalyzerTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000044}" name="G10UI">
+        <FILE id="G10U_H01" name="G10AnalyzerFifo.h" compile="0" resource="0" file="../Source/G10UI/G10AnalyzerFifo.h"/>
+        <FILE id="G10U_H02" name="G10LookAndFeel.h" compile="0" resource="0" file="../Source/G10UI/G10LookAndFeel.h"/>
+        <FILE id="G10U_H03" name="G10EyeHandleComponent.h" compile="0" resource="0" file="../Source/G10UI/G10EyeHandleComponent.h"/>
+        <FILE id="G10U_CPP1" name="G10EyeHandleComponent.cpp" compile="1" resource="0" file="../Source/G10UI/G10EyeHandleComponent.cpp"/>
+        <FILE id="G10U_H04" name="G10BandFaderComponent.h" compile="0" resource="0" file="../Source/G10UI/G10BandFaderComponent.h"/>
+        <FILE id="G10U_CPP2" name="G10BandFaderComponent.cpp" compile="1" resource="0" file="../Source/G10UI/G10BandFaderComponent.cpp"/>
+        <FILE id="G10U_H05" name="G10SpectrumAnalyzerComponent.h" compile="0" resource="0" file="../Source/G10UI/G10SpectrumAnalyzerComponent.h"/>
+        <FILE id="G10U_CPP3" name="G10SpectrumAnalyzerComponent.cpp" compile="1" resource="0" file="../Source/G10UI/G10SpectrumAnalyzerComponent.cpp"/>
+        <FILE id="G10U_H06" name="G10RotaryKnobComponent.h" compile="0" resource="0" file="../Source/G10UI/G10RotaryKnobComponent.h"/>
+        <FILE id="G10U_CPP4" name="G10RotaryKnobComponent.cpp" compile="1" resource="0" file="../Source/G10UI/G10RotaryKnobComponent.cpp"/>
+        <FILE id="G10U_H07" name="G10Editor.h" compile="0" resource="0" file="../Source/G10UI/G10Editor.h"/>
+        <FILE id="G10U_CPP5" name="G10Editor.cpp" compile="1" resource="0" file="../Source/G10UI/G10Editor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000050}" name="Dynamics">
+        <FILE id="DYN_H01" name="ApexDynamicsCore.h" compile="0" resource="0"
+              file="../Source/DynamicsCore/ApexDynamicsCore.h"/>
+        <FILE id="DYN_CPP1" name="ApexDynamicsCoreTests.cpp" compile="1" resource="0"
+              file="Source/Dynamics/ApexDynamicsCoreTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000046}" name="C4">
+        <FILE id="C4_H1" name="C4TestUtils.h" compile="0" resource="0"
+              file="Source/C4/C4TestUtils.h"/>
+        <FILE id="C4_CPP1" name="C4EngineTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4EngineTests.cpp"/>
+        <FILE id="C4_CPP2" name="C4FilterTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4FilterTests.cpp"/>
+        <FILE id="C4_CPP3" name="C4NeutralPathTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4NeutralPathTests.cpp"/>
+        <FILE id="C4_CPP4" name="C4NumericalSafetyTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4NumericalSafetyTests.cpp"/>
+        <FILE id="C4_CPP5" name="C4AutomationTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4AutomationTests.cpp"/>
+        <FILE id="C4_CPP6" name="C4ProcessorTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4ProcessorTests.cpp"/>
+        <FILE id="C4_CPP7" name="C4RtAllocationTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4RtAllocationTests.cpp"/>
+        <FILE id="C4_CPP8" name="C4SampleRateTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4SampleRateTests.cpp"/>
+        <FILE id="C4_CPP9" name="C4FormatHostTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4FormatHostTests.cpp"/>
+        <FILE id="C4_CPP10" name="C4CompositionTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4CompositionTests.cpp"/>
+        <FILE id="C4_CPP11" name="C4MorphAuditTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4MorphAuditTests.cpp"/>
+        <FILE id="C4_CPP12" name="C4Processor.cpp" compile="1" resource="0"
+              file="../Source/C4Core/C4Processor.cpp"/>
+        <FILE id="C4_CPP14" name="C4SmootherTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4SmootherTests.cpp"/>
+        <FILE id="C4_CPP15" name="C4LifecycleTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4LifecycleTests.cpp"/>
+        <FILE id="C4_CPP16" name="C4HaloMapperTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4HaloMapperTests.cpp"/>
+        <FILE id="C4_CPP17" name="C4CouplingTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4CouplingTests.cpp"/>
+        <FILE id="C4_CPP18" name="C4ResidualBankTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4ResidualBankTests.cpp"/>
+        <FILE id="C4_CPP19" name="C4Phase5TuningTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4Phase5TuningTests.cpp"/>
+        <FILE id="C4_CPP20" name="C4RenderPackTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4RenderPackTests.cpp"/>
+        <FILE id="C4_CPP21" name="C4SpectrumTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4SpectrumTests.cpp"/>
+        <FILE id="C4_CPP22" name="C4EditorHookTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4EditorHookTests.cpp"/>
+        <FILE id="C4_CPP23" name="C4VisualPreviewTests.cpp" compile="1" resource="0"
+              file="Source/C4/C4VisualPreviewTests.cpp"/>
+        <FILE id="C4_H02" name="C4Editor.h" compile="0" resource="0"
+              file="../Source/C4UI/C4Editor.h"/>
+        <FILE id="C4_H03" name="ApexNativePluginFormat.h" compile="0" resource="0"
+              file="../Source/PluginHostCore/ApexNativePluginFormat.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000048}" name="ParametricEQ">
+        <FILE id="PEQ_H01" name="ParametricEQTestUtils.h" compile="0" resource="0"
+              file="Source/ParametricEQ/ParametricEQTestUtils.h"/>
+        <FILE id="PEQ_CPP01" name="ParametricEQEngineTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQEngineTests.cpp"/>
+        <FILE id="PEQ_CPP02" name="ParametricEQFilterTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQFilterTests.cpp"/>
+        <FILE id="PEQ_CPP03" name="ParametricEQResponseTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQResponseTests.cpp"/>
+        <FILE id="PEQ_CPP04" name="ParametricEQNeutralPathTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQNeutralPathTests.cpp"/>
+        <FILE id="PEQ_CPP05" name="ParametricEQSampleRateTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQSampleRateTests.cpp"/>
+        <FILE id="PEQ_CPP06" name="ParametricEQBlockSizeTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQBlockSizeTests.cpp"/>
+        <FILE id="PEQ_CPP07" name="ParametricEQNumericalSafetyTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQNumericalSafetyTests.cpp"/>
+        <FILE id="PEQ_CPP08" name="ParametricEQCompositionTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQCompositionTests.cpp"/>
+        <FILE id="PEQ_CPP09" name="ParametricEQRtAllocationTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQRtAllocationTests.cpp"/>
+        <FILE id="PEQ_CPP10" name="ParametricEQProcessorTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQProcessorTests.cpp"/>
+        <FILE id="PEQ_CPP11" name="ParametricEQResponseCoreTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQResponseCoreTests.cpp"/>
+        <FILE id="PEQ_CPP12" name="ParametricEQAnalyzerTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQAnalyzerTests.cpp"/>
+        <FILE id="PEQ_CPP13" name="ParametricEQFormatHostTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQFormatHostTests.cpp"/>
+        <FILE id="PEQ_CPP14" name="ParametricEQProcessor.cpp" compile="1" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQProcessor.cpp"/>
+        <FILE id="PEQ_CPP15" name="ParametricEQStereoTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQStereoTests.cpp"/>
+        <FILE id="PEQ_CPP16" name="ParametricEQMidSideTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQMidSideTests.cpp"/>
+        <FILE id="PEQ_CPP17" name="ParametricEQAuditionTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQAuditionTests.cpp"/>
+        <FILE id="PEQ_CPP18" name="ParametricEQStateTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQStateTests.cpp"/>
+        <FILE id="PEQ_CPP19" name="ParametricEQAutomationTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQAutomationTests.cpp"/>
+        <FILE id="PEQ_CPP20" name="ParametricEQLifecycleTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQLifecycleTests.cpp"/>
+        <FILE id="PEQ_CPP21" name="ParametricEQEditorTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQEditorTests.cpp"/>
+        <FILE id="PEQ_CPP22" name="ParametricEQDynamicEQTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicEQTests.cpp"/>
+        <FILE id="PEQ_CPP23" name="ParametricEQDynamicStateTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicStateTests.cpp"/>
+        <FILE id="PEQ_CPP24" name="ParametricEQDynamicAutomationTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicAutomationTests.cpp"/>
+        <FILE id="PEQ_CPP25" name="ParametricEQDynamicSidechainTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicSidechainTests.cpp"/>
+        <FILE id="PEQ_CPP26" name="ParametricEQDynamicLifecycleTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicLifecycleTests.cpp"/>
+        <FILE id="PEQ_CPP27" name="ParametricEQDynamicRtAllocationTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicRtAllocationTests.cpp"/>
+        <FILE id="PEQ_CPP28" name="ParametricEQDynamicResponseTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicResponseTests.cpp"/>
+        <FILE id="PEQ_CPP29" name="ParametricEQDynamicStereoTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicStereoTests.cpp"/>
+        <FILE id="PEQ_CPP30" name="ParametricEQDynamicMidSideTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicMidSideTests.cpp"/>
+        <FILE id="PEQ_CPP31" name="ParametricEQDynamicEditorTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQDynamicEditorTests.cpp"/>
+        <FILE id="PEQ_CPP32" name="ParametricEQLinearPhaseTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQLinearPhaseTests.cpp"/>
+        <FILE id="PEQ_H02" name="ApexSpectrumAnalyzerCore.h" compile="0" resource="0"
+              file="../Source/AnalysisCore/ApexSpectrumAnalyzerCore.h"/>
+        <FILE id="PEQ_H03" name="ParametricEQResponseCore.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQResponseCore.h"/>
+        <FILE id="PEQ_H04" name="ParametricEQProcessor.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQProcessor.h"/>
+        <FILE id="PEQ_H05" name="ParametricEQNativePluginFormat.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQNativePluginFormat.h"/>
+        <FILE id="PEQ_H08" name="ParametricEQLinearPhase.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQLinearPhase.h"/>
+        <FILE id="PEQ_H06" name="ParametricEQAuditionCore.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQAuditionCore.h"/>
+        <FILE id="PEQ_H07" name="ParametricEQEditor.h" compile="0" resource="0"
+              file="../Source/ParametricEQUI/ParametricEQEditor.h"/>
+      <FILE id="PEQ_H08" name="ParametricEQEditor.cpp" compile="1" resource="0"
+            file="../Source/ParametricEQUI/ParametricEQEditor.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000060}" name="QuickTrack">
+        <FILE id="QT_CPP1" name="QuickTrackCoreTests.cpp" compile="1" resource="0"
+              file="Source/QuickTrack/QuickTrackCoreTests.cpp"/>
+        <FILE id="QT_CPP2" name="TrackCreationInputTests.cpp" compile="1" resource="0"
+              file="Source/QuickTrack/TrackCreationInputTests.cpp"/>
+        <FILE id="QT_CPP3" name="QuickTrackClickThroughTests.cpp" compile="1" resource="0"
+              file="Source/QuickTrack/QuickTrackClickThroughTests.cpp"/>
+        <FILE id="QT_CPP4" name="QuickTrackPopupTests.cpp" compile="1" resource="0"
+              file="Source/QuickTrack/QuickTrackPopupTests.cpp"/>
+        <FILE id="QT_CPP5" name="QuickTrackBubblegumTests.cpp" compile="1" resource="0"
+              file="Source/QuickTrack/QuickTrackBubblegumTests.cpp"/>
+         <FILE id="QT_CPP6" name="BubblegumRefreshTests.cpp" compile="1" resource="0"
+               file="Source/QuickTrack/BubblegumRefreshTests.cpp"/>
+         <FILE id="QT_CPP7" name="QuickWorkflowTests.cpp" compile="1" resource="0"
+               file="Source/QuickTrack/QuickWorkflowTests.cpp"/>
+         <FILE id="QT_CPP8" name="BubblegumAnchorResolver.cpp" compile="1" resource="0"
+               file="../Source/Bubblegum/BubblegumAnchorResolver.cpp"/>
+        </GROUP>
+      <FILE id="MJ_CPP1" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+    </GROUP>
+  </MAINGROUP>
+  <EXPORTFORMATS>
+    <VS2026 targetFolder="Builds/VisualStudio2026">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug" isDebug="1" targetName="APEXTests" defines="APEX_TEST_CONFIGURATION=Debug"
+                       extraCompilerFlags="/utf-8 /bigobj /I&quot;..\..\..\Source&quot; /I&quot;..\..\..\Source\ThirdParty&quot; /I&quot;..\..\..\Source\ThirdParty\signalsmith-stretch&quot; /I&quot;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK&quot;"/>
+        <CONFIGURATION name="Release" isDebug="0" targetName="APEXTests" defines="APEX_TEST_CONFIGURATION=Release"
+                       extraCompilerFlags="/utf-8 /bigobj /I&quot;..\..\..\Source&quot; /I&quot;..\..\..\Source\ThirdParty&quot; /I&quot;..\..\..\Source\ThirdParty\signalsmith-stretch&quot; /I&quot;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK&quot;"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_core" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_basics" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2026>
+  </EXPORTFORMATS>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1"/>
+</JUCERPROJECT>

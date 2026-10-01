@@ -1,0 +1,18 @@
+#pragma once
+
+#include "ApexSoundEngineCore.h"
+#include "ApexRoutingBufferCore.h"
+#include "ApexClipRenderCore.h"
+#include "ApexMixFanoutCore.h"
+#include "ApexPluginPdcContractCore.h"
+#include "ApexPdcDelayLineCore.h"
+#include "ApexSourceReadContractCore.h"
+#include "ApexPitchTimeInputPlanCore.h"
+#include "ApexClipOutputMixPlanCore.h"
+#include "ApexFallbackTimePitchContractCore.h"
+#include "ApexIdentityFallbackReadPlanCore.h"
+#include "ApexFallbackTimePitchRequestCore.h"
+#include "ApexFallbackScratchMixPlanCore.h"
+#include "ApexClipRenderStateBookkeepingCore.h"
+#include "ApexClipRenderPathDecisionCore.h"
+#include "ApexFallbackTimePitchStateCore.h"

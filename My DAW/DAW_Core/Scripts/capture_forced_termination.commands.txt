@@ -1,0 +1,6 @@
+.echo === APEX FORCED TERMINATION CAPTURE ARMED ===
+.reload /f
+sxi 80000003
+sxi 80000004
+bu KERNELBASE!TerminateThread ".echo; .echo === TerminateThread INTERCEPTED BEFORE TARGET TERMINATION ===; .printf \"STOPPER_OS_TID=%x TARGET_NATIVE_HANDLE=%p EXIT_CODE=%x\\n\", @$tid, @rcx, @rdx; .echo === TARGET HANDLE ===; !handle @rcx f; .echo === STOPPER STACK / OWNER ===; kv 100; .echo === ALL LIVE THREADS ===; ~; ~* kv 100; .echo === RUNAWAY ===; !runaway 7; .echo === LOCKS ===; !locks; .echo === HANG ANALYSIS ===; !analyze -hang; .dump /ma C:\Users\1993v\OneDrive\Desktop\Apex backup\crash-reports\APEX_AUTOTUNE_TERMINATE_THREAD_PREKILL.dmp; .echo === CAPTURE COMPLETE; PROCESS WILL EXIT BEFORE TARGET TERMINATION ===; q"
+g

@@ -1,0 +1,21 @@
+{
+  "candidate": "DAW_BRAIN_AUDITED_INTEGRATION_CANDIDATE.md",
+  "candidate_sha256": "ce92abd24f6ed246004047a374cbf791dedc8fe5b2c2ee98d7154cfa6bc9a7ca",
+  "candidate_bytes": 2272878,
+  "validation": "DAW_BRAIN_AUDITED_INTEGRATION_VALIDATION_v1.json",
+  "validation_sha256": "aeb5f3931d74909a09e483b267457622fc293a0af8a9d4b1fd07c4b7966ffb9d",
+  "report": "DAW_BRAIN_AUDITED_INTEGRATION_REPORT_v1.md",
+  "report_sha256": "8d3684322821bf2fb1f84d74fbe93021c7d26cf0e42f054d79a105e3972a9549",
+  "base_v6": {
+    "source": "exact embedded V6 block in archival master",
+    "full_sha256": "7582222e3ae04b5efc57b647546abf7e4a770e2e8d66760632ddc84f01692d8d",
+    "sections_1_38_sha256": "a5b1e24e6d91284d3a030c990891638334b81c586f829cc72fc197a80bf94f2c",
+    "terminal_review_claims": 253
+  },
+  "post_v6_reaudit_report": "APEX_POST_V6_REAL_REAUDIT_FINAL_COMPLETION_REPORT_v1.json",
+  "post_v6_reaudit_report_sha256": "96a939d31a8abf3df3ae9979594a532972f853f604d7e23534a16655bfc32d9e",
+  "binding_map": "APEX_CANONICAL_INTEGRATION_MAP_v1_1_BINDINGS_RESOLVED.json",
+  "binding_map_sha256": "c67053413590ee2df87e7af398410f2902cc66c0a15e3d17e9a04ed7e51d7f0a",
+  "repository_canonical_modified": false,
+  "install_state": "NOT_INSTALLED"
+}

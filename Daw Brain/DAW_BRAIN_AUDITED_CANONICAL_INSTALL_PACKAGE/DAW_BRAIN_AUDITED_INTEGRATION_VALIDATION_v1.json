@@ -1,0 +1,375 @@
+{
+  "validation_version": "1.0",
+  "created": "2026-07-23",
+  "candidate": "DAW_BRAIN_AUDITED_INTEGRATION_CANDIDATE.md",
+  "candidate_sha256": "ce92abd24f6ed246004047a374cbf791dedc8fe5b2c2ee98d7154cfa6bc9a7ca",
+  "candidate_bytes": 2272878,
+  "source_master": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+  "source_master_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+  "v6_extracted_full_sha256": "7582222e3ae04b5efc57b647546abf7e4a770e2e8d66760632ddc84f01692d8d",
+  "v6_sections_1_38_sha256": "a5b1e24e6d91284d3a030c990891638334b81c586f829cc72fc197a80bf94f2c",
+  "ai43_sha256": "a00273aa6f7f1b36415243eddcb03f02240391259149704a44fafbfab435fbe2",
+  "checks": {
+    "V6_SECTIONS_1_38_BYTE_IDENTICAL": true,
+    "VOLUME_HEADINGS_EXACT_13_TO_46": true,
+    "EXTENSION_SECTIONS_85_775_CONTIGUOUS_ONCE": true,
+    "CORE_SECTIONS_1_38_CONTIGUOUS_ONCE": true,
+    "AI_REASONING_SECTION_43_PRESENT_ONCE": true,
+    "NO_EMBEDDED_V7_V8_COMPLETE_MARKERS": true,
+    "V16_42_ALL_PROMOTION_DECISIONS_PASS": true,
+    "V13_46_ALL_BINDINGS_PROMOTED": true,
+    "REPOSITORY_CANONICAL_MODIFIED": false
+  },
+  "failed_checks": [],
+  "overall_result": "PASS_REPOSITORY_READY_CANDIDATE_NOT_INSTALLED",
+  "volume_sources": {
+    "13": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 85,
+      "section_max": 114,
+      "authority_id": "AUTH-NATIVE-PLUGIN-ENGINEERING-001",
+      "binding_state": "BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "14": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 115,
+      "section_max": 180,
+      "authority_id": "AUTH-MUSIC-ENGINEERING-001",
+      "binding_state": "BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "15": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 181,
+      "section_max": 279,
+      "authority_id": "AUTH-DESIGN-HCI-001",
+      "binding_state": "BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "16": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME16_CORRECTED_CANDIDATE_v1.md",
+      "source_sha256": "202be346144c245cbc5795734ca60e0098c53599de7f8c94177c446a8c53863a",
+      "section_min": 280,
+      "section_max": 298,
+      "authority_id": "AUTH-VOLUME16-BRAIN-COMPILER-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 51
+    },
+    "17": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME17_CORRECTED_CANDIDATE_v1.md",
+      "source_sha256": "457f2608051cc4aa6430dfa8f31e883c3c68743e0e0f83979b66af6317c6dfd9",
+      "section_min": 299,
+      "section_max": 315,
+      "authority_id": "AUTH-VOLUME17-SCIENTIFIC-REASONING-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 56
+    },
+    "18": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME18_CORRECTED_CANDIDATE_v1.md",
+      "source_sha256": "53a258c225bba3dbd4c04c01cf132759232de879286536279827181dd0169796",
+      "section_min": 316,
+      "section_max": 335,
+      "authority_id": "AUTH-VOLUME18-AUTONOMOUS-RESEARCH-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 45
+    },
+    "19": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME19_CORRECTED_CANDIDATE_v1.md",
+      "source_sha256": "5d6536c6e98ed0e2bd80588482303dcc17fe0afa22afb288b2f9cc445974456d",
+      "section_min": 336,
+      "section_max": 345,
+      "authority_id": "AUTH-VOLUME19-INTELLIGENCE-ORCHESTRATOR-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 31
+    },
+    "20": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME20_CORRECTED_CANDIDATE_REAL_v1.md",
+      "source_sha256": "3b6bb1e81494570e5e31dc57ad65a2044ff0475361efe9b00dfac05152052fa5",
+      "section_min": 346,
+      "section_max": 360,
+      "authority_id": "AUTH-VOLUME20-DSP-SCIENTIST-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 23
+    },
+    "21": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME21_CORRECTED_CANDIDATE_REAL_v1.md",
+      "source_sha256": "4c4f58604f59db969182c728df598ad0eb9726e6b92adce44b488da3c6ff03a4",
+      "section_min": 361,
+      "section_max": 371,
+      "authority_id": "AUTH-VOLUME21-ACOUSTICS-001",
+      "binding_state": "LIBRARY_OBJECT_AND_EMBEDDED_HASHES_BOUND",
+      "claim_count": 17
+    },
+    "22": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME22_CORRECTED_CANDIDATE_REAL_v1.md",
+      "source_sha256": "80ea2ca52e3ea4823b33d38669e18287237c317b3b1dd36478631cfb33162c9e",
+      "section_min": 372,
+      "section_max": 385,
+      "authority_id": "AUTH-VOLUME22-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 23
+    },
+    "23": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME23_CORRECTED_CANDIDATE_REAL_v1.md",
+      "source_sha256": "544ab536b4616ab38474417253d6c8fe80cede6eb4fa1e117c7d4be17268ca5b",
+      "section_min": 386,
+      "section_max": 394,
+      "authority_id": "AUTH-VOLUME23-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 25
+    },
+    "24": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME24_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "8991638dbc18ea711518b1c37bada610cf5217135af0b1e1b13d4cc30afd8198",
+      "section_min": 395,
+      "section_max": 413,
+      "authority_id": "AUTH-VOLUME24-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 34
+    },
+    "25": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME25_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "c7ce38a0eecca4646fb27254a875067031442c8ff50141f4eda52b8230209c15",
+      "section_min": 414,
+      "section_max": 428,
+      "authority_id": "AUTH-VOLUME25-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 21
+    },
+    "26": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME26_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "34572a3e6bb854be374d4a15ee7798953396255b5d745470966a50f5f1c4a3b4",
+      "section_min": 429,
+      "section_max": 440,
+      "authority_id": "AUTH-VOLUME26-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 17
+    },
+    "27": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME27_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "d809d976966045310a1c88f740890110d1d79a9af75219f308860f3ee949e09d",
+      "section_min": 441,
+      "section_max": 457,
+      "authority_id": "AUTH-VOLUME27-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 23
+    },
+    "28": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME28_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "7550e6540fa05bd7484f0dfeb70f596846f9ff102c6d8037013511ff42de5f8d",
+      "section_min": 458,
+      "section_max": 462,
+      "authority_id": "AUTH-VOLUME28-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 6
+    },
+    "29": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME29_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "9608742f65ba1e3390c0e504eef531072cb70ed170805de762bae2a6777a3172",
+      "section_min": 463,
+      "section_max": 479,
+      "authority_id": "AUTH-VOLUME29-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 26
+    },
+    "30": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME30_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "c7309f4d7477ab9cfcd21c4f3ed44510be9d6661b766d7270b65c2e3627b163e",
+      "section_min": 480,
+      "section_max": 495,
+      "authority_id": "AUTH-VOLUME30-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 20
+    },
+    "31": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME31_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "52c4689d02403024fbfcd46596252911004112d6965a3ae4bca8903480eef765",
+      "section_min": 496,
+      "section_max": 510,
+      "authority_id": "AUTH-VOLUME31-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 18
+    },
+    "32": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME32_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "16ca29a5d6342e0aead942e12393c0b15911e15a53c5ba14fe327a15fbccfd27",
+      "section_min": 511,
+      "section_max": 525,
+      "authority_id": "AUTH-VOLUME32-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 20
+    },
+    "33": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME33_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "1169c88f0d691c6f66ea6b137c2f0275df0bf872bd5ca5508ff46f22676c52e9",
+      "section_min": 526,
+      "section_max": 530,
+      "authority_id": "AUTH-VOLUME33-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 6
+    },
+    "34": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME34_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "97e8ef0035be5b2fb16af9c442c08e30f8f4c1d028b5817f3d6e2202e1c0efac",
+      "section_min": 531,
+      "section_max": 552,
+      "authority_id": "AUTH-VOLUME34-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 31
+    },
+    "35": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME35_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "a367428d958572b80212c22c3f7a81dd7b3367beb341084409871fb418b90128",
+      "section_min": 553,
+      "section_max": 574,
+      "authority_id": "AUTH-VOLUME35-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 30
+    },
+    "36": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME36_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "a0ac5b57ef04cf13c1116c1fbb7b82f32742ddb9a7bb7e47c72299943f0db8cc",
+      "section_min": 575,
+      "section_max": 589,
+      "authority_id": "AUTH-VOLUME36-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 19
+    },
+    "37": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME37_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "44c1f3a117c1f3c80f2052798f95b1b8ba957c4a6dd58f2c0ddb604ef88ab44a",
+      "section_min": 590,
+      "section_max": 610,
+      "authority_id": "AUTH-VOLUME37-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 38
+    },
+    "38": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME38_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "28e38ddf2c304400dd967a2ee8fdab63c2245d012e8fe48d699ae38458f50a3b",
+      "section_min": 611,
+      "section_max": 615,
+      "authority_id": "AUTH-VOLUME38-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 9
+    },
+    "39": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME39_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "95f2ffd2759668e4a3c931441359c6bd2ff2dcdfeaa8b5e723013b729d8136ee",
+      "section_min": 616,
+      "section_max": 660,
+      "authority_id": "AUTH-VOLUME39-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 76
+    },
+    "40": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME40_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "f95b51ae954317e05148fffcdc1f45913f2f8582054887832fb1f043ae383606",
+      "section_min": 661,
+      "section_max": 672,
+      "authority_id": "AUTH-VOLUME40-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 14
+    },
+    "41": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME41_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "2a942bbc64b5e1b28e540942108765c6dc3ef3134adf6a4a33b7da32a98c0bec",
+      "section_min": 673,
+      "section_max": 680,
+      "authority_id": "AUTH-VOLUME41-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 11
+    },
+    "42": {
+      "source_kind": "REAL_REAUDIT_CORRECTED_CANDIDATE",
+      "source_name": "APEX_VOLUME42_CORRECTED_CANDIDATE_REAL_REAUDIT_v2.md",
+      "source_sha256": "a52c7f870a5dc6977789b0c2dc23c9fd6545e1eb7e82715f95d12d97ae8514a8",
+      "section_min": 681,
+      "section_max": 690,
+      "authority_id": "AUTH-VOLUME42-001",
+      "binding_state": "RUNTIME_HASH_BOUND",
+      "claim_count": 13
+    },
+    "43": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 691,
+      "section_max": 730,
+      "authority_id": "AUTH-CONTROL-PLANE-001",
+      "binding_state": "GROUP_BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "44": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 731,
+      "section_max": 750,
+      "authority_id": "AUTH-CONTROL-PLANE-001",
+      "binding_state": "GROUP_BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "45": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 751,
+      "section_max": 766,
+      "authority_id": "AUTH-CONTROL-PLANE-001",
+      "binding_state": "GROUP_BOUND_IN_ALPHA8",
+      "claim_count": null
+    },
+    "46": {
+      "source_kind": "ORIGINAL_PROMOTED_VOLUME_PROSE_WITH_GOVERNING_AUDIT_BINDING",
+      "source_name": "APEX_ULTIMATE_MASTER_BRAIN_v10.0.0_AUDITED_CANONICAL.md",
+      "source_sha256": "032856d71ab7584555880d9ae27ce4d4759cf591944b55c89a08b1937a3762fe",
+      "section_min": 767,
+      "section_max": 775,
+      "authority_id": "AUTH-CONTROL-PLANE-001",
+      "binding_state": "GROUP_BOUND_IN_ALPHA8",
+      "claim_count": null
+    }
+  },
+  "explicit_exclusions": {
+    "v7_v8_unpromoted_neighbor_sections": "Excluded from authoritative body unless separately audited/promoted.",
+    "standalone_design_brain_duplicate_body": "Not concatenated; promoted Design/HCI knowledge is represented by Volume 15 authority.",
+    "standalone_ai_brain_duplicate_body": "Not concatenated wholesale; promoted AI/Reasoning authority is represented by §43 plus the audited extension program.",
+    "historical_v6_v7_v8_duplicate_snapshots": "Not concatenated."
+  },
+  "install_state": "NOT_INSTALLED",
+  "repository_canonical_modified": false
+}

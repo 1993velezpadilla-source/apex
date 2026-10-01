@@ -1,0 +1,7 @@
+[submodule "signalsmith-stretch"]
+    path = My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch
+    url = https://github.com/Signalsmith-Audio/signalsmith-stretch.git
+    ignore = untracked
+[submodule "signalsmith-linear"]
+    path = My DAW/DAW_Core/Source/ThirdParty/signalsmith-linear
+    url = https://github.com/Signalsmith-Audio/linear.git

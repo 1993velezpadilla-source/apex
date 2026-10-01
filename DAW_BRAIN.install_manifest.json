@@ -1,0 +1,12 @@
+﻿{
+    "installed_at":  "2026-07-24T15:13:05.5547023-04:00",
+    "repo_root":  "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup",
+    "target":  "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\DAW_BRAIN.md",
+    "installed_sha256":  "ce92abd24f6ed246004047a374cbf791dedc8fe5b2c2ee98d7154cfa6bc9a7ca",
+    "source_candidate":  "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\Daw Brain\\DAW_BRAIN_AUDITED_CANONICAL_INSTALL_PACKAGE\\DAW_BRAIN_AUDITED_INTEGRATION_CANDIDATE.md",
+    "source_candidate_sha256":  "ce92abd24f6ed246004047a374cbf791dedc8fe5b2c2ee98d7154cfa6bc9a7ca",
+    "previous_sha256":  "88e465097a76b99f936c7b8b9b341b4803198bcd538f532cbe3725324280b2bd",
+    "backup":  "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\.apex_brain_backups\\DAW_BRAIN.pre_audited_integration.20260724_151305.md",
+    "repository_feature_state_verified":  false,
+    "note":  "Canonical knowledge file installed. Live APEX repository/runtime verification remains separate."
+}

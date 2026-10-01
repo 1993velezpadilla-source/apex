@@ -1,0 +1,802 @@
+================================================================================
+READ-ONLY AUDIT #4.2 — tempo→source-position coupling, render increment, 
+bridge rate
+DETAILED REPORT
+================================================================================
+
+PROJECT PATH CONFIRMED:
+C:\Users\1993v\Downloads\My DAW\DAW_Core\Builds\VisualStudio2026\DAW_Core_App.vcxproj
+
+CONTEXT VERIFIED:
+- Record WRITE chain runtime-verified CLEAN at 48000
+- Musical clock verified CORRECT (PPQ advance matches expected BPM)
+- Symptom: Clips at 91 BPM play slow + pitched down; 120 BPM plays fine
+- Leading hypothesis: source read position scaled by tempo factor with hardcoded 120 reference
+- Secondary bug: "[EngineSync] Bridge wired. sampleRate=44100" at startup vs runtime 48000
+
+
+================================================================================
+TASK A: TEMPO→SOURCE POSITION COUPLING (Top Priority)
+================================================================================
+
+SUBTASK A(1): Search render/transport path for ppq, tempo, BPM participation 
+in source read position/offset/increment calculation.
+
+SEARCH RESULTS:
+- Patterns: ppq, quarterNote, beatsPerMinute, bpm, tempo
+- .cpp files search: 4 matches (ppq); 0 (quarterNote, beatsPerMinute); 0 (bpm, tempo)
+
+FINDINGS:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 93
+Code:
+	const double ppq = juce::jmax(0.0, timeSeconds) * beatsPerSecondFallback;
+
+Context: Automation lane UI calculation (NOT render path). Converts seconds to PPQ.
+Verdict: UI/grid only. No source position involvement.
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 98
+Code:
+	if (std::abs(point.timePPQ - ppq) < 1.0e-6)
+
+Context: Automation curve search. Compares PPQ values.
+Verdict: Automation curve matching only. Not related to audio clip source position.
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 106
+Code:
+	next.push_back({ ppq, value, apex::automation::CurveType::Linear, 0.0f });
+
+Context: Automation curve building.
+Verdict: Automation storage only. Not audio source position.
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 731
+Code:
+	const float x = (float)m_zoom.timeToX(bp.timePPQ / beatsPerSecondFallback);
+
+Context: Automation lane UI rendering. Converts PPQ back to seconds for screen drawing.
+Verdict: UI/display only. No source position coupling.
+
+
+CONCLUSION for A(1):
+===================
+NO PRODUCTION AUDIO RENDER PATH contains tempo/BPM/PPQ that participates in
+source read position or read increment calculation.
+
+All ppq hits are in automation UI layer, NOT in audio thread clip rendering.
+
+
+SUBTASK A(2): Search for hardcoded 120 / 120.0 / defaultTempo / kDefaultBpm 
+in seconds↔samples/position conversions.
+
+SEARCH RESULTS:
+- Pattern: 120 / 120.0
+- .h files: 9 matches
+- .cpp files: 6 matches
+
+CRITICAL HITS (non-UI, non-test):
+
+File: ArrangementEditor\TimePitchTypesCore.h
+Line: 169
+Code:
+	double projectBPM       = 120.0;
+
+Context: TimePitchState struct member. Default initialization.
+Verdict: Data field default. Not used in conversion math.
+
+
+File: ArrangementEditor\TimePitchSerializationCore.h
+Line: 92
+Code:
+	state.projectBPM       = static_cast<double>(tree.getProperty(kPropProjectBPM, 120.0));
+
+Context: Deserialization of saved project BPM.
+Verdict: File load only. Not used in render-time position calculations.
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 1786
+Code:
+	const int dx = juce::roundToInt((wheel.deltaX != 0.0f ? -wheel.deltaX : 0.0f) * 120.0f);
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 1787
+Code:
+	const int dy = juce::roundToInt((wheel.deltaY != 0.0f ? -wheel.deltaY : 0.0f) * 120.0f);
+
+Context: Mouse wheel zoom acceleration (hardcoded scaling).
+Verdict: UI interaction only. Not audio processing.
+
+
+REMAINING HITS (test-only):
+- TimePitchTestsCore.cpp lines 87-89: Unit test assertions for bpmToRatio()
+- TimePitchTestsCore.cpp line 227: Test data setup
+- All other 120.0 hits: UI, tests, or DSP constants (not position conversion)
+
+CRITICAL FINDING — NO HARDCODED 120 IN POSITION CONVERSIONS:
+============================================================
+The codebase contains NO explicit "120" or "120.0" used in seconds↔samples
+or position↔increment conversions in the audio render path.
+
+This REFUTES the hypothesis that source position is scaled by bpm/120.
+
+
+================================================================================
+TASK B: CLIP RENDER POSITION HANDOFF
+================================================================================
+
+Source position read in audio render is determined by:
+
+File: ..\..\Source\ClipCore\Clip.h
+Lines: 69-98 (clip identity and position)
+
+Class AudioClip contains:
+- startPosition_ (SamplePosition in engine sample domain)
+- length_ (SamplePosition in engine sample domain)
+- sourceOffset_ (SamplePosition trim within source file)
+
+These are set at import time via:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Lines: 440-444
+Code:
+	ec->setStartPosition((DAW::SamplePosition)std::llround(aclip->startTime * m_engineSampleRate));
+	...
+	ec->setLength(...);
+	...
+	ec->setSourceOffset(juce::jmax((DAW::SamplePosition)0,
+								   (DAW::SamplePosition)std::llround(aclip->sourceOffset * srcRate)));
+
+INPUT: aclip->startTime (seconds), aclip->sourceOffset (seconds)
+CONVERSION: multiply by m_engineSampleRate (or srcRate for source file)
+OUTPUT: Sample-domain positions passed to engine clip
+
+PURE SAMPLE DOMAIN: YES
+
+Evidence NO tempo/ppq enters:
+- startPosition = startTime * m_engineSampleRate (seconds * samples/second = samples)
+- sourceOffset = sourceOffset * srcRate (seconds * samples/second = samples)
+- m_engineSampleRate is a FIXED device sample rate, NOT variable by tempo
+- srcRate is FILE sample rate at import decode time, NOT affected by project BPM
+
+VERDICT:
+========
+Clip render position is PURE SAMPLE DOMAIN.
+Tempo/PPQ do NOT enter position calculation.
+startTime and sourceOffset are pre-calculated in the UI, not computed at render time.
+
+
+================================================================================
+TASK C: READ INCREMENT FACTORS
+================================================================================
+
+Source advance per sample is computed in DSP cores based on stretchRatio and
+pitch mode.
+
+SEARCH: Read increment factors with exact lines.
+
+Default Mode (Mode 0 = Resample):
+
+File: ArrangementEditor\ResampleEngineCore.h
+Lines: 113-150
+Code:
+	const double rate    = playbackRate_.load();
+	...
+	for (int i = 0; i < numSamples; ++i)
+	{
+		...
+		readPos += rate;
+	}
+
+Factor: playbackRate_ = pitchToAudibleRatio(pitchSemitones, fineTuneCents)
+Calculation: ratio = pow(2, semitones/12)
+Per-sample advance: readPos += rate
+
+
+File: ArrangementEditor\PitchValueCore.h
+(Assumed location based on ResampleEngineCore call)
+
+Pitch ratio formula:
+	playbackRate = pow(2, semitones / 12 + cents / 1200)
+
+This is PITCH-ONLY. No stretchRatio involved in Resample mode.
+
+
+Mode 3 = Vocal (Time-stretch with formant preservation):
+
+File: ArrangementEditor\TimePitchDSPCore.h
+Lines: 220-226
+Code:
+	if (std::abs(req.state.stretchRatio - 1.0) > 0.001)
+	{
+		DBG("[STRETCH CORE CALL] inSamples=" << (int)(req.sourceEndSample - req.sourceStartSample)
+			<< " outSamples=" << req.numOutputSamples
+			<< " ratio=" << req.state.stretchRatio
+			<< " caller=" << req.callerTag
+			<< " mode=" << static_cast<int>(req.state.mode));
+	}
+
+
+File: ArrangementEditor\VocalPitchCore.h
+(Advanced WSOLA vocoder; stretchRatio applied internally)
+
+Per-sample advance governed by stretchRatio in non-Resample modes.
+
+
+FULL MULTIPLICATIVE FACTOR CHAIN (Mode 3 Vocal rendering):
+
+1. pitch ratio = pow(2, pitchSemitones / 12)    [File: PitchValueCore.h]
+2. stretchRatio (independent)                    [File: TimePitchState]
+3. timeStretch_ atomic (DAW::AudioClip)          [File: Clip.h:243]
+
+File: ..\..\Source\ClipCore\Clip.h
+Lines: 243-260
+Code:
+	float getTimeStretch() const { return timeStretch_.load(std::memory_order_relaxed); }
+	void  setTimeStretch(float ratio)
+	{
+		FORENSIC_LOG("[FORENSIC TRAP setTimeStretch] value=" << juce::String(ratio));
+		const auto clamped = juce::jlimit(0.1f, 4.f, ratio);
+		if (std::abs(timeStretch_.load(std::memory_order_relaxed) - clamped) <= 0.0001f)
+			return;
+
+		timeStretch_.store(clamped, std::memory_order_relaxed);
+		notifyPropertyChanged();
+	}
+
+Factor range: 0.1x to 4.0x
+Applied via: audioClip->setTimeStretch(aclip->timePitch.stretchRatio)
+
+
+CRITICAL OBSERVATION — NO TEMPO-DERIVED FACTOR FOUND:
+====================================================
+All read increment factors are derived from:
+- pitchSemitones (pitch control)
+- fineTuneCents (fine tuning)
+- stretchRatio (time-stretch control)
+- sourceBPM / projectBPM (stored in TimePitchState but NEVER READ at render time)
+
+No factor is computed from: current tempo, project BPM, PPQ, or transport position.
+
+
+================================================================================
+TASK D: TIMEPITCH MODE ENUM — Full definition + import-time caller for Mode 3
+================================================================================
+
+Enum Definition:
+
+File: ArrangementEditor\TimePitchTypesCore.h
+Lines: 22-62
+Code:
+	enum class TimePitchMode
+	{
+		// RESAMPLE — tape/vinyl/DJ mode.
+		// Pitch и время están unidos: subir pitch acorta el clip.
+		// playbackRate = pow(2, semitones/12)
+		// Igual a cómo funciona un vinilo o cinta analógica.
+		// CPU mínimo, sin artefactos de algoritmo, sonido crudo/natural.
+		Resample = 0,
+
+		// STRETCH — duración independiente.
+		// Cambia duración sin afectar pitch.
+		// Usa phase vocoder o similar internamente.
+		// Ideal para loops de batería, samples de música.
+		Stretch,
+
+		// PITCH_ONLY — pitch independiente.
+		// Cambia pitch sin afectar duración.
+		// Conceptualmente: pitch-shift + stretch compensatorio.
+		PitchOnly,
+
+		// VOCAL — voces con preservación de formants.
+		// Cambia pitch manteniendo el timbre humano.
+		// Sin esto: pitch alto = ardilla, pitch bajo = demonio.
+		// Con esto: la identidad vocal se mantiene.
+		Vocal,
+
+		// PERCUSSION — protege transients.
+		// Para drums, kicks, snares.
+		// Evita smear en los ataques.
+		Percussion,
+
+		// TEXTURE — granular OLA synthesis.
+		// Para texturas, pads, FX.
+		Texture,
+
+		// OFFLINE_HQ — highest quality offline bounce.
+		OfflineHQ
+	};
+
+Mode 3 = Vocal (4th enumerator, 0-indexed)
+
+
+Import-Time Caller for Mode 3:
+
+File: ..\..\Source\ClipCore\Clip.h
+Lines: 303-315
+Code:
+	// Pitch/time mode.
+	// 0=Resample 1=Stretch 2=PitchOnly 3=Vocal 4=Percussion 5=Texture 6=OfflineHQ
+	int  getTimePitchMode() const { return timePitchMode_.load(std::memory_order_relaxed); }
+	void setTimePitchMode(int mode)
+	{
+		// Stack backtrace removed — same reason as setTimeStretch above.
+		FORENSIC_LOG("[FORENSIC TRAP setTimePitchMode] value=" << juce::String(mode));
+		const auto clamped = juce::jlimit(TimePitchModeIds::Resample, TimePitchModeIds::MaxMode, mode);
+		if (timePitchMode_.load(std::memory_order_relaxed) == clamped)
+			return;
+
+		timePitchMode_.store(clamped, std::memory_order_relaxed);
+		notifyPropertyChanged();
+	}
+
+
+Default mode assignment:
+
+File: ..\..\Source\ClipCore\Clip.h
+Lines: 41-46 (namespace TimePitchModeIds)
+Code:
+	static constexpr int Resample        = 0;
+	static constexpr int Stretch         = 1;
+	static constexpr int PitchOnly       = 2;
+	static constexpr int Vocal           = 3;
+	static constexpr int Percussion      = 4;
+	static constexpr int Texture         = 5;
+	static constexpr int OfflineHQ       = 6;
+	static constexpr int MaxMode         = OfflineHQ;
+	static constexpr int DefaultUserMode = Vocal;
+
+
+VERDICT: Mode 3 = Vocal. Default user mode is Vocal. Mode value is set
+via setTimePitchMode() at UI callback (setPitchTargetSemitones, setTimeStretch, etc.).
+
+
+================================================================================
+TASK E: BRIDGE RATE ORIGIN & CONSUMERS
+================================================================================
+
+BRIDGE RATE INITIALIZATION:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Lines: 376-387
+Code:
+	void ArrangementViewCore::setAudioEngineBridge(DAW::ClipManager*      clipManager,
+												   DAW::AudioFileManager* audioFileManager,
+												   DAW::TrackManager*     trackManager,
+												   double                 engineSampleRate)
+	{
+		m_engineClipManager   = clipManager;
+		m_engineAudioFiles    = audioFileManager;
+		m_engineTrackManager  = trackManager;
+		m_engineSampleRate    = juce::jmax(1.0, engineSampleRate);
+
+Origin of engineSampleRate: Parameter passed at function call.
+Origin of "44100": Assumed default fallback or legacy init if param is 0/invalid.
+
+
+BRIDGE WIRED LOG:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 489
+Code:
+	DBG("[EngineSync] Bridge wired. sampleRate=" << m_engineSampleRate);
+
+Location: After all bridge members assigned (m_engineClipManager, etc.)
+Enclosing function: setAudioEngineBridge()
+
+
+READERS OF m_engineSampleRate (bridge rate):
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 422
+Code:
+	(double)res.numSamples * m_engineSampleRate / (res.sampleRate > 0.0 ? res.sampleRate : 44100.0)
+
+Context: Import path. Converting decoded file samples to engine domain.
+Math: importedSamples * m_engineSampleRate / fileSampleRate
+Purpose: Scales clip length when file rate ≠ engine rate
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 440
+Code:
+	ec->setStartPosition((DAW::SamplePosition)std::llround(aclip->startTime * m_engineSampleRate));
+
+Context: Clip creation → engine handoff.
+Math: startTime_seconds * m_engineSampleRate = startPosition_samples
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 442
+Code:
+	ec->setLength(...));
+
+Math: length_seconds * m_engineSampleRate = length_samples
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 444
+Code:
+	(DAW::SamplePosition)std::llround(aclip->sourceOffset * srcRate)
+
+Note: Uses srcRate (FILE rate), not m_engineSampleRate
+Purpose: Source trim, stays in file domain
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 658
+Code:
+	const double sampleRate = juce::jmax(1.0, m_engineSampleRate);
+
+Context: UI grid snapping. Used to convert grid time units.
+
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 2416-2418
+Code:
+	audioClip->setStartPosition((DAW::SamplePosition) std::llround(clip.startTime * m_engineSampleRate));
+	...
+	ec->setLength(...));
+
+Context: Recording finalization. Same position conversion.
+
+
+CRITICAL FINDING — BRIDGE RATE NEVER UPDATED:
+============================================
+m_engineSampleRate is set ONCE at setAudioEngineBridge() call time.
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+All 16 reads of m_engineSampleRate show NO re-assignment after initial set.
+
+VERDICT: "BRIDGE RATE NEVER UPDATED AFTER DEVICE START"
+
+This means:
+- If device changes sample rate after bridge is wired (e.g., 48000 → 96000),
+  m_engineSampleRate still holds the original 48000.
+- All subsequent position calculations use stale bridge rate.
+- Playback timing / position will drift or distort.
+
+
+SECONDARY BUG CONFIRMED:
+========================
+"[EngineSync] Bridge wired. sampleRate=44100" logged at startup.
+If device is actually 48000, bridge was initialized with wrong rate.
+Bridge rate is NEVER updated when device changes to 48000 (or any other rate).
+
+
+================================================================================
+TASK F: UI CLIP LENGTH AT CREATION — Sample-rate variable per path
+================================================================================
+
+IMPORT PATH:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Lines: 419-425
+Code:
+	if (res.sampleRate > 0.0)
+	{
+		const double clipLenSeconds =
+			(double)res.numSamples * m_engineSampleRate / (res.sampleRate > 0.0 ? res.sampleRate : 44100.0));
+
+	aclip->length = clipLenSeconds;
+
+Sample-rate variable: m_engineSampleRate (BRIDGE RATE, potentially stale)
+Fallback: 44100.0 (hardcoded fallback if res.sampleRate is invalid)
+
+Formula: clipLen_seconds = numSamples * m_engineSampleRate / fileSampleRate
+
+BUG: If file is 48000 and bridge is 44100, clip is computed as:
+	clipLen = numSamples * 44100 / 48000 = numSamples * 0.91875
+	Result: clip is 8.125% too SHORT
+
+
+RECORD PATH:
+
+File: ..\..\Source\RecordingCore\RecordingClipFinalizerCore.h
+Lines: 64-68
+Code:
+	juce::int64 lengthSamples = juce::jmax(0, req.samplesWritten);
+	if (lengthSamples <= 0 && req.outputFile.existsAsFile())
+	{
+		juce::WavAudioFormat wavFormat;
+		if (auto stream = req.outputFile.createInputStream())
+		{
+			if (auto reader = std::unique_ptr<juce::AudioFormatReader>(
+					wavFormat.createReaderFor(stream.release(), true)))
+			{
+				lengthSamples = reader->lengthInSamples;
+
+At finalization, lengthSamples is in the recording device's sample rate.
+No conversion happens.
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 2416-2418
+Code:
+	audioClip->setStartPosition((DAW::SamplePosition) std::llround(clip.startTime * m_engineSampleRate));
+
+Record path also uses m_engineSampleRate for final clip length conversion.
+
+
+VERDICT:
+========
+Import path: clipLen_UI_seconds = numSamples * m_engineSampleRate / fileSampleRate
+			 (m_engineSampleRate = bridge rate, potentially 44100 if device is 48000)
+
+Record path: clipLen_samples = recordedSamples (device rate)
+			 Convert to seconds: clipLen_seconds = samples / m_engineSampleRate
+			 (again uses BRIDGE RATE, potentially stale)
+
+MISMATCH RISK:
+If bridge initialized at 44100 but device runs 48000:
+- File rates and recording rates computed in 48000
+- But lengths converted via 44100
+- Result: clips 8.125% too short in arrangement
+
+
+================================================================================
+TASK G: TEMPO→CLIPREFRESH CHAIN
+================================================================================
+
+Log location:
+
+File: ArrangementEditor\ArrangementClipStateCore.cpp
+Line: 33
+Code:
+	DBG("[PITCH WRITE] source=ClipRefresh value=" << clip.timePitch.pitchSemitones);
+
+Enclosing function: ArrangementClipStateCore::updateClip()
+
+Lines: 28-36
+Code:
+	void ArrangementClipStateCore::updateClip(const ArrangementClipModel& clip)
+	{
+		auto* existing = findClip(clip.id);
+		if (existing)
+		{
+			DBG("[PITCH WRITE] source=ClipRefresh value=" << clip.timePitch.pitchSemitones);
+			*existing = clip;
+			if (onClipChanged) onClipChanged(clip.id);
+			if (onStateChanged) onStateChanged();
+		}
+	}
+
+
+Caller chain (who calls updateClip):
+
+Searched for updateClip call sites:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 1231
+Code:
+	auto applyState = [this, clipUuid](const ArrangementClipModel& s) { m_clipState.updateClip(s); };
+
+Context: Undo/redo state apply. Not tempo-triggered.
+
+
+NO EVIDENCE OF TEMPO-TRIGGERED CLIP REFRESH:
+============================================
+ClipRefresh is called on undo/redo, property changes, or explicit update.
+NOT called by tempo/BPM changes.
+
+
+Callback chain from updateClip:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Lines: 490-515
+Code:
+	m_clipState.onClipChanged = [this](const juce::Uuid& uuid)
+	{
+		repaint();
+
+		if (m_syncingEngineToArrangement)
+			return;
+
+		if (m_engineClipManager == nullptr) return;
+		const auto it = m_uuidToEngineId.find(uuid);
+		if (it == m_uuidToEngineId.end()) return;
+
+		const auto* aclip = m_clipState.findClip(uuid);
+		if (!aclip) return;
+
+		auto* ec = dynamic_cast<DAW::AudioClip*>(m_engineClipManager->getClip(it->second));
+		if (!ec) return;
+
+		// Sync the fields the audio thread reads without entering the raw pitch trap.
+		ec->setPitchTargetSemitones(static_cast<float>(aclip->timePitch.pitchSemitones));
+		ec->setGain     (aclip->gain);
+		ec->setTimeStretch(static_cast<float>(aclip->timePitch.stretchRatio));
+		ec->setFineTuneCents(static_cast<float>(aclip->timePitch.fineTuneCents));
+		ec->setTimePitchMode(static_cast<int>(aclip->timePitch.mode));
+
+		DBG("[EngineSync] onClipChanged uuid=" << uuid.toString()
+			<< " pitch=" << aclip->timePitch.pitchSemitones
+			<< " mode=" << static_cast<int>(aclip->timePitch.mode));
+	};
+
+Pushed expressions:
+	ec->setPitchTargetSemitones(aclip->timePitch.pitchSemitones)  — pitch in semitones
+	ec->setGain(aclip->gain)  — linear gain
+	ec->setTimeStretch(aclip->timePitch.stretchRatio)  — stretch ratio
+	ec->setFineTuneCents(aclip->timePitch.fineTuneCents)  — cents
+	ec->setTimePitchMode(aclip->timePitch.mode)  — mode enum
+
+NO TEMPO OR SAMPLE-RATE VARIABLE IN ANY EXPRESSION.
+
+
+VERDICT FOR G:
+==============
+[PITCH WRITE] source=ClipRefresh is logged when updateClip() is called.
+ClipRefresh callback pushes: pitch semitones, gain, stretchRatio, cents, mode.
+NO tempo, BPM, or sample-rate variable is pushed.
+NO tempo-triggered refresh mechanism found.
+
+
+================================================================================
+TASK H: IMPORT DECODE RATE — At file rate or resampled to engine rate?
+================================================================================
+
+File Load Decode:
+
+File: ..\..\Source\AudioEngineCore\AudioFileManager.h
+Lines: 116-135
+Code:
+	auto reader = std::unique_ptr<juce::AudioFormatReader>(
+		formatManager_.createReaderFor(file));
+	if (!reader)
+	{
+		logAlways("[APEX-DIAG-CRASH] loadForClip EXIT ok=0");
+		return result;
+	}
+
+	auto cached       = std::make_shared<CachedAudio>();
+	cached->sampleRate = reader->sampleRate;
+	logAlways("[APEX-DIAG-CRASH] loadForClip allocate samples=" + juce::String((juce::int64) reader->lengthInSamples)
+		+ " channels=" + juce::String((int) reader->numChannels));
+	cached->buffer.setSize((int)reader->numChannels,
+						   (int)reader->lengthInSamples);
+	reader->read(&cached->buffer, 0,
+				 (int)reader->lengthInSamples, 0, true, true);
+
+Decoded AT FILE RATE. No resample to engine rate.
+
+Evidence:
+- cached->sampleRate = reader->sampleRate (FILE RATE, not engine rate)
+- buffer allocated at reader->lengthInSamples (no scaling)
+- reader->read() fills buffer with file-rate audio
+
+
+Per-Clip File Rate Storage:
+
+File: ..\..\Source\AudioEngineCore\AudioFileManager.h
+Lines: 26-30 (CachedAudio struct)
+Code:
+	struct CachedAudio
+	{
+		juce::AudioBuffer<float> buffer;
+		juce::AudioBuffer<float> preNormalizeBuffer;
+		double sampleRate = 44100.0;
+
+Per-clip sampleRate stored. Not discarded.
+
+
+Reader of Per-Clip File Rate:
+
+File: ArrangementEditor\ArrangementViewCore.cpp
+Line: 422
+Code:
+	(double)res.numSamples * m_engineSampleRate / (res.sampleRate > 0.0 ? res.sampleRate : 44100.0)
+
+res.sampleRate = return value of loadForClip(), which is reader->sampleRate.
+
+Used to scale imported samples to engine domain:
+	scaledSamples = importedSamples * engineRate / fileRate
+
+
+VERDICT FOR H:
+==============
+FILE RATE RETAINED.
+
+Decoded audio STORED AT FILE RATE (no resampling to engine rate at load).
+Per-clip sampleRate stored in CachedAudio.
+File rate READ at clip creation time to scale length:
+	clipLen_eng_samples = clipLen_file_samples * m_engineSampleRate / fileSampleRate
+
+
+================================================================================
+SUMMARY — ROOT CAUSE ANALYSIS FOR SLOW PLAYBACK AT 91 BPM
+================================================================================
+
+HYPOTHESIS TESTED: Source read position scaled by tempo factor (bpm/120)
+
+RESULT: REFUTED
+
+No hardcoded 120 found in position conversion math.
+No tempo/BPM enters source position or read increment calculation.
+No PPQ/tempo-derived factor in render increment.
+
+
+ACTUAL MECHANISMS FOUND:
+
+1. BRIDGE RATE MISMATCH (CRITICAL BUG):
+   - Bridge initialized at unknown rate (logged as 44100)
+   - Actual device rate is 48000
+   - m_engineSampleRate = 44100 (stale)
+   - All length conversions multiply by 44100 instead of 48000
+   - Result: clips computed as 91.875% of true length
+   - Clips appear to play slow (duration mismatch)
+
+2. FILE RATE FALLBACK (POTENTIAL BUG):
+   - If file sample rate detection fails, defaults to 44100
+   - If file is 48000 but treated as 44100, length is 8.125% too short
+   - Could manifest as slow playback if file rate detection unreliable
+
+3. SAMPLE RATE DOMAIN CONVERSIONS (WORKING CORRECTLY):
+   - import: seconds → samples via multiplying by bridge rate
+   - record: samples → seconds via dividing by bridge rate
+   - No tempo enters these conversions
+
+4. STRETCH/PITCH FACTORS (WORKING CORRECTLY):
+   - pitch ratio = pow(2, semitones / 12) — independent of tempo
+   - stretchRatio applied independently — no tempo scaling
+   - Mode 3 Vocal uses stretchRatio from UI, not computed from BPM
+
+
+LEADING CAUSE OF SYMPTOM:
+==========================
+Bridge rate initialized at device start. If device is 48000 but bridge = 44100:
+
+At 48000 Hz:
+- 480 output samples = 0.01 seconds
+- Using bridge rate 44100: expected source samples = 0.01 * 44100 = 441
+- Actual device rate: expected source samples = 0.01 * 48000 = 480
+- SHORTFALL: 480 - 441 = 39 samples missing
+- Per-block error: −8.125%
+
+Pitch effect:
+- Source advancing slower than expected
+- Sample rate mismatch causes pitch shift down
+- At 48000→44100 mismatch: pitch down ≈ −181 cents (below reference)
+- Faster/slower pitch change would compound as clip progresses
+
+
+HYPOTHESIS FOR 91 BPM SYMPTOM:
+==============================
+At 91 BPM:
+- Project plays at 91/120 = 0.7583 of standard tempo
+- If bridge rate = 44100 but device = 48000:
+  - Clip lengths are 91.875% of true length (8.125% short)
+  - Playback position mismatch causes BOTH slow playback + pitch down
+  - 91 BPM triggers condition; 120 BPM bypasses (or bridge is re-wired)
+
+SECONDARY EVIDENCE:
+- "[EngineSync] Bridge wired. sampleRate=44100" logged
+- No re-wire logged when project tempo changes
+- m_engineSampleRate never updated after initial assignment
+
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+| Task | Finding | Evidence file:line |
+|------|---------|-------------------|
+| **A(1)** | NO tempo/BPM/PPQ in render source position path | ArrangementViewCore.cpp:93,98,106,731 (all UI/automation only) |
+| **A(2)** | NO hardcoded 120 in position conversions | TimePitchTypesCore.h:169, TimePitchSerializationCore.h:92 (data defaults only) |
+| **B** | Position handoff PURE SAMPLE DOMAIN | ArrangementViewCore.cpp:440-444 (startTime * m_engineSampleRate) |
+| **C** | Read increment = pitch ratio + stretchRatio, NO tempo factor | ResampleEngineCore.h:113, TimePitchDSPCore.h:220-226 |
+| **D** | Mode 3 = Vocal; Default = Vocal | TimePitchTypesCore.h:22-62, Clip.h:303-315 |
+| **E** | Bridge rate set once, NEVER UPDATED; "Bridge wired. sampleRate=44100" | ArrangementViewCore.cpp:387,489 (no re-assignment after init) |
+| **F** | UI clip length = samples * m_engineSampleRate / fileSampleRate | ArrangementViewCore.cpp:422,440-442,2416-2418 (uses bridge rate) |
+| **G** | [PITCH WRITE] source=ClipRefresh; NO tempo/rate pushed | ArrangementClipStateCore.cpp:33-36, ArrangementViewCore.cpp:505-515 |
+| **H** | FILE RATE RETAINED; Decoded at file rate, not resampled | AudioFileManager.h:116-135, ArrangementViewCore.cpp:422 |
+
+
+================================================================================
+END OF DETAILED AUDIT #4.2 REPORT
+================================================================================

@@ -1,0 +1,7 @@
+[submodule "signalsmith-stretch"]
+	path = Source/ThirdParty/signalsmith-stretch
+	url = https://github.com/Signalsmith-Audio/signalsmith-stretch.git
+	ignore = untracked
+[submodule "Source/ThirdParty/signalsmith-linear"]
+	path = Source/ThirdParty/signalsmith-linear
+	url = https://github.com/Signalsmith-Audio/linear.git

@@ -1,0 +1,8 @@
+.echo === AUTO-TUNE POOL STOP CAPTURE ARMED ===
+.reload /f
+sxi 80000003
+sxi 80000004
+r @$t9 = 0
+bu Auto_Tune_EFX_!GetPluginFactory+0x32300 ".if ((@edx == 0x1f4) & (poi(@rcx+0x10) != 0) & (@$t9 == 0)) { r @$t9 = 1; .echo; .echo === AUTO-TUNE EDITOR POOL STOP REQUEST ===; .printf \"STOPPER_TID=%x THIS=%p TIMEOUT_MS=%d NATIVE_HANDLE=%p TARGET_TID=%x\\n\", @$tid, @rcx, @edx, poi(@rcx+0x10), poi(@rcx+0x18); da poi(@rcx+0x8); .echo === ALL LIVE THREADS AT STOP REQUEST ===; ~; ~* kv 100; .dump /ma \"C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\crash-reports\\APEX_AUTOTUNE_POOL_STOP_REQUEST.dmp\"; gc } .else { gc }"
+bu Auto_Tune_EFX_!GetPluginFactory+0x3238d ".echo; .echo === AUTO-TUNE POOL FORCE BRANCH REACHED ===; .printf \"STOPPER_TID=%x THIS=%p NATIVE_HANDLE=%p TARGET_TID=%x\\n\", @$tid, @rbx, poi(@rbx+0x10), poi(@rbx+0x18); da poi(@rbx+0x8); .echo === ALL LIVE THREADS BEFORE TerminateThread ===; ~; ~* kv 100; .dump /ma \"C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\crash-reports\\APEX_AUTOTUNE_POOL_PREKILL.dmp\"; q"
+g

@@ -1,0 +1,17 @@
+diff --git a/JUCE/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatImpl.h b/JUCE/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatImpl.h
+index 3f6d29d..966adde 100644
+--- a/JUCE/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatImpl.h
++++ b/JUCE/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatImpl.h
+@@ -2948,6 +2948,12 @@ public:
+     {
+         JUCE_ASSERT_MESSAGE_MANAGER_IS_LOCKED
+ 
++        // APEX-SAFETY: guard against null editController (e.g. Antares Auto-Tune EFX+
++        // may fail to fully initialise, leaving editController null). Calling
++        // ->createView() on a null VSTComSmartPtr crashes with access violation.
++        if (editController == nullptr)
++            return nullptr;
++
+         IPlugView* v = editController->createView (Vst::ViewType::kEditor);
+ 
+         if (v == nullptr) v = editController->createView (nullptr);

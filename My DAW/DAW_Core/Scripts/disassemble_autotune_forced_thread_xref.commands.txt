@@ -1,0 +1,5 @@
+.echo === AUTO-TUNE FORCE-KILL XREF DISASSEMBLY ARMED ===
+sxi 80000003
+sxi 80000004
+sxe -c ".echo === AUTO-TUNE MODULE LOADED ===; lmvm Auto_Tune_EFX_; ub Auto_Tune_EFX_+0x8e9bd L80; u Auto_Tune_EFX_+0x8e9bd L100; q" ld:Auto_Tune_EFX_
+g

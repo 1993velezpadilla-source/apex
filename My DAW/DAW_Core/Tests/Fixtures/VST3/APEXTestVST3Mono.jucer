@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JUCERPROJECT id="APEXTestVST3Mono" name="APEXTestVST3Mono" projectType="audioplug"
+              version="1.0.0" bundleIdentifier="com.apex.test-vst3-mono"
+              companyName="APEX" pluginName="APEX Test VST3 Mono"
+              pluginDesc="Deterministic mono APEX sandbox integration fixture"
+              pluginManufacturer="APEX" pluginManufacturerCode="APXT"
+              pluginCode="ATM1" pluginChannelConfigs="{1,1}"
+              pluginIsSynth="0" pluginWantsMidiIn="0" pluginProducesMidiOut="0"
+              pluginIsMidiEffectPlugin="0" pluginEditorNeedsKeyFocus="0"
+              pluginVSTCategory="kPlugCategEffect" pluginVST3Category="Fx"
+              pluginFormats="buildVST3" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
+              defines="JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_USE_CURL=0">
+  <MAINGROUP id="APEXTestVST3MonoGroup" name="APEXTestVST3Mono">
+    <GROUP id="APEXTestVST3MonoSource" name="Source">
+      <FILE id="APEXTestVST3MonoEntry" name="APEXTestVST3Mono.cpp" compile="1" resource="0"
+            file="Source/APEXTestVST3Mono.cpp"/>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1"/>
+  <EXPORTFORMATS>
+    <VS2026 targetFolder="Builds/VisualStudio2026Mono">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="APEXTestVST3Mono"
+                       extraCompilerFlags="/utf-8 /bigobj"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="APEXTestVST3Mono"
+                       extraCompilerFlags="/utf-8 /bigobj"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2026>
+  </EXPORTFORMATS>
+</JUCERPROJECT>

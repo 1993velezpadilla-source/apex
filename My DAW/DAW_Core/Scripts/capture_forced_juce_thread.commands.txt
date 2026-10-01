@@ -1,0 +1,6 @@
+.echo === APEX FORCED JUCE THREAD CAPTURE ARMED ===
+.reload /f
+sxi 80000003
+sxi 80000004
+bu `juce_Thread.cpp:265` ".echo; .echo === FORCED JUCE THREAD PRE-TERMINATION ===; dv /t /v; r @$t0 = poi(@rsp+0x50); r @$t1 = poi(@$t0+0x18); r @$t2 = poi(@$t0+0x10); .printf \"JUCE_THREAD_OBJECT=%p NATIVE_HANDLE=%p OS_TID=%x TIMEOUT_MS=%d\\n\", @$t0, @$t2, @$t1, poi(@rsp+0x58); da poi(@$t0+0x8); dt DAW_Core!juce::Thread @$t0; dps @$t0 L1; .echo === STOPPER STACK ===; kv 100; .echo === ALL THREADS ===; ~; ~* kv 100; .echo === RUNAWAY ===; !runaway 7; .echo === LOCKS ===; !locks; .echo === HANG ANALYSIS ===; !analyze -hang; .dump /ma C:\Users\1993v\OneDrive\Desktop\Apex backup\crash-reports\APEX_AUTOTUNE_FORCED_THREAD_PREKILL.dmp; .echo === CAPTURE COMPLETE; PROCESS WILL EXIT BEFORE TerminateThread ===; q"
+g

@@ -1,0 +1,69 @@
+# Installed SDKs, duplicate workspace copies, and local agent state
+/My DAW/Sdk setups/
+/New folder/
+/Daw Brain/New folder/
+/.apex_brain_backups/
+/.claude/
+/.superpowers/
+node_modules/
+**/.git/
+
+# Generated application/plugin binaries and intermediate build products
+.vs/
+**/x64/
+**/bin/
+**/obj/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+*.recipe
+*.exp
+*.lib
+*.dll
+*.exe
+*.vst3
+*.iobj
+*.ipdb
+*.pch
+*.suo
+*.user
+*.VC.db
+*.res
+*.vcxproj.FileListAbsolute.txt
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake-build-*/
+
+# Runtime recordings, recovery data, logs, and crash/test runs
+crash-reports/
+recaps/
+**/evidence/runs/
+.apex-debug/
+TestResults/
+Recordings/
+.apex_autosaves/
+.backups/
+*.dmp
+*.log
+*.trx
+/tools/cdb_commands.txt
+
+# Secrets, signing material, and temporary editor files
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pfx
+*.p12
+*.pem
+*.key
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
