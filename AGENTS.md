@@ -2,15 +2,29 @@
 
 ## Official workspace
 
-The official APEX workspace is:
+The authorized APEX workspace is the root of the current checkout of:
+
+`https://github.com/1993velezpadilla-source/apex`
+
+This includes GitHub-connected cloud checkouts used for tasks started from a
+mobile device. Resolve repository paths relative to that checkout rather than
+assuming a Windows drive exists.
+
+The original desktop workspace is:
 
 `C:\Users\1993v\OneDrive\Desktop\Apex backup`
 
-Do not inspect, edit, build, or reference another copy of APEX unless the user explicitly authorizes it.
+Use that path for work explicitly targeting the original desktop folder. Do not
+inspect or edit a different copy unless the user authorizes that workspace.
+
+In a cloud environment, inspect and edit the checked-out repository. The Windows
+application build requires the documented Windows toolchain and local SDKs. If
+those prerequisites are unavailable, report that build/runtime validation is
+pending; never invent successful build or audio-test results.
 
 ## Canonical knowledge
 
-- The canonical DAW architecture reference is `../../DAW_BRAIN.md` in the official workspace.
+- The canonical DAW architecture reference is `DAW_BRAIN.md` at the checkout root (`../../DAW_BRAIN.md` when working from `My DAW/DAW_Core`).
 - `.opencode/agents/daw-brain.md` defines the conversational DAW Brain agent.
 - The actual repository and measured runtime determine what APEX currently implements.
 
