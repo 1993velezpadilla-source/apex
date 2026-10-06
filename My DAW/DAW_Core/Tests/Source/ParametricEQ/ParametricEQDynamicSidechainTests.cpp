@@ -53,6 +53,7 @@ public:
         testExternalKeyDrivesGainWithoutProgramCoupling();
         testExternalKeyAppearingAndDisappearing();
         testSourceSwitchIsDeterministic();
+        testBandLimitedDetectorFilterRejectsOutOfBandKey();
     }
 
 private:
@@ -172,6 +173,57 @@ private:
         expect (! processor.submitExternalDetectorKey (key)
                 || processor.isExternalKeyValidForTesting(),
                 "key state is coherent");
+    }
+
+    void testBandLimitedDetectorFilterRejectsOutOfBandKey()
+    {
+        beginTest ("per-band SC filter focuses Dynamic EQ detection around the band");
+
+        auto measureReduction = [] (double keyFrequency, bool filterEnabled)
+        {
+            auto processorStorage = std::make_unique<Processor>();
+            auto& processor = *processorStorage;
+            configureBell (processor, 0, 1000.0f, 6.0f, 6.0f);
+            processor.prepareToPlay (48000.0, 512);
+            setUnits (processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Enable), 1.0f);
+            setUnits (processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Threshold), -30.0f);
+            setUnits (processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Range), 12.0f);
+            setUnits (processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Attack), 0.0005f);
+            setUnits (processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Release), 0.010f);
+            setUnits (processor, kDynamicSidechainParameter, 1.0f);
+            setUnits (processor, dynamicFilterParameterIndex (0),
+                      filterEnabled ? 1.0f : 0.0f);
+
+            juce::AudioBuffer<float> program (2, 512);
+            juce::AudioBuffer<float> key (2, 512);
+            juce::MidiBuffer midi;
+            for (int block = 0; block < 18; ++block)
+            {
+                fillSine (program, 250.0, 0.005, block * 512);
+                fillSine (key, keyFrequency, 0.8, block * 512);
+                processor.submitExternalDetectorKey (key);
+                processor.processBlock (program, midi);
+            }
+            return processor.getDynamicGainDbForTesting (0);
+        };
+
+        const double focusedNear = measureReduction (1000.0, true);
+        const double focusedFar = measureReduction (100.0, true);
+        const double broadbandFar = measureReduction (100.0, false);
+
+        expect (focusedNear < -7.0,
+                "in-band key must still drive strong reduction");
+        expect (std::abs (focusedFar) < 2.0,
+                "far-out key must be rejected by the focused detector");
+        expect (broadbandFar < -7.0,
+                "disabling SC Filter restores broadband detector behaviour");
+        expect (focusedNear < focusedFar - 4.0,
+                "detector filtering must materially discriminate frequency");
     }
 
     void testSourceSwitchIsDeterministic()

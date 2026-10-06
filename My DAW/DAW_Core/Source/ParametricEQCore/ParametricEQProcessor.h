@@ -3,6 +3,8 @@
 #include <JuceHeader.h>
 
 #include "ParametricEQAuditionCore.h"
+#include "ParametricEQBiquad.h"
+#include "ParametricEQCharacterCore.h"
 #include "ParametricEQLinearPhase.h"
 #include "ParametricEQResponseCore.h"
 #include "../AnalysisCore/ApexSpectrumAnalyzerCore.h"
@@ -39,7 +41,16 @@ constexpr int kDynamicDetectorParameter = kFirstDynamicParameter + kDynamicBandP
 constexpr int kDynamicSidechainParameter = kDynamicDetectorParameter + 1;
 constexpr int kDynamicLinkParameter = kDynamicDetectorParameter + 2;
 constexpr int kPhaseModeParameter = kDynamicDetectorParameter + 3;
-constexpr int kNumParameters = kPhaseModeParameter + 1;
+constexpr int kCharacterModeParameter = kPhaseModeParameter + 1;
+constexpr int kFirstDynamicFilterParameter = kCharacterModeParameter + 1;
+constexpr int kDynamicFilterParameterCount = kMaxBands;
+constexpr int kOutputGainParameter = kFirstDynamicFilterParameter
+                                   + kDynamicFilterParameterCount;
+constexpr int kOutputPanParameter = kOutputGainParameter + 1;
+constexpr int kOutputPhaseInvertParameter = kOutputPanParameter + 1;
+constexpr int kOutputAutoGainParameter = kOutputPhaseInvertParameter + 1;
+constexpr int kOutputGainScaleParameter = kOutputAutoGainParameter + 1;
+constexpr int kNumParameters = kOutputGainScaleParameter + 1;
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -49,6 +60,11 @@ constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 constexpr int placementParameterIndex (int band) noexcept
 {
     return kFirstPlacementParameter + band;
+}
+
+constexpr int dynamicFilterParameterIndex (int band) noexcept
+{
+    return kFirstDynamicFilterParameter + band;
 }
 
 static_assert (kFirstPlacementParameter == 170 && kFirstDynamicParameter == 194,
@@ -80,8 +96,14 @@ static_assert (kDynamicDetectorParameter == 314 && kPhaseModeParameter == 317,
 constexpr int kPhaseModeMinimum = 0;
 constexpr int kPhaseModeLinear = 1;
 
-static_assert (kNumParameters == 318,
-               "Phase 6 appends peq.phase at index 317");
+static_assert (kCharacterModeParameter == 318,
+               "Phase 7 appends peq.character after the frozen Phase 6 ABI");
+static_assert (kFirstDynamicFilterParameter == 319,
+               "Phase 8 appends per-band detector filters after peq.character");
+static_assert (kOutputGainParameter == 343,
+               "Phase 9 output controls must append after Phase 8");
+static_assert (kNumParameters == 348,
+               "Phase 9 parameter count must remain append-only");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -101,6 +123,9 @@ public:
         DetectorChoice,
         SourceChoice,
         PhaseModeChoice,
+        CharacterChoice,
+        Pan,
+        GainScale,
         DesignMode
     };
 
@@ -148,12 +173,12 @@ public:
     static constexpr const char* kPluginName = "APEX Parametric EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
-    static constexpr const char* kVersion = "1.0.0";
+    static constexpr const char* kVersion = "1.2.0";
     static constexpr const char* kFileOrIdentifier = "APEX::ParametricEQ";
     static constexpr const char* kStateTag = "parametriceqstate";
     static constexpr const char* kVersionProperty = "version";
     static constexpr const char* kAnalyzerProperty = "peq.analyzer";
-    static constexpr int kStateVersion = 4;
+    static constexpr int kStateVersion = 6;
 
     Processor();
     ~Processor() override;
@@ -249,7 +274,18 @@ private:
                                   const BandSettings& rhs) noexcept;
     BandSettings readBandParameters (int band) const noexcept;
     DesignMode readDesignModeParameter() const noexcept;
+    CharacterMode readCharacterModeParameter() const noexcept;
     bool readBypassParameter() const noexcept;
+    float readOutputGainDb() const noexcept;
+    float readOutputPan() const noexcept;
+    bool readOutputPhaseInvert() const noexcept;
+    bool readOutputAutoGain() const noexcept;
+    float readOutputGainScale() const noexcept;
+    static float measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept;
+    void applyOutputStage (juce::AudioBuffer<float>& buffer,
+                           int channels, int samples,
+                           float inputRmsDb) noexcept;
     void readBandPlacementParameters (
         std::array<BandSettings, kMaxBands>& settings) const noexcept;
 
@@ -307,6 +343,11 @@ private:
     std::array<APEX::Dynamics::Detector, kMaxBands> dynamicDetectors_ {};
     std::array<APEX::Dynamics::Envelope, kMaxBands> dynamicEnvelopes_ {};
     std::array<DynamicBandParameters, kMaxBands> dynamicParameters_ {};
+    std::array<BiquadCoefficients, kMaxBands> dynamicKeyFilterCoefficients_ {};
+    std::array<std::array<BiquadState, kMaxChannels>, kMaxBands>
+        dynamicKeyFilterStates_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterFrequencyHz_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterQ_ {};
     std::array<double, kMaxBands> dynamicSmoothedGainDb_ {};
     std::uint32_t dynamicActiveMask_ = 0;
     bool dynamicAnyActive_ = false;
@@ -365,8 +406,10 @@ private:
     bool auditionHold_ = false;
     bool auditionReady_ = false;
 
+    CharacterCore characterCore_;
     ResponseCore responseCore_;
     Analysis::SpectrumAnalyzerCore analyzer_ { "APEX Parametric EQ Analyzer" };
+    double outputAutoGainDb_ = 0.0;
 };
 
 } // namespace APEX::ParametricEQ

@@ -66,6 +66,7 @@ public:
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
         testLongPressCreatesBand();
+        testSketchGestureCreatesBands();
         testPhaseSelectorDrivesCanonicalParameter();
     }
 
@@ -297,6 +298,56 @@ private:
         expect (created >= 0, "long-press must enable a band");
         expectEquals (editor->getSelectedBandForTesting(), created,
                       "created band becomes the selection");
+    }
+
+    void testSketchGestureCreatesBands()
+    {
+        beginTest ("EQ Sketch converts a freehand gesture into native bands");
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        processor.prepareToPlay (48000.0, 512);
+
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (1280, 720);
+        auto& sketch = editor->getSketchButtonForTesting();
+        expect (sketch.getBounds().getHeight() >= 44,
+                "Sketch must retain a touch-safe target");
+
+        juce::MessageManager::getInstance();
+        sketch.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("SKETCH ON"), sketch.getButtonText());
+
+        const auto graph = editor->getGraphBoundsForTesting();
+        const auto pointFor = [&graph] (double xRatio, double gainDb)
+        {
+            const auto yRatio = 0.5 * (1.0 - gainDb / 18.0);
+            return juce::Point<float> (
+                static_cast<float> (xRatio * graph.getWidth()),
+                static_cast<float> (yRatio * graph.getHeight()));
+        };
+
+        editor->injectGraphMouseDownForTesting (pointFor (0.20, 0.0));
+        for (int step = 1; step <= 12; ++step)
+        {
+            const double x = 0.20 + 0.05 * step;
+            const double dx = (x - 0.50) / 0.09;
+            const double gain = 8.0 * std::exp (-0.5 * dx * dx);
+            editor->injectGraphMouseDragForTesting (pointFor (x, gain));
+        }
+        editor->injectGraphMouseUpForTesting (pointFor (0.80, 0.0));
+
+        int enabled = 0;
+        for (int band = 0; band < kMaxBands; ++band)
+            enabled += processor.getParametricEQParameter (
+                parameterIndex (band, BandParameterOffset::Enabled))->getBool()
+                     ? 1 : 0;
+
+        expect (enabled >= 1, "Sketch should publish at least one band");
+        expectEquals (juce::String ("SKETCH"), sketch.getButtonText(),
+                      "Sketch returns to one-shot idle mode after commit");
+        expect (editor->getSelectedBandForTesting() >= 0,
+                "last created Sketch band becomes selected");
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()

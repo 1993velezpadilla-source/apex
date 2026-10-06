@@ -44,11 +44,11 @@ public:
 private:
     void testFrozenAbiAndAppendedPlacements()
     {
-        beginTest ("frozen 170-prefix plus appended Phase 3/5/6 parameters = 318 stable IDs");
+        beginTest ("frozen 170-prefix plus append-only Phase 3/5/6/7/8 parameters = 343 stable IDs");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         expectEquals (processor.getParameters().size(), kNumParameters);
-        expectEquals (kNumParameters, 318);
+        expectEquals (kNumParameters, 343);
 
         std::set<std::string> ids;
         for (int index = 0; index < kNumParameters; ++index)
@@ -86,6 +86,14 @@ private:
                 expected = "peq.dyn.link";
             else if (index == kPhaseModeParameter)
                 expected = "peq.phase";
+            else if (index == kCharacterModeParameter)
+                expected = "peq.character";
+            else if (index >= kFirstDynamicFilterParameter
+                     && index < kNumParameters)
+                expected = "peq.band"
+                         + juce::String (index - kFirstDynamicFilterParameter + 1)
+                               .paddedLeft ('0', 2)
+                         + ".dyn.filter";
             else
             {
                 const int band = index / 7;
@@ -108,7 +116,7 @@ private:
             expect (parameter->isStorageLockFree(),
                     "atomic storage must be lock-free: " + parameter->paramID);
         }
-        expectEquals (ids.size(), static_cast<std::size_t> (318));
+        expectEquals (ids.size(), static_cast<std::size_t> (343));
         expectEquals (Processor::getParameterId (170),
                       juce::String ("peq.band01.placement"));
         expectEquals (Processor::getParameterId (193),
@@ -127,6 +135,12 @@ private:
                       juce::String ("peq.dyn.link"));
         expectEquals (Processor::getParameterId (317),
                       juce::String ("peq.phase"));
+        expectEquals (Processor::getParameterId (318),
+                      juce::String ("peq.character"));
+        expectEquals (Processor::getParameterId (319),
+                      juce::String ("peq.band01.dyn.filter"));
+        expectEquals (Processor::getParameterId (342),
+                      juce::String ("peq.band24.dyn.filter"));
         expect (processor.getBypassParameter()
                 == processor.getParametricEQParameter (kGlobalBypassParameter));
     }
@@ -334,7 +348,7 @@ private:
         if (tree.isValid())
         {
             expectEquals (tree.getNumProperties(), kNumParameters + 2,
-                          "version + analyzer + 194 parameters");
+                          "version + analyzer + all hosted parameters");
             for (int property = 0; property < tree.getNumProperties(); ++property)
             {
                 const auto propertyName = tree.getPropertyName (property).toString();

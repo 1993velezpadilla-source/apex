@@ -352,6 +352,10 @@
               file="Source/ParametricEQ/ParametricEQDynamicEditorTests.cpp"/>
         <FILE id="PEQ_CPP32" name="ParametricEQLinearPhaseTests.cpp" compile="1" resource="0"
               file="Source/ParametricEQ/ParametricEQLinearPhaseTests.cpp"/>
+        <FILE id="PEQ_CPP33" name="ParametricEQCharacterTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQCharacterTests.cpp"/>
+        <FILE id="PEQ_CPP34" name="ParametricEQSketchTests.cpp" compile="1" resource="0"
+              file="Source/ParametricEQ/ParametricEQSketchTests.cpp"/>
         <FILE id="PEQ_H02" name="ApexSpectrumAnalyzerCore.h" compile="0" resource="0"
               file="../Source/AnalysisCore/ApexSpectrumAnalyzerCore.h"/>
         <FILE id="PEQ_H03" name="ParametricEQResponseCore.h" compile="0" resource="0"
@@ -364,6 +368,10 @@
               file="../Source/ParametricEQCore/ParametricEQLinearPhase.h"/>
         <FILE id="PEQ_H06" name="ParametricEQAuditionCore.h" compile="0" resource="0"
               file="../Source/ParametricEQCore/ParametricEQAuditionCore.h"/>
+        <FILE id="PEQ_H09" name="ParametricEQCharacterCore.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQCharacterCore.h"/>
+        <FILE id="PEQ_H10" name="ParametricEQSketchCore.h" compile="0" resource="0"
+              file="../Source/ParametricEQCore/ParametricEQSketchCore.h"/>
         <FILE id="PEQ_H07" name="ParametricEQEditor.h" compile="0" resource="0"
               file="../Source/ParametricEQUI/ParametricEQEditor.h"/>
       <FILE id="PEQ_H08" name="ParametricEQEditor.cpp" compile="1" resource="0"

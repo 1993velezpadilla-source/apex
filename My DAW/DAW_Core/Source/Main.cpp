@@ -7,8 +7,19 @@
 */
 
 #include <JuceHeader.h>
-#include "MainComponent.h"
+
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <commctrl.h>
+ #include <dbghelp.h>
+ #include <gdiplus.h>
+ #pragma comment(lib, "comctl32.lib")
+ #pragma comment(lib, "dbghelp.lib")
+ #pragma comment(lib, "gdiplus.lib")
+#endif
+
 #include "SplashScreen.h"
+#include "MainComponent.h"
 #include "UICore/ApexPresentationClock.h"
 #include "PluginScanCore/PluginScanWorkerProcessCore.h"
 #include "PluginSecurityCore/HostBuildTrustModeCore.h"
@@ -29,11 +40,6 @@
 #include <utility>
 
 #if JUCE_WINDOWS
- #include <windows.h>
- #include <commctrl.h>
- #include <dbghelp.h>
- #pragma comment(lib, "comctl32.lib")
- #pragma comment(lib, "dbghelp.lib")
 
 //==============================================================================
 // Minidump writer — catches any unhandled crash and writes a .dmp file

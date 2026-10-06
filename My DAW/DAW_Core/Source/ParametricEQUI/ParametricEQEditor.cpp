@@ -1,4 +1,5 @@
 #include "ParametricEQEditor.h"
+#include "../ParametricEQCore/ParametricEQSketchCore.h"
 
 #include <array>
 #include <cstring>
@@ -105,6 +106,7 @@ public:
         addAndMakeVisible (detectorButton_);
         addAndMakeVisible (keyButton_);
         addAndMakeVisible (linkButton_);
+        addAndMakeVisible (characterButton_);
         addAndMakeVisible (title_);
 
         designButton_.setTitle ("Switch filter design mode");
@@ -114,6 +116,7 @@ public:
         detectorButton_.setTitle ("Switch dynamic detector mode");
         keyButton_.setTitle ("Switch dynamic sidechain source");
         linkButton_.setTitle ("Toggle dynamic stereo link");
+        characterButton_.setTitle ("Cycle APEX character mode");
         // State display is driven by refresh(); onClick must fire on every
         // click, so these buttons do not own click-toggle state.
         designButton_.setClickingTogglesState (false);
@@ -123,6 +126,7 @@ public:
         detectorButton_.setClickingTogglesState (false);
         keyButton_.setClickingTogglesState (false);
         linkButton_.setClickingTogglesState (false);
+        characterButton_.setClickingTogglesState (false);
         title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, Palette::text());
         title_.setText ("APEX Parametric EQ", juce::dontSendNotification);
@@ -185,6 +189,16 @@ public:
                              link->getValue() >= 0.5f ? 0.0f : 1.0f);
             refresh();
         };
+        characterButton_.onClick = [this]
+        {
+            auto* character = processor_.getParametricEQParameter (
+                kCharacterModeParameter);
+            const int next = (character->getChoiceIndex() + 1)
+                           % kCharacterModeCount;
+            notifyParameter (processor_, kCharacterModeParameter,
+                             character->toNormalised (static_cast<float> (next)));
+            refresh();
+        };
         // Host/state changes to peq.phase must reach the top bar even when
         // they were not initiated by this button; a low-rate timer refresh
         // matches the existing inspector/graph synchronization pattern.
@@ -224,17 +238,49 @@ public:
             kDynamicSidechainParameter)->getBool() ? "Key External" : "Key Internal");
         linkButton_.setButtonText (processor_.getParametricEQParameter (
             kDynamicLinkParameter)->getBool() ? "Link On" : "Link Off");
+        const auto character = static_cast<CharacterMode> (std::clamp (
+            processor_.getParametricEQParameter (kCharacterModeParameter)
+                ->getChoiceIndex(), 0, kCharacterModeCount - 1));
+        characterButton_.setButtonText (
+            juce::String ("CHAR ") + characterModeName (character));
+        characterButton_.setColour (
+            juce::TextButton::buttonColourId,
+            character == CharacterMode::Pure ? Palette::surfaceHover()
+                                             : Palette::accentActive());
         repaint();
     }
 
     void resized() override
     {
-        auto bounds = getLocalBounds().reduced (4, 6);
-        // Seven buttons; the 44 px floor keeps every target touch-safe while
-        // remaining visible at the compact phone breakpoint. No horizontal
-        // inset: 7 x 44 px must fit inside the narrowest supported width.
-        const int buttonWidth = std::max (44, bounds.getWidth() / 8);
-        const int titleWidth = std::max (0, bounds.getWidth() - 7 * buttonWidth);
+        auto bounds = getLocalBounds().reduced (4, 4);
+        if (getWidth() < 430)
+        {
+            // Compact-phone contract: two rows of four controls, each row at
+            // least 44 logical pixels tall.  The title yields its space to
+            // controls instead of shrinking touch targets.
+            title_.setVisible (false);
+            auto row1 = bounds.removeFromTop (bounds.getHeight() / 2);
+            auto row2 = bounds;
+            auto placeFour = [] (juce::Rectangle<int> row,
+                                 juce::Component& a, juce::Component& b,
+                                 juce::Component& d, juce::Component& e)
+            {
+                const int w = std::max (44, row.getWidth() / 4);
+                a.setBounds (row.removeFromLeft (w));
+                b.setBounds (row.removeFromLeft (w));
+                d.setBounds (row.removeFromLeft (w));
+                e.setBounds (row);
+            };
+            placeFour (row1, designButton_, bypassButton_, phaseButton_,
+                       analyzerButton_);
+            placeFour (row2, detectorButton_, keyButton_, linkButton_,
+                       characterButton_);
+            return;
+        }
+
+        title_.setVisible (true);
+        const int buttonWidth = std::max (44, bounds.getWidth() / 10);
+        const int titleWidth = std::max (0, bounds.getWidth() - 8 * buttonWidth);
         title_.setBounds (bounds.removeFromLeft (titleWidth));
         designButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         bypassButton_.setBounds (bounds.removeFromLeft (buttonWidth));
@@ -242,7 +288,8 @@ public:
         analyzerButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         detectorButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         keyButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        linkButton_.setBounds (bounds);
+        linkButton_.setBounds (bounds.removeFromLeft (buttonWidth));
+        characterButton_.setBounds (bounds);
     }
 
     void timerCallback() override
@@ -261,6 +308,7 @@ private:
     juce::TextButton detectorButton_ { "Detector RMS" };
     juce::TextButton keyButton_ { "Key Internal" };
     juce::TextButton linkButton_ { "Link On" };
+    juce::TextButton characterButton_ { "CHAR Pure" };
 };
 
 //==============================================================================
@@ -271,11 +319,34 @@ public:
     EqGraphComponent (ParametricEQEditor& owner, Processor& processor)
         : owner_ (owner), processor_ (processor)
     {
-        setInterceptsMouseClicks (true, false);
+        setInterceptsMouseClicks (true, true);
+        addAndMakeVisible (sketchButton_);
+        sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
+        sketchButton_.setClickingTogglesState (true);
+        sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                 Palette::surfaceHover());
+        sketchButton_.onClick = [this]
+        {
+            sketchArmed_ = sketchButton_.getToggleState();
+            if (! sketchArmed_)
+            {
+                sketching_ = false;
+                sketchPointCount_ = 0;
+            }
+            sketchButton_.setButtonText (sketchArmed_ ? "SKETCH ON" : "SKETCH");
+            sketchButton_.setColour (
+                juce::TextButton::buttonColourId,
+                sketchArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+            repaint();
+        };
         startTimerHz (25);
     }
 
-    void resized() override { curveDirty_ = true; }
+    void resized() override
+    {
+        curveDirty_ = true;
+        sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -301,6 +372,26 @@ public:
             g.setColour (Palette::curveSide().withAlpha (0.75f));
             g.strokePath (sideCurve_, juce::PathStrokeType (1.0f));
         }
+
+        if (sketching_ && sketchPointCount_ > 1)
+        {
+            juce::Path sketch;
+            for (int i = 0; i < sketchPointCount_; ++i)
+            {
+                const auto& point = sketchPoints_[static_cast<std::size_t> (i)];
+                const auto x = static_cast<float> (point.x * bounds.getWidth());
+                const auto y = static_cast<float> (
+                    yForGain (point.gainDb, bounds.getHeight()));
+                if (i == 0)
+                    sketch.startNewSubPath (x, y);
+                else
+                    sketch.lineTo (x, y);
+            }
+            g.setColour (Palette::selected().withAlpha (0.92f));
+            g.strokePath (sketch, juce::PathStrokeType (
+                3.0f, juce::PathStrokeType::curved,
+                juce::PathStrokeType::rounded));
+        }
         drawNodes (g, bounds);
     }
 
@@ -314,6 +405,16 @@ public:
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
+        if (sketchArmed_ && hit < 0)
+        {
+            sketching_ = true;
+            longPressFired_ = true; // sketch owns this pointer lease
+            sketchPointCount_ = 0;
+            appendSketchPoint (event.position);
+            owner_.selectBand (-1);
+            repaint();
+            return;
+        }
         if (hit >= 0)
         {
             owner_.selectBand (hit);
@@ -336,6 +437,12 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override
     {
         lastDragPosition_ = event.position;
+        if (sketching_)
+        {
+            appendSketchPoint (event.position);
+            repaint();
+            return;
+        }
         if (dragging_ && dragBand_ >= 0)
         {
             const auto width = static_cast<double> (std::max (1, getWidth()));
@@ -358,6 +465,11 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         pointerDown_ = false;
+        if (sketching_)
+        {
+            commitSketch();
+            return;
+        }
         if (dragging_ && dragBand_ >= 0)
         {
             auto* frequency = processor_.getParametricEQParameter (parameterIndex (
@@ -415,6 +527,7 @@ public:
     }
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
+    juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
 
 private:
     void timerCallback() override
@@ -688,6 +801,80 @@ private:
         return std::nullopt;
     }
 
+    void appendSketchPoint (juce::Point<float> position)
+    {
+        const double width = std::max (1, getWidth());
+        const double height = std::max (1, getHeight());
+        SketchPoint point {
+            std::clamp (static_cast<double> (position.x) / width, 0.0, 1.0),
+            std::clamp (gainForY (position.y, height), -18.0, 18.0)
+        };
+
+        if (sketchPointCount_ > 0)
+        {
+            const auto& previous = sketchPoints_[
+                static_cast<std::size_t> (sketchPointCount_ - 1)];
+            if (std::abs (point.x - previous.x) < 0.002
+                && std::abs (point.gainDb - previous.gainDb) < 0.15)
+                return;
+        }
+
+        if (sketchPointCount_ < SketchPlanner::kMaximumInputPoints)
+            sketchPoints_[static_cast<std::size_t> (sketchPointCount_++)] = point;
+        else
+            sketchPoints_.back() = point;
+    }
+
+    void commitSketch()
+    {
+        const auto plan = SketchPlanner::plan (
+            sketchPoints_.data(), sketchPointCount_,
+            ParametricEQEditor::kDisplayMinimumFrequency,
+            ParametricEQEditor::kDisplayMaximumFrequency);
+
+        int lastBand = -1;
+        for (int proposal = 0; proposal < plan.count; ++proposal)
+        {
+            const auto freeBand = firstDisabledBand();
+            if (! freeBand.has_value())
+                break;
+            const int band = *freeBand;
+            const auto& proposed = plan.bands[static_cast<std::size_t> (proposal)];
+
+            auto publishUnits = [this, band] (BandParameterOffset offset,
+                                              float value)
+            {
+                const int index = parameterIndex (band, offset);
+                auto* parameter = processor_.getParametricEQParameter (index);
+                notifyParameter (processor_, index, parameter->toNormalised (value));
+            };
+
+            publishUnits (BandParameterOffset::Shape,
+                          static_cast<float> (proposed.shape));
+            publishUnits (BandParameterOffset::Frequency,
+                          static_cast<float> (proposed.frequencyHz));
+            publishUnits (BandParameterOffset::Gain,
+                          static_cast<float> (proposed.gainDb));
+            publishUnits (BandParameterOffset::Q,
+                          static_cast<float> (proposed.q));
+            notifyParameter (processor_, parameterIndex (
+                band, BandParameterOffset::Enabled), 1.0f);
+            lastBand = band;
+        }
+
+        sketching_ = false;
+        sketchArmed_ = false;
+        sketchPointCount_ = 0;
+        sketchButton_.setToggleState (false, juce::dontSendNotification);
+        sketchButton_.setButtonText ("SKETCH");
+        sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                 Palette::surfaceHover());
+        curveDirty_ = true;
+        if (lastBand >= 0)
+            owner_.selectBand (lastBand);
+        repaint();
+    }
+
     ParametricEQEditor& owner_;
     Processor& processor_;
     juce::Path mainCurve_, midCurve_, sideCurve_;
@@ -698,6 +885,11 @@ private:
     bool spectrumActive_ = false;
     std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
         spectrumCopy_ {};
+    juce::TextButton sketchButton_ { "SKETCH" };
+    std::array<SketchPoint, SketchPlanner::kMaximumInputPoints> sketchPoints_ {};
+    int sketchPointCount_ = 0;
+    bool sketchArmed_ = false;
+    bool sketching_ = false;
     bool dragging_ = false;
     int dragBand_ = -1;
     juce::Point<float> lastDragPosition_;
@@ -762,6 +954,13 @@ public:
         content_.addAndMakeVisible (qSlider_);
         content_.addAndMakeVisible (slopeSlider_);
         content_.addAndMakeVisible (placementLabel_);
+        content_.addAndMakeVisible (dynLabel_);
+        content_.addAndMakeVisible (dynEnableButton_);
+        content_.addAndMakeVisible (dynFilterButton_);
+        content_.addAndMakeVisible (dynThresholdSlider_);
+        content_.addAndMakeVisible (dynRangeSlider_);
+        content_.addAndMakeVisible (dynAttackSlider_);
+        content_.addAndMakeVisible (dynReleaseSlider_);
         auditionButton_ = std::make_unique<HoldButton> (owner_);
         content_.addAndMakeVisible (auditionButton_.get());
 
@@ -820,7 +1019,7 @@ public:
                     parameter->toNormalised (static_cast<float> (placement)));
                 refresh();
             };
-            addAndMakeVisible (button.get());
+            content_.addAndMakeVisible (button.get());
             placementButtons_.push_back (std::move (button));
         }
 
@@ -836,6 +1035,20 @@ public:
         dynEnableButton_.onClick = [this]
         {
             toggleDynamic (DynamicBandOffset::Enable);
+        };
+        dynFilterButton_.setClickingTogglesState (false);
+        dynFilterButton_.setTitle (
+            "Band-limit the Dynamic EQ detector around this band's frequency and Q");
+        dynFilterButton_.onClick = [this]
+        {
+            const int band = owner_.getSelectedBandForTesting();
+            if (band < 0)
+                return;
+            const int index = dynamicFilterParameterIndex (band);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index,
+                             parameter->getValue() >= 0.5f ? 0.0f : 1.0f);
+            refresh();
         };
         configureSlider (dynThresholdSlider_, "Dynamic Threshold");
         configureSlider (dynRangeSlider_, "Dynamic Range");
@@ -863,8 +1076,8 @@ public:
         // The audition row must retain its full touch-target height: content
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
-        // 1 dynamic label + 5 dynamic rows.
-        const int contentHeight = contentMargin + 12 * row + 2 * labelHeight
+        // 1 dynamic label + 6 dynamic rows.
+        const int contentHeight = contentMargin + 13 * row + 2 * labelHeight
                                 + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
@@ -900,6 +1113,7 @@ public:
 
         dynLabel_.setBounds (bounds.removeFromTop (labelHeight));
         dynEnableButton_.setBounds (bounds.removeFromTop (row));
+        dynFilterButton_.setBounds (bounds.removeFromTop (row));
         dynThresholdSlider_.setBounds (bounds.removeFromTop (row));
         dynRangeSlider_.setBounds (bounds.removeFromTop (row));
         dynAttackSlider_.setBounds (bounds.removeFromTop (row));
@@ -963,6 +1177,7 @@ public:
                     band, BandParameterOffset::Shape))->getChoiceIndex());
             const bool dynamicCompatible = isDynamicCompatibleShape (shape);
             dynEnableButton_.setEnabled (dynamicCompatible);
+            dynFilterButton_.setEnabled (dynamicCompatible);
             dynThresholdSlider_.setEnabled (dynamicCompatible);
             dynRangeSlider_.setEnabled (dynamicCompatible);
             dynAttackSlider_.setEnabled (dynamicCompatible);
@@ -975,6 +1190,14 @@ public:
                 dynEnableButton_.setColour (juce::TextButton::buttonColourId,
                                             dynamicOn ? Palette::accentActive()
                                                       : Palette::surfaceHover());
+                const auto detectorFiltered = processor_.getParametricEQParameter (
+                    dynamicFilterParameterIndex (band))->getBool();
+                dynFilterButton_.setButtonText (
+                    detectorFiltered ? "SC Filter On" : "SC Filter Off");
+                dynFilterButton_.setColour (
+                    juce::TextButton::buttonColourId,
+                    detectorFiltered ? Palette::accentActive()
+                                     : Palette::surfaceHover());
                 syncSlider (dynThresholdSlider_, dynamicParameterIndex (
                     band, DynamicBandOffset::Threshold));
                 syncSlider (dynRangeSlider_, dynamicParameterIndex (
@@ -988,6 +1211,7 @@ public:
         else
         {
             dynEnableButton_.setEnabled (false);
+            dynFilterButton_.setEnabled (false);
             dynThresholdSlider_.setEnabled (false);
             dynRangeSlider_.setEnabled (false);
             dynAttackSlider_.setEnabled (false);
@@ -997,6 +1221,7 @@ public:
     }
 
     juce::TextButton& getDynEnableButtonForTesting() { return dynEnableButton_; }
+    juce::TextButton& getDynFilterButtonForTesting() { return dynFilterButton_; }
     juce::Slider& getDynRangeSliderForTesting() { return dynRangeSlider_; }
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
@@ -1118,6 +1343,7 @@ private:
     // Phase 5 contextual Dynamic EQ controls.
     juce::Label dynLabel_;
     juce::TextButton dynEnableButton_ { "Dynamic Off" };
+    juce::TextButton dynFilterButton_ { "SC Filter Off" };
     juce::Slider dynThresholdSlider_;
     juce::Slider dynRangeSlider_;
     juce::Slider dynAttackSlider_;
@@ -1178,7 +1404,9 @@ void ParametricEQEditor::applyLayout()
         layoutMode_ = LayoutMode::CompactPhone;
 
     auto bounds = getLocalBounds();
-    const int topBarHeight = std::min (56, std::max (44, height / 12));
+    const int topBarHeight = width < 430
+                           ? std::min (104, std::max (88, height / 6))
+                           : std::min (56, std::max (44, height / 12));
     topBar_->setBounds (bounds.removeFromTop (topBarHeight));
 
     // Portrait-capable, compact devices use a bottom contextual sheet; the
@@ -1240,9 +1468,19 @@ juce::TextButton& ParametricEQEditor::getPhaseButtonForTesting()
     return topBar_->getPhaseButtonForTesting();
 }
 
+juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
+{
+    return graph_->getSketchButtonForTesting();
+}
+
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()
 {
     return inspector_->getDynEnableButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getDynFilterButtonForTesting()
+{
+    return inspector_->getDynFilterButtonForTesting();
 }
 
 juce::Slider& ParametricEQEditor::getDynRangeSliderForTesting()

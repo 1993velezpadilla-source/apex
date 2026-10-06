@@ -47,14 +47,14 @@ public:
 
     void runTest() override
     {
-        testV3RoundTripPreservesAll317();
+        testV3RoundTripPreservesAppendOnlyParameters();
         testV2StateMigratesWithDeterministicDefaults();
         testMalformedDynamicStateIsTotal();
         testRuntimeDynamicsNeverSerialized();
     }
 
 private:
-    void testV3RoundTripPreservesAll317()
+    void testV3RoundTripPreservesAppendOnlyParameters()
     {
         beginTest ("v3 round-trips every dynamic parameter");
         auto sourceStorage = std::make_unique<Processor>();
@@ -235,7 +235,7 @@ private:
         if (tree.isValid())
         {
             expectEquals (tree.getNumProperties(), kNumParameters + 2,
-                          "version + analyzer + 317 parameters");
+                          "version + analyzer + all hosted parameters");
             std::set<juce::String> names;
             for (int property = 0; property < tree.getNumProperties(); ++property)
                 names.insert (tree.getPropertyName (property).toString());

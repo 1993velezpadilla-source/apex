@@ -198,6 +198,11 @@ constexpr const char* kShapeNames[] =
     "Notch", "Band Pass", "Tilt", "Flat Tilt", "All Pass"
 };
 
+constexpr const char* kCharacterNames[] =
+{
+    "Pure", "Velvet", "Heat"
+};
+
 constexpr const char* kBandParameterSuffixes[] =
 {
     "enabled", "bypass", "shape", "frequency", "gain", "q", "slope"
@@ -282,6 +287,10 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return normalisedValue >= 0.5f ? "External" : "Internal";
         case Kind::PhaseModeChoice:
             return normalisedValue >= 0.5f ? "Linear Phase" : "Minimum Phase";
+        case Kind::CharacterChoice:
+            return kCharacterNames[std::clamp (
+                static_cast<int> (std::lround (value)), 0,
+                kCharacterModeCount - 1)];
         case Kind::Frequency:
             return formatFrequency (value);
         case Kind::Gain:
@@ -291,6 +300,12 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return "Q " + juce::String (value, value < 1.0f ? 3 : 2);
         case Kind::Slope:
             return juce::String (value, 1) + " dB/oct";
+        case Kind::Pan:
+            return std::abs (value) < 0.005f ? "Center"
+                 : (value < 0.0f ? "L " : "R ")
+                 + juce::String (std::abs (value) * 100.0f, 0) + "%";
+        case Kind::GainScale:
+            return juce::String (value * 100.0f, 0) + "%";
         case Kind::DesignMode:
             return normalisedValue >= 0.5f ? "Analog Matched" : "Realtime";
     }
@@ -326,6 +341,11 @@ float ParametricEQParameter::getValueForText (const juce::String& source) const
         case Kind::PhaseModeChoice:
             return text.containsIgnoreCase ("linear")
                 || text.getFloatValue() >= 0.5f ? 1.0f : 0.0f;
+        case Kind::CharacterChoice:
+            for (int index = 0; index < kCharacterModeCount; ++index)
+                if (text.equalsIgnoreCase (kCharacterNames[index]))
+                    return toNormalised (static_cast<float> (index));
+            return toNormalised (text.getFloatValue());
         case Kind::Frequency:
             return toNormalised (parseFrequency (text));
         case Kind::DesignMode:
@@ -342,6 +362,8 @@ int ParametricEQParameter::getNumSteps() const
         return 10;
     if (kind_ == Kind::Placement)
         return kChannelPlacementCount;
+    if (kind_ == Kind::CharacterChoice)
+        return kCharacterModeCount;
     if (kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
@@ -352,6 +374,7 @@ int ParametricEQParameter::getNumSteps() const
 bool ParametricEQParameter::isDiscrete() const
 {
     return kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice
         || kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice;
@@ -370,6 +393,8 @@ juce::String ParametricEQParameter::getLabel() const
         case Kind::Gain: return "dB";
         case Kind::Q: return "Q";
         case Kind::Slope: return "dB/oct";
+        case Kind::Pan: return "%";
+        case Kind::GainScale: return "%";
         default: return {};
     }
 }
@@ -394,7 +419,8 @@ float ParametricEQParameter::toNormalised (float units) const noexcept
         || kind_ == Kind::PhaseModeChoice)
         return units >= 0.5f ? 1.0f : 0.0f;
 
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return std::clamp (std::round (units), minimumUnits_, maximumUnits_)
              / std::max (1.0f, maximumUnits_);
 
@@ -416,7 +442,8 @@ float ParametricEQParameter::fromNormalised (float normalised) const noexcept
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
         return normalised >= 0.5f ? 1.0f : 0.0f;
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return static_cast<float> (std::clamp (
             static_cast<int> (std::lround (normalised * maximumUnits_)),
             0, static_cast<int> (maximumUnits_)));
@@ -520,6 +547,33 @@ Processor::Processor()
     add (kPhaseModeParameter, ParametricEQParameter::Kind::PhaseModeChoice,
          "Phase Mode", 0.0f, 1.0f, 0.0f); // Minimum Phase default
 
+    // Phase 7: APEX-owned character stage.  Append-only ABI: all prior
+    // automation IDs and saved states retain their original indices.
+    add (kCharacterModeParameter, ParametricEQParameter::Kind::CharacterChoice,
+         "Character", 0.0f, static_cast<float> (kCharacterModeCount - 1), 0.0f);
+
+    // Phase 8: optional band-limited detector key for every dynamic band.
+    // Defaults OFF for exact migration of all earlier sessions.
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (dynamicFilterParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Dynamic SC Filter", 0.0f, 1.0f, 0.0f);
+    }
+
+    // Phase 9: complete output stage, append-only after index 342.
+    add (kOutputGainParameter, ParametricEQParameter::Kind::Gain,
+         "Output Gain", -36.0f, 36.0f, 0.0f);
+    add (kOutputPanParameter, ParametricEQParameter::Kind::Pan,
+         "Output Pan", -1.0f, 1.0f, 0.0f);
+    add (kOutputPhaseInvertParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Phase Invert", 0.0f, 1.0f, 0.0f);
+    add (kOutputAutoGainParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Auto Gain", 0.0f, 1.0f, 0.0f);
+    add (kOutputGainScaleParameter, ParametricEQParameter::Kind::GainScale,
+         "Output Gain Scale", 0.0f, 2.0f, 1.0f);
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -587,6 +641,12 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
         dynamicEnvelopes_[static_cast<std::size_t> (band)].prepare (
             rate, dynamicParameters_[static_cast<std::size_t> (band)].attackSeconds,
             dynamicParameters_[static_cast<std::size_t> (band)].releaseSeconds);
+        dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+            = BiquadCoefficients::identity();
+        dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)] = 0.0;
+        dynamicKeyFilterQ_[static_cast<std::size_t> (band)] = 0.0;
+        for (auto& state : dynamicKeyFilterStates_[static_cast<std::size_t> (band)])
+            state.reset();
     }
     adoptDynamicParameters();
 
@@ -596,9 +656,12 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     responsePrepareEpoch_ = responseCore_.beginPrepareEpoch();
     prepared_ = true;
     snapToPublishedParameters (true);
+    characterCore_.prepare (rate, channels);
+    characterCore_.setMode (readCharacterModeParameter());
     analyzer_.prepare (rate);
     analyzer_.signalDiscontinuity();
-    setLatencySamples (0);
+    // Keep PDC truthful.  adoptPhaseMode() owns subsequent latency changes.
+    setLatencySamples (linearRequested ? kLinearPhaseLatencySamples : 0);
 }
 
 void Processor::releaseResources()
@@ -613,9 +676,14 @@ void Processor::releaseResources()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
+    characterCore_.reset();
+    outputAutoGainDb_ = 0.0;
     analyzer_.signalDiscontinuity();
     prepared_ = false;
 }
@@ -633,8 +701,14 @@ void Processor::reset()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
+    characterCore_.reset();
+    characterCore_.setMode (readCharacterModeParameter());
+    outputAutoGainDb_ = 0.0;
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
                              &convolverNextL_, &convolverNextR_ })
         convolver->reset();
@@ -660,12 +734,14 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     if (channels <= 0 || samples <= 0)
         return;
 
+    const float inputRmsDb = measureRmsDb (buffer, channels, samples);
     analyzer_.pushPre (buffer, channels, samples);
 
     const bool bypassTarget = readBypassParameter();
     adoptPublishedParameters (bypassTarget);
     adoptDynamicParameters();
     adoptPhaseMode();
+    characterCore_.setMode (readCharacterModeParameter());
     adoptAuditionCommand();
 
     if (bypassTarget && auditionHold_)
@@ -701,6 +777,8 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         currentEngine_.process (buffer.getArrayOfWritePointers(), channels,
                                 samples);
+        characterCore_.process (buffer.getArrayOfWritePointers(), channels,
+                                samples);
     }
     else
     {
@@ -721,6 +799,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         wetStateResetForBypass_ = true;
     }
 
+    applyOutputStage (buffer, channels, samples, inputRmsDb);
     analyzer_.pushPost (buffer, channels, samples);
     if (responseDirty_)
         publishResponseFrame();
@@ -840,6 +919,19 @@ juce::String Processor::getParameterId (int index)
         return "peq.dyn.link";
     if (index == kPhaseModeParameter)
         return "peq.phase";
+    if (index == kCharacterModeParameter)
+        return "peq.character";
+    if (index >= kFirstDynamicFilterParameter
+        && index < kFirstDynamicFilterParameter + kDynamicFilterParameterCount)
+        return "peq.band"
+             + juce::String (index - kFirstDynamicFilterParameter + 1)
+                   .paddedLeft ('0', 2)
+             + ".dyn.filter";
+    if (index == kOutputGainParameter) return "peq.output.gain";
+    if (index == kOutputPanParameter) return "peq.output.pan";
+    if (index == kOutputPhaseInvertParameter) return "peq.output.phaseInvert";
+    if (index == kOutputAutoGainParameter) return "peq.output.autoGain";
+    if (index == kOutputGainScaleParameter) return "peq.output.gainScale";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -908,7 +1000,8 @@ BandSettings Processor::readBandParameters (int band) const noexcept
     settings.frequencyHz = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Frequency))]->getUnitsValue();
     settings.gainDb = parameters_[static_cast<std::size_t> (parameterIndex (
-        band, BandParameterOffset::Gain))]->getUnitsValue();
+        band, BandParameterOffset::Gain))]->getUnitsValue()
+                    * readOutputGainScale();
     settings.q = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Q))]->getUnitsValue();
     settings.slopeDbPerOctave = parameters_[static_cast<std::size_t> (parameterIndex (
@@ -922,9 +1015,118 @@ DesignMode Processor::readDesignModeParameter() const noexcept
          ? DesignMode::AnalogMatched : DesignMode::Realtime;
 }
 
+CharacterMode Processor::readCharacterModeParameter() const noexcept
+{
+    const int index = std::clamp (
+        parameters_[static_cast<std::size_t> (kCharacterModeParameter)]
+            ->getChoiceIndex(),
+        0, kCharacterModeCount - 1);
+    return static_cast<CharacterMode> (index);
+}
+
 bool Processor::readBypassParameter() const noexcept
 {
     return parameters_[static_cast<std::size_t> (kGlobalBypassParameter)]->getBool();
+}
+
+float Processor::readOutputGainDb() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputGainParameter)]
+        ->getUnitsValue();
+}
+
+float Processor::readOutputPan() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputPanParameter)]
+            ->getUnitsValue(), -1.0f, 1.0f);
+}
+
+bool Processor::readOutputPhaseInvert() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputPhaseInvertParameter)]
+        ->getBool();
+}
+
+bool Processor::readOutputAutoGain() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputAutoGainParameter)]
+        ->getBool();
+}
+
+float Processor::readOutputGainScale() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputGainScaleParameter)]
+            ->getUnitsValue(), 0.0f, 2.0f);
+}
+
+float Processor::measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept
+{
+    double sumSquares = 0.0;
+    std::uint64_t count = 0;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const auto* data = buffer.getReadPointer (channel);
+        for (int sample = 0; sample < samples; ++sample)
+        {
+            const double value = std::isfinite (data[sample])
+                               ? static_cast<double> (data[sample]) : 0.0;
+            sumSquares += value * value;
+        }
+        count += static_cast<std::uint64_t> (samples);
+    }
+
+    if (count == 0 || sumSquares <= 1.0e-18)
+        return -180.0f;
+
+    const double rms = std::sqrt (sumSquares / static_cast<double> (count));
+    return static_cast<float> (20.0 * std::log10 (std::max (rms, 1.0e-9)));
+}
+
+void Processor::applyOutputStage (juce::AudioBuffer<float>& buffer,
+                                  int channels, int samples,
+                                  float inputRmsDb) noexcept
+{
+    double autoGainTargetDb = 0.0;
+    if (readOutputAutoGain())
+    {
+        const float outputRmsDb = measureRmsDb (buffer, channels, samples);
+        if (inputRmsDb > -90.0f && outputRmsDb > -90.0f)
+            autoGainTargetDb = std::clamp (
+                static_cast<double> (inputRmsDb - outputRmsDb), -12.0, 12.0);
+    }
+
+    const double sampleRate = std::max (1.0, getSampleRate());
+    const double smoothingSeconds = 0.250;
+    const double blockAlpha = std::exp (
+        -static_cast<double> (samples) / (sampleRate * smoothingSeconds));
+    outputAutoGainDb_ = blockAlpha * outputAutoGainDb_
+                      + (1.0 - blockAlpha) * autoGainTargetDb;
+
+    const float totalGain = juce::Decibels::decibelsToGain (
+        readOutputGainDb() + static_cast<float> (outputAutoGainDb_));
+
+    const float pan = readOutputPan();
+    float leftGain = totalGain;
+    float rightGain = totalGain;
+    if (channels >= 2)
+    {
+        if (pan < 0.0f)
+            rightGain *= 1.0f + pan;
+        else if (pan > 0.0f)
+            leftGain *= 1.0f - pan;
+    }
+
+    const float polarity = readOutputPhaseInvert() ? -1.0f : 1.0f;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const float channelGain = polarity
+                                * (channel == 0 ? leftGain : rightGain);
+        auto* data = buffer.getWritePointer (channel);
+        juce::FloatVectorOperations::multiply (data, channelGain, samples);
+    }
 }
 
 void Processor::configureEngine (
@@ -1163,6 +1365,10 @@ void Processor::processChunk (juce::AudioBuffer<float>& buffer,
         responseDirty_ = true;
     }
 
+    // Character is part of the wet path, before the global bypass blend.
+    characterCore_.process (chunk.getArrayOfWritePointers(),
+                            numberOfChannels, numberOfSamples);
+
     if (bypassMix_ > 0.0 || bypassTarget)
     {
         for (int sample = 0; sample < numberOfSamples; ++sample)
@@ -1242,9 +1448,38 @@ void Processor::adoptDynamicParameters() noexcept
         next.releaseSeconds = static_cast<double> (parameters_[
             static_cast<std::size_t> (dynamicParameterIndex (
                 band, DynamicBandOffset::Release))]->getUnitsValue());
+        next.sidechainFilter = parameters_[static_cast<std::size_t> (
+            dynamicFilterParameterIndex (band))]->getBool();
         next = DynamicBandParameters::sanitised (next);
 
         const auto& previous = dynamicParameters_[static_cast<std::size_t> (band)];
+        const auto& detectorBand = targetSettings_[static_cast<std::size_t> (band)];
+        const bool detectorBandChanged
+            = dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                  != detectorBand.frequencyHz
+           || dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                  != detectorBand.q;
+        if (next.sidechainFilter && (detectorBandChanged
+                                     || ! previous.sidechainFilter))
+        {
+            dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+                = FilterDesigner::designRbj (
+                    FilterShape::BandPass, detectorBand.frequencyHz,
+                    detectorBand.q, 0.0, getSampleRate());
+            dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                = detectorBand.frequencyHz;
+            dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                = detectorBand.q;
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
+        else if (! next.sidechainFilter && previous.sidechainFilter)
+        {
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
         const bool compatible = next.enabled
             && isDynamicCompatibleShape (targetSettings_[
                 static_cast<std::size_t> (band)].shape);
@@ -1317,6 +1552,13 @@ void Processor::computeDynamicGains (int numberOfChannels,
         auto& detector = dynamicDetectors_[static_cast<std::size_t> (band)];
         auto& envelope = dynamicEnvelopes_[static_cast<std::size_t> (band)];
         auto* gains = dynamicGainScratch_.getWritePointer (band);
+        auto& keyStates = dynamicKeyFilterStates_[static_cast<std::size_t> (band)];
+        const auto& keyCoefficients
+            = dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)];
+
+        if (externalUnavailable && parameters.sidechainFilter)
+            for (auto& state : keyStates)
+                state.reset();
 
         for (int sample = 0; sample < numberOfSamples; ++sample)
         {
@@ -1328,25 +1570,35 @@ void Processor::computeDynamicGains (int numberOfChannels,
             const double keyR = externalUnavailable ? 0.0
                               : (std::isfinite (keyRight[sample])
                                  ? static_cast<double> (keyRight[sample]) : 0.0);
+            const double detectorL = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[0].process (
+                    static_cast<float> (keyL), keyCoefficients))
+                : keyL;
+            const double detectorR = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[1].process (
+                    static_cast<float> (keyR), keyCoefficients))
+                : keyR;
             double levelDb = -144.0;
             switch (placement)
             {
                 case ChannelPlacement::Stereo:
-                    levelDb = detector.processStereoFrame (keyL, keyR,
+                    levelDb = detector.processStereoFrame (detectorL, detectorR,
                                                            dynamicDetectorMode_,
                                                            dynamicLink_);
                     break;
                 case ChannelPlacement::Left:
-                    levelDb = detector.processMono (keyL, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorL, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Right:
-                    levelDb = detector.processMono (keyR, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorR, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Mid:
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (mid, dynamicDetectorMode_);
                     break;
                 }
@@ -1354,7 +1606,7 @@ void Processor::computeDynamicGains (int numberOfChannels,
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (side, dynamicDetectorMode_);
                     break;
                 }

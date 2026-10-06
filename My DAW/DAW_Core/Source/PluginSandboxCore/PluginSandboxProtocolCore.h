@@ -13,6 +13,15 @@
   #define NOMINMAX   // keep windows.h min/max macros from poisoning std::min/std::max
  #endif
  #include <windows.h>
+ #ifdef near
+  #undef near
+ #endif
+ #ifdef far
+  #undef far
+ #endif
+ #ifdef small
+  #undef small
+ #endif
 #endif
 
 namespace DAW {
