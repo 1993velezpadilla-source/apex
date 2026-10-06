@@ -1079,6 +1079,7 @@
         <FILE id="PEQ_CPP1" name="ParametricEQProcessor.cpp" compile="1" resource="0" file="Source/ParametricEQCore/ParametricEQProcessor.cpp"/>
         <FILE id="PEQ_H006" name="ParametricEQNativePluginFormat.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQNativePluginFormat.h"/>
         <FILE id="PEQ_H007" name="ParametricEQAuditionCore.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQAuditionCore.h"/>
+        <FILE id="PEQ_H009" name="ParametricEQCharacterCore.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQCharacterCore.h"/>
       </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000049}" name="ParametricEQUI">
         <FILE id="PEQUI_H01" name="ParametricEQEditor.h" compile="0" resource="0" file="Source/ParametricEQUI/ParametricEQEditor.h"/>
