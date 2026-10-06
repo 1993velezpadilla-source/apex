@@ -527,6 +527,7 @@ public:
     }
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
+    juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
 
 private:
     void timerCallback() override
@@ -1431,6 +1432,11 @@ juce::TextButton& ParametricEQEditor::getAuditionButtonForTesting()
 juce::TextButton& ParametricEQEditor::getPhaseButtonForTesting()
 {
     return topBar_->getPhaseButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
+{
+    return graph_->getSketchButtonForTesting();
 }
 
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()
