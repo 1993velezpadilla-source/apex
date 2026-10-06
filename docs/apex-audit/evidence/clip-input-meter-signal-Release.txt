@@ -1,0 +1,51 @@
+APEX Release verification — 2026-10-03
+
+Scope: FIX-017 clip display/reset, Trim gain staging, and input-meter signal.
+
+Application:
+- Configuration/platform: Release x64
+- Artifact: My DAW/DAW_Core/Builds/VisualStudio2026/x64/Release/App/DAW_Core.exe
+- Size: 14,053,888 bytes
+- SHA-256: EEE64C936367120B20BAD1E0B29CB654109B34D3CDA937FD0F61DC789C41231F
+- Authenticode: NotSigned (unsigned build requested)
+
+Focused test:
+- Artifact: My DAW/DAW_Core/Tests/Builds/VisualStudio2026/x64/Release/ConsoleApp/APEXTests.exe
+- Size: 14,879,232 bytes
+- SHA-256: E11F977EA2AE8643ECAF9EB98BBB7D23B7BB7744EC1D3C2E9B294D5B576FC9B8
+- Invocation: APEXTests.exe --name=mixer.clip-input-meter-signal.v1
+- Result: exit code 0; all 8 test cases completed successfully.
+
+The repository build wrapper stopped in dependency preflight because Git reported dubious ownership under this execution context. The application and focused test binary were built with the same Release x64 MSBuild configuration directly. No global Git ownership setting was changed.
+
+This is focused verification only. The full Release suite, physical audio interface/microphone, and a user song were not tested. No claim of full release certification is made.
+
+Test transcript:
+Random seed: 0xa9e12026
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Mixer peak handoff retains the largest block until the UI consumes it...
+Completed tests in mixer.clip-input-meter-signal.v1 / Mixer peak handoff retains the largest block until the UI consumes it
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / A valid channel still reports a clip when its partner is non-finite...
+Completed tests in mixer.clip-input-meter-signal.v1 / A valid channel still reports a clip when its partner is non-finite
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / LevelMeter does not relatch a cleared clip from its visual peak hold...
+Completed tests in mixer.clip-input-meter-signal.v1 / LevelMeter does not relatch a cleared clip from its visual peak hold
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Normal and Master strips both reserve a readable clip box...
+Completed tests in mixer.clip-input-meter-signal.v1 / Normal and Master strips both reserve a readable clip box
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Trim input peak and VU detector keep distinct calibrated units...
+Completed tests in mixer.clip-input-meter-signal.v1 / Trim input peak and VU detector keep distinct calibrated units
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Gain-staging VU follows the post-Trim channel input...
+Completed tests in mixer.clip-input-meter-signal.v1 / Gain-staging VU follows the post-Trim channel input
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Armed but unmonitored mic input meters a post-Trim preview...
+Completed tests in mixer.clip-input-meter-signal.v1 / Armed but unmonitored mic input meters a post-Trim preview
+-----------------------------------------------------------------
+Starting tests in: mixer.clip-input-meter-signal.v1 / Input trim setter updates the Track state snapshot...
+Completed tests in mixer.clip-input-meter-signal.v1 / Input trim setter updates the Track state snapshot
+
+-----------------------------------------------------------------
+All tests completed successfully.

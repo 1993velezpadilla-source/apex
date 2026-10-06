@@ -13,8 +13,9 @@ namespace R = DAW::ProjectSampleRateReconcile;
     rate and a seconds-preserving reconcile is applied ONLY when both rates
     are proven. Legacy projects (no metadata) are never silently
     reinterpreted; a rate is never invented. MIDI clips reconcile through
-    the tested setSampleRate path (length rescale + rate update); PPQ
-    automation is untouched by construction.
+    the tested setSampleRate path (length rescale + rate update). Sample-domain
+    AutomationManagerCore positions reconcile with the timeline; PPQ automation
+    remains untouched by construction.
 */
 class ProjectSampleRateReconcileTests final : public juce::UnitTest
 {
@@ -79,6 +80,70 @@ public:
             expectEquals (R::scalePosition (44101, 48000.0 / 44100.0), (int64_t) 48001);
             expectEquals (R::scalePosition (96000, 0.5), (int64_t) 48000);
             expectEquals (R::scalePosition (0, 2.0), (int64_t) 0);
+        }
+
+        beginTest ("clip automation lane and region points remain aligned after save/reopen at 48 kHz");
+        {
+            const auto plan = R::makePlan (44100.0, 48000.0, true);
+            DAW::ClipManager clips;
+            auto* clip = clips.createEmptyClip (DAW::TrackID ("t-auto"), "vocal",
+                                                (DAW::SamplePosition) 44100,
+                                                (DAW::SamplePosition) 44100);
+
+            DAW::AutomationManagerCore savedAutomation;
+            const auto tapeStopId = DAW::AutomationLaneCore::makeClipTapeStopParameterId(clip->getID());
+            savedAutomation.addPoint(clip->getTrackID(), tapeStopId, 55125, 0.25f); // 0.25 s into clip
+            savedAutomation.addPoint(clip->getTrackID(), tapeStopId, 77175, 0.75f); // 0.75 s into clip
+
+            DAW::AutomationClipRegionCore savedRegion;
+            savedRegion.trackId = clip->getTrackID();
+            savedRegion.parameterId = "clip.region.tape_stop";
+            savedRegion.startSample = 88200;
+            savedRegion.lengthSamples = 44100;
+            savedRegion.localPoints = { { 0, 0.0f }, { 22050, 1.0f }, { 44100, 0.0f } };
+            savedAutomation.addClipRegion(savedRegion);
+
+            // Exercise the same ValueTree save/restore boundary used by projects.
+            DAW::AutomationManagerCore reopenedAutomation;
+            reopenedAutomation.restoreState(savedAutomation.getState());
+
+            expect(R::shouldReconcile(plan));
+            R::reconcileClips(clips, plan.factor, plan.deviceRate);
+            R::reconcileAutomation(reopenedAutomation, plan.factor);
+
+            expectEquals((juce::int64)clip->getStartPosition(), (juce::int64)48000);
+            expectEquals((juce::int64)clip->getLength(), (juce::int64)48000);
+
+            const auto* lane = reopenedAutomation.findLane(clip->getTrackID(), tapeStopId);
+            expect(lane != nullptr);
+            if (lane != nullptr)
+            {
+                expectEquals((juce::int64)lane->points.size(), (juce::int64)2);
+                if (lane->points.size() == 2)
+                {
+                    expectEquals((juce::int64)lane->points[0].timeSamples, (juce::int64)60000);
+                    expectEquals((juce::int64)lane->points[1].timeSamples, (juce::int64)84000);
+                    expectWithinAbsoluteError((double)(lane->points[0].timeSamples - clip->getStartPosition()) / 48000.0,
+                                              0.25, 1.0e-9);
+                    expectWithinAbsoluteError((double)(lane->points[1].timeSamples - clip->getStartPosition()) / 48000.0,
+                                              0.75, 1.0e-9);
+                }
+            }
+
+            expectEquals((juce::int64)reopenedAutomation.getClipRegions().size(), (juce::int64)1);
+            if (reopenedAutomation.getClipRegions().size() == 1)
+            {
+                const auto& region = reopenedAutomation.getClipRegions().front();
+                expectEquals((juce::int64)region.startSample, (juce::int64)96000);
+                expectEquals((juce::int64)region.lengthSamples, (juce::int64)48000);
+                expectEquals((juce::int64)region.localPoints.size(), (juce::int64)3);
+                if (region.localPoints.size() == 3)
+                {
+                    expectEquals((juce::int64)region.localPoints[0].timeSamples, (juce::int64)0);
+                    expectEquals((juce::int64)region.localPoints[1].timeSamples, (juce::int64)24000);
+                    expectEquals((juce::int64)region.localPoints[2].timeSamples, (juce::int64)48000);
+                }
+            }
         }
 
         beginTest ("clip timeline fields reconcile seconds-preserving (44.1 -> 48)");

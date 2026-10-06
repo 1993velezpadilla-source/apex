@@ -65,6 +65,19 @@ inline juce::String formatBufferSizeLabel(int bufferSize)
         : juce::String (bufferSize);
 }
 
+/** The requested input-channel count is an upper bound for the device mask,
+    not a promise that the hardware exposes that many channels. Once a device
+    has granted any input channels, do not restart it just because the actual
+    count is below that upper bound. */
+inline bool shouldRepairMissingInputChannels(bool inputDeviceSelected,
+                                             int requestedChannelCapacity,
+                                             int activeChannelCount) noexcept
+{
+    return inputDeviceSelected
+        && requestedChannelCapacity > 0
+        && activeChannelCount <= 0;
+}
+
 struct CapabilityCheckResult
 {
     bool ok = true;

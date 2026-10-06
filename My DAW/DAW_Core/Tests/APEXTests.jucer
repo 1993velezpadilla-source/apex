@@ -71,6 +71,10 @@
            <FILE id="DI_CPP18" name="MixerResponsiveTests.cpp" compile="1"
                  resource="0" file="Source/Diagnostics/MixerResponsiveTests.cpp"/>
          </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000051}" name="Device">
+        <FILE id="DV_CPP1" name="DeviceCapabilityTests.cpp" compile="1" resource="0"
+              file="Source/Device/DeviceCapabilityTests.cpp"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000045}" name="PluginHost">
         <FILE id="PH_CPP1" name="SidechainRoutingRegressionTests.cpp" compile="1"
               resource="0" file="Source/PluginHost/SidechainRoutingRegressionTests.cpp"/>

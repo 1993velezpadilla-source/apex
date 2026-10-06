@@ -1,6 +1,6 @@
 # APEX Fix Registry
 
-**Last verified:** 2026-07-26
+**Last updated:** 2026-10-03. FIX-001…014 remain historical and were not all re-verified on this date.
 
 ## Known Fixes in Codebase
 
@@ -79,3 +79,43 @@
 - **Description:** Projects persist the authoritative device-granted sample rate (only when proven); on reopen, a pure plan decides: none / seconds-preserving reconcile / legacy-unverified / device-rate-unknown. Reconcile scales clips (AudioClip engine-domain fields; MIDI via the tested setSampleRate path), transport position, and markers; PPQ automation is untouched by construction; LoadRateReport exposed for the GUI phase
 - **Root Cause:** Project files carried no sample-rate identity — sample-domain timelines were silently reinterpreted at whatever rate the device happened to run
 - **Tests:** `project.sample-rate-reconcile.v1` (11 cases: same-rate, 44.1->48, 48->96, 96->48, legacy, unavailable device rate, clip/MIDI time-correctness, clamps, no-op guards)
+
+## Actualización parcial verificada — 2026-10-03
+
+Las entradas FIX-001…014 son históricas; no se reejecutaron todas durante esta auditoría. La fotografía actual, backlog y límites de verificación están en [APEX_PROJECT_AUDIT.md](APEX_PROJECT_AUDIT.md).
+
+### FIX-015 Reordenamiento de plugins: ganancia manual e identidad de automatización
+
+- **Trigger:** editar valores manuales y reordenar inserts; caída permanente de volumen y posibles escrituras a instancias vecinas.
+- **Causa:** suavizado realimentado desde historial obsoleto sin lane activo y bindings/keys de automatización asociados al slot anterior.
+- **Archivos:** `My DAW/DAW_Core/Source/PluginHostCore/PluginInstanceCore.h:1675`; `PluginChainCore.h:1025`; `Automation/AutomationParameterKeyCore.h:183`; `AutomationCore/AutomationManagerCore.h:59`; `CommandCore/GeneralCommands.h:170`; `PluginHostCore/MixerPluginSidePanel.h:97`; `MainComponent.cpp:3325`; `AppCore/ApplicationCore.h:208`.
+- **Conducta:** mover las mismas instancias, parámetros y lanes; Undo/Redo no recrea plugins; escrituras DSP al parámetro local correcto.
+- **Prueba:** `plugin.reorder.gain-preservation.v1`, 40 comprobaciones dentro de PluginHost. Antes salida0.0125821 frente a0.25 (~−25.96dB), 12 fallos; después PluginHost417/0 en Debug y Release.
+- **Estado:** FOCUSED_VERIFIED / RUNTIME_PENDING; continuidades/tails/latencia y sesión comercial pendientes. Las puertas globales no están aprobadas.
+- **Identidad:** HEAD core `000816f2d1338d5e97728fdacb72c75e0fe9c24a` + patch local [plugin-reorder-fix.patch](docs/apex-audit/evidence/plugin-reorder-fix.patch); ver hashes en [audit-evidence.json](docs/apex-audit/audit-evidence.json).
+
+### FIX-016 APEXTests: vida de Theme entre suites
+
+- **Trigger:** batería de pruebas crea/destruye inicialización GUI entre suites; lectura inválida al crear un strip del mixer.
+- **Causa:** JUCE DeletedAtShutdown elimina Theme pero su singleton conserva el puntero. Excepción `0xC0000005`; primer frame `MixerStrip::initChildren`, `Source/UICore/MixerPanel.h:2527`.
+- **Cambio:** `My DAW/DAW_Core/Tests/Source/Main.cpp:93`, `guiLifetime`, vive durante todo el runner.
+- **Verificación:** la nueva corrida amplia pasó el lugar del crash; Mixer fader42/0 en Debug y Release. La corrida amplia no terminó por benchmarks y registró otros fallos; no se afirma ausencia universal de crashes.
+- **Estado:** FOCUSED_VERIFIED; logs de diagnóstico preservados en `docs/apex-audit/evidence`, dump original en core `.apex-debug/plugin-reorder/full-suite-crash.dmp`.
+
+### FIX-017 Indicador de clip numérico y Trim/VU de gain staging
+
+- **Trigger:** el clip box de canales/master mostraba `...`; el reset del master no limpiaba el latch; las barras variaban con el bloque y el VU de Trim no concordaba con la entrada de micrófono.
+- **Causa corregida:** el texto vivía en un carril demasiado estrecho y la UI reutilizaba un hold visual como si fuera un evento nuevo. El pico de audio se atenuaba `0.92` una vez por bloque, haciendo que la respuesta dependiera del buffer. El meter de Trim no seguía de forma consistente la señal post-Trim/pre-FX que alimenta los plugins; la entrada hardware se selecciona aparte únicamente cuando está armada pero no monitoreada.
+- **Cambios:** `My DAW/DAW_Core/Source/TrackCore/Track.h` guarda máximo pendiente por ventana UI, exceso sobre 0 dBFS y sanitiza muestras inválidas; `Source/AudioEngineCore/AudioEngine.h` publica pico crudo por ventana y solo cede la VU a micrófono en ruta armada sin monitoreo; `Source/ChannelStripCore/LevelMeter.h` desacopla clip del peak hold y fija verde (<−6 dBFS), amarillo (−6…0) y rojo (≥0); `Source/UICore/MixerPanel.h` muestra `+x.x dB` en un box 48×14 y conecta reset en strips normales/Master.
+- **Trim/VU:** `Source/InputMonitorCore/TrackInputProcessorCore.h` mide el canal real post-Trim/pre-FX; en ruta armada sin monitoreo, `LiveInputMonitorEngine.h` mide el hardware en una copia con el target de Trim, sin avanzar otra vez el suavizador. `InputMeterCore.h`, `AnalogVuMeterComponent.h`, `AnalogVuBallisticsCore.h`, `CompactVuNeedle.h` y `InputTrimFloatingPanel.h` separan VU/RMS de peak dBFS y fijan `0 VU = −18 dBFS` para seno de referencia. `Track::setInputTrimDb` notifica el cambio para estado/autosave.
+- **Pruebas:** `mixer.clip-input-meter-signal.v1`, Debug x64, 8 casos, 0 fallos; incluye VU +6 dB al subir Trim +6 dB y preview de micrófono armado/no monitoreado. Confirma Track state snapshot, no un ciclo completo de guardar/reabrir proyecto. Test SHA-256 `11A1A516E554FB3C28A4D2A2812AFF6611BC0E34A7D5F07BFA915DED927507C5`; App SHA-256 `B98C221BD66954BEB361F5D8EB58D7D0DB6450450C616B01C26F1686877959A9`. Transcript e informe en `docs/apex-audit/evidence`.
+- **Patch:** [clip-vu-gain-staging-fix.patch](docs/apex-audit/evidence/clip-vu-gain-staging-fix.patch), SHA-256 `2A6285E74BE59181DD7BBE6AC52766D7A1E9C2BC22181CFA704D66FF5CF44573`; contiene los archivos de FIX-017 y pasa `git apply --reverse --check` contra el árbol actual.
+- **Estado:** FOCUSED_VERIFIED / RUNTIME_PENDING. Sin prueba física de micrófono/interfaz o proyecto del usuario; Release y batería completa no re-ejecutados. El gate de dependencias sigue con advertencia Git de Signalsmith.
+
+### FIX-018 Buffer 2048: reapertura innecesaria y ruido aún sin resolver
+
+- **Trigger:** Windows Audio, buffer 2048, Apply y playback inmediato; el usuario sigue reportando ruido tipo zipper después del cambio anterior.
+- **Corrección verificada, alcance limitado:** `My DAW/DAW_Core/Source/DeviceCore/DeviceCapabilityCore.h` y `Source/MainComponent.cpp` evitan tratar la capacidad solicitada de hasta 64 entradas como si fuera el número de entradas activas concedidas por el driver. Esto evita un segundo `setAudioDeviceSetup` cuando Windows Audio ya concedió 1–2 entradas válidas. Las pruebas confirman ese comportamiento del dispositivo; **no demuestran que esa reapertura fuera la causa del ruido reportado ni que el ruido haya desaparecido**. La afirmación causal de la versión anterior fue prematura.
+- **Pruebas previas:** `APEX.Device` pasó 51 aserciones en Debug y Release; `routing-buffer.prepare.v1` pasó 15 y `plugin.automation.large-block-smoothing.v1` 11 en Debug. Esas pruebas no renderizan el escenario auditivo exacto del usuario. Release app compiló/enlazó con firma omitida; el build Release de toda la solución de pruebas falló por C1002 del compilador en `PluginSandboxPhaseE2CTests.cpp`.
+- **Nueva evidencia de investigación:** `My DAW/DAW_Core/evidence/track-reprepare-2048-case-Debug-2026-10-05.{json,txt}`: el clip normal con plugin de ganancia de prueba continúa en el primer bloque de 2048 (RMS 0.141; plugin input RMS 0.200; cero infracciones; máximo salto entre muestras 0.0125 dentro del flujo reanudado). En la secuencia de Apply mientras está parado y Play inmediato, RMS del primer bloque = 0.114 y no hay infracciones. El clip con time-stretch sí cae a RMS ≈0 durante tres bloques y recupera nivel en el cuarto; aún no establece que la sesión del usuario use stretch ni que explique su ruido. No se usaron plugins comerciales ni hardware Realtek. La corrida completa de esta suite termina con 4,512 pases y dos fallos: el cursor de clip hot-play-stop y la audibilidad del primer bloque del test de stretch a 1024.
+- **Estado:** ISSUE OPEN / ROOT CAUSE UNCONFIRMED. No declarar FIX-018 resuelto hasta que el render de 2048 y la reproducción Windows Audio/Realtek relevantes no presenten el ruido.

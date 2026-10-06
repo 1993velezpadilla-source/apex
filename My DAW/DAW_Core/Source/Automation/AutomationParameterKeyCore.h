@@ -163,6 +163,45 @@ namespace apex::automation
             publishLocked();
         }
 
+        /** Permute a slot-addressed key without changing its stable ID.
+            All replacements use the OLD addresses, so swaps cannot merge
+            two instances of the same component. Control plane only. */
+        static juce::String remapSlotKey(const juce::String& key,
+                                        const juce::String& prefix,
+                                        const std::vector<int>& oldToNew)
+        {
+            for (size_t oldIndex = 0; oldIndex < oldToNew.size(); ++oldIndex)
+            {
+                const auto oldPrefix = prefix + juce::String((int)oldIndex) + ".";
+                if (key.startsWith(oldPrefix))
+                    return prefix + juce::String(oldToNew[oldIndex]) + "."
+                        + key.substring(oldPrefix.length());
+            }
+            return key;
+        }
+
+        void remapPluginSlots(const juce::String& trackID,
+                              const std::vector<int>& oldToNew)
+        {
+            if (trackID.isEmpty()) return;
+            const auto pluginPrefix = "plugin." + trackID + ".slot";
+            const auto bridgePrefix = "plugin." + trackID + ".core.plugin.";
+            const auto remap = [&](const juce::String& key)
+            {
+                return remapSlotKey(remapSlotKey(key, pluginPrefix, oldToNew),
+                                    bridgePrefix, oldToNew);
+            };
+            const juce::ScopedLock sl(mapsLock);
+            KeyToIDMap next;
+            next.reserve(keyToID.size());
+            for (const auto& [key, id] : keyToID)
+                next.emplace(remap(key), id);
+            keyToID.swap(next);
+            for (auto& [id, key] : idToKey)
+                key = remap(key);
+            publishLocked();
+        }
+
         juce::ValueTree getState() const
         {
             juce::ValueTree state ("KeyRegistry");

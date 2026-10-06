@@ -11,8 +11,11 @@ namespace DAW {
  *
  * Bridges the per-track InputTrimCore + InputMeterCore (owned by Track) to
  * the audio engine's per-block processing. Single concern: applying the trim
- * gain to the track's audio buffer and updating the input meter atomic
- * levels every block.
+ * gain to the track's audio buffer and publishing the resulting post-trim,
+ * pre-FX signal to the gain-staging meter. This signal includes whatever is
+ * actually entering the channel (clips, incoming sends, and monitored hardware).
+ * LiveInputMonitorEngine owns the exceptional armed-but-not-monitored hardware
+ * input meter path, since that signal is intentionally absent from trackBuffer.
  *
  * Stateless. All state lives inside the Track's owned InputTrimCore and
  * InputMeterCore instances. Each Track has unique instances, so there is
@@ -69,21 +72,20 @@ namespace DAW {
 class TrackInputProcessorCore
 {
 public:
-    /** One-time per-block call. Apply trim, update meter. */
+    /** One-time per-block call. Apply trim and optionally publish this input stage. */
     static void processTrack(Track& track,
                              float* L,
                              float* R,
-                             int    numSamples) noexcept
+                             int    numSamples,
+                             bool   publishMeter = true) noexcept
     {
         // Pre-FX input trim — multiplies samples by the smoothed gain set
         // through InputTrimCore::setTargetGainDb(). This is what makes the
         // panel knob actually affect audio.
         track.getInputTrim().applyToStereoBuffer(L, R, numSamples);
 
-        // Per-track input peak/RMS meter — measures POST-trim so the panel
-        // VU meter reflects what the user is driving into the FX chain.
-        // Atomic stores; UI thread reads the same atomics.
-        track.getInputMeter().processBlock(L, R, numSamples);
+        if (publishMeter)
+            track.getInputMeter().processBlock(L, R, numSamples);
     }
 
     /** Called from prepareToPlay() and trackAdded(). */

@@ -48,6 +48,39 @@ public:
         juce::Array<TrackSnapshot> tracks;
     };
 
+    /** Holds take writers alive for the complete device callback, including
+        the post-fader tap that runs inside AudioEngine. */
+    class AudioCallbackScope
+    {
+    public:
+        AudioCallbackScope(RecordingEngine& owner, int numSamples) noexcept
+            : owner_(owner), numSamples_(juce::jmax(0, numSamples))
+        {
+            owner_.activeAudioCallbacks_.fetch_add(1, std::memory_order_acq_rel);
+            capture_ = owner_.recording_.load(std::memory_order_acquire)
+                && !owner_.stopping_.load(std::memory_order_acquire);
+            if (capture_)
+                owner_.beginPostFaderCallbackBlock();
+        }
+
+        ~AudioCallbackScope() noexcept
+        {
+            if (capture_)
+                owner_.finishPostFaderCallbackBlock(numSamples_);
+            owner_.activeAudioCallbacks_.fetch_sub(1, std::memory_order_acq_rel);
+        }
+
+        bool shouldCapture() const noexcept { return capture_; }
+
+        AudioCallbackScope(const AudioCallbackScope&) = delete;
+        AudioCallbackScope& operator=(const AudioCallbackScope&) = delete;
+
+    private:
+        RecordingEngine& owner_;
+        int numSamples_ = 0;
+        bool capture_ = false;
+    };
+
     RecordingEngine()
         : diskThread_("DAW_RecordingDiskThread")
     {}
@@ -233,7 +266,7 @@ public:
                 ? track->getInputFirstChannel()
                 : getTrackInputChannel(track->getID());
             rec->monoInput     = track->isInputMono();
-            rec->recordWet     = false;
+            rec->recordWet     = track->getRecordMode() == TrackRecordMode::PostFader;
             rec->outputFile    = recordDir.getChildFile(
                 "rec_" + rec->trackID + "_" + ts
                 + "_" + juce::String(fileIndex++) + ".wav");
@@ -246,7 +279,7 @@ public:
             rec->liveWaveform  = &liveWaveform;
 
             if (!rec->writer.start(rec->outputFile, sampleRate_,
-                                   2, recordingBitDepth_, diskThread_))
+                                   2, recordingBitDepth_, diskThread_, rec->recordWet))
             {
                 juce::Logger::writeToLog("[REC] ERROR: could not create take file for track=" + rec->trackID
                     + " file=" + rec->outputFile.getFullPathName()
@@ -261,7 +294,7 @@ public:
                 + (rec->monoInput
                     ? " input=ch" + juce::String(rec->firstInputCh) + " (mono)"
                     : " input=ch" + juce::String(rec->firstInputCh) + "/" + juce::String(rec->firstInputCh + 1))
-                + " mode=DRY"
+                + (rec->recordWet ? " mode=POST_FADER" : " mode=DRY")
                 + " file=" + rec->outputFile.getFullPathName());
 
             activeRecordings_.push_back(std::move(rec));
@@ -332,25 +365,10 @@ public:
      */
     void processBlock(const juce::AudioBuffer<float>& inputBuffer,
                       int numSamples,
-                      int validInputChannels)
+                      int validInputChannels,
+                      bool captureThisBlock)
     {
-        struct AudioCallbackGuard
-        {
-            explicit AudioCallbackGuard(std::atomic<int>& count) noexcept : count_(count)
-            {
-                count_.fetch_add(1, std::memory_order_acq_rel);
-            }
-
-            ~AudioCallbackGuard() noexcept
-            {
-                count_.fetch_sub(1, std::memory_order_acq_rel);
-            }
-
-            std::atomic<int>& count_;
-        } guard(activeAudioCallbacks_);
-
-        if (!recording_.load(std::memory_order_acquire)
-            || stopping_.load(std::memory_order_acquire))
+        if (!captureThisBlock)
             return;
 
         if (numSamples <= 0)
@@ -369,6 +387,18 @@ public:
             // C11: use the take's resolved pointers — no live TrackManager
             // iteration on the audio thread (data race / potential UAF).
             Track* track = rec->resolvedTrack;
+            const bool recordDryBecauseMonitorIsOff = rec->recordWet
+                && track != nullptr
+                && track->getMonitoringState().getMode() == InputMonitorMode::Off;
+
+            // Printed takes are written from the post-fader tap inside the
+            // mixer. When monitoring is explicitly Off, the mic is deliberately
+            // excluded from that processing path; keep the vocal take instead
+            // of silently recording nothing. This fallback is dry and does not
+            // turn monitoring on or send the mic to the speakers.
+            if (rec->recordWet && !recordDryBecauseMonitorIsOff)
+                continue;
+
             auto* liveWaveform = rec->liveWaveform != nullptr
                 ? rec->liveWaveform
                 : (track != nullptr ? &track->getLiveRecordWaveform() : nullptr);
@@ -382,6 +412,12 @@ public:
             const bool inputAvailable = RecordingInputValidityCore::prepareRouteSources(
                 inputBuffer, rec->firstInputCh, rec->monoInput, validChannels,
                 printBuffer_, writableSamples, chans);
+
+            // Both a post-fader tap and the monitor-off dry fallback fulfill
+            // this callback's take. Mark before enqueueing so a failed push is
+            // not followed by a second block that would shift the sample clock.
+            if (recordDryBecauseMonitorIsOff)
+                rec->blockWritten = true;
 
             if (liveWaveform != nullptr)
                 liveWaveform->setInputAvailable(inputAvailable);
@@ -407,6 +443,70 @@ public:
                     {
                         accumulateLivePeakSample(chans[ch][s], mn, mx, hasPeak);
                     }
+                liveWaveform->pushPeak(mn, mx);
+            }
+        }
+    }
+
+    /** Called by AudioEngine after inserts, fader/pan and mute ramp. The tap
+        only copies into the writer; it never changes the audible mix buffer. */
+    void processPostFaderBlock(const TrackID& trackId,
+                               const juce::AudioBuffer<float>& postFaderBuffer,
+                               int numSamples,
+                               bool captureThisBlock) noexcept
+    {
+        if (!captureThisBlock || numSamples <= 0
+            || postFaderBuffer.getNumChannels() < 2
+            || numSamples > postFaderBuffer.getNumSamples()
+            || numSamples > printBuffer_.getNumSamples())
+            return;
+
+        for (auto& rec : activeRecordings_)
+        {
+            if (!rec || !rec->recordWet || rec->trackID != trackId
+                || !rec->writer.isActive()
+                || rec->writerFailed.load(std::memory_order_acquire))
+                continue;
+
+            // Mark before enqueueing: a rejected block must not be replaced by
+            // a second silent block, which would skew the take's sample clock.
+            rec->blockWritten = true;
+            printBuffer_.copyFrom(0, 0, postFaderBuffer, 0, 0, numSamples);
+            printBuffer_.copyFrom(1, 0, postFaderBuffer, 1, 0, numSamples);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                auto* samples = printBuffer_.getWritePointer(ch);
+                for (int sample = 0; sample < numSamples; ++sample)
+                    if (!std::isfinite(samples[sample]) || std::abs(samples[sample]) < 1.0e-30f)
+                        samples[sample] = 0.0f;
+            }
+            const float* channels[2] = {
+                printBuffer_.getReadPointer(0),
+                printBuffer_.getReadPointer(1)
+            };
+            const bool writeAccepted = rec->writer.pushSamples(channels, numSamples);
+            auto* liveWaveform = rec->liveWaveform;
+            if (liveWaveform != nullptr)
+            {
+                liveWaveform->setInputAvailable(true);
+                RecordingWriterStateCore::publishWriteResult(
+                    writeAccepted, *liveWaveform,
+                    rec->writerFailed, writerStopRequested_);
+            }
+            else if (!writeAccepted)
+            {
+                rec->writerFailed.store(true, std::memory_order_release);
+                writerStopRequested_.store(true, std::memory_order_release);
+            }
+
+            diagWetOk_.fetch_add(1, std::memory_order_relaxed);
+            if (writeAccepted && liveWaveform != nullptr)
+            {
+                float mn = 0.0f, mx = 0.0f;
+                bool hasPeak = false;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int sample = 0; sample < numSamples; ++sample)
+                        accumulateLivePeakSample(channels[ch][sample], mn, mx, hasPeak);
                 liveWaveform->pushPeak(mn, mx);
             }
         }
@@ -826,6 +926,7 @@ private:
         int                     firstInputCh  { 0 };
         bool                    monoInput     { false };
         bool                    recordWet     { false };
+        bool                    blockWritten   { false }; // audio callback only
         juce::File              outputFile;
         RecordingDiskWriterCore writer;
         uint64_t                lastInputHash { 0 };
@@ -840,6 +941,62 @@ private:
         Track*                  resolvedTrack { nullptr };
         LiveRecordWaveformCore* liveWaveform  { nullptr };
     };
+
+    void beginPostFaderCallbackBlock() noexcept
+    {
+        for (auto& rec : activeRecordings_)
+            if (rec && rec->recordWet)
+                rec->blockWritten = false;
+    }
+
+    void finishPostFaderCallbackBlock(int numSamples) noexcept
+    {
+        if (numSamples <= 0 || printBuffer_.getNumChannels() < 2
+            || printBuffer_.getNumSamples() <= 0)
+            return;
+
+        const int scratchCapacity = printBuffer_.getNumSamples();
+        for (auto& rec : activeRecordings_)
+        {
+            if (!rec || !rec->recordWet || rec->blockWritten
+                || !rec->writer.isActive()
+                || rec->writerFailed.load(std::memory_order_acquire))
+                continue;
+
+            // If Auto/On monitoring was active but routing/plugin processing
+            // was suspended or the track node was unavailable, preserve the
+            // take's clock with silence. Monitor Off has its explicit dry-input
+            // fallback in processBlock().
+            rec->blockWritten = true;
+            if (rec->liveWaveform != nullptr)
+                rec->liveWaveform->setInputAvailable(false);
+
+            int remaining = numSamples;
+            while (remaining > 0)
+            {
+                const int chunk = juce::jmin(remaining, scratchCapacity);
+                printBuffer_.clear(0, chunk);
+                const float* silence[2] = {
+                    printBuffer_.getReadPointer(0), printBuffer_.getReadPointer(1)
+                };
+                const bool writeAccepted = rec->writer.pushSamples(silence, chunk);
+                if (rec->liveWaveform != nullptr)
+                    RecordingWriterStateCore::publishWriteResult(
+                        writeAccepted, *rec->liveWaveform,
+                        rec->writerFailed, writerStopRequested_);
+                else if (!writeAccepted)
+                {
+                    rec->writerFailed.store(true, std::memory_order_release);
+                    writerStopRequested_.store(true, std::memory_order_release);
+                }
+
+                if (!writeAccepted)
+                    break;
+                remaining -= chunk;
+            }
+            diagWetMissSilence_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 
     TrackManager*        tracks_     = nullptr;
     ClipManager*         clips_      = nullptr;

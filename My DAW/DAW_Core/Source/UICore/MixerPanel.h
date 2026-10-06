@@ -429,7 +429,11 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 
     void tickMeter()
     {
-        meter_.setLevels(track_.getPeakLevelLeft(), track_.getPeakLevelRight());
+        float peakLeft = 0.0f, peakRight = 0.0f;
+        track_.consumePeakLevels(peakLeft, peakRight);
+        meter_.setLevels(peakLeft, peakRight);
+        if (track_.isClipLatched())
+            meter_.setClipOverDb(track_.getClipOverDb());
         meter_.tick();
         if (vu_.isVisible())
             vu_.tick();
@@ -437,7 +441,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 
     bool needsMeterPresentationTick() const noexcept
     {
-        return meter_.needsAnimationTick();
+        return meter_.needsAnimationTick()
+            || track_.hasPendingPeakLevel();
     }
 
     bool needsLavaPresentationTick() const noexcept
@@ -846,10 +851,10 @@ muteBtn_.setBounds(nextButtonBounds());
         meter_.setClipIndicatorVisible(false);
         clipIndicator_.setMeter(&meter_);
         clipIndicator_.setEnabledForStrip(true);
-        clipIndicator_.setBounds(tlBtnArea.getX(),
+        clipIndicator_.setBounds(juce::jmax(2, getWidth() - 54),
                                  panRow.getY() - 17,
-                                 12,
-                                 12);
+                                 48,
+                                 14);
         if (clipIndicator_.getParentComponent() == nullptr)
             addAndMakeVisible(clipIndicator_);
 
@@ -1631,12 +1636,19 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     // meter's latch and repaints on change; clicking clears the latch until
     // the track clips again.
     class MixerClipIndicator final : public juce::Component,
+                                     public juce::SettableTooltipClient,
                                      private juce::Timer
     {
     public:
-        MixerClipIndicator() { startTimerHz(15); }
+        MixerClipIndicator()
+        {
+            setComponentID("mixer.clip-indicator");
+            startTimerHz(15);
+        }
 
         void setMeter(LevelMeter* meter) { meter_ = meter; }
+
+        std::function<void()> onClear;
 
         void setEnabledForStrip(bool shouldBeEnabled)
         {
@@ -1655,14 +1667,16 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
             g.setColour(juce::Colours::black.withAlpha(0.25f));
             g.drawRoundedRectangle(b.reduced(0.5f), 2.0f, 1.0f);
             g.setColour(juce::Colours::white);
-            g.setFont(juce::Font(8.5f, juce::Font::bold));
+            g.setFont(juce::Font(10.0f, juce::Font::bold));
             g.drawText("+" + juce::String(meter_->getClipOverDb(), 1),
                        getLocalBounds(), juce::Justification::centred);
         }
 
         void mouseDown(const juce::MouseEvent&) override
         {
-            if (meter_ != nullptr)
+            if (onClear)
+                onClear();
+            else if (meter_ != nullptr)
                 meter_->clearClip();
             repaint();
         }
@@ -1671,9 +1685,15 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
         void timerCallback() override
         {
             const bool latched = meter_ != nullptr && meter_->isClipLatched();
-            if (latched != lastLatched_)
+            const float overDb = latched ? meter_->getClipOverDb() : 0.0f;
+            if (latched != lastLatched_ || std::abs(overDb - lastClipOverDb_) > 0.04f)
             {
                 lastLatched_ = latched;
+                lastClipOverDb_ = overDb;
+                setTooltip(latched
+                    ? juce::String("Sample peak is ") + juce::String(overDb, 1)
+                        + " dB above 0 dBFS. Click to reset."
+                    : juce::String("No sample clip. Click after a clip to reset."));
                 repaint();
             }
         }
@@ -1681,6 +1701,7 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
         LevelMeter* meter_ = nullptr;
         bool enabled_ = true;
         bool lastLatched_ = false;
+        float lastClipOverDb_ = 0.0f;
     };
 
     SmallButton  trackLensBtn_ { "TL", juce::Colour(0xFFE84393) };
@@ -2580,19 +2601,25 @@ private:
             juce::PopupMenu menu;
             menu.addSectionHeader("Recording Mode");
 
-            // Only show "Record Dry" option, hide "Record With Effects (printed)"
             constexpr int kRecordDry = 1;
+            constexpr int kRecordPostFader = 2;
 
-            menu.addItem(kRecordDry, "Record Dry (effects monitored only)", true, true);
+            menu.addItem(kRecordDry, "Record Dry / Pre-Fader (no effects printed)", true,
+                         track_.getRecordMode() == TrackRecordMode::Dry);
+            menu.addItem(kRecordPostFader,
+                         "Record Wet / Post-Fader (track FX + fader printed)", true,
+                         track_.getRecordMode() == TrackRecordMode::PostFader);
+            menu.addItem(3,
+                         "Monitor Off records dry; Auto/On prints FX. Playback runs FX again",
+                         false, false);
 
             menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(getParentComponent()),
-                               [this, kRecordDry](int result)
+                               [this, kRecordDry, kRecordPostFader](int result)
                                {
                                    if (result == kRecordDry)
-                                   {
-                                       // Record dry mode selected
-                                       if (onArmToggled) onArmToggled(armBtn_.active);
-                                   }
+                                       track_.setRecordMode(TrackRecordMode::Dry);
+                                   else if (result == kRecordPostFader)
+                                       track_.setRecordMode(TrackRecordMode::PostFader);
                                });
         };
         autoModeBtn_.onClick = [this]
@@ -2668,6 +2695,14 @@ inputBtn_.onClick = [this]
         // Meter
         meter_.setInterceptsMouseClicks(false, false);
         addAndMakeVisible(meter_);
+        clipIndicator_.setMeter(&meter_);
+        clipIndicator_.onClear = [safeStrip = juce::Component::SafePointer<MixerStrip>(this)]
+        {
+            if (safeStrip == nullptr)
+                return;
+            safeStrip->track_.clearClipPeak();
+            safeStrip->meter_.clearClip();
+        };
 
         // Personal trim VU needle — bound to the SAME per-track InputMeterCore
         // as the trim panel so mixer, timeline row and panel agree by
@@ -2979,6 +3014,16 @@ inputBtn_.onClick = [this]
         }
 
         persistArea.removeFromTop(4);
+
+        // Readable clip box for the master. The meter lane is too narrow to
+        // carry text or a practical reset hit target.
+        auto clipRow = persistArea.removeFromTop(18).reduced(8, 1);
+        meter_.setClipIndicatorVisible(false);
+        clipIndicator_.setMeter(&meter_);
+        clipIndicator_.setEnabledForStrip(true);
+        clipIndicator_.setBounds(clipRow.getRight() - 50, clipRow.getY(), 48, 14);
+        if (clipIndicator_.getParentComponent() == nullptr)
+            addAndMakeVisible(clipIndicator_);
 
         // Fader area: mini-meter on left, fader rail on right of persist.
         // Keep this large when sections are minimized so dB ticks are readable.

@@ -205,6 +205,7 @@ public:
         auto it = pluginChains_.find(trackId);
         if (it != pluginChains_.end()) return it->second.get();
         auto chain = std::make_shared<PluginChainCore>();
+        chain->setAutomationManager(&automationManager_);
         chain->setPlayheadInfoCore(&pluginPlayheadInfoCore_);
         chain->setAutomationContext(trackId, &pluginAutomationGestureCore_, &lastTouchedPluginParameterCore_);
         // Always prepare the chain so appendPlugin() / restoreState() can

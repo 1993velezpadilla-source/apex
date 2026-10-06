@@ -14,10 +14,10 @@ enum class InputMonitorMode
 /**
  * TrackMonitoringStateModel — per-track input monitoring state.
  *
- * Recording mode is always dry (no plugin effects printed to file).
- * Wet/printed recording was removed to eliminate the zipper noise
- * from redundant signal paths — no major DAW offers per-track
- * wet-printing as a toggle.
+ * Monitoring state controls only whether live input enters the audible track
+ * path. Per-track record mode is stored independently on Track; PostFader
+ * recording copies the already-processed output and never adds another audible
+ * path.
  *
  * Thread-safe via atomics for audio↔UI bridge.
  */

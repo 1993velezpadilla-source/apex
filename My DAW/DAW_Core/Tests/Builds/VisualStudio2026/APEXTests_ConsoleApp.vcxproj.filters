@@ -11,6 +11,9 @@
     <Filter Include="APEXTests\Source\Diagnostics">
       <UniqueIdentifier>{C19E375D-70B5-031D-BB32-E4AFE9C37D21}</UniqueIdentifier>
     </Filter>
+    <Filter Include="APEXTests\Source\Device">
+      <UniqueIdentifier>{31DD2A1B-667A-4FA2-905E-4D8FF72DB9DE}</UniqueIdentifier>
+    </Filter>
     <Filter Include="APEXTests\Source\PluginHost">
       <UniqueIdentifier>{9B18DD47-7A99-3940-7B54-86ABC8A65C94}</UniqueIdentifier>
     </Filter>
@@ -784,11 +787,17 @@
     <ClCompile Include="..\..\Source\Diagnostics\ProjectPersistenceTransactionTests.cpp">
       <Filter>APEXTests\Source\Diagnostics</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Project\ProjectSampleRateReconcileTests.cpp">
+      <Filter>APEXTests\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\Source\ProjectCore\AutosaveManagerCore.cpp">
       <Filter>APEXTests\Source\Diagnostics</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Diagnostics\MixerResponsiveTests.cpp">
       <Filter>APEXTests\Source\Diagnostics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Device\DeviceCapabilityTests.cpp">
+      <Filter>APEXTests\Source\Device</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\PluginHost\SidechainRoutingRegressionTests.cpp">
       <Filter>APEXTests\Source\PluginHost</Filter>

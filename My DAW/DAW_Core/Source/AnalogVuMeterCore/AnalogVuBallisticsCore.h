@@ -15,7 +15,7 @@ namespace DAW {
  * holds its own smoothing — switching tracks does not bleed needle history.
  *
  * Three modes:
- *   ClassicVu : symmetric ~300 ms time constant (IEC 60268-17 reference VU)
+ *   ClassicVu : approximately 300 ms to 99% (VU-style needle response)
  *   Ppm       : 10 ms rise / 1.7 s fall (BBC PPM)
  *   Custom    : user-defined rise/fall in seconds
  *
@@ -57,34 +57,35 @@ public:
         recomputeAlphas();
     }
 
-    /** Gain-staging calibration: the dBFS level that reads as 0 VU on the
-     *  meter face. Default -18 dBFS = 0 VU (the standard gain-staging target
-     *  for the trim meter). getNeedleDb()/getPeakMaxDb() return VU-calibrated
-     *  values: vu = dbfs - vuReferenceDb. */
+    /** Gain-staging calibration: the dBFS peak-equivalent level that reads
+     *  as 0 VU on the meter face. The separate peak-max readout stays dBFS. */
     void setVuReferenceDb(float db) noexcept { vuReferenceDb_ = db; }
     float getVuReferenceDb() const noexcept { return vuReferenceDb_; }
 
-    /** Feed one linear-gain peak sample. Call from the UI tick. */
-    void feed(float peakGain) noexcept
+    /** Feed a detector level and a separate sample peak. Call from the UI tick. */
+    void feed(float detectorGain, float peakGain) noexcept
     {
-        const float target = juce::jmax(0.0f, peakGain);
+        const float target = std::isfinite(detectorGain) ? juce::jmax(0.0f, detectorGain) : 0.0f;
+        peakGain = std::isfinite(peakGain) ? juce::jmax(0.0f, peakGain) : 0.0f;
 
         if (target > smoothed_)
             smoothed_ += (target - smoothed_) * alphaRise_;
         else
             smoothed_ += (target - smoothed_) * alphaFall_;
 
-        if (target > peakHold_)
-            peakHold_ = target;
+        if (peakGain > peakHold_)
+            peakHold_ = peakGain;
     }
+
+    /** Backward-compatible feed for displays whose detector is also a peak. */
+    void feed(float peakGain) noexcept { feed(peakGain, peakGain); }
 
     float getNeedleGain() const noexcept { return smoothed_; }
 
     float getNeedleDb() const noexcept
     {
-        // -120 dB sentinel = silence (kept below the VU offset so the UI's
-        // "no signal" checks keep working). Real values are VU-calibrated:
-        // vu = dbfs - vuReferenceDb (e.g. -18 dBFS -> 0 VU).
+        // -120 dB sentinel = silence. Detector input is peak-equivalent so a
+        // sine at the reference level reads 0 VU.
         if (smoothed_ <= 1.0e-6f) return -120.0f;
         return 20.0f * std::log10(smoothed_) - vuReferenceDb_;
     }
@@ -94,7 +95,7 @@ public:
     float getPeakMaxDb() const noexcept
     {
         if (peakHold_ <= 1.0e-6f) return -120.0f;
-        return 20.0f * std::log10(peakHold_) - vuReferenceDb_;
+        return 20.0f * std::log10(peakHold_);
     }
 
     /** Reset peak max only — needle keeps its current smoothed position. */
@@ -111,12 +112,13 @@ private:
     void recomputeAlphas() noexcept
     {
         const float dt = 1.0f / tickRateHz_;
-        float riseSec = 0.3f;
-        float fallSec = 0.3f;
+        float riseSec = 0.065f;
+        float fallSec = 0.065f;
 
         switch (mode_)
         {
-            case Mode::ClassicVu: riseSec = fallSec = 0.3f; break;
+            // One-pole tau=65 ms reaches about 99% in 300 ms.
+            case Mode::ClassicVu: riseSec = fallSec = 0.065f; break;
             case Mode::Ppm:       riseSec = 0.010f; fallSec = 1.700f; break;
             case Mode::Custom:    riseSec = customRiseSec_; fallSec = customFallSec_; break;
         }

@@ -1,0 +1,766 @@
+diff --git a/Source/AppCore/ApplicationCore.h b/Source/AppCore/ApplicationCore.h
+index 5ea0ea1..8dedd7e 100644
+--- a/Source/AppCore/ApplicationCore.h
++++ b/Source/AppCore/ApplicationCore.h
+@@ -205,6 +205,7 @@ public:
+         auto it = pluginChains_.find(trackId);
+         if (it != pluginChains_.end()) return it->second.get();
+         auto chain = std::make_shared<PluginChainCore>();
++        chain->setAutomationManager(&automationManager_);
+         chain->setPlayheadInfoCore(&pluginPlayheadInfoCore_);
+         chain->setAutomationContext(trackId, &pluginAutomationGestureCore_, &lastTouchedPluginParameterCore_);
+         // Always prepare the chain so appendPlugin() / restoreState() can
+diff --git a/Source/Automation/AutomationParameterKeyCore.h b/Source/Automation/AutomationParameterKeyCore.h
+index 5bbcf3f..d27f790 100644
+--- a/Source/Automation/AutomationParameterKeyCore.h
++++ b/Source/Automation/AutomationParameterKeyCore.h
+@@ -163,6 +163,45 @@ namespace apex::automation
+             publishLocked();
+         }
+ 
++        /** Permute a slot-addressed key without changing its stable ID.
++            All replacements use the OLD addresses, so swaps cannot merge
++            two instances of the same component. Control plane only. */
++        static juce::String remapSlotKey(const juce::String& key,
++                                        const juce::String& prefix,
++                                        const std::vector<int>& oldToNew)
++        {
++            for (size_t oldIndex = 0; oldIndex < oldToNew.size(); ++oldIndex)
++            {
++                const auto oldPrefix = prefix + juce::String((int)oldIndex) + ".";
++                if (key.startsWith(oldPrefix))
++                    return prefix + juce::String(oldToNew[oldIndex]) + "."
++                        + key.substring(oldPrefix.length());
++            }
++            return key;
++        }
++
++        void remapPluginSlots(const juce::String& trackID,
++                              const std::vector<int>& oldToNew)
++        {
++            if (trackID.isEmpty()) return;
++            const auto pluginPrefix = "plugin." + trackID + ".slot";
++            const auto bridgePrefix = "plugin." + trackID + ".core.plugin.";
++            const auto remap = [&](const juce::String& key)
++            {
++                return remapSlotKey(remapSlotKey(key, pluginPrefix, oldToNew),
++                                    bridgePrefix, oldToNew);
++            };
++            const juce::ScopedLock sl(mapsLock);
++            KeyToIDMap next;
++            next.reserve(keyToID.size());
++            for (const auto& [key, id] : keyToID)
++                next.emplace(remap(key), id);
++            keyToID.swap(next);
++            for (auto& [id, key] : idToKey)
++                key = remap(key);
++            publishLocked();
++        }
++
+         juce::ValueTree getState() const
+         {
+             juce::ValueTree state ("KeyRegistry");
+diff --git a/Source/AutomationCore/AutomationManagerCore.h b/Source/AutomationCore/AutomationManagerCore.h
+index 54d9d01..915985e 100644
+--- a/Source/AutomationCore/AutomationManagerCore.h
++++ b/Source/AutomationCore/AutomationManagerCore.h
+@@ -54,6 +54,30 @@ public:
+         return "plugin." + juce::String(pluginSlotIndex) + ".__slot_mix__";
+     }
+ 
++    /** Keep legacy parameter, wet/dry and clip-region lanes with the
++        processor instance when insert positions change. Message thread. */
++    void remapPluginSlots(const TrackID& trackId, const std::vector<int>& oldToNew)
++    {
++        const auto remap = [&](const juce::String& parameterId)
++        {
++            for (size_t oldIndex = 0; oldIndex < oldToNew.size(); ++oldIndex)
++            {
++                const auto prefix = "plugin." + juce::String((int)oldIndex) + ".";
++                if (parameterId.startsWith(prefix))
++                    return "plugin." + juce::String(oldToNew[oldIndex]) + "."
++                        + parameterId.substring(prefix.length());
++            }
++            return parameterId;
++        };
++        for (auto& lane : lanes_)
++            if (lane.trackId == trackId)
++                lane.setParameterId(remap(lane.getParameterId()));
++        for (auto& region : clipRegions_)
++            if (region.trackId == trackId)
++                region.parameterId = remap(region.parameterId);
++        publishSnapshot();
++    }
++
+     AutomationManagerCore()
+     {
+         publishSnapshot();
+diff --git a/Source/CommandCore/GeneralCommands.h b/Source/CommandCore/GeneralCommands.h
+index 4f6d7fd..be60585 100644
+--- a/Source/CommandCore/GeneralCommands.h
++++ b/Source/CommandCore/GeneralCommands.h
+@@ -165,6 +165,27 @@ private:
+     bool hasExecuted_ = false;
+ };
+ 
++/** An order edit preserves live processor state and automation identities.
++    Undo/redo must reverse the permutation instead of recreating the chain. */
++class PluginChainMoveCommand final : public Command
++{
++public:
++    PluginChainMoveCommand(PluginChainCore& chain, int fromIndex, int toIndex)
++        : chain_(chain), fromIndex_(fromIndex), toIndex_(toIndex) {}
++    juce::String getDescription() const override { return "Move Plugin"; }
++    juce::String getCategory() const override { return "Plugin"; }
++    void execute() override { applied_ = chain_.moveSlot(fromIndex_, toIndex_); }
++    void undo() override
++    {
++        if (applied_) chain_.moveSlot(toIndex_, fromIndex_);
++    }
++private:
++    PluginChainCore& chain_;
++    int fromIndex_;
++    int toIndex_;
++    bool applied_ = false;
++};
++
+ class AddTrackCommand : public Command
+ {
+ public:
+diff --git a/Source/MainComponent.cpp b/Source/MainComponent.cpp
+index 962532c..38ec974 100644
+--- a/Source/MainComponent.cpp
++++ b/Source/MainComponent.cpp
+@@ -3322,6 +3322,11 @@ MainComponent::MainComponent()
+             CommandManager::getInstance().execute(std::make_unique<PluginChainStateCommand>(
+                 chain, appCore_.getPluginScanner().getFormatManager(), before, after, description, true));
+     };
++    pluginSidePanel_->onPluginSlotMoveRequested = [](DAW::PluginChainCore& chain, int fromIndex, int toIndex)
++    {
++        CommandManager::getInstance().execute(
++            std::make_unique<DAW::PluginChainMoveCommand>(chain, fromIndex, toIndex));
++    };
+ 
+     pluginSidePanel_->onSlotClickedWithModifiers = [this](int slotIndex, const juce::ModifierKeys& mods)
+     {
+diff --git a/Source/PluginHostCore/MixerPluginSidePanel.h b/Source/PluginHostCore/MixerPluginSidePanel.h
+index 45a760c..af91a72 100644
+--- a/Source/PluginHostCore/MixerPluginSidePanel.h
++++ b/Source/PluginHostCore/MixerPluginSidePanel.h
+@@ -92,6 +92,16 @@ public:
+     std::function<void(const TrackID&)> onAddPluginRequested;
+ 
+     std::function<void(PluginChainCore&, std::function<void()>, const juce::String&)> onPluginChainEditRequested;
++    std::function<void(PluginChainCore&, int, int)> onPluginSlotMoveRequested;
++
++    void requestSlotMove(int fromIndex, int toIndex)
++    {
++        if (chain_ == nullptr) return;
++        if (onPluginSlotMoveRequested)
++            onPluginSlotMoveRequested(*chain_, fromIndex, toIndex);
++        else
++            chain_->moveSlot(fromIndex, toIndex);
++    }
+ 
+     std::function<void(PluginInstanceCore* slot, const TrackID& trackId, int slotIndex)> onPluginEditorOpened;
+ 
+@@ -264,7 +274,7 @@ public:
+                                           (int)(details.localPosition.y - kHeaderH) / kSlotHeight);
+             if (targetSlot != srcSlot)
+             {
+-                chain_->moveSlot(srcSlot, targetSlot);
++                requestSlotMove(srcSlot, targetSlot);
+                 rebuildSlots();
+             }
+         }
+@@ -1362,8 +1372,8 @@ private:
+                             safeThis->repaint();
+                         }
+                     }
+-                    else if (r == 3) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->moveSlot(safeThis->index_, safeThis->index_ - 1); }, "Move Plugin"); else chain->moveSlot(safeThis->index_, safeThis->index_ - 1); safeThis->owner_.rebuildSlots(); }
+-                    else if (r == 4) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->moveSlot(safeThis->index_, safeThis->index_ + 1); }, "Move Plugin"); else chain->moveSlot(safeThis->index_, safeThis->index_ + 1); safeThis->owner_.rebuildSlots(); }
++                    else if (r == 3) { safeThis->owner_.requestSlotMove(safeThis->index_, safeThis->index_ - 1); safeThis->owner_.rebuildSlots(); }
++                    else if (r == 4) { safeThis->owner_.requestSlotMove(safeThis->index_, safeThis->index_ + 1); safeThis->owner_.rebuildSlots(); }
+                     else if (r == 10) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->removePlugin(safeThis->index_); }, "Remove Plugin"); else chain->removePlugin(safeThis->index_); safeThis->owner_.rebuildSlots(); }
+                 });
+         }
+diff --git a/Source/PluginHostCore/PluginChainCore.h b/Source/PluginHostCore/PluginChainCore.h
+index b553b22..07f4232 100644
+--- a/Source/PluginHostCore/PluginChainCore.h
++++ b/Source/PluginHostCore/PluginChainCore.h
+@@ -82,6 +82,70 @@ public:
+     };
+ 
+ private:
++    // Automation bindings belong to mutable processor instances, unlike the
++    // immutable order snapshot. Readers enter without waiting. A control-plane
++    // edit closes admission and drains existing readers before rebinding.
++    // Sequential consistency makes the admission/count handshake unambiguous.
++    class RealtimeReadScope
++    {
++    public:
++        explicit RealtimeReadScope(PluginChainCore& owner) noexcept : owner_(owner)
++        {
++            if (owner_.controlEditPending_.load()) return;
++            owner_.activeRealtimeReaders_.fetch_add(1);
++            if (owner_.controlEditPending_.load())
++                owner_.activeRealtimeReaders_.fetch_sub(1);
++            else
++                entered_ = true;
++        }
++        ~RealtimeReadScope()
++        {
++            if (entered_) owner_.activeRealtimeReaders_.fetch_sub(1);
++        }
++        explicit operator bool() const noexcept { return entered_; }
++    private:
++        PluginChainCore& owner_;
++        bool entered_ = false;
++        JUCE_DECLARE_NON_COPYABLE(RealtimeReadScope)
++    };
++
++    class ControlEditScope
++    {
++    public:
++        explicit ControlEditScope(PluginChainCore& owner) : owner_(owner)
++        {
++            if (owner_.controlEditDepth_ > 0)
++            {
++                ++owner_.controlEditDepth_;
++                entered_ = true;
++                return;
++            }
++            owner_.controlEditPending_.store(true);
++            const auto start = juce::Time::getMillisecondCounter();
++            while (owner_.activeRealtimeReaders_.load() != 0)
++            {
++                if (juce::Time::getMillisecondCounter() - start >= 2000)
++                {
++                    owner_.controlEditPending_.store(false);
++                    return; // no mutation occurred; retain the valid chain
++                }
++                juce::Thread::yield(); // control plane only
++            }
++            owner_.controlEditDepth_ = 1;
++            entered_ = true;
++        }
++        ~ControlEditScope()
++        {
++            if (entered_ && --owner_.controlEditDepth_ == 0)
++                owner_.controlEditPending_.store(false);
++        }
++        explicit operator bool() const noexcept { return entered_; }
++    private:
++        PluginChainCore& owner_;
++        bool entered_ = false;
++        JUCE_DECLARE_NON_COPYABLE(ControlEditScope)
++    };
++
+     struct RetiredSnapshot
+     {
+         std::shared_ptr<const Snapshot> snapshot;
+@@ -122,12 +186,19 @@ public:
+                               PluginAutomationGestureCore* gestureCore,
+                               LastTouchedPluginParameterCore* lastTouchedCore) noexcept
+     {
++        ControlEditScope edit(*this);
++        if (!edit) return;
+         trackId_ = trackId;
+         gestureCore_ = gestureCore;
+         lastTouchedCore_ = lastTouchedCore;
+         refreshAutomationContexts();
+     }
+ 
++    void setAutomationManager(AutomationManagerCore* manager) noexcept
++    {
++        automationManager_ = manager;
++    }
++
+     void setPlayheadInfoCore(PluginPlayheadInfoCore* playheadInfo) noexcept
+     {
+         playheadInfo_ = playheadInfo;
+@@ -894,6 +965,15 @@ public:
+                                  double bpm = 120.0,
+                                  int numSamples = 512) noexcept
+     {
++        RealtimeReadScope reader(*this);
++        if (!reader) return;
++        // The engine may have captured its automation snapshot before this
++        // chain's reorder completed. Adopt the current lane addresses inside
++        // the admission gate so an old wet/dry lane cannot hit a new occupant.
++        const auto currentAutomation = automationManager_ != nullptr
++            ? automationManager_->getSnapshotPublisher().get() : nullptr;
++        if (currentAutomation != nullptr)
++            automationSnap = currentAutomation.get();
+         // Iterate the PUBLISHED slot snapshot — the same immutable view the
+         // audio processing path uses — never the live slots_ vector, which
+         // the message thread mutates (this was a data race before).
+@@ -942,11 +1022,41 @@ public:
+     }
+ 
+     /** Move a slot from one index to another (reorder). */
+-    void moveSlot(int fromIndex, int toIndex)
++    bool moveSlot(int fromIndex, int toIndex)
+     {
+         int n = (int)slots_.size();
+-        if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n) return;
+-        if (fromIndex == toIndex) return;
++        if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n) return false;
++        if (fromIndex == toIndex) return false;
++
++        ControlEditScope edit(*this);
++        if (!edit) return false;
++        std::vector<int> oldToNew((size_t)n);
++        for (int i = 0; i < n; ++i)
++            oldToNew[(size_t)i] = i == fromIndex ? toIndex
++                : (fromIndex < toIndex && i > fromIndex && i <= toIndex) ? i - 1
++                : (toIndex < fromIndex && i >= toIndex && i < fromIndex) ? i + 1 : i;
++
++        // IDs, registry pointers, gestures, wet/dry lanes and sidechain bus
++        // ownership move with the existing instances; no plugin is recreated
++        // or re-prepared for an order change.
++        apex::automation::AutomationParameterKeyRegistry::getInstance()
++            .remapPluginSlots(trackId_, oldToNew);
++        decltype(slotAutomationBindings_) movedBindings;
++        for (auto& [index, binding] : slotAutomationBindings_)
++            movedBindings.emplace(index >= 0 && index < n ? oldToNew[(size_t)index] : index,
++                                  std::move(binding));
++        slotAutomationBindings_.swap(movedBindings);
++        const auto remapBusConfig = [&](auto& config)
++        {
++            std::decay_t<decltype(config)> next;
++            for (auto& [index, buses] : config)
++                next.emplace(index >= 0 && index < n ? oldToNew[(size_t)index] : index, buses);
++            config.swap(next);
++        };
++        remapBusConfig(sidechainAuxInputBuses_);
++        remapBusConfig(activeSidechainAuxInputBuses_);
++        if (automationManager_ != nullptr)
++            automationManager_->remapPluginSlots(trackId_, oldToNew);
+ 
+         auto moving = std::move(slots_[fromIndex]);
+         auto movingBypass = std::move(bypassCores_[fromIndex]);
+@@ -955,9 +1065,10 @@ public:
+         slots_.insert(slots_.begin() + juce::jmin(toIndex, (int)slots_.size()), std::move(moving));
+         bypassCores_.insert(bypassCores_.begin() + juce::jmin(toIndex, (int)bypassCores_.size()), std::move(movingBypass));
+ 
+-        publishSnapshot();
+         refreshAutomationContexts();
++        publishSnapshot();
+         notifyChanged();
++        return true;
+     }
+ 
+     /** Copy a plugin into this chain, preserving its resolved execution mode.
+@@ -1166,6 +1277,8 @@ public:
+ 
+     void processBlock(juce::AudioBuffer<float>& buffer, int numSamples)
+     {
++        RealtimeReadScope reader(*this);
++        if (!reader) return;
+         if (! validateProcessBuffer(buffer, numSamples)) return;
+         if (! validateOfflinePreparedForProcess(numSamples)) return;
+         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
+@@ -1256,6 +1369,8 @@ public:
+                               juce::MidiBuffer& midiIn,
+                               int numSamples)
+     {
++        RealtimeReadScope reader(*this);
++        if (!reader) return;
+         if (! validateProcessBuffer(buffer, numSamples)) return;
+         if (! validateOfflinePreparedForProcess(numSamples)) return;
+         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
+@@ -1318,6 +1433,8 @@ public:
+                                     juce::AudioBuffer<float>& sidechainBuffer,
+                                     int numSamples)
+     {
++        RealtimeReadScope reader(*this);
++        if (!reader) return;
+         if (! validateProcessBuffer(mainBuffer, numSamples)) return;
+         if (! validateOfflinePreparedForProcess(numSamples)) return;
+         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
+@@ -1788,6 +1905,10 @@ private:
+     // Published snapshot — swapped atomically between message and audio threads.
+     // Audio thread loads this once at block start and processes the stable list.
+     std::shared_ptr<const Snapshot> published_;
++    std::atomic<bool> controlEditPending_ { false };
++    std::atomic<int> activeRealtimeReaders_ { 0 };
++    int controlEditDepth_ = 0; // message thread only
++    AutomationManagerCore* automationManager_ = nullptr; // ApplicationCore owns
+ 
+     // Plugins removed from slots_ but kept alive so the audio thread's old
+     // snapshot references remain valid. The custom plugin deleter defers the
+@@ -1844,6 +1965,8 @@ private:
+ 
+     void configureSlotAutomation(PluginInstanceCore* plugin, int slotIndex)
+     {
++        ControlEditScope edit(*this);
++        if (!edit) return;
+         if (plugin != nullptr)
+             plugin->configureAutomationContext(trackId_, slotIndex, gestureCore_, lastTouchedCore_);
+ 
+@@ -1947,6 +2070,8 @@ private:
+ 
+     void refreshAutomationContexts()
+     {
++        ControlEditScope edit(*this);
++        if (!edit) return;
+         for (int i = 0; i < (int)slots_.size(); ++i)
+         {
+             auto* slot = slots_[(size_t)i].get();
+diff --git a/Source/PluginHostCore/PluginInstanceCore.h b/Source/PluginHostCore/PluginInstanceCore.h
+index 471b59e..f6cc75e 100644
+--- a/Source/PluginHostCore/PluginInstanceCore.h
++++ b/Source/PluginHostCore/PluginInstanceCore.h
+@@ -1559,14 +1559,20 @@ public:
+         const TrackID& trackId,
+         int64_t samplePosition,
+         double ppqPosition,
+-        float currentValue) noexcept
++        float currentValue,
++        bool* hasAutomation = nullptr) noexcept
+     {
++        if (hasAutomation != nullptr)
++            *hasAutomation = false;
+         float newValue = currentValue;
+         if (automationSnap != nullptr)
+         {
+             if (auto* lane = automationSnap->findLaneRT(trackId, binding.coreParamId))
+-                if (lane->enabled)
++                if (lane->enabled && !lane->points.empty())
++                {
+                     newValue = lane->getValueAtSample(samplePosition, currentValue);
++                    if (hasAutomation != nullptr) *hasAutomation = true;
++                }
+         }
+         if (binding.apexPid != apex::automation::kInvalidParameterID)
+         {
+@@ -1574,7 +1580,10 @@ public:
+             {
+                 auto snap = apexLane->getSnapshot();
+                 if (snap != nullptr && ! snap->empty())
++                {
+                     newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
++                    if (hasAutomation != nullptr) *hasAutomation = true;
++                }
+             }
+         }
+         if (binding.bridgePid != apex::automation::kInvalidParameterID)
+@@ -1583,7 +1592,10 @@ public:
+             {
+                 auto snap = bridgeLane->getSnapshot();
+                 if (snap != nullptr && ! snap->empty())
++                {
+                     newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
++                    if (hasAutomation != nullptr) *hasAutomation = true;
++                }
+             }
+         }
+         return newValue;
+@@ -1651,9 +1663,24 @@ public:
+             // manual bridge) lives in ONE shared evaluator used identically by
+             // the InProcess and Sandboxed sinks — execution mode must never
+             // change the automation math.
++            bool hasAutomation = false;
+             const float newValue = computeCanonicalTarget(
+                 binding, laneStore, automationSnap, trackId,
+-                samplePosition, ppqPosition, currentValue);
++                samplePosition, ppqPosition, currentValue, &hasAutomation);
++
++            // Without an active lane the processor owns its manual value.
++            // Smoothing stale history back into that value creates a feedback
++            // loop: the attenuated value becomes the next block's target and
++            // never recovers. In a chain the loss compounds at every insert.
++            if (!hasAutomation)
++            {
++                lastAutomationValues_[(size_t)i] = currentValue;
++                if (auto mirrored = registry.findRT(binding.apexPid))
++                    if (mirrored->getBoundPluginParameter() == pluginParam
++                        && std::abs(mirrored->getNormalizedValue() - currentValue) > 0.0001f)
++                        mirrored->setValueFromPlugin(currentValue);
++                continue;
++            }
+ 
+             // De-zipper smoothing (10 ms one-pole, closed-form advancement).
+             // The smoother must advance across the FULL audio block: the old
+@@ -1675,8 +1702,12 @@ public:
+             {
+                 if (auto automationParam = registry.findRT (binding.apexPid))
+                 {
+-                    automationParam->setValueFromAutomation (smoothedValue);
+-                    continue;
++                    // The instance-local parameter is the DSP authority. A
++                    // registry entry must never redirect this write to the
++                    // processor that previously occupied this slot.
++                    if (automationParam->getBoundPluginParameter() == pluginParam)
++                        automationParam->writeValue(smoothedValue,
++                            apex::automation::ChangeSource::Automation);
+                 }
+             }
+ 
+diff --git a/Tests/Source/Main.cpp b/Tests/Source/Main.cpp
+index b0d1aad..92e4132 100644
+--- a/Tests/Source/Main.cpp
++++ b/Tests/Source/Main.cpp
+@@ -86,6 +86,12 @@ int main (int argc, char** argv)
+         return 0;
+     }
+ 
++    // Keep one GUI lifetime across the entire run. Individual UI suites also
++    // use ScopedJuceInitialiser_GUI; without this outer owner their teardown
++    // deletes process-wide DeletedAtShutdown singletons (including Theme),
++    // leaving later suites with dangling singleton references.
++    juce::ScopedJuceInitialiser_GUI guiLifetime;
++
+     ConsoleLogger logger;
+     juce::Logger::setCurrentLogger (&logger);
+ 
+diff --git a/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp b/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp
+index c371732..c89425b 100644
+--- a/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp
++++ b/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp
+@@ -21,6 +21,7 @@
+ #include <JuceHeader.h>
+ #include "../../../Source/PluginHostCore/PluginChainCore.h"
+ #include "../../../Source/Automation/AutomationSystemCore.h"
++#include "../../../Source/CommandCore/GeneralCommands.h"
+ 
+ #include <atomic>
+ #include <cmath>
+@@ -29,6 +30,7 @@
+ #include <optional>
+ #include <stdexcept>
+ #include <string>
++#include <thread>
+ #include <vector>
+ 
+ namespace
+@@ -77,6 +79,7 @@ struct MatrixSpec
+     bool rejectEnabledAuxBus      = false;    // veto any enabled auxiliary input
+     bool stateThrows              = false;
+     float gain                    = 1.0f;
++    bool parameterControlsGain    = false;
+     juce::uint32 stateMarker      = 0;        // written to state / recorded from state
+     juce::String modulePath;                  // non-empty => instance retains a mock module
+ };
+@@ -240,7 +243,9 @@ public:
+                 {
+                     src = buffer.getSample (ch, i);
+                 }
+-                d[i] = spec_.gain * src;
++                const float parameterGain = spec_.parameterControlsGain
++                    ? getParameters()[0]->getValue() : 1.0f;
++                d[i] = spec_.gain * parameterGain * src;
+             }
+         }
+     }
+@@ -1174,6 +1179,209 @@ public:
+ 
+ static PluginIdentitySimilarNameCoexistenceTests pluginIdentitySimilarNameCoexistenceTests;
+ 
++class PluginReorderGainRegressionTests final : public juce::UnitTest
++{
++public:
++    PluginReorderGainRegressionTests()
++        : UnitTest("plugin.reorder.gain-preservation.v1", "PluginHost") {}
++
++    void runTest() override
++    {
++        testManualValuesAreAuthoritative();
++        testReorderKeepsInstanceValues();
++        testReorderKeepsAutomationOwner();
++        testLegacyLanesFollowThePlugin();
++        testRepeatedMovesDuringPlayback();
++    }
++
++private:
++    void testManualValuesAreAuthoritative()
++    {
++        beginTest("five manual unity inserts never acquire a permanent gain dip");
++        DAW::PluginChainCore chain;
++        chain.prepare(kRate, 64);
++        auto spec = *makeSpecForUid(kUidStereo);
++        spec.parameterControlsGain = true;
++        for (int i = 0; i < 5; ++i)
++            chain.appendPluginInstanceForTesting(std::make_unique<MatrixProbeProcessor>(spec));
++        chain.setAutomationContext("reorder-manual-unity", nullptr, nullptr);
++
++        // Simulate GUI changes after the host seeded its smoothing history.
++        for (int i = 0; i < 5; ++i)
++            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(1.0f);
++        chain.moveSlot(0, 4);
++        // The same manual edit must also work after a reorder.
++        for (int i = 0; i < 5; ++i)
++            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(0.5f);
++        chain.setAutomationContext("reorder-manual-unity", nullptr, nullptr);
++        for (int i = 0; i < 5; ++i)
++            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(1.0f);
++
++        juce::AudioBuffer<float> buffer(2, 64);
++        for (int block = 0; block < 64; ++block)
++        {
++            chain.applyAutomationAtSample("reorder-manual-unity", nullptr, block * 64, kRate, 120.0, 64);
++            fillTonePair(buffer, 64, 0.25f, 0.5f);
++            chain.processBlock(buffer, 64);
++        }
++        expectWithinAbsoluteError(buffer.getSample(0, 63), 0.25f, 1.0e-5f,
++                                  "host must not smooth a manual value towards stale history");
++        for (int i = 0; i < 5; ++i)
++            expectWithinAbsoluteError(chain.getSlot(i)->getProcessor()->getParameters()[0]->getValue(),
++                                      1.0f, 1.0e-6f, "manual unity remains authoritative");
++    }
++
++    void testReorderKeepsInstanceValues()
++    {
++        beginTest("moving identical plugins cannot write into a neighbouring instance");
++        DAW::PluginChainCore chain;
++        chain.prepare(kRate, 64);
++        const float values[] = { 0.95f, 0.8f, 0.6f, 0.3f, 0.1f };
++        std::vector<juce::AudioProcessorParameter*> parameters;
++        for (int i = 0; i < 5; ++i)
++        {
++            chain.appendPluginInstanceForTesting(
++                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
++            auto* parameter = chain.getSlot(i)->getProcessor()->getParameters()[0];
++            parameter->setValueNotifyingHost(values[i]);
++            parameters.push_back(parameter);
++        }
++        chain.setAutomationContext("reorder-instance-values", nullptr, nullptr);
++        chain.moveSlot(0, 4);
++        for (int block = 0; block < 64; ++block)
++            chain.applyAutomationAtSample("reorder-instance-values", nullptr, block * 64, kRate, 120.0, 64);
++        for (int i = 0; i < 5; ++i)
++            expectWithinAbsoluteError(parameters[(size_t)i]->getValue(), values[i], 1.0e-6f,
++                                      "parameter belongs to its original processor after reorder");
++    }
++
++    void testReorderKeepsAutomationOwner()
++    {
++        beginTest("automation identity and its bound processor follow a moved plugin");
++        using KR = apex::automation::AutomationParameterKeyRegistry;
++        DAW::PluginChainCore chain;
++        chain.prepare(kRate, 64);
++        for (int i = 0; i < 2; ++i)
++            chain.appendPluginInstanceForTesting(
++                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
++        chain.setAutomationContext("reorder-automated-owner", nullptr, nullptr);
++        auto* originalParameter = chain.getSlot(0)->getProcessor()->getParameters()[0];
++        const auto pluginName = chain.getSlot(0)->getName();
++        const auto oldKey = KR::pluginParamKey("reorder-automated-owner", 0, pluginName, "param0", kUidStereo);
++        const auto parameterId = KR::getInstance().findID(oldKey);
++        expect(parameterId != apex::automation::kInvalidParameterID);
++        auto& lanes = apex::automation::AutomationLaneStore::getInstance();
++        lanes.getOrCreateLane(parameterId).addPoint({ 0.0, 0.2f });
++        DAW::PluginChainMoveCommand move(chain, 0, 1);
++        move.execute();
++        const auto newKey = KR::pluginParamKey("reorder-automated-owner", 1, pluginName, "param0", kUidStereo);
++        expectEquals((int)KR::getInstance().findID(newKey), (int)parameterId,
++                     "reorder keeps the automation ID attached to the instance");
++        auto* parameter = apex::automation::AutomationSystem::getInstance().getRegistry().find(parameterId);
++        expect(parameter != nullptr && parameter->getBoundPluginParameter() == originalParameter,
++               "the original automation ID still writes to the original plugin");
++        for (int block = 0; block < 128; ++block)
++            chain.applyAutomationAtSample("reorder-automated-owner", nullptr, block * 64, kRate, 120.0, 64);
++        expectWithinAbsoluteError(originalParameter->getValue(), 0.2f, 1.0e-4f,
++                                  "lane still controls the original processor");
++        expectWithinAbsoluteError(chain.getSlot(0)->getProcessor()->getParameters()[0]->getValue(),
++                                  0.5f, 1.0e-6f, "unautomated neighbour is untouched");
++        auto* originalInstance = chain.getSlot(1);
++        move.undo();
++        expect(chain.getSlot(0) == originalInstance, "undo keeps the live processor instance");
++        expectEquals((int)KR::getInstance().findID(oldKey), (int)parameterId, "undo reverses key permutation");
++        move.execute();
++        expect(chain.getSlot(1) == originalInstance, "redo keeps the live processor instance");
++        lanes.removeLane(parameterId);
++    }
++
++    void testLegacyLanesFollowThePlugin()
++    {
++        beginTest("legacy parameter and wet/dry lanes follow the plugin through save/restore");
++        DAW::AutomationManagerCore manager;
++        DAW::PluginChainCore chain;
++        chain.setAutomationManager(&manager);
++        chain.prepare(kRate, 64);
++        for (int i = 0; i < 2; ++i)
++            chain.appendPluginInstanceForTesting(
++                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
++        const juce::String trackId = "reorder-legacy-lanes";
++        chain.setAutomationContext(trackId, nullptr, nullptr);
++        auto* instance = chain.getSlot(0);
++        const auto parameterId = "plugin.0." + instance->getPluginInstanceId() + ".param0";
++        manager.addPoint(trackId, parameterId, 0, 0.2f);
++        manager.addPoint(trackId, DAW::AutomationManagerCore::makePluginSlotMixId(0), 0, 0.8f);
++        const auto beforeReorderSnapshot = manager.getSnapshotPublisher().get();
++        expect(chain.moveSlot(0, 1));
++        const auto remappedId = "plugin.1." + instance->getPluginInstanceId() + ".param0";
++        auto snapshot = manager.getSnapshotPublisher().get();
++        expect(snapshot->findLaneRT(trackId, remappedId) != nullptr, "parameter lane follows instance");
++        expect(snapshot->findLaneRT(trackId, DAW::AutomationManagerCore::makePluginSlotMixId(1)) != nullptr,
++               "wet/dry lane follows instance");
++        for (int block = 0; block < 128; ++block)
++            chain.applyAutomationAtSample(trackId, beforeReorderSnapshot.get(), block * 64, kRate, 120.0, 64);
++        expectWithinAbsoluteError(instance->getProcessor()->getParameters()[0]->getValue(),
++                                  0.2f, 1.0e-4f, "legacy automation drives moved instance");
++        expectWithinAbsoluteError(chain.getSlotMix(1), 0.8f, 1.0e-4f, "wet/dry automation drives moved instance");
++        expectWithinAbsoluteError(chain.getSlotMix(0), 1.0f, 1.0e-6f, "neighbour mix remains unity");
++        DAW::AutomationManagerCore restored;
++        restored.restoreState(manager.getState());
++        expect(restored.getSnapshotPublisher().get()->findLaneRT(trackId, remappedId) != nullptr,
++               "new lane address survives persistence");
++    }
++
++    void testRepeatedMovesDuringPlayback()
++    {
++        beginTest("200 moves during continuous audio preserve six insert gains and live instances");
++        DAW::PluginChainCore chain;
++        chain.prepare(kRate, 64);
++        auto spec = *makeSpecForUid(kUidStereo);
++        spec.parameterControlsGain = true;
++        std::vector<MatrixProbeProcessor*> processors;
++        for (int i = 0; i < 6; ++i)
++        {
++            auto processor = std::make_unique<MatrixProbeProcessor>(spec);
++            processor->quietLogging.store(true);
++            processor->getParameters()[0]->setValueNotifyingHost(1.0f);
++            processors.push_back(processor.get());
++            chain.appendPluginInstanceForTesting(std::move(processor));
++        }
++        chain.setAutomationContext("reorder-live-stress", nullptr, nullptr);
++        std::atomic<bool> stop { false };
++        std::atomic<int> blocks { 0 }, badBlocks { 0 };
++        std::thread audio([&]
++        {
++            juce::AudioBuffer<float> buffer(2, 64);
++            while (!stop.load())
++            {
++                chain.applyAutomationAtSample("reorder-live-stress", nullptr, 0, kRate, 120.0, 64);
++                fillTonePair(buffer, 64, 0.25f, 0.5f);
++                chain.processBlock(buffer, 64);
++                if (std::abs(buffer.getSample(0, 63) - 0.25f) > 1.0e-5f)
++                    badBlocks.fetch_add(1);
++                blocks.fetch_add(1);
++            }
++        });
++        while (blocks.load() < 32) juce::Thread::yield();
++        int completedMoves = 0;
++        for (int moveIndex = 0; moveIndex < 200; ++moveIndex)
++            if (chain.moveSlot(moveIndex % 2 == 0 ? 0 : 5, moveIndex % 2 == 0 ? 5 : 0))
++                ++completedMoves;
++        stop.store(true);
++        audio.join();
++        expectEquals(completedMoves, 200, "every reorder completed");
++        expectEquals(badBlocks.load(), 0, "no permanent or transient gain dip with unity inserts");
++        for (auto* processor : processors)
++        {
++            expectEquals(processor->prepareCount, 1, "order edits never re-prepare plugins");
++            expectWithinAbsoluteError(processor->getParameters()[0]->getValue(), 1.0f, 1.0e-6f,
++                                      "each live processor retains unity");
++        }
++    }
++};
++
++static PluginReorderGainRegressionTests pluginReorderGainRegressionTests;
++
+ // ══════════════════════════════════════════════════════════════════════════════
+ // plugin.module.coexistence.lifecycle.v1
+ //

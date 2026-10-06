@@ -92,6 +92,16 @@ public:
     std::function<void(const TrackID&)> onAddPluginRequested;
 
     std::function<void(PluginChainCore&, std::function<void()>, const juce::String&)> onPluginChainEditRequested;
+    std::function<void(PluginChainCore&, int, int)> onPluginSlotMoveRequested;
+
+    void requestSlotMove(int fromIndex, int toIndex)
+    {
+        if (chain_ == nullptr) return;
+        if (onPluginSlotMoveRequested)
+            onPluginSlotMoveRequested(*chain_, fromIndex, toIndex);
+        else
+            chain_->moveSlot(fromIndex, toIndex);
+    }
 
     std::function<void(PluginInstanceCore* slot, const TrackID& trackId, int slotIndex)> onPluginEditorOpened;
 
@@ -264,7 +274,7 @@ public:
                                           (int)(details.localPosition.y - kHeaderH) / kSlotHeight);
             if (targetSlot != srcSlot)
             {
-                chain_->moveSlot(srcSlot, targetSlot);
+                requestSlotMove(srcSlot, targetSlot);
                 rebuildSlots();
             }
         }
@@ -1362,8 +1372,8 @@ private:
                             safeThis->repaint();
                         }
                     }
-                    else if (r == 3) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->moveSlot(safeThis->index_, safeThis->index_ - 1); }, "Move Plugin"); else chain->moveSlot(safeThis->index_, safeThis->index_ - 1); safeThis->owner_.rebuildSlots(); }
-                    else if (r == 4) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->moveSlot(safeThis->index_, safeThis->index_ + 1); }, "Move Plugin"); else chain->moveSlot(safeThis->index_, safeThis->index_ + 1); safeThis->owner_.rebuildSlots(); }
+                    else if (r == 3) { safeThis->owner_.requestSlotMove(safeThis->index_, safeThis->index_ - 1); safeThis->owner_.rebuildSlots(); }
+                    else if (r == 4) { safeThis->owner_.requestSlotMove(safeThis->index_, safeThis->index_ + 1); safeThis->owner_.rebuildSlots(); }
                     else if (r == 10) { if (safeThis->owner_.onPluginChainEditRequested) safeThis->owner_.onPluginChainEditRequested(*chain, [chain, safeThis]() { chain->removePlugin(safeThis->index_); }, "Remove Plugin"); else chain->removePlugin(safeThis->index_); safeThis->owner_.rebuildSlots(); }
                 });
         }

@@ -9,6 +9,7 @@ struct PitchTimeInputPlan
 	double stretchRatio = 1.0;
 	int inputSamplesNeeded = 1;
 	int safeInputSamples = 1;
+	int startupPreRollSamples = 0;
 	int64_t inputClipOffset = 0;
 };
 
@@ -24,13 +25,18 @@ public:
 	static PitchTimeInputPlan makeInputPlan(int outputSampleCount,
 											SamplePosition engineClipOffset,
 											float clipStretch,
-											int inputBufferSamples) noexcept
+												int inputBufferSamples,
+												int inputLeadSamples = 0,
+												int startupPreRollSamples = 0) noexcept
 	{
 		PitchTimeInputPlan plan;
 		plan.stretchRatio = juce::jmax(0.01, (double)clipStretch);
 		plan.inputSamplesNeeded = juce::jmax(1, (int)std::llround((double)outputSampleCount / plan.stretchRatio));
-		plan.safeInputSamples = juce::jmin(plan.inputSamplesNeeded, inputBufferSamples);
-		plan.inputClipOffset = (int64_t)std::llround((double)engineClipOffset / plan.stretchRatio);
+		plan.startupPreRollSamples = juce::jmax(0, startupPreRollSamples);
+		const int totalInputSamples = plan.inputSamplesNeeded + plan.startupPreRollSamples;
+		plan.safeInputSamples = juce::jmin(totalInputSamples, inputBufferSamples);
+		plan.inputClipOffset = (int64_t)std::llround((double)engineClipOffset / plan.stretchRatio)
+			+ (int64_t)juce::jmax(0, inputLeadSamples);
 		return plan;
 	}
 

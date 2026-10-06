@@ -392,6 +392,81 @@ public:
             }
         }
 
+        beginTest ("stage6.clip-independent-pitch-core.startup-preroll");
+        {
+            constexpr int blockSize = 2048;
+            constexpr double deviceRate = 48000.0;
+            constexpr double stretchRatio = 1.5;
+            constexpr float amplitude = 0.4f;
+            constexpr double frequency = 440.0;
+
+            ClipIndependentPitchCore core;
+            core.prepare (deviceRate, blockSize, 2);
+
+            ClipPitchProcessParams params;
+            params.sampleRate = (int) deviceRate;
+            params.channels = 2;
+            params.stretchRatio = stretchRatio;
+            params.startupPreRollSamples = core.requiredStartupPreRollSamples (stretchRatio);
+
+            const int inputSamples = (int) std::llround (blockSize / stretchRatio);
+            const int totalInput = params.startupPreRollSamples + inputSamples * 3;
+            std::vector<float> source (totalInput, 0.0f);
+            std::vector<float> outputL (blockSize * 2, 0.0f);
+            std::vector<float> outputR (blockSize * 2, 0.0f);
+            for (int i = 0; i < totalInput; ++i)
+                source[(size_t) i] = amplitude * std::sin (
+                    (float) (2.0 * juce::MathConstants<double>::pi * frequency * i / deviceRate));
+
+            const auto firstPlan = DAW::SoundEngine::ApexPitchTimeInputPlanCore::makeInputPlan (
+                blockSize, 0, (float) stretchRatio, totalInput, 0,
+                params.startupPreRollSamples);
+            expect (params.startupPreRollSamples > 0,
+                    "stretched playback requests a nonzero Signalsmith startup seek");
+            expectEquals (firstPlan.safeInputSamples,
+                          params.startupPreRollSamples + inputSamples,
+                          "first input window includes seek samples and the first process block");
+
+            const float* firstInput[2] = { source.data(), source.data() };
+            float* firstOutput[2] = { outputL.data(), outputR.data() };
+            core.processBlock (firstInput, firstOutput, 2, blockSize, params);
+            expectEquals (core.activeInputLeadSamples(), params.startupPreRollSamples,
+                          "core publishes the source lead consumed by outputSeek");
+
+            const auto secondPlan = DAW::SoundEngine::ApexPitchTimeInputPlanCore::makeInputPlan (
+                blockSize, blockSize, (float) stretchRatio, totalInput,
+                core.activeInputLeadSamples(), 0);
+            expectEquals (secondPlan.inputClipOffset,
+                          (int64_t) inputSamples + params.startupPreRollSamples,
+                          "next source window continues after seek and processed input");
+
+            const float* secondInput[2] = {
+                source.data() + secondPlan.inputClipOffset,
+                source.data() + secondPlan.inputClipOffset
+            };
+            float* secondOutput[2] = {
+                outputL.data() + blockSize,
+                outputR.data() + blockSize
+            };
+            core.processBlock (secondInput, secondOutput, 2, blockSize, params);
+
+            double sumSquares = 0.0;
+            for (int i = 0; i < blockSize; ++i)
+                sumSquares += (double) outputL[(size_t) i] * outputL[(size_t) i];
+            const float firstBlockRms = (float) std::sqrt (sumSquares / blockSize);
+            expect (firstBlockRms > 0.05f,
+                    "2048-sample stretched clip produces audible audio in its first block");
+            float maxAdjacentJump = 0.0f;
+            for (size_t i = 1; i < outputL.size(); ++i)
+                maxAdjacentJump = juce::jmax (maxAdjacentJump,
+                    std::abs (outputL[i] - outputL[i - 1]));
+            expect (maxAdjacentJump < 0.08f,
+                    "seek pre-roll and the next 2048 block join without a hard discontinuity");
+            expect (allFinite (outputL.data(), (int) outputL.size())
+                        && allFinite (outputR.data(), (int) outputR.size()),
+                    "startup pre-roll output remains finite");
+        }
+
         // ══════════════════════════════════════════════════════════════════
         // STAGE 6b — DIRECT SIGNALSMITH WITH FIXED SEED
         // Decisive test of pure DSP block-segmentation invariance, isolated

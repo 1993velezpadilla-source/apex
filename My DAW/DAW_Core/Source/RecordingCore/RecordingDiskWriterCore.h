@@ -35,25 +35,29 @@ public:
                double sampleRate,
                int numChannels,
                int bitDepth,
-               juce::TimeSliceThread& diskThread)
+               juce::TimeSliceThread& diskThread,
+               bool useFloatingPointWav = false)
     {
         stop();
 
         outputFile_ = outFile;
         outputFile_.deleteFile();
 
-        auto* outStream = outputFile_.createOutputStream().release();
+        std::unique_ptr<juce::OutputStream> outStream = outputFile_.createOutputStream();
         if (outStream == nullptr) return false;
 
         juce::WavAudioFormat wav;
-        std::unique_ptr<juce::AudioFormatWriter> writer(
-            wav.createWriterFor(outStream, sampleRate,
-                                (unsigned int) numChannels, bitDepth, {}, 0));
-        if (writer == nullptr)
-        {
-            delete outStream;
-            return false;
-        }
+        const auto actualBitDepth = useFloatingPointWav ? 32 : bitDepth;
+        const auto sampleFormat = useFloatingPointWav
+            ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+            : juce::AudioFormatWriterOptions::SampleFormat::integral;
+        const auto options = juce::AudioFormatWriterOptions{}
+            .withSampleRate(sampleRate)
+            .withNumChannels(numChannels)
+            .withBitsPerSample(actualBitDepth)
+            .withSampleFormat(sampleFormat);
+        auto writer = wav.createWriterFor(outStream, options);
+        if (writer == nullptr) return false;
 
         threadedWriter_.reset(
             new juce::AudioFormatWriter::ThreadedWriter(

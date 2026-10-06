@@ -1,0 +1,13 @@
+endpoint=Speakers (Realtek(R) Audio)
+mode=legacy block=64 rate=48000 period=480 capacity=1056 costMs=0.533 callbacks=1133 emptyBeforeWrite=0 minPadding=608
+mode=legacy block=128 rate=48000 period=480 capacity=1056 costMs=1.067 callbacks=567 emptyBeforeWrite=0 minPadding=608
+mode=legacy block=256 rate=48000 period=480 capacity=1056 costMs=2.133 callbacks=284 emptyBeforeWrite=0 minPadding=608
+mode=legacy block=512 rate=48000 period=480 capacity=1056 costMs=4.267 callbacks=142 emptyBeforeWrite=0 minPadding=608
+mode=legacy block=1024 rate=48000 period=480 capacity=1056 costMs=8.533 callbacks=71 emptyBeforeWrite=0 minPadding=608
+mode=legacy block=2048 rate=48000 period=480 capacity=1056 costMs=17.067 callbacks=36 emptyBeforeWrite=0 minPadding=128
+mode=buffered block=64 rate=48000 period=480 capacity=1056 costMs=0.533 callbacks=1133 emptyBeforeWrite=0 minPadding=608
+mode=buffered block=128 rate=48000 period=480 capacity=1056 costMs=1.067 callbacks=567 emptyBeforeWrite=0 minPadding=608
+mode=buffered block=256 rate=48000 period=480 capacity=1056 costMs=2.133 callbacks=284 emptyBeforeWrite=0 minPadding=608
+mode=buffered block=512 rate=48000 period=480 capacity=1056 costMs=4.267 callbacks=140 emptyBeforeWrite=2 minPadding=0
+mode=buffered block=1024 rate=48000 period=480 capacity=1504 costMs=8.533 callbacks=71 emptyBeforeWrite=0 minPadding=96
+mode=buffered block=2048 rate=48000 period=480 capacity=2528 costMs=17.067 callbacks=36 emptyBeforeWrite=0 minPadding=640

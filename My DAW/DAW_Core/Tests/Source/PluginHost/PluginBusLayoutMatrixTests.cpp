@@ -21,14 +21,17 @@
 #include <JuceHeader.h>
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
+#include "../../../Source/CommandCore/GeneralCommands.h"
 
 #include <atomic>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -77,6 +80,7 @@ struct MatrixSpec
     bool rejectEnabledAuxBus      = false;    // veto any enabled auxiliary input
     bool stateThrows              = false;
     float gain                    = 1.0f;
+    bool parameterControlsGain    = false;
     juce::uint32 stateMarker      = 0;        // written to state / recorded from state
     juce::String modulePath;                  // non-empty => instance retains a mock module
 };
@@ -167,9 +171,10 @@ public:
         return true;
     }
 
-    void prepareToPlay (double, int) override
+    void prepareToPlay (double, int blockSize) override
     {
         ++prepareCount;
+        maxBlock_ = juce::jmax(maxBlock_, blockSize);
         log_->push_back (juce::String::formatted ("prepare in=%d out=%d",
             getTotalNumInputChannels(), getTotalNumOutputChannels()));
     }
@@ -194,10 +199,22 @@ public:
         block.append (&spec_.stateMarker, 4);
     }
 
-    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
     {
         const int channels = buffer.getNumChannels();
         const int n = juce::jmin (buffer.getNumSamples(), maxBlock_);
+        const int observation = processObservationCount++;
+        if (observation < (int) observedParameterValues.size())
+        {
+            observedParameterValues[(size_t) observation] = getParameters()[0]->getValue();
+            observedMidiEventCounts[(size_t) observation] = (int) midi.getNumEvents();
+            observedFirstMidiSamplePositions[(size_t) observation] = -1;
+            for (const auto metadata : midi)
+            {
+                observedFirstMidiSamplePositions[(size_t) observation] = metadata.samplePosition;
+                break;
+            }
+        }
         lastChannels.store (channels, std::memory_order_relaxed);
         lastSamples.store (n, std::memory_order_relaxed);
         if (! quietLogging.load (std::memory_order_relaxed))
@@ -240,7 +257,9 @@ public:
                 {
                     src = buffer.getSample (ch, i);
                 }
-                d[i] = spec_.gain * src;
+                const float parameterGain = spec_.parameterControlsGain
+                    ? getParameters()[0]->getValue() : 1.0f;
+                d[i] = spec_.gain * parameterGain * src;
             }
         }
     }
@@ -283,6 +302,10 @@ public:
     std::atomic<int> lastSamples  { 0 };
     std::atomic<float> firstInput0 { -1000.0f };
     std::atomic<float> firstInput1 { -1000.0f };
+    std::array<float, 256> observedParameterValues {};
+    std::array<int, 256> observedMidiEventCounts {};
+    std::array<int, 256> observedFirstMidiSamplePositions {};
+    int processObservationCount = 0;
 
     // Module-lifetime instrumentation (defined after MockModule).
     ~MatrixProbeProcessor() override;
@@ -1173,6 +1196,321 @@ public:
 };
 
 static PluginIdentitySimilarNameCoexistenceTests pluginIdentitySimilarNameCoexistenceTests;
+
+class PluginReorderGainRegressionTests final : public juce::UnitTest
+{
+public:
+    PluginReorderGainRegressionTests()
+        : UnitTest("plugin.reorder.gain-preservation.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        testManualValuesAreAuthoritative();
+        testReorderKeepsInstanceValues();
+        testReorderKeepsAutomationOwner();
+        testLegacyLanesFollowThePlugin();
+        testRepeatedMovesDuringPlayback();
+    }
+
+private:
+    void testManualValuesAreAuthoritative()
+    {
+        beginTest("five manual unity inserts never acquire a permanent gain dip");
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        for (int i = 0; i < 5; ++i)
+            chain.appendPluginInstanceForTesting(std::make_unique<MatrixProbeProcessor>(spec));
+        chain.setAutomationContext("reorder-manual-unity", nullptr, nullptr);
+
+        // Simulate GUI changes after the host seeded its smoothing history.
+        for (int i = 0; i < 5; ++i)
+            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(1.0f);
+        chain.moveSlot(0, 4);
+        // The same manual edit must also work after a reorder.
+        for (int i = 0; i < 5; ++i)
+            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(0.5f);
+        chain.setAutomationContext("reorder-manual-unity", nullptr, nullptr);
+        for (int i = 0; i < 5; ++i)
+            chain.getSlot(i)->getProcessor()->getParameters()[0]->setValueNotifyingHost(1.0f);
+
+        juce::AudioBuffer<float> buffer(2, 64);
+        for (int block = 0; block < 64; ++block)
+        {
+            chain.applyAutomationAtSample("reorder-manual-unity", nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(buffer, 64, 0.25f, 0.5f);
+            chain.processBlock(buffer, 64);
+        }
+        expectWithinAbsoluteError(buffer.getSample(0, 63), 0.25f, 1.0e-5f,
+                                  "host must not smooth a manual value towards stale history");
+        for (int i = 0; i < 5; ++i)
+            expectWithinAbsoluteError(chain.getSlot(i)->getProcessor()->getParameters()[0]->getValue(),
+                                      1.0f, 1.0e-6f, "manual unity remains authoritative");
+    }
+
+    void testReorderKeepsInstanceValues()
+    {
+        beginTest("moving identical plugins cannot write into a neighbouring instance");
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        const float values[] = { 0.95f, 0.8f, 0.6f, 0.3f, 0.1f };
+        std::vector<juce::AudioProcessorParameter*> parameters;
+        for (int i = 0; i < 5; ++i)
+        {
+            chain.appendPluginInstanceForTesting(
+                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
+            auto* parameter = chain.getSlot(i)->getProcessor()->getParameters()[0];
+            parameter->setValueNotifyingHost(values[i]);
+            parameters.push_back(parameter);
+        }
+        chain.setAutomationContext("reorder-instance-values", nullptr, nullptr);
+        chain.moveSlot(0, 4);
+        for (int block = 0; block < 64; ++block)
+            chain.applyAutomationAtSample("reorder-instance-values", nullptr, block * 64, kRate, 120.0, 64);
+        for (int i = 0; i < 5; ++i)
+            expectWithinAbsoluteError(parameters[(size_t)i]->getValue(), values[i], 1.0e-6f,
+                                      "parameter belongs to its original processor after reorder");
+    }
+
+    void testReorderKeepsAutomationOwner()
+    {
+        beginTest("automation identity and its bound processor follow a moved plugin");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        for (int i = 0; i < 2; ++i)
+            chain.appendPluginInstanceForTesting(
+                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
+        chain.setAutomationContext("reorder-automated-owner", nullptr, nullptr);
+        auto* originalParameter = chain.getSlot(0)->getProcessor()->getParameters()[0];
+        const auto pluginName = chain.getSlot(0)->getName();
+        const auto oldKey = KR::pluginParamKey("reorder-automated-owner", 0, pluginName, "param0", kUidStereo);
+        const auto parameterId = KR::getInstance().findID(oldKey);
+        expect(parameterId != apex::automation::kInvalidParameterID);
+        auto& lanes = apex::automation::AutomationLaneStore::getInstance();
+        lanes.getOrCreateLane(parameterId).addPoint({ 0.0, 0.2f });
+        DAW::PluginChainMoveCommand move(chain, 0, 1);
+        move.execute();
+        const auto newKey = KR::pluginParamKey("reorder-automated-owner", 1, pluginName, "param0", kUidStereo);
+        expectEquals((int)KR::getInstance().findID(newKey), (int)parameterId,
+                     "reorder keeps the automation ID attached to the instance");
+        auto* parameter = apex::automation::AutomationSystem::getInstance().getRegistry().find(parameterId);
+        expect(parameter != nullptr && parameter->getBoundPluginParameter() == originalParameter,
+               "the original automation ID still writes to the original plugin");
+        for (int block = 0; block < 128; ++block)
+            chain.applyAutomationAtSample("reorder-automated-owner", nullptr, block * 64, kRate, 120.0, 64);
+        expectWithinAbsoluteError(originalParameter->getValue(), 0.2f, 1.0e-4f,
+                                  "lane still controls the original processor");
+        expectWithinAbsoluteError(chain.getSlot(0)->getProcessor()->getParameters()[0]->getValue(),
+                                  0.5f, 1.0e-6f, "unautomated neighbour is untouched");
+        auto* originalInstance = chain.getSlot(1);
+        move.undo();
+        expect(chain.getSlot(0) == originalInstance, "undo keeps the live processor instance");
+        expectEquals((int)KR::getInstance().findID(oldKey), (int)parameterId, "undo reverses key permutation");
+        move.execute();
+        expect(chain.getSlot(1) == originalInstance, "redo keeps the live processor instance");
+        lanes.removeLane(parameterId);
+    }
+
+    void testLegacyLanesFollowThePlugin()
+    {
+        beginTest("legacy parameter and wet/dry lanes follow the plugin through save/restore");
+        DAW::AutomationManagerCore manager;
+        DAW::PluginChainCore chain;
+        chain.setAutomationManager(&manager);
+        chain.prepare(kRate, 64);
+        for (int i = 0; i < 2; ++i)
+            chain.appendPluginInstanceForTesting(
+                std::make_unique<MatrixProbeProcessor>(*makeSpecForUid(kUidStereo)));
+        const juce::String trackId = "reorder-legacy-lanes";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* instance = chain.getSlot(0);
+        const auto parameterId = "plugin.0." + instance->getPluginInstanceId() + ".param0";
+        manager.addPoint(trackId, parameterId, 0, 0.2f);
+        manager.addPoint(trackId, DAW::AutomationManagerCore::makePluginSlotMixId(0), 0, 0.8f);
+        const auto beforeReorderSnapshot = manager.getSnapshotPublisher().get();
+        expect(chain.moveSlot(0, 1));
+        const auto remappedId = "plugin.1." + instance->getPluginInstanceId() + ".param0";
+        auto snapshot = manager.getSnapshotPublisher().get();
+        expect(snapshot->findLaneRT(trackId, remappedId) != nullptr, "parameter lane follows instance");
+        expect(snapshot->findLaneRT(trackId, DAW::AutomationManagerCore::makePluginSlotMixId(1)) != nullptr,
+               "wet/dry lane follows instance");
+        for (int block = 0; block < 128; ++block)
+            chain.applyAutomationAtSample(trackId, beforeReorderSnapshot.get(), block * 64, kRate, 120.0, 64);
+        expectWithinAbsoluteError(instance->getProcessor()->getParameters()[0]->getValue(),
+                                  0.2f, 1.0e-4f, "legacy automation drives moved instance");
+        expectWithinAbsoluteError(chain.getSlotMix(1), 0.8f, 1.0e-4f, "wet/dry automation drives moved instance");
+        expectWithinAbsoluteError(chain.getSlotMix(0), 1.0f, 1.0e-6f, "neighbour mix remains unity");
+        DAW::AutomationManagerCore restored;
+        restored.restoreState(manager.getState());
+        expect(restored.getSnapshotPublisher().get()->findLaneRT(trackId, remappedId) != nullptr,
+               "new lane address survives persistence");
+    }
+
+    void testRepeatedMovesDuringPlayback()
+    {
+        beginTest("200 moves during continuous audio preserve six insert gains and live instances");
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        std::vector<MatrixProbeProcessor*> processors;
+        for (int i = 0; i < 6; ++i)
+        {
+            auto processor = std::make_unique<MatrixProbeProcessor>(spec);
+            processor->quietLogging.store(true);
+            processor->getParameters()[0]->setValueNotifyingHost(1.0f);
+            processors.push_back(processor.get());
+            chain.appendPluginInstanceForTesting(std::move(processor));
+        }
+        chain.setAutomationContext("reorder-live-stress", nullptr, nullptr);
+        std::atomic<bool> stop { false };
+        std::atomic<int> blocks { 0 }, badBlocks { 0 };
+        std::thread audio([&]
+        {
+            juce::AudioBuffer<float> buffer(2, 64);
+            while (!stop.load())
+            {
+                chain.applyAutomationAtSample("reorder-live-stress", nullptr, 0, kRate, 120.0, 64);
+                fillTonePair(buffer, 64, 0.25f, 0.5f);
+                chain.processBlock(buffer, 64);
+                if (std::abs(buffer.getSample(0, 63) - 0.25f) > 1.0e-5f)
+                    badBlocks.fetch_add(1);
+                blocks.fetch_add(1);
+            }
+        });
+        while (blocks.load() < 32) juce::Thread::yield();
+        int completedMoves = 0;
+        for (int moveIndex = 0; moveIndex < 200; ++moveIndex)
+            if (chain.moveSlot(moveIndex % 2 == 0 ? 0 : 5, moveIndex % 2 == 0 ? 5 : 0))
+                ++completedMoves;
+        stop.store(true);
+        audio.join();
+        expectEquals(completedMoves, 200, "every reorder completed");
+        expectEquals(badBlocks.load(), 0, "no permanent or transient gain dip with unity inserts");
+        for (auto* processor : processors)
+        {
+            expectEquals(processor->prepareCount, 1, "order edits never re-prepare plugins");
+            expectWithinAbsoluteError(processor->getParameters()[0]->getValue(), 1.0f, 1.0e-6f,
+                                      "each live processor retains unity");
+        }
+    }
+};
+
+static PluginReorderGainRegressionTests pluginReorderGainRegressionTests;
+
+class PluginAutomationLargeBlockTests final : public juce::UnitTest
+{
+public:
+    PluginAutomationLargeBlockTests()
+        : UnitTest("plugin.automation.large-block-smoothing.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        beginTest("2048-sample plugin automation updates in short slices and preserves MIDI offsets");
+        testChangingAutomationUsesShortSlices();
+        beginTest("static plugin automation retains the full host block");
+        testStaticAutomationKeepsFullBlock();
+    }
+
+private:
+    static constexpr int largeBlock = 2048;
+    static constexpr const char* trackId = "automation-large-block";
+
+    void testChangingAutomationUsesShortSlices()
+    {
+        DAW::AutomationManagerCore manager;
+        DAW::PluginChainCore chain;
+        chain.setAutomationManager(&manager);
+        chain.prepare(kRate, largeBlock);
+
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* probePtr = probe.get();
+        chain.appendPluginInstanceForTesting(std::move(probe));
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+
+        const auto parameterId = "plugin.0." + chain.getSlot(0)->getPluginInstanceId() + ".param0";
+        manager.addPoint(trackId, parameterId, 0, 0.1f);
+        manager.addPoint(trackId, parameterId, largeBlock, 0.9f);
+        const auto automation = manager.getSnapshotPublisher().get();
+
+        juce::AudioBuffer<float> audio(2, largeBlock);
+        audio.clear();
+        probePtr->quietLogging.store(true, std::memory_order_relaxed);
+
+        chain.processBlockWithAutomation(audio, nullptr, nullptr, trackId,
+            automation.get(), 0, kRate, 120.0, largeBlock);
+
+        probePtr->processObservationCount = 0;
+        audio.clear();
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 63);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 61, (juce::uint8) 100), 64);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 62, (juce::uint8) 100), largeBlock - 1);
+        chain.processBlockWithAutomation(audio, &midi, nullptr, trackId,
+            automation.get(), largeBlock, kRate, 120.0, largeBlock);
+
+        expectEquals(probePtr->processObservationCount, largeBlock / DAW::PluginChainCore::kAutomationSliceSamples,
+                     "only an automated large callback is subdivided");
+        if (probePtr->processObservationCount >= 32)
+        {
+            const auto first = probePtr->observedParameterValues[0];
+            const auto last = probePtr->observedParameterValues[31];
+            expect(last > first, "the plugin sees automation progress within one device callback");
+            float largestStep = 0.0f;
+            for (int i = 1; i < 32; ++i)
+                largestStep = juce::jmax(largestStep,
+                    std::abs(probePtr->observedParameterValues[(size_t)i]
+                             - probePtr->observedParameterValues[(size_t)i - 1]));
+            expect(largestStep < 0.15f, "parameter movement has no host-block-sized jump");
+
+            expectEquals(probePtr->observedMidiEventCounts[0], 1,
+                         "event at the end of slice zero appears once");
+            expectEquals(probePtr->observedFirstMidiSamplePositions[0], 63,
+                         "event at sample 63 keeps its slice-relative position");
+            expectEquals(probePtr->observedMidiEventCounts[1], 1,
+                         "event at sample 64 moves into slice one exactly once");
+            expectEquals(probePtr->observedFirstMidiSamplePositions[1], 0,
+                         "event at a slice boundary starts at offset zero");
+            expectEquals(probePtr->observedMidiEventCounts[31], 1,
+                         "event at the end of the 2048-sample callback appears once");
+            expectEquals(probePtr->observedFirstMidiSamplePositions[31], 63,
+                         "last MIDI event is aligned to the final slice");
+        }
+    }
+
+    void testStaticAutomationKeepsFullBlock()
+    {
+        DAW::AutomationManagerCore manager;
+        DAW::PluginChainCore chain;
+        chain.setAutomationManager(&manager);
+        chain.prepare(kRate, largeBlock);
+        auto spec = *makeSpecForUid(kUidStereo);
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* probePtr = probe.get();
+        chain.appendPluginInstanceForTesting(std::move(probe));
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        const auto parameterId = "plugin.0." + chain.getSlot(0)->getPluginInstanceId() + ".param0";
+        manager.addPoint(trackId, parameterId, 0, 0.5f);
+        const auto automation = manager.getSnapshotPublisher().get();
+        juce::AudioBuffer<float> audio(2, largeBlock);
+        audio.clear();
+        probePtr->quietLogging.store(true, std::memory_order_relaxed);
+
+        chain.processBlockWithAutomation(audio, nullptr, nullptr, trackId,
+            automation.get(), 0, kRate, 120.0, largeBlock);
+
+        expectEquals(probePtr->processObservationCount, 1,
+                     "a constant automated value does not multiply plugin callbacks");
+        expectEquals(probePtr->lastSamples.load(std::memory_order_relaxed), largeBlock,
+                     "the plugin receives the negotiated 2048-sample block when no value is moving");
+    }
+};
+
+static PluginAutomationLargeBlockTests pluginAutomationLargeBlockTests;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // plugin.module.coexistence.lifecycle.v1

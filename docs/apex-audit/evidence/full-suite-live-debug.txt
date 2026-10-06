@@ -1,0 +1,418 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.219 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.2270 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+*** wait with pending attach
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             Tests\Builds\VisualStudio2026\x64\Debug\ConsoleApp
+Symbol search path is: Tests\Builds\VisualStudio2026\x64\Debug\ConsoleApp
+Executable search path is: 
+WARNING: Process 29660 is not attached as a debuggee
+         The process can be examined but debug events will not be received
+................................................................
+..........
+Loading unloaded module list
+................................
+(73dc.6ac): Wake debugger - code 80000007 (first chance)
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+ntdll!NtRaiseHardError+0x14:
+00007ff8`d8523c54 c3              ret
+0:000> cdb: Reading initial command '.exr -1; .ecxr; ~* kb; lm; .dump /ma ".apex-debug\plugin-reorder\full-suite-crash.dmp"; qd'
+ExceptionAddress: 0000000000000000
+   ExceptionCode: 80000007 (Wake debugger)
+  ExceptionFlags: 00000000
+NumberParameters: 0
+Unable to get exception context, HRESULT 0x8000FFFF
+
+.  0  Id: 73dc.6ac Suspend: 1 Teb: 00000008`8c179000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d59df283     : 00000000`00000088 0000013e`5de40000 00000000`000013a8 0000013e`5de70000 : ntdll!NtRaiseHardError+0x14
+00007ff8`d8529ba0     : 00007ff8`d856ff28 00007ff8`d856ff34 00000000`00000000 00000000`00000000 : KERNELBASE!UnhandledExceptionFilter+0x4f3
+00007ff8`d84e4703     : 00000008`8c2ff990 00007ff8`d859c494 00000008`8c2f5280 00000000`00000000 : ntdll!strncpy+0x2a50
+00007ff8`d85254ff     : 00000008`8c2f5e70 00000008`8c2f5780 00000000`00000000 00007ff8`d859c494 : ntdll!_C_specific_handler+0x93
+00007ff8`d848bd25     : 00000008`8c2f5e70 00000000`00000000 00007ff8`d846caec 00007ff8`d859c494 : ntdll!_chkstk+0x9f
+00007ff8`d8524e3e     : 74af8628`f86d779d 00007ff6`e7f0c74c 00000000`00000000 00000000`00000067 : ntdll!RtlWow64GetCurrentMachine+0x655
+00007ff6`e6c46c0e     : 0000013e`66486110 00000008`41500000 0000013e`00000000 0000013e`66486110 : ntdll!KiUserExceptionDispatcher+0x2e
+*** WARNING: Unable to verify checksum for C:\Users\1993v\OneDrive\Desktop\Apex backup\My DAW\DAW_Core\Tests\Builds\VisualStudio2026\x64\Debug\ConsoleApp\APEXTests.exe
+00007ff6`e6c2c9cd     : 00000008`8c2f6fb0 00000008`8c2f70c8 00000008`8c2f6b48 00000008`8c2f6b70 : APEXTests!DAW::MixerStrip::initChildren+0x13e
+00007ff6`e6c32ea7     : 00000008`8c2f6fb0 0000013e`66486110 00000008`8c2fadf0 00000000`00000000 : APEXTests!DAW::MixerStrip::MixerStrip+0x137d
+00007ff6`e6c5f5b5     : 00000008`8c2fae48 0000013e`66486110 00000008`00000000 00000008`c0c00000 : APEXTests!<lambda_95405436286a04e81efe0d53853350bb>::operator()+0xd7
+00007ff6`e7616b3f     : 00007ff6`e8ae35b8 00000008`8c2fec38 00000008`00000001 0000013e`5d939c20 : APEXTests!MixerFaderUndoExactTests::runTest+0x4d5
+00007ff6`e7617409     : 00007ff6`e8ae35b8 00000008`8c2ff780 00000008`8c2feca0 00000008`8c2fedf0 : APEXTests!juce::UnitTest::performTest+0x6f
+00007ff6`e7617455     : 00000008`8c2ff780 00007ff6`e8b01230 00000000`a9e12026 00007ff6`e83afbb0 : APEXTests!juce::UnitTestRunner::runTests+0x209
+00007ff6`e71e6464     : 00000008`8c2ff780 00000000`a9e12026 00000008`8c2fee40 00000008`8c2ff020 : APEXTests!juce::UnitTestRunner::runAllTests+0x25
+00007ff6`e8106169     : 00000000`00000003 0000013e`5d8df670 00007ff6`e6617fa7 00007ff6`e65f0000 : APEXTests!main+0x824
+00007ff6`e8106052     : 00007ff6`e6617fa7 00007ff6`00000002 00000000`00000000 00000000`00000000 : APEXTests!invoke_main+0x39
+00007ff6`e8105f0e     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!__scrt_common_main_seh+0x132
+00007ff6`e81061fe     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!__scrt_common_main+0xe
+00007ff8`d755cd87     : 00000008`8c178000 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!mainCRTStartup+0xe
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   1  Id: 73dc.2508 Suspend: 1 Teb: 00000008`8c18f000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000001 0000013e`5fd85a80 0000013e`5fdf88b0 00000008`8cdffde8 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000001 00000000`00000001 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3b40 0000013e`5fdb3b40 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   2  Id: 73dc.45c0 Suspend: 1 Teb: 00000008`8c191000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`6653fe40 0000013e`5fdf88c0 00000008`8ceffc48 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000002 0000013e`5fdf9a70 00000000`00000002 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3ae0 0000013e`5fdb3ae0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   3  Id: 73dc.6ef4 Suspend: 1 Teb: 00000008`8c193000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`6ef6f640 0000013e`5fdf88d0 00000008`8cfff7c8 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000004 0000013e`5fdf9a70 00000000`00000004 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`00080001 0000013e`5fdb3b70 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   4  Id: 73dc.6f18 Suspend: 1 Teb: 00000008`8c195000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`67382c80 0000013e`5fdf88e0 00000008`8d0ffae8 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000008 00000000`00000008 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3ba0 0000013e`5fdb3ba0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   5  Id: 73dc.4ef4 Suspend: 1 Teb: 00000008`8c197000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000001 0000013e`5fd84980 0000013e`5fdf88f0 00000008`8d1ffac8 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000010 00000000`00000010 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3b10 0000013e`5fdb3b10 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   6  Id: 73dc.32e0 Suspend: 1 Teb: 00000008`8c199000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`67599980 0000013e`5fdf8900 00000008`8d2ff928 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000020 0000013e`5fdf9a70 00000000`00000020 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3bd0 0000013e`5fdb3bd0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   7  Id: 73dc.7268 Suspend: 1 Teb: 00000008`8c19b000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`67383540 0000013e`5fdf8910 00000008`8d3ff658 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000040 00000000`00000040 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3d20 0000013e`5fdb3d20 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   8  Id: 73dc.7260 Suspend: 1 Teb: 00000008`8c19d000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`67593f40 0000013e`5fdf8920 00000008`8d4ff638 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000080 0000013e`5fdf9a70 00000000`00000080 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3c00 0000013e`5fdb3c00 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+   9  Id: 73dc.476c Suspend: 1 Teb: 00000008`8c19f000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000003 0000013e`5fd85a80 ffffffff`ffffffff 00000008`8d5ffd88 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000100 00000000`00000100 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3de0 0000013e`5fdb3de0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  10  Id: 73dc.70f4 Suspend: 1 Teb: 00000008`8c1a1000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`5fd84980 0000013e`5fdf8940 00000008`8d6ffc58 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000200 00000000`00000200 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3c90 0000013e`5fdb3c90 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  11  Id: 73dc.4ee4 Suspend: 1 Teb: 00000008`8c1a3000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 00000000`00000000 0000013e`5fdf8880 00000008`8d7ffba8 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000400 0000013e`5fdf9a70 00000000`00000400 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3c30 0000013e`5fdb3c30 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  12  Id: 73dc.5e0c Suspend: 1 Teb: 00000008`8c1a5000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000101 0000013e`5d947e80 0000013e`5fdf8960 00000008`8d8ff708 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00000800 00000000`00000800 00000000`00000003 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3c60 0000013e`5fdb3c60 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  13  Id: 73dc.3e4c Suspend: 1 Teb: 00000008`8c1a7000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000001 0000013e`66581ac0 0000013e`5fdf8970 00000008`8d9ff738 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00001000 0000013e`5fdf9a70 00000000`00001000 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3cc0 0000013e`5fdb3cc0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  14  Id: 73dc.2114 Suspend: 1 Teb: 00000008`8c1a9000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 00000000`00000000 00000000`00000000 0000013e`5fdf8880 00000008`8daff710 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 00000000`00000003 0000013e`5fdf8500 0000013e`5fdf8500 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca60ad43     : 00000000`00002000 0000013e`5fdf9a70 00000000`00002000 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca60b00f     : 0000013e`5fdb3ab0 0000013e`5fdb3ab0 00000000`00000000 00000000`00000000 : amdxx64+0xaad43
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0xab00f
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  15  Id: 73dc.315c Suspend: 1 Teb: 00000008`8c1ab000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83d137b     : 0000013e`6040126c 00007ff8`ca9c4900 00000000`00010000 00000008`8dbff750 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f3ac8     : 00000000`00000000 0000013e`5fdb4390 0000013e`6640ec40 0000013e`6640ec40 : ntdll!RtlSleepConditionVariableCS+0x14b
+00007ff8`ca590810     : 0000013e`6640e7c0 0000013e`6640e7c0 0000013e`6640ec40 00000000`00000000 : KERNELBASE!SleepConditionVariableCS+0x38
+00007ff8`ca590719     : 0000013e`6640ec40 0000013e`5fdff5c0 00000000`00000000 00000000`00000000 : amdxx64+0x30810
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64+0x30719
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  16  Id: 73dc.4f94 Suspend: 1 Teb: 00000008`8c1ad000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d58ebe9f     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!NtWaitForSingleObject+0x14
+00007ff8`ca68ae45     : 0000013e`6646a080 00000000`00000005 0000013e`00000000 00000000`00000d9c : KERNELBASE!WaitForSingleObjectEx+0xaf
+00007ff8`ca68ad20     : 00000000`00000000 0000013e`6646a080 0000013e`5fde0310 00000000`00000000 : amdxx64!boost::serialization::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >+0x72d05
+00007ff8`ca68af7f     : 0000013e`6646a080 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >+0x72be0
+00007ff8`ca68b129     : 0000013e`5fdffb00 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >+0x72e3f
+00007ff8`cb3a9aef     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >::singleton<boost::serialization::extended_type_info_typeid<_SC_CBRCONSTVALUES> >+0x72fe9
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdxx64!boost::serialization::singleton<std::set<boost::serialization::void_cast_detail::void_caster const * __ptr64,boost::serialization::void_cast_detail::void_caster_compare,std::allocator<boost::serialization::void_cast_detail::void_caster const * __ptr64> > >::is_destroyed+0x32a2f
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  17  Id: 73dc.6a28 Suspend: 1 Teb: 00000008`8c1bd000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d58f2773     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!NtWaitForMultipleObjects+0x14
+00007ff8`d58f2641     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : KERNELBASE!WaitForMultipleObjectsEx+0x123
+00007ff8`c956648d     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : KERNELBASE!WaitForMultipleObjects+0x11
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : amdihk64+0x648d
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  18  Id: 73dc.36e4 Suspend: 1 Teb: 00000008`8c01a000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d83da65e     : 00000000`00000000 00000000`00000000 00007ff8`d83d9aa0 0000013e`5d8d1a80 : ntdll!ZwWaitForWorkViaWorkerFactory+0x14
+00007ff8`d755cd87     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!TpCallbackMayRunLong+0x1a0e
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+
+  19  Id: 73dc.7274 Suspend: 1 Teb: 00000008`8c096000 Unfrozen
+RetAddr               : Args to Child                                                           : Call Site
+00007ff8`d846298e     : 00000008`8c3ff680 00000008`8c3ff648 00000000`00000000 00007ff6`e770cce3 : ntdll!ZwWaitForAlertByThreadId+0x14
+00007ff8`d58f2a58     : 00000000`00000000 0000013e`66548170 00000008`8c3ff6e0 00000000`00000000 : ntdll!RtlSleepConditionVariableSRW+0x1de
+00007ff6`e8103607     : 00000000`00000000 41b1e198`d8000000 41b1d260`c0000000 41b1d260`c0000000 : KERNELBASE!SleepConditionVariableSRW+0x38
+00007ff6`e81036ef     : 0000013e`665412a0 0000013e`66541250 42abca19`0000012c 00007ff6`e766629e : APEXTests!_Primitive_wait_for+0x47
+00007ff6`e81037aa     : 0000013e`665412a0 0000013e`66541250 00000d00`0000012c 00000000`00000100 : APEXTests!_Cnd_timedwait_for_impl+0x6f
+00007ff6`e767e077     : 0000013e`665412a0 0000013e`66541250 00000008`0000012c 00000008`8c3ff840 : APEXTests!_Cnd_timedwait_for_unchecked+0x2a
+00007ff6`e767e12d     : 0000013e`665412a0 00000008`8c3ff8d8 42abca19`0b1e5000 7fefffff`ffffffff : APEXTests!std::condition_variable::wait_until<std::chrono::steady_clock,std::chrono::duration<double,std::ratio<1,1000000000> > >+0x157
+00007ff6`e767deff     : 0000013e`665412a0 00000008`8c3ff8d8 42abca19`0b1e5000 0000013e`66541248 : APEXTests!std::condition_variable::wait_until<std::chrono::steady_clock,std::chrono::duration<double,std::ratio<1,1000000000> >,<lambda_025b59e1b3938d88b71866777fbace94> >+0x3d
+00007ff6`e760893e     : 0000013e`665412a0 00000008`8c3ff8d8 4072c000`00000000 0000013e`66541248 : APEXTests!std::condition_variable::wait_for<double,std::ratio<1,1000>,<lambda_025b59e1b3938d88b71866777fbace94> >+0x5f
+00007ff6`e772c0f7     : 0000013e`66541248 4072c000`00000000 00000008`0000004b 0000013e`66541058 : APEXTests!juce::WaitableEvent::wait+0xee
+00007ff6`e76099f0     : 0000013e`66540fc0 40c38800`00000000 00000008`8c3ff9e8 00000054`00000000 : APEXTests!juce::Timer::TimerThread::run+0x137
+00007ff6`e76096b3     : 0000013e`66540fc0 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!juce::Thread::threadEntryPoint+0x110
+00007ff6`e76413ff     : 0000013e`66540fc0 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!juce::juce_threadEntryPoint+0x13
+00007ff8`59132ec5     : 0000013e`66540fc0 00000000`00000000 00000000`00000000 00000000`00000000 : APEXTests!juce::threadEntryProc+0x4f
+00007ff8`d755cd87     : 0000013e`6e9f2650 00000000`00000000 00000000`00000000 00000000`00000000 : ucrtbased!register_onexit_function+0xf5
+00007ff8`d846caec     : 00000000`00000000 00000000`00000000 000004f0`fffffb30 000004d0`fffffb30 : KERNEL32!BaseThreadInitThunk+0x17
+00000000`00000000     : 00000000`00000000 00000000`00000000 00000000`00000000 00000000`00000000 : ntdll!RtlUserThreadStart+0x2c
+start             end                 module name
+00000000`64460000 00000000`645b1000   amdenc64   (deferred)             
+00007ff6`e65f0000 00007ff6`e8d9a000   APEXTests C (private pdb symbols)  tests\builds\visualstudio2026\x64\debug\consoleapp\APEXTests.pdb
+00007ff8`59090000 00007ff8`59294000   ucrtbased   (export symbols)       C:\Windows\SYSTEM32\ucrtbased.dll
+00007ff8`63970000 00007ff8`63a4a000   MSVCP140D   (deferred)             
+00007ff8`910f0000 00007ff8`91145000   MSUTB      (deferred)             
+00007ff8`91150000 00007ff8`9116a000   msctfmonitor   (deferred)             
+00007ff8`9bc40000 00007ff8`9c1f0000   d3d10warp   (deferred)             
+00007ff8`abf00000 00007ff8`ac042000   textinputframework   (deferred)             
+00007ff8`b8f30000 00007ff8`b8f3f000   VCRUNTIME140_1D   (deferred)             
+00007ff8`b9ee0000 00007ff8`b9ff4000   MrmCoreR   (deferred)             
+00007ff8`ba3a0000 00007ff8`ba3d0000   VCRUNTIME140D   (deferred)             
+00007ff8`bc1c0000 00007ff8`bc1d7000   virtdisk   (deferred)             
+00007ff8`bccc0000 00007ff8`bcf50000   COMCTL32   (deferred)             
+00007ff8`bd900000 00007ff8`bdbc4000   iertutil   (deferred)             
+00007ff8`c02e0000 00007ff8`c0573000   WININET    (deferred)             
+00007ff8`c52f0000 00007ff8`c5319000   srvcli     (deferred)             
+00007ff8`c9560000 00007ff8`c959e000   amdihk64   (export symbols)       C:\Windows\System32\DriverStore\FileRepository\u0198040.inf_amd64_44e379dcebebe813\B025647\amdihk64.dll
+00007ff8`c9910000 00007ff8`c9933000   atidxx64   (deferred)             
+00007ff8`ca280000 00007ff8`ca2b6000   WINMM      (deferred)             
+00007ff8`ca2c0000 00007ff8`ca2cb000   VERSION    (deferred)             
+00007ff8`ca560000 00007ff8`cd3fa000   amdxx64    (export symbols)       C:\Windows\System32\DriverStore\FileRepository\u0198040.inf_amd64_44e379dcebebe813\B025647\amdxx64.dll
+00007ff8`ce9e0000 00007ff8`cea3e000   directxdatabasehelper   (deferred)             
+00007ff8`cffc0000 00007ff8`cffda000   Microsoft_Internal_WarpPal   (deferred)             
+00007ff8`cffe0000 00007ff8`d0218000   WindowsCodecs   (deferred)             
+00007ff8`d06b0000 00007ff8`d091a000   DWrite     (deferred)             
+00007ff8`d0920000 00007ff8`d0f5a000   d2d1       (deferred)             
+00007ff8`d0f60000 00007ff8`d11c0000   d3d11      (deferred)             
+00007ff8`d11d0000 00007ff8`d13f5000   dcomp      (deferred)             
+00007ff8`d1400000 00007ff8`d14b6000   policymanager   (deferred)             
+00007ff8`d1910000 00007ff8`d1a3b000   CoreMessaging   (deferred)             
+00007ff8`d1d10000 00007ff8`d1daf000   apphelp    (deferred)             
+00007ff8`d20e0000 00007ff8`d2188000   uxtheme    (deferred)             
+00007ff8`d2200000 00007ff8`d2244000   dxcore     (deferred)             
+00007ff8`d2250000 00007ff8`d238b000   dxgi       (deferred)             
+00007ff8`d23b0000 00007ff8`d23df000   dwmapi     (deferred)             
+00007ff8`d2820000 00007ff8`d2a6c000   dbghelp    (deferred)             
+00007ff8`d2c40000 00007ff8`d2d35000   PROPSYS    (deferred)             
+00007ff8`d3000000 00007ff8`d38ae000   Windows_Storage   (deferred)             
+00007ff8`d3b50000 00007ff8`d3b5d000   netutils   (deferred)             
+00007ff8`d4290000 00007ff8`d42ab000   kernel_appcore   (deferred)             
+00007ff8`d43c0000 00007ff8`d43f6000   ntmarta    (deferred)             
+00007ff8`d4550000 00007ff8`d4599000   SspiCli    (deferred)             
+00007ff8`d4b60000 00007ff8`d4b6c000   CRYPTBASE   (deferred)             
+00007ff8`d5190000 00007ff8`d51e2000   CFGMGR32   (deferred)             
+00007ff8`d5400000 00007ff8`d5415000   UMPDC      (deferred)             
+00007ff8`d5420000 00007ff8`d547e000   powrprof   (deferred)             
+00007ff8`d54b0000 00007ff8`d54da000   BCrypt     (deferred)             
+00007ff8`d54e0000 00007ff8`d5509000   profapi    (deferred)             
+00007ff8`d55c0000 00007ff8`d55e7000   win32u     (deferred)             
+00007ff8`d5810000 00007ff8`d58bc000   bcryptPrimitives   (deferred)             
+00007ff8`d58d0000 00007ff8`d5cd2000   KERNELBASE   (export symbols)       C:\Windows\System32\KERNELBASE.dll
+00007ff8`d5ce0000 00007ff8`d5d83000   msvcp_win   (deferred)             
+00007ff8`d5e50000 00007ff8`d5f9c000   ucrtbase   (deferred)             
+00007ff8`d5fb0000 00007ff8`d60d9000   gdi32full   (deferred)             
+00007ff8`d60e0000 00007ff8`d61f8000   RPCRT4     (deferred)             
+00007ff8`d6240000 00007ff8`d63da000   ole32      (deferred)             
+00007ff8`d63e0000 00007ff8`d648e000   clbcatq    (deferred)             
+00007ff8`d64b0000 00007ff8`d6530000   WS2_32     (deferred)             
+00007ff8`d6570000 00007ff8`d6619000   msvcrt     (deferred)             
+00007ff8`d6620000 00007ff8`d6686000   SHLWAPI    (deferred)             
+00007ff8`d6690000 00007ff8`d6a15000   combase    (deferred)             
+00007ff8`d6ab0000 00007ff8`d6f37000   SETUPAPI   (deferred)             
+00007ff8`d6f40000 00007ff8`d6ffc000   ADVAPI32   (deferred)             
+00007ff8`d7010000 00007ff8`d7105000   COMDLG32   (deferred)             
+00007ff8`d7160000 00007ff8`d7191000   IMM32      (deferred)             
+00007ff8`d73a0000 00007ff8`d7449000   sechost    (deferred)             
+00007ff8`d7530000 00007ff8`d75fb000   KERNEL32   (export symbols)       C:\Windows\System32\KERNEL32.DLL
+00007ff8`d7600000 00007ff8`d775b000   MSCTF      (deferred)             
+00007ff8`d7760000 00007ff8`d785b000   shcore     (deferred)             
+00007ff8`d7860000 00007ff8`d7ff8000   SHELL32    (deferred)             
+00007ff8`d8000000 00007ff8`d80d9000   OLEAUT32   (deferred)             
+00007ff8`d80e0000 00007ff8`d82af000   USER32     (deferred)             
+00007ff8`d82c0000 00007ff8`d82eb000   GDI32      (deferred)             
+00007ff8`d83c0000 00007ff8`d8627000   ntdll      (export symbols)       C:\Windows\SYSTEM32\ntdll.dll
+
+Unloaded modules:
+00007ff8`d2ac0000 00007ff8`d2ad4000   resourcepolicyclient.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`a6d90000 00007ff8`a6e04000   thumbcache.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`d06b0000 00007ff8`d091a000   DWrite.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+00007ff8`be010000 00007ff8`be1ec000   urlmon.dll
+00007ff8`ac6b0000 00007ff8`ac70c000   dataexchange.dll
+00007ff8`c9cc0000 00007ff8`c9f10000   twinapi.appcore.dll
+Creating .apex-debug\plugin-reorder\full-suite-crash.dmp - mini user dump
+Dump successfully written
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

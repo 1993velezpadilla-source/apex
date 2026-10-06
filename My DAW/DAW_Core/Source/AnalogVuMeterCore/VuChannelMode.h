@@ -10,15 +10,14 @@ namespace DAW {
  * provides separate L and R atomics; this enum tells the meter Component
  * how to combine them into a single needle reading.
  *
- * MaxLR  : juce::jmax(peakL, peakR) — default for stereo source visualisation
+ * MaxLR  : max of the two detected levels
  * LeftOnly  : peakL — useful for inspecting one channel of a stereo pair
  * RightOnly : peakR
- * Average   : (peakL + peakR) * 0.5f — closer to perceived loudness
- * Sum       : peakL + peakR — exposes phase relationships when summing to mono
+ * Average   : mean of independently detected L/R levels (default stereo VU)
+ * Sum       : sum of detected levels, not a phase-aware mono waveform sum
  *
- * The L+R toggle in InputTrimFloatingPanel cycles between the first three
- * modes (Max, L, R) on click. Average and Sum are reserved for a future
- * right-click context menu on the VU meter itself.
+ * The panel cycles Stereo (Average), Left, Right, Max. Sum is retained for
+ * existing programmatic consumers; it is not a mid/side detector.
  */
 enum class VuChannelMode
 {
@@ -48,10 +47,10 @@ inline juce::String channelModeLabel(VuChannelMode mode) noexcept
 {
     switch (mode)
     {
-        case VuChannelMode::MaxLR:     return "L+R";
+        case VuChannelMode::MaxLR:     return "MAX";
         case VuChannelMode::LeftOnly:  return "L";
         case VuChannelMode::RightOnly: return "R";
-        case VuChannelMode::Average:   return "AVG";
+        case VuChannelMode::Average:   return "L+R";
         case VuChannelMode::Sum:       return "SUM";
     }
     return "L+R";

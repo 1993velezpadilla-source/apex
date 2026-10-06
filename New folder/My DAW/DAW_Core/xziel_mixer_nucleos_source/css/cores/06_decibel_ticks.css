@@ -1,0 +1,41 @@
+.ticks {
+  position: absolute;
+  inset: 0;
+  grid-column: 1 / 4;
+  pointer-events: none;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 8px;
+  color: rgba(255,250,236,0.52);
+}
+
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--tick-y);
+  transform: translateY(-50%);
+}
+
+.tick::before,
+.tick::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(248,224,168,0.1), rgba(248,224,168,0.62));
+}
+
+.tick::before { left: 2px; }
+.tick::after {
+  right: 2px;
+  transform: scaleX(-1);
+}
+
+.tick-label {
+  display: block;
+  text-align: center;
+  opacity: .72;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.75);
+}

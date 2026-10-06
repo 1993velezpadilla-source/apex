@@ -149,6 +149,7 @@ juce::ValueTree Track::getState() const
     state.setProperty(IDs::MUTED, muted_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::SOLOED, soloed_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::ARMED, armed_.load(std::memory_order_relaxed), nullptr);
+    state.setProperty("recordMode", recordMode_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::MONITORING, monitoring_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::VOLUME, volume_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::PAN, pan_.load(std::memory_order_relaxed), nullptr);
@@ -165,6 +166,8 @@ juce::ValueTree Track::getState() const
     state.setProperty(IDs::IS_MASTER, isMaster_, nullptr);
     state.setProperty("inputMonitorMode", (int) monitoringState_.getMode(), nullptr);
     state.setProperty("inputTrimDb", inputTrim_.getTargetGainDb(), nullptr);
+    state.setProperty("trimVuReferenceDb", inputMeter_.getVuReferenceDb(), nullptr);
+    state.setProperty("trimVuChannelMode", (int) inputMeter_.getVuChannelMode(), nullptr);
     state.setProperty("inputFirstChannel", inputFirstChannel_.load(std::memory_order_relaxed), nullptr);
     state.setProperty("inputMono", inputMono_.load(std::memory_order_relaxed), nullptr);
 
@@ -180,6 +183,10 @@ void Track::restoreState(const juce::ValueTree& state)
     muted_.store((bool)state.getProperty(IDs::MUTED, false), std::memory_order_relaxed);
     soloed_.store((bool)state.getProperty(IDs::SOLOED, false), std::memory_order_relaxed);
     armed_.store((bool)state.getProperty(IDs::ARMED, false), std::memory_order_relaxed);
+    const int savedRecordMode = (int) state.getProperty("recordMode", (int) TrackRecordMode::Dry);
+    recordMode_.store(savedRecordMode == (int) TrackRecordMode::PostFader
+        ? (int) TrackRecordMode::PostFader : (int) TrackRecordMode::Dry,
+        std::memory_order_relaxed);
     monitoring_.store((bool)state.getProperty(IDs::MONITORING, false), std::memory_order_relaxed);
     volume_.store((float)state.getProperty(IDs::VOLUME, 1.0f), std::memory_order_relaxed);
     pan_.store((float)state.getProperty(IDs::PAN, 0.0f), std::memory_order_relaxed);
@@ -225,6 +232,9 @@ void Track::restoreState(const juce::ValueTree& state)
         monitoringState_.setMode(InputMonitorMode::On);
     if (state.hasProperty("inputTrimDb"))
         inputTrim_.setTargetGainDb((float) state.getProperty("inputTrimDb", 0.0f));
+    inputMeter_.setVuReferenceDb((float) state.getProperty("trimVuReferenceDb", -18.0f));
+    inputMeter_.setVuChannelMode((VuChannelMode) (int) state.getProperty(
+        "trimVuChannelMode", (int) VuChannelMode::Average));
     inputFirstChannel_.store(juce::jmax(0, (int) state.getProperty("inputFirstChannel", 0)), std::memory_order_relaxed);
     inputMono_.store((bool) state.getProperty("inputMono", false), std::memory_order_relaxed);
 }

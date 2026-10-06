@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-05",
+  "scope": "Trim classic VU focused verification",
+  "artifacts": [
+    {
+      "path": "Source\\AnalogVuMeterCore\\ClassicVuDetectorCore.h",
+      "sha256": "4E649A57BDB1630E05EABBFAFE8A4A3C37FA6955E5A5BA641515171FE28F0C31"
+    },
+    {
+      "path": "Source\\AnalogVuMeterCore\\AnalogVuMeterComponent.h",
+      "sha256": "82C090E99EF8BD9A29D16C47237CCE44F6FBF1D39614DCE58588F472A3B55677"
+    },
+    {
+      "path": "Source\\AnalogVuMeterCore\\CompactVuNeedle.h",
+      "sha256": "336EA290CBDC143C49A2FD3DF3DBCE328AC7DF5B9E37B2BAE8CF4AAAFEEA492B"
+    },
+    {
+      "path": "Source\\AnalogVuMeterCore\\VuChannelMode.h",
+      "sha256": "41F13164794344C4A944C1A799E2EB8096F49EB40D0FD7D7463085FC266B45D8"
+    },
+    {
+      "path": "Source\\InputMonitorCore\\InputMeterCore.h",
+      "sha256": "B3A071EEF89D84D632DD60225EC9E978894FC62DF42AC30157EDC9BB50466568"
+    },
+    {
+      "path": "Source\\InputMonitorCore\\LiveInputMonitorEngine.h",
+      "sha256": "36BB81EE2B1B07E30A2B9F3C439CEAB601BF8BB712C56163ECC296A388ED64EB"
+    },
+    {
+      "path": "Source\\UICore\\InputTrimFloatingPanel.h",
+      "sha256": "0E031EB1D8758926C3E0A9B8F22B67FEBC13D787E8B63B8CE9ECC80EF5197B8C"
+    },
+    {
+      "path": "Source\\TrackCore\\Track.h",
+      "sha256": "7F1E94010AB791F7947067BFCEA874B795E5A41C98DC481B6B9BAE3A812E4635"
+    },
+    {
+      "path": "Source\\TrackCore\\Track.cpp",
+      "sha256": "64872F63E105D2A984D37D8D50B8CE2D25B856642CE2063290CC35EF042339A7"
+    },
+    {
+      "path": "Tests\\Source\\Diagnostics\\MixerResponsiveTests.cpp",
+      "sha256": "98D9914F58367A49D25B3321EDC0F37C8A9558105EE724BBA8E6121633BA6B3F"
+    },
+    {
+      "path": "Builds\\VisualStudio2026\\x64\\Release\\App\\DAW_Core.exe",
+      "sha256": "8E6591671A5605505DF110CFCE6FF944F389E36DC0787C89619C98BF2D7F10BC"
+    },
+    {
+      "path": "Builds\\VisualStudio2026\\x64\\Debug\\App\\DAW_Core.exe",
+      "sha256": "C07100649771D0802D3F083A1E2C2BC4E2A1843B878F5ADF23DEE794FAB38978"
+    },
+    {
+      "path": "Tests\\Builds\\VisualStudio2026\\x64\\Debug\\ConsoleApp\\APEXTests.exe",
+      "sha256": "4E6D1B018DE97746DD55AE239F8F0F65E87BCB7C7C9CA690B96DAFEBBF9C8E09"
+    },
+    {
+      "path": "Tests\\Builds\\VisualStudio2026\\x64\\Release\\ConsoleApp\\APEXTests.exe",
+      "sha256": "2EA0A81EFB85E704EEA86895A21E3213AD86E9739FAA16177B407D226ED5C283"
+    }
+  ]
+}

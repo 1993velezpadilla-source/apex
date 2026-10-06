@@ -4,6 +4,7 @@
 #include <cmath>
 #include "../ClipCore/Clip.h"
 #include "../MidiCore/MidiClip.h"
+#include "../AutomationCore/AutomationManagerCore.h"
 
 namespace DAW::ProjectSampleRateReconcile {
 
@@ -16,8 +17,9 @@ namespace DAW::ProjectSampleRateReconcile {
     ONLY when both rates are proven (Brain §3: the result of negotiation is
     authoritative; never invent a rate).
 
-    - Automation is PPQ-domain (AutomationLaneStoreCore serializes timePPQ),
-      so it is time-correct without any scaling — nothing here touches it.
+    - AutomationManagerCore's lanes and clip regions use sample-domain
+      positions and must scale with the timeline. The separate
+      AutomationLaneStoreCore serializes timePPQ and remains rate-independent.
     - AudioClip's source-file sample bounds (sourceStart/EndSample) are
       source-domain and are never scaled. Clip start/length/sourceOffset are
       engine-domain and are scaled.
@@ -113,6 +115,16 @@ inline void reconcileClips (ClipManager& clips, double factor, double deviceRate
                 (SamplePosition) scalePosition ((int64_t) clip->getLength(), factor)));
         }
     }
+}
+
+/** Seconds-preserving reconcile for AutomationManagerCore's sample-domain
+    lanes, clip-region bounds, and clip-local point positions. */
+inline void reconcileAutomation (AutomationManagerCore& automation, double factor)
+{
+    if (! std::isfinite(factor) || factor <= 0.0)
+        return;
+
+    automation.scaleSamplePositions(factor);
 }
 
 } // namespace DAW::ProjectSampleRateReconcile

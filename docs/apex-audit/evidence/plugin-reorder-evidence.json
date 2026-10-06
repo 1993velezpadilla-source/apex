@@ -1,0 +1,965 @@
+{
+  "date": "2026-10-03",
+  "sourceCommit": "000816f2d1338d5e97728fdacb72c75e0fe9c24a",
+  "workingTreeChanges": true,
+  "reproducedGainDropDb": -25.96,
+  "focusedDebug": {
+    "schemaVersion": 1,
+    "seed": 2850103334,
+    "configuration": "Debug",
+    "resultGroups": 33,
+    "assertionsPassed": 417,
+    "assertionsFailed": 0,
+    "durationMs": 0,
+    "tests": [
+      {
+        "name": "plugin.empty_track.digital_silence.v1",
+        "subcategory": "empty monitored-off track remains silent through insert lifecycle",
+        "passes": 114,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "interactive editor has a real APEX owner and remains visible after owner activation",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "SafeEditorHost defers native editor destruction until after window teardown",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "PluginEditorWindow defers native editor destruction past window teardown",
+        "passes": 3,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "editor close remains independent while audio processing is in flight",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "repeated create/open/close/remove/recreate preserves exact ownership",
+        "passes": 88,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "stereo track + stereo plugin = PASS",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "mono track + mono plugin = PASS",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "mono-to-stereo plugin = negotiated 1->2",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "stereo-to-mono plugin = negotiated 2->1",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "0->1 instrument = negotiated mono output",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "0->2 instrument = PASS",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "dual-layout plugin negotiates deterministically (stereo preferred)",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "unrouted auxiliary bus stays disabled",
+        "passes": 2,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "rejected sidechain proposal keeps the previous valid layout prepared",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "narrower caller buffer must not allocate in processBlock",
+        "passes": 3,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "saved slot persists the negotiated bus layout",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "restore replays lifecycle order and host fields",
+        "passes": 14,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "detectable state-restore failure is contained",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "similar-name components coexist in either insert order",
+        "passes": 10,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "remove + reinsert keeps identities independent",
+        "passes": 10,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "two instances of the same component stay independent",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "same display name + different UID must not share automation identity",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "state markers stay with their own component across save/restore",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "five manual unity inserts never acquire a permanent gain dip",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "moving identical plugins cannot write into a neighbouring instance",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "automation identity and its bound processor follow a moved plugin",
+        "passes": 8,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "legacy parameter and wet/dry lanes follow the plugin through save/restore",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "200 moves during continuous audio preserve six insert gains and live instances",
+        "passes": 14,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "two shells coexist: distinct modules, order-independent",
+        "passes": 24,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "removing one component never invalidates the sibling's module",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "reinsertion re-fetches a LIVE module handle (never a stale factory)",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "two components from the SAME module: one load, retained until final release",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      }
+    ]
+  },
+  "focusedRelease": {
+    "schemaVersion": 1,
+    "seed": 2850103334,
+    "configuration": "Release",
+    "resultGroups": 33,
+    "assertionsPassed": 417,
+    "assertionsFailed": 0,
+    "durationMs": 0,
+    "tests": [
+      {
+        "name": "plugin.empty_track.digital_silence.v1",
+        "subcategory": "empty monitored-off track remains silent through insert lifecycle",
+        "passes": 114,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "interactive editor has a real APEX owner and remains visible after owner activation",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "SafeEditorHost defers native editor destruction until after window teardown",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "PluginEditorWindow defers native editor destruction past window teardown",
+        "passes": 3,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "editor close remains independent while audio processing is in flight",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.editor-lifecycle.v1",
+        "subcategory": "repeated create/open/close/remove/recreate preserves exact ownership",
+        "passes": 88,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "stereo track + stereo plugin = PASS",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "mono track + mono plugin = PASS",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "mono-to-stereo plugin = negotiated 1->2",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "stereo-to-mono plugin = negotiated 2->1",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "0->1 instrument = negotiated mono output",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "0->2 instrument = PASS",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "dual-layout plugin negotiates deterministically (stereo preferred)",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "unrouted auxiliary bus stays disabled",
+        "passes": 2,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "rejected sidechain proposal keeps the previous valid layout prepared",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.bus-layout.matrix.v1",
+        "subcategory": "narrower caller buffer must not allocate in processBlock",
+        "passes": 3,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "saved slot persists the negotiated bus layout",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "restore replays lifecycle order and host fields",
+        "passes": 14,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.project-restore.lifecycle-layout.v1",
+        "subcategory": "detectable state-restore failure is contained",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "similar-name components coexist in either insert order",
+        "passes": 10,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "remove + reinsert keeps identities independent",
+        "passes": 10,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "two instances of the same component stay independent",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "same display name + different UID must not share automation identity",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.identity.similar-name.coexistence.v1",
+        "subcategory": "state markers stay with their own component across save/restore",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "five manual unity inserts never acquire a permanent gain dip",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "moving identical plugins cannot write into a neighbouring instance",
+        "passes": 5,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "automation identity and its bound processor follow a moved plugin",
+        "passes": 8,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "legacy parameter and wet/dry lanes follow the plugin through save/restore",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "200 moves during continuous audio preserve six insert gains and live instances",
+        "passes": 14,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "two shells coexist: distinct modules, order-independent",
+        "passes": 24,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "removing one component never invalidates the sibling's module",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "reinsertion re-fetches a LIVE module handle (never a stale factory)",
+        "passes": 6,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "plugin.module.coexistence.lifecycle.v1",
+        "subcategory": "two components from the SAME module: one load, retained until final release",
+        "passes": 7,
+        "failures": 0,
+        "messages": []
+      }
+    ]
+  },
+  "builds": [
+    {
+      "Path": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\My DAW\\DAW_Core\\Builds\\VisualStudio2026\\x64\\Debug\\App\\DAW_Core.exe",
+      "Hash": "2AE926016A74DDFB3BF4A5B462D557E9BA2578465F1DCAD21879DF6E95B018C8"
+    },
+    {
+      "Path": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\My DAW\\DAW_Core\\Builds\\VisualStudio2026\\x64\\Release\\App\\DAW_Core.exe",
+      "Hash": "00ECBBE82E52D6E80850C05C88B8F2B54C12DCEE8F1451ED0471126EE87EC0EE"
+    }
+  ],
+  "mixerFaderDebug": {
+    "schemaVersion": 1,
+    "seed": 2850103334,
+    "configuration": "Debug",
+    "resultGroups": 5,
+    "assertionsPassed": 42,
+    "assertionsFailed": 0,
+    "durationMs": 0,
+    "tests": [
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Fader conversion keeps 0 dB at canonical unity gain",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Normal fader: 0 dB to negative dB, one exact Undo/Redo",
+        "passes": 9,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Normal fader: cross-zero upward and downward values",
+        "passes": 18,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Master fader shares exact canonical transaction path",
+        "passes": 9,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "No-op drag creates zero Undo entries",
+        "passes": 2,
+        "failures": 0,
+        "messages": []
+      }
+    ]
+  },
+  "mixerFaderRelease": {
+    "schemaVersion": 1,
+    "seed": 2850103334,
+    "configuration": "Release",
+    "resultGroups": 5,
+    "assertionsPassed": 42,
+    "assertionsFailed": 0,
+    "durationMs": 0,
+    "tests": [
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Fader conversion keeps 0 dB at canonical unity gain",
+        "passes": 4,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Normal fader: 0 dB to negative dB, one exact Undo/Redo",
+        "passes": 9,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Normal fader: cross-zero upward and downward values",
+        "passes": 18,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "Master fader shares exact canonical transaction path",
+        "passes": 9,
+        "failures": 0,
+        "messages": []
+      },
+      {
+        "name": "mixer.fader_undo_exact.v1",
+        "subcategory": "No-op drag creates zero Undo entries",
+        "passes": 2,
+        "failures": 0,
+        "messages": []
+      }
+    ]
+  },
+  "beforeFixDebug": {
+    "schemaVersion": 1,
+    "seed": 2850103334,
+    "configuration": "Debug",
+    "resultGroups": 3,
+    "assertionsPassed": 2,
+    "assertionsFailed": 12,
+    "durationMs": 0,
+    "tests": [
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "five manual unity inserts never acquire a permanent gain dip",
+        "passes": 0,
+        "failures": 6,
+        "messages": [
+          "!!! Test 1 failed: host must not smooth a manual value towards stale history -- Expected value  within 1e-05 of: 0.25, Actual value: 0.0125821",
+          "!!! Test 2 failed: manual unity remains authoritative -- Expected value  within 1e-06 of: 1, Actual value: 0.55",
+          "!!! Test 3 failed: manual unity remains authoritative -- Expected value  within 1e-06 of: 1, Actual value: 0.55",
+          "!!! Test 4 failed: manual unity remains authoritative -- Expected value  within 1e-06 of: 1, Actual value: 0.55",
+          "!!! Test 5 failed: manual unity remains authoritative -- Expected value  within 1e-06 of: 1, Actual value: 0.55",
+          "!!! Test 6 failed: manual unity remains authoritative -- Expected value  within 1e-06 of: 1, Actual value: 0.55"
+        ]
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "moving identical plugins cannot write into a neighbouring instance",
+        "passes": 0,
+        "failures": 5,
+        "messages": [
+          "!!! Test 1 failed: parameter belongs to its original processor after reorder -- Expected value  within 1e-06 of: 0.95, Actual value: 0.54",
+          "!!! Test 2 failed: parameter belongs to its original processor after reorder -- Expected value  within 1e-06 of: 0.8, Actual value: 0.54",
+          "!!! Test 3 failed: parameter belongs to its original processor after reorder -- Expected value  within 1e-06 of: 0.6, Actual value: 0.54",
+          "!!! Test 4 failed: parameter belongs to its original processor after reorder -- Expected value  within 1e-06 of: 0.3, Actual value: 0.54",
+          "!!! Test 5 failed: parameter belongs to its original processor after reorder -- Expected value  within 1e-06 of: 0.1, Actual value: 0.54"
+        ]
+      },
+      {
+        "name": "plugin.reorder.gain-preservation.v1",
+        "subcategory": "automation identity and its bound processor follow a moved plugin",
+        "passes": 2,
+        "failures": 1,
+        "messages": [
+          "!!! Test 2 failed: reorder keeps the automation ID attached to the instance -- Expected value: \u000b, Actual value: \f"
+        ]
+      }
+    ]
+  },
+  "broadDebug": {
+    "status": "incomplete",
+    "reason": "Stopped during long CPU benchmarks after targeted suites completed and other failures were recorded",
+    "passedGlobalGate": false,
+    "log": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\My DAW\\DAW_Core\\evidence\\plugin-reorder-all-Debug.log",
+    "observedFailures": [
+      {
+        "group": "Starting tests in: apex.ui.stage_ab.presentation_ownership.v1 / Visual components use the shared presentation receiver...",
+        "message": "!!! Test 1 failed"
+      },
+      {
+        "group": "Starting tests in: apex.ui.stage_ab.presentation_ownership.v1 / Visual components have no independent Timer base...",
+        "message": "!!! Test 1 failed"
+      },
+      {
+        "group": "Starting tests in: track.reprepare.survival.v1 / failure-a.hot-play-stop-release-480-prepare-1024...",
+        "message": "!!! Test 11 failed: identity render path retains no per-clip cursor state -- Expected value: 0, Actual value: 3"
+      },
+      {
+        "group": "Starting tests in: track.reprepare.survival.v1 / bad.stretch.clip1.block-profile...",
+        "message": "!!! Test 2 failed: stretch clip audible in FIRST block after reprepare"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 6 failed: enum-only fixture did not report success"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 7 failed: enum-only fixture was not labeled as a sandbox worker"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 8 failed: enum-only fixture did not report one description"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode reports a missing path explicitly...",
+        "message": "!!! Test 4 failed: missing-path enum-only diagnostic did not report failure"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode reports a missing path explicitly...",
+        "message": "!!! Test 5 failed: missing-path enum-only diagnostic did not identify the missing path"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 17 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 18 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 19 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 20 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 21 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 22 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 23 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 24 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 25 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 26 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 27 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 28 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 29 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 18 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 19 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 20 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 21 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 22 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 23 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 24 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 25 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 26 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 27 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 28 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 29 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 33 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 17 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 18 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 19 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 20 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 21 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 22 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 23 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 24 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 25 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 26 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 27 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 28 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 29 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-write-timeout.v1 / PluginCreate write timeout is classified before response read...",
+        "message": "!!! Test 10 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=11584 generation=1 session=6acdc0d2eddf431cadce343981524ab2"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-write-timeout.v1 / PluginCreate write timeout is classified before response read...",
+        "message": "!!! Test 11 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_TIMEOUT pid=11584 generation=1 session=6acdc0d2eddf431cadce343981524ab2"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 12 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 13 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 14 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_TIMEOUT pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 7 failed: missing PluginCreate audit phase: op=PluginCreate phase=CREATE_INSTANCE_BEGIN pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 8 failed: missing PluginCreate audit phase: op=PluginCreate phase=CREATE_INSTANCE_FAILURE pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 9 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.dense-metadata-ipc.v1 / three dense metadata control-plane cycles preserve identity and cleanup...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-source-precedence.v1 / dense metadata is stable before source-precedence assertions...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-source-precedence.v1 / dense metadata is stable before source-precedence assertions...",
+        "message": "!!! Test 2 failed: dense metadata construction failed: worker rejected invalid or non-VST3 plugin identity"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-block-partition-contract.v1 / constant-target smoother has equal final state for 4x512 and 1x2048...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-density-bound.v1 / exactly 64 same-boundary representable events are accepted...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.unsupported-ordinal-bound.v1 / ordinal 127 is representable and ordinal 128 is rejected without poisoning E2A...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.unsupported-ordinal-bound.v1 / ordinal 127 is representable and ordinal 128 is rejected without poisoning E2A...",
+        "message": "!!! Test 2 failed: dense metadata construction failed: worker rejected invalid or non-VST3 plugin identity"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.multi-parameter-boundary-order.v1 / param_0, param_1, param_63, and param_127 commit independently...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.multi-parameter-delivery-resubmit.v1 / failed multi-parameter submit preserves all lastDelivered values and resubmits current state...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.edge-matrix-zero-rt.v1 / final E2B edge matrix remains allocation-free in the callback...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      }
+    ]
+  },
+  "screenshotCrash": {
+    "process": "APEXTests.exe",
+    "exception": "0xC0000005",
+    "faultAddress": "0x00007FF6E6C46C0E",
+    "firstApexFrame": "DAW::MixerStrip::initChildren",
+    "source": "Source/UICore/MixerPanel.h:2527",
+    "cause": "Theme singleton deleted between test suites while a static pointer still referred to it",
+    "correction": "Process-wide JUCE GUI lifetime in Tests/Source/Main.cpp:93",
+    "dump": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\My DAW\\DAW_Core\\.apex-debug\\plugin-reorder\\full-suite-crash.dmp"
+  },
+  "gates": {
+    "repositoryPolicy": "passed",
+    "validateTestEvidence": "passed: 6 checks",
+    "verifyDependencies": "failed: Git dubious ownership in signalsmith-stretch",
+    "buildFoundation": "failed: temporary materializer missing required JUCE patch; symlink privilege unavailable",
+    "fullRelease": "not run",
+    "userAudioSession": "not tested"
+  }
+}

@@ -1,0 +1,14 @@
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=32 actual=32 listed=1 rateListed=1 callbacks=2415 audioProgress=1.00529 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=64 actual=64 listed=1 rateListed=1 callbacks=1207 audioProgress=1.00483 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=128 actual=128 listed=1 rateListed=1 callbacks=602 audioProgress=1.00268 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=256 actual=256 listed=1 rateListed=1 callbacks=301 audioProgress=1.00332 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=512 actual=512 listed=1 rateListed=1 callbacks=150 audioProgress=1.00489 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=1024 actual=1024 listed=1 rateListed=1 callbacks=75 audioProgress=1.00555 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=2048 actual=2048 listed=1 rateListed=1 callbacks=37 audioProgress=1.00307 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=32 actual=32 listed=1 rateListed=1 callbacks=2219 audioProgress=1.00514 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=64 actual=64 listed=1 rateListed=1 callbacks=1109 audioProgress=1.00498 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=128 actual=128 listed=1 rateListed=1 callbacks=554 audioProgress=1.00364 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=256 actual=256 listed=1 rateListed=1 callbacks=277 audioProgress=1.00218 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=512 actual=512 listed=1 rateListed=1 callbacks=138 audioProgress=1.00086 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=1024 actual=1024 listed=1 rateListed=1 callbacks=69 audioProgress=0.99942 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=2048 actual=2048 listed=1 rateListed=1 callbacks=34 audioProgress=1.00177 inputXruns=-1

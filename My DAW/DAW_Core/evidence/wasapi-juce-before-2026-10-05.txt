@@ -1,0 +1,8 @@
+FAIL endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=32 actual=144 listed=0 rateListed=1 callbacks=536 audioProgress=1.00394 inputXruns=-1
+FAIL endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=64 actual=144 listed=0 rateListed=1 callbacks=533 audioProgress=1.00115 inputXruns=-1
+FAIL endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=128 actual=144 listed=0 rateListed=1 callbacks=536 audioProgress=1.00380 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=256 actual=256 listed=1 rateListed=1 callbacks=300 audioProgress=1.00310 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=512 actual=512 listed=1 rateListed=1 callbacks=150 audioProgress=1.00574 inputXruns=-1
+PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=1024 actual=1024 listed=1 rateListed=1 callbacks=75 audioProgress=1.00574 inputXruns=-1
+FAIL endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=2048 actual=2048 listed=1 rateListed=1 callbacks=27 audioProgress=0.71566 inputXruns=-1
+FAIL endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=32 actual=144 listed=0 rateListed=1 callbacks=493 audioProgress=1.00450 inputXruns=-1

@@ -165,6 +165,27 @@ private:
     bool hasExecuted_ = false;
 };
 
+/** An order edit preserves live processor state and automation identities.
+    Undo/redo must reverse the permutation instead of recreating the chain. */
+class PluginChainMoveCommand final : public Command
+{
+public:
+    PluginChainMoveCommand(PluginChainCore& chain, int fromIndex, int toIndex)
+        : chain_(chain), fromIndex_(fromIndex), toIndex_(toIndex) {}
+    juce::String getDescription() const override { return "Move Plugin"; }
+    juce::String getCategory() const override { return "Plugin"; }
+    void execute() override { applied_ = chain_.moveSlot(fromIndex_, toIndex_); }
+    void undo() override
+    {
+        if (applied_) chain_.moveSlot(toIndex_, fromIndex_);
+    }
+private:
+    PluginChainCore& chain_;
+    int fromIndex_;
+    int toIndex_;
+    bool applied_ = false;
+};
+
 class AddTrackCommand : public Command
 {
 public:

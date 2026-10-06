@@ -241,6 +241,8 @@ try {
         -PristineTargetSha256 $expectedPatch3PristineTargetHash `
         -PatchedTargetSha256 $expectedPatch3PatchedTargetHash
 
+    Invoke-ApexWasapiPatch -Root $temporaryRoot -RepositoryRoot $repositoryRoot
+
     if (Test-Path -LiteralPath $installationRoot) {
         $difference = $null
         if (-not (Test-ApexDirectoryPayloadEquivalent -ReferenceRoot $temporaryRoot -CandidateRoot $installationRoot -Difference ([ref] $difference))) {

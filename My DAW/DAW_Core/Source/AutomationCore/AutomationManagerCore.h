@@ -7,6 +7,7 @@
 #include "AutomationArticulatorToolsCore.h"
 #include <cstdint>
 #include <atomic>
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -52,6 +53,30 @@ public:
     static juce::String makePluginSlotMixId(int pluginSlotIndex)
     {
         return "plugin." + juce::String(pluginSlotIndex) + ".__slot_mix__";
+    }
+
+    /** Keep legacy parameter, wet/dry and clip-region lanes with the
+        processor instance when insert positions change. Message thread. */
+    void remapPluginSlots(const TrackID& trackId, const std::vector<int>& oldToNew)
+    {
+        const auto remap = [&](const juce::String& parameterId)
+        {
+            for (size_t oldIndex = 0; oldIndex < oldToNew.size(); ++oldIndex)
+            {
+                const auto prefix = "plugin." + juce::String((int)oldIndex) + ".";
+                if (parameterId.startsWith(prefix))
+                    return "plugin." + juce::String(oldToNew[oldIndex]) + "."
+                        + parameterId.substring(prefix.length());
+            }
+            return parameterId;
+        };
+        for (auto& lane : lanes_)
+            if (lane.trackId == trackId)
+                lane.setParameterId(remap(lane.getParameterId()));
+        for (auto& region : clipRegions_)
+            if (region.trackId == trackId)
+                region.parameterId = remap(region.parameterId);
+        publishSnapshot();
     }
 
     AutomationManagerCore()
@@ -384,6 +409,55 @@ public:
     {
         lanes_.clear();
         clipRegions_.clear();
+        publishSnapshot();
+    }
+
+    /** Scale every sample-domain automation position when the project timeline
+        is reconciled to a different, proven audio-device sample rate.
+        Message thread only (project load / undo). */
+    void scaleSamplePositions(double factor)
+    {
+        if (!std::isfinite(factor) || factor <= 0.0 || std::abs(factor - 1.0) < 1.0e-12)
+            return;
+
+        const auto scale = [factor](int64_t position)
+        {
+            return (int64_t)std::llround((double)position * factor);
+        };
+
+        for (auto& lane : lanes_)
+        {
+            for (auto& point : lane.points)
+                point.timeSamples = scale(point.timeSamples);
+            lane.sortAndResolveDuplicates();
+        }
+
+        for (auto& region : clipRegions_)
+        {
+            region.startSample = scale(region.startSample);
+            region.lengthSamples = juce::jmax<int64_t>(0, scale(region.lengthSamples));
+            for (auto& point : region.localPoints)
+                point.timeSamples = juce::jlimit<int64_t>(0, region.lengthSamples, scale(point.timeSamples));
+
+            std::stable_sort(region.localPoints.begin(), region.localPoints.end(),
+                [](const AutomationPoint& a, const AutomationPoint& b)
+                {
+                    return a.timeSamples < b.timeSamples;
+                });
+            if (region.localPoints.size() > 1)
+            {
+                size_t write = 0;
+                for (size_t read = 1; read < region.localPoints.size(); ++read)
+                {
+                    if (region.localPoints[read].timeSamples == region.localPoints[write].timeSamples)
+                        region.localPoints[write] = region.localPoints[read];
+                    else
+                        region.localPoints[++write] = region.localPoints[read];
+                }
+                region.localPoints.resize(write + 1);
+            }
+        }
+
         publishSnapshot();
     }
 

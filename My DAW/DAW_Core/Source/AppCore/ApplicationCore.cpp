@@ -290,6 +290,15 @@ void ApplicationCore::initialize()
     // Recording engine — captures input audio to armed tracks
     recordingEngine_.setSubsystems(trackManager_.get(), clipManager_.get(),
                                     transport_.get(), &audioFileManager_);
+    audioEngine_.setPostFaderRecordTap(
+        &recordingEngine_,
+        [](void* context, const TrackID& trackId,
+           const juce::AudioBuffer<float>& postFaderBuffer,
+           int numSamples, bool captureThisBlock) noexcept
+        {
+            static_cast<RecordingEngine*>(context)->processPostFaderBlock(
+                trackId, postFaderBuffer, numSamples, captureThisBlock);
+        });
     recordingEngine_.setRecordingFinalizedCallback([this]
     {
         if (autosaveManager_)
@@ -1437,6 +1446,12 @@ bool ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& buff
         return false;
     }
 
+    // Keep active take writers alive through both the raw-input capture and
+    // the post-fader tap inside AudioEngine. The scope also writes a silent
+    // block for printed takes when routing/plugin processing is unavailable.
+    RecordingEngine::AudioCallbackScope recordingCallbackScope(
+        recordingEngine_, bufferToFill.numSamples);
+
     setHardwareInputChannelCount(validInputChannels);
 
     // PROFESSIONAL SIGNAL FLOW:
@@ -1528,7 +1543,7 @@ bool ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& buff
         audioEngine_.clearLiveInputBuffer();
 
     if (RecordingCallbackPolicyCore::shouldFeedRecorder(
-            recordingEngine_.isActivelyRecording(), offlineRendering, routingGraphAvailable))
+            recordingCallbackScope.shouldCapture(), offlineRendering, routingGraphAvailable))
     {
         const int recordedSamples = juce::jmin(
             bufferToFill.numSamples, preservedHardwareInput_.getNumSamples());
@@ -1553,7 +1568,8 @@ bool ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& buff
         if (preservedHardwareInput_.getNumChannels() > 0 && recordedSamples > 0)
             recordingEngine_.processBlock(
                 preservedHardwareInput_, recordedSamples,
-                hasFreshHardwareInput ? preservedChannels : 0);
+                hasFreshHardwareInput ? preservedChannels : 0,
+                recordingCallbackScope.shouldCapture());
     }
 
     markStage (CallbackStageRecording);
@@ -1594,7 +1610,9 @@ bool ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& buff
             preservedHardwareInput_, preservedSamples, preservedChannels);
     markStage (CallbackStageMonitorTrim);
 
+    audioEngine_.setPostFaderRecordCaptureEnabled(recordingCallbackScope.shouldCapture());
     audioEngine_.process(bufferToFill);
+    audioEngine_.setPostFaderRecordCaptureEnabled(false);
     markStage (CallbackStageEngine);
 
     if (bufferToFill.buffer && bufferToFill.buffer->getNumChannels() >= 2)

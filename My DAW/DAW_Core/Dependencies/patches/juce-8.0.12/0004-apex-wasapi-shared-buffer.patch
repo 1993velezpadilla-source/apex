@@ -1,0 +1,143 @@
+diff --git a/JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp b/JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp
+index 254c582..8f04140 100644
+--- a/JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp
++++ b/JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp
+@@ -496,7 +496,16 @@ public:
+ 
+         (void) check (client->GetBufferSize (&actualBufferSize));
+         createSessionEventCallback();
+-        return check (client->SetEventHandle (clientEvent));
++        return ! usesEventCallback || check (client->SetEventHandle (clientEvent));
++    }
++
++    bool waitForNextBuffer (Thread& thread) const
++    {
++        // Buffered shared streams use padding, not endpoint events. The short
++        // wait is interruptible by close(), which signals this same handle.
++        const auto result = WaitForSingleObject (clientEvent, usesEventCallback ? 1000 : 1);
++        return ! thread.threadShouldExit()
++            && (result == WAIT_OBJECT_0 || (! usesEventCallback && result == WAIT_TIMEOUT));
+     }
+ 
+     void closeClient()
+@@ -558,6 +567,7 @@ public:
+     DWORD defaultFormatChannelMask = 0;
+     Array<double> rates;
+     HANDLE clientEvent = {};
++    bool usesEventCallback = true;
+     BigInteger channels;
+     Array<int> channelMaps;
+     UINT32 actualBufferSize = 0;
+@@ -711,7 +721,12 @@ private:
+                                                            isExclusiveMode (deviceMode) ? nullptr
+                                                                                         : &nearestFormat)))
+             {
+-                if (nearestFormat != nullptr)
++                // Standard shared WASAPI opens the requested client rate and
++                // enables AUTOCONVERTPCM/SRC in getStreamFlags().  A nearest
++                // mix format therefore describes the endpoint, not the rate
++                // that this client can use.  Preserve the requested rate so
++                // the UI exposes the same rates that tryFormat() can open.
++                if (nearestFormat != nullptr && ! supportsSampleRateConversion (deviceMode))
+                     rate = (double) nearestFormat->nSamplesPerSec;
+ 
+                 if (! rates.contains (rate))
+@@ -841,7 +856,7 @@ private:
+ 
+     DWORD getStreamFlags() const
+     {
+-        DWORD streamFlags = 0x40000; /*AUDCLNT_STREAMFLAGS_EVENTCALLBACK*/
++        DWORD streamFlags = usesEventCallback ? 0x40000 : 0; /*AUDCLNT_STREAMFLAGS_EVENTCALLBACK*/
+ 
+         if (supportsSampleRateConversion (deviceMode))
+             streamFlags |= (0x80000000    /*AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM*/
+@@ -867,6 +882,18 @@ private:
+ 
+         check (client->GetDevicePeriod (&defaultPeriod, &minPeriod));
+ 
++        // A 2048-frame callback can use ~43 ms at 48 kHz. The legacy shared
++        // event path still allocated only ~22 ms and drained that buffer while
++        // processing the next callback. Raising the host block therefore made
++        // underruns MORE likely. Shared polling permits a real larger queue.
++        // Keep one host block plus one engine period queued, so draining the
++        // previous block never leaves less than a host-block processing budget.
++        const auto requestedDuration = samplesToRefTime (bufferSizeSamples, format.Format.nSamplesPerSec);
++        const bool bufferedShared = deviceMode == WASAPIDeviceMode::shared
++                                 && requestedDuration > defaultPeriod;
++        usesEventCallback = ! bufferedShared;
++        const auto sharedDuration = bufferedShared ? requestedDuration + defaultPeriod : 0;
++
+         if (isExclusiveMode (deviceMode) && bufferSizeSamples > 0)
+             defaultPeriod = jmax (minPeriod, samplesToRefTime (bufferSizeSamples, format.Format.nSamplesPerSec));
+ 
+@@ -876,7 +903,7 @@ private:
+             auto hr = client->Initialize (isExclusiveMode (deviceMode) ? AUDCLNT_SHAREMODE_EXCLUSIVE
+                                                                        : AUDCLNT_SHAREMODE_SHARED,
+                                           getStreamFlags(),
+-                                          defaultPeriod,
++                                          isExclusiveMode (deviceMode) ? defaultPeriod : sharedDuration,
+                                           isExclusiveMode (deviceMode) ? defaultPeriod : 0,
+                                           (WAVEFORMATEX*) &format,
+                                           &session);
+@@ -1156,7 +1183,8 @@ public:
+         {
+             // This is needed in order not to drop any input data if the output device endpoint buffer was full
+             if ((! isExclusiveMode (deviceMode)) && inputDevice != nullptr
+-                  && WaitForSingleObject (inputDevice->clientEvent, 0) == WAIT_OBJECT_0)
++                  && (! inputDevice->usesEventCallback
++                      || WaitForSingleObject (inputDevice->clientEvent, 0) == WAIT_OBJECT_0))
+                 inputDevice->handleDeviceBuffer();
+ 
+             int samplesToDo = jmin (getNumSamplesAvailableToCopy(), bufferSize);
+@@ -1164,7 +1192,7 @@ public:
+             if (samplesToDo == 0)
+             {
+                 // This can ONLY occur in non-exclusive mode
+-                if (! thread.threadShouldExit() && WaitForSingleObject (clientEvent, 1000) == WAIT_OBJECT_0)
++                if (waitForNextBuffer (thread))
+                     continue;
+ 
+                 break;
+@@ -1277,6 +1305,12 @@ public:
+                 sampleRates = d->rates;
+             }
+ 
++            // In standard shared mode these are client callback sizes, not
++            // exclusive hardware periods. The existing input reservoir and
++            // output block adapter also support blocks below the engine period.
++            if (deviceMode == WASAPIDeviceMode::shared)
++                minBufferSize = 32;
++
+             bufferSizes.clear();
+             bufferSizes.addUsingDefaultSort (defaultBufferSize);
+ 
+@@ -1297,8 +1331,8 @@ public:
+             }
+             else
+             {
+-                int n = 64;
+-                for (int i = 0; i < 40; ++i)
++                int n = deviceMode == WASAPIDeviceMode::shared ? 32 : 64;
++                for (int i = 0; i < 41; ++i)
+                 {
+                     if (n >= minBufferSize && n <= 2048 && ! bufferSizes.contains (n))
+                         bufferSizes.addUsingDefaultSort (n);
+@@ -1375,7 +1409,8 @@ public:
+             return lastError;
+         }
+ 
+-        currentBufferSizeSamples  = bufferSizeSamples <= 0 ? defaultBufferSize : jmax (bufferSizeSamples, minBufferSize);
++        currentBufferSizeSamples  = bufferSizeSamples <= 0 ? defaultBufferSize
++                                                           : jmax (bufferSizeSamples, minBufferSize);
+         currentSampleRate         = sampleRate > 0 ? sampleRate : defaultSampleRate;
+         lastKnownInputChannels    = inputChannels;
+         lastKnownOutputChannels   = outputChannels;
+@@ -1560,7 +1595,7 @@ public:
+             {
+                 if (outputDevice == nullptr)
+                 {
+-                    if (WaitForSingleObject (inputDevice->clientEvent, 1000) == WAIT_TIMEOUT)
++                    if (! inputDevice->waitForNextBuffer (*this))
+                         break;
+ 
+                     inputDevice->handleDeviceBuffer();

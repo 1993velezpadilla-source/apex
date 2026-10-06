@@ -33,34 +33,25 @@ public:
     {
         setOpaque(false);
         setInterceptsMouseClicks(false, false);
-        ballistics_.setTickRateHz(60.0f);
     }
 
-    /** Bind to the per-track input meter. Resets smoothing so the needle
-     *  starts clean when rebinding. */
+    /** Bind to the track's existing measurement without restarting it. */
     void setSource(InputMeterCore* src) noexcept
     {
         source_ = src;
-        ballistics_.resetAll();
     }
 
     /** Break the binding before the owning Track is destroyed. */
     void clearSource() noexcept { source_ = nullptr; }
 
-    /** One UI tick — feed ballistics from the bound meter and repaint.
+    /** One UI tick — repaint the audio-clock value.
      *  Call from the host's existing timer; safe when unbound. */
     void tick() noexcept
     {
-        if (source_ != nullptr)
-        {
-            const float peakL = source_->getPeakLevelL();
-            const float peakR = source_->getPeakLevelR();
-            ballistics_.feed(juce::jmax(peakL, peakR));
-        }
         repaint();
     }
 
-    float getNeedleDb() const noexcept { return ballistics_.getNeedleDb(); }
+    float getNeedleDb() const noexcept { return source_ != nullptr ? source_->getVuDb() : -120.0f; }
 
     void paint(juce::Graphics& g) override
     {
@@ -85,7 +76,7 @@ public:
         }
 
         // ── Needle (clamped by AnalogVuScaleCore, can never leave the dial) ─
-        const float angleDeg = AnalogVuScaleCore::dbToAngleDeg(ballistics_.getNeedleDb());
+        const float angleDeg = AnalogVuScaleCore::dbToAngleDeg(getNeedleDb());
         const float angleRad = juce::degreesToRadians(angleDeg);
         const float len = juce::jmax(1.0f, r - 2.0f);
         const juce::Point<float> tip(pivot.x + std::sin(angleRad) * len,
@@ -100,7 +91,6 @@ public:
 
 private:
     InputMeterCore*        source_ { nullptr };
-    AnalogVuBallisticsCore ballistics_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CompactVuNeedle)
 };

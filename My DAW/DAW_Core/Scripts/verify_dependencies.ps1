@@ -477,6 +477,7 @@ if ($archiveIdentityVerified -and $patchIdentityVerified -and $patch2IdentityVer
             -TargetRelativePath $expected.JucePatch3Target `
             -PristineTargetSha256 $expected.JucePatch3PristineTargetSha256 `
             -PatchedTargetSha256 $expected.JucePatch3PatchedTargetSha256
+        Invoke-ApexWasapiPatch -Root $temporaryRoot -RepositoryRoot $repositoryRoot
         $difference = $null
         if (-not (Test-ApexDirectoryPayloadEquivalent -ReferenceRoot $temporaryRoot -CandidateRoot $installationRoot -Difference ([ref] $difference))) {
             Add-DependencyFailure "JUCE installation payload does not match the pinned archive-plus-patch payload: $difference"

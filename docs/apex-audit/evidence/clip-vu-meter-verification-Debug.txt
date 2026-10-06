@@ -1,0 +1,21 @@
+APEX clip / Trim / VU focused verification
+Date: 2026-10-03
+Core baseline: 000816f2d1338d5e97728fdacb72c75e0fe9c24a (working tree modified)
+
+Focused test: mixer.clip-input-meter-signal.v1
+Configuration: Debug | x64
+Process exit code: 0
+APEXTests.exe SHA-256: 11A1A516E554FB3C28A4D2A2812AFF6611BC0E34A7D5F07BFA915DED927507C5
+Transcript: clip-input-meter-signal-Debug.txt
+Coverage: pending peak handoff; finite-channel clip value; visual clip reset; normal/master indicator geometry; RMS-to-VU calibration and peak dBFS separation; +6 dB Trim moves the post-Trim/pre-FX VU by +6 dB; armed/unmonitored mic preview follows Trim; Track state snapshot notification.
+
+Application build: Debug | x64 | unsigned
+Result: PASS (build_apex.ps1)
+DAW_Core.exe SHA-256: B98C221BD66954BEB361F5D8EB58D7D0DB6450450C616B01C26F1686877959A9
+The build preflight reported the existing Git dubious-ownership failure for the Signalsmith submodule and continued, per build script behavior.
+
+Source patch: clip-vu-gain-staging-fix.patch
+Patch SHA-256: 2A6285E74BE59181DD7BBE6AC52766D7A1E9C2BC22181CFA704D66FF5CF44573
+Reverse-apply check against current core tree: PASS
+
+Limits: focused test only; no physical audio-interface/microphone session or user song was exercised. No complete project save/reopen was tested, and this does not change the earlier full-suite/dependency-gate status.

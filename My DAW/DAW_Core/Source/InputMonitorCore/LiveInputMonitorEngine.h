@@ -17,8 +17,10 @@ namespace DAW {
  * Audio output for live monitoring is handled ENTIRELY by
  * AudioEngine::addLiveInputToTrackBuffer(). This class only handles:
  *
- *   1. Input trim (gain staging before metering)
- *   2. Input VU metering (visual feedback)
+ *   1. Input VU metering for armed tracks whose hardware input is not inserted
+ *      into the audio graph (monitor-off / meter-only path)
+ *   2. A scratch-copy preview at the requested Trim gain, without advancing
+ *      the audible trim smoother a second time
  */
 class LiveInputMonitorEngine
 {
@@ -99,38 +101,41 @@ public:
             }
 
             const bool feedMeterOnly = !shouldMonitor && track->isArmed();
-            if (!shouldMonitor && !feedMeterOnly) continue;
+            if (!feedMeterOnly)
+            {
+                // The graph owns ordinary playback and monitored channels.
+                // Feeding a silent block here advances VU time twice and
+                // biases the reading even though the graph later overwrites RMS.
+                continue;
+            }
 
             const int firstCh = track->getInputFirstChannel() > 0
                 ? track->getInputFirstChannel()
                 : getTrackInputChannel(track->getID());
             const bool mono   = track->isInputMono();
             if (! RecordingInputValidityCore::isRouteAvailable(firstCh, mono, validChannels))
+            {
+                // With no valid input route the graph owns this meter too
+                // (see usesLiveInputOnlyForTrimMeter in AudioEngine).
                 continue;
+            }
 
             const float* hwL = input.getReadPointer(firstCh);
             const float* hwR = mono ? hwL : input.getReadPointer(firstCh + 1);
 
-            if (feedMeterOnly)
-            {
-                // Armed but NOT monitoring: the live input is not part of the
-                // track buffer, so meter it here (post-trim) so the trim panel
-                // VU still shows the incoming signal level.
-                std::memcpy(scratchL_.data(), hwL, sizeof(float) * (size_t) numSamples);
-                std::memcpy(scratchR_.data(), hwR, sizeof(float) * (size_t) numSamples);
-
-                track->getInputTrim().applyToStereoBuffer(scratchL_.data(), scratchR_.data(), numSamples);
-                track->getInputMeter().processBlock(scratchL_.data(), scratchR_.data(), numSamples);
+            // When monitoring is on, AudioEngine inserts this hardware signal
+            // in the track buffer and TrackInputProcessorCore meters the actual
+            // post-Trim/pre-FX channel input once. Only the armed-but-not-
+            // monitored case needs a separate mic-input VU source.
+            if (!feedMeterOnly)
                 continue;
-            }
 
-            // Monitoring: the engine adds the live input to the track buffer
-            // (AudioEngine::addLiveInputToTrackBuffer) and TrackInputProcessorCore
-            // meters that buffer exactly once per block (post-trim, pre-FX).
-            // Feeding the meter here as well would double-count the signal and
-            // make the trim-panel VU over-read by ~6 dB. Nothing else is done
-            // in this loop, so monitoring tracks simply fall through.
-            juce::ignoreUnused(hwL, hwR);
+            std::memcpy(scratchL_.data(), hwL, sizeof(float) * (size_t) numSamples);
+            std::memcpy(scratchR_.data(), hwR, sizeof(float) * (size_t) numSamples);
+            track->getInputTrim().applyTargetGainToStereoBuffer(
+                scratchL_.data(), scratchR_.data(), numSamples);
+            track->getInputMeter().processBlock(
+                scratchL_.data(), scratchR_.data(), numSamples);
         }
     }
 

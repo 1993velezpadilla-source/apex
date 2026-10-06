@@ -1,6 +1,8 @@
 # APEX Test Registry
 
-**Last verified:** 2026-07-26
+> Registro histórico de julio de 2026. Para builds, pruebas enfocadas, hashes, fallos y límites actuales del 3 de octubre, leer [APEX_PROJECT_AUDIT.md](APEX_PROJECT_AUDIT.md) y [calidad](docs/apex-audit/quality.md). La batería completa actual no está aprobada. Las antiguas etiquetas NO TEST no describen la existencia actual de suites y no deben usarse como inventario vigente.
+
+**Last updated:** 2026-10-03. Historical entries were not all re-verified; FIX-017 focused test below was run in Debug x64 only.
 
 ## Test Framework
 
@@ -159,4 +161,17 @@
 | Time/Pitch DSP | NO TEST |
 | Tape stop | NO TEST |
 | Click/metronome | NO TEST |
-| Mixer | NO TEST |
+| Mixer | PARTIAL — TEST-025 covers clip and Trim/VU signaling; broad mixer behavior is not certified |
+
+## Focused verification after the registry snapshot
+
+### TEST-025 Mixer Clip / Input Trim Meter Signal (mixer.clip-input-meter-signal.v1)
+- **File:** `My DAW/DAW_Core/Tests/Source/Diagnostics/MixerResponsiveTests.cpp`
+- **Category:** Diagnostics
+- **Configuration / result:** Debug x64; 8 cases passed, process exit 0.
+- **Coverage:** audio-to-UI peak high-water handoff; positive clip amount in dBFS including a valid channel beside a non-finite channel; reset stays cleared after visual peak hold; 48×14 clip-box geometry on regular and Master strips; sine RMS at −18.06 dBFS reads approximately 0 VU while Peak Max stays in dBFS; +6 dB Trim moves the post-Trim VU by +6 dB; armed-but-unmonitored mic preview follows Trim; Track Trim gain target and Track property-state snapshot update (no project save/reopen).
+- **Evidence:** `docs/apex-audit/evidence/clip-input-meter-signal-Debug.txt` and `clip-vu-meter-verification-Debug.txt`.
+- **Limit:** no physical interface/mic session; no Release or complete-suite re-run.
+
+Mixer coverage is now partial, not absent: this targeted test checks clip and Trim/VU signal presentation; it does not certify all mixer behavior.
+

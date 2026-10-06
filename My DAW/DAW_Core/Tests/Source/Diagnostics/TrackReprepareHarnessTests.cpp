@@ -1802,6 +1802,108 @@ public:
             expect (toneC > 0.05f, "chain-track1 track C non-zero after reprepare");
         }
 
+        // A device buffer Apply is a cold device lifecycle, but ordinary
+        // playback through a track insert must still be continuous on the
+        // first 2048-sample callback after the device resumes.
+        beginTest ("device.reprepare-2048.normal-clip-track-plugin-continuity");
+        {
+            Harness h;
+            expect (h.setupN (*this, 1), "setupN");
+            h.engine.prepare (Harness::kSr, 480);
+            auto* probe = h.attachChainProbe (*this, h.xtracks[0], 480, true, true);
+            expect (probe != nullptr, "track probe exists");
+
+            h.transport.setPosition (0);
+            h.transport.play();
+            std::vector<float> prior;
+            for (int b = 0; b < 8; ++b)
+                h.renderOne (480, prior);
+            const float beforeApplyRms = rmsOf (prior);
+
+            h.reprepare (Harness::kSr, 2048);
+            std::vector<float> firstAfterApply;
+            std::vector<float> continuousAfterApply;
+            for (int b = 0; b < 3; ++b)
+            {
+                h.renderOne (2048, firstAfterApply);
+                continuousAfterApply.insert (continuousAfterApply.end(),
+                                             firstAfterApply.begin(), firstAfterApply.end());
+            }
+
+            float maxAdjacentJump = 0.0f;
+            for (size_t i = 1; i < continuousAfterApply.size(); ++i)
+                maxAdjacentJump = juce::jmax (maxAdjacentJump,
+                    std::abs (continuousAfterApply[i] - continuousAfterApply[i - 1]));
+            const float outputRms = rmsOf (firstAfterApply);
+
+            logMessage (juce::String ("REPREPARE-2048 normal clip RMS=")
+                        + juce::String (outputRms, 6)
+                        + " beforeApplyRms=" + juce::String (beforeApplyRms, 6)
+                        + " maxPostApplyJump=" + juce::String (maxAdjacentJump, 6)
+                        + " pluginBlock=" + juce::String (probe != nullptr ? probe->lastBlockSize() : 0)
+                        + " pluginInputRms=" + juce::String (probe != nullptr ? probe->lastInputRms() : 0.0f, 6));
+
+            expect (outputRms > 0.05f, "normal clip remains audible on first 2048 callback");
+            expect (beforeApplyRms > 0.05f, "normal clip is audible before the device reprepare");
+            expect (probe != nullptr && probe->lastBlockSize() == 2048,
+                    "track plugin receives the applied 2048-sample block");
+            expect (probe != nullptr && probe->violationCount() == 0,
+                    "track plugin has no prepared-block contract violation");
+            expect (probe != nullptr && probe->lastInputRms() > 0.05f,
+                    "track plugin receives non-zero audio on first 2048 callback");
+            expect (maxAdjacentJump < 0.08f,
+                    "normal clip has no hard discontinuity within the resumed 2048 stream");
+        }
+
+        // Match the panel workflow more closely: the project is stopped when
+        // its device closes and prepares at 2048, then the user presses Play
+        // immediately after Apply completes.
+        beginTest ("device.apply-2048.stopped-project-immediate-play");
+        {
+            Harness h;
+            expect (h.setupN (*this, 1), "setupN");
+            h.engine.prepare (Harness::kSr, 480);
+            auto* probe = h.attachChainProbe (*this, h.xtracks[0], 480, true, true);
+            expect (probe != nullptr, "track probe exists");
+            expect (! h.transport.isPlaying(), "transport stays stopped during the device Apply");
+
+            h.reprepare (Harness::kSr, 2048);
+            h.transport.setPosition (0);
+            h.transport.play();
+
+            std::vector<float> firstAfterPlay;
+            std::vector<float> continuousAfterPlay;
+            for (int b = 0; b < 3; ++b)
+            {
+                h.renderOne (2048, firstAfterPlay);
+                continuousAfterPlay.insert (continuousAfterPlay.end(),
+                                            firstAfterPlay.begin(), firstAfterPlay.end());
+            }
+
+            float maxAdjacentJump = 0.0f;
+            for (size_t i = 1; i < continuousAfterPlay.size(); ++i)
+                maxAdjacentJump = juce::jmax (maxAdjacentJump,
+                    std::abs (continuousAfterPlay[i] - continuousAfterPlay[i - 1]));
+            const float firstBlockRms = rmsOf (std::vector<float>(continuousAfterPlay.begin(),
+                                                                  continuousAfterPlay.begin() + 2048));
+
+            logMessage (juce::String ("APPLY-2048 stopped->play firstBlockRms=")
+                        + juce::String (firstBlockRms, 6)
+                        + " maxPostApplyJump=" + juce::String (maxAdjacentJump, 6)
+                        + " pluginBlock=" + juce::String (probe != nullptr ? probe->lastBlockSize() : 0)
+                        + " pluginInputRms=" + juce::String (probe != nullptr ? probe->lastInputRms() : 0.0f, 6));
+
+            expect (firstBlockRms > 0.05f, "normal clip is audible in the first block after Play");
+            expect (probe != nullptr && probe->lastBlockSize() == 2048,
+                    "track plugin receives the 2048-sample block after Play");
+            expect (probe != nullptr && probe->violationCount() == 0,
+                    "track plugin has no block-size or lifecycle violation");
+            expect (probe != nullptr && probe->lastInputRms() > 0.05f,
+                    "track plugin receives audio immediately after Play");
+            expect (maxAdjacentJump < 0.08f,
+                    "normal clip has no hard discontinuity after Apply then Play");
+        }
+
         // ══════════════════════════════════════════════════════════════════
         // STRETCH — CLIP 1 (Critical Theory #1: clip DSP continuity after
         // reprepare). Clip A is time-stretched 1.5x. Per-block profile after
@@ -1843,6 +1945,53 @@ public:
 
             expect (rms[0] > 0.05f, "stretch clip audible in FIRST block after reprepare");
             expect (rms[7] > 0.05f, "stretch clip audible by block 7 after reprepare");
+        }
+
+        // Diagnostic 2048 block profile for the stateful stretch path after
+        // a device restart. Keep the startup and recovery values in evidence;
+        // passing this recovery check does not claim that startup latency is
+        // inaudible or matches the user's reported project.
+        beginTest ("bad.stretch.clip1.reprepare-2048.block-profile");
+        {
+            Harness h;
+            expect (h.setupN (*this, 1), "setupN");
+            h.xclips[0]->setTimeStretch (1.5f);
+
+            h.engine.prepare (Harness::kSr, 480);
+            h.transport.setPosition (0);
+            h.transport.play();
+
+            std::vector<float> pre;
+            for (int b = 0; b < 32; ++b)
+                h.renderOne (480, pre);
+            const float preRms = rmsOf (pre);
+            logMessage (juce::String ("STRETCH-2048 last pre-reprepare block RMS: ") + juce::String (preRms, 4));
+
+            h.reprepare (Harness::kSr, 2048);
+
+            float rms[8] = { 0.f };
+            float maxAdjacentJump = 0.f;
+            float previous = 0.f;
+            for (int b = 0; b < 8; ++b)
+            {
+                std::vector<float> blk;
+                h.renderOne (2048, blk);
+                rms[b] = rmsOf (blk);
+                for (float sample : blk)
+                {
+                    maxAdjacentJump = juce::jmax (maxAdjacentJump, std::abs (sample - previous));
+                    previous = sample;
+                }
+            }
+
+            juce::String profile = "STRETCH-2048 post-reprepare blocks: ";
+            for (int b = 0; b < 8; ++b)
+                profile += juce::String (b) + ":" + juce::String (rms[b], 4) + " ";
+            logMessage (profile + "maxAdjacentJump=" + juce::String (maxAdjacentJump, 4));
+
+            expect (rms[0] > 0.05f, "stretch clip is audible in the first 2048 block after reprepare");
+            expect (rms[7] > 0.05f, "stretch clip remains audible by block 7 after reprepare");
+            expect (maxAdjacentJump < 0.35f, "2048 reprepare has no hard zipper-sized sample jump");
         }
 
         // ══════════════════════════════════════════════════════════════════

@@ -26,6 +26,7 @@ struct ClipPitchProcessParams {
     // <1.0 = clip shorter. SignalSmith handles this via asymmetric
     // input/output buffer sizes.
     double stretchRatio = 1.0;
+    int startupPreRollSamples = 0;
 
     double totalSemitones() const { return pitchSemitones + fineTuneCents / 100.0; }
     double pitchRatio() const { return std::pow(2.0, totalSemitones() / 12.0); }
@@ -60,6 +61,7 @@ public:
         const size_t maxInputSize = (size_t)(maxBlockSize_ * 10);
 
         stereoStretcher_.presetDefault(maxChannels_, static_cast<float>(sampleRate_));
+        maxInputPreRollSamples_ = juce::jmax(0, stereoStretcher_.outputSeekLength(10.0f));
         lastChans_ = maxChannels_;
         for (int ch = 0; ch < maxChannels_; ++ch)
         {
@@ -69,6 +71,7 @@ public:
 
         processingActive_  = false;
         bypassTailSamples_ = 0;
+        activeInputLeadSamples_ = 0;
     }
 
     void reset()
@@ -84,6 +87,7 @@ public:
         currentSemitones_  = 0.0;
         processingActive_  = false;
         bypassTailSamples_ = 0;
+        activeInputLeadSamples_ = 0;
     }
 
     void processBlock(const float* const* input,
@@ -99,6 +103,7 @@ public:
             stereoStretcher_.reset();
             lastChans_ = chans;
             processingActive_ = false;
+            activeInputLeadSamples_ = 0;
         }
 
         targetFactor_ = params.isActive() ? params.pitchRatio() : 1.0;
@@ -115,6 +120,10 @@ public:
             return;
         }
 
+        const float* processInput[kMaxChannels] = {};
+        for (int ch = 0; ch < chans; ++ch)
+            processInput[ch] = input[ch];
+
         if (!processingActive_)
         {
             processingActive_ = true;
@@ -123,7 +132,25 @@ public:
                 std::fill(scratchIn_[ch].begin(), scratchIn_[ch].end(), 0.0f);
                 std::fill(scratchOut_[ch].begin(), scratchOut_[ch].end(), 0.0f);
             }
-            stereoStretcher_.reset();
+            const int preRollSamples = juce::jlimit(0, maxInputPreRollSamples_,
+                                                     params.startupPreRollSamples);
+            if (preRollSamples > 0)
+            {
+                const double initialSemitones = params.pitchRampData != nullptr
+                    && params.pitchRampLength > 0
+                    ? (double) params.pitchRampData[0] + params.fineTuneCents / 100.0
+                    : params.totalSemitones();
+                stereoStretcher_.setTransposeSemitones(static_cast<float>(initialSemitones));
+                stereoStretcher_.outputSeek(input, preRollSamples);
+                for (int ch = 0; ch < chans; ++ch)
+                    processInput[ch] += preRollSamples;
+                activeInputLeadSamples_ = preRollSamples;
+            }
+            else
+            {
+                stereoStretcher_.reset();
+                activeInputLeadSamples_ = 0;
+            }
         }
 
         // ── Smoother chain (Bug 40 fix preserved) ────────────────────────────
@@ -160,7 +187,7 @@ public:
         // the ramp in 32-sample steps; a flat ramp is unaffected.
         if (pitchInTransition || useRamp)
         {
-            processSubBlocks(input, output, chans, numSamples, safeInputSamples, params, useRamp);
+            processSubBlocks(processInput, output, chans, numSamples, safeInputSamples, params, useRamp);
         }
         else
         {
@@ -169,7 +196,7 @@ public:
             float* outArrays[kMaxChannels] = {};
             for (int ch = 0; ch < chans; ++ch)
             {
-                std::copy(input[ch], input[ch] + safeInputSamples, scratchIn_[ch].begin());
+                std::copy(processInput[ch], processInput[ch] + safeInputSamples, scratchIn_[ch].begin());
                 inArrays[ch] = scratchIn_[ch].data();
                 outArrays[ch] = scratchOut_[ch].data();
             }
@@ -191,6 +218,7 @@ public:
                 {
                     processingActive_ = false;
                     stereoStretcher_.reset();
+                    activeInputLeadSamples_ = 0;
                 }
             }
         }
@@ -203,6 +231,25 @@ public:
     int latencySamples() const noexcept
     {
         return stereoStretcher_.inputLatency() + stereoStretcher_.outputLatency();
+    }
+
+    int requiredStartupPreRollSamples(double stretchRatio) const noexcept
+    {
+        if (processingActive_)
+            return 0;
+        const float playbackRate = static_cast<float>(1.0 / juce::jmax(0.01, stretchRatio));
+        return juce::jlimit(0, maxInputPreRollSamples_,
+            stereoStretcher_.outputSeekLength(playbackRate));
+    }
+
+    int activeInputLeadSamples() const noexcept { return activeInputLeadSamples_; }
+    int maxInputPreRollSamples() const noexcept { return maxInputPreRollSamples_; }
+
+    static int maxInputPreRollSamplesForSampleRate(double rate)
+    {
+        signalsmith::stretch::SignalsmithStretch<float> probe(0);
+        probe.presetDefault(2, static_cast<float>(juce::jmax(1.0, rate)));
+        return juce::jmax(0, probe.outputSeekLength(10.0f));
     }
 
     void processSubBlocks(const float* const* input, float* const* output, int chans,
@@ -270,6 +317,8 @@ private:
     double smoothedFactor_   = 1.0;
     double smoothingCoeff_   = 1.0;
     double currentSemitones_ = 0.0;
+    int    activeInputLeadSamples_ = 0;
+    int    maxInputPreRollSamples_ = 0;
     int    bypassTailSamples_= 0;
     bool   processingActive_ = false;
 

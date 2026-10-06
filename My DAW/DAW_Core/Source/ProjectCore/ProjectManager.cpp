@@ -809,6 +809,9 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
             if (subs_.clips)
                 ProjectSampleRateReconcile::reconcileClips(*subs_.clips, plan.factor, plan.deviceRate);
 
+            if (subs_.automation)
+                ProjectSampleRateReconcile::reconcileAutomation(*subs_.automation, plan.factor);
+
             if (subs_.transport)
                 subs_.transport->setPosition((SamplePosition) ProjectSampleRateReconcile::scalePosition(
                     (int64_t) subs_.transport->getPosition(), plan.factor));
@@ -821,8 +824,8 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
                         m->length   = (SamplePosition) ProjectSampleRateReconcile::scalePosition((int64_t) m->length, plan.factor);
                     }
 
-            // PPQ automation needs no reconcile by construction (timePPQ is
-            // rate-independent musical time).
+            // The independent PPQ AutomationLaneStore remains rate-independent;
+            // AutomationManagerCore's sample-domain lanes were reconciled above.
             juce::Logger::writeToLog("[PROJECT] sample-rate mismatch reconciled seconds-preserving: project "
                 + juce::String(plan.projectRate, 1) + " Hz -> device " + juce::String(plan.deviceRate, 1)
                 + " Hz (factor " + juce::String(plan.factor, 6) + ")");

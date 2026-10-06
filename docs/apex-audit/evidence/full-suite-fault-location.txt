@@ -1,0 +1,96 @@
+
+************* Preparing the environment for Debugger Extensions Gallery repositories **************
+   ExtensionRepository : Implicit
+   UseExperimentalFeatureForNugetShare : true
+   AllowNugetExeUpdate : true
+   NonInteractiveNuget : true
+   AllowNugetMSCredentialProviderInstall : true
+   AllowParallelInitializationOfLocalRepositories : true
+   EnableRedirectToChakraJsProvider : false
+
+   -- Configuring repositories
+      ----> Repository : LocalInstalled, Enabled: true
+      ----> Repository : UserExtensions, Enabled: true
+
+>>>>>>>>>>>>> Preparing the environment for Debugger Extensions Gallery repositories completed, duration 0.000 seconds
+
+************* Waiting for Debugger Extensions Gallery to Initialize **************
+
+>>>>>>>>>>>>> Waiting for Debugger Extensions Gallery to Initialize completed, duration 0.031 seconds
+   ----> Repository : UserExtensions, Enabled: true, Packages count: 0
+   ----> Repository : LocalInstalled, Enabled: true, Packages count: 30
+
+Microsoft (R) Windows Debugger Version 10.0.28000.2270 AMD64
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+
+Loading Dump File [C:\Users\1993v\OneDrive\Desktop\Apex backup\My DAW\DAW_Core\.apex-debug\plugin-reorder\full-suite-crash.dmp]
+User Mini Dump File with Full Memory : Only application data is available
+
+
+************* Path validation summary **************
+Response                         Time (ms)     Location
+OK                                             Tests\Builds\VisualStudio2026\x64\Debug\ConsoleApp
+Symbol search path is: Tests\Builds\VisualStudio2026\x64\Debug\ConsoleApp
+Executable search path is: 
+Windows 10 Version 26200 MP (16 procs) Free x64
+Product: WinNt, suite: SingleUserTS Personal
+Edition build lab: 26100.1.amd64fre.ge_release.240331-1435
+Debug session time: Sat Oct  3 16:51:02.000 2026 (UTC - 4:00)
+System Uptime: 0 days 4:14:38.407
+Process Uptime: 0 days 0:03:33.000
+................................................................
+..........
+Loading unloaded module list
+................................
+This dump file has an exception of interest stored in it.
+The stored exception information can be accessed via .ecxr
+(73dc.6ac): Wake debugger - code 80000007 (first/second chance not available)
+
++------------------------------------------------------------------------+
+| This target supports Hardware-enforced Stack Protection. A HW based    |
+| "Shadow Stack" may be available to assist in debugging and analysis.   |
+| See aka.ms/userhsp for more info.                                      |
+|                                                                        |
+| dps @ssp                                                               |
+|                                                                        |
++------------------------------------------------------------------------+
+
+For analysis of this file, run !analyze -v
+ntdll!NtRaiseHardError+0x14:
+00007ff8`d8523c54 c3              ret
+0:000> cdb: Reading initial command 'ln 0x00007ff6e6c46c0e; u 0x00007ff6e6c46bde 0x00007ff6e6c46c3e; q'
+*** WARNING: Unable to verify checksum for APEXTests.exe
+C:\Users\1993v\OneDrive\Desktop\Apex backup\My DAW\DAW_Core\Source\UICore\MixerPanel.h(2527)+0x1b
+(00007ff6`e6c46ad0)   APEXTests!DAW::MixerStrip::initChildren+0x13e   |  (00007ff6`e6c476d0)   APEXTests!DAW::MixerStrip::initMasterModeChildren
+APEXTests!DAW::MixerStrip::initChildren+0x10e [C:\Users\1993v\OneDrive\Desktop\Apex backup\My DAW\DAW_Core\Source\UICore\MixerPanel.h @ 2522]:
+00007ff6`e6c46bde ba81020001      mov     edx,1000281h
+00007ff6`e6c46be3 488b8c2490000000 mov     rcx,qword ptr [rsp+90h]
+00007ff6`e6c46beb e807c2a3ff      call    APEXTests!ILT+597490(?setColourComponentjuceQEAAXHVColour (00007ff6`e6682df7)
+00007ff6`e6c46bf0 90              nop
+00007ff6`e6c46bf1 eb35            jmp     APEXTests!DAW::MixerStrip::initChildren+0x158 (00007ff6`e6c46c28)
+00007ff6`e6c46bf3 488b8424b0010000 mov     rax,qword ptr [rsp+1B0h]
+00007ff6`e6c46bfb 4805980c0000    add     rax,0C98h
+00007ff6`e6c46c01 4889842498000000 mov     qword ptr [rsp+98h],rax
+00007ff6`e6c46c09 e85b3d9dff      call    APEXTests!ILT+170340(?getInstanceThemeDAWSAAEAV12XZ) (00007ff6`e661a969)
+00007ff6`e6c46c0e 448b80fc010000  mov     r8d,dword ptr [rax+1FCh]
+00007ff6`e6c46c15 ba81020001      mov     edx,1000281h
+00007ff6`e6c46c1a 488b8c2498000000 mov     rcx,qword ptr [rsp+98h]
+00007ff6`e6c46c22 e8d0c1a3ff      call    APEXTests!ILT+597490(?setColourComponentjuceQEAAXHVColour (00007ff6`e6682df7)
+00007ff6`e6c46c27 90              nop
+00007ff6`e6c46c28 488b8424b0010000 mov     rax,qword ptr [rsp+1B0h]
+00007ff6`e6c46c30 4805980c0000    add     rax,0C98h
+00007ff6`e6c46c36 48898424a0000000 mov     qword ptr [rsp+0A0h],rax
+00007ff6`e6c46c3e 488d942420010000 lea     rdx,[rsp+120h]
+quit:
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\atlmfc.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\concurrency.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\cpp_rest.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\ObjectiveC.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\stl.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Data.Json.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Geolocation.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Devices.Sensors.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\Windows.Media.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\windows.natvis'
+NatVis script unloaded from 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\Visualizers\winrt.natvis'

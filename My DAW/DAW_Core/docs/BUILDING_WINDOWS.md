@@ -86,6 +86,20 @@ Release acceptance requires all of the following evidence:
   Release x64 rebuilds, and hardware smoke tests after selecting the final
   dependency contract. Compilation alone is not release acceptance.
 
+### WASAPI shared buffer patch
+
+`0004-apex-wasapi-shared-buffer.patch` sizes the standard shared render queue
+for large application callbacks and restores small client blocks and shared
+sample-rate enumeration. Its identities are pinned by
+`juce.compatibilityPatch4` and `Get-ApexWasapiPatch`; both dependency scripts
+apply it after patches 0001-0003 before comparing the SDK payload.
+
+Realtek output reproduction, the 32-2048 / 44.1-48 kHz matrix, diagnostic
+commands, artifact hashes and remaining hardware limits are recorded in
+[`evidence/wasapi-shared-buffer-2048-root-cause-2026-10-05.md`](../evidence/wasapi-shared-buffer-2048-root-cause-2026-10-05.md).
+The output regression is verified; microphone/recording and vendor-ASIO
+hardware acceptance are separate, outstanding gates.
+
 ## Verify Dependencies
 
 Run the build-foundation and dependency gates before building:

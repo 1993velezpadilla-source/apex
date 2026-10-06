@@ -120,6 +120,12 @@ static inline void sanitizeStereoBuffer(juce::AudioBuffer<float>& buffer, int nu
 class AudioEngine : public juce::Timer
 {
 public:
+    using PostFaderRecordTap = void (*)(void* context,
+                                        const TrackID& trackId,
+                                        const juce::AudioBuffer<float>& postFaderBuffer,
+                                        int numSamples,
+                                        bool captureThisBlock) noexcept;
+
     AudioEngine() = default;
 
     void setSubsystems(TrackManager* tracks, ClipManager* clips,
@@ -183,6 +189,17 @@ public:
         liveInputBuffer_ = nullptr;
         liveInputNumSamples_ = 0;
         liveInputValidChannels_ = 0;
+    }
+
+    void setPostFaderRecordTap(void* context, PostFaderRecordTap tap) noexcept
+    {
+        postFaderRecordContext_ = context;
+        postFaderRecordTap_ = tap;
+    }
+
+    void setPostFaderRecordCaptureEnabled(bool enabled) noexcept
+    {
+        postFaderRecordCaptureEnabled_ = enabled;
     }
     /** Publish per-track plugin-chain latencies (MESSAGE THREAD only).
      *  Called by ApplicationCore whenever a chain is created, structurally
@@ -337,8 +354,10 @@ public:
             masterPdcScratchL_.assign((size_t) blockSize, 0.f);
             masterPdcScratchR_.assign((size_t) blockSize, 0.f);
         }
-        if (pitchInputBuffer_.getNumSamples() < blockSize * 10)
-            pitchInputBuffer_.setSize(2, blockSize * 10);
+        const int inputPrimeCapacity =
+            ArrangementEditor::ClipIndependentPitchCore::maxInputPreRollSamplesForSampleRate(sampleRate_);
+        if (pitchInputBuffer_.getNumSamples() < blockSize * 10 + inputPrimeCapacity)
+            pitchInputBuffer_.setSize(2, blockSize * 10 + inputPrimeCapacity);
         if (pitchOutputBuffer_.getNumSamples() < blockSize)
             pitchOutputBuffer_.setSize(2, blockSize);
     }
@@ -523,7 +542,8 @@ public:
         for (auto& [id, core] : clipTapeStopProcessorMap_)
             if (core) core->prepare(sampleRate, worstCaseBlock, 2);
         // Per-clip independent pitch cores are created on demand in getOrCreateClipPitchCore()
-        pitchInputBuffer_.setSize(2, worstCaseBlock * 10);
+        pitchInputBuffer_.setSize(2, worstCaseBlock * 10
+            + ArrangementEditor::ClipIndependentPitchCore::maxInputPreRollSamplesForSampleRate(sampleRate));
         pitchOutputBuffer_.setSize(2, worstCaseBlock);
         clipRegionPluginBuffer_.setSize(2, worstCaseBlock);
         pdcScratchL_.assign(worstCaseBlock, 0.f);
@@ -872,9 +892,7 @@ public:
         if (tracks_->hasMasterTrack())
         {
             auto* master = tracks_->getMasterTrack();
-            float dispL = juce::jmax(masterPeakL, master->getPeakLevelLeft()  * 0.92f);
-            float dispR = juce::jmax(masterPeakR, master->getPeakLevelRight() * 0.92f);
-            master->setPeakLevels(dispL, dispR);
+            master->setPeakLevels(masterPeakL, masterPeakR);
         }
 
     }
@@ -931,6 +949,9 @@ private:
     const juce::AudioBuffer<float>* liveInputBuffer_ = nullptr;
     int liveInputNumSamples_ = 0;
     int liveInputValidChannels_ = 0;
+    void* postFaderRecordContext_ = nullptr;
+    PostFaderRecordTap postFaderRecordTap_ = nullptr;
+    bool postFaderRecordCaptureEnabled_ = false; // set on the device callback thread
 
     // Hash functor for juce::String keys in unordered_map — O(1) average lookup.
     struct JuceStringHash
@@ -1834,6 +1855,21 @@ private:
         return false;
     }
 
+    bool usesLiveInputOnlyForTrimMeter(const Track& track, int numSamples) const noexcept
+    {
+        if (!track.isArmed() || liveInputBuffer_ == nullptr
+            || liveInputNumSamples_ != numSamples || transport_ == nullptr
+            || shouldMonitorLiveInputForTrack(track))
+            return false;
+
+        // An armed track with monitoring disabled does not receive hardware
+        // input in trackBuffer_. LiveInputMonitorEngine meters that input on a
+        // scratch copy instead, so avoid overwriting its VU with the unrelated
+        // playback buffer later in this callback.
+        return RecordingInputValidityCore::isRouteAvailable(
+            track.getInputFirstChannel(), track.isInputMono(), liveInputValidChannels_);
+    }
+
     bool addLiveInputToTrackBuffer(Track& track, int numSamples) noexcept
     {
         const bool monitorTargetOn = shouldMonitorLiveInputForTrack(track);
@@ -2204,7 +2240,9 @@ private:
         {
             auto* tbL = trackBuf.getWritePointer(0);
             auto* tbR = trackBuf.getWritePointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
-            TrackInputProcessorCore::processTrack(*track, tbL, tbR, numSamples);
+            const bool publishTrackInputMeter = !usesLiveInputOnlyForTrimMeter(*track, numSamples);
+            TrackInputProcessorCore::processTrack(*track, tbL, tbR, numSamples,
+                                                  publishTrackInputMeter);
         }
 
         // Capture pre-FX snapshot before the plugin chain runs (for PreFX tap)
@@ -2331,40 +2369,18 @@ private:
                     { hasSidechainInput = true; break; }
                 }
 
-                chain.applyAutomationAtSample(track->getID(), automationSnap, (int64_t)position,
-                                              sampleRate_, transport_ ? transport_->getTempo() : 120.0,
-                                              numSamples);
-
 #if APEX_AUDIO_DEBUG_LOGS
                 emitMonitorJumpDiagIfNeeded(*track, liveInputWasAdded, numSamples);
 #endif
 
-                if (hasMidiInput)
-                    chain.processBlockWithMidi(trackBuf, trackMidi, numSamples);
-                else if (hasSidechainInput)
-                {
-                    if (auto* sc = findSidechainBuffer(nodeMeta->id))
-                        chain.processBlockWithSidechain(trackBuf, *sc, numSamples);
-                else
-                {
-                    // No active sidechain into this node. The plugin keeps its
-                    // own auxiliary bus buffer between blocks (JUCE does not
-                    // clear it), so a removed cable left stale audio feeding the
-                    // compressor's detector — "always active even after removing
-                    // the cable". Feed the chain a SILENT sidechain instead of
-                    // skipping it: the aux bus is overwritten with silence and
-                    // the detector sees nothing.
-                    if (auto* sc = findSidechainBuffer(nodeMeta->id))
-                    {
-                        sc->clear();
-                        chain.processBlockWithSidechain(trackBuf, *sc, numSamples);
-                    }
-                    else
-                        chain.processBlock(trackBuf, numSamples);
-                }
-                }
-                else
-                    chain.processBlock(trackBuf, numSamples);
+                auto* sc = hasSidechainInput ? findSidechainBuffer(nodeMeta->id) : nullptr;
+                chain.processBlockWithAutomation(
+                    trackBuf,
+                    hasMidiInput ? &trackMidi : nullptr,
+                    hasMidiInput ? nullptr : sc,
+                    track->getID(), automationSnap, (int64_t)position,
+                    sampleRate_, transport_ ? transport_->getTempo() : 120.0,
+                    numSamples);
 
 #if APEX_AUDIO_DEBUG_LOGS
                 emitMonitorFxDiagIfNeeded(*track, liveInputWasAdded, &chain);
@@ -2413,9 +2429,7 @@ private:
         float leftPeak  = trackBuf.getMagnitude(0, 0, numSamples) * leftGain;
         float rightPeak = trackBuf.getMagnitude(
             juce::jmin(1, trackBuf.getNumChannels() - 1), 0, numSamples) * rightGain;
-        float displayLeft  = juce::jmax(leftPeak,  track->getPeakLevelLeft()  * 0.92f);
-        float displayRight = juce::jmax(rightPeak, track->getPeakLevelRight() * 0.92f);
-        track->setPeakLevels(displayLeft, displayRight);
+        track->setPeakLevels(leftPeak, rightPeak);
 
         // ── TrackLens: post-plugin, post-fader metering ───────────────────
         if (trackPeakMeterManager_ != nullptr)
@@ -2481,6 +2495,13 @@ private:
         auto* tbR = trackBuf.getWritePointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
         volumeRamp.applyToStereoBuffer(tbL, tbR, numSamples);
         SoundEngine::ApexMixFanoutCore::applyStereoMuteRamp(tbL, tbR, muteRamp, numSamples);
+
+        // Record mode taps the already-processed channel output. This is a
+        // read-only copy point: no second plugin pass and no audible summing.
+        if (postFaderRecordCaptureEnabled_ && liveInputWasAdded && track->isArmed()
+            && postFaderRecordTap_ != nullptr)
+            postFaderRecordTap_(postFaderRecordContext_, track->getID(), trackBuf,
+                                numSamples, true);
 
         // ── Route to outputs (Direct + Post-fader sends) ────────────────
         for (const auto& edge : snap->edges)
@@ -2619,11 +2640,6 @@ private:
             auto it = pluginChainsBlockSnap_->find(busTrack->getID());
             if (it != pluginChainsBlockSnap_->end() && it->second)
             {
-                it->second->applyAutomationAtSample(busTrack->getID(), automationSnap,
-                                                    (int64_t)position, sampleRate_,
-                                                    transport_ ? transport_->getTempo() : 120.0,
-                                                    numSamples);
-
                 // Same sidechain contract as the track path: an active
                 // sidechain edge into this node must feed the chain's
                 // auxiliary bus instead of a plain processBlock. Bus
@@ -2640,17 +2656,11 @@ private:
                     { hasSidechainInput = true; break; }
                 }
 
-                if (hasSidechainInput)
-                {
-                    if (auto* sc = findSidechainBuffer(nodeMeta->id))
-                        it->second->processBlockWithSidechain(nodeBuf, *sc, numSamples);
-                    else
-                        it->second->processBlock(nodeBuf, numSamples);
-                }
-                else
-                {
-                    it->second->processBlock(nodeBuf, numSamples);
-                }
+                auto* sc = hasSidechainInput ? findSidechainBuffer(nodeMeta->id) : nullptr;
+                it->second->processBlockWithAutomation(
+                    nodeBuf, nullptr, sc, busTrack->getID(), automationSnap,
+                    (int64_t)position, sampleRate_,
+                    transport_ ? transport_->getTempo() : 120.0, numSamples);
             }
         }
 
@@ -2680,9 +2690,7 @@ private:
         {
             float peakL = nodeBuf.getMagnitude(0, 0, numSamples) * busGain;
             float peakR = nodeBuf.getMagnitude(juce::jmin(1, nodeBuf.getNumChannels() - 1), 0, numSamples) * busGain;
-            float dispL = juce::jmax(peakL, busTrack->getPeakLevelLeft() * 0.92f);
-            float dispR = juce::jmax(peakR, busTrack->getPeakLevelRight() * 0.92f);
-            busTrack->setPeakLevels(dispL, dispR);
+            busTrack->setPeakLevels(peakL, peakR);
         }
 
         if (busMuted && busMuteFade != nullptr && busMuteFade->isFullyMuted()) return;
@@ -2857,9 +2865,7 @@ private:
             float leftPeak  = trackBuffer_.getMagnitude(0, 0, numSamples) * leftGain;
             float rightPeak = trackBuffer_.getMagnitude(
                 juce::jmin(1, trackBuffer_.getNumChannels() - 1), 0, numSamples) * rightGain;
-            float displayLeft = juce::jmax(leftPeak, track->getPeakLevelLeft() * 0.92f);
-            float displayRight = juce::jmax(rightPeak, track->getPeakLevelRight() * 0.92f);
-            track->setPeakLevels(displayLeft, displayRight);
+            track->setPeakLevels(leftPeak, rightPeak);
 
             auto& muteFade = getOrCreateMuteFade(track->getID());
             const float* muteRamp = muteFade.generate(!audible, numSamples);
@@ -3517,6 +3523,9 @@ private:
                             DBG("[INDEPENDENT PITCH] Stretch active: " << clipStretch << "x via SignalSmith");
 
                         // Step 1: Read source into pitch input buffer, with stretch awareness.
+                        auto& pitchCore = getOrCreateClipPitchCore(clip->getID());
+                        const int startupPreRollSamples = pitchCore.requiredStartupPreRollSamples(clipStretch);
+                        SoundEngine::PitchTimeInputPlan inputPlan;
                         {
                             // Defensive: clear the full count region BEFORE reading so
                             // any samples not written by the loop below are zero, not stale.
@@ -3560,11 +3569,13 @@ private:
                             }
 #endif
 
-                            const auto inputPlan = SoundEngine::ApexPitchTimeInputPlanCore::makeInputPlan(
+                            inputPlan = SoundEngine::ApexPitchTimeInputPlanCore::makeInputPlan(
                                 count,
                                 engineClipOffset,
                                 clipStretch,
-                                pitchInputBuffer_.getNumSamples());
+                                pitchInputBuffer_.getNumSamples(),
+                                pitchCore.activeInputLeadSamples(),
+                                startupPreRollSamples);
                             const int safeInputSamples = inputPlan.safeInputSamples;
 
                             for (int ch = 0; ch < maxChans; ++ch)
@@ -3640,7 +3651,7 @@ private:
                             pitchParams.pitchRampData   = pitchActive ? pitchRamp_.data() : nullptr;
                             pitchParams.pitchRampLength = pitchActive ? count : 0;
                             pitchParams.stretchRatio = (double)clipStretch;
-                            auto& pitchCore = getOrCreateClipPitchCore(clip->getID());
+                            pitchParams.startupPreRollSamples = inputPlan.startupPreRollSamples;
                             if (pitchActive)
                                 DBG("[PITCH CORE RAMP] first=" << pitchRamp_[0]
                                     << " last=" << smoothedClipPitch);

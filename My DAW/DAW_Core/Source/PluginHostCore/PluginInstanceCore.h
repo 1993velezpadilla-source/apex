@@ -1559,14 +1559,20 @@ public:
         const TrackID& trackId,
         int64_t samplePosition,
         double ppqPosition,
-        float currentValue) noexcept
+        float currentValue,
+        bool* hasAutomation = nullptr) noexcept
     {
+        if (hasAutomation != nullptr)
+            *hasAutomation = false;
         float newValue = currentValue;
         if (automationSnap != nullptr)
         {
             if (auto* lane = automationSnap->findLaneRT(trackId, binding.coreParamId))
-                if (lane->enabled)
+                if (lane->enabled && !lane->points.empty())
+                {
                     newValue = lane->getValueAtSample(samplePosition, currentValue);
+                    if (hasAutomation != nullptr) *hasAutomation = true;
+                }
         }
         if (binding.apexPid != apex::automation::kInvalidParameterID)
         {
@@ -1574,7 +1580,10 @@ public:
             {
                 auto snap = apexLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
+                {
                     newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
+                    if (hasAutomation != nullptr) *hasAutomation = true;
+                }
             }
         }
         if (binding.bridgePid != apex::automation::kInvalidParameterID)
@@ -1583,7 +1592,10 @@ public:
             {
                 auto snap = bridgeLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
+                {
                     newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
+                    if (hasAutomation != nullptr) *hasAutomation = true;
+                }
             }
         }
         return newValue;
@@ -1651,9 +1663,24 @@ public:
             // manual bridge) lives in ONE shared evaluator used identically by
             // the InProcess and Sandboxed sinks — execution mode must never
             // change the automation math.
+            bool hasAutomation = false;
             const float newValue = computeCanonicalTarget(
                 binding, laneStore, automationSnap, trackId,
-                samplePosition, ppqPosition, currentValue);
+                samplePosition, ppqPosition, currentValue, &hasAutomation);
+
+            // Without an active lane the processor owns its manual value.
+            // Smoothing stale history back into that value creates a feedback
+            // loop: the attenuated value becomes the next block's target and
+            // never recovers. In a chain the loss compounds at every insert.
+            if (!hasAutomation)
+            {
+                lastAutomationValues_[(size_t)i] = currentValue;
+                if (auto mirrored = registry.findRT(binding.apexPid))
+                    if (mirrored->getBoundPluginParameter() == pluginParam
+                        && std::abs(mirrored->getNormalizedValue() - currentValue) > 0.0001f)
+                        mirrored->setValueFromPlugin(currentValue);
+                continue;
+            }
 
             // De-zipper smoothing (10 ms one-pole, closed-form advancement).
             // The smoother must advance across the FULL audio block: the old
@@ -1675,13 +1702,141 @@ public:
             {
                 if (auto automationParam = registry.findRT (binding.apexPid))
                 {
-                    automationParam->setValueFromAutomation (smoothedValue);
-                    continue;
+                    // The instance-local parameter is the DSP authority. A
+                    // registry entry must never redirect this write to the
+                    // processor that previously occupied this slot.
+                    if (automationParam->getBoundPluginParameter() == pluginParam)
+                        automationParam->writeValue(smoothedValue,
+                            apex::automation::ChangeSource::Automation);
                 }
             }
 
             pluginParam->setValue (smoothedValue);
         }
+    }
+
+    /** Returns true when a plugin parameter's automation changes (or its
+        smoother is still converging) during this host block. The audio engine
+        uses this to subdivide only blocks that need finer automation timing;
+        static lanes keep the normal large-buffer processing path. */
+    bool hasAutomationChangeWithinBlock(const TrackID& trackId,
+                                        const AutomationSnapshot* automationSnap,
+                                        int64_t samplePosition,
+                                        double sampleRate,
+                                        double bpm,
+                                        int numSamples) noexcept
+    {
+        if (numSamples <= 0 || trackId != trackId_)
+            return false;
+
+        auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
+        auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
+        const auto keyGeneration = keyRegistry.getChangeGeneration();
+        const double ppqScale = sampleRate > 0.0 && bpm > 0.0
+            ? bpm / (60.0 * sampleRate) : 0.0;
+        const double ppqStart = static_cast<double>(samplePosition) * ppqScale;
+        const double ppqEnd = static_cast<double>(samplePosition + numSamples - 1) * ppqScale;
+        const int64_t sampleEnd = samplePosition + numSamples - 1;
+
+        auto bindingsChange = [&](auto& bindings, const auto& lastValues,
+                                  auto&& getCurrentValue) noexcept
+        {
+            const auto count = juce::jmin((int) bindings.size(), (int) lastValues.size());
+            for (int i = 0; i < count; ++i)
+            {
+                auto& binding = bindings[(size_t) i];
+                if (binding.keyGeneration != keyGeneration)
+                {
+                    binding.apexPid = keyRegistry.findIDRT(binding.apexKey);
+                    binding.bridgePid = keyRegistry.findIDRT(binding.bridgeKey);
+                    binding.keyGeneration = keyGeneration;
+                }
+
+                const auto* legacyLane = automationSnap != nullptr
+                    ? automationSnap->findLaneRT(trackId, binding.coreParamId) : nullptr;
+                if (legacyLane != nullptr
+                    && (!legacyLane->enabled || legacyLane->points.empty()))
+                    legacyLane = nullptr;
+
+                auto apexLane = binding.apexPid != apex::automation::kInvalidParameterID
+                    ? laneStore.findLaneRT(binding.apexPid) : nullptr;
+                auto apexPoints = apexLane != nullptr ? apexLane->getSnapshot() : nullptr;
+                if (apexPoints != nullptr && apexPoints->empty())
+                    apexPoints.reset();
+
+                auto bridgeLane = binding.bridgePid != apex::automation::kInvalidParameterID
+                    ? laneStore.findLaneRT(binding.bridgePid) : nullptr;
+                auto bridgePoints = bridgeLane != nullptr ? bridgeLane->getSnapshot() : nullptr;
+                if (bridgePoints != nullptr && bridgePoints->empty())
+                    bridgePoints.reset();
+
+                if (legacyLane == nullptr && apexPoints == nullptr && bridgePoints == nullptr)
+                    continue;
+
+                const float currentValue = getCurrentValue(i);
+                auto targetAt = [&](int64_t sample, double ppq) noexcept
+                {
+                    float target = currentValue;
+                    if (legacyLane != nullptr)
+                        target = legacyLane->getValueAtSample(sample, target);
+                    if (apexPoints != nullptr)
+                        target = apex::automation::AutomationLane::evaluateAt(*apexPoints, ppq);
+                    if (bridgePoints != nullptr)
+                        target = apex::automation::AutomationLane::evaluateAt(*bridgePoints, ppq);
+                    return target;
+                };
+
+                const float targetStart = targetAt(samplePosition, ppqStart);
+                const float targetEnd = targetAt(sampleEnd, ppqEnd);
+                bool pointInsideBlock = false;
+                if (legacyLane != nullptr)
+                {
+                    const auto point = std::upper_bound(
+                        legacyLane->points.begin(), legacyLane->points.end(), samplePosition,
+                        [](int64_t position, const AutomationPoint& candidate)
+                        { return position < candidate.timeSamples; });
+                    pointInsideBlock = point != legacyLane->points.end()
+                        && point->timeSamples <= sampleEnd;
+                }
+                auto apexPointInsideBlock = [&](const auto& points) noexcept
+                {
+                    if (points == nullptr)
+                        return false;
+                    const auto point = std::upper_bound(
+                        points->begin(), points->end(), ppqStart,
+                        [](double position, const apex::automation::Breakpoint& candidate)
+                        { return position < candidate.timePPQ; });
+                    return point != points->end() && point->timePPQ <= ppqEnd;
+                };
+                pointInsideBlock = pointInsideBlock
+                    || apexPointInsideBlock(apexPoints)
+                    || apexPointInsideBlock(bridgePoints);
+
+                if (std::abs(lastValues[(size_t) i] - targetStart) > 0.0001f
+                    || std::abs(targetEnd - targetStart) > 0.0001f
+                    || pointInsideBlock)
+                    return true;
+            }
+            return false;
+        };
+
+        if (sandboxProxy_ != nullptr)
+            return bindingsChange(sandboxAutomationBindings_, sandboxLastAutomationValues_,
+                [&](int i) noexcept { return sandboxLastAutomationValues_[(size_t) i]; });
+
+        if (plugin_ == nullptr)
+            return false;
+        auto& params = plugin_->getParameters();
+        return bindingsChange(rtAutomationBindings_, lastAutomationValues_,
+            [&](int i) noexcept
+            {
+                if (i >= parameterInfos_.size())
+                    return lastAutomationValues_[(size_t) i];
+                const int parameterIndex = parameterInfos_.getReference(i).parameterIndex;
+                return parameterIndex >= 0 && parameterIndex < params.size()
+                    && params[parameterIndex] != nullptr
+                    ? params[parameterIndex]->getValue() : lastAutomationValues_[(size_t) i];
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════════════

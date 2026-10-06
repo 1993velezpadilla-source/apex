@@ -85,6 +85,18 @@ public:
             expectEquals (DAW::DeviceCapability::formatBufferSizeLabel (32).getIntValue(), 32);
             expectEquals (DAW::DeviceCapability::formatBufferSizeLabel (64).getIntValue(), 64);
         }
+
+        beginTest ("resume does not restart a device for fewer granted inputs than the request capacity");
+        {
+            // Windows Audio commonly grants a stereo microphone while Apex
+            // requests capacity for up to 64 channels. That is already a valid
+            // device setup and must not cause a second restart after Apply.
+            expect (! DAW::DeviceCapability::shouldRepairMissingInputChannels (true, 64, 2));
+            expect (! DAW::DeviceCapability::shouldRepairMissingInputChannels (true, 64, 1));
+            expect (DAW::DeviceCapability::shouldRepairMissingInputChannels (true, 64, 0));
+            expect (! DAW::DeviceCapability::shouldRepairMissingInputChannels (false, 64, 0));
+            expect (! DAW::DeviceCapability::shouldRepairMissingInputChannels (true, 0, 0));
+        }
     }
 };
 

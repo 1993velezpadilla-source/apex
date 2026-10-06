@@ -6,6 +6,10 @@
 #include "../../Source/UICore/MixerKeyboardRoutingCore.h"
 #include "../../Source/SelectionCore/MultiSelectionCore.h"
 #include "../../Source/TrackCore/Track.h"
+#include "../../Source/InputMonitorCore/InputMeterCore.h"
+#include "../../Source/InputMonitorCore/LiveInputMonitorEngine.h"
+#include "../../Source/InputMonitorCore/TrackInputProcessorCore.h"
+#include "../../Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h"
 #include "../../Source/CommandCore/Command.h"
 #include "../../Source/CommandCore/CommandManager.h"
 #include "../../Source/CommandCore/GeneralCommands.h"
@@ -13,9 +17,12 @@
 #include "../../Source/RoutingCore/MasterRouteStateCore.h"
 #include "../../Source/TrackCore/TrackReorderCore.h"
 #include "../../Source/UICore/TrackList.h"
+#include "../../Source/UICore/InputTrimFloatingPanel.h"
 
 #include <type_traits>
 #include <utility>
+#include <cmath>
+#include <limits>
 
 namespace
 {
@@ -1561,3 +1568,389 @@ public:
 };
 
 static MixerFaderUndoExactTests mixerFaderUndoExactTests;
+
+class MixerMeterSignalTests final : public juce::UnitTest
+{
+public:
+    MixerMeterSignalTests()
+        : juce::UnitTest("mixer.clip-input-meter-signal.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        beginTest("Mixer peak handoff retains the largest block until the UI consumes it");
+        DAW::Track track("meter-test", "Meter Test");
+        track.setPeakLevels(0.50f, 1.25f);
+        track.setPeakLevels(0.30f, 0.75f);
+        expect(track.isClipLatched(), "Track must latch a sample peak above 0 dBFS");
+        expectWithinAbsoluteError(track.getClipOverDb(), 20.0f * std::log10(1.25f), 0.0001f,
+                                  "Clip readout must report the positive overshoot in dBFS");
+        float left = 0.0f, right = 0.0f;
+        track.consumePeakLevels(left, right);
+        expectWithinAbsoluteError(left, 0.50f, 0.0001f, "Left peak must be preserved");
+        expectWithinAbsoluteError(right, 1.25f, 0.0001f, "Right peak must be preserved");
+        expectWithinAbsoluteError(track.getPeakLevel(), 0.75f, 0.0001f,
+                                  "Shared readers keep the latest block while the UI consumes its own peak window");
+        expectWithinAbsoluteError(track.getPendingPeakLevel(), 0.0f, 0.0001f,
+                                  "UI consume must clear only its pending meter window");
+        track.setPeakLevels(0.25f, 0.25f);
+        track.clearClipPeak();
+        expect(!track.isClipLatched(), "Reset must clear the clip latch independently of meter history");
+        track.consumePeakLevels(left, right);
+        expectWithinAbsoluteError(track.getPendingPeakLevel(), 0.0f, 0.0001f,
+                                  "Consumed UI values must not reappear for a second reader");
+
+        beginTest("A valid channel still reports a clip when its partner is non-finite");
+        track.clearClipPeak();
+        track.setPeakLevels(std::numeric_limits<float>::infinity(), 2.0f);
+        expect(track.isClipLatched(), "A non-finite left sample must not hide a valid right-channel clip");
+        expectWithinAbsoluteError(track.getClipOverDb(), 20.0f * std::log10(2.0f), 0.0001f,
+                                  "Clip dBFS must be calculated from the sanitized valid peak");
+
+        beginTest("LevelMeter does not relatch a cleared clip from its visual peak hold");
+        DAW::LevelMeter meter;
+        meter.setLevels(2.0f, 0.5f);
+        for (int i = 0; i < 8; ++i)
+            meter.tick();
+        expect(!meter.isClipLatched(), "Visual peak holds must not act as fresh clip events");
+        meter.setClipOverDb(3.4f);
+        expect(meter.isClipLatched(), "A measured clip event must latch");
+        expectWithinAbsoluteError(meter.getClipOverDb(), 3.4f, 0.0001f,
+                                  "Clip amount must remain available for the indicator");
+        meter.clearClip();
+        for (int i = 0; i < 8; ++i)
+            meter.tick();
+        expect(!meter.isClipLatched(), "Cleared visual history must not immediately re-arm the clip box");
+
+        beginTest("Normal and Master strips both reserve a readable clip box");
+        const auto previousGlobalRange = DAW::FaderRangeCore::getGlobalInstance();
+        DAW::FaderRangeCore range;
+        DAW::FaderRangeCore::setGlobalInstance(&range);
+        DAW::Track normalTrack("meter-normal", "Normal");
+        DAW::Track masterTrack("meter-master", "Master");
+        masterTrack.setMaster(true);
+        DAW::MixerStrip normalStrip(normalTrack, range);
+        DAW::MixerStrip masterStrip(masterTrack, range);
+        normalStrip.setBounds(0, 0, 80, 520);
+        masterStrip.setBounds(0, 0, 170, 520);
+        auto checkClipBox = [this](juce::Component& strip, const juce::String& label)
+        {
+            auto* box = strip.findChildWithID("mixer.clip-indicator");
+            expect(box != nullptr, label + ": strip must own a clip indicator");
+            if (box == nullptr)
+                return;
+            expect(box->isVisible(), label + ": clip indicator must be visible");
+            expectEquals(box->getWidth(), 48, label + ": clip readout must fit a numeric value");
+            expect(box->getHeight() >= 14, label + ": clip reset hit target must be practical");
+            expect(box->getX() >= 0 && box->getRight() <= strip.getWidth(),
+                   label + ": clip readout must stay inside its strip");
+        };
+        checkClipBox(normalStrip, "normal track");
+        checkClipBox(masterStrip, "Master");
+        DAW::FaderRangeCore::setGlobalInstance(previousGlobalRange);
+
+        beginTest("Trim input peak and VU detector keep distinct calibrated units");
+        DAW::Track meterTrack("meter-signal", "Meter Signal");
+        DAW::TrackInputProcessorCore::prepareTrack(meterTrack, 48000.0, 480);
+        float leftSine[480] {};
+        float rightSine[480] {};
+        constexpr float amplitude = 0.125f; // -18.06 dBFS sample peak
+        for (int i = 0; i < 480; ++i)
+        {
+            const float sample = amplitude * std::sin(juce::MathConstants<float>::twoPi
+                                                       * (float) i / 48.0f);
+            leftSine[i] = rightSine[i] = sample;
+        }
+        DAW::TrackInputProcessorCore::processTrack(meterTrack, leftSine, rightSine, 480);
+        const auto& inputMeter = meterTrack.getInputMeter();
+        expectWithinAbsoluteError(inputMeter.getPeakMaxLevelL(), amplitude, 0.0001f,
+                                  "Peak maximum must remain a true sample peak");
+        expectWithinAbsoluteError(inputMeter.getRmsLevelL(), amplitude * 0.70710678f, 0.0001f,
+                                  "The separate block-RMS diagnostic retains RMS units");
+
+        for (int i = 0; i < 100; ++i)
+            DAW::TrackInputProcessorCore::processTrack(meterTrack, leftSine, rightSine, 480);
+        expectWithinAbsoluteError(inputMeter.getVuDb(), 0.0f, 0.10f,
+                                  "A -18 dBFS peak sine must settle at 0 VU");
+        expectWithinAbsoluteError(inputMeter.getSamplePeakMaxDb(), -18.0618f, 0.02f,
+                                  "Peak maximum readout must be raw dBFS, not VU");
+
+        beginTest("Gain-staging VU follows the post-Trim channel input");
+        DAW::Track stagedTrack("meter-trim", "Trimmed Meter");
+        DAW::TrackInputProcessorCore::prepareTrack(stagedTrack, 48000.0, 480);
+        stagedTrack.setInputTrimDb(6.0f);
+        float trimmedLeft[480] {};
+        float trimmedRight[480] {};
+        for (int block = 0; block < 100; ++block)
+        {
+            for (int i = 0; i < 480; ++i)
+            {
+                trimmedLeft[i] = leftSine[i];
+                trimmedRight[i] = rightSine[i];
+            }
+            DAW::TrackInputProcessorCore::processTrack(
+                stagedTrack, trimmedLeft, trimmedRight, 480);
+        }
+        const auto& stagedMeter = stagedTrack.getInputMeter();
+        const float expectedTrimGain = std::pow(10.0f, 6.0f / 20.0f);
+        expectWithinAbsoluteError(stagedMeter.getRmsLevelL(),
+                                  amplitude * expectedTrimGain * 0.70710678f,
+                                  0.0005f,
+                                  "Track input RMS must follow the audible pre-FX Trim gain");
+        expectWithinAbsoluteError(stagedMeter.getVuDb(), 6.0f, 0.12f,
+                                  "Adding 6 dB of Trim must move the gain-staging VU by 6 dB");
+        expectWithinAbsoluteError(stagedMeter.getSamplePeakMaxDb(), -12.0618f, 0.03f,
+                                  "Post-Trim peak display must remain dBFS, separate from VU");
+
+        beginTest("Armed but unmonitored mic input meters a post-Trim preview");
+        DAW::TrackManager inputTracks;
+        auto* armedTrack = inputTracks.createTrack("armed-meter-input");
+        expect(armedTrack != nullptr, "Test track must be created");
+        if (armedTrack != nullptr)
+        {
+            armedTrack->setArmed(true);
+            armedTrack->setInputSource(0, false);
+            armedTrack->getMonitoringState().setMode(DAW::InputMonitorMode::Off);
+            armedTrack->setInputTrimDb(6.0f);
+            armedTrack->getInputMeter().prepare(48000.0);
+
+            DAW::ApplicationState appState;
+            DAW::TransportController transport(appState);
+            DAW::LiveInputMonitorEngine liveInputMeter;
+            liveInputMeter.setSubsystems(&inputTracks, &transport);
+            liveInputMeter.prepare(48000.0, 480);
+            juce::AudioBuffer<float> hardwareInput(2, 480);
+            for (int i = 0; i < 480; ++i)
+            {
+                const float sample = amplitude * std::sin(juce::MathConstants<float>::twoPi
+                                                           * (float) i / 48.0f);
+                hardwareInput.setSample(0, i, sample);
+                hardwareInput.setSample(1, i, sample);
+            }
+            liveInputMeter.processBlock(hardwareInput, 480, 2);
+
+            const float gain = std::pow(10.0f, 6.0f / 20.0f);
+            expectWithinAbsoluteError(armedTrack->getInputMeter().getRmsLevelL(),
+                                      amplitude * gain * 0.70710678f, 0.0005f,
+                                      "Meter-only mic preview must include the requested Trim gain");
+            expectWithinAbsoluteError(armedTrack->getInputMeter().getPeakMaxLevelL(),
+                                      amplitude * gain, 0.0005f,
+                                      "Mic preview peak maximum must remain a true post-Trim sample peak");
+        }
+
+        beginTest("Input trim setter updates the Track state snapshot");
+        track.setInputTrimDb(6.0f);
+        expectWithinAbsoluteError(track.getInputTrim().getTargetGainDb(), 6.0f, 0.0001f,
+                                  "Trim control must update the audio gain target");
+        expectWithinAbsoluteError((float) track.getState().getProperty("inputTrimDb", 0.0f),
+                                  6.0f, 0.0001f,
+                                  "Trim change must be visible to the track's saved state");
+    }
+};
+
+static MixerMeterSignalTests mixerMeterSignalTests;
+
+class TrimClassicVuTests final : public juce::UnitTest
+{
+public:
+    TrimClassicVuTests() : juce::UnitTest("trim.classic-vu.v1", "APEX.Mixer") {}
+
+    static void tone(DAW::InputMeterCore& meter, double rate, int samples,
+                     int block, float leftGain, float rightGain)
+    {
+        std::vector<float> left((size_t) block), right((size_t) block);
+        for (int offset = 0; offset < samples; offset += block)
+        {
+            const int n = juce::jmin(block, samples - offset);
+            for (int i = 0; i < n; ++i)
+            {
+                const float s = (float) std::sin(juce::MathConstants<double>::twoPi * 1000.0 * (offset + i) / rate);
+                left[(size_t) i] = s * leftGain;
+                right[(size_t) i] = s * rightGain;
+            }
+            meter.processBlock(left.data(), right.data(), n);
+        }
+    }
+
+    void runTest() override
+    {
+        constexpr float reference = 0.12589254118f; // -18 dBFS peak sine
+        beginTest("Sine calibration, 300 ms movement and mechanical overshoot");
+        for (const double rate : {44100.0, 48000.0, 96000.0, 192000.0})
+        {
+            DAW::InputMeterCore meter;
+            meter.prepare(rate);
+            tone(meter, rate, (int) (0.3 * rate), 128, reference, reference);
+            expectWithinAbsoluteError(meter.getVuLevel(DAW::VuChannelMode::Average) / reference,
+                                      0.99f, 0.003f, "99% deflection at 300 ms");
+            tone(meter, rate, (int) rate, 2048, reference, reference);
+            expectWithinAbsoluteError(meter.getVuDb(), 0.0f, 0.035f, "Reference sine settles at 0 VU");
+            const float overshoot = meter.getVuMaxLevel(DAW::VuChannelMode::Average) / reference;
+            expect(overshoot > 1.009f && overshoot < 1.016f, "Small analog movement overshoot");
+            expectWithinAbsoluteError(meter.getSamplePeakMaxDb(), -18.0f, 0.01f, "Sample peak retains dBFS units");
+            meter.processBlock(nullptr, nullptr, (int) (rate * 0.3));
+            expect(meter.getVuLevel(DAW::VuChannelMode::Average) < reference * 0.012f,
+                   "Release moves back by 99% in 300 ms");
+            meter.processBlock(nullptr, nullptr, (int) rate);
+            expect(meter.getVuDb() < -80.0f, "Silence cannot leave a stuck needle");
+        }
+
+        beginTest("VU measures rectified average, not block RMS or peak");
+        DAW::InputMeterCore sine, square, burst;
+        sine.prepare(48000.0); square.prepare(48000.0); burst.prepare(48000.0);
+        tone(sine, 48000.0, 48000, 512, reference, reference);
+        std::vector<float> squareSamples(48000, reference);
+        square.processBlock(squareSamples.data(), squareSamples.data(), 48000);
+        expectWithinAbsoluteError(square.getVuDb() - sine.getVuDb(), 3.9224f, 0.03f,
+                                  "Equal-peak square differs from a sine by the rectifier form factor");
+        tone(burst, 48000.0, 480, 32, reference, reference);
+        burst.processBlock(nullptr, nullptr, 24000);
+        expect(burst.getVuMaxLevel(DAW::VuChannelMode::Average) < reference * 0.12f,
+               "A 10 ms burst must not register as a sustained tone");
+        expectWithinAbsoluteError(burst.getSamplePeakMaxDb(), -18.0f, 0.01f,
+                                  "Peak still catches the entire brief burst");
+
+        beginTest("Every audio sample counts, independently of callback size");
+        for (const double rate : {44100.0, 48000.0})
+        {
+            const int samples = (int) rate;
+            std::vector<float> signal((size_t) samples);
+            for (int i = 0; i < samples; ++i)
+            {
+                const float envelope = (i < samples / 5 || (i > samples / 3 && i < samples * 3 / 4)) ? 0.4f : 0.01f;
+                signal[(size_t) i] = envelope * (float) std::sin(juce::MathConstants<double>::twoPi * 317.0 * i / rate);
+            }
+            float expectedLevel = 0.0f, expectedMax = 0.0f;
+            for (const int block : {17, 32, 64, 128, 256, 480, 512, 1024, 2048})
+            {
+                DAW::InputMeterCore meter; meter.prepare(rate);
+                for (int i = 0; i < samples; i += block)
+                    meter.processBlock(signal.data() + i, signal.data() + i, juce::jmin(block, samples - i));
+                const float level = meter.getVuLevel(DAW::VuChannelMode::Average);
+                const float maximum = meter.getVuMaxLevel(DAW::VuChannelMode::Average);
+                if (block == 17) { expectedLevel = level; expectedMax = maximum; }
+                expectWithinAbsoluteError(level, expectedLevel, 0.000001f, "Current VU at block " + juce::String(block));
+                expectWithinAbsoluteError(maximum, expectedMax, 0.000001f, "Held VU at block " + juce::String(block));
+            }
+        }
+
+        beginTest("Stereo VU averaging and independent peak safety");
+        DAW::InputMeterCore stereo; stereo.prepare(48000.0);
+        tone(stereo, 48000.0, 48000, 64, reference, 0.0f);
+        expectWithinAbsoluteError(stereo.getVuDb(), -6.0206f, 0.035f, "Single stereo needle averages L/R levels");
+        stereo.setVuChannelMode(DAW::VuChannelMode::LeftOnly);
+        expectWithinAbsoluteError(stereo.getVuDb(), 0.0f, 0.035f);
+        stereo.setVuChannelMode(DAW::VuChannelMode::RightOnly);
+        expectEquals(stereo.getVuDb(), -120.0f);
+        expectWithinAbsoluteError(stereo.getSamplePeakMaxDb(), -18.0f, 0.01f,
+                                  "Peak readout covers either channel even when viewing R");
+        stereo.reset(); stereo.setVuChannelMode(DAW::VuChannelMode::Average);
+        tone(stereo, 48000.0, 48000, 2048, reference, -reference);
+        expectWithinAbsoluteError(stereo.getVuDb(), 0.0f, 0.035f, "Stereo mode must not cancel opposite polarity");
+
+        beginTest("All views share calibration, current value and audio-owned maximum");
+        DAW::Track track("vu-panel-track", "VU calibration");
+        auto& meter = track.getInputMeter(); meter.prepare(48000.0);
+        tone(meter, 48000.0, 48000, 2048, reference, reference);
+        DAW::AnalogVuMeterComponent large; large.setSource(&meter);
+        DAW::CompactVuNeedle compact; compact.setSource(&meter);
+        for (int i = 0; i < 100; ++i) compact.tick();
+        expectEquals(large.getNeedleDb(), compact.getNeedleDb(), "UI timer frequency cannot change the value");
+        track.setTrimVuReferenceDb(-20.0f);
+        expectWithinAbsoluteError(large.getNeedleDb(), 2.0f, 0.035f);
+        expectEquals(large.getNeedleDb(), compact.getNeedleDb());
+        large.resetPeakHold();
+        expectEquals(large.getVuMaxDb(), -120.0f);
+        expectEquals(large.getPeakMaxDb(), -120.0f);
+        expectWithinAbsoluteError(large.getNeedleDb(), 2.0f, 0.035f, "Reset preserves current needle");
+        expect(!large.isOverloadLatched());
+
+        beginTest("Reference, channel and Trim survive XML persistence; legacy defaults remain usable");
+        track.setInputTrimDb(-4.0f);
+        track.setTrimVuChannelMode(DAW::VuChannelMode::LeftOnly);
+        const auto xml = track.getState().createXml();
+        const auto parsed = juce::parseXML(xml->toString());
+        expect(parsed != nullptr);
+        DAW::Track restored("vu-restored", "Restored");
+        if (parsed != nullptr) restored.restoreState(juce::ValueTree::fromXml(*parsed));
+        expectEquals(restored.getInputMeter().getVuReferenceDb(), -20.0f);
+        expectEquals((int) restored.getInputMeter().getVuChannelMode(), (int) DAW::VuChannelMode::LeftOnly);
+        expectEquals(restored.getInputTrim().getTargetGainDb(), -4.0f);
+        auto legacy = track.getState();
+        legacy.removeProperty("trimVuReferenceDb", nullptr);
+        legacy.removeProperty("trimVuChannelMode", nullptr);
+        restored.restoreState(legacy);
+        expectEquals(restored.getInputMeter().getVuReferenceDb(), -18.0f);
+        expectEquals((int) restored.getInputMeter().getVuChannelMode(), (int) DAW::VuChannelMode::Average);
+
+        beginTest("Live-input preview does not advance ordinary channel VU with a second silent block");
+        DAW::TrackManager tracks;
+        auto* ordinary = tracks.createTrack("Ordinary playback");
+        ordinary->getInputMeter().prepare(48000.0);
+        tone(ordinary->getInputMeter(), 48000.0, 48000, 512, reference, reference);
+        const float levelBefore = ordinary->getInputMeter().getVuDb();
+        DAW::ApplicationState state;
+        DAW::TransportController transport(state);
+        DAW::LiveInputMonitorEngine monitor;
+        monitor.setSubsystems(&tracks, &transport); monitor.prepare(48000.0, 2048);
+        juce::AudioBuffer<float> input(2, 2048); input.clear();
+        for (int i = 0; i < 12; ++i) monitor.processBlock(input, 2048, 2);
+        expectEquals(ordinary->getInputMeter().getVuDb(), levelBefore,
+                     "Only the graph owns the unarmed track meter");
+
+        beginTest("Invalid samples cannot poison detector state or held values");
+        const float invalid[] {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN(), -0.5f};
+        meter.processBlock(invalid, invalid, 3);
+        tone(meter, 48000.0, 48000, 32, reference, reference);
+        expect(std::isfinite(meter.getVuDb()));
+        expectWithinAbsoluteError(meter.getVuDb(), 2.0f, 0.035f);
+
+        beginTest("Each channel-selector click advances one mode without changing Trim");
+        {
+            track.setTrimVuChannelMode(DAW::VuChannelMode::Average);
+            DAW::InputTrimFloatingPanel panel(track);
+            auto* channel = dynamic_cast<DAW::BubblegumPanelToggleSwitch*>(panel.findChildWithID("trim.vu-channel"));
+            expect(channel != nullptr);
+            if (channel != nullptr)
+            {
+                for (auto expected : {DAW::VuChannelMode::LeftOnly, DAW::VuChannelMode::RightOnly,
+                                      DAW::VuChannelMode::MaxLR, DAW::VuChannelMode::Average})
+                {
+                    channel->setOn(!channel->isOn()); // same transition as mouseDown
+                    expectEquals((int) meter.getVuChannelMode(), (int) expected);
+                    expect(channel->isOn());
+                }
+            }
+            expectEquals(track.getInputTrim().getTargetGainDb(), -4.0f);
+        }
+
+        // Optional offscreen artifact from the actual JUCE panel, for visual review.
+        const auto imagePath = juce::SystemStats::getEnvironmentVariable("APEX_VU_TEST_SCREENSHOT", {});
+        if (imagePath.isNotEmpty())
+        {
+            track.setTrimVuReferenceDb(-18.0f);
+            track.setTrimVuChannelMode(DAW::VuChannelMode::Average);
+            DAW::TrackInputProcessorCore::prepareTrack(track, 48000.0, 480);
+            float wave[480], rightWave[480];
+            const float inputAmplitude = juce::Decibels::decibelsToGain(-14.0f);
+            for (int block = 0; block < 100; ++block)
+            {
+                for (int i = 0; i < 480; ++i)
+                    wave[i] = rightWave[i] = inputAmplitude * std::sin(juce::MathConstants<float>::twoPi * i / 48.0f);
+                DAW::TrackInputProcessorCore::processTrack(track, wave, rightWave, 480);
+            }
+            DAW::InputTrimFloatingPanel panel(track);
+            auto image = panel.createComponentSnapshot(panel.getLocalBounds(), true, 2.0f);
+            juce::FileOutputStream output {juce::File(imagePath)};
+            expect(output.openedOk());
+            if (output.openedOk())
+            {
+                // FileOutputStream appends to existing files. Replace the prior
+                // review image so readers do not keep seeing the first PNG.
+                expect(output.setPosition(0) && output.truncate().wasOk());
+                expect(juce::PNGImageFormat().writeImageToStream(image, output));
+            }
+        }
+    }
+};
+
+static TrimClassicVuTests trimClassicVuTests;

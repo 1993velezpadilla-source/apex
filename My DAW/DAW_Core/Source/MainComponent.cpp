@@ -3322,6 +3322,11 @@ MainComponent::MainComponent()
             CommandManager::getInstance().execute(std::make_unique<PluginChainStateCommand>(
                 chain, appCore_.getPluginScanner().getFormatManager(), before, after, description, true));
     };
+    pluginSidePanel_->onPluginSlotMoveRequested = [](DAW::PluginChainCore& chain, int fromIndex, int toIndex)
+    {
+        CommandManager::getInstance().execute(
+            std::make_unique<DAW::PluginChainMoveCommand>(chain, fromIndex, toIndex));
+    };
 
     pluginSidePanel_->onSlotClickedWithModifiers = [this](int slotIndex, const juce::ModifierKeys& mods)
     {
@@ -7843,22 +7848,33 @@ void MainComponent::setAudioChannels(int numInputChannels, int numOutputChannels
             }
 
             const int wantedIns = setup.inputDeviceName.trim().isNotEmpty() ? numInputChannels : 0;
+            const int activeIns = dev->getActiveInputChannels().countNumberOfSetBits();
+            const bool repairInputChannels = DAW::DeviceCapability::shouldRepairMissingInputChannels(
+                setup.inputDeviceName.trim().isNotEmpty(), wantedIns, activeIns);
+            const bool repairOutputChannels =
+                setup.outputChannels.countNumberOfSetBits() < juce::jmin(numOutputChannels, 1);
 
-            if (setup.inputChannels.countNumberOfSetBits() != wantedIns
-                || setup.outputChannels.countNumberOfSetBits() < juce::jmin(numOutputChannels, 1))
+            if (repairInputChannels || repairOutputChannels)
             {
                 // Explicit masks with useDefault*Channels = false. JUCE derives
                 // numInputChansNeeded from an explicit mask; the default-channel
                 // path replays the manager's cached count instead - and once that
                 // cache hits 0 (the zero-input trap) every "successful" reopen
                 // comes back with no inputs and monitoring/recording stay silent.
-                setup.useDefaultInputChannels = false;
-                setup.inputChannels.clear();
-                setup.inputChannels.setRange(0, wantedIns, true);
+                // The request count is only an upper bound: JUCE reports the
+                // channels the device actually granted. Reopening a working
+                // 1- or 2-channel input to chase the 64-channel capacity causes
+                // a needless second restart immediately after Apply.
+                if (repairInputChannels)
+                {
+                    setup.useDefaultInputChannels = false;
+                    setup.inputChannels.clear();
+                    setup.inputChannels.setRange(0, wantedIns, true);
+                }
 
                 // Only rebuild the output mask when it is empty - an existing
                 // mask is a deliberate choice (e.g. an explicit ASIO out pair).
-                if (setup.outputChannels.countNumberOfSetBits() == 0)
+                if (repairOutputChannels && setup.outputChannels.countNumberOfSetBits() == 0)
                 {
                     setup.useDefaultOutputChannels = false;
                     setup.outputChannels.clear();
@@ -7871,7 +7887,7 @@ void MainComponent::setAudioChannels(int numInputChannels, int numOutputChannels
                 // endpoint is blocked (Windows mic privacy, exclusive-mode
                 // claim). If the combined open failed, retry output-only and
                 // let the input watchdog/preflight surface the input problem.
-                if (audioError.isNotEmpty() && wantedIns > 0)
+                if (audioError.isNotEmpty() && repairInputChannels)
                 {
                     juce::Logger::writeToLog("[AudioDevice] setAudioChannels: input+output open failed ["
                         + audioError + "] - retrying output-only so playback keeps working");

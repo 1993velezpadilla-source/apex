@@ -12,7 +12,7 @@ namespace DAW {
  * The JUCE Component that assembles the analog VU meter from the nine
  * Batch 1 nucleos. Owns:
  *   - a non-owning pointer to the per-track InputMeterCore (the audio source)
- *   - a per-instance BallisticsCore (smoothing state)
+ *   - the shared audio-clock VU reading (no second UI smoothing pass)
  *   - a per-instance OverloadCore (latch state)
  *   - the six stateless renderers (cream face, red zone, scale markings,
  *     logo, overload bulb, needle)
@@ -22,9 +22,9 @@ namespace DAW {
  * a different InputMeterCore — switching tracks does not bleed needle
  * history or OL latch.
  *
- * UI rate: 60 Hz timer drives the smoothing and repaint.
+ * UI rate: 60 Hz only requests a repaint; audio rate determines ballistics.
  *
- * Click-to-reset: clicking on the OL bulb clears the overload latch.
+ * Click-to-reset: clicking anywhere clears held VU/peak maxima and OL.
  */
 class AnalogVuMeterComponent : public juce::Component,
                                private juce::Timer
@@ -58,30 +58,47 @@ public:
     void setChannelMode(VuChannelMode m)
     {
         channelMode_ = m;
+        if (source_ != nullptr) source_->setVuChannelMode(m);
         ballistics_.resetAll();
         overload_.reset();
         repaint();
     }
 
-    VuChannelMode getChannelMode() const noexcept { return channelMode_; }
+    VuChannelMode getChannelMode() const noexcept
+    {
+        return source_ != nullptr ? source_->getVuChannelMode() : channelMode_;
+    }
+
+    float getNeedleDb() const noexcept
+    {
+        if (source_ == nullptr) return -120.0f;
+        return ballistics_.getMode() == AnalogVuBallisticsCore::Mode::ClassicVu
+            ? source_->getVuDb() : ballistics_.getNeedleDb();
+    }
+    float getVuMaxDb() const noexcept { return source_ != nullptr ? source_->getVuMaxDb() : -120.0f; }
 
     /** Latched peak max in dB. The panel can show this in a readout. */
-    float getPeakMaxDb() const { return ballistics_.getPeakMaxDb(); }
+    float getPeakMaxDb() const { return source_ != nullptr ? source_->getSamplePeakMaxDb() : -120.0f; }
 
-    /** Reset the peak max latch (called when user clicks the PEAK MAX readout). */
-    void resetPeakHold() { ballistics_.resetPeakHold(); repaint(); }
+    /** Reset the dBFS peak maximum and the overload latch. */
+    void resetPeakHold()
+    {
+        if (source_ != nullptr)
+        {
+            source_->resetPeakHold();
+            source_->resetVuMax();
+        }
+        ballistics_.resetPeakHold();
+        overload_.reset();
+        repaint();
+    }
 
     /** True if the OL bulb is currently latched. */
     bool isOverloadLatched() const { return overload_.isLatched(); }
 
-    void mouseDown(const juce::MouseEvent& e) override
+    void mouseDown(const juce::MouseEvent&) override
     {
-        const auto faceBounds = getFaceBounds();
-        if (overloadRenderer_.hitTest(e.position, faceBounds))
-        {
-            overload_.reset();
-            repaint();
-        }
+        resetPeakHold();
     }
 
     void paint(juce::Graphics& g) override
@@ -96,9 +113,10 @@ public:
         creamFace_.paint(g, faceBounds);
         redZone_.paint(g, pivot);
         markings_.paint(g, pivot);
-        logo_.paint(g, faceBounds, juce::String::fromUTF8("peak \xc2\xb7 -17 dB/s"));
+        const float reference = source_ != nullptr ? source_->getVuReferenceDb() : -18.0f;
+        logo_.paint(g, faceBounds, "0 VU = " + juce::String(reference, 0) + " dBFS");
         overloadRenderer_.paint(g, faceBounds, overload_);
-        needle_.paint(g, pivot, ballistics_.getNeedleDb());
+        needle_.paint(g, pivot, getNeedleDb());
     }
 
 private:
@@ -106,11 +124,13 @@ private:
     {
         if (source_ != nullptr)
         {
-            const float peakL = source_->getPeakLevelL();
-            const float peakR = source_->getPeakLevelR();
-            const float combined = combineChannelPeaks(peakL, peakR, channelMode_);
-            ballistics_.feed(combined);
-            overload_.feed(combined);
+            const float peakL = source_->getPeakMaxLevelL();
+            const float peakR = source_->getPeakMaxLevelR();
+            if (ballistics_.getMode() != AnalogVuBallisticsCore::Mode::ClassicVu)
+                ballistics_.feed(combineChannelPeaks(source_->getRmsLevelL(), source_->getRmsLevelR(),
+                                                     getChannelMode()) * 1.41421356237f,
+                                 juce::jmax(peakL, peakR));
+            overload_.feed(juce::jmax(peakL, peakR));
         }
         repaint();
     }
@@ -123,7 +143,7 @@ private:
     InputMeterCore*               source_ { nullptr };
     AnalogVuBallisticsCore        ballistics_;
     AnalogVuOverloadCore          overload_;
-    VuChannelMode                 channelMode_ { VuChannelMode::MaxLR };
+    VuChannelMode                 channelMode_ { VuChannelMode::Average };
     AnalogVuCreamFaceRenderer     creamFace_;
     AnalogVuRedZoneRenderer       redZone_;
     AnalogVuScaleMarkingsRenderer markings_;

@@ -1,3 +1,36 @@
+function Get-ApexWasapiPatch {
+    param([Parameter(Mandatory = $true)][string] $RepositoryRoot)
+    $expected = @{
+        relativePath = 'Dependencies/patches/juce-8.0.12/0004-apex-wasapi-shared-buffer.patch'
+        sha256 = '8565917FC95A7E83B9184FB94685B2950B2458E34E2F7BDE16A3A17FC716BF43'
+        targetRelativePath = 'JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp'
+        pristineTargetSha256 = 'C5367D92BA534779CC8ACCEDD20424F7E3B6DAA7CE597D33CA8858451AB36759'
+        patchedTargetSha256 = 'B0D577BCC9D4F03721A0AF594753EDF739A39048E43E38BF24B1EC4DA7A77696'
+    }
+    $contract = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'Dependencies\apex-windows-dependencies.json') -Raw | ConvertFrom-Json
+    foreach ($key in $expected.Keys) {
+        if ([string] $contract.juce.compatibilityPatch4.$key -cne $expected[$key]) {
+            throw "juce.compatibilityPatch4.$key does not match the pinned WASAPI patch."
+        }
+    }
+    $patch = Join-Path $RepositoryRoot $expected.relativePath
+    if ((Get-FileHash -LiteralPath $patch -Algorithm SHA256).Hash -cne $expected.sha256) {
+        throw 'WASAPI patch SHA-256 mismatch.'
+    }
+    return $expected
+}
+
+function Invoke-ApexWasapiPatch {
+    param([Parameter(Mandatory = $true)][string] $Root,
+          [Parameter(Mandatory = $true)][string] $RepositoryRoot)
+    $patch = Get-ApexWasapiPatch -RepositoryRoot $RepositoryRoot
+    Invoke-JuceVerifiedPatch -Root $Root `
+        -PatchPath (Join-Path $RepositoryRoot $patch.relativePath) `
+        -TargetRelativePath $patch.targetRelativePath `
+        -PristineTargetSha256 $patch.pristineTargetSha256 `
+        -PatchedTargetSha256 $patch.patchedTargetSha256
+}
+
 function Invoke-JuceVerifiedPatch {
     [CmdletBinding()]
     param(

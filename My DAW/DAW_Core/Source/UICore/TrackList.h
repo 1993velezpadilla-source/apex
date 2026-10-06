@@ -934,7 +934,7 @@ public:
         else if (monitorHover_)
             currentTooltip_ = "Monitor\nToggle input monitoring. When enabled, you hear the live input through this track's FX chain.";
         else if (armHover_)
-            currentTooltip_ = "Record Arm\nArm this track for recording. When armed, incoming audio or MIDI will be captured.";
+            currentTooltip_ = "Record Arm\nArm this track for recording. Right-click the row to choose Dry / Pre-Fader or Wet / Post-Fader.";
         else if (automationHover_)
             currentTooltip_ = "Automation Visibility\nToggle automation lane visibility on the arrangement timeline.";
         else if (trimHover_)
@@ -1188,6 +1188,36 @@ private:
             mon.isTicked = track_.isMonitoring();
             mon.action = [safeThis] { if (safeThis) { if (safeThis->onSetMonitoring) safeThis->onSetMonitoring(safeThis->track_.getID(), !safeThis->track_.isMonitoring()); else safeThis->track_.setMonitoring(!safeThis->track_.isMonitoring()); safeThis->repaint(); } };
             menu.addItem(mon);
+        }
+
+        menu.addSectionHeader("Recording Mode");
+        {
+            juce::PopupMenu::Item dry("Record Dry / Pre-Fader (no effects printed)");
+            dry.isTicked = track_.getRecordMode() == TrackRecordMode::Dry;
+            dry.action = [safeThis]
+            {
+                if (!safeThis) return;
+                safeThis->track_.setRecordMode(TrackRecordMode::Dry);
+                safeThis->repaint();
+            };
+            menu.addItem(dry);
+        }
+        {
+            juce::PopupMenu::Item postFader("Record Wet / Post-Fader (track FX + fader printed)");
+            postFader.isTicked = track_.getRecordMode() == TrackRecordMode::PostFader;
+            postFader.action = [safeThis]
+            {
+                if (!safeThis) return;
+                safeThis->track_.setRecordMode(TrackRecordMode::PostFader);
+                safeThis->repaint();
+            };
+            menu.addItem(postFader);
+        }
+        {
+            juce::PopupMenu::Item recordingHint(
+                "Monitor Off records dry; Auto/On prints FX. Playback runs FX again");
+            recordingHint.isEnabled = false;
+            menu.addItem(recordingHint);
         }
 
         menu.addSeparator();

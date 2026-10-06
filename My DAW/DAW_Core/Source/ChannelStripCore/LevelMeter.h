@@ -56,15 +56,25 @@ public:
     bool isClipLatched() const noexcept { return clipLatched_; }
     float getClipOverDb() const noexcept { return clipOverDb_; }
 
+    /** Pull the latest clip maximum from its owning track. */
+    void setClipOverDb(float overDb) noexcept
+    {
+        if (!std::isfinite(overDb) || overDb <= 0.0f)
+            return;
+        if (!clipLatched_ || overDb > clipOverDb_)
+        {
+            clipLatched_ = true;
+            clipOverDb_ = overDb;
+            repaint();
+        }
+    }
+
     /** Clear the latched clip state (click-to-reset). */
     void clearClip() noexcept
     {
-        if (clipLatched_ || clipOverDb_ > 0.0f)
-        {
-            clipLatched_ = false;
-            clipOverDb_  = 0.0f;
-            repaint();
-        }
+        clipLatched_ = false;
+        clipOverDb_  = 0.0f;
+        repaint();
     }
 
     /** True while signal or peak-hold state still needs a presentation tick. */
@@ -107,13 +117,6 @@ public:
 
         tickChannel(targetLevelL_, smoothLevelL_, peakHoldL_, peakTimerL_);
         tickChannel(targetLevelR_, smoothLevelR_, peakHoldR_, peakTimerR_);
-
-        const float clipGain = juce::jmax(peakHoldL_, peakHoldR_);
-        if (clipGain > 1.0f)
-        {
-            clipLatched_ = true;
-            clipOverDb_ = juce::jmax(clipOverDb_, 20.0f * std::log10(clipGain));
-        }
 
         // Idle breathing: silence detection
         const bool hasSig = (smoothLevelL_ > 0.001f || smoothLevelR_ > 0.001f);
@@ -190,7 +193,8 @@ public:
         const float unityNorm = core ? core->getUnityNorm() : 0.88f;
         juce::ignoreUnused(unityNorm, minDb);
 
-        auto clipIndicatorArea = b.removeFromTop(30.0f);
+        auto clipIndicatorArea = clipIndicatorVisible_ ? b.removeFromTop(30.0f)
+                                                       : juce::Rectangle<float>();
 
         const float scaleW = b.getWidth() >= 32.0f ? 24.0f : 0.0f;
         auto scaleArea  = b.removeFromLeft(scaleW);
@@ -246,34 +250,46 @@ public:
                                                  meterVisualW,
                                                  meterBounds.getHeight());
 
-        // Helper: sample the continuous gradient colour at a given normalised position (0=bottom, 1=top)
-        auto sampleMeterGradient = [&](float normPos) -> juce::Colour
+        // Meter colours are tied to dBFS, independent of the +6/+12 fader
+        // taper: green below -6 dBFS, yellow from -6 to 0, red above 0.
+        auto colourForDb = [&](float db) -> juce::Colour
         {
-            // normPos 0=bottom(loud), 1=top(quiet). Zones mirror dB zones.
-            if (normPos > 0.95f) return t.colors.ember;
-            if (normPos > 0.88f) return t.colors.ember.interpolatedWith(t.colors.amber, (1.0f - normPos) / 0.07f);
-            if (normPos > 0.75f) return t.colors.amber.interpolatedWith(t.colors.jade, (0.88f - normPos) / 0.13f);
-            if (normPos > 0.60f) return t.colors.jade.interpolatedWith(t.colors.moss,  (0.75f - normPos) / 0.15f);
+            if (db >= 0.0f) return t.colors.ember;
+            if (db >= -6.0f) return t.colors.amber;
+            if (db >= -18.0f) return t.colors.jade;
             return t.colors.moss;
         };
 
         // Rebuild the liquid-fill gradient if bounds or theme changed.
         // Keyed on meterBounds + theme colours so it survives resize / theme switch.
         if (gradientDirty_ || cachedGradientBounds_ != meterBounds
-            || cachedEmber_ != t.colors.ember || cachedMoss_ != t.colors.moss)
+            || cachedEmber_ != t.colors.ember || cachedMoss_ != t.colors.moss
+            || cachedAmber_ != t.colors.amber || cachedJade_ != t.colors.jade)
         {
+            const float maxDb = core ? core->getMaxDb() : 6.0f;
+            const float minDb = core ? core->getMinDb() : -96.0f;
             cachedMeterGradient_ = juce::ColourGradient(
-                t.colors.ember, meterBounds.getCentreX(), meterBounds.getY(),
-                t.colors.moss,  meterBounds.getCentreX(), meterBounds.getBottom(), false);
-            cachedMeterGradient_.addColour(0.05, t.colors.ember);
-            cachedMeterGradient_.addColour(0.12, t.colors.ember.interpolatedWith(t.colors.amber, 0.5f));
-            cachedMeterGradient_.addColour(0.25, t.colors.amber);
-            cachedMeterGradient_.addColour(0.40, t.colors.jade);
-            cachedMeterGradient_.addColour(0.60, t.colors.moss);
-            cachedMeterGradient_.addColour(1.00, t.colors.moss);
+                colourForDb(maxDb), meterBounds.getCentreX(), meterBounds.getY(),
+                colourForDb(minDb), meterBounds.getCentreX(), meterBounds.getBottom(), false);
+            auto addDbStop = [&](float db, juce::Colour colour)
+            {
+                if (db < minDb || db > maxDb)
+                    return;
+                const float y = getYForDb(db, meterBounds, core);
+                const double position = juce::jlimit(0.0f, 1.0f,
+                    (y - meterBounds.getY()) / juce::jmax(1.0f, meterBounds.getHeight()));
+                cachedMeterGradient_.addColour(position, colour);
+            };
+            addDbStop(0.0f, t.colors.ember);
+            addDbStop(-0.1f, t.colors.amber);
+            addDbStop(-6.0f, t.colors.amber);
+            addDbStop(-18.0f, t.colors.jade);
+            addDbStop(-18.1f, t.colors.moss);
             cachedGradientBounds_ = meterBounds;
             cachedEmber_ = t.colors.ember;
             cachedMoss_  = t.colors.moss;
+            cachedAmber_ = t.colors.amber;
+            cachedJade_ = t.colors.jade;
             gradientDirty_ = false;
         }
 
@@ -297,9 +313,8 @@ public:
             g.fillRoundedRectangle(barBounds.getX(), topY, barBounds.getWidth(), fillH, 1.0f);
 
             // Meniscus: 2px brighter band at the top surface of the liquid
-            const float normAtTop = juce::jlimit(0.0f, 1.0f,
-                1.0f - (topY - meterBounds.getY()) / juce::jmax(1.0f, meterBounds.getHeight()));
-            const juce::Colour meniscusCol = sampleMeterGradient(normAtTop).brighter(0.35f);
+            const float topDb = smoothLevel <= 0.000001f ? -96.0f : 20.0f * std::log10(smoothLevel);
+            const juce::Colour meniscusCol = colourForDb(topDb).brighter(0.35f);
             g.setColour(meniscusCol);
             g.fillRect(barBounds.getX(), topY - 1.0f, barBounds.getWidth(), 2.0f);
         };
@@ -343,14 +358,8 @@ public:
         {
             const float db = gain <= 0.000001f ? -96.0f : 20.0f * std::log10(gain);
             // Sample continuous gradient at peak position
-            float normPos = juce::jlimit(0.0f, 1.0f,
-                1.0f - (getYForLevel(gain, meterBounds, core) - meterBounds.getY())
-                      / juce::jmax(1.0f, meterBounds.getHeight()));
             juce::ignoreUnused(db);
-            if (normPos > 0.95f) return t.colors.ember.brighter(0.4f);
-            if (normPos > 0.75f) return t.colors.amber.brighter(0.4f);
-            if (normPos > 0.40f) return t.colors.jade.brighter(0.4f);
-            return t.colors.moss.brighter(0.4f);
+            return colourForDb(db).brighter(0.4f);
         };
 
         const float dropletPulse = 0.85f + 0.15f * (0.5f + 0.5f * std::sin(dropletPhase_));
@@ -434,6 +443,8 @@ private:
     mutable juce::Rectangle<float>      cachedGradientBounds_;
     mutable juce::Colour                cachedEmber_;
     mutable juce::Colour                cachedMoss_;
+    mutable juce::Colour                cachedAmber_;
+    mutable juce::Colour                cachedJade_;
     mutable bool                        gradientDirty_ = true;
 
     // Cached scale tick image — rebuilt only on resize or fader-range change

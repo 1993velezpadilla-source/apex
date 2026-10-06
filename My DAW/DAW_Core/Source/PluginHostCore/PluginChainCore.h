@@ -14,6 +14,7 @@
 #include "../Automation/AutomationSystemCore.h"
 #include "../Automation/AutomationParameterKeyCore.h"
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <unordered_map>
 
@@ -71,6 +72,8 @@ struct PluginChainDiagSnapshot
 class PluginChainCore
 {
 public:
+    static constexpr int kAutomationSliceSamples = 64;
+
     /** Immutable snapshot of the plugin chain for lock-free audio-thread use. */
     struct Snapshot
     {
@@ -82,6 +85,70 @@ public:
     };
 
 private:
+    // Automation bindings belong to mutable processor instances, unlike the
+    // immutable order snapshot. Readers enter without waiting. A control-plane
+    // edit closes admission and drains existing readers before rebinding.
+    // Sequential consistency makes the admission/count handshake unambiguous.
+    class RealtimeReadScope
+    {
+    public:
+        explicit RealtimeReadScope(PluginChainCore& owner) noexcept : owner_(owner)
+        {
+            if (owner_.controlEditPending_.load()) return;
+            owner_.activeRealtimeReaders_.fetch_add(1);
+            if (owner_.controlEditPending_.load())
+                owner_.activeRealtimeReaders_.fetch_sub(1);
+            else
+                entered_ = true;
+        }
+        ~RealtimeReadScope()
+        {
+            if (entered_) owner_.activeRealtimeReaders_.fetch_sub(1);
+        }
+        explicit operator bool() const noexcept { return entered_; }
+    private:
+        PluginChainCore& owner_;
+        bool entered_ = false;
+        JUCE_DECLARE_NON_COPYABLE(RealtimeReadScope)
+    };
+
+    class ControlEditScope
+    {
+    public:
+        explicit ControlEditScope(PluginChainCore& owner) : owner_(owner)
+        {
+            if (owner_.controlEditDepth_ > 0)
+            {
+                ++owner_.controlEditDepth_;
+                entered_ = true;
+                return;
+            }
+            owner_.controlEditPending_.store(true);
+            const auto start = juce::Time::getMillisecondCounter();
+            while (owner_.activeRealtimeReaders_.load() != 0)
+            {
+                if (juce::Time::getMillisecondCounter() - start >= 2000)
+                {
+                    owner_.controlEditPending_.store(false);
+                    return; // no mutation occurred; retain the valid chain
+                }
+                juce::Thread::yield(); // control plane only
+            }
+            owner_.controlEditDepth_ = 1;
+            entered_ = true;
+        }
+        ~ControlEditScope()
+        {
+            if (entered_ && --owner_.controlEditDepth_ == 0)
+                owner_.controlEditPending_.store(false);
+        }
+        explicit operator bool() const noexcept { return entered_; }
+    private:
+        PluginChainCore& owner_;
+        bool entered_ = false;
+        JUCE_DECLARE_NON_COPYABLE(ControlEditScope)
+    };
+
     struct RetiredSnapshot
     {
         std::shared_ptr<const Snapshot> snapshot;
@@ -122,10 +189,17 @@ public:
                               PluginAutomationGestureCore* gestureCore,
                               LastTouchedPluginParameterCore* lastTouchedCore) noexcept
     {
+        ControlEditScope edit(*this);
+        if (!edit) return;
         trackId_ = trackId;
         gestureCore_ = gestureCore;
         lastTouchedCore_ = lastTouchedCore;
         refreshAutomationContexts();
+    }
+
+    void setAutomationManager(AutomationManagerCore* manager) noexcept
+    {
+        automationManager_ = manager;
     }
 
     void setPlayheadInfoCore(PluginPlayheadInfoCore* playheadInfo) noexcept
@@ -894,59 +968,60 @@ public:
                                  double bpm = 120.0,
                                  int numSamples = 512) noexcept
     {
+        RealtimeReadScope reader(*this);
+        if (!reader) return;
+        // The engine may have captured its automation snapshot before this
+        // chain's reorder completed. Adopt the current lane addresses inside
+        // the admission gate so an old wet/dry lane cannot hit a new occupant.
+        const auto currentAutomation = automationManager_ != nullptr
+            ? automationManager_->getSnapshotPublisher().get() : nullptr;
+        if (currentAutomation != nullptr)
+            automationSnap = currentAutomation.get();
         // Iterate the PUBLISHED slot snapshot — the same immutable view the
         // audio processing path uses — never the live slots_ vector, which
         // the message thread mutates (this was a data race before).
         auto snap = std::atomic_load(&published_);
         if (!snap) return;
-
-        const size_t numSlots = snap->slots.size();
-
-        for (size_t i = 0; i < numSlots; ++i)
-        {
-            auto* slot = snap->slots[i].get();
-            if (slot == nullptr)
-                continue;
-
-            if (automationSnap != nullptr)
-            {
-                if (i < snap->slotMixParameterIds.size())
-                if (auto* lane = automationSnap->findLaneRT(
-                        trackId, snap->slotMixParameterIds[i]))
-                    if (lane->enabled && !lane->points.empty())
-                    {
-                        const float rawMix = lane->getValueAtSample(samplePosition, slot->getSlotMixNormalized());
-                        float lastMix = slot->getLastSlotMixAutomationValue();
-                        if (std::abs(lastMix - rawMix) > 0.0001f)
-                        {
-                            // Closed-form one-pole advancement across the FULL
-                            // block. The former iteration loop was capped at
-                            // 1024 samples, so host blocks above 1024 (e.g.
-                            // 2048) applied a stale mid-ramp wet/dry value
-                            // every block. advance() is block-size invariant.
-                            const float coeff = AutomationSmootherCore::makeCoeff(sampleRate, 0.010);
-                            const float smoothed = AutomationSmootherCore::advance(lastMix, rawMix, coeff, numSamples);
-                            slot->setLastSlotMixAutomationValue(smoothed);
-                            slot->setSlotMixNormalized(smoothed);
-                        }
-                        else
-                        {
-                            slot->setLastSlotMixAutomationValue(rawMix);
-                            slot->setSlotMixNormalized(rawMix);
-                        }
-                    }
-            }
-
-            slot->applyAutomationAtSample(trackId, (int)i, automationSnap, samplePosition, sampleRate, bpm, numSamples);
-        }
+        applyAutomationForSnapshot(trackId, automationSnap, samplePosition,
+                                   sampleRate, bpm, numSamples, *snap);
     }
 
     /** Move a slot from one index to another (reorder). */
-    void moveSlot(int fromIndex, int toIndex)
+    bool moveSlot(int fromIndex, int toIndex)
     {
         int n = (int)slots_.size();
-        if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n) return;
-        if (fromIndex == toIndex) return;
+        if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n) return false;
+        if (fromIndex == toIndex) return false;
+
+        ControlEditScope edit(*this);
+        if (!edit) return false;
+        std::vector<int> oldToNew((size_t)n);
+        for (int i = 0; i < n; ++i)
+            oldToNew[(size_t)i] = i == fromIndex ? toIndex
+                : (fromIndex < toIndex && i > fromIndex && i <= toIndex) ? i - 1
+                : (toIndex < fromIndex && i >= toIndex && i < fromIndex) ? i + 1 : i;
+
+        // IDs, registry pointers, gestures, wet/dry lanes and sidechain bus
+        // ownership move with the existing instances; no plugin is recreated
+        // or re-prepared for an order change.
+        apex::automation::AutomationParameterKeyRegistry::getInstance()
+            .remapPluginSlots(trackId_, oldToNew);
+        decltype(slotAutomationBindings_) movedBindings;
+        for (auto& [index, binding] : slotAutomationBindings_)
+            movedBindings.emplace(index >= 0 && index < n ? oldToNew[(size_t)index] : index,
+                                  std::move(binding));
+        slotAutomationBindings_.swap(movedBindings);
+        const auto remapBusConfig = [&](auto& config)
+        {
+            std::decay_t<decltype(config)> next;
+            for (auto& [index, buses] : config)
+                next.emplace(index >= 0 && index < n ? oldToNew[(size_t)index] : index, buses);
+            config.swap(next);
+        };
+        remapBusConfig(sidechainAuxInputBuses_);
+        remapBusConfig(activeSidechainAuxInputBuses_);
+        if (automationManager_ != nullptr)
+            automationManager_->remapPluginSlots(trackId_, oldToNew);
 
         auto moving = std::move(slots_[fromIndex]);
         auto movingBypass = std::move(bypassCores_[fromIndex]);
@@ -955,9 +1030,10 @@ public:
         slots_.insert(slots_.begin() + juce::jmin(toIndex, (int)slots_.size()), std::move(moving));
         bypassCores_.insert(bypassCores_.begin() + juce::jmin(toIndex, (int)bypassCores_.size()), std::move(movingBypass));
 
-        publishSnapshot();
         refreshAutomationContexts();
+        publishSnapshot();
         notifyChanged();
+        return true;
     }
 
     /** Copy a plugin into this chain, preserving its resolved execution mode.
@@ -1166,6 +1242,8 @@ public:
 
     void processBlock(juce::AudioBuffer<float>& buffer, int numSamples)
     {
+        RealtimeReadScope reader(*this);
+        if (!reader) return;
         if (! validateProcessBuffer(buffer, numSamples)) return;
         if (! validateOfflinePreparedForProcess(numSamples)) return;
         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
@@ -1256,6 +1334,8 @@ public:
                               juce::MidiBuffer& midiIn,
                               int numSamples)
     {
+        RealtimeReadScope reader(*this);
+        if (!reader) return;
         if (! validateProcessBuffer(buffer, numSamples)) return;
         if (! validateOfflinePreparedForProcess(numSamples)) return;
         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
@@ -1318,6 +1398,8 @@ public:
                                     juce::AudioBuffer<float>& sidechainBuffer,
                                     int numSamples)
     {
+        RealtimeReadScope reader(*this);
+        if (!reader) return;
         if (! validateProcessBuffer(mainBuffer, numSamples)) return;
         if (! validateOfflinePreparedForProcess(numSamples)) return;
         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
@@ -1441,6 +1523,92 @@ public:
         if (applyChainOutputMix)
             PluginSlotMixCore::apply(chainInputBuffer_, mainBuffer, chainOutputMix,
                                      SlotMixCurve::EqualPower, numSamples);
+    }
+
+    /** Applies plugin automation at short in-block intervals while preserving
+        one immutable chain ordering for the full device callback. Static lanes
+        and chains without moving automation retain their single-call path. */
+    void processBlockWithAutomation(juce::AudioBuffer<float>& mainBuffer,
+                                    juce::MidiBuffer* midiIn,
+                                    juce::AudioBuffer<float>* sidechainBuffer,
+                                    const TrackID& trackId,
+                                    const AutomationSnapshot* automationSnap,
+                                    int64_t samplePosition,
+                                    double sampleRate,
+                                    double bpm,
+                                    int numSamples)
+    {
+        RealtimeReadScope reader(*this);
+        if (!reader) return;
+        if (!validateProcessBuffer(mainBuffer, numSamples)) return;
+        if (!validateOfflinePreparedForProcess(numSamples)) return;
+        if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
+        if (sidechainBuffer != nullptr
+            && (sidechainBuffer->getNumSamples() < numSamples
+                || sidechainBuffer->getNumChannels() <= 0))
+        {
+            jassertfalse;
+            sidechainBuffer = nullptr;
+        }
+
+        diagProcessedBlocks_.fetch_add(1, std::memory_order_relaxed);
+        auto snap = std::atomic_load(&published_);
+        if (!snap) return;
+
+        auto currentAutomation = automationManager_ != nullptr
+            ? automationManager_->getSnapshotPublisher().get() : nullptr;
+        if (currentAutomation != nullptr)
+            automationSnap = currentAutomation.get();
+
+        const bool canSlice = numSamples > kAutomationSliceSamples
+            && canRenderAutomationInSlices(trackId, automationSnap,
+                                           samplePosition, sampleRate, bpm,
+                                           numSamples, *snap)
+            && midiBufferFitsAutomationScratch(midiIn)
+            && mainBuffer.getNumChannels() == kAutomationSliceMaxChannels
+            && (sidechainBuffer == nullptr
+                || sidechainBuffer->getNumChannels() <= kAutomationSliceMaxChannels);
+
+        if (!canSlice)
+        {
+            applyAutomationForSnapshot(trackId, automationSnap, samplePosition,
+                                       sampleRate, bpm, numSamples, *snap);
+            processBlockWithSnapshot(mainBuffer, midiIn, sidechainBuffer,
+                                     numSamples, *snap);
+            return;
+        }
+
+        const int mainChannelCount = mainBuffer.getNumChannels();
+        int offset = 0;
+        while (offset < numSamples)
+        {
+            const int sliceSamples = juce::jmin(kAutomationSliceSamples, numSamples - offset);
+            for (int ch = 0; ch < mainChannelCount; ++ch)
+                automationSliceMainBuffer_.copyFrom(ch, 0, mainBuffer, ch, offset, sliceSamples);
+            if (sidechainBuffer != nullptr)
+                for (int ch = 0; ch < sidechainBuffer->getNumChannels(); ++ch)
+                    automationSliceSidechainBuffer_.copyFrom(
+                        ch, 0, *sidechainBuffer, ch, offset, sliceSamples);
+
+            juce::MidiBuffer* sliceMidi = nullptr;
+            if (midiIn != nullptr)
+            {
+                automationMidiScratch_.clear();
+                automationMidiScratch_.addEvents(*midiIn, offset, sliceSamples, -offset);
+                sliceMidi = &automationMidiScratch_;
+            }
+
+            applyAutomationForSnapshot(trackId, automationSnap,
+                                       samplePosition + offset, sampleRate, bpm,
+                                       sliceSamples, *snap);
+            processBlockWithSnapshot(automationSliceMainBuffer_, sliceMidi,
+                                     sidechainBuffer != nullptr
+                                         ? &automationSliceSidechainBuffer_ : nullptr,
+                                     sliceSamples, *snap);
+            for (int ch = 0; ch < mainChannelCount; ++ch)
+                mainBuffer.copyFrom(ch, offset, automationSliceMainBuffer_, ch, 0, sliceSamples);
+            offset += sliceSamples;
+        }
     }
 
     // ── Listener ─────────────────────────────────────────────────────────
@@ -1788,6 +1956,10 @@ private:
     // Published snapshot — swapped atomically between message and audio threads.
     // Audio thread loads this once at block start and processes the stable list.
     std::shared_ptr<const Snapshot> published_;
+    std::atomic<bool> controlEditPending_ { false };
+    std::atomic<int> activeRealtimeReaders_ { 0 };
+    int controlEditDepth_ = 0; // message thread only
+    AutomationManagerCore* automationManager_ = nullptr; // ApplicationCore owns
 
     // Plugins removed from slots_ but kept alive so the audio thread's old
     // snapshot references remain valid. The custom plugin deleter defers the
@@ -1816,6 +1988,9 @@ private:
     juce::AudioBuffer<float> drySnapshotBuffer_;
     juce::AudioBuffer<float> wetBuffer_;
     juce::AudioBuffer<float> chainInputBuffer_;
+    juce::AudioBuffer<float> automationSliceMainBuffer_;
+    juce::AudioBuffer<float> automationSliceSidechainBuffer_;
+    juce::MidiBuffer automationMidiScratch_;
 
     // C1+SC scratch capacity contract. Written only by
     // prepareSidechainScratchCapacity() on non-realtime threads; the audio
@@ -1844,6 +2019,8 @@ private:
 
     void configureSlotAutomation(PluginInstanceCore* plugin, int slotIndex)
     {
+        ControlEditScope edit(*this);
+        if (!edit) return;
         if (plugin != nullptr)
             plugin->configureAutomationContext(trackId_, slotIndex, gestureCore_, lastTouchedCore_);
 
@@ -1947,6 +2124,8 @@ private:
 
     void refreshAutomationContexts()
     {
+        ControlEditScope edit(*this);
+        if (!edit) return;
         for (int i = 0; i < (int)slots_.size(); ++i)
         {
             auto* slot = slots_[(size_t)i].get();
@@ -2143,6 +2322,11 @@ private:
         drySnapshotBuffer_.setSize(requiredChannels, capacity, false, false, true);
         wetBuffer_.setSize(requiredChannels, capacity, false, false, true);
         chainInputBuffer_.setSize(requiredChannels, capacity, false, false, true);
+        automationSliceMainBuffer_.setSize(kAutomationSliceMaxChannels,
+                                           kAutomationSliceSamples, false, false, true);
+        automationSliceSidechainBuffer_.setSize(kAutomationSliceMaxChannels,
+                                                kAutomationSliceSamples, false, false, true);
+        automationMidiScratch_.ensureSize(kAutomationMidiScratchBytes);
 
         preparedScratchChannels_ = requiredChannels;
         preparedScratchSamples_  = capacity;
@@ -2202,6 +2386,238 @@ private:
         }
 
         return true;
+    }
+
+    static constexpr int kAutomationSliceMaxChannels = 2;
+    static constexpr size_t kAutomationMidiScratchBytes = 65536;
+
+    static bool midiBufferFitsAutomationScratch(const juce::MidiBuffer* midi) noexcept
+    {
+        if (midi == nullptr)
+            return true;
+        size_t encodedBytes = 0;
+        for (const auto metadata : *midi)
+        {
+            encodedBytes += (size_t) metadata.numBytes + 2 * sizeof(int);
+            if (encodedBytes > kAutomationMidiScratchBytes)
+                return false;
+        }
+        return true;
+    }
+
+    void applyAutomationForSnapshot(const TrackID& trackId,
+                                    const AutomationSnapshot* automationSnap,
+                                    int64_t samplePosition,
+                                    double sampleRate,
+                                    double bpm,
+                                    int numSamples,
+                                    const Snapshot& snap) noexcept
+    {
+        for (size_t i = 0; i < snap.slots.size(); ++i)
+        {
+            auto* slot = snap.slots[i].get();
+            if (slot == nullptr)
+                continue;
+
+            if (automationSnap != nullptr && i < snap.slotMixParameterIds.size())
+                if (auto* lane = automationSnap->findLaneRT(trackId, snap.slotMixParameterIds[i]))
+                    if (lane->enabled && !lane->points.empty())
+                    {
+                        const float rawMix = lane->getValueAtSample(
+                            samplePosition, slot->getSlotMixNormalized());
+                        const float lastMix = slot->getLastSlotMixAutomationValue();
+                        if (std::abs(lastMix - rawMix) > 0.0001f)
+                        {
+                            const float coeff = AutomationSmootherCore::makeCoeff(sampleRate, 0.010);
+                            const float smoothed = AutomationSmootherCore::advance(
+                                lastMix, rawMix, coeff, numSamples);
+                            slot->setLastSlotMixAutomationValue(smoothed);
+                            slot->setSlotMixNormalized(smoothed);
+                        }
+                        else
+                        {
+                            slot->setLastSlotMixAutomationValue(rawMix);
+                            slot->setSlotMixNormalized(rawMix);
+                        }
+                    }
+
+            slot->applyAutomationAtSample(trackId, (int)i, automationSnap,
+                                          samplePosition, sampleRate, bpm, numSamples);
+        }
+    }
+
+    bool canRenderAutomationInSlices(const TrackID& trackId,
+                                     const AutomationSnapshot* automationSnap,
+                                     int64_t samplePosition,
+                                     double sampleRate,
+                                     double bpm,
+                                     int numSamples,
+                                     const Snapshot& snap) noexcept
+    {
+        // Check execution mode before checking for automation. A later
+        // in-process slot must not make us subdivide a chain that also owns a
+        // fixed-quantum sandboxed plugin.
+        for (const auto& slot : snap.slots)
+            if (slot != nullptr && slot->isSandboxed())
+                return false;
+
+        for (size_t i = 0; i < snap.slots.size(); ++i)
+        {
+            auto* slot = snap.slots[i].get();
+            if (slot == nullptr)
+                continue;
+
+            if (slot->hasAutomationChangeWithinBlock(trackId, automationSnap,
+                                                     samplePosition, sampleRate,
+                                                     bpm, numSamples))
+                return true;
+
+            if (automationSnap != nullptr && i < snap.slotMixParameterIds.size())
+                if (const auto* lane = automationSnap->findLaneRT(
+                        trackId, snap.slotMixParameterIds[i]))
+                    if (lane->enabled && !lane->points.empty())
+                    {
+                        const int64_t end = samplePosition + numSamples - 1;
+                        const float startValue = lane->getValueAtSample(
+                            samplePosition, slot->getSlotMixNormalized());
+                        const float endValue = lane->getValueAtSample(
+                            end, slot->getSlotMixNormalized());
+                        if (std::abs(slot->getLastSlotMixAutomationValue() - startValue) > 0.0001f
+                            || std::abs(endValue - startValue) > 0.0001f)
+                            return true;
+                        const auto point = std::upper_bound(
+                            lane->points.begin(), lane->points.end(), samplePosition,
+                            [](int64_t position, const AutomationPoint& candidate)
+                            { return position < candidate.timeSamples; });
+                        if (point != lane->points.end() && point->timeSamples <= end)
+                            return true;
+                    }
+        }
+        return false;
+    }
+
+    void processBlockWithSnapshot(juce::AudioBuffer<float>& mainBuffer,
+                                  juce::MidiBuffer* midiIn,
+                                  juce::AudioBuffer<float>* sidechainBuffer,
+                                  int numSamples,
+                                  const Snapshot& snap)
+    {
+        const float chainOutputMix = getChainOutputMix();
+        const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap.slots.empty();
+        if (applyChainOutputMix)
+            captureChainInput(mainBuffer, numSamples);
+
+        juce::MidiBuffer emptyMidi;
+        const bool logThisBlock = beginOfflineBlockLog(mainBuffer, numSamples, snap.slots.size());
+        const bool hasMidiInput = midiIn != nullptr;
+        const int scCh = sidechainBuffer != nullptr ? sidechainBuffer->getNumChannels() : 0;
+
+        bool firstMidiSlot = true;
+        for (size_t i = 0; i < snap.slots.size(); ++i)
+        {
+            auto& slot = snap.slots[i];
+            if (!slot) continue;
+            auto* bypass = i < snap.bypassCores.size() ? snap.bypassCores[i] : nullptr;
+
+            if (hasMidiInput)
+            {
+                processSlotWithBypass(*slot, bypass, mainBuffer,
+                                      firstMidiSlot ? *midiIn : emptyMidi, numSamples);
+                firstMidiSlot = false;
+                logAfterPluginIfNeeded(logThisBlock, *slot, mainBuffer, numSamples);
+                continue;
+            }
+
+            auto* proc = slot->getProcessor();
+            const auto& enabledAuxBuses = getEnabledAuxInputBusesForSlot((int)i);
+            if (sidechainBuffer != nullptr && proc != nullptr
+                && !enabledAuxBuses.isEmpty() && scCh > 0)
+            {
+                const int mainCh = mainBuffer.getNumChannels();
+                const int totalCh = juce::jmax(proc->getTotalNumInputChannels(),
+                                               proc->getTotalNumOutputChannels());
+                if (!sidechainScratchCovers(totalCh, numSamples))
+                {
+                    jassertfalse;
+                    processSlotWithBypass(*slot, bypass, mainBuffer, emptyMidi, numSamples);
+                    logAfterPluginIfNeeded(logThisBlock, *slot, mainBuffer, numSamples);
+                    continue;
+                }
+
+                for (int ch = 0; ch < totalCh; ++ch)
+                    combinedBuffer_.clear(ch, 0, numSamples);
+
+                const int slotMainIn = slot->getActiveMainInputChannels();
+                if (slotMainIn == 1 && mainCh >= 2)
+                {
+                    combinedBuffer_.addFrom(0, 0, mainBuffer, 0, 0, numSamples, 0.5f);
+                    combinedBuffer_.addFrom(0, 0, mainBuffer, 1, 0, numSamples, 0.5f);
+                }
+                else
+                    for (int ch = 0; ch < juce::jmin(juce::jmin(mainCh, slotMainIn), totalCh); ++ch)
+                        combinedBuffer_.copyFrom(ch, 0, mainBuffer, ch, 0, numSamples);
+
+                for (int bus : enabledAuxBuses)
+                    if (auto* inputBus = proc->getBus(true, bus))
+                    {
+                        if (!inputBus->isEnabled() || inputBus->getCurrentLayout().isDisabled())
+                            continue;
+                        const int busChannels = inputBus->getNumberOfChannels();
+                        const int busOffset = proc->getChannelIndexInProcessBlockBuffer(true, bus, 0);
+                        jassert(busOffset >= 0 && busOffset + busChannels <= totalCh);
+                        for (int ch = 0; ch < busChannels && busOffset + ch < totalCh; ++ch)
+                            combinedBuffer_.copyFrom(busOffset + ch, 0, *sidechainBuffer,
+                                                     juce::jmin(ch, scCh - 1), 0, numSamples);
+                    }
+
+                processSlotWithBypass(*slot, bypass, combinedBuffer_, emptyMidi,
+                                      numSamples, /*combinedLayout=*/true);
+                const int slotMainOut = slot->getActiveMainOutputChannels();
+                for (int ch = 0; ch < juce::jmin(mainCh, combinedBuffer_.getNumChannels()); ++ch)
+                    mainBuffer.copyFrom(ch, 0, combinedBuffer_,
+                                        slotMainOut == 1 ? 0 : juce::jmin(ch, slotMainOut - 1),
+                                        0, numSamples);
+            }
+            else if (sidechainBuffer == nullptr && proc != nullptr
+                     && !enabledAuxBuses.isEmpty())
+            {
+                const int mainCh = mainBuffer.getNumChannels();
+                const int totalCh = juce::jmax(proc->getTotalNumInputChannels(),
+                                               proc->getTotalNumOutputChannels());
+                if (sidechainScratchCovers(totalCh, numSamples))
+                {
+                    for (int ch = 0; ch < totalCh; ++ch)
+                        combinedBuffer_.clear(ch, 0, numSamples);
+                    const int slotMainIn = slot->getActiveMainInputChannels();
+                    if (slotMainIn == 1 && mainCh >= 2)
+                    {
+                        combinedBuffer_.addFrom(0, 0, mainBuffer, 0, 0, numSamples, 0.5f);
+                        combinedBuffer_.addFrom(0, 0, mainBuffer, 1, 0, numSamples, 0.5f);
+                    }
+                    else
+                        for (int ch = 0; ch < juce::jmin(juce::jmin(mainCh, slotMainIn), totalCh); ++ch)
+                            combinedBuffer_.copyFrom(ch, 0, mainBuffer, ch, 0, numSamples);
+
+                    processSlotWithBypass(*slot, bypass, combinedBuffer_, emptyMidi,
+                                          numSamples, /*combinedLayout=*/true);
+                    const int slotMainOut = slot->getActiveMainOutputChannels();
+                    for (int ch = 0; ch < juce::jmin(mainCh, combinedBuffer_.getNumChannels()); ++ch)
+                        mainBuffer.copyFrom(ch, 0, combinedBuffer_,
+                                            slotMainOut == 1 ? 0 : juce::jmin(ch, slotMainOut - 1),
+                                            0, numSamples);
+                }
+                else
+                    processSlotWithBypass(*slot, bypass, mainBuffer, emptyMidi, numSamples);
+            }
+            else
+                processSlotWithBypass(*slot, bypass, mainBuffer, emptyMidi, numSamples);
+
+            logAfterPluginIfNeeded(logThisBlock, *slot, mainBuffer, numSamples);
+        }
+
+        if (applyChainOutputMix)
+            PluginSlotMixCore::apply(chainInputBuffer_, mainBuffer, chainOutputMix,
+                                     SlotMixCurve::EqualPower, numSamples);
     }
 
     bool beginOfflineBlockLog(const juce::AudioBuffer<float>& buffer, int numSamples, size_t slotCount)

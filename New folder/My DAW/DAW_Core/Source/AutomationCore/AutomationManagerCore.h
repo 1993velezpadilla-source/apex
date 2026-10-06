@@ -1,0 +1,847 @@
+#pragma once
+#include <JuceHeader.h>
+#include "AutomationLaneCore.h"
+#include "AutomationSnapshotPublisherCore.h"
+#include "AutomationClipRegionCore.h"
+#include "AutomationClipClipboardCore.h"
+#include "AutomationArticulatorToolsCore.h"
+#include <cstdint>
+#include <functional>
+#include <vector>
+
+namespace DAW {
+
+class AutomationManagerCore
+{
+public:
+    struct PluginParameterTarget
+    {
+        TrackID trackId;
+        juce::String pluginInstanceId;
+        int pluginSlotIndex = -1;
+        juce::String parameterId;
+    };
+
+    struct PluginSlotMixTarget
+    {
+        TrackID trackId;
+        int pluginSlotIndex = -1;
+    };
+
+    struct SegmentShapeClipboard
+    {
+        bool valid = false;
+        AutomationCurveType curve = AutomationCurveType::Linear;
+        float tension = 0.0f;
+        float startValue = 0.0f;
+        float endValue = 1.0f;
+    };
+
+    static juce::String makePluginParameterId(const PluginParameterTarget& target)
+    {
+        return "plugin." + juce::String(target.pluginSlotIndex) + "." + target.pluginInstanceId + "." + target.parameterId;
+    }
+
+    template <typename Target>
+    static juce::String makePluginParameterId(const Target& target)
+    {
+        return "plugin." + juce::String(target.pluginSlotIndex) + "." + target.pluginInstanceId + "." + target.parameterId;
+    }
+
+    static juce::String makePluginSlotMixId(int pluginSlotIndex)
+    {
+        return "plugin." + juce::String(pluginSlotIndex) + ".__slot_mix__";
+    }
+
+    AutomationManagerCore()
+    {
+        publishSnapshot();
+    }
+
+    AutomationLaneCore& getOrCreateLane(const TrackID& trackId, const juce::String& parameterId)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+            return *lane;
+
+        lanes_.emplace_back(trackId, parameterId);
+        return lanes_.back();
+    }
+
+    void addPoint(const TrackID& trackId, const juce::String& parameterId, int64_t timeSamples, float value)
+    {
+        getOrCreateLane(trackId, parameterId).addPoint(timeSamples, AutomationLaneCore::clampValueForParameter(parameterId, value));
+        publishSnapshot();
+    }
+
+    void addOrReplacePoint(const TrackID& trackId, const juce::String& parameterId, int64_t timeSamples, float value, bool deferPublish = false)
+    {
+        auto& lane = getOrCreateLane(trackId, parameterId);
+        value = AutomationLaneCore::clampValueForParameter(parameterId, value);
+        for (auto& point : lane.points)
+        {
+            if (point.timeSamples == timeSamples)
+            {
+                point.value = value;
+                if (!deferPublish)
+                    publishSnapshot();
+                return;
+            }
+        }
+
+        lane.addPoint(timeSamples, value);
+        if (!deferPublish)
+            publishSnapshot();
+    }
+
+    void movePoint(const TrackID& trackId, const juce::String& parameterId, int pointIndex, int64_t timeSamples, float value)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            lane->setPoint(pointIndex, timeSamples, AutomationLaneCore::clampValueForParameter(parameterId, value));
+            publishSnapshot();
+        }
+    }
+
+    void removePoint(const TrackID& trackId, const juce::String& parameterId, int pointIndex)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            lane->removeAutomationPoint(pointIndex);
+            publishSnapshot();
+        }
+    }
+
+    bool resetPointValue(const TrackID& trackId, const juce::String& parameterId, int pointIndex)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (pointIndex < 0 || pointIndex >= (int)lane->points.size())
+                return false;
+
+            lane->points[(size_t)pointIndex].value = AutomationLaneCore::clampValueForParameter(parameterId, lane->getDefaultValue());
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool copyPointValue(const TrackID& trackId, const juce::String& parameterId, int pointIndex)
+    {
+        if (const auto* lane = findLane(trackId, parameterId))
+        {
+            if (pointIndex < 0 || pointIndex >= (int)lane->points.size())
+                return false;
+
+            copiedPointValue_ = lane->points[(size_t)pointIndex].value;
+            hasCopiedPointValue_ = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool canPastePointValue() const noexcept { return hasCopiedPointValue_; }
+
+    bool pastePointValue(const TrackID& trackId, const juce::String& parameterId, int pointIndex)
+    {
+        if (!hasCopiedPointValue_)
+            return false;
+
+        return setPointExactValue(trackId, parameterId, pointIndex, copiedPointValue_);
+    }
+
+    bool setPointExactValue(const TrackID& trackId, const juce::String& parameterId, int pointIndex, float value)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (pointIndex < 0 || pointIndex >= (int)lane->points.size())
+                return false;
+
+            lane->points[(size_t)pointIndex].value = AutomationLaneCore::clampValueForParameter(parameterId, value);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool copySegmentShape(const TrackID& trackId, const juce::String& parameterId, int segmentIndex)
+    {
+        if (const auto* lane = findLane(trackId, parameterId))
+        {
+            if (segmentIndex < 0 || segmentIndex + 1 >= (int)lane->points.size())
+                return false;
+
+            const auto& a = lane->points[(size_t)segmentIndex];
+            const auto& b = lane->points[(size_t)segmentIndex + 1];
+            segmentClipboard_.valid = true;
+            segmentClipboard_.curve = a.curveToNext;
+            segmentClipboard_.tension = a.tensionToNext;
+            segmentClipboard_.startValue = a.value;
+            segmentClipboard_.endValue = b.value;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool canPasteSegmentShape() const noexcept { return segmentClipboard_.valid; }
+
+    bool pasteSegmentShape(const TrackID& trackId, const juce::String& parameterId, int segmentIndex, bool pasteValues)
+    {
+        if (!segmentClipboard_.valid)
+            return false;
+
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (segmentIndex < 0 || segmentIndex + 1 >= (int)lane->points.size())
+                return false;
+
+            auto& a = lane->points[(size_t)segmentIndex];
+            auto& b = lane->points[(size_t)segmentIndex + 1];
+            a.curveToNext = segmentClipboard_.curve;
+            a.tensionToNext = segmentClipboard_.tension;
+
+            if (pasteValues)
+            {
+                a.value = AutomationLaneCore::clampValueForParameter(parameterId, segmentClipboard_.startValue);
+                b.value = AutomationLaneCore::clampValueForParameter(parameterId, segmentClipboard_.endValue);
+            }
+
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool setPointExactTime(const TrackID& trackId, const juce::String& parameterId, int pointIndex, int64_t timeSamples)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (pointIndex < 0 || pointIndex >= (int)lane->points.size())
+                return false;
+
+            lane->points[(size_t)pointIndex].timeSamples = juce::jmax<int64_t>(0, timeSamples);
+            lane->sortAndResolveDuplicates();
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    void setPointCurveToNext(const TrackID& trackId, const juce::String& parameterId, int pointIndex, AutomationCurveType curve)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            lane->setCurveToNext(pointIndex, curve);
+            publishSnapshot();
+        }
+    }
+
+    bool resetSegmentTension(const TrackID& trackId, const juce::String& parameterId, int segmentIndex)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (segmentIndex < 0 || segmentIndex + 1 >= (int)lane->points.size())
+                return false;
+
+            lane->setTensionToNext(segmentIndex, 0.0f);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool setSegmentCurve(const TrackID& trackId, const juce::String& parameterId, int segmentIndex, AutomationCurveType curve)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (segmentIndex < 0 || segmentIndex + 1 >= (int)lane->points.size())
+                return false;
+
+            lane->setCurveToNext(segmentIndex, curve);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool deletePointsInSegment(const TrackID& trackId, const juce::String& parameterId, int64_t startSample, int64_t endSample)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            if (startSample > endSample)
+                std::swap(startSample, endSample);
+
+            const auto oldSize = lane->points.size();
+            lane->points.erase(std::remove_if(lane->points.begin(), lane->points.end(),
+                [startSample, endSample](const AutomationPoint& point)
+                {
+                    return point.timeSamples > startSample && point.timeSamples < endSample;
+                }), lane->points.end());
+
+            if (lane->points.size() != oldSize)
+            {
+                lane->sortAndResolveDuplicates();
+                publishSnapshot();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void setPointTensionToNext(const TrackID& trackId, const juce::String& parameterId, int pointIndex, float tension)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            lane->setTensionToNext(pointIndex, tension);
+            publishSnapshot();
+        }
+    }
+
+    int insertPointPreservingLevel(const TrackID& trackId, const juce::String& parameterId, int64_t timeSamples)
+    {
+        if (auto* lane = findEditableLane(trackId, parameterId))
+        {
+            const int index = lane->insertPointPreservingLevel(timeSamples);
+            publishSnapshot();
+            return index;
+        }
+
+        return -1;
+    }
+
+    void setLaneEnabled(const TrackID& trackId, const juce::String& parameterId, bool enabled)
+    {
+        auto& lane = getOrCreateLane(trackId, parameterId);
+        lane.setEnabled(enabled);
+        publishSnapshot();
+    }
+
+    void setLaneVisible(const TrackID& trackId, const juce::String& parameterId, bool visible)
+    {
+        auto& lane = getOrCreateLane(trackId, parameterId);
+        lane.setVisible(visible);
+        publishSnapshot();
+    }
+
+    void showLane(const TrackID& trackId, const juce::String& parameterId)
+    {
+        setLaneVisible(trackId, parameterId, true);
+    }
+
+    void hideLane(const TrackID& trackId, const juce::String& parameterId)
+    {
+        setLaneVisible(trackId, parameterId, false);
+    }
+
+    const AutomationLaneCore* findLane(const TrackID& trackId, const juce::String& parameterId) const noexcept
+    {
+        for (const auto& lane : lanes_)
+            if (lane.trackId == trackId && lane.parameterId == parameterId)
+                return &lane;
+
+        return nullptr;
+    }
+
+    void clearLane(const TrackID& trackId, const juce::String& parameterId)
+    {
+        clipRegions_.erase(std::remove_if(clipRegions_.begin(), clipRegions_.end(),
+            [&trackId, &parameterId](const AutomationClipRegionCore& region)
+            {
+                return region.trackId == trackId && region.parameterId == parameterId;
+            }), clipRegions_.end());
+
+        for (auto it = lanes_.begin(); it != lanes_.end(); ++it)
+        {
+            if (it->trackId == trackId && it->parameterId == parameterId)
+            {
+                lanes_.erase(it);
+                publishSnapshot();
+                return;
+            }
+        }
+    }
+
+    void clearAll()
+    {
+        lanes_.clear();
+        clipRegions_.clear();
+        publishSnapshot();
+    }
+
+    void publishSnapshot()
+    {
+        syncAllClipRegionsToLanes();
+        publisher_.publish(*this);
+    }
+
+    AutomationSnapshotPublisherCore& getSnapshotPublisher() noexcept { return publisher_; }
+    const AutomationSnapshotPublisherCore& getSnapshotPublisher() const noexcept { return publisher_; }
+
+    const std::vector<AutomationLaneCore>& getLanes() const noexcept { return lanes_; }
+    const std::vector<AutomationClipRegionCore>& getClipRegions() const noexcept { return clipRegions_; }
+
+    AutomationClipRegionCore* findClipRegion(const juce::Uuid& regionId) noexcept
+    {
+        for (auto& region : clipRegions_)
+            if (region.regionId == regionId)
+                return &region;
+
+        return nullptr;
+    }
+
+    const AutomationClipRegionCore* findClipRegion(const juce::Uuid& regionId) const noexcept
+    {
+        for (const auto& region : clipRegions_)
+            if (region.regionId == regionId)
+                return &region;
+
+        return nullptr;
+    }
+
+    AutomationClipRegionCore& addClipRegion(AutomationClipRegionCore region)
+    {
+        if (region.name.isEmpty())
+            region.name = region.parameterId;
+
+        clipRegions_.push_back(std::move(region));
+        syncClipRegionToLane(clipRegions_.back());
+        publishSnapshot();
+        return clipRegions_.back();
+    }
+
+    bool duplicateClipRegion(const juce::Uuid& regionId, int64_t newStartSample)
+    {
+        for (const auto& region : clipRegions_)
+        {
+            if (region.regionId == regionId)
+            {
+                auto duplicate = region;
+                duplicate.regionId = juce::Uuid();
+                duplicate.startSample = newStartSample;
+                duplicate.selected = false;
+                clipRegions_.push_back(std::move(duplicate));
+                syncClipRegionToLane(clipRegions_.back());
+                publishSnapshot();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool moveClipRegion(const juce::Uuid& regionId, int64_t newStartSample)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            region->startSample = juce::jmax<int64_t>(0, newStartSample);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool resizeClipRegion(const juce::Uuid& regionId, int64_t newLengthSamples)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            region->lengthSamples = juce::jmax<int64_t>(1, newLengthSamples);
+            for (auto& point : region->localPoints)
+                point.timeSamples = juce::jlimit<int64_t>(0, region->lengthSamples, point.timeSamples);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool setClipRegionMuted(const juce::Uuid& regionId, bool muted)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            region->muted = muted;
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool renameClipRegion(const juce::Uuid& regionId, const juce::String& name)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            region->name = name;
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool setClipRegionColor(const juce::Uuid& regionId, juce::Colour color)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            region->color = color;
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool deleteClipRegion(const juce::Uuid& regionId)
+    {
+        for (auto it = clipRegions_.begin(); it != clipRegions_.end(); ++it)
+        {
+            if (it->regionId == regionId)
+            {
+                clearLanePointsInRegionRange(*it);
+                clipRegions_.erase(it);
+                publishSnapshot();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool copyClipRegionState(const juce::Uuid& regionId)
+    {
+        if (const auto* region = findClipRegion(regionId))
+        {
+            AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool pasteClipRegionState(const juce::Uuid& regionId)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            const bool changed = AutomationArticulatorToolsCore::pasteState(*region, clipClipboard_);
+            if (changed)
+                syncClipRegionToLane(*region);
+            if (changed)
+                publishSnapshot();
+            return changed;
+        }
+
+        return false;
+    }
+
+    bool flipClipRegionVertically(const juce::Uuid& regionId)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            AutomationArticulatorToolsCore::flipVertically(*region);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool scaleClipRegionLevels(const juce::Uuid& regionId, float amount)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            AutomationArticulatorToolsCore::scaleLevels(*region, amount);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool normalizeClipRegionLevels(const juce::Uuid& regionId)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            AutomationArticulatorToolsCore::normalizeLevels(*region);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool resetClipRegionLevels(const juce::Uuid& regionId, float defaultValue = 0.0f)
+    {
+        if (auto* region = findClipRegion(regionId))
+        {
+            clearLanePointsInRegionRange(*region);
+            AutomationArticulatorToolsCore::resetLevels(*region, defaultValue);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
+        }
+
+        return false;
+    }
+
+    AutomationClipClipboardCore& getClipClipboard() noexcept { return clipClipboard_; }
+    const AutomationClipClipboardCore& getClipClipboard() const noexcept { return clipClipboard_; }
+
+    juce::ValueTree getState() const
+    {
+        return getStateFilteredByClipExistence({});
+    }
+
+    juce::ValueTree getStateFilteredByClipExistence(const std::function<bool(const juce::String&)>& clipExists) const
+    {
+        juce::ValueTree automation("Automation");
+        automation.setProperty("version", 2, nullptr);
+
+        for (const auto& lane : lanes_)
+        {
+            if (!AutomationLaneCore::referencesExistingClip(lane.parameterId, clipExists))
+                continue;
+
+            juce::ValueTree laneTree("Lane");
+            laneTree.setProperty("trackId", lane.trackId, nullptr);
+            laneTree.setProperty("parameterId", lane.parameterId, nullptr);
+            laneTree.setProperty("enabled", lane.enabled, nullptr);
+
+            for (const auto& point : lane.points)
+            {
+                juce::ValueTree pointTree("Point");
+                pointTree.setProperty("timeSamples", (juce::int64)point.timeSamples, nullptr);
+                pointTree.setProperty("value", point.value, nullptr);
+                pointTree.setProperty("curveToNext", (int)point.curveToNext, nullptr);
+                pointTree.setProperty("curveToNextName", automationCurveTypeToString(point.curveToNext), nullptr);
+                pointTree.setProperty("tensionToNext", point.tensionToNext, nullptr);
+                laneTree.addChild(pointTree, -1, nullptr);
+            }
+
+            automation.addChild(laneTree, -1, nullptr);
+        }
+
+        juce::ValueTree regions("AutomationClipRegions");
+        for (const auto& region : clipRegions_)
+        {
+            if (!AutomationLaneCore::referencesExistingClip(region.parameterId, clipExists))
+                continue;
+
+            regions.addChild(region.getState(), -1, nullptr);
+        }
+        automation.addChild(regions, -1, nullptr);
+
+        return automation;
+    }
+
+    void restoreState(const juce::ValueTree& automation,
+                      const std::function<bool(const juce::String&)>& clipExists = {})
+    {
+        lanes_.clear();
+        clipRegions_.clear();
+
+        if (automation.isValid())
+        {
+            const int version = (int)automation.getProperty("version", 1);
+            for (int i = 0; i < automation.getNumChildren(); ++i)
+            {
+                auto laneTree = automation.getChild(i);
+                if (laneTree.hasType("AutomationClipRegions"))
+                {
+                    for (int r = 0; r < laneTree.getNumChildren(); ++r)
+                    {
+                        auto region = AutomationClipRegionCore::fromState(laneTree.getChild(r));
+                        if (region.isValid() && AutomationLaneCore::referencesExistingClip(region.parameterId, clipExists))
+                            clipRegions_.push_back(std::move(region));
+                    }
+                    continue;
+                }
+
+                if (!laneTree.hasType("Lane"))
+                    continue;
+
+                const auto parameterId = laneTree.getProperty("parameterId", {}).toString();
+                if (!AutomationLaneCore::referencesExistingClip(parameterId, clipExists))
+                    continue;
+
+                AutomationLaneCore lane(
+                    laneTree.getProperty("trackId", {}).toString(),
+                    parameterId);
+                lane.enabled = (bool)laneTree.getProperty("enabled", true);
+
+                for (int p = 0; p < laneTree.getNumChildren(); ++p)
+                {
+                    auto pointTree = laneTree.getChild(p);
+                    if (!pointTree.hasType("Point"))
+                        continue;
+
+                    const auto curve = pointTree.hasProperty("curveToNextName")
+                        ? automationCurveTypeFromString(pointTree.getProperty("curveToNextName").toString())
+                        : (version >= 2
+                            ? automationCurveTypeFromStoredInt((int)pointTree.getProperty("curveToNext", 0))
+                            : legacyAutomationCurveTypeFromStoredInt((int)pointTree.getProperty("curveToNext", 0)));
+
+                    lane.points.push_back({
+                        (int64_t)(juce::int64)pointTree.getProperty("timeSamples", (juce::int64)0),
+                        (float)pointTree.getProperty("value", 1.0f),
+                        curve,
+                        juce::jlimit(-1.0f, 1.0f, (float)pointTree.getProperty("tensionToNext", 0.0f))
+                    });
+                }
+
+                lane.sortAndResolveDuplicates();
+                lanes_.push_back(std::move(lane));
+            }
+        }
+
+        publishSnapshot();
+    }
+
+    bool removeOrphanedClipAutomation(const std::function<bool(const juce::String&)>& clipExists)
+    {
+        if (!clipExists)
+            return false;
+
+        const auto laneEnd = std::remove_if(lanes_.begin(), lanes_.end(),
+            [&clipExists](const AutomationLaneCore& lane)
+            {
+                return !AutomationLaneCore::referencesExistingClip(lane.parameterId, clipExists);
+            });
+
+        const bool removedLanes = laneEnd != lanes_.end();
+        if (removedLanes)
+            lanes_.erase(laneEnd, lanes_.end());
+
+        const auto regionEnd = std::remove_if(clipRegions_.begin(), clipRegions_.end(),
+            [&clipExists](const AutomationClipRegionCore& region)
+            {
+                return !AutomationLaneCore::referencesExistingClip(region.parameterId, clipExists);
+            });
+
+        const bool removedRegions = regionEnd != clipRegions_.end();
+        if (removedRegions)
+            clipRegions_.erase(regionEnd, clipRegions_.end());
+
+        if (removedLanes || removedRegions)
+            publishSnapshot();
+
+        return removedLanes || removedRegions;
+    }
+
+private:
+    AutomationLaneCore* findEditableLane(const TrackID& trackId, const juce::String& parameterId) noexcept
+    {
+        for (auto& lane : lanes_)
+            if (lane.trackId == trackId && lane.parameterId == parameterId)
+                return &lane;
+
+        return nullptr;
+    }
+
+    void clearLanePointsInRegionRange(const AutomationClipRegionCore& region)
+    {
+        if (auto* lane = findEditableLane(region.trackId, region.parameterId))
+        {
+            const int64_t start = region.startSample;
+            const int64_t end = region.endSample();
+            lane->points.erase(std::remove_if(lane->points.begin(), lane->points.end(),
+                [start, end](const AutomationPoint& point)
+                {
+                    return point.timeSamples >= start && point.timeSamples <= end;
+                }), lane->points.end());
+            lane->sortAndResolveDuplicates();
+        }
+    }
+
+    void syncClipRegionToLane(const AutomationClipRegionCore& region)
+    {
+        if (!region.isValid())
+            return;
+
+        auto& lane = getOrCreateLane(region.trackId, region.parameterId);
+        const int64_t start = region.startSample;
+        const int64_t end = region.endSample();
+        lane.points.erase(std::remove_if(lane.points.begin(), lane.points.end(),
+            [start, end](const AutomationPoint& point)
+            {
+                return point.timeSamples >= start && point.timeSamples <= end;
+            }), lane.points.end());
+
+        if (region.muted)
+        {
+            lane.sortAndResolveDuplicates();
+            return;
+        }
+
+        for (auto point : region.localPoints)
+        {
+            point.timeSamples = juce::jlimit<int64_t>(start, end, start + juce::jlimit<int64_t>(0, region.lengthSamples, point.timeSamples));
+            point.value = AutomationLaneCore::clampValueForParameter(region.parameterId, point.value);
+            point.tensionToNext = juce::jlimit(-1.0f, 1.0f, point.tensionToNext);
+            lane.points.push_back(point);
+        }
+
+        lane.sortAndResolveDuplicates();
+    }
+
+    void syncAllClipRegionsToLanes()
+    {
+        for (const auto& region : clipRegions_)
+            clearLanePointsInRegionRange(region);
+
+        for (const auto& region : clipRegions_)
+            syncClipRegionToLane(region);
+    }
+
+    std::vector<AutomationLaneCore> lanes_;
+    std::vector<AutomationClipRegionCore> clipRegions_;
+    AutomationClipClipboardCore clipClipboard_;
+    SegmentShapeClipboard segmentClipboard_;
+    float copiedPointValue_ = 0.0f;
+    bool hasCopiedPointValue_ = false;
+    mutable uint64_t nextVersion_ = 1;
+    AutomationSnapshotPublisherCore publisher_;
+
+    friend class AutomationSnapshotPublisherCore;
+};
+
+inline void AutomationSnapshotPublisherCore::publish(const AutomationManagerCore& manager)
+{
+    auto snap = std::make_shared<AutomationSnapshot>();
+    snap->version = manager.nextVersion_++;
+    snap->lanes.reserve(manager.lanes_.size());
+
+    for (const auto& lane : manager.lanes_)
+    {
+        AutomationSnapshot::LaneSnapshot laneSnap;
+        laneSnap.trackId = lane.trackId;
+        laneSnap.parameterId = lane.parameterId;
+        laneSnap.enabled = lane.isEnabled();
+        laneSnap.points = lane.points;
+        snap->lanes.push_back(std::move(laneSnap));
+    }
+
+    std::atomic_store_explicit(&snapshot_, snap, std::memory_order_release);
+}
+
+} // namespace DAW

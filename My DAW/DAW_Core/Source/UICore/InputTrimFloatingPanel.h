@@ -22,18 +22,18 @@ namespace DAW {
  *   - BubblegumPanelHeaderCore        : "Input gain" title + minimize + close
  *   - BubblegumPanelToggleSwitch      : channel mode selector for the VU meter
  *   - AnalogVuMeterComponent          : cream-faced analog VU
- *   - BubblegumPanelReadoutBox x 2    : CURRENT (live trim) + PEAK MAX (latched)
+ *   - Separate current/max VU, sample peak dBFS, and Trim dB readouts
+ *   - Reference selector and reset control
  *   - BubblegumKnobComponent          : the gain knob
  *
  * Per-track uniqueness:
  *   - The knob's binding closes over the Track& passed to the constructor.
  *     Read = track_.getInputTrim().getTargetGainDb().
- *     Write = track_.getInputTrim().setTargetGainDb(dB).
+ *     Write = Track::setInputTrimDb(dB), which marks the project dirty.
  *     Two panels for two tracks have entirely separate bindings; their
  *     knobs cannot ever read/write each other's value.
- *   - The VU meter binds to track_.getInputMeter() — the per-track atomic
- *     peak source. Smoothing state lives inside the per-instance VU
- *     Component, so each panel has its own needle.
+ *   - The VU meter, mixer and arranger read the same audio-clock detector.
+ *     Reference and channel mode are per-track settings saved in the project.
  *
  * Taskbar integration:
  *   - Inherits IBubblegumTaskbarHost. Registers with the global taskbar
@@ -56,22 +56,25 @@ public:
     explicit InputTrimFloatingPanel(Track& track)
         : track_(track)
     {
-        setSize(360, 460);
+        setSize(360, 526);
         setOpaque(false);
 
         // ── Header ───────────────────────────────────────────────
-        header_.setTitle("Input gain");
-        header_.setSubtitle(juce::String(juce::CharPointer_UTF8("pre-fader \xc2\xb7 ch ")) + juce::String(track_.getIndex() + 1));
+        header_.setTitle("Trim / VU");
+        header_.setSubtitle(juce::String(juce::CharPointer_UTF8("pre-FX \xc2\xb7 ch ")) + juce::String(track_.getIndex() + 1));
         header_.onMinimizeClicked = [this] { minimizeFromTaskbar(); };
         header_.onCloseClicked    = [this] { closeFromTaskbar(); };
         addAndMakeVisible(header_);
 
         // ── Channel mode toggle for the VU meter ─────────────────
-        lrToggle_.setLabel(channelModeLabel(VuChannelMode::MaxLR));
+        lrToggle_.setLabel(channelModeLabel(track_.getInputMeter().getVuChannelMode()));
+        lrToggle_.setComponentID("trim.vu-channel");
         lrToggle_.setOn(true);
-        lrToggle_.onChanged = [this](bool)
+        lrToggle_.onChanged = [this](bool on)
         {
-            cycleChannelMode();
+            // A click turns the pill off; restoring its lit indicator must
+            // not advance the channel a second time.
+            if (!on) cycleChannelMode();
         };
         addAndMakeVisible(lrToggle_);
 
@@ -79,10 +82,21 @@ public:
         vu_.setSource(&track_.getInputMeter());
         addAndMakeVisible(vu_);
 
+        reference_.setComponentID("trim.vu-reference");
+        for (int db = -30; db <= 0; ++db)
+            reference_.addItem("0 VU = " + juce::String(db) + " dBFS", db + 31);
+        reference_.onChange = [this]
+        {
+            if (!detached_ && reference_.getSelectedId() > 0)
+                track_.setTrimVuReferenceDb((float) (reference_.getSelectedId() - 31));
+        };
+        reference_.setTooltip("Calibration for a steady sine. Changes the VU reference, not the audio gain.");
+        addAndMakeVisible(reference_);
+
         // ── Knob, bound to per-track InputTrimCore ───────────────
         BubblegumKnobValueBinding b;
         b.getValue    = [this] { return track_.getInputTrim().getTargetGainDb(); };
-        b.setValue    = [this](float dB) { track_.getInputTrim().setTargetGainDb(dB); };
+        b.setValue    = [this](float dB) { track_.setInputTrimDb(dB); };
         b.formatValue = [](float dB)
         {
             if (dB <= -120.0f) return juce::String("-inf");
@@ -97,11 +111,11 @@ public:
         addAndMakeVisible(knob_);
 
         // ── Readouts ─────────────────────────────────────────────
-        currentReadout_.setLabel("CURRENT");
+        currentReadout_.setLabel("TRIM dB");
         currentReadout_.setUseAlternateValueColour(false);
         addAndMakeVisible(currentReadout_);
 
-        peakMaxReadout_.setLabel("PEAK MAX");
+        peakMaxReadout_.setLabel("PEAK dBFS");
         peakMaxReadout_.setUseAlternateValueColour(true);
         peakMaxReadout_.onClicked = [this]
         {
@@ -109,6 +123,23 @@ public:
             refreshReadouts();
         };
         addAndMakeVisible(peakMaxReadout_);
+
+        vuCurrentReadout_.setLabel("CURRENT VU");
+        vuCurrentReadout_.setComponentID("trim.current-vu");
+        addAndMakeVisible(vuCurrentReadout_);
+        vuMaxReadout_.setLabel("MAX VU");
+        vuMaxReadout_.setComponentID("trim.max-vu");
+        vuMaxReadout_.onClicked = [this] { vu_.resetPeakHold(); refreshReadouts(); };
+        addAndMakeVisible(vuMaxReadout_);
+        resetMeters_.setButtonText("Reset meters");
+        resetMeters_.setComponentID("trim.reset-meters");
+        resetMeters_.onClick = [this] { vu_.resetPeakHold(); refreshReadouts(); };
+        addAndMakeVisible(resetMeters_);
+        help_.setText("Set Trim around 0 VU for nominal level.\nWatch PEAK separately for digital clipping.", juce::dontSendNotification);
+        help_.setFont(juce::Font(12.0f));
+        help_.setColour(juce::Label::textColourId, juce::Colour(0xFFBFC4D0));
+        help_.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(help_);
 
         // ── Taskbar registration ─────────────────────────────────
         BubblegumTaskbarCore::getGlobalInstance().registerHost(this);
@@ -250,20 +281,25 @@ public:
         // Header occupies the top 60 px of the panel.
         header_.setBounds(0, 0, W, 60);
 
-        // L+R toggle: 40x18, sits to the left of the minimize/close buttons.
-        const int toggleX = juce::roundToInt(header_.getRightWidgetEdgeX() - 40.0f);
-        lrToggle_.setBounds(toggleX, 14, 40, 18);
+        // Leave room for L+R / MAX beside the indicator dot.
+        const int toggleX = juce::roundToInt(header_.getRightWidgetEdgeX() - 64.0f);
+        lrToggle_.setBounds(toggleX, 14, 64, 18);
 
         // VU meter: 320 wide, 200 tall, 20 px horizontal margin, starts at y=70.
         vu_.setBounds(20, 70, W - 40, 200);
 
-        // Two readouts side-by-side at y=290, 80x42 each.
-        currentReadout_.setBounds(40,         290, 80, 42);
-        peakMaxReadout_.setBounds(W - 40 - 80, 290, 80, 42);
+        reference_.setBounds(40, 282, W - 80, 26);
+        const int readoutWidth = (W - 56) / 3;
+        vuCurrentReadout_.setBounds(20, 320, readoutWidth, 42);
+        vuMaxReadout_.setBounds(28 + readoutWidth, 320, readoutWidth, 42);
+        peakMaxReadout_.setBounds(36 + 2 * readoutWidth, 320, readoutWidth, 42);
+        currentReadout_.setBounds(20, 396, 88, 42);
+        resetMeters_.setBounds(W - 110, 398, 90, 30);
 
         // Knob centred at y=340, 110x110.
         const int knobSize = 110;
-        knob_.setBounds((W - knobSize) / 2, 340, knobSize, knobSize);
+        knob_.setBounds((W - knobSize) / 2, 378, knobSize, knobSize);
+        help_.setBounds(16, 487, W - 32, 36);
     }
 
 private:
@@ -279,6 +315,11 @@ private:
         if (detached_) return;
         const float currentDb = track_.getInputTrim().getTargetGainDb();
         currentReadout_.setValue(formatDb(currentDb));
+        reference_.setSelectedId(juce::roundToInt(track_.getInputMeter().getVuReferenceDb()) + 31,
+                                 juce::dontSendNotification);
+        lrToggle_.setLabel(channelModeLabel(vu_.getChannelMode()));
+        vuCurrentReadout_.setValue(formatDb(vu_.getNeedleDb()));
+        vuMaxReadout_.setValue(formatDb(vu_.getVuMaxDb()));
 
         const float peakDb = vu_.getPeakMaxDb();
         peakMaxReadout_.setValue(peakDb <= -120.0f ? juce::String(juce::CharPointer_UTF8("\xe2\x80\x94"))
@@ -288,22 +329,24 @@ private:
     static juce::String formatDb(float dB)
     {
         if (dB <= -120.0f) return "-inf";
+        if (std::abs(dB) < 0.05f) return "0.0";
         return (dB > 0.0f ? juce::String("+") : juce::String())
              + juce::String(dB, 1);
     }
 
     void cycleChannelMode()
     {
+        if (detached_) return;
         VuChannelMode next;
         switch (vu_.getChannelMode())
         {
-            case VuChannelMode::MaxLR:     next = VuChannelMode::LeftOnly;  break;
+            case VuChannelMode::Average:   next = VuChannelMode::LeftOnly;  break;
             case VuChannelMode::LeftOnly:  next = VuChannelMode::RightOnly; break;
             case VuChannelMode::RightOnly: next = VuChannelMode::MaxLR;     break;
-            default:                       next = VuChannelMode::MaxLR;     break;
+            default:                       next = VuChannelMode::Average;   break;
         }
 
-        vu_.setChannelMode(next);
+        track_.setTrimVuChannelMode(next);
         lrToggle_.setLabel(channelModeLabel(next));
         lrToggle_.setOn(true);
         lrToggle_.repaint();
@@ -320,6 +363,10 @@ private:
     BubblegumKnobComponent     knob_;
     BubblegumPanelReadoutBox   currentReadout_;
     BubblegumPanelReadoutBox   peakMaxReadout_;
+    BubblegumPanelReadoutBox   vuCurrentReadout_, vuMaxReadout_;
+    juce::ComboBox             reference_;
+    juce::TextButton           resetMeters_;
+    juce::Label                help_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InputTrimFloatingPanel)
 };

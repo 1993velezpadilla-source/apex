@@ -1,0 +1,396 @@
+{
+  "listedFiles": 172609,
+  "method": "rg --files --hidden --no-ignore excluding .git internals; no external symlink traversal",
+  "rootGroups": [
+    {
+      "Name": "My DAW",
+      "Count": 121114
+    },
+    {
+      "Name": "New folder",
+      "Count": 47595
+    },
+    {
+      "Name": ".opencode",
+      "Count": 3674
+    },
+    {
+      "Name": "crash-reports",
+      "Count": 58
+    },
+    {
+      "Name": ".superpowers",
+      "Count": 54
+    },
+    {
+      "Name": "evidence",
+      "Count": 22
+    },
+    {
+      "Name": "Daw Brain",
+      "Count": 17
+    },
+    {
+      "Name": "set145_spink_premium",
+      "Count": 15
+    },
+    {
+      "Name": "docs",
+      "Count": 14
+    },
+    {
+      "Name": "recaps",
+      "Count": 7
+    },
+    {
+      "Name": ".github",
+      "Count": 4
+    },
+    {
+      "Name": "Apex plug-ins",
+      "Count": 4
+    },
+    {
+      "Name": "tools",
+      "Count": 2
+    },
+    {
+      "Name": "DAW_BRAIN.install_manifest.json",
+      "Count": 1
+    },
+    {
+      "Name": "DAW_BRAIN.md",
+      "Count": 1
+    },
+    {
+      "Name": "DesignReferences",
+      "Count": 1
+    },
+    {
+      "Name": "oversampling_test.obj",
+      "Count": 1
+    },
+    {
+      "Name": "opencode.json",
+      "Count": 1
+    },
+    {
+      "Name": "README.md",
+      "Count": 1
+    },
+    {
+      "Name": "test_orcarouter.py",
+      "Count": 1
+    },
+    {
+      "Name": "FINAL_VALIDATION_REPORT.md",
+      "Count": 1
+    },
+    {
+      "Name": ".apex_brain_backups",
+      "Count": 1
+    },
+    {
+      "Name": "apex-workspace.json",
+      "Count": 1
+    },
+    {
+      "Name": "automation_test.obj",
+      "Count": 1
+    },
+    {
+      "Name": ".claude",
+      "Count": 1
+    },
+    {
+      "Name": ".gitattributes",
+      "Count": 1
+    },
+    {
+      "Name": ".gitignore",
+      "Count": 1
+    },
+    {
+      "Name": ".gitmodules",
+      "Count": 1
+    },
+    {
+      "Name": "AGENTS.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_ARCHITECTURE_MAP.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_AUDIO_INTERFACE_COMPATIBILITY_REPORT.md",
+      "Count": 1
+    },
+    {
+      "Name": "Cerebro",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_BUILD_REGISTRY.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_FIX_REGISTRY.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_INTERMITTENT_CRASH_FORENSIC_REPORT.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_LOW_BUFFER_FORENSIC_AUDIT_REPORT.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_PERFORMANCE_BASELINES.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_STATE.md",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_TEST_REGISTRY.md",
+      "Count": 1
+    },
+    {
+      "Name": "Users1993vAppDataLocalTempopencodeAPEX_CDB_CRASH_20260728_194015.dmp",
+      "Count": 1
+    },
+    {
+      "Name": "APEX_CAPABILITY_REGISTRY.md",
+      "Count": 1
+    },
+    {
+      "Name": "Users1993vAppDataLocalTempopencodeAPEX_CDB_CRASH_20260728_195459.dmp",
+      "Count": 1
+    }
+  ],
+  "coreGroups": [
+    {
+      "Name": "Builds",
+      "Count": 31012
+    },
+    {
+      "Name": ".apex-debug",
+      "Count": 19076
+    },
+    {
+      "Name": "evidence",
+      "Count": 3844
+    },
+    {
+      "Name": "Tests",
+      "Count": 1578
+    },
+    {
+      "Name": "tracktion_engine-develop",
+      "Count": 1459
+    },
+    {
+      "Name": "Source",
+      "Count": 901
+    },
+    {
+      "Name": "stftPitchShift-main",
+      "Count": 78
+    },
+    {
+      "Name": "tools",
+      "Count": 40
+    },
+    {
+      "Name": "JuceLibraryCode",
+      "Count": 31
+    },
+    {
+      "Name": "docs",
+      "Count": 31
+    },
+    {
+      "Name": ".superpowers",
+      "Count": 25
+    },
+    {
+      "Name": "xziel_mixer_nucleos_source",
+      "Count": 21
+    },
+    {
+      "Name": ".vs",
+      "Count": 21
+    },
+    {
+      "Name": "Scripts",
+      "Count": 20
+    },
+    {
+      "Name": "trimmm",
+      "Count": 10
+    },
+    {
+      "Name": "splash files (3)",
+      "Count": 9
+    },
+    {
+      "Name": "files (22)",
+      "Count": 9
+    },
+    {
+      "Name": "files (12)",
+      "Count": 8
+    },
+    {
+      "Name": "trimm 2",
+      "Count": 8
+    },
+    {
+      "Name": ".opencode",
+      "Count": 8
+    },
+    {
+      "Name": "Trimm 5",
+      "Count": 7
+    },
+    {
+      "Name": "Trimm 3",
+      "Count": 7
+    },
+    {
+      "Name": "pipiano",
+      "Count": 7
+    },
+    {
+      "Name": "files (18)",
+      "Count": 6
+    },
+    {
+      "Name": "Dependencies",
+      "Count": 5
+    },
+    {
+      "Name": "files (11)",
+      "Count": 5
+    },
+    {
+      "Name": "files (24)",
+      "Count": 5
+    },
+    {
+      "Name": "Trimmm 6",
+      "Count": 4
+    },
+    {
+      "Name": "files (23)",
+      "Count": 4
+    },
+    {
+      "Name": "files (15)",
+      "Count": 4
+    },
+    {
+      "Name": "files (19)",
+      "Count": 4
+    },
+    {
+      "Name": "files (13)",
+      "Count": 3
+    },
+    {
+      "Name": "files (20)",
+      "Count": 2
+    },
+    {
+      "Name": "Trimmm 4",
+      "Count": 2
+    },
+    {
+      "Name": "build_warnings.txt",
+      "Count": 1
+    },
+    {
+      "Name": "build_warnings2.txt",
+      "Count": 1
+    },
+    {
+      "Name": "BUBBLEGUM_OFFSCREEN_ENDPOINTS_IMPLEMENTATION.md",
+      "Count": 1
+    },
+    {
+      "Name": "crash-reports_cdb_analysis.txt",
+      "Count": 1
+    },
+    {
+      "Name": "DAW_BRAIN.md",
+      "Count": 1
+    },
+    {
+      "Name": ".gitattributes",
+      "Count": 1
+    },
+    {
+      "Name": ".gitignore",
+      "Count": 1
+    },
+    {
+      "Name": ".gitmodules",
+      "Count": 1
+    },
+    {
+      "Name": "test_output.txt",
+      "Count": 1
+    },
+    {
+      "Name": "DAW_CORE_OMEGA_PROMPT.md",
+      "Count": 1
+    },
+    {
+      "Name": "diagnostics",
+      "Count": 1
+    },
+    {
+      "Name": "ARCHITECTURE.md",
+      "Count": 1
+    },
+    {
+      "Name": "apex_audit_64.json.tmp",
+      "Count": 1
+    },
+    {
+      "Name": "opencode.json",
+      "Count": 1
+    },
+    {
+      "Name": "logo",
+      "Count": 1
+    },
+    {
+      "Name": "AGENTS.md",
+      "Count": 1
+    },
+    {
+      "Name": "g10_visual_concept",
+      "Count": 1
+    },
+    {
+      "Name": "build_err.txt",
+      "Count": 1
+    },
+    {
+      "Name": "Users1993vOneDriveDesktopApex backupcrash-reportsAPEX_AUTOTUNE_POOL_STOP_REQUEST.dmp",
+      "Count": 1
+    },
+    {
+      "Name": "DAW_Core.jucer",
+      "Count": 1
+    },
+    {
+      "Name": "build_errors.txt",
+      "Count": 1
+    }
+  ]
+}

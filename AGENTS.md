@@ -2,29 +2,15 @@
 
 ## Official workspace
 
-The authorized APEX workspace is the root of the current checkout of:
-
-`https://github.com/1993velezpadilla-source/apex`
-
-This includes GitHub-connected cloud checkouts used for tasks started from a
-mobile device. Resolve repository paths relative to that checkout rather than
-assuming a Windows drive exists.
-
-The original desktop workspace is:
+The official APEX workspace is:
 
 `C:\Users\1993v\OneDrive\Desktop\Apex backup`
 
-Use that path for work explicitly targeting the original desktop folder. Do not
-inspect or edit a different copy unless the user authorizes that workspace.
-
-In a cloud environment, inspect and edit the checked-out repository. The Windows
-application build requires the documented Windows toolchain and local SDKs. If
-those prerequisites are unavailable, report that build/runtime validation is
-pending; never invent successful build or audio-test results.
+Do not inspect, edit, build, or reference another copy of APEX unless the user explicitly authorizes it.
 
 ## Canonical knowledge
 
-- The canonical DAW architecture reference is `DAW_BRAIN.md` at the checkout root (`../../DAW_BRAIN.md` when working from `My DAW/DAW_Core`).
+- The canonical DAW architecture reference is `../../DAW_BRAIN.md` in the official workspace.
 - `.opencode/agents/daw-brain.md` defines the conversational DAW Brain agent.
 - The actual repository and measured runtime determine what APEX currently implements.
 
@@ -108,3 +94,9 @@ This script:
 8. Ask for approval before modifying source code.
 9. Build x64 Debug after approved correction.
 10. Never claim the crash is fixed from compilation alone.
+
+## Current project audit and session memory
+
+Read `APEX_PROJECT_AUDIT.md` and `APEX_STATE.md` for the 2026-10-03 snapshot before planning development. Detailed evidence, persistence paths, architecture and backlog AUD-01 through AUD-12 are in `docs/apex-audit/`. Recheck Git and affected code when the state changes; this snapshot does not certify a global release.
+
+The canonical Brain is the file at this workspace root. The `My DAW/DAW_Core/DAW_BRAIN.md` file is historical. Preserve active source in `My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor`; that folder is not disposable build output.

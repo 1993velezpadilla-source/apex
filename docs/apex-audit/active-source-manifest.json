@@ -1,0 +1,2692 @@
+{
+  "project": "My DAW/DAW_Core/DAW_Core.jucer",
+  "listedFiles": 447,
+  "sourceFiles": 290,
+  "arrangementEditorFiles": 157,
+  "arrangementEditorCompiled": 37,
+  "missingListedFiles": [],
+  "files": [
+    {
+      "path": "Source/AppCore/ApplicationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AppCore/ApplicationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StateCore/ApplicationState.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StateCore/ApplicationState.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TransportCore/TransportController.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TransportCore/TransportController.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TrackCore/Track.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TrackCore/Track.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ClipCore/Clip.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ClipCore/Clip.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ClipCore/PatternClip.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ClipCore/PatternClip.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollClipModel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollClipModel.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/MidiClip.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/MidiClip.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/MidiTrackCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/MidiTrackCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollGridRenderer.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollGridRenderer.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollNoteRenderer.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollNoteRenderer.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollSelectionRenderer.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollSelectionRenderer.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollToolbarComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollToolbarComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollScaleHelper.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollScaleHelper.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollPlaybackCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollPlaybackCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollKeyboardComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollKeyboardComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollRulerComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollRulerComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MidiCore/PianoRollSmokeTest.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ThemeCore/Theme.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ThemeCore/Theme.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UtilityCore/Types.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UtilityCore/Types.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DiagnosticsCore/CallbackAuditCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/GamepadCore/GamepadManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/GamepadCore/GamepadManager.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/GamepadCore/GamepadMapper.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/GamepadCore/GamepadMapper.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ControlsCore/ModernControls.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/InteractionModeCore/InteractionModeManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/InteractionModeCore/InteractionModeManager.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/FloatingWindowCore/FloatingWindowBase.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/CursorCore/VirtualCursor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/BubbleTaskbar.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/MixerBubble.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/MasterBubble.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/MarkerBubble.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/BubbleOrchestrator.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubbleCore/BubbleMergeOverlay.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/GestureCore/GestureRecognizer.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ActionCore/ActionID.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ActionCore/ActionManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MarkerCore/SectionMarker.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MarkerCore/MarkerManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/KeyBindingCore/KeyBindingProfile.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/KeyBindingCore/KeyBindingManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/KeyBindingCore/GlobalTransportSpaceHook.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/KeyBindingCore/GlobalTransportSpaceHook.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/CommandCore/Command.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/CommandCore/CommandManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/CommandCore/ClipCommands.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/RoutingCore/RoutingNode.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/RoutingCore/RoutingConnection.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/RoutingCore/RoutingGraph.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/ProjectManager.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/ProjectManager.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/AutosaveManagerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/AutosaveManagerCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/CrashRecoveryCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/CrashRecoveryCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/RecoverySessionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/RecoverySessionCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/FilePublicationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/AutosaveWriteJobCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ProjectCore/AutosavePublicationAuthority.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AudioEngineCore/AudioEngine.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ChannelStripCore/LevelMeter.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/TransportBar.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/SettingsPanel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/TrackList.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/DAWMenuBar.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/ArrangementView.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/MixerPanel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/TrackListWindow.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/MixerWindow.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/PianoRollWindow.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/TrackColorPalette.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/CrashRecoveryDialogComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/CrashRecoveryDialogComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/SlimeSidePanel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/BubblegumCableOverlayComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/BubblegumCableOverlayComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/MixerDragStateMachine.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/UICore/MixerDragStateMachine.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginScannerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginInstanceCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginChainCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginInstanceCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginChainCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginSlotUI.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/HostPlayheadCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/HostPlayheadCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginEditorWindowWin32Patch.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginPlayheadInfoCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/PluginPlayheadInfoCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/MixerPluginSidePanel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxProtocolCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxProcessCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginWorkerMainCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxSelfTestCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxAudioTransportShared.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxAudioTransportCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginWorkerAudioTransportCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/SandboxedPluginProxyCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxFixedQuantumReblockerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSandboxCore/PluginSandboxPreparationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AutomationCore/AutomationArticulatorToolsCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AutomationCore/AutomationArticulatorToolsCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AutomationSequence/AutomationSequenceDialogComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AutomationSequence/AutomationSequenceDialogComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableRenderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableMotionStabilityCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableMotionStabilityCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableSurfaceShaderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableSurfaceShaderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableAudioReactiveCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableAudioReactiveCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableHangingCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableHangingCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableVisibilityCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableVisibilityCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumAnchorResolver.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumAnchorResolver.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableGeometryCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableGeometryCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableImpactSplashCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableImpactSplashCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableStyleSettingsCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumCableStyleSettingsCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumDropletCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Bubblegum/BubblegumDropletCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubblegumCable/SidechainCableRenderer.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubblegumCable/SidechainCableRenderer.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubblegumSelectionCore/BubblegumSelectionOverlayComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/BubblegumSelectionCore/BubblegumSelectionOverlayComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DeviceCore/SafeAsioDeviceTypeCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DeviceCore/SafeAsioDeviceTypeCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderAnimationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderAnimationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderHierarchyStateCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderHierarchyStateCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderIntegrationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderIntegrationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderInteractionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderInteractionCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderLayoutCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderLayoutCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderPaintCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderPaintCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderPersistenceCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderPersistenceCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderVisualStyleCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MixerFolderCore/MixerFolderVisualStyleCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSecurityCore/PluginRuntimeDependencyFailureCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSecurityCore/PluginRuntimeDependencyFailureCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSafetyCore/PluginSehGuardCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSafetyCore/PluginSehGuardCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSafetyCore/PluginCrashGuardCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginSafetyCore/PluginCrashGuardCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/RenderCore/ExportRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/RenderCore/ExportRenderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/SelectionCore/MultiSelectionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/SelectionCore/MultiSelectionCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TapeStop/TapeStopAutomationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/TapeStop/TapeStopAutomationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneIntegrationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneIntegrationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneProjectStateCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneProjectStateCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneRenderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneSessionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneSessionCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexSibilantDetectorCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexSibilantDetectorCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexPitchDetectionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexPitchDetectionCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexFormantCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexFormantCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexNoteSegmentationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexNoteSegmentationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexPitchCurveCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexPitchCurveCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexScaleSnapCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexScaleSnapCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneCacheCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneCore/ApexTuneCacheCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneEditorComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneEditorComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTunePianoGridComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTunePianoGridComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTunePitchTraceComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTunePitchTraceComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneStandaloneLauncher.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneStandaloneLauncher.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneToolBarComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/VocalTuneUI/ApexTuneToolBarComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementClipStateCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementClipStateCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementClipModel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementDebugLogCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementDebugPanelCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementSelectionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementSnapCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementToolbarCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementUndoCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationIntegrationExample.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationLaneComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationLaneContainerComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationNowVisible.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationPhase1Guide.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationSystemIntegrated.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationUndoRedoCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationVisibilityDiagnostic.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipAutomationPanel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipColourPickerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipContextMenuCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipEdgeHandleCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipEraseOverlayCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipEraserCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipFadeCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipFadeHandleCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipFadeRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipFreezeState.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipGainCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipGainHandleCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipGlueCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipIndependentPitchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipMuteCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipMuteOverlayCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPanelKnobBridgeCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPitchBadgeCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPitchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPitchRenderPathCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPluginCategoryCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPluginScanCoreUnlimited.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPluginSlotModel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPropertiesWindowCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipRegionPluginApplyCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipSplitCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/BladeSplitPlanCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipSplitIndicatorCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipStretchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipTimePitchBridgeCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/CryptReverbCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/DarkVoiceBodyCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/DemonAtmosphereCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EchoTapCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EditorToolButtonCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EditorToolCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EditorToolSelectorCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/FormantShiftCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/FormantValueCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/GranularStretchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/HowlNoiseCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/IndependentPitchEngineCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/MakingAutomationVisible.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/OfflineHQTimePitchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PercussionStretchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase1Step1Complete_Step2Prep.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase1Step3Complete.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase1Step3Guide.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase1TestHelper.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase2Complete.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase2Guide.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase2Step1Complete.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase2Step2Complete.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase3Guide.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/Phase3Step1Complete.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PhaseVocoderStretchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PianoRollButtonCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchBypassCrossfaderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchEngineBlendCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchForensicAuditCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchScaleMathCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchSmootherCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchTimelineCompensationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchValueCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchWaveformInvalidationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchZoneClassifierCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ResampleEngineCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/RubberBandSelectCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/StretchModeRegistryCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/StretchValueCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TapeResamplePitchEngineCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchArtifactControl.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchAutomationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchBackgroundRenderCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchBounceCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchCPUSafetyCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchDSPCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchExportCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchKnobMappingCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchPresetsCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchQualityCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchQualitySelectorCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchRenderCacheCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchSerializationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchTypesCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchUICore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchUndoActions.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TransientDetectorCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchKnobMappingCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchStateCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VocalPitchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VoiceReactiveAnalyzerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VoiceTransformDSPCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VoiceTransformMapperCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VoiceTransformTypesCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/VoiceTransformUICore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/WailModulationCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/WhyAutomationNotShowing.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/WSOLAStretchCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ArrangementToolbarCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/AutomationImplementations.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipColourPickerCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipEdgeHandleCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipEraseOverlayCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipFadeHandleCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipGainHandleCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipMuteOverlayCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPitchBadgeCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPitchRenderPathCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipPluginScanCoreUnlimited.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipSplitIndicatorCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/CryptReverbCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/DemonAtmosphereCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EchoTapCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EditorToolButtonCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/EditorToolSelectorCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/HowlNoiseCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/IndependentPitchEngineCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PianoRollButtonCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchBypassCrossfaderCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchEngineBlendCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchForensicAuditCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchScaleMathCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchSmootherCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchTimelineCompensationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchWaveformInvalidationCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/PitchZoneClassifierCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/RubberBandSelectCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/TimePitchTestsCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchKnobMappingCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Builds/VisualStudio2026/ArrangementEditor/UnifiedPitchStateCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/Main.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MainComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/MainComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerTypes.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerModel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerModel.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerLookAndFeel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerLookAndFeel.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerStepGrid.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerStepGrid.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerChannelStrip.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerChannelStrip.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerHeader.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerHeader.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerWindow.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerWindow.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerPlaybackCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/StepSequencerCore/StepSequencerPlaybackCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerTypes.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerVoice.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerVoice.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerVoicePool.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerVoicePool.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerEngine.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DrumSamplerCore/DrumSamplerEngine.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PatternManagerCore/PatternManagerTypes.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PatternManagerCore/PatternManagerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PatternManagerCore/PatternManagerCore.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10Core/G10Types.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10Core/G10CurveEngineCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10Core/G10Processor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10Core/G10NativePluginFormat.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10Core/G10Processor.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10AnalyzerFifo.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10LookAndFeel.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10EyeHandleComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10EyeHandleComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10BandFaderComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10BandFaderComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10SpectrumAnalyzerComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10SpectrumAnalyzerComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10RotaryKnobComponent.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10RotaryKnobComponent.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10Editor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/G10UI/G10Editor.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4Types.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4TuningProfile.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4FilterCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4BandCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4EngineCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4Processor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4NativePluginFormat.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4HaloShelfMapper.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4ResidualBankCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4SpectrumCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4ResponseCurveCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4UI/C4Editor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/C4Core/C4Processor.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/AnalysisCore/ApexSpectrumAnalyzerCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/DynamicsCore/ApexDynamicsCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQLinearPhase.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQTypes.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQBiquad.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQEngine.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQResponseCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQProcessor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQProcessor.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQNativePluginFormat.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQCore/ParametricEQAuditionCore.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQUI/ParametricEQEditor.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/ParametricEQUI/ParametricEQEditor.cpp",
+      "compile": true,
+      "resource": false,
+      "exists": true
+    },
+    {
+      "path": "Source/PluginHostCore/ApexNativePluginFormat.h",
+      "compile": false,
+      "resource": false,
+      "exists": true
+    }
+  ]
+}

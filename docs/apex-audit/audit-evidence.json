@@ -1,0 +1,559 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-10-03",
+  "timezone": "America/New_York",
+  "inspectionMode": "static code and full folder-name inventory; existing dynamic evidence rechecked",
+  "codeChangesDuringAudit": false,
+  "officialWorkspace": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup",
+  "outerCommit": "9538337efb49155a37ec47a2af30ee5cc4dfb70f",
+  "applicationCommit": "000816f2d1338d5e97728fdacb72c75e0fe9c24a",
+  "applicationBranch": "feature/apex-windows-baseline-evidence",
+  "applicationDirty": true,
+  "sourcePatch": "docs/apex-audit/evidence/plugin-reorder-fix.patch",
+  "folderInventory": {
+    "listedFilesBeforeAuditDocumentation": 172609,
+    "excludesGitInternals": true,
+    "duplicateWorkspaceContentsReviewed": false,
+    "followsExternalSymlinks": false,
+    "sourceImmediateDirectories": 104,
+    "sourcePhysicalFiles": 901,
+    "projucerListedFiles": 447,
+    "arrangementEditorFiles": 157,
+    "arrangementEditorCompiledCpp": 37,
+    "listedProjectFilesMissing": 0
+  },
+  "focusedTests": [
+    {
+      "name": "PluginHost",
+      "configuration": "Debug",
+      "groups": 33,
+      "assertionsPassed": 417,
+      "assertionsFailed": 0,
+      "result": "FOCUSED_VERIFIED",
+      "artifact": "docs/apex-audit/evidence/plugin-reorder-PluginHost-Debug.json"
+    },
+    {
+      "name": "PluginHost",
+      "configuration": "Release",
+      "groups": 33,
+      "assertionsPassed": 417,
+      "assertionsFailed": 0,
+      "result": "FOCUSED_VERIFIED",
+      "artifact": "docs/apex-audit/evidence/plugin-reorder-PluginHost-Release.json"
+    },
+    {
+      "name": "MixerFader",
+      "configuration": "Debug",
+      "assertionsPassed": 42,
+      "assertionsFailed": 0,
+      "result": "FOCUSED_VERIFIED",
+      "artifact": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Debug.json"
+    },
+    {
+      "name": "MixerFader",
+      "configuration": "Release",
+      "assertionsPassed": 42,
+      "assertionsFailed": 0,
+      "result": "FOCUSED_VERIFIED",
+      "artifact": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Release.json"
+    }
+  ],
+  "globalReleaseApproved": false,
+  "broadDebug": {
+    "status": "incomplete",
+    "reason": "Stopped during long CPU benchmarks after targeted suites completed and other failures were recorded",
+    "passedGlobalGate": false,
+    "log": "C:\\Users\\1993v\\OneDrive\\Desktop\\Apex backup\\My DAW\\DAW_Core\\evidence\\plugin-reorder-all-Debug.log",
+    "observedFailures": [
+      {
+        "group": "Starting tests in: apex.ui.stage_ab.presentation_ownership.v1 / Visual components use the shared presentation receiver...",
+        "message": "!!! Test 1 failed"
+      },
+      {
+        "group": "Starting tests in: apex.ui.stage_ab.presentation_ownership.v1 / Visual components have no independent Timer base...",
+        "message": "!!! Test 1 failed"
+      },
+      {
+        "group": "Starting tests in: track.reprepare.survival.v1 / failure-a.hot-play-stop-release-480-prepare-1024...",
+        "message": "!!! Test 11 failed: identity render path retains no per-clip cursor state -- Expected value: 0, Actual value: 3"
+      },
+      {
+        "group": "Starting tests in: track.reprepare.survival.v1 / bad.stretch.clip1.block-profile...",
+        "message": "!!! Test 2 failed: stretch clip audible in FIRST block after reprepare"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 6 failed: enum-only fixture did not report success"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 7 failed: enum-only fixture was not labeled as a sandbox worker"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode launches the production worker entry with a fixture...",
+        "message": "!!! Test 8 failed: enum-only fixture did not report one description"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode reports a missing path explicitly...",
+        "message": "!!! Test 4 failed: missing-path enum-only diagnostic did not report failure"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.enum-only-diagnostic.v1 / enum-only mode reports a missing path explicitly...",
+        "message": "!!! Test 5 failed: missing-path enum-only diagnostic did not identify the missing path"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 17 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 18 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 19 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 20 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 21 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 22 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 23 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 24 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 25 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 26 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 27 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 28 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20504 generation=1 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 29 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-create.v1 / worker exclusively creates, prepares, reports, and destroys exact VST3...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=20504 generation=2357444457514811473 session=20b7533e6be240518985c68a77557887"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 18 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 19 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 20 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 21 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 22 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 23 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 24 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 25 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 26 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 27 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 28 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 29 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=8744 generation=1 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-module-isolation.v1 / real VST3 module exists only in worker process...",
+        "message": "!!! Test 33 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=8744 generation=-2495238666891737840 session=dd5f21a71e194510a2ba1546035ff62d"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 17 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 18 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_CONTEXT pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 19 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 20 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 21 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 22 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 23 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 24 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 25 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 26 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 27 failed: missing parent PluginCreate milestone: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 28 failed: parent PluginCreate milestones are out of order: op=PluginCreate phase=PLUGINCREATE_COMPLETE pid=20756 generation=1 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 29 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RECEIVED pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 30 failed: missing PluginCreate audit phase: op=PluginCreate phase=VST3_ENUMERATION_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 31 failed: missing PluginCreate audit phase: op=PluginCreate phase=PARAMETER_BIND_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.real-vst3-audio.v1 / shared memory round trip executes fixture gain and 32-sample delay...",
+        "message": "!!! Test 32 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=20756 generation=-6186471839717241284 session=aa253ca39cb24e3cbd67371b89043dd8"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-write-timeout.v1 / PluginCreate write timeout is classified before response read...",
+        "message": "!!! Test 10 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_BEGIN pid=11584 generation=1 session=6acdc0d2eddf431cadce343981524ab2"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-write-timeout.v1 / PluginCreate write timeout is classified before response read...",
+        "message": "!!! Test 11 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_TIMEOUT pid=11584 generation=1 session=6acdc0d2eddf431cadce343981524ab2"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 12 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_WRITE_COMPLETE pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 13 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_BEGIN pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-response-read-timeout.v1 / PluginCreate response timeout is classified after request write...",
+        "message": "!!! Test 14 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_READ_TIMEOUT pid=29512 generation=1 session=b9b276f0e56547709605d281e5deba73"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 7 failed: missing PluginCreate audit phase: op=PluginCreate phase=CREATE_INSTANCE_BEGIN pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 8 failed: missing PluginCreate audit phase: op=PluginCreate phase=CREATE_INSTANCE_FAILURE pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.plugin-create-failure-milestone.v1 / worker create failure records begin without complete...",
+        "message": "!!! Test 9 failed: missing PluginCreate audit phase: op=PluginCreate phase=PLUGINCREATE_RESPONSE_SEND_COMPLETE pid=11272 generation=8025262561515160609 session=6f5f75c7b05a442199f8cc6d92125dcf"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.dense-metadata-ipc.v1 / three dense metadata control-plane cycles preserve identity and cleanup...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-source-precedence.v1 / dense metadata is stable before source-precedence assertions...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-source-precedence.v1 / dense metadata is stable before source-precedence assertions...",
+        "message": "!!! Test 2 failed: dense metadata construction failed: worker rejected invalid or non-VST3 plugin identity"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-block-partition-contract.v1 / constant-target smoother has equal final state for 4x512 and 1x2048...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.producer-density-bound.v1 / exactly 64 same-boundary representable events are accepted...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.unsupported-ordinal-bound.v1 / ordinal 127 is representable and ordinal 128 is rejected without poisoning E2A...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.unsupported-ordinal-bound.v1 / ordinal 127 is representable and ordinal 128 is rejected without poisoning E2A...",
+        "message": "!!! Test 2 failed: dense metadata construction failed: worker rejected invalid or non-VST3 plugin identity"
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.multi-parameter-boundary-order.v1 / param_0, param_1, param_63, and param_127 commit independently...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.multi-parameter-delivery-resubmit.v1 / failed multi-parameter submit preserves all lastDelivered values and resubmits current state...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      },
+      {
+        "group": "Starting tests in: plugin.sandbox.phase-e2b.edge-matrix-zero-rt.v1 / final E2B edge matrix remains allocation-free in the callback...",
+        "message": "!!! Test 1 failed: dense E2B fixture bundle is missing: "
+      }
+    ]
+  },
+  "existingGates": {
+    "repositoryPolicy": "passed",
+    "validateTestEvidence": "passed: 6 checks",
+    "verifyDependencies": "failed: Git dubious ownership in signalsmith-stretch",
+    "buildFoundation": "failed: temporary materializer missing required JUCE patch; symlink privilege unavailable",
+    "fullRelease": "not run",
+    "userAudioSession": "not tested"
+  },
+  "runtimeUserSession": "NOT_VERIFIED",
+  "binaryChecks": [
+    {
+      "path": "My DAW/DAW_Core/Builds/VisualStudio2026/x64/Debug/App/DAW_Core.exe",
+      "exists": true,
+      "sha256": "2AE926016A74DDFB3BF4A5B462D557E9BA2578465F1DCAD21879DF6E95B018C8"
+    },
+    {
+      "path": "My DAW/DAW_Core/Builds/VisualStudio2026/x64/Release/App/DAW_Core.exe",
+      "exists": true,
+      "sha256": "00ECBBE82E52D6E80850C05C88B8F2B54C12DCEE8F1451ED0471126EE87EC0EE"
+    },
+    {
+      "path": "My DAW/DAW_Core/Tests/Builds/VisualStudio2026/x64/Debug/ConsoleApp/APEXTests.exe",
+      "exists": true,
+      "sha256": "03EFA2EAB2F8BA7BD757B283DDB940C167FC54415386BD05B7F5894619800C79"
+    },
+    {
+      "path": "My DAW/DAW_Core/Tests/Builds/VisualStudio2026/x64/Release/ConsoleApp/APEXTests.exe",
+      "exists": true,
+      "sha256": "3A0711EFDE8FB280E9F8DC1FEE004945C2AEAFBF44E440C53A5DC15DB541900E"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/apex-audit/active-source-manifest.json",
+      "bytes": 70178,
+      "sha256": "35293390013E62891CF767111BF0AA32DF908A9EB450A435138958FC1C379E2D"
+    },
+    {
+      "path": "docs/apex-audit/architecture.md",
+      "bytes": 16275,
+      "sha256": "8F5580E3E8FF4BE655467AC6EBB9B71024F4FC3BCB315221BE45F696EA60E0EA"
+    },
+    {
+      "path": "docs/apex-audit/folder-inventory.zip",
+      "bytes": 1850074,
+      "sha256": "9803534BABA46AFD8E1C921139D2EBD04A699E3A0307CF27984F848D934B6516"
+    },
+    {
+      "path": "docs/apex-audit/folder-summary.csv",
+      "bytes": 3691,
+      "sha256": "A7AEA9841A9C317502B7C5C7DE4C0DA1E64B31A90E6B6D90798F6FFE9E83D8CB"
+    },
+    {
+      "path": "docs/apex-audit/folder-summary.json",
+      "bytes": 6831,
+      "sha256": "B3B91D5CBD95475C028DDC160751EAFF6361686AEDBD8C5DAD804D9032068B37"
+    },
+    {
+      "path": "docs/apex-audit/persistence.md",
+      "bytes": 25166,
+      "sha256": "2EFEC2348D42329C6BF47FFBEFB332E6CED23A05B93CAF41B5E7B583344214BC"
+    },
+    {
+      "path": "docs/apex-audit/quality.md",
+      "bytes": 14295,
+      "sha256": "BCAD847D53804415AE451EFFDC4CD00BBDB25B57020917CEB6A1E509A9379152"
+    },
+    {
+      "path": "docs/apex-audit/source-modules.txt",
+      "bytes": 1477,
+      "sha256": "B94705E4757B5FB792A4382CDDEB342E08FD03FE614A85E58F767656976867F6"
+    },
+    {
+      "path": "docs/apex-audit/evidence/full-suite-fault-location.txt",
+      "bytes": 6140,
+      "sha256": "DED5D7C901A143599460514D9F5C323B5C397EA7A5B4D75848604BA4BC284010"
+    },
+    {
+      "path": "docs/apex-audit/evidence/full-suite-live-debug.txt",
+      "bytes": 43945,
+      "sha256": "8B9ADC6D2E828045D85C3EF276D18A66301CDAFCEDB9BCA4F88829296F174867"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-all-Debug.log",
+      "bytes": 355036,
+      "sha256": "3F7FEDA39F63FE3BEB323567F003ADD559FBF259714B30CF204AD0B5687E6466"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-app-Debug.log",
+      "bytes": 1211418,
+      "sha256": "FEA7C93A88E498D08D27A88914688D207ECA4461C6261C354EED982D807E9AD9"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-app-Release.log",
+      "bytes": 1226152,
+      "sha256": "E19B7E39007BBE9ACF24DDAC7C850505A4A604907C48B193DEBD003A28E5236E"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-before-Debug.json",
+      "bytes": 2226,
+      "sha256": "E290AAF1DB887709FE351991B935C075AE31A2B058CB2063ACB4F945121909F2"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-build-Debug.log",
+      "bytes": 52922,
+      "sha256": "4F2F266C705F34219C228BE1F737B5D23D6F36CB2DA2A9E3CF2BE76BA4CB3B34"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-build-foundation.log",
+      "bytes": 4000,
+      "sha256": "7A2A596972AE354908DF3E4F46721DFFE496C18BBC6869D7897C43088CA7725B"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-build-Release.log",
+      "bytes": 65328,
+      "sha256": "F2754E6D595EFB49740DEBB3E1D1ADC77F16D0FF4D4AE0B7194B9E7AFA809A40"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-evidence.json",
+      "bytes": 48209,
+      "sha256": "A27E57D2C44FDA0DDD4B8AAD2EAE89FA8C99BBA158AEFF80D90EFD634EE1A21E"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-fix.patch",
+      "bytes": 36453,
+      "sha256": "35AB098DA56BA74651D085200298AD6005A1DAC06F78C564C37B40AEC4434EEA"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Debug.json",
+      "bytes": 915,
+      "sha256": "AD637F4717482ACB412897746D9B15B1E41B0F8E7BFDCFC4DA20925EEB142E99"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Debug.log",
+      "bytes": 1457,
+      "sha256": "1708819B9788DECB4055AD46EC6107654D91132069A2C49DF55540EC8C8F26EC"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Release.json",
+      "bytes": 917,
+      "sha256": "E54BD47A12111F87212193B39AE34287863967F64AE0BB5F37A307F0B59EE2AD"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-mixer-fader-Release.log",
+      "bytes": 1457,
+      "sha256": "1708819B9788DECB4055AD46EC6107654D91132069A2C49DF55540EC8C8F26EC"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-PluginHost-Debug.json",
+      "bytes": 5700,
+      "sha256": "ADFE3DF5421BCE8339525282691B2CED6984B0C64A3E55185908BB24F411AB9E"
+    },
+    {
+      "path": "docs/apex-audit/evidence/plugin-reorder-PluginHost-Release.json",
+      "bytes": 5702,
+      "sha256": "E6A5CFFE95C63BBC182125026F7F35273392136E470E76294C69B3820ED26E96"
+    },
+    {
+      "path": "docs/apex-audit/history/AGENTS-core.pre-audit-2026-10-03.md",
+      "bytes": 550,
+      "sha256": "431862FDE018BE57B5BB247D35B4D3CC066ABE4C9FBD43C3957D15B83D44CCB2"
+    },
+    {
+      "path": "docs/apex-audit/history/AGENTS.pre-audit-2026-10-03.md",
+      "bytes": 3867,
+      "sha256": "F6FF55B381C6CDEAAE3E6BBA8316F05634E267775787ABBC1805A67DB4620BB5"
+    },
+    {
+      "path": "docs/apex-audit/history/APEX_BUILD_REGISTRY.pre-audit-2026-10-03.md",
+      "bytes": 1321,
+      "sha256": "5AD5CCBE72AB44C0DE1294E90ADBEB1D4643F4EB18858964276B361BE153B741"
+    },
+    {
+      "path": "docs/apex-audit/history/APEX_FIX_REGISTRY.pre-audit-2026-10-03.md",
+      "bytes": 7380,
+      "sha256": "D1A4A0B3CDE55E34FB50F9F25AA2DD298E721F45163804BBCA8843CC968A53BB"
+    },
+    {
+      "path": "docs/apex-audit/history/APEX_STATE.pre-audit-2026-10-03.md",
+      "bytes": 1039,
+      "sha256": "3A5DB05ED9AB00C5394F515C98EEB6ECB7F7967B8F0DA2F9D359264C940F37F5"
+    },
+    {
+      "path": "docs/apex-audit/history/APEX_TEST_REGISTRY.pre-audit-2026-10-03.md",
+      "bytes": 7124,
+      "sha256": "A449A687180F49BD680CE28F8B57474A2E56334E5304112980C14C2D1CF17D81"
+    }
+  ],
+  "snapshotLimit": "Artefactos y estado anteriores a nuevas correcciones; las discrepancias documentales se actualizaron al finalizar esta auditoría. Sin nuevos builds/full suites."
+}

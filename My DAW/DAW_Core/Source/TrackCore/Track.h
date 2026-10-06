@@ -7,6 +7,7 @@
 #include "../InputMonitorCore/InputMeterCore.h"
 #include "../RecordingCore/LiveRecordWaveformCore.h"
 #include <atomic>
+#include <cmath>
 
 namespace DAW {
 
@@ -21,6 +22,13 @@ enum class TrackRole
     Instrument,
     Utility,
     Print
+};
+
+/** Signal point written by an armed track when recording. */
+enum class TrackRecordMode : int
+{
+    Dry = 0,
+    PostFader = 1
 };
 
 // Track model - pure data, no UI
@@ -44,6 +52,20 @@ public:
     
     bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
     void setArmed(bool shouldBeArmed);
+
+    TrackRecordMode getRecordMode() const noexcept
+    {
+        return static_cast<TrackRecordMode>(recordMode_.load(std::memory_order_relaxed));
+    }
+    void setRecordMode(TrackRecordMode mode)
+    {
+        const auto safeMode = mode == TrackRecordMode::PostFader
+            ? TrackRecordMode::PostFader : TrackRecordMode::Dry;
+        if (getRecordMode() == safeMode)
+            return;
+        recordMode_.store((int) safeMode, std::memory_order_relaxed);
+        notifyPropertyChanged();
+    }
 
     bool isMonitoring() const { return monitoring_.load(std::memory_order_relaxed); }
     void setMonitoring(bool shouldBeMonitoring);
@@ -77,15 +99,76 @@ public:
     }
     float getPeakLevelLeft() const  { return peakLevelLeft_.load(std::memory_order_relaxed); }
     float getPeakLevelRight() const { return peakLevelRight_.load(std::memory_order_relaxed); }
+    float getPendingPeakLevel() const noexcept
+    {
+        return juce::jmax(pendingPeakLevelLeft_.load(std::memory_order_relaxed),
+                          pendingPeakLevelRight_.load(std::memory_order_relaxed));
+    }
+    bool hasPendingPeakLevel() const noexcept { return getPendingPeakLevel() > 0.0f; }
+    void consumePeakLevels(float& left, float& right) noexcept
+    {
+        left = pendingPeakLevelLeft_.exchange(0.0f, std::memory_order_relaxed);
+        right = pendingPeakLevelRight_.exchange(0.0f, std::memory_order_relaxed);
+    }
     void  setPeakLevel(float v)
     {
-        peakLevelLeft_.store(v, std::memory_order_relaxed);
-        peakLevelRight_.store(v, std::memory_order_relaxed);
+        setPeakLevels(v, v);
     }
     void setPeakLevels(float left, float right)
     {
-        peakLevelLeft_.store(left, std::memory_order_relaxed);
-        peakLevelRight_.store(right, std::memory_order_relaxed);
+        const float safeLeft = std::isfinite(left) && left > 0.0f ? left : 0.0f;
+        const float safeRight = std::isfinite(right) && right > 0.0f ? right : 0.0f;
+        peakLevelLeft_.store(safeLeft, std::memory_order_relaxed);
+        peakLevelRight_.store(safeRight, std::memory_order_relaxed);
+        publishPeak(pendingPeakLevelLeft_, safeLeft);
+        publishPeak(pendingPeakLevelRight_, safeRight);
+        const float over = juce::jmax(safeLeft, safeRight);
+        if (std::isfinite(over) && over > 1.0f)
+        {
+            const float overDb = 20.0f * std::log10(over);
+            float previous = clipOverDb_.load(std::memory_order_relaxed);
+            while (overDb > previous
+                   && !clipOverDb_.compare_exchange_weak(previous, overDb,
+                                                         std::memory_order_relaxed)) {}
+        }
+    }
+
+    bool isClipLatched() const noexcept
+    {
+        return clipOverDb_.load(std::memory_order_relaxed) > 0.0f;
+    }
+    float getClipOverDb() const noexcept
+    {
+        return clipOverDb_.load(std::memory_order_relaxed);
+    }
+    void clearClipPeak() noexcept
+    {
+        clipOverDb_.store(0.0f, std::memory_order_relaxed);
+    }
+
+    /** Set the pre-fader input trim and notify project listeners for save/undo. */
+    void setInputTrimDb(float db)
+    {
+        if (!std::isfinite(db)) db = 0.0f;
+        db = juce::jlimit(-120.0f, 24.0f, db);
+        if (std::abs(inputTrim_.getTargetGainDb() - db) < 0.0001f)
+            return;
+        inputTrim_.setTargetGainDb(db);
+        notifyPropertyChanged();
+    }
+
+    void setTrimVuReferenceDb(float db)
+    {
+        const auto previous = inputMeter_.getVuReferenceDb();
+        inputMeter_.setVuReferenceDb(db);
+        if (previous != inputMeter_.getVuReferenceDb()) notifyPropertyChanged();
+    }
+
+    void setTrimVuChannelMode(VuChannelMode mode)
+    {
+        const auto previous = inputMeter_.getVuChannelMode();
+        inputMeter_.setVuChannelMode(mode);
+        if (previous != inputMeter_.getVuChannelMode()) notifyPropertyChanged();
     }
 
     // Role
@@ -159,11 +242,22 @@ protected:
     void notifyPropertyChanged();
     
 private:
+    static void publishPeak(std::atomic<float>& destination, float value) noexcept
+    {
+        if (!std::isfinite(value) || value <= 0.0f)
+            return;
+        float previous = destination.load(std::memory_order_relaxed);
+        while (value > previous
+               && !destination.compare_exchange_weak(previous, value,
+                                                     std::memory_order_relaxed)) {}
+    }
+
     TrackID id_;
     juce::String name_;
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
     std::atomic<bool> armed_{false};
+    std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
     std::atomic<float> volume_{1.0f}; // 0.0 to ~+6 dB
     std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
@@ -180,6 +274,9 @@ private:
     bool isMaster_ = false;
     std::atomic<float> peakLevelLeft_{0.f};
     std::atomic<float> peakLevelRight_{0.f};
+    std::atomic<float> pendingPeakLevelLeft_{0.f};
+    std::atomic<float> pendingPeakLevelRight_{0.f};
+    std::atomic<float> clipOverDb_{0.f};
     class PluginChainCore* pluginChain_ = nullptr; // Non-owning pointer — owned by ApplicationCore
     TrackMonitoringStateModel monitoringState_;
     InputFxChain              inputFxChain_;

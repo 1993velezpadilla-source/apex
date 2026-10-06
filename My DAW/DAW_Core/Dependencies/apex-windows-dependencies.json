@@ -34,6 +34,16 @@
       "rationale": "Guards against null editController in VST3 plugin view creation. Prevents AV crash when plugins like Antares Auto-Tune EFX+ fail to fully initialise.",
       "hardwareValidationRequired": false
     },
+    "compatibilityPatch4": {
+      "relativePath": "Dependencies/patches/juce-8.0.12/0004-apex-wasapi-shared-buffer.patch",
+      "sha256": "8565917FC95A7E83B9184FB94685B2950B2458E34E2F7BDE16A3A17FC716BF43",
+      "targetRelativePath": "JUCE/modules/juce_audio_devices/native/juce_WASAPI_windows.cpp",
+      "pristineTargetSha256": "C5367D92BA534779CC8ACCEDD20424F7E3B6DAA7CE597D33CA8858451AB36759",
+      "patchedTargetSha256": "B0D577BCC9D4F03721A0AF594753EDF739A39048E43E38BF24B1EC4DA7A77696",
+      "validationStatus": "realtek-output-regression-tested-2026-10-05",
+      "rationale": "Size the standard shared queue for large host callbacks; retain small client blocks and shared sample-rate conversion.",
+      "hardwareValidationRequired": true
+    },
     "compatibilityPatch3": {
       "relativePath": "Dependencies/patches/juce-8.0.12/0003-apex-string-null-holder-guard.patch",
       "sha256": "F2E8617B9907E5206E7393557E42EA1B782B296A883C25E59958CB64DA83C029",

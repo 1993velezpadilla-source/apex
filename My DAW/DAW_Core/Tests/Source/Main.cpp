@@ -86,6 +86,12 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // Keep one GUI lifetime across the entire run. Individual UI suites also
+    // use ScopedJuceInitialiser_GUI; without this outer owner their teardown
+    // deletes process-wide DeletedAtShutdown singletons (including Theme),
+    // leaving later suites with dangling singleton references.
+    juce::ScopedJuceInitialiser_GUI guiLifetime;
+
     ConsoleLogger logger;
     juce::Logger::setCurrentLogger (&logger);
 

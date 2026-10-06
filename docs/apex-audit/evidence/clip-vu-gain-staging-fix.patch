@@ -1,0 +1,1109 @@
+diff --git a/Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h b/Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h
+index a259aa9..e848e60 100644
+--- a/Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h
++++ b/Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h
+@@ -15,7 +15,7 @@ namespace DAW {
+  * holds its own smoothing — switching tracks does not bleed needle history.
+  *
+  * Three modes:
+- *   ClassicVu : symmetric ~300 ms time constant (IEC 60268-17 reference VU)
++ *   ClassicVu : approximately 300 ms to 99% (VU-style needle response)
+  *   Ppm       : 10 ms rise / 1.7 s fall (BBC PPM)
+  *   Custom    : user-defined rise/fall in seconds
+  *
+@@ -57,34 +57,35 @@ public:
+         recomputeAlphas();
+     }
+ 
+-    /** Gain-staging calibration: the dBFS level that reads as 0 VU on the
+-     *  meter face. Default -18 dBFS = 0 VU (the standard gain-staging target
+-     *  for the trim meter). getNeedleDb()/getPeakMaxDb() return VU-calibrated
+-     *  values: vu = dbfs - vuReferenceDb. */
++    /** Gain-staging calibration: the dBFS peak-equivalent level that reads
++     *  as 0 VU on the meter face. The separate peak-max readout stays dBFS. */
+     void setVuReferenceDb(float db) noexcept { vuReferenceDb_ = db; }
+     float getVuReferenceDb() const noexcept { return vuReferenceDb_; }
+ 
+-    /** Feed one linear-gain peak sample. Call from the UI tick. */
+-    void feed(float peakGain) noexcept
++    /** Feed a detector level and a separate sample peak. Call from the UI tick. */
++    void feed(float detectorGain, float peakGain) noexcept
+     {
+-        const float target = juce::jmax(0.0f, peakGain);
++        const float target = std::isfinite(detectorGain) ? juce::jmax(0.0f, detectorGain) : 0.0f;
++        peakGain = std::isfinite(peakGain) ? juce::jmax(0.0f, peakGain) : 0.0f;
+ 
+         if (target > smoothed_)
+             smoothed_ += (target - smoothed_) * alphaRise_;
+         else
+             smoothed_ += (target - smoothed_) * alphaFall_;
+ 
+-        if (target > peakHold_)
+-            peakHold_ = target;
++        if (peakGain > peakHold_)
++            peakHold_ = peakGain;
+     }
+ 
++    /** Backward-compatible feed for displays whose detector is also a peak. */
++    void feed(float peakGain) noexcept { feed(peakGain, peakGain); }
++
+     float getNeedleGain() const noexcept { return smoothed_; }
+ 
+     float getNeedleDb() const noexcept
+     {
+-        // -120 dB sentinel = silence (kept below the VU offset so the UI's
+-        // "no signal" checks keep working). Real values are VU-calibrated:
+-        // vu = dbfs - vuReferenceDb (e.g. -18 dBFS -> 0 VU).
++        // -120 dB sentinel = silence. Detector input is peak-equivalent so a
++        // sine at the reference level reads 0 VU.
+         if (smoothed_ <= 1.0e-6f) return -120.0f;
+         return 20.0f * std::log10(smoothed_) - vuReferenceDb_;
+     }
+@@ -94,7 +95,7 @@ public:
+     float getPeakMaxDb() const noexcept
+     {
+         if (peakHold_ <= 1.0e-6f) return -120.0f;
+-        return 20.0f * std::log10(peakHold_) - vuReferenceDb_;
++        return 20.0f * std::log10(peakHold_);
+     }
+ 
+     /** Reset peak max only — needle keeps its current smoothed position. */
+@@ -111,12 +112,13 @@ private:
+     void recomputeAlphas() noexcept
+     {
+         const float dt = 1.0f / tickRateHz_;
+-        float riseSec = 0.3f;
+-        float fallSec = 0.3f;
++        float riseSec = 0.065f;
++        float fallSec = 0.065f;
+ 
+         switch (mode_)
+         {
+-            case Mode::ClassicVu: riseSec = fallSec = 0.3f; break;
++            // One-pole tau=65 ms reaches about 99% in 300 ms.
++            case Mode::ClassicVu: riseSec = fallSec = 0.065f; break;
+             case Mode::Ppm:       riseSec = 0.010f; fallSec = 1.700f; break;
+             case Mode::Custom:    riseSec = customRiseSec_; fallSec = customFallSec_; break;
+         }
+diff --git a/Source/AnalogVuMeterCore/AnalogVuMeterComponent.h b/Source/AnalogVuMeterCore/AnalogVuMeterComponent.h
+index fafb76a..c4fdb90 100644
+--- a/Source/AnalogVuMeterCore/AnalogVuMeterComponent.h
++++ b/Source/AnalogVuMeterCore/AnalogVuMeterComponent.h
+@@ -68,8 +68,15 @@ public:
+     /** Latched peak max in dB. The panel can show this in a readout. */
+     float getPeakMaxDb() const { return ballistics_.getPeakMaxDb(); }
+ 
+-    /** Reset the peak max latch (called when user clicks the PEAK MAX readout). */
+-    void resetPeakHold() { ballistics_.resetPeakHold(); repaint(); }
++    /** Reset the dBFS peak maximum and the overload latch. */
++    void resetPeakHold()
++    {
++        if (source_ != nullptr)
++            source_->resetPeakHold();
++        ballistics_.resetPeakHold();
++        overload_.reset();
++        repaint();
++    }
+ 
+     /** True if the OL bulb is currently latched. */
+     bool isOverloadLatched() const { return overload_.isLatched(); }
+@@ -96,7 +103,7 @@ public:
+         creamFace_.paint(g, faceBounds);
+         redZone_.paint(g, pivot);
+         markings_.paint(g, pivot);
+-        logo_.paint(g, faceBounds, juce::String::fromUTF8("peak \xc2\xb7 -17 dB/s"));
++        logo_.paint(g, faceBounds, juce::String::fromUTF8("VU \xc2\xb7 0 = -18 dBFS"));
+         overloadRenderer_.paint(g, faceBounds, overload_);
+         needle_.paint(g, pivot, ballistics_.getNeedleDb());
+     }
+@@ -106,11 +113,15 @@ private:
+     {
+         if (source_ != nullptr)
+         {
+-            const float peakL = source_->getPeakLevelL();
+-            const float peakR = source_->getPeakLevelR();
+-            const float combined = combineChannelPeaks(peakL, peakR, channelMode_);
+-            ballistics_.feed(combined);
+-            overload_.feed(combined);
++            const float rmsL = source_->getRmsLevelL();
++            const float rmsR = source_->getRmsLevelR();
++            const float peakL = source_->getPeakMaxLevelL();
++            const float peakR = source_->getPeakMaxLevelR();
++            const float rms = combineChannelPeaks(rmsL, rmsR, channelMode_);
++            const float peak = combineChannelPeaks(peakL, peakR, channelMode_);
++            constexpr float kSineRmsToPeak = 1.41421356237f;
++            ballistics_.feed(rms * kSineRmsToPeak, peak);
++            overload_.feed(peak);
+         }
+         repaint();
+     }
+diff --git a/Source/AnalogVuMeterCore/CompactVuNeedle.h b/Source/AnalogVuMeterCore/CompactVuNeedle.h
+index 455380b..a5a32b2 100644
+--- a/Source/AnalogVuMeterCore/CompactVuNeedle.h
++++ b/Source/AnalogVuMeterCore/CompactVuNeedle.h
+@@ -53,9 +53,10 @@ public:
+     {
+         if (source_ != nullptr)
+         {
+-            const float peakL = source_->getPeakLevelL();
+-            const float peakR = source_->getPeakLevelR();
+-            ballistics_.feed(juce::jmax(peakL, peakR));
++            const float rmsL = source_->getRmsLevelL();
++            const float rmsR = source_->getRmsLevelR();
++            constexpr float kSineRmsToPeak = 1.41421356237f;
++            ballistics_.feed(juce::jmax(rmsL, rmsR) * kSineRmsToPeak);
+         }
+         repaint();
+     }
+diff --git a/Source/AudioEngineCore/AudioEngine.h b/Source/AudioEngineCore/AudioEngine.h
+index 0284c3c..b48ad9b 100644
+--- a/Source/AudioEngineCore/AudioEngine.h
++++ b/Source/AudioEngineCore/AudioEngine.h
+@@ -872,9 +872,7 @@ public:
+         if (tracks_->hasMasterTrack())
+         {
+             auto* master = tracks_->getMasterTrack();
+-            float dispL = juce::jmax(masterPeakL, master->getPeakLevelLeft()  * 0.92f);
+-            float dispR = juce::jmax(masterPeakR, master->getPeakLevelRight() * 0.92f);
+-            master->setPeakLevels(dispL, dispR);
++            master->setPeakLevels(masterPeakL, masterPeakR);
+         }
+ 
+     }
+@@ -1834,6 +1832,21 @@ private:
+         return false;
+     }
+ 
++    bool usesLiveInputOnlyForTrimMeter(const Track& track, int numSamples) const noexcept
++    {
++        if (!track.isArmed() || liveInputBuffer_ == nullptr
++            || liveInputNumSamples_ != numSamples || transport_ == nullptr
++            || shouldMonitorLiveInputForTrack(track))
++            return false;
++
++        // An armed track with monitoring disabled does not receive hardware
++        // input in trackBuffer_. LiveInputMonitorEngine meters that input on a
++        // scratch copy instead, so avoid overwriting its VU with the unrelated
++        // playback buffer later in this callback.
++        return RecordingInputValidityCore::isRouteAvailable(
++            track.getInputFirstChannel(), track.isInputMono(), liveInputValidChannels_);
++    }
++
+     bool addLiveInputToTrackBuffer(Track& track, int numSamples) noexcept
+     {
+         const bool monitorTargetOn = shouldMonitorLiveInputForTrack(track);
+@@ -2204,7 +2217,9 @@ private:
+         {
+             auto* tbL = trackBuf.getWritePointer(0);
+             auto* tbR = trackBuf.getWritePointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
+-            TrackInputProcessorCore::processTrack(*track, tbL, tbR, numSamples);
++            const bool publishTrackInputMeter = !usesLiveInputOnlyForTrimMeter(*track, numSamples);
++            TrackInputProcessorCore::processTrack(*track, tbL, tbR, numSamples,
++                                                  publishTrackInputMeter);
+         }
+ 
+         // Capture pre-FX snapshot before the plugin chain runs (for PreFX tap)
+@@ -2413,9 +2428,7 @@ private:
+         float leftPeak  = trackBuf.getMagnitude(0, 0, numSamples) * leftGain;
+         float rightPeak = trackBuf.getMagnitude(
+             juce::jmin(1, trackBuf.getNumChannels() - 1), 0, numSamples) * rightGain;
+-        float displayLeft  = juce::jmax(leftPeak,  track->getPeakLevelLeft()  * 0.92f);
+-        float displayRight = juce::jmax(rightPeak, track->getPeakLevelRight() * 0.92f);
+-        track->setPeakLevels(displayLeft, displayRight);
++        track->setPeakLevels(leftPeak, rightPeak);
+ 
+         // ── TrackLens: post-plugin, post-fader metering ───────────────────
+         if (trackPeakMeterManager_ != nullptr)
+@@ -2680,9 +2693,7 @@ private:
+         {
+             float peakL = nodeBuf.getMagnitude(0, 0, numSamples) * busGain;
+             float peakR = nodeBuf.getMagnitude(juce::jmin(1, nodeBuf.getNumChannels() - 1), 0, numSamples) * busGain;
+-            float dispL = juce::jmax(peakL, busTrack->getPeakLevelLeft() * 0.92f);
+-            float dispR = juce::jmax(peakR, busTrack->getPeakLevelRight() * 0.92f);
+-            busTrack->setPeakLevels(dispL, dispR);
++            busTrack->setPeakLevels(peakL, peakR);
+         }
+ 
+         if (busMuted && busMuteFade != nullptr && busMuteFade->isFullyMuted()) return;
+@@ -2857,9 +2868,7 @@ private:
+             float leftPeak  = trackBuffer_.getMagnitude(0, 0, numSamples) * leftGain;
+             float rightPeak = trackBuffer_.getMagnitude(
+                 juce::jmin(1, trackBuffer_.getNumChannels() - 1), 0, numSamples) * rightGain;
+-            float displayLeft = juce::jmax(leftPeak, track->getPeakLevelLeft() * 0.92f);
+-            float displayRight = juce::jmax(rightPeak, track->getPeakLevelRight() * 0.92f);
+-            track->setPeakLevels(displayLeft, displayRight);
++            track->setPeakLevels(leftPeak, rightPeak);
+ 
+             auto& muteFade = getOrCreateMuteFade(track->getID());
+             const float* muteRamp = muteFade.generate(!audible, numSamples);
+diff --git a/Source/ChannelStripCore/LevelMeter.h b/Source/ChannelStripCore/LevelMeter.h
+index 5081bae..4feb301 100644
+--- a/Source/ChannelStripCore/LevelMeter.h
++++ b/Source/ChannelStripCore/LevelMeter.h
+@@ -56,17 +56,27 @@ public:
+     bool isClipLatched() const noexcept { return clipLatched_; }
+     float getClipOverDb() const noexcept { return clipOverDb_; }
+ 
+-    /** Clear the latched clip state (click-to-reset). */
+-    void clearClip() noexcept
++    /** Pull the latest clip maximum from its owning track. */
++    void setClipOverDb(float overDb) noexcept
+     {
+-        if (clipLatched_ || clipOverDb_ > 0.0f)
++        if (!std::isfinite(overDb) || overDb <= 0.0f)
++            return;
++        if (!clipLatched_ || overDb > clipOverDb_)
+         {
+-            clipLatched_ = false;
+-            clipOverDb_  = 0.0f;
++            clipLatched_ = true;
++            clipOverDb_ = overDb;
+             repaint();
+         }
+     }
+ 
++    /** Clear the latched clip state (click-to-reset). */
++    void clearClip() noexcept
++    {
++        clipLatched_ = false;
++        clipOverDb_  = 0.0f;
++        repaint();
++    }
++
+     /** True while signal or peak-hold state still needs a presentation tick. */
+     bool needsAnimationTick() const noexcept
+     {
+@@ -108,13 +118,6 @@ public:
+         tickChannel(targetLevelL_, smoothLevelL_, peakHoldL_, peakTimerL_);
+         tickChannel(targetLevelR_, smoothLevelR_, peakHoldR_, peakTimerR_);
+ 
+-        const float clipGain = juce::jmax(peakHoldL_, peakHoldR_);
+-        if (clipGain > 1.0f)
+-        {
+-            clipLatched_ = true;
+-            clipOverDb_ = juce::jmax(clipOverDb_, 20.0f * std::log10(clipGain));
+-        }
+-
+         // Idle breathing: silence detection
+         const bool hasSig = (smoothLevelL_ > 0.001f || smoothLevelR_ > 0.001f);
+         if (hasSig)
+@@ -190,7 +193,8 @@ public:
+         const float unityNorm = core ? core->getUnityNorm() : 0.88f;
+         juce::ignoreUnused(unityNorm, minDb);
+ 
+-        auto clipIndicatorArea = b.removeFromTop(30.0f);
++        auto clipIndicatorArea = clipIndicatorVisible_ ? b.removeFromTop(30.0f)
++                                                       : juce::Rectangle<float>();
+ 
+         const float scaleW = b.getWidth() >= 32.0f ? 24.0f : 0.0f;
+         auto scaleArea  = b.removeFromLeft(scaleW);
+@@ -246,34 +250,46 @@ public:
+                                                  meterVisualW,
+                                                  meterBounds.getHeight());
+ 
+-        // Helper: sample the continuous gradient colour at a given normalised position (0=bottom, 1=top)
+-        auto sampleMeterGradient = [&](float normPos) -> juce::Colour
++        // Meter colours are tied to dBFS, independent of the +6/+12 fader
++        // taper: green below -6 dBFS, yellow from -6 to 0, red above 0.
++        auto colourForDb = [&](float db) -> juce::Colour
+         {
+-            // normPos 0=bottom(loud), 1=top(quiet). Zones mirror dB zones.
+-            if (normPos > 0.95f) return t.colors.ember;
+-            if (normPos > 0.88f) return t.colors.ember.interpolatedWith(t.colors.amber, (1.0f - normPos) / 0.07f);
+-            if (normPos > 0.75f) return t.colors.amber.interpolatedWith(t.colors.jade, (0.88f - normPos) / 0.13f);
+-            if (normPos > 0.60f) return t.colors.jade.interpolatedWith(t.colors.moss,  (0.75f - normPos) / 0.15f);
++            if (db >= 0.0f) return t.colors.ember;
++            if (db >= -6.0f) return t.colors.amber;
++            if (db >= -18.0f) return t.colors.jade;
+             return t.colors.moss;
+         };
+ 
+         // Rebuild the liquid-fill gradient if bounds or theme changed.
+         // Keyed on meterBounds + theme colours so it survives resize / theme switch.
+         if (gradientDirty_ || cachedGradientBounds_ != meterBounds
+-            || cachedEmber_ != t.colors.ember || cachedMoss_ != t.colors.moss)
++            || cachedEmber_ != t.colors.ember || cachedMoss_ != t.colors.moss
++            || cachedAmber_ != t.colors.amber || cachedJade_ != t.colors.jade)
+         {
++            const float maxDb = core ? core->getMaxDb() : 6.0f;
++            const float minDb = core ? core->getMinDb() : -96.0f;
+             cachedMeterGradient_ = juce::ColourGradient(
+-                t.colors.ember, meterBounds.getCentreX(), meterBounds.getY(),
+-                t.colors.moss,  meterBounds.getCentreX(), meterBounds.getBottom(), false);
+-            cachedMeterGradient_.addColour(0.05, t.colors.ember);
+-            cachedMeterGradient_.addColour(0.12, t.colors.ember.interpolatedWith(t.colors.amber, 0.5f));
+-            cachedMeterGradient_.addColour(0.25, t.colors.amber);
+-            cachedMeterGradient_.addColour(0.40, t.colors.jade);
+-            cachedMeterGradient_.addColour(0.60, t.colors.moss);
+-            cachedMeterGradient_.addColour(1.00, t.colors.moss);
++                colourForDb(maxDb), meterBounds.getCentreX(), meterBounds.getY(),
++                colourForDb(minDb), meterBounds.getCentreX(), meterBounds.getBottom(), false);
++            auto addDbStop = [&](float db, juce::Colour colour)
++            {
++                if (db < minDb || db > maxDb)
++                    return;
++                const float y = getYForDb(db, meterBounds, core);
++                const double position = juce::jlimit(0.0f, 1.0f,
++                    (y - meterBounds.getY()) / juce::jmax(1.0f, meterBounds.getHeight()));
++                cachedMeterGradient_.addColour(position, colour);
++            };
++            addDbStop(0.0f, t.colors.ember);
++            addDbStop(-0.1f, t.colors.amber);
++            addDbStop(-6.0f, t.colors.amber);
++            addDbStop(-18.0f, t.colors.jade);
++            addDbStop(-18.1f, t.colors.moss);
+             cachedGradientBounds_ = meterBounds;
+             cachedEmber_ = t.colors.ember;
+             cachedMoss_  = t.colors.moss;
++            cachedAmber_ = t.colors.amber;
++            cachedJade_ = t.colors.jade;
+             gradientDirty_ = false;
+         }
+ 
+@@ -297,9 +313,8 @@ public:
+             g.fillRoundedRectangle(barBounds.getX(), topY, barBounds.getWidth(), fillH, 1.0f);
+ 
+             // Meniscus: 2px brighter band at the top surface of the liquid
+-            const float normAtTop = juce::jlimit(0.0f, 1.0f,
+-                1.0f - (topY - meterBounds.getY()) / juce::jmax(1.0f, meterBounds.getHeight()));
+-            const juce::Colour meniscusCol = sampleMeterGradient(normAtTop).brighter(0.35f);
++            const float topDb = smoothLevel <= 0.000001f ? -96.0f : 20.0f * std::log10(smoothLevel);
++            const juce::Colour meniscusCol = colourForDb(topDb).brighter(0.35f);
+             g.setColour(meniscusCol);
+             g.fillRect(barBounds.getX(), topY - 1.0f, barBounds.getWidth(), 2.0f);
+         };
+@@ -343,14 +358,8 @@ public:
+         {
+             const float db = gain <= 0.000001f ? -96.0f : 20.0f * std::log10(gain);
+             // Sample continuous gradient at peak position
+-            float normPos = juce::jlimit(0.0f, 1.0f,
+-                1.0f - (getYForLevel(gain, meterBounds, core) - meterBounds.getY())
+-                      / juce::jmax(1.0f, meterBounds.getHeight()));
+             juce::ignoreUnused(db);
+-            if (normPos > 0.95f) return t.colors.ember.brighter(0.4f);
+-            if (normPos > 0.75f) return t.colors.amber.brighter(0.4f);
+-            if (normPos > 0.40f) return t.colors.jade.brighter(0.4f);
+-            return t.colors.moss.brighter(0.4f);
++            return colourForDb(db).brighter(0.4f);
+         };
+ 
+         const float dropletPulse = 0.85f + 0.15f * (0.5f + 0.5f * std::sin(dropletPhase_));
+@@ -434,6 +443,8 @@ private:
+     mutable juce::Rectangle<float>      cachedGradientBounds_;
+     mutable juce::Colour                cachedEmber_;
+     mutable juce::Colour                cachedMoss_;
++    mutable juce::Colour                cachedAmber_;
++    mutable juce::Colour                cachedJade_;
+     mutable bool                        gradientDirty_ = true;
+ 
+     // Cached scale tick image — rebuilt only on resize or fader-range change
+diff --git a/Source/InputMonitorCore/InputMeterCore.h b/Source/InputMonitorCore/InputMeterCore.h
+index 8d433af..b2b9339 100644
+--- a/Source/InputMonitorCore/InputMeterCore.h
++++ b/Source/InputMonitorCore/InputMeterCore.h
+@@ -47,6 +47,9 @@ public:
+         peakLevelL_.store(dL, std::memory_order_relaxed);
+         peakLevelR_.store(dR, std::memory_order_relaxed);
+ 
++        publishPeakMax(peakMaxLevelL_, newPeakL);
++        publishPeakMax(peakMaxLevelR_, newPeakR);
++
+         float rmsL = (float) std::sqrt(sumSqL / numSamples);
+         float rmsR = (float) std::sqrt(sumSqR / numSamples);
+         if (!std::isfinite(rmsL)) rmsL = 0.0f;
+@@ -57,22 +60,43 @@ public:
+ 
+     float getPeakLevelL() const noexcept { return peakLevelL_.load(std::memory_order_relaxed); }
+     float getPeakLevelR() const noexcept { return peakLevelR_.load(std::memory_order_relaxed); }
++    float getPeakMaxLevelL() const noexcept { return peakMaxLevelL_.load(std::memory_order_relaxed); }
++    float getPeakMaxLevelR() const noexcept { return peakMaxLevelR_.load(std::memory_order_relaxed); }
+     float getRmsLevelL()  const noexcept { return rmsLevelL_.load(std::memory_order_relaxed); }
+     float getRmsLevelR()  const noexcept { return rmsLevelR_.load(std::memory_order_relaxed); }
+ 
++    void resetPeakHold() noexcept
++    {
++        peakMaxLevelL_.store(0.0f, std::memory_order_relaxed);
++        peakMaxLevelR_.store(0.0f, std::memory_order_relaxed);
++    }
++
+     void reset() noexcept
+     {
+         peakLevelL_.store(0.0f, std::memory_order_relaxed);
+         peakLevelR_.store(0.0f, std::memory_order_relaxed);
++        resetPeakHold();
+         rmsLevelL_.store(0.0f, std::memory_order_relaxed);
+         rmsLevelR_.store(0.0f, std::memory_order_relaxed);
+     }
+ 
+ private:
++    static void publishPeakMax(std::atomic<float>& destination, float value) noexcept
++    {
++        if (!std::isfinite(value) || value <= 0.0f)
++            return;
++        float previous = destination.load(std::memory_order_relaxed);
++        while (value > previous
++               && !destination.compare_exchange_weak(previous, value,
++                                                     std::memory_order_relaxed)) {}
++    }
++
+     double sampleRate_          { 44100.0 };
+     float  peakDecayPerSample_  { 1.0f };
+     std::atomic<float> peakLevelL_ { 0.0f };
+     std::atomic<float> peakLevelR_ { 0.0f };
++    std::atomic<float> peakMaxLevelL_ { 0.0f };
++    std::atomic<float> peakMaxLevelR_ { 0.0f };
+     std::atomic<float> rmsLevelL_  { 0.0f };
+     std::atomic<float> rmsLevelR_  { 0.0f };
+ };
+diff --git a/Source/InputMonitorCore/InputTrimCore.h b/Source/InputMonitorCore/InputTrimCore.h
+index 88e6855..ccb1996 100644
+--- a/Source/InputMonitorCore/InputTrimCore.h
++++ b/Source/InputMonitorCore/InputTrimCore.h
+@@ -26,6 +26,8 @@ public:
+ 
+     void setTargetGainDb(float db) noexcept
+     {
++        if (!std::isfinite(db)) db = 0.0f;
++        db = juce::jlimit(-120.0f, 24.0f, db);
+         targetGainDb_.store(db, std::memory_order_relaxed);
+         const float linear = (db <= -120.0f) ? 0.0f : std::pow(10.0f, db * 0.05f);
+         targetGain_.store(linear, std::memory_order_relaxed);
+@@ -36,6 +38,22 @@ public:
+         return targetGainDb_.load(std::memory_order_relaxed);
+     }
+ 
++    float getTargetGainLinear() const noexcept
++    {
++        return targetGain_.load(std::memory_order_relaxed);
++    }
++
++    /** Apply the requested gain without advancing audio-thread smoothing.
++        Used only for the independent input-meter preview copy. */
++    void applyTargetGainToStereoBuffer(float* L, float* R, int numSamples) const noexcept
++    {
++        if (numSamples <= 0)
++            return;
++        const float gain = getTargetGainLinear();
++        if (L) juce::FloatVectorOperations::multiply(L, gain, numSamples);
++        if (R) juce::FloatVectorOperations::multiply(R, gain, numSamples);
++    }
++
+     void applyToStereoBuffer(float* L, float* R, int numSamples) noexcept
+     {
+         const juce::ScopedNoDenormals noDenormals;
+diff --git a/Source/InputMonitorCore/LiveInputMonitorEngine.h b/Source/InputMonitorCore/LiveInputMonitorEngine.h
+index 06535e8..02ca742 100644
+--- a/Source/InputMonitorCore/LiveInputMonitorEngine.h
++++ b/Source/InputMonitorCore/LiveInputMonitorEngine.h
+@@ -17,8 +17,10 @@ namespace DAW {
+  * Audio output for live monitoring is handled ENTIRELY by
+  * AudioEngine::addLiveInputToTrackBuffer(). This class only handles:
+  *
+- *   1. Input trim (gain staging before metering)
+- *   2. Input VU metering (visual feedback)
++ *   1. Input VU metering for armed tracks whose hardware input is not inserted
++ *      into the audio graph (monitor-off / meter-only path)
++ *   2. A scratch-copy preview at the requested Trim gain, without advancing
++ *      the audible trim smoother a second time
+  */
+ class LiveInputMonitorEngine
+ {
+@@ -99,38 +101,38 @@ public:
+             }
+ 
+             const bool feedMeterOnly = !shouldMonitor && track->isArmed();
+-            if (!shouldMonitor && !feedMeterOnly) continue;
++            if (!shouldMonitor && !feedMeterOnly)
++            {
++                track->getInputMeter().processBlock(nullptr, nullptr, numSamples);
++                continue;
++            }
+ 
+             const int firstCh = track->getInputFirstChannel() > 0
+                 ? track->getInputFirstChannel()
+                 : getTrackInputChannel(track->getID());
+             const bool mono   = track->isInputMono();
+             if (! RecordingInputValidityCore::isRouteAvailable(firstCh, mono, validChannels))
++            {
++                track->getInputMeter().processBlock(nullptr, nullptr, numSamples);
+                 continue;
++            }
+ 
+             const float* hwL = input.getReadPointer(firstCh);
+             const float* hwR = mono ? hwL : input.getReadPointer(firstCh + 1);
+ 
+-            if (feedMeterOnly)
+-            {
+-                // Armed but NOT monitoring: the live input is not part of the
+-                // track buffer, so meter it here (post-trim) so the trim panel
+-                // VU still shows the incoming signal level.
+-                std::memcpy(scratchL_.data(), hwL, sizeof(float) * (size_t) numSamples);
+-                std::memcpy(scratchR_.data(), hwR, sizeof(float) * (size_t) numSamples);
+-
+-                track->getInputTrim().applyToStereoBuffer(scratchL_.data(), scratchR_.data(), numSamples);
+-                track->getInputMeter().processBlock(scratchL_.data(), scratchR_.data(), numSamples);
++            // When monitoring is on, AudioEngine inserts this hardware signal
++            // in the track buffer and TrackInputProcessorCore meters the actual
++            // post-Trim/pre-FX channel input once. Only the armed-but-not-
++            // monitored case needs a separate mic-input VU source.
++            if (!feedMeterOnly)
+                 continue;
+-            }
+ 
+-            // Monitoring: the engine adds the live input to the track buffer
+-            // (AudioEngine::addLiveInputToTrackBuffer) and TrackInputProcessorCore
+-            // meters that buffer exactly once per block (post-trim, pre-FX).
+-            // Feeding the meter here as well would double-count the signal and
+-            // make the trim-panel VU over-read by ~6 dB. Nothing else is done
+-            // in this loop, so monitoring tracks simply fall through.
+-            juce::ignoreUnused(hwL, hwR);
++            std::memcpy(scratchL_.data(), hwL, sizeof(float) * (size_t) numSamples);
++            std::memcpy(scratchR_.data(), hwR, sizeof(float) * (size_t) numSamples);
++            track->getInputTrim().applyTargetGainToStereoBuffer(
++                scratchL_.data(), scratchR_.data(), numSamples);
++            track->getInputMeter().processBlock(
++                scratchL_.data(), scratchR_.data(), numSamples);
+         }
+     }
+ 
+diff --git a/Source/InputMonitorCore/TrackInputProcessorCore.h b/Source/InputMonitorCore/TrackInputProcessorCore.h
+index 60cecbe..def9874 100644
+--- a/Source/InputMonitorCore/TrackInputProcessorCore.h
++++ b/Source/InputMonitorCore/TrackInputProcessorCore.h
+@@ -11,8 +11,11 @@ namespace DAW {
+  *
+  * Bridges the per-track InputTrimCore + InputMeterCore (owned by Track) to
+  * the audio engine's per-block processing. Single concern: applying the trim
+- * gain to the track's audio buffer and updating the input meter atomic
+- * levels every block.
++ * gain to the track's audio buffer and publishing the resulting post-trim,
++ * pre-FX signal to the gain-staging meter. This signal includes whatever is
++ * actually entering the channel (clips, incoming sends, and monitored hardware).
++ * LiveInputMonitorEngine owns the exceptional armed-but-not-monitored hardware
++ * input meter path, since that signal is intentionally absent from trackBuffer.
+  *
+  * Stateless. All state lives inside the Track's owned InputTrimCore and
+  * InputMeterCore instances. Each Track has unique instances, so there is
+@@ -69,21 +72,20 @@ namespace DAW {
+ class TrackInputProcessorCore
+ {
+ public:
+-    /** One-time per-block call. Apply trim, update meter. */
++    /** One-time per-block call. Apply trim and optionally publish this input stage. */
+     static void processTrack(Track& track,
+                              float* L,
+                              float* R,
+-                             int    numSamples) noexcept
++                             int    numSamples,
++                             bool   publishMeter = true) noexcept
+     {
+         // Pre-FX input trim — multiplies samples by the smoothed gain set
+         // through InputTrimCore::setTargetGainDb(). This is what makes the
+         // panel knob actually affect audio.
+         track.getInputTrim().applyToStereoBuffer(L, R, numSamples);
+ 
+-        // Per-track input peak/RMS meter — measures POST-trim so the panel
+-        // VU meter reflects what the user is driving into the FX chain.
+-        // Atomic stores; UI thread reads the same atomics.
+-        track.getInputMeter().processBlock(L, R, numSamples);
++        if (publishMeter)
++            track.getInputMeter().processBlock(L, R, numSamples);
+     }
+ 
+     /** Called from prepareToPlay() and trackAdded(). */
+diff --git a/Source/TrackCore/Track.h b/Source/TrackCore/Track.h
+index 8f9622a..474a266 100644
+--- a/Source/TrackCore/Track.h
++++ b/Source/TrackCore/Track.h
+@@ -7,6 +7,7 @@
+ #include "../InputMonitorCore/InputMeterCore.h"
+ #include "../RecordingCore/LiveRecordWaveformCore.h"
+ #include <atomic>
++#include <cmath>
+ 
+ namespace DAW {
+ 
+@@ -77,15 +78,62 @@ public:
+     }
+     float getPeakLevelLeft() const  { return peakLevelLeft_.load(std::memory_order_relaxed); }
+     float getPeakLevelRight() const { return peakLevelRight_.load(std::memory_order_relaxed); }
++    float getPendingPeakLevel() const noexcept
++    {
++        return juce::jmax(pendingPeakLevelLeft_.load(std::memory_order_relaxed),
++                          pendingPeakLevelRight_.load(std::memory_order_relaxed));
++    }
++    bool hasPendingPeakLevel() const noexcept { return getPendingPeakLevel() > 0.0f; }
++    void consumePeakLevels(float& left, float& right) noexcept
++    {
++        left = pendingPeakLevelLeft_.exchange(0.0f, std::memory_order_relaxed);
++        right = pendingPeakLevelRight_.exchange(0.0f, std::memory_order_relaxed);
++    }
+     void  setPeakLevel(float v)
+     {
+-        peakLevelLeft_.store(v, std::memory_order_relaxed);
+-        peakLevelRight_.store(v, std::memory_order_relaxed);
++        setPeakLevels(v, v);
+     }
+     void setPeakLevels(float left, float right)
+     {
+-        peakLevelLeft_.store(left, std::memory_order_relaxed);
+-        peakLevelRight_.store(right, std::memory_order_relaxed);
++        const float safeLeft = std::isfinite(left) && left > 0.0f ? left : 0.0f;
++        const float safeRight = std::isfinite(right) && right > 0.0f ? right : 0.0f;
++        peakLevelLeft_.store(safeLeft, std::memory_order_relaxed);
++        peakLevelRight_.store(safeRight, std::memory_order_relaxed);
++        publishPeak(pendingPeakLevelLeft_, safeLeft);
++        publishPeak(pendingPeakLevelRight_, safeRight);
++        const float over = juce::jmax(safeLeft, safeRight);
++        if (std::isfinite(over) && over > 1.0f)
++        {
++            const float overDb = 20.0f * std::log10(over);
++            float previous = clipOverDb_.load(std::memory_order_relaxed);
++            while (overDb > previous
++                   && !clipOverDb_.compare_exchange_weak(previous, overDb,
++                                                         std::memory_order_relaxed)) {}
++        }
++    }
++
++    bool isClipLatched() const noexcept
++    {
++        return clipOverDb_.load(std::memory_order_relaxed) > 0.0f;
++    }
++    float getClipOverDb() const noexcept
++    {
++        return clipOverDb_.load(std::memory_order_relaxed);
++    }
++    void clearClipPeak() noexcept
++    {
++        clipOverDb_.store(0.0f, std::memory_order_relaxed);
++    }
++
++    /** Set the pre-fader input trim and notify project listeners for save/undo. */
++    void setInputTrimDb(float db)
++    {
++        if (!std::isfinite(db)) db = 0.0f;
++        db = juce::jlimit(-120.0f, 24.0f, db);
++        if (std::abs(inputTrim_.getTargetGainDb() - db) < 0.0001f)
++            return;
++        inputTrim_.setTargetGainDb(db);
++        notifyPropertyChanged();
+     }
+ 
+     // Role
+@@ -159,6 +207,16 @@ protected:
+     void notifyPropertyChanged();
+     
+ private:
++    static void publishPeak(std::atomic<float>& destination, float value) noexcept
++    {
++        if (!std::isfinite(value) || value <= 0.0f)
++            return;
++        float previous = destination.load(std::memory_order_relaxed);
++        while (value > previous
++               && !destination.compare_exchange_weak(previous, value,
++                                                     std::memory_order_relaxed)) {}
++    }
++
+     TrackID id_;
+     juce::String name_;
+     std::atomic<bool> muted_{false};
+@@ -180,6 +238,9 @@ private:
+     bool isMaster_ = false;
+     std::atomic<float> peakLevelLeft_{0.f};
+     std::atomic<float> peakLevelRight_{0.f};
++    std::atomic<float> pendingPeakLevelLeft_{0.f};
++    std::atomic<float> pendingPeakLevelRight_{0.f};
++    std::atomic<float> clipOverDb_{0.f};
+     class PluginChainCore* pluginChain_ = nullptr; // Non-owning pointer — owned by ApplicationCore
+     TrackMonitoringStateModel monitoringState_;
+     InputFxChain              inputFxChain_;
+diff --git a/Source/UICore/InputTrimFloatingPanel.h b/Source/UICore/InputTrimFloatingPanel.h
+index e49ff54..14ba42d 100644
+--- a/Source/UICore/InputTrimFloatingPanel.h
++++ b/Source/UICore/InputTrimFloatingPanel.h
+@@ -28,7 +28,7 @@ namespace DAW {
+  * Per-track uniqueness:
+  *   - The knob's binding closes over the Track& passed to the constructor.
+  *     Read = track_.getInputTrim().getTargetGainDb().
+- *     Write = track_.getInputTrim().setTargetGainDb(dB).
++ *     Write = Track::setInputTrimDb(dB), which marks the project dirty.
+  *     Two panels for two tracks have entirely separate bindings; their
+  *     knobs cannot ever read/write each other's value.
+  *   - The VU meter binds to track_.getInputMeter() — the per-track atomic
+@@ -82,7 +82,7 @@ public:
+         // ── Knob, bound to per-track InputTrimCore ───────────────
+         BubblegumKnobValueBinding b;
+         b.getValue    = [this] { return track_.getInputTrim().getTargetGainDb(); };
+-        b.setValue    = [this](float dB) { track_.getInputTrim().setTargetGainDb(dB); };
++        b.setValue    = [this](float dB) { track_.setInputTrimDb(dB); };
+         b.formatValue = [](float dB)
+         {
+             if (dB <= -120.0f) return juce::String("-inf");
+@@ -97,11 +97,11 @@ public:
+         addAndMakeVisible(knob_);
+ 
+         // ── Readouts ─────────────────────────────────────────────
+-        currentReadout_.setLabel("CURRENT");
++        currentReadout_.setLabel("TRIM dB");
+         currentReadout_.setUseAlternateValueColour(false);
+         addAndMakeVisible(currentReadout_);
+ 
+-        peakMaxReadout_.setLabel("PEAK MAX");
++        peakMaxReadout_.setLabel("PEAK dBFS");
+         peakMaxReadout_.setUseAlternateValueColour(true);
+         peakMaxReadout_.onClicked = [this]
+         {
+diff --git a/Source/UICore/MixerPanel.h b/Source/UICore/MixerPanel.h
+index 8567142..09a2895 100644
+--- a/Source/UICore/MixerPanel.h
++++ b/Source/UICore/MixerPanel.h
+@@ -429,7 +429,11 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
+ 
+     void tickMeter()
+     {
+-        meter_.setLevels(track_.getPeakLevelLeft(), track_.getPeakLevelRight());
++        float peakLeft = 0.0f, peakRight = 0.0f;
++        track_.consumePeakLevels(peakLeft, peakRight);
++        meter_.setLevels(peakLeft, peakRight);
++        if (track_.isClipLatched())
++            meter_.setClipOverDb(track_.getClipOverDb());
+         meter_.tick();
+         if (vu_.isVisible())
+             vu_.tick();
+@@ -437,7 +441,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
+ 
+     bool needsMeterPresentationTick() const noexcept
+     {
+-        return meter_.needsAnimationTick();
++        return meter_.needsAnimationTick()
++            || track_.hasPendingPeakLevel();
+     }
+ 
+     bool needsLavaPresentationTick() const noexcept
+@@ -846,10 +851,10 @@ muteBtn_.setBounds(nextButtonBounds());
+         meter_.setClipIndicatorVisible(false);
+         clipIndicator_.setMeter(&meter_);
+         clipIndicator_.setEnabledForStrip(true);
+-        clipIndicator_.setBounds(tlBtnArea.getX(),
++        clipIndicator_.setBounds(juce::jmax(2, getWidth() - 54),
+                                  panRow.getY() - 17,
+-                                 12,
+-                                 12);
++                                 48,
++                                 14);
+         if (clipIndicator_.getParentComponent() == nullptr)
+             addAndMakeVisible(clipIndicator_);
+ 
+@@ -1631,13 +1636,20 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
+     // meter's latch and repaints on change; clicking clears the latch until
+     // the track clips again.
+     class MixerClipIndicator final : public juce::Component,
++                                     public juce::SettableTooltipClient,
+                                      private juce::Timer
+     {
+     public:
+-        MixerClipIndicator() { startTimerHz(15); }
++        MixerClipIndicator()
++        {
++            setComponentID("mixer.clip-indicator");
++            startTimerHz(15);
++        }
+ 
+         void setMeter(LevelMeter* meter) { meter_ = meter; }
+ 
++        std::function<void()> onClear;
++
+         void setEnabledForStrip(bool shouldBeEnabled)
+         {
+             enabled_ = shouldBeEnabled;
+@@ -1655,14 +1667,16 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
+             g.setColour(juce::Colours::black.withAlpha(0.25f));
+             g.drawRoundedRectangle(b.reduced(0.5f), 2.0f, 1.0f);
+             g.setColour(juce::Colours::white);
+-            g.setFont(juce::Font(8.5f, juce::Font::bold));
++            g.setFont(juce::Font(10.0f, juce::Font::bold));
+             g.drawText("+" + juce::String(meter_->getClipOverDb(), 1),
+                        getLocalBounds(), juce::Justification::centred);
+         }
+ 
+         void mouseDown(const juce::MouseEvent&) override
+         {
+-            if (meter_ != nullptr)
++            if (onClear)
++                onClear();
++            else if (meter_ != nullptr)
+                 meter_->clearClip();
+             repaint();
+         }
+@@ -1671,9 +1685,15 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
+         void timerCallback() override
+         {
+             const bool latched = meter_ != nullptr && meter_->isClipLatched();
+-            if (latched != lastLatched_)
++            const float overDb = latched ? meter_->getClipOverDb() : 0.0f;
++            if (latched != lastLatched_ || std::abs(overDb - lastClipOverDb_) > 0.04f)
+             {
+                 lastLatched_ = latched;
++                lastClipOverDb_ = overDb;
++                setTooltip(latched
++                    ? juce::String("Sample peak is ") + juce::String(overDb, 1)
++                        + " dB above 0 dBFS. Click to reset."
++                    : juce::String("No sample clip. Click after a clip to reset."));
+                 repaint();
+             }
+         }
+@@ -1681,6 +1701,7 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
+         LevelMeter* meter_ = nullptr;
+         bool enabled_ = true;
+         bool lastLatched_ = false;
++        float lastClipOverDb_ = 0.0f;
+     };
+ 
+     SmallButton  trackLensBtn_ { "TL", juce::Colour(0xFFE84393) };
+@@ -2668,6 +2689,14 @@ inputBtn_.onClick = [this]
+         // Meter
+         meter_.setInterceptsMouseClicks(false, false);
+         addAndMakeVisible(meter_);
++        clipIndicator_.setMeter(&meter_);
++        clipIndicator_.onClear = [safeStrip = juce::Component::SafePointer<MixerStrip>(this)]
++        {
++            if (safeStrip == nullptr)
++                return;
++            safeStrip->track_.clearClipPeak();
++            safeStrip->meter_.clearClip();
++        };
+ 
+         // Personal trim VU needle — bound to the SAME per-track InputMeterCore
+         // as the trim panel so mixer, timeline row and panel agree by
+@@ -2980,6 +3009,16 @@ inputBtn_.onClick = [this]
+ 
+         persistArea.removeFromTop(4);
+ 
++        // Readable clip box for the master. The meter lane is too narrow to
++        // carry text or a practical reset hit target.
++        auto clipRow = persistArea.removeFromTop(18).reduced(8, 1);
++        meter_.setClipIndicatorVisible(false);
++        clipIndicator_.setMeter(&meter_);
++        clipIndicator_.setEnabledForStrip(true);
++        clipIndicator_.setBounds(clipRow.getRight() - 50, clipRow.getY(), 48, 14);
++        if (clipIndicator_.getParentComponent() == nullptr)
++            addAndMakeVisible(clipIndicator_);
++
+         // Fader area: mini-meter on left, fader rail on right of persist.
+         // Keep this large when sections are minimized so dB ticks are readable.
+         auto faderArea = persistArea.reduced(8, 4);
+diff --git a/Tests/Source/Diagnostics/MixerResponsiveTests.cpp b/Tests/Source/Diagnostics/MixerResponsiveTests.cpp
+index 68654d8..20ed057 100644
+--- a/Tests/Source/Diagnostics/MixerResponsiveTests.cpp
++++ b/Tests/Source/Diagnostics/MixerResponsiveTests.cpp
+@@ -6,6 +6,10 @@
+ #include "../../Source/UICore/MixerKeyboardRoutingCore.h"
+ #include "../../Source/SelectionCore/MultiSelectionCore.h"
+ #include "../../Source/TrackCore/Track.h"
++#include "../../Source/InputMonitorCore/InputMeterCore.h"
++#include "../../Source/InputMonitorCore/LiveInputMonitorEngine.h"
++#include "../../Source/InputMonitorCore/TrackInputProcessorCore.h"
++#include "../../Source/AnalogVuMeterCore/AnalogVuBallisticsCore.h"
+ #include "../../Source/CommandCore/Command.h"
+ #include "../../Source/CommandCore/CommandManager.h"
+ #include "../../Source/CommandCore/GeneralCommands.h"
+@@ -16,6 +20,8 @@
+ 
+ #include <type_traits>
+ #include <utility>
++#include <cmath>
++#include <limits>
+ 
+ namespace
+ {
+@@ -1561,3 +1567,190 @@ public:
+ };
+ 
+ static MixerFaderUndoExactTests mixerFaderUndoExactTests;
++
++class MixerMeterSignalTests final : public juce::UnitTest
++{
++public:
++    MixerMeterSignalTests()
++        : juce::UnitTest("mixer.clip-input-meter-signal.v1", "APEX.Diagnostics") {}
++
++    void runTest() override
++    {
++        beginTest("Mixer peak handoff retains the largest block until the UI consumes it");
++        DAW::Track track("meter-test", "Meter Test");
++        track.setPeakLevels(0.50f, 1.25f);
++        track.setPeakLevels(0.30f, 0.75f);
++        expect(track.isClipLatched(), "Track must latch a sample peak above 0 dBFS");
++        expectWithinAbsoluteError(track.getClipOverDb(), 20.0f * std::log10(1.25f), 0.0001f,
++                                  "Clip readout must report the positive overshoot in dBFS");
++        float left = 0.0f, right = 0.0f;
++        track.consumePeakLevels(left, right);
++        expectWithinAbsoluteError(left, 0.50f, 0.0001f, "Left peak must be preserved");
++        expectWithinAbsoluteError(right, 1.25f, 0.0001f, "Right peak must be preserved");
++        expectWithinAbsoluteError(track.getPeakLevel(), 0.75f, 0.0001f,
++                                  "Shared readers keep the latest block while the UI consumes its own peak window");
++        expectWithinAbsoluteError(track.getPendingPeakLevel(), 0.0f, 0.0001f,
++                                  "UI consume must clear only its pending meter window");
++        track.setPeakLevels(0.25f, 0.25f);
++        track.clearClipPeak();
++        expect(!track.isClipLatched(), "Reset must clear the clip latch independently of meter history");
++        track.consumePeakLevels(left, right);
++        expectWithinAbsoluteError(track.getPendingPeakLevel(), 0.0f, 0.0001f,
++                                  "Consumed UI values must not reappear for a second reader");
++
++        beginTest("A valid channel still reports a clip when its partner is non-finite");
++        track.clearClipPeak();
++        track.setPeakLevels(std::numeric_limits<float>::infinity(), 2.0f);
++        expect(track.isClipLatched(), "A non-finite left sample must not hide a valid right-channel clip");
++        expectWithinAbsoluteError(track.getClipOverDb(), 20.0f * std::log10(2.0f), 0.0001f,
++                                  "Clip dBFS must be calculated from the sanitized valid peak");
++
++        beginTest("LevelMeter does not relatch a cleared clip from its visual peak hold");
++        DAW::LevelMeter meter;
++        meter.setLevels(2.0f, 0.5f);
++        for (int i = 0; i < 8; ++i)
++            meter.tick();
++        expect(!meter.isClipLatched(), "Visual peak holds must not act as fresh clip events");
++        meter.setClipOverDb(3.4f);
++        expect(meter.isClipLatched(), "A measured clip event must latch");
++        expectWithinAbsoluteError(meter.getClipOverDb(), 3.4f, 0.0001f,
++                                  "Clip amount must remain available for the indicator");
++        meter.clearClip();
++        for (int i = 0; i < 8; ++i)
++            meter.tick();
++        expect(!meter.isClipLatched(), "Cleared visual history must not immediately re-arm the clip box");
++
++        beginTest("Normal and Master strips both reserve a readable clip box");
++        const auto previousGlobalRange = DAW::FaderRangeCore::getGlobalInstance();
++        DAW::FaderRangeCore range;
++        DAW::FaderRangeCore::setGlobalInstance(&range);
++        DAW::Track normalTrack("meter-normal", "Normal");
++        DAW::Track masterTrack("meter-master", "Master");
++        masterTrack.setMaster(true);
++        DAW::MixerStrip normalStrip(normalTrack, range);
++        DAW::MixerStrip masterStrip(masterTrack, range);
++        normalStrip.setBounds(0, 0, 80, 520);
++        masterStrip.setBounds(0, 0, 170, 520);
++        auto checkClipBox = [this](juce::Component& strip, const juce::String& label)
++        {
++            auto* box = strip.findChildWithID("mixer.clip-indicator");
++            expect(box != nullptr, label + ": strip must own a clip indicator");
++            if (box == nullptr)
++                return;
++            expect(box->isVisible(), label + ": clip indicator must be visible");
++            expectEquals(box->getWidth(), 48, label + ": clip readout must fit a numeric value");
++            expect(box->getHeight() >= 14, label + ": clip reset hit target must be practical");
++            expect(box->getX() >= 0 && box->getRight() <= strip.getWidth(),
++                   label + ": clip readout must stay inside its strip");
++        };
++        checkClipBox(normalStrip, "normal track");
++        checkClipBox(masterStrip, "Master");
++        DAW::FaderRangeCore::setGlobalInstance(previousGlobalRange);
++
++        beginTest("Trim input peak and VU detector keep distinct calibrated units");
++        DAW::Track meterTrack("meter-signal", "Meter Signal");
++        DAW::TrackInputProcessorCore::prepareTrack(meterTrack, 48000.0, 480);
++        float leftSine[480] {};
++        float rightSine[480] {};
++        constexpr float amplitude = 0.125f; // -18.06 dBFS sample peak
++        for (int i = 0; i < 480; ++i)
++        {
++            const float sample = amplitude * std::sin(juce::MathConstants<float>::twoPi
++                                                       * (float) i / 48.0f);
++            leftSine[i] = rightSine[i] = sample;
++        }
++        DAW::TrackInputProcessorCore::processTrack(meterTrack, leftSine, rightSine, 480);
++        const auto& inputMeter = meterTrack.getInputMeter();
++        expectWithinAbsoluteError(inputMeter.getPeakMaxLevelL(), amplitude, 0.0001f,
++                                  "Peak maximum must remain a true sample peak");
++        expectWithinAbsoluteError(inputMeter.getRmsLevelL(), amplitude * 0.70710678f, 0.0001f,
++                                  "VU detector source must be RMS energy, not peak with a fake release");
++
++        DAW::AnalogVuBallisticsCore vu;
++        constexpr float rmsToSinePeak = 1.41421356237f;
++        const float rms = inputMeter.getRmsLevelL();
++        for (int i = 0; i < 360; ++i)
++            vu.feed(rms * rmsToSinePeak, inputMeter.getPeakMaxLevelL());
++        expectWithinAbsoluteError(vu.getNeedleDb(), 0.0f, 0.10f,
++                                  "A -18 dBFS peak sine must settle at 0 VU");
++        expectWithinAbsoluteError(vu.getPeakMaxDb(), -18.0618f, 0.02f,
++                                  "Peak maximum readout must be raw dBFS, not VU");
++
++        beginTest("Gain-staging VU follows the post-Trim channel input");
++        DAW::Track stagedTrack("meter-trim", "Trimmed Meter");
++        DAW::TrackInputProcessorCore::prepareTrack(stagedTrack, 48000.0, 480);
++        stagedTrack.setInputTrimDb(6.0f);
++        float trimmedLeft[480] {};
++        float trimmedRight[480] {};
++        for (int block = 0; block < 30; ++block)
++        {
++            for (int i = 0; i < 480; ++i)
++            {
++                trimmedLeft[i] = leftSine[i];
++                trimmedRight[i] = rightSine[i];
++            }
++            DAW::TrackInputProcessorCore::processTrack(
++                stagedTrack, trimmedLeft, trimmedRight, 480);
++        }
++        const auto& stagedMeter = stagedTrack.getInputMeter();
++        const float expectedTrimGain = std::pow(10.0f, 6.0f / 20.0f);
++        expectWithinAbsoluteError(stagedMeter.getRmsLevelL(),
++                                  amplitude * expectedTrimGain * 0.70710678f,
++                                  0.0005f,
++                                  "Track input RMS must follow the audible pre-FX Trim gain");
++        DAW::AnalogVuBallisticsCore stagedVu;
++        for (int i = 0; i < 360; ++i)
++            stagedVu.feed(stagedMeter.getRmsLevelL() * rmsToSinePeak,
++                          stagedMeter.getPeakMaxLevelL());
++        expectWithinAbsoluteError(stagedVu.getNeedleDb(), 6.0f, 0.12f,
++                                  "Adding 6 dB of Trim must move the gain-staging VU by 6 dB");
++        expectWithinAbsoluteError(stagedVu.getPeakMaxDb(), -12.0618f, 0.03f,
++                                  "Post-Trim peak display must remain dBFS, separate from VU");
++
++        beginTest("Armed but unmonitored mic input meters a post-Trim preview");
++        DAW::TrackManager inputTracks;
++        auto* armedTrack = inputTracks.createTrack("armed-meter-input");
++        expect(armedTrack != nullptr, "Test track must be created");
++        if (armedTrack != nullptr)
++        {
++            armedTrack->setArmed(true);
++            armedTrack->setInputSource(0, false);
++            armedTrack->getMonitoringState().setMode(DAW::InputMonitorMode::Off);
++            armedTrack->setInputTrimDb(6.0f);
++            armedTrack->getInputMeter().prepare(48000.0);
++
++            DAW::ApplicationState appState;
++            DAW::TransportController transport(appState);
++            DAW::LiveInputMonitorEngine liveInputMeter;
++            liveInputMeter.setSubsystems(&inputTracks, &transport);
++            liveInputMeter.prepare(48000.0, 480);
++            juce::AudioBuffer<float> hardwareInput(2, 480);
++            for (int i = 0; i < 480; ++i)
++            {
++                const float sample = amplitude * std::sin(juce::MathConstants<float>::twoPi
++                                                           * (float) i / 48.0f);
++                hardwareInput.setSample(0, i, sample);
++                hardwareInput.setSample(1, i, sample);
++            }
++            liveInputMeter.processBlock(hardwareInput, 480, 2);
++
++            const float gain = std::pow(10.0f, 6.0f / 20.0f);
++            expectWithinAbsoluteError(armedTrack->getInputMeter().getRmsLevelL(),
++                                      amplitude * gain * 0.70710678f, 0.0005f,
++                                      "Meter-only mic preview must include the requested Trim gain");
++            expectWithinAbsoluteError(armedTrack->getInputMeter().getPeakMaxLevelL(),
++                                      amplitude * gain, 0.0005f,
++                                      "Mic preview peak maximum must remain a true post-Trim sample peak");
++        }
++
++        beginTest("Input trim setter updates the Track state snapshot");
++        track.setInputTrimDb(6.0f);
++        expectWithinAbsoluteError(track.getInputTrim().getTargetGainDb(), 6.0f, 0.0001f,
++                                  "Trim control must update the audio gain target");
++        expectWithinAbsoluteError((float) track.getState().getProperty("inputTrimDb", 0.0f),
++                                  6.0f, 0.0001f,
++                                  "Trim change must be visible to the track's saved state");
++    }
++};
++
++static MixerMeterSignalTests mixerMeterSignalTests;

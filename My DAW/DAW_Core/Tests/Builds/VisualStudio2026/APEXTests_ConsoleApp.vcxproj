@@ -176,8 +176,10 @@
     <ClCompile Include="..\..\Source\Diagnostics\DspBlockInvarianceTests.cpp"/>
     <ClCompile Include="..\..\Source\Diagnostics\TrackReprepareHarnessTests.cpp"/>
     <ClCompile Include="..\..\Source\Diagnostics\ProjectPersistenceTransactionTests.cpp"/>
+    <ClCompile Include="..\..\Source\Project\ProjectSampleRateReconcileTests.cpp"/>
     <ClCompile Include="..\..\..\Source\ProjectCore\AutosaveManagerCore.cpp"/>
     <ClCompile Include="..\..\Source\Diagnostics\MixerResponsiveTests.cpp"/>
+    <ClCompile Include="..\..\Source\Device\DeviceCapabilityTests.cpp"/>
     <ClCompile Include="..\..\Source\PluginHost\SidechainRoutingRegressionTests.cpp"/>
     <ClCompile Include="..\..\Source\PluginHost\PluginScanPersistenceTests.cpp"/>
     <ClCompile Include="..\..\Source\PluginHost\PluginBusLayoutMatrixTests.cpp"/>

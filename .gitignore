@@ -1,6 +1,6 @@
-# Installed SDKs, duplicate workspace copies, and local agent state
+# Installed SDKs, generated workspace artifacts, and local agent state
 /My DAW/Sdk setups/
-/New folder/
+/New folder/My DAW/Sdk setups/
 /Daw Brain/New folder/
 /.apex_brain_backups/
 /.claude/
@@ -9,6 +9,7 @@ node_modules/
 **/.git/
 
 # Generated application/plugin binaries and intermediate build products
+/New folder/My DAW/DAW_Core/Builds/VisualStudio2026/dumpbin_release.txt
 .vs/
 **/x64/
 **/bin/
