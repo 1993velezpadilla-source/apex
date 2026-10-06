@@ -8,6 +8,15 @@
  #endif
  #include <objbase.h>
  #include <windows.h>
+ #ifdef near
+  #undef near
+ #endif
+ #ifdef far
+  #undef far
+ #endif
+ #ifdef small
+  #undef small
+ #endif
  #ifdef min
   #undef min
  #endif
