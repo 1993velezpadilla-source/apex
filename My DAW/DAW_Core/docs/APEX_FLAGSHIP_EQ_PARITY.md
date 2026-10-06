@@ -22,7 +22,7 @@ product with stable APEX parameter IDs and APEX UI language.
 - Responsive/touch-safe APEX editor and intrinsic APEX Native hosting.
 - Extensive state/automation/RT-allocation/sample-rate/editor regression suites.
 
-## Phase 7 — in this branch
+## Phase 7/8 — in this branch
 
 - [x] APEX Character stage: Pure / Velvet / Heat.
 - [x] Character parameter appended at index 318 without moving IDs 0..317.
@@ -30,13 +30,16 @@ product with stable APEX parameter IDs and APEX UI language.
 - [x] Character control in the responsive APEX top bar.
 - [x] Correct Linear Phase latency reporting at prepare time.
 - [x] Character regression tests and project registration.
+- [x] EQ Sketch freehand planner + touch workflow + editor regression path.
+- [x] Per-band Dynamic EQ sidechain filtering centered on band frequency/Q.
+- [x] Repair Dynamic EQ/placement inspector parenting so controls live in the scroll viewport.
+- [x] Extend append-only parameter ABI through index 342.
 - [ ] Full Windows Debug + Release build and APEXTests gauntlet.
 
 ## Remaining flagship parity work
 
 - Spectral dynamics: frequency-selective dynamic action inside a band's pass region.
-- Optional sidechain detector filtering and dedicated SC listen workflow.
-- EQ Sketch / draw-to-bands editing.
+- Dedicated sidechain-listen workflow (per-band detector filtering is now implemented).
 - Spectrum Grab style peak suggestions.
 - EQ Match capture, target curve generation and bounded band fitting.
 - Cross-instance registry, collision visualization and native APEX track metadata.
