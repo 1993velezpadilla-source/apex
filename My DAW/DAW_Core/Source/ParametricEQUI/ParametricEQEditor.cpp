@@ -1,4 +1,5 @@
 #include "ParametricEQEditor.h"
+#include "../ParametricEQCore/ParametricEQSketchCore.h"
 
 #include <array>
 #include <cstring>
@@ -319,10 +320,33 @@ public:
         : owner_ (owner), processor_ (processor)
     {
         setInterceptsMouseClicks (true, false);
+        addAndMakeVisible (sketchButton_);
+        sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
+        sketchButton_.setClickingTogglesState (true);
+        sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                 Palette::surfaceHover());
+        sketchButton_.onClick = [this]
+        {
+            sketchArmed_ = sketchButton_.getToggleState();
+            if (! sketchArmed_)
+            {
+                sketching_ = false;
+                sketchPointCount_ = 0;
+            }
+            sketchButton_.setButtonText (sketchArmed_ ? "SKETCH ON" : "SKETCH");
+            sketchButton_.setColour (
+                juce::TextButton::buttonColourId,
+                sketchArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+            repaint();
+        };
         startTimerHz (25);
     }
 
-    void resized() override { curveDirty_ = true; }
+    void resized() override
+    {
+        curveDirty_ = true;
+        sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -348,6 +372,26 @@ public:
             g.setColour (Palette::curveSide().withAlpha (0.75f));
             g.strokePath (sideCurve_, juce::PathStrokeType (1.0f));
         }
+
+        if (sketching_ && sketchPointCount_ > 1)
+        {
+            juce::Path sketch;
+            for (int i = 0; i < sketchPointCount_; ++i)
+            {
+                const auto& point = sketchPoints_[static_cast<std::size_t> (i)];
+                const auto x = static_cast<float> (point.x * bounds.getWidth());
+                const auto y = static_cast<float> (
+                    yForGain (point.gainDb, bounds.getHeight()));
+                if (i == 0)
+                    sketch.startNewSubPath (x, y);
+                else
+                    sketch.lineTo (x, y);
+            }
+            g.setColour (Palette::selected().withAlpha (0.92f));
+            g.strokePath (sketch, juce::PathStrokeType (
+                3.0f, juce::PathStrokeType::curved,
+                juce::PathStrokeType::rounded));
+        }
         drawNodes (g, bounds);
     }
 
@@ -361,6 +405,16 @@ public:
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
+        if (sketchArmed_ && hit < 0)
+        {
+            sketching_ = true;
+            longPressFired_ = true; // sketch owns this pointer lease
+            sketchPointCount_ = 0;
+            appendSketchPoint (event.position);
+            owner_.selectBand (-1);
+            repaint();
+            return;
+        }
         if (hit >= 0)
         {
             owner_.selectBand (hit);
@@ -383,6 +437,12 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override
     {
         lastDragPosition_ = event.position;
+        if (sketching_)
+        {
+            appendSketchPoint (event.position);
+            repaint();
+            return;
+        }
         if (dragging_ && dragBand_ >= 0)
         {
             const auto width = static_cast<double> (std::max (1, getWidth()));
@@ -405,6 +465,11 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         pointerDown_ = false;
+        if (sketching_)
+        {
+            commitSketch();
+            return;
+        }
         if (dragging_ && dragBand_ >= 0)
         {
             auto* frequency = processor_.getParametricEQParameter (parameterIndex (
@@ -735,6 +800,80 @@ private:
         return std::nullopt;
     }
 
+    void appendSketchPoint (juce::Point<float> position)
+    {
+        const double width = std::max (1, getWidth());
+        const double height = std::max (1, getHeight());
+        SketchPoint point {
+            std::clamp (static_cast<double> (position.x) / width, 0.0, 1.0),
+            std::clamp (gainForY (position.y, height), -18.0, 18.0)
+        };
+
+        if (sketchPointCount_ > 0)
+        {
+            const auto& previous = sketchPoints_[
+                static_cast<std::size_t> (sketchPointCount_ - 1)];
+            if (std::abs (point.x - previous.x) < 0.002
+                && std::abs (point.gainDb - previous.gainDb) < 0.15)
+                return;
+        }
+
+        if (sketchPointCount_ < SketchPlanner::kMaximumInputPoints)
+            sketchPoints_[static_cast<std::size_t> (sketchPointCount_++)] = point;
+        else
+            sketchPoints_.back() = point;
+    }
+
+    void commitSketch()
+    {
+        const auto plan = SketchPlanner::plan (
+            sketchPoints_.data(), sketchPointCount_,
+            ParametricEQEditor::kDisplayMinimumFrequency,
+            ParametricEQEditor::kDisplayMaximumFrequency);
+
+        int lastBand = -1;
+        for (int proposal = 0; proposal < plan.count; ++proposal)
+        {
+            const auto freeBand = firstDisabledBand();
+            if (! freeBand.has_value())
+                break;
+            const int band = *freeBand;
+            const auto& proposed = plan.bands[static_cast<std::size_t> (proposal)];
+
+            auto publishUnits = [this, band] (BandParameterOffset offset,
+                                              float value)
+            {
+                const int index = parameterIndex (band, offset);
+                auto* parameter = processor_.getParametricEQParameter (index);
+                notifyParameter (processor_, index, parameter->toNormalised (value));
+            };
+
+            publishUnits (BandParameterOffset::Shape,
+                          static_cast<float> (proposed.shape));
+            publishUnits (BandParameterOffset::Frequency,
+                          static_cast<float> (proposed.frequencyHz));
+            publishUnits (BandParameterOffset::Gain,
+                          static_cast<float> (proposed.gainDb));
+            publishUnits (BandParameterOffset::Q,
+                          static_cast<float> (proposed.q));
+            notifyParameter (processor_, parameterIndex (
+                band, BandParameterOffset::Enabled), 1.0f);
+            lastBand = band;
+        }
+
+        sketching_ = false;
+        sketchArmed_ = false;
+        sketchPointCount_ = 0;
+        sketchButton_.setToggleState (false, juce::dontSendNotification);
+        sketchButton_.setButtonText ("SKETCH");
+        sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                 Palette::surfaceHover());
+        curveDirty_ = true;
+        if (lastBand >= 0)
+            owner_.selectBand (lastBand);
+        repaint();
+    }
+
     ParametricEQEditor& owner_;
     Processor& processor_;
     juce::Path mainCurve_, midCurve_, sideCurve_;
@@ -745,6 +884,11 @@ private:
     bool spectrumActive_ = false;
     std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
         spectrumCopy_ {};
+    juce::TextButton sketchButton_ { "SKETCH" };
+    std::array<SketchPoint, SketchPlanner::kMaximumInputPoints> sketchPoints_ {};
+    int sketchPointCount_ = 0;
+    bool sketchArmed_ = false;
+    bool sketching_ = false;
     bool dragging_ = false;
     int dragBand_ = -1;
     juce::Point<float> lastDragPosition_;
