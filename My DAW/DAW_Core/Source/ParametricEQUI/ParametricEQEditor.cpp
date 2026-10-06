@@ -954,6 +954,13 @@ public:
         content_.addAndMakeVisible (qSlider_);
         content_.addAndMakeVisible (slopeSlider_);
         content_.addAndMakeVisible (placementLabel_);
+        content_.addAndMakeVisible (dynLabel_);
+        content_.addAndMakeVisible (dynEnableButton_);
+        content_.addAndMakeVisible (dynFilterButton_);
+        content_.addAndMakeVisible (dynThresholdSlider_);
+        content_.addAndMakeVisible (dynRangeSlider_);
+        content_.addAndMakeVisible (dynAttackSlider_);
+        content_.addAndMakeVisible (dynReleaseSlider_);
         auditionButton_ = std::make_unique<HoldButton> (owner_);
         content_.addAndMakeVisible (auditionButton_.get());
 
@@ -1029,6 +1036,20 @@ public:
         {
             toggleDynamic (DynamicBandOffset::Enable);
         };
+        dynFilterButton_.setClickingTogglesState (false);
+        dynFilterButton_.setTitle (
+            "Band-limit the Dynamic EQ detector around this band's frequency and Q");
+        dynFilterButton_.onClick = [this]
+        {
+            const int band = owner_.getSelectedBandForTesting();
+            if (band < 0)
+                return;
+            const int index = dynamicFilterParameterIndex (band);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index,
+                             parameter->getValue() >= 0.5f ? 0.0f : 1.0f);
+            refresh();
+        };
         configureSlider (dynThresholdSlider_, "Dynamic Threshold");
         configureSlider (dynRangeSlider_, "Dynamic Range");
         configureSlider (dynAttackSlider_, "Dynamic Attack");
@@ -1055,8 +1076,8 @@ public:
         // The audition row must retain its full touch-target height: content
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
-        // 1 dynamic label + 5 dynamic rows.
-        const int contentHeight = contentMargin + 12 * row + 2 * labelHeight
+        // 1 dynamic label + 6 dynamic rows.
+        const int contentHeight = contentMargin + 13 * row + 2 * labelHeight
                                 + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
@@ -1092,6 +1113,7 @@ public:
 
         dynLabel_.setBounds (bounds.removeFromTop (labelHeight));
         dynEnableButton_.setBounds (bounds.removeFromTop (row));
+        dynFilterButton_.setBounds (bounds.removeFromTop (row));
         dynThresholdSlider_.setBounds (bounds.removeFromTop (row));
         dynRangeSlider_.setBounds (bounds.removeFromTop (row));
         dynAttackSlider_.setBounds (bounds.removeFromTop (row));
@@ -1155,6 +1177,7 @@ public:
                     band, BandParameterOffset::Shape))->getChoiceIndex());
             const bool dynamicCompatible = isDynamicCompatibleShape (shape);
             dynEnableButton_.setEnabled (dynamicCompatible);
+            dynFilterButton_.setEnabled (dynamicCompatible);
             dynThresholdSlider_.setEnabled (dynamicCompatible);
             dynRangeSlider_.setEnabled (dynamicCompatible);
             dynAttackSlider_.setEnabled (dynamicCompatible);
@@ -1167,6 +1190,14 @@ public:
                 dynEnableButton_.setColour (juce::TextButton::buttonColourId,
                                             dynamicOn ? Palette::accentActive()
                                                       : Palette::surfaceHover());
+                const auto detectorFiltered = processor_.getParametricEQParameter (
+                    dynamicFilterParameterIndex (band))->getBool();
+                dynFilterButton_.setButtonText (
+                    detectorFiltered ? "SC Filter On" : "SC Filter Off");
+                dynFilterButton_.setColour (
+                    juce::TextButton::buttonColourId,
+                    detectorFiltered ? Palette::accentActive()
+                                     : Palette::surfaceHover());
                 syncSlider (dynThresholdSlider_, dynamicParameterIndex (
                     band, DynamicBandOffset::Threshold));
                 syncSlider (dynRangeSlider_, dynamicParameterIndex (
@@ -1180,6 +1211,7 @@ public:
         else
         {
             dynEnableButton_.setEnabled (false);
+            dynFilterButton_.setEnabled (false);
             dynThresholdSlider_.setEnabled (false);
             dynRangeSlider_.setEnabled (false);
             dynAttackSlider_.setEnabled (false);
@@ -1189,6 +1221,7 @@ public:
     }
 
     juce::TextButton& getDynEnableButtonForTesting() { return dynEnableButton_; }
+    juce::TextButton& getDynFilterButtonForTesting() { return dynFilterButton_; }
     juce::Slider& getDynRangeSliderForTesting() { return dynRangeSlider_; }
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
@@ -1310,6 +1343,7 @@ private:
     // Phase 5 contextual Dynamic EQ controls.
     juce::Label dynLabel_;
     juce::TextButton dynEnableButton_ { "Dynamic Off" };
+    juce::TextButton dynFilterButton_ { "SC Filter Off" };
     juce::Slider dynThresholdSlider_;
     juce::Slider dynRangeSlider_;
     juce::Slider dynAttackSlider_;
@@ -1442,6 +1476,11 @@ juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()
 {
     return inspector_->getDynEnableButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getDynFilterButtonForTesting()
+{
+    return inspector_->getDynFilterButtonForTesting();
 }
 
 juce::Slider& ParametricEQEditor::getDynRangeSliderForTesting()
