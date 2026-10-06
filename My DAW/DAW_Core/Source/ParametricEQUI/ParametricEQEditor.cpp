@@ -319,7 +319,7 @@ public:
     EqGraphComponent (ParametricEQEditor& owner, Processor& processor)
         : owner_ (owner), processor_ (processor)
     {
-        setInterceptsMouseClicks (true, false);
+        setInterceptsMouseClicks (true, true);
         addAndMakeVisible (sketchButton_);
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
