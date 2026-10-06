@@ -1019,7 +1019,7 @@ public:
                     parameter->toNormalised (static_cast<float> (placement)));
                 refresh();
             };
-            addAndMakeVisible (button.get());
+            content_.addAndMakeVisible (button.get());
             placementButtons_.push_back (std::move (button));
         }
 
