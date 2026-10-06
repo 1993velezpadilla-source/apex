@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 
 #include "ParametricEQAuditionCore.h"
+#include "ParametricEQCharacterCore.h"
 #include "ParametricEQLinearPhase.h"
 #include "ParametricEQResponseCore.h"
 #include "../AnalysisCore/ApexSpectrumAnalyzerCore.h"
@@ -39,7 +40,8 @@ constexpr int kDynamicDetectorParameter = kFirstDynamicParameter + kDynamicBandP
 constexpr int kDynamicSidechainParameter = kDynamicDetectorParameter + 1;
 constexpr int kDynamicLinkParameter = kDynamicDetectorParameter + 2;
 constexpr int kPhaseModeParameter = kDynamicDetectorParameter + 3;
-constexpr int kNumParameters = kPhaseModeParameter + 1;
+constexpr int kCharacterModeParameter = kPhaseModeParameter + 1;
+constexpr int kNumParameters = kCharacterModeParameter + 1;
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -80,8 +82,10 @@ static_assert (kDynamicDetectorParameter == 314 && kPhaseModeParameter == 317,
 constexpr int kPhaseModeMinimum = 0;
 constexpr int kPhaseModeLinear = 1;
 
-static_assert (kNumParameters == 318,
-               "Phase 6 appends peq.phase at index 317");
+static_assert (kCharacterModeParameter == 318,
+               "Phase 7 appends peq.character after the frozen Phase 6 ABI");
+static_assert (kNumParameters == 319,
+               "Phase 7 parameter count must remain append-only");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -101,6 +105,7 @@ public:
         DetectorChoice,
         SourceChoice,
         PhaseModeChoice,
+        CharacterChoice,
         DesignMode
     };
 
@@ -148,12 +153,12 @@ public:
     static constexpr const char* kPluginName = "APEX Parametric EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
-    static constexpr const char* kVersion = "1.0.0";
+    static constexpr const char* kVersion = "1.1.0";
     static constexpr const char* kFileOrIdentifier = "APEX::ParametricEQ";
     static constexpr const char* kStateTag = "parametriceqstate";
     static constexpr const char* kVersionProperty = "version";
     static constexpr const char* kAnalyzerProperty = "peq.analyzer";
-    static constexpr int kStateVersion = 4;
+    static constexpr int kStateVersion = 5;
 
     Processor();
     ~Processor() override;
@@ -249,6 +254,7 @@ private:
                                   const BandSettings& rhs) noexcept;
     BandSettings readBandParameters (int band) const noexcept;
     DesignMode readDesignModeParameter() const noexcept;
+    CharacterMode readCharacterModeParameter() const noexcept;
     bool readBypassParameter() const noexcept;
     void readBandPlacementParameters (
         std::array<BandSettings, kMaxBands>& settings) const noexcept;
@@ -365,6 +371,7 @@ private:
     bool auditionHold_ = false;
     bool auditionReady_ = false;
 
+    CharacterCore characterCore_;
     ResponseCore responseCore_;
     Analysis::SpectrumAnalyzerCore analyzer_ { "APEX Parametric EQ Analyzer" };
 };
