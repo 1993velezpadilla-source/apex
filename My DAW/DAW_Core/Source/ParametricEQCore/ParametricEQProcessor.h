@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 
 #include "ParametricEQAuditionCore.h"
+#include "ParametricEQBiquad.h"
 #include "ParametricEQCharacterCore.h"
 #include "ParametricEQLinearPhase.h"
 #include "ParametricEQResponseCore.h"
