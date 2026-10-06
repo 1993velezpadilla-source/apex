@@ -41,7 +41,10 @@ constexpr int kDynamicSidechainParameter = kDynamicDetectorParameter + 1;
 constexpr int kDynamicLinkParameter = kDynamicDetectorParameter + 2;
 constexpr int kPhaseModeParameter = kDynamicDetectorParameter + 3;
 constexpr int kCharacterModeParameter = kPhaseModeParameter + 1;
-constexpr int kNumParameters = kCharacterModeParameter + 1;
+constexpr int kFirstDynamicFilterParameter = kCharacterModeParameter + 1;
+constexpr int kDynamicFilterParameterCount = kMaxBands;
+constexpr int kNumParameters = kFirstDynamicFilterParameter
+                             + kDynamicFilterParameterCount;
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -51,6 +54,11 @@ constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 constexpr int placementParameterIndex (int band) noexcept
 {
     return kFirstPlacementParameter + band;
+}
+
+constexpr int dynamicFilterParameterIndex (int band) noexcept
+{
+    return kFirstDynamicFilterParameter + band;
 }
 
 static_assert (kFirstPlacementParameter == 170 && kFirstDynamicParameter == 194,
@@ -84,8 +92,10 @@ constexpr int kPhaseModeLinear = 1;
 
 static_assert (kCharacterModeParameter == 318,
                "Phase 7 appends peq.character after the frozen Phase 6 ABI");
-static_assert (kNumParameters == 319,
-               "Phase 7 parameter count must remain append-only");
+static_assert (kFirstDynamicFilterParameter == 319,
+               "Phase 8 appends per-band detector filters after peq.character");
+static_assert (kNumParameters == 343,
+               "Phase 8 parameter count must remain append-only");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -153,12 +163,12 @@ public:
     static constexpr const char* kPluginName = "APEX Parametric EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
-    static constexpr const char* kVersion = "1.1.0";
+    static constexpr const char* kVersion = "1.2.0";
     static constexpr const char* kFileOrIdentifier = "APEX::ParametricEQ";
     static constexpr const char* kStateTag = "parametriceqstate";
     static constexpr const char* kVersionProperty = "version";
     static constexpr const char* kAnalyzerProperty = "peq.analyzer";
-    static constexpr int kStateVersion = 5;
+    static constexpr int kStateVersion = 6;
 
     Processor();
     ~Processor() override;
@@ -313,6 +323,11 @@ private:
     std::array<APEX::Dynamics::Detector, kMaxBands> dynamicDetectors_ {};
     std::array<APEX::Dynamics::Envelope, kMaxBands> dynamicEnvelopes_ {};
     std::array<DynamicBandParameters, kMaxBands> dynamicParameters_ {};
+    std::array<BiquadCoefficients, kMaxBands> dynamicKeyFilterCoefficients_ {};
+    std::array<std::array<BiquadState, kMaxChannels>, kMaxBands>
+        dynamicKeyFilterStates_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterFrequencyHz_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterQ_ {};
     std::array<double, kMaxBands> dynamicSmoothedGainDb_ {};
     std::uint32_t dynamicActiveMask_ = 0;
     bool dynamicAnyActive_ = false;
