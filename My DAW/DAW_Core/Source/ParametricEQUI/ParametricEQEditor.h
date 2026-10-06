@@ -60,6 +60,7 @@ public:
     juce::Rectangle<int> getNodeBoundsForTesting (int band) const;
     juce::TextButton& getAuditionButtonForTesting();
     juce::TextButton& getPhaseButtonForTesting();
+    juce::TextButton& getSketchButtonForTesting();
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
     juce::TextButton& getDynEnableButtonForTesting();
