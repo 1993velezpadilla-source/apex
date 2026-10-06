@@ -544,6 +544,16 @@ Processor::Processor()
     add (kCharacterModeParameter, ParametricEQParameter::Kind::CharacterChoice,
          "Character", 0.0f, static_cast<float> (kCharacterModeCount - 1), 0.0f);
 
+    // Phase 8: optional band-limited detector key for every dynamic band.
+    // Defaults OFF for exact migration of all earlier sessions.
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (dynamicFilterParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Dynamic SC Filter", 0.0f, 1.0f, 0.0f);
+    }
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -611,6 +621,12 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
         dynamicEnvelopes_[static_cast<std::size_t> (band)].prepare (
             rate, dynamicParameters_[static_cast<std::size_t> (band)].attackSeconds,
             dynamicParameters_[static_cast<std::size_t> (band)].releaseSeconds);
+        dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+            = BiquadCoefficients::identity();
+        dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)] = 0.0;
+        dynamicKeyFilterQ_[static_cast<std::size_t> (band)] = 0.0;
+        for (auto& state : dynamicKeyFilterStates_[static_cast<std::size_t> (band)])
+            state.reset();
     }
     adoptDynamicParameters();
 
@@ -640,6 +656,9 @@ void Processor::releaseResources()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
@@ -661,6 +680,9 @@ void Processor::reset()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     characterCore_.reset();
@@ -875,6 +897,12 @@ juce::String Processor::getParameterId (int index)
         return "peq.phase";
     if (index == kCharacterModeParameter)
         return "peq.character";
+    if (index >= kFirstDynamicFilterParameter
+        && index < kFirstDynamicFilterParameter + kDynamicFilterParameterCount)
+        return "peq.band"
+             + juce::String (index - kFirstDynamicFilterParameter + 1)
+                   .paddedLeft ('0', 2)
+             + ".dyn.filter";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -1290,9 +1318,38 @@ void Processor::adoptDynamicParameters() noexcept
         next.releaseSeconds = static_cast<double> (parameters_[
             static_cast<std::size_t> (dynamicParameterIndex (
                 band, DynamicBandOffset::Release))]->getUnitsValue());
+        next.sidechainFilter = parameters_[static_cast<std::size_t> (
+            dynamicFilterParameterIndex (band))]->getBool();
         next = DynamicBandParameters::sanitised (next);
 
         const auto& previous = dynamicParameters_[static_cast<std::size_t> (band)];
+        const auto& detectorBand = targetSettings_[static_cast<std::size_t> (band)];
+        const bool detectorBandChanged
+            = dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                  != detectorBand.frequencyHz
+           || dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                  != detectorBand.q;
+        if (next.sidechainFilter && (detectorBandChanged
+                                     || ! previous.sidechainFilter))
+        {
+            dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+                = FilterDesigner::designRbj (
+                    FilterShape::BandPass, detectorBand.frequencyHz,
+                    detectorBand.q, 0.0, getSampleRate());
+            dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                = detectorBand.frequencyHz;
+            dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                = detectorBand.q;
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
+        else if (! next.sidechainFilter && previous.sidechainFilter)
+        {
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
         const bool compatible = next.enabled
             && isDynamicCompatibleShape (targetSettings_[
                 static_cast<std::size_t> (band)].shape);
@@ -1365,6 +1422,13 @@ void Processor::computeDynamicGains (int numberOfChannels,
         auto& detector = dynamicDetectors_[static_cast<std::size_t> (band)];
         auto& envelope = dynamicEnvelopes_[static_cast<std::size_t> (band)];
         auto* gains = dynamicGainScratch_.getWritePointer (band);
+        auto& keyStates = dynamicKeyFilterStates_[static_cast<std::size_t> (band)];
+        const auto& keyCoefficients
+            = dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)];
+
+        if (externalUnavailable && parameters.sidechainFilter)
+            for (auto& state : keyStates)
+                state.reset();
 
         for (int sample = 0; sample < numberOfSamples; ++sample)
         {
@@ -1376,25 +1440,35 @@ void Processor::computeDynamicGains (int numberOfChannels,
             const double keyR = externalUnavailable ? 0.0
                               : (std::isfinite (keyRight[sample])
                                  ? static_cast<double> (keyRight[sample]) : 0.0);
+            const double detectorL = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[0].process (
+                    static_cast<float> (keyL), keyCoefficients))
+                : keyL;
+            const double detectorR = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[1].process (
+                    static_cast<float> (keyR), keyCoefficients))
+                : keyR;
             double levelDb = -144.0;
             switch (placement)
             {
                 case ChannelPlacement::Stereo:
-                    levelDb = detector.processStereoFrame (keyL, keyR,
+                    levelDb = detector.processStereoFrame (detectorL, detectorR,
                                                            dynamicDetectorMode_,
                                                            dynamicLink_);
                     break;
                 case ChannelPlacement::Left:
-                    levelDb = detector.processMono (keyL, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorL, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Right:
-                    levelDb = detector.processMono (keyR, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorR, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Mid:
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (mid, dynamicDetectorMode_);
                     break;
                 }
@@ -1402,7 +1476,7 @@ void Processor::computeDynamicGains (int numberOfChannels,
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (side, dynamicDetectorMode_);
                     break;
                 }
