@@ -300,6 +300,12 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return "Q " + juce::String (value, value < 1.0f ? 3 : 2);
         case Kind::Slope:
             return juce::String (value, 1) + " dB/oct";
+        case Kind::Pan:
+            return std::abs (value) < 0.005f ? "Center"
+                 : (value < 0.0f ? "L " : "R ")
+                 + juce::String (std::abs (value) * 100.0f, 0) + "%";
+        case Kind::GainScale:
+            return juce::String (value * 100.0f, 0) + "%";
         case Kind::DesignMode:
             return normalisedValue >= 0.5f ? "Analog Matched" : "Realtime";
     }
@@ -387,6 +393,8 @@ juce::String ParametricEQParameter::getLabel() const
         case Kind::Gain: return "dB";
         case Kind::Q: return "Q";
         case Kind::Slope: return "dB/oct";
+        case Kind::Pan: return "%";
+        case Kind::GainScale: return "%";
         default: return {};
     }
 }
@@ -554,6 +562,18 @@ Processor::Processor()
              "Band " + number + " Dynamic SC Filter", 0.0f, 1.0f, 0.0f);
     }
 
+    // Phase 9: complete output stage, append-only after index 342.
+    add (kOutputGainParameter, ParametricEQParameter::Kind::Gain,
+         "Output Gain", -36.0f, 36.0f, 0.0f);
+    add (kOutputPanParameter, ParametricEQParameter::Kind::Pan,
+         "Output Pan", -1.0f, 1.0f, 0.0f);
+    add (kOutputPhaseInvertParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Phase Invert", 0.0f, 1.0f, 0.0f);
+    add (kOutputAutoGainParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Auto Gain", 0.0f, 1.0f, 0.0f);
+    add (kOutputGainScaleParameter, ParametricEQParameter::Kind::GainScale,
+         "Output Gain Scale", 0.0f, 2.0f, 1.0f);
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -663,6 +683,7 @@ void Processor::releaseResources()
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
     characterCore_.reset();
+    outputAutoGainDb_ = 0.0;
     analyzer_.signalDiscontinuity();
     prepared_ = false;
 }
@@ -687,6 +708,7 @@ void Processor::reset()
     dynamicSmoothedGainDb_.fill (0.0);
     characterCore_.reset();
     characterCore_.setMode (readCharacterModeParameter());
+    outputAutoGainDb_ = 0.0;
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
                              &convolverNextL_, &convolverNextR_ })
         convolver->reset();
@@ -712,6 +734,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     if (channels <= 0 || samples <= 0)
         return;
 
+    const float inputRmsDb = measureRmsDb (buffer, channels, samples);
     analyzer_.pushPre (buffer, channels, samples);
 
     const bool bypassTarget = readBypassParameter();
@@ -776,6 +799,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         wetStateResetForBypass_ = true;
     }
 
+    applyOutputStage (buffer, channels, samples, inputRmsDb);
     analyzer_.pushPost (buffer, channels, samples);
     if (responseDirty_)
         publishResponseFrame();
@@ -903,6 +927,11 @@ juce::String Processor::getParameterId (int index)
              + juce::String (index - kFirstDynamicFilterParameter + 1)
                    .paddedLeft ('0', 2)
              + ".dyn.filter";
+    if (index == kOutputGainParameter) return "peq.output.gain";
+    if (index == kOutputPanParameter) return "peq.output.pan";
+    if (index == kOutputPhaseInvertParameter) return "peq.output.phaseInvert";
+    if (index == kOutputAutoGainParameter) return "peq.output.autoGain";
+    if (index == kOutputGainScaleParameter) return "peq.output.gainScale";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -971,7 +1000,8 @@ BandSettings Processor::readBandParameters (int band) const noexcept
     settings.frequencyHz = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Frequency))]->getUnitsValue();
     settings.gainDb = parameters_[static_cast<std::size_t> (parameterIndex (
-        band, BandParameterOffset::Gain))]->getUnitsValue();
+        band, BandParameterOffset::Gain))]->getUnitsValue()
+                    * readOutputGainScale();
     settings.q = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Q))]->getUnitsValue();
     settings.slopeDbPerOctave = parameters_[static_cast<std::size_t> (parameterIndex (
@@ -997,6 +1027,106 @@ CharacterMode Processor::readCharacterModeParameter() const noexcept
 bool Processor::readBypassParameter() const noexcept
 {
     return parameters_[static_cast<std::size_t> (kGlobalBypassParameter)]->getBool();
+}
+
+float Processor::readOutputGainDb() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputGainParameter)]
+        ->getUnitsValue();
+}
+
+float Processor::readOutputPan() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputPanParameter)]
+            ->getUnitsValue(), -1.0f, 1.0f);
+}
+
+bool Processor::readOutputPhaseInvert() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputPhaseInvertParameter)]
+        ->getBool();
+}
+
+bool Processor::readOutputAutoGain() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputAutoGainParameter)]
+        ->getBool();
+}
+
+float Processor::readOutputGainScale() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputGainScaleParameter)]
+            ->getUnitsValue(), 0.0f, 2.0f);
+}
+
+float Processor::measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept
+{
+    double sumSquares = 0.0;
+    std::uint64_t count = 0;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const auto* data = buffer.getReadPointer (channel);
+        for (int sample = 0; sample < samples; ++sample)
+        {
+            const double value = std::isfinite (data[sample])
+                               ? static_cast<double> (data[sample]) : 0.0;
+            sumSquares += value * value;
+        }
+        count += static_cast<std::uint64_t> (samples);
+    }
+
+    if (count == 0 || sumSquares <= 1.0e-18)
+        return -180.0f;
+
+    const double rms = std::sqrt (sumSquares / static_cast<double> (count));
+    return static_cast<float> (20.0 * std::log10 (std::max (rms, 1.0e-9)));
+}
+
+void Processor::applyOutputStage (juce::AudioBuffer<float>& buffer,
+                                  int channels, int samples,
+                                  float inputRmsDb) noexcept
+{
+    double autoGainTargetDb = 0.0;
+    if (readOutputAutoGain())
+    {
+        const float outputRmsDb = measureRmsDb (buffer, channels, samples);
+        if (inputRmsDb > -90.0f && outputRmsDb > -90.0f)
+            autoGainTargetDb = std::clamp (
+                static_cast<double> (inputRmsDb - outputRmsDb), -12.0, 12.0);
+    }
+
+    const double sampleRate = std::max (1.0, getSampleRate());
+    const double smoothingSeconds = 0.250;
+    const double blockAlpha = std::exp (
+        -static_cast<double> (samples) / (sampleRate * smoothingSeconds));
+    outputAutoGainDb_ = blockAlpha * outputAutoGainDb_
+                      + (1.0 - blockAlpha) * autoGainTargetDb;
+
+    const float totalGain = juce::Decibels::decibelsToGain (
+        readOutputGainDb() + static_cast<float> (outputAutoGainDb_));
+
+    const float pan = readOutputPan();
+    float leftGain = totalGain;
+    float rightGain = totalGain;
+    if (channels >= 2)
+    {
+        if (pan < 0.0f)
+            rightGain *= 1.0f + pan;
+        else if (pan > 0.0f)
+            leftGain *= 1.0f - pan;
+    }
+
+    const float polarity = readOutputPhaseInvert() ? -1.0f : 1.0f;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const float channelGain = polarity
+                                * (channel == 0 ? leftGain : rightGain);
+        auto* data = buffer.getWritePointer (channel);
+        juce::FloatVectorOperations::multiply (data, channelGain, samples);
+    }
 }
 
 void Processor::configureEngine (
