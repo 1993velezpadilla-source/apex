@@ -44,8 +44,13 @@ constexpr int kPhaseModeParameter = kDynamicDetectorParameter + 3;
 constexpr int kCharacterModeParameter = kPhaseModeParameter + 1;
 constexpr int kFirstDynamicFilterParameter = kCharacterModeParameter + 1;
 constexpr int kDynamicFilterParameterCount = kMaxBands;
-constexpr int kNumParameters = kFirstDynamicFilterParameter
-                             + kDynamicFilterParameterCount;
+constexpr int kOutputGainParameter = kFirstDynamicFilterParameter
+                                   + kDynamicFilterParameterCount;
+constexpr int kOutputPanParameter = kOutputGainParameter + 1;
+constexpr int kOutputPhaseInvertParameter = kOutputPanParameter + 1;
+constexpr int kOutputAutoGainParameter = kOutputPhaseInvertParameter + 1;
+constexpr int kOutputGainScaleParameter = kOutputAutoGainParameter + 1;
+constexpr int kNumParameters = kOutputGainScaleParameter + 1;
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -95,8 +100,10 @@ static_assert (kCharacterModeParameter == 318,
                "Phase 7 appends peq.character after the frozen Phase 6 ABI");
 static_assert (kFirstDynamicFilterParameter == 319,
                "Phase 8 appends per-band detector filters after peq.character");
-static_assert (kNumParameters == 343,
-               "Phase 8 parameter count must remain append-only");
+static_assert (kOutputGainParameter == 343,
+               "Phase 9 output controls must append after Phase 8");
+static_assert (kNumParameters == 348,
+               "Phase 9 parameter count must remain append-only");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -117,6 +124,8 @@ public:
         SourceChoice,
         PhaseModeChoice,
         CharacterChoice,
+        Pan,
+        GainScale,
         DesignMode
     };
 
@@ -267,6 +276,16 @@ private:
     DesignMode readDesignModeParameter() const noexcept;
     CharacterMode readCharacterModeParameter() const noexcept;
     bool readBypassParameter() const noexcept;
+    float readOutputGainDb() const noexcept;
+    float readOutputPan() const noexcept;
+    bool readOutputPhaseInvert() const noexcept;
+    bool readOutputAutoGain() const noexcept;
+    float readOutputGainScale() const noexcept;
+    static float measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept;
+    void applyOutputStage (juce::AudioBuffer<float>& buffer,
+                           int channels, int samples,
+                           float inputRmsDb) noexcept;
     void readBandPlacementParameters (
         std::array<BandSettings, kMaxBands>& settings) const noexcept;
 
