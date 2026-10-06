@@ -198,6 +198,11 @@ constexpr const char* kShapeNames[] =
     "Notch", "Band Pass", "Tilt", "Flat Tilt", "All Pass"
 };
 
+constexpr const char* kCharacterNames[] =
+{
+    "Pure", "Velvet", "Heat"
+};
+
 constexpr const char* kBandParameterSuffixes[] =
 {
     "enabled", "bypass", "shape", "frequency", "gain", "q", "slope"
@@ -282,6 +287,10 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return normalisedValue >= 0.5f ? "External" : "Internal";
         case Kind::PhaseModeChoice:
             return normalisedValue >= 0.5f ? "Linear Phase" : "Minimum Phase";
+        case Kind::CharacterChoice:
+            return kCharacterNames[std::clamp (
+                static_cast<int> (std::lround (value)), 0,
+                kCharacterModeCount - 1)];
         case Kind::Frequency:
             return formatFrequency (value);
         case Kind::Gain:
@@ -326,6 +335,11 @@ float ParametricEQParameter::getValueForText (const juce::String& source) const
         case Kind::PhaseModeChoice:
             return text.containsIgnoreCase ("linear")
                 || text.getFloatValue() >= 0.5f ? 1.0f : 0.0f;
+        case Kind::CharacterChoice:
+            for (int index = 0; index < kCharacterModeCount; ++index)
+                if (text.equalsIgnoreCase (kCharacterNames[index]))
+                    return toNormalised (static_cast<float> (index));
+            return toNormalised (text.getFloatValue());
         case Kind::Frequency:
             return toNormalised (parseFrequency (text));
         case Kind::DesignMode:
@@ -342,6 +356,8 @@ int ParametricEQParameter::getNumSteps() const
         return 10;
     if (kind_ == Kind::Placement)
         return kChannelPlacementCount;
+    if (kind_ == Kind::CharacterChoice)
+        return kCharacterModeCount;
     if (kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
@@ -352,6 +368,7 @@ int ParametricEQParameter::getNumSteps() const
 bool ParametricEQParameter::isDiscrete() const
 {
     return kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice
         || kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice;
@@ -394,7 +411,8 @@ float ParametricEQParameter::toNormalised (float units) const noexcept
         || kind_ == Kind::PhaseModeChoice)
         return units >= 0.5f ? 1.0f : 0.0f;
 
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return std::clamp (std::round (units), minimumUnits_, maximumUnits_)
              / std::max (1.0f, maximumUnits_);
 
@@ -416,7 +434,8 @@ float ParametricEQParameter::fromNormalised (float normalised) const noexcept
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
         return normalised >= 0.5f ? 1.0f : 0.0f;
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return static_cast<float> (std::clamp (
             static_cast<int> (std::lround (normalised * maximumUnits_)),
             0, static_cast<int> (maximumUnits_)));
@@ -520,6 +539,11 @@ Processor::Processor()
     add (kPhaseModeParameter, ParametricEQParameter::Kind::PhaseModeChoice,
          "Phase Mode", 0.0f, 1.0f, 0.0f); // Minimum Phase default
 
+    // Phase 7: APEX-owned character stage.  Append-only ABI: all prior
+    // automation IDs and saved states retain their original indices.
+    add (kCharacterModeParameter, ParametricEQParameter::Kind::CharacterChoice,
+         "Character", 0.0f, static_cast<float> (kCharacterModeCount - 1), 0.0f);
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -596,9 +620,12 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     responsePrepareEpoch_ = responseCore_.beginPrepareEpoch();
     prepared_ = true;
     snapToPublishedParameters (true);
+    characterCore_.prepare (rate, channels);
+    characterCore_.setMode (readCharacterModeParameter());
     analyzer_.prepare (rate);
     analyzer_.signalDiscontinuity();
-    setLatencySamples (0);
+    // Keep PDC truthful.  adoptPhaseMode() owns subsequent latency changes.
+    setLatencySamples (linearRequested ? kLinearPhaseLatencySamples : 0);
 }
 
 void Processor::releaseResources()
@@ -616,6 +643,7 @@ void Processor::releaseResources()
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
+    characterCore_.reset();
     analyzer_.signalDiscontinuity();
     prepared_ = false;
 }
@@ -635,6 +663,8 @@ void Processor::reset()
         envelope.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
+    characterCore_.reset();
+    characterCore_.setMode (readCharacterModeParameter());
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
                              &convolverNextL_, &convolverNextR_ })
         convolver->reset();
@@ -666,6 +696,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     adoptPublishedParameters (bypassTarget);
     adoptDynamicParameters();
     adoptPhaseMode();
+    characterCore_.setMode (readCharacterModeParameter());
     adoptAuditionCommand();
 
     if (bypassTarget && auditionHold_)
@@ -700,6 +731,8 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         && ! dynamicAnyActive_ && ! linearPhaseTarget_ && modeMix_ <= 0.0)
     {
         currentEngine_.process (buffer.getArrayOfWritePointers(), channels,
+                                samples);
+        characterCore_.process (buffer.getArrayOfWritePointers(), channels,
                                 samples);
     }
     else
@@ -840,6 +873,8 @@ juce::String Processor::getParameterId (int index)
         return "peq.dyn.link";
     if (index == kPhaseModeParameter)
         return "peq.phase";
+    if (index == kCharacterModeParameter)
+        return "peq.character";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -920,6 +955,15 @@ DesignMode Processor::readDesignModeParameter() const noexcept
 {
     return parameters_[static_cast<std::size_t> (kDesignModeParameter)]->getBool()
          ? DesignMode::AnalogMatched : DesignMode::Realtime;
+}
+
+CharacterMode Processor::readCharacterModeParameter() const noexcept
+{
+    const int index = std::clamp (
+        parameters_[static_cast<std::size_t> (kCharacterModeParameter)]
+            ->getChoiceIndex(),
+        0, kCharacterModeCount - 1);
+    return static_cast<CharacterMode> (index);
 }
 
 bool Processor::readBypassParameter() const noexcept
@@ -1162,6 +1206,10 @@ void Processor::processChunk (juce::AudioBuffer<float>& buffer,
         }
         responseDirty_ = true;
     }
+
+    // Character is part of the wet path, before the global bypass blend.
+    characterCore_.process (chunk.getArrayOfWritePointers(),
+                            numberOfChannels, numberOfSamples);
 
     if (bypassMix_ > 0.0 || bypassTarget)
     {
