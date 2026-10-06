@@ -1,0 +1,144 @@
+name: APEX Flagship EQ Gauntlet
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/DAW_Core.jucer'
+      - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/**'
+      - '.github/workflows/flagship-eq-gauntlet.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/DAW_Core.jucer'
+      - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/**'
+      - '.github/workflows/flagship-eq-gauntlet.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  parametric-eq:
+    name: Parametric EQ ${{ matrix.configuration }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout APEX
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Materialize pinned JUCE 8.0.12
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = Join-Path $env:GITHUB_WORKSPACE 'My DAW\DAW_Core'
+          $contract = Get-Content (Join-Path $repoRoot 'Dependencies\apex-windows-dependencies.json') -Raw | ConvertFrom-Json
+          $juceRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot ([string] $contract.juce.rootRelativeToRepository)))
+          $juceParent = Split-Path -Parent $juceRoot
+          New-Item -ItemType Directory -Force -Path $juceParent | Out-Null
+
+          git init $juceRoot
+          git -C $juceRoot remote add origin https://github.com/juce-framework/JUCE.git
+          git -C $juceRoot fetch --depth=1 origin ([string] $contract.juce.upstreamCommit)
+          git -C $juceRoot checkout --detach FETCH_HEAD
+
+          foreach ($patchName in @(
+            '0001-apex-asio4all-compatibility.patch',
+            '0002-apex-vst3-null-editcontroller-guard.patch',
+            '0003-apex-string-null-holder-guard.patch'
+          )) {
+            $patch = Join-Path $repoRoot "Dependencies\patches\juce-8.0.12\$patchName"
+            git -C $juceRoot apply --check -p2 $patch
+            git -C $juceRoot apply -p2 $patch
+          }
+
+          $head = (git -C $juceRoot rev-parse HEAD).Trim()
+          if ($head -cne [string] $contract.juce.upstreamCommit) {
+            throw "JUCE HEAD '$head' does not match the pinned commit."
+          }
+
+      - name: Resolve VS18 / v145 toolchain
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere -PathType Leaf)) {
+            throw "vswhere.exe is unavailable on this runner."
+          }
+
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -version '[18.0,19.0)' -property installationPath).Trim()
+          if ([string]::IsNullOrWhiteSpace($vs)) {
+            throw "The hosted runner does not provide Visual Studio 18. This is an infrastructure gate, not an APEX code pass."
+          }
+
+          $msbuild = Join-Path $vs 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+          if (-not (Test-Path $msbuild -PathType Leaf)) {
+            throw "VS18 resolved, but amd64 MSBuild is missing: $msbuild"
+          }
+
+          "MSBUILD=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "VS18: $vs"
+          Write-Host "MSBuild: $msbuild"
+
+      - name: Build APEX ${{ matrix.configuration }}
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @(
+            'Builds\VisualStudio2026\DAW_Core.sln',
+            '/t:Build',
+            '/p:Configuration=${{ matrix.configuration }}',
+            '/p:Platform=x64',
+            '/m',
+            '/nr:false',
+            '/nologo',
+            '/v:minimal'
+          )
+          & $env:MSBUILD @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build APEXTests ${{ matrix.configuration }}
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @(
+            'Tests\Builds\VisualStudio2026\APEXTests.sln',
+            '/t:Build',
+            '/p:Configuration=${{ matrix.configuration }}',
+            '/p:Platform=x64',
+            '/m',
+            '/nr:false',
+            '/nologo',
+            '/v:minimal'
+          )
+          & $env:MSBUILD @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run Parametric EQ gauntlet
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'Tests\Builds\VisualStudio2026\x64\${{ matrix.configuration }}\ConsoleApp\APEXTests.exe'
+          if (-not (Test-Path $exe -PathType Leaf)) {
+            throw "APEXTests binary missing: $exe"
+          }
+          & $exe '--category=APEX.ParametricEQ' '--seed=0xA9E12026'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
