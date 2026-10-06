@@ -409,6 +409,7 @@ private:
     CharacterCore characterCore_;
     ResponseCore responseCore_;
     Analysis::SpectrumAnalyzerCore analyzer_ { "APEX Parametric EQ Analyzer" };
+    double outputAutoGainDb_ = 0.0;
 };
 
 } // namespace APEX::ParametricEQ
