@@ -55,6 +55,7 @@ public:
         testProcessorResponseAndReset();
         testAutomationTransitionAndBlockIndependence();
         testBypassContract();
+        testOutputStageAndPhase9Abi();
         testRealtimeAllocation();
     }
 
@@ -99,6 +100,29 @@ private:
                       juce::String ("peq.design"));
         expectEquals (Processor::getParameterId (kGlobalBypassParameter),
                       juce::String ("peq.bypass"));
+        expectEquals (Processor::getParameterId (kOutputGainParameter),
+                      juce::String ("peq.output.gain"));
+        expectEquals (Processor::getParameterId (kOutputPanParameter),
+                      juce::String ("peq.output.pan"));
+        expectEquals (Processor::getParameterId (kOutputPhaseInvertParameter),
+                      juce::String ("peq.output.phaseInvert"));
+        expectEquals (Processor::getParameterId (kOutputAutoGainParameter),
+                      juce::String ("peq.output.autoGain"));
+        expectEquals (Processor::getParameterId (kOutputGainScaleParameter),
+                      juce::String ("peq.output.gainScale"));
+        expectWithinAbsoluteError (
+            processor.getParametricEQParameter (kOutputGainParameter)->getUnitsValue(),
+            0.0f, 0.0f);
+        expectWithinAbsoluteError (
+            processor.getParametricEQParameter (kOutputPanParameter)->getUnitsValue(),
+            0.0f, 0.0f);
+        expect (! processor.getParametricEQParameter (
+            kOutputPhaseInvertParameter)->getBool());
+        expect (! processor.getParametricEQParameter (
+            kOutputAutoGainParameter)->getBool());
+        expectWithinAbsoluteError (
+            processor.getParametricEQParameter (kOutputGainScaleParameter)->getUnitsValue(),
+            1.0f, 0.0f);
 
         for (int band = 0; band < kMaxBands; ++band)
         {
@@ -215,6 +239,11 @@ private:
         setUnits (source, parameterIndex (7, BandParameterOffset::Frequency), 72.0f);
         setUnits (source, parameterIndex (7, BandParameterOffset::Slope), 47.5f);
         setUnits (source, kDesignModeParameter, 1.0f);
+        setUnits (source, kOutputGainParameter, 4.5f);
+        setUnits (source, kOutputPanParameter, -0.25f);
+        setUnits (source, kOutputPhaseInvertParameter, 1.0f);
+        setUnits (source, kOutputAutoGainParameter, 1.0f);
+        setUnits (source, kOutputGainScaleParameter, 0.75f);
         source.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
 
         const auto block = serialise (source);
@@ -391,6 +420,55 @@ private:
         processor.processBlock (dry, midi);
         expect (processor.getBypassMixForTesting() < 1.0,
                 "un-bypass must begin from the current dry state");
+    }
+
+    void testOutputStageAndPhase9Abi()
+    {
+        beginTest ("Phase 9 output stage is neutral by default and applies gain/pan/polarity");
+
+        auto neutralStorage = std::make_unique<Processor>();
+        auto& neutral = *neutralStorage;
+        neutral.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> neutralBuffer (2, 256);
+        ParametricEQTest::fillDeterministic (neutralBuffer, 0xA901u);
+        juce::AudioBuffer<float> neutralExpected;
+        neutralExpected.makeCopyOf (neutralBuffer);
+        juce::MidiBuffer midi;
+        neutral.processBlock (neutralBuffer, midi);
+        expect (ParametricEQTest::bitEqual (neutralBuffer, neutralExpected),
+                "default Phase 9 output controls must be bit-neutral");
+
+        auto outputStorage = std::make_unique<Processor>();
+        auto& output = *outputStorage;
+        output.prepareToPlay (48000.0, 256);
+        setUnits (output, kOutputGainParameter, 6.0f);
+        setUnits (output, kOutputPanParameter, 1.0f);
+        setUnits (output, kOutputPhaseInvertParameter, 1.0f);
+
+        juce::AudioBuffer<float> buffer (2, 256);
+        ParametricEQTest::fillDeterministic (buffer, 0xA902u);
+        juce::AudioBuffer<float> expected;
+        expected.makeCopyOf (buffer);
+        const float gain = juce::Decibels::decibelsToGain (6.0f);
+        output.processBlock (buffer, midi);
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            expectWithinAbsoluteError (buffer.getSample (0, sample), 0.0f, 1.0e-7f);
+            expectWithinAbsoluteError (
+                buffer.getSample (1, sample),
+                -expected.getSample (1, sample) * gain, 2.0e-6f);
+        }
+
+        auto scaledStorage = std::make_unique<Processor>();
+        auto& scaled = *scaledStorage;
+        configureBell (scaled, 0, 1000.0f, 6.0f, 2.0f);
+        setUnits (scaled, kOutputGainScaleParameter, 0.5f);
+        scaled.prepareToPlay (48000.0, 128);
+        expectWithinAbsoluteError (
+            scaled.getCurrentEngineForTesting().getMagnitudeDb (1000.0),
+            3.0, 0.03,
+            "50% gain scale must halve static EQ gain before coefficient design");
     }
 
     void testRealtimeAllocation()
