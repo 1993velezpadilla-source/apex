@@ -3,8 +3,17 @@
 #include <JuceHeader.h>
 
 #if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX 1
+ #endif
  #include <objbase.h>
  #include <windows.h>
+ #ifdef min
+  #undef min
+ #endif
+ #ifdef max
+  #undef max
+ #endif
 #endif
 
 namespace DAW
