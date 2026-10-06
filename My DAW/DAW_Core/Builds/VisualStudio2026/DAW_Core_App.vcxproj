@@ -3343,6 +3343,7 @@
     <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQNativePluginFormat.h"/>
     <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQAuditionCore.h"/>
     <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQCharacterCore.h"/>
+    <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQSketchCore.h"/>
     <ClInclude Include="..\..\Source\ParametricEQUI\ParametricEQEditor.h"/>
     <ClInclude Include="..\..\Source\PluginHostCore\ApexNativePluginFormat.h"/>
     <ClInclude Include="..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>
