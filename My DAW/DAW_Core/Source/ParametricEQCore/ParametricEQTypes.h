@@ -72,6 +72,7 @@ struct DynamicBandParameters
     double rangeDb = 0.0;       // signed: + cuts above threshold, - boosts below
     double attackSeconds = 0.010;
     double releaseSeconds = 0.100;
+    bool sidechainFilter = false; // band-limited detector key around this EQ band
 
     static DynamicBandParameters sanitised (DynamicBandParameters value) noexcept
     {
