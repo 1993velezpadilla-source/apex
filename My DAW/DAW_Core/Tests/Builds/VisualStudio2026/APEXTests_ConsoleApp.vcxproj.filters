@@ -1168,6 +1168,9 @@
     <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQCharacterTests.cpp">
       <Filter>APEXTests\Source\ParametricEQ</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQSketchTests.cpp">
+      <Filter>APEXTests\Source\ParametricEQ</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\Source\ParametricEQUI\ParametricEQEditor.cpp">
       <Filter>APEXTests\Source\ParametricEQ</Filter>
     </ClCompile>
@@ -4099,6 +4102,9 @@
       <Filter>APEXTests\Source\ParametricEQ</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQCharacterCore.h">
+      <Filter>APEXTests\Source\ParametricEQ</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQSketchCore.h">
       <Filter>APEXTests\Source\ParametricEQ</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\Source\ParametricEQUI\ParametricEQEditor.h">
