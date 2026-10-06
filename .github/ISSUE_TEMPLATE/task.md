@@ -1,6 +1,6 @@
 ---
 name: Tarea o mejora
-about: Definir un cambio y sus criterios de aceptaciÃ³n
+about: Definir un cambio y sus criterios de aceptación
 title: "[Tarea] "
 labels: ""
 assignees: ""
@@ -10,8 +10,8 @@ assignees: ""
 
 ## Alcance
 
-## Criterios de aceptaciÃ³n
+## Criterios de aceptación
 
 - [ ]
 
-## ValidaciÃ³n prevista
+## Validación prevista
