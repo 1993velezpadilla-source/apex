@@ -6,6 +6,8 @@ on:
     paths:
       - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
       - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
       - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
       - 'My DAW/DAW_Core/DAW_Core.jucer'
       - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
@@ -16,6 +18,8 @@ on:
     paths:
       - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
       - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
       - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
       - 'My DAW/DAW_Core/DAW_Core.jucer'
       - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
