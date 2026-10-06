@@ -303,6 +303,7 @@
     <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQDynamicMidSideTests.cpp"/>
     <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQDynamicEditorTests.cpp"/>
     <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQLinearPhaseTests.cpp"/>
+    <ClCompile Include="..\..\Source\ParametricEQ\ParametricEQCharacterTests.cpp"/>
     <ClCompile Include="..\..\..\Source\ParametricEQUI\ParametricEQEditor.cpp"/>
     <ClCompile Include="..\..\Source\QuickTrack\QuickTrackCoreTests.cpp"/>
     <ClCompile Include="..\..\Source\QuickTrack\TrackCreationInputTests.cpp"/>
@@ -3018,6 +3019,7 @@
     <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQNativePluginFormat.h"/>
     <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQLinearPhase.h"/>
     <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQAuditionCore.h"/>
+    <ClInclude Include="..\..\..\Source\ParametricEQCore\ParametricEQCharacterCore.h"/>
     <ClInclude Include="..\..\..\Source\ParametricEQUI\ParametricEQEditor.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\buffers\juce_AudioChannelSet.h"/>
