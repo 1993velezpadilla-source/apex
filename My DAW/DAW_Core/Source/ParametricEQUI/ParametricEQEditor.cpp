@@ -105,6 +105,7 @@ public:
         addAndMakeVisible (detectorButton_);
         addAndMakeVisible (keyButton_);
         addAndMakeVisible (linkButton_);
+        addAndMakeVisible (characterButton_);
         addAndMakeVisible (title_);
 
         designButton_.setTitle ("Switch filter design mode");
@@ -114,6 +115,7 @@ public:
         detectorButton_.setTitle ("Switch dynamic detector mode");
         keyButton_.setTitle ("Switch dynamic sidechain source");
         linkButton_.setTitle ("Toggle dynamic stereo link");
+        characterButton_.setTitle ("Cycle APEX character mode");
         // State display is driven by refresh(); onClick must fire on every
         // click, so these buttons do not own click-toggle state.
         designButton_.setClickingTogglesState (false);
@@ -123,6 +125,7 @@ public:
         detectorButton_.setClickingTogglesState (false);
         keyButton_.setClickingTogglesState (false);
         linkButton_.setClickingTogglesState (false);
+        characterButton_.setClickingTogglesState (false);
         title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, Palette::text());
         title_.setText ("APEX Parametric EQ", juce::dontSendNotification);
@@ -185,6 +188,16 @@ public:
                              link->getValue() >= 0.5f ? 0.0f : 1.0f);
             refresh();
         };
+        characterButton_.onClick = [this]
+        {
+            auto* character = processor_.getParametricEQParameter (
+                kCharacterModeParameter);
+            const int next = (character->getChoiceIndex() + 1)
+                           % kCharacterModeCount;
+            notifyParameter (processor_, kCharacterModeParameter,
+                             character->toNormalised (static_cast<float> (next)));
+            refresh();
+        };
         // Host/state changes to peq.phase must reach the top bar even when
         // they were not initiated by this button; a low-rate timer refresh
         // matches the existing inspector/graph synchronization pattern.
@@ -224,17 +237,49 @@ public:
             kDynamicSidechainParameter)->getBool() ? "Key External" : "Key Internal");
         linkButton_.setButtonText (processor_.getParametricEQParameter (
             kDynamicLinkParameter)->getBool() ? "Link On" : "Link Off");
+        const auto character = static_cast<CharacterMode> (std::clamp (
+            processor_.getParametricEQParameter (kCharacterModeParameter)
+                ->getChoiceIndex(), 0, kCharacterModeCount - 1));
+        characterButton_.setButtonText (
+            juce::String ("CHAR ") + characterModeName (character));
+        characterButton_.setColour (
+            juce::TextButton::buttonColourId,
+            character == CharacterMode::Pure ? Palette::surfaceHover()
+                                             : Palette::accentActive());
         repaint();
     }
 
     void resized() override
     {
-        auto bounds = getLocalBounds().reduced (4, 6);
-        // Seven buttons; the 44 px floor keeps every target touch-safe while
-        // remaining visible at the compact phone breakpoint. No horizontal
-        // inset: 7 x 44 px must fit inside the narrowest supported width.
-        const int buttonWidth = std::max (44, bounds.getWidth() / 8);
-        const int titleWidth = std::max (0, bounds.getWidth() - 7 * buttonWidth);
+        auto bounds = getLocalBounds().reduced (4, 4);
+        if (getWidth() < 430)
+        {
+            // Compact-phone contract: two rows of four controls, each row at
+            // least 44 logical pixels tall.  The title yields its space to
+            // controls instead of shrinking touch targets.
+            title_.setVisible (false);
+            auto row1 = bounds.removeFromTop (bounds.getHeight() / 2);
+            auto row2 = bounds;
+            auto placeFour = [] (juce::Rectangle<int> row,
+                                 juce::Component& a, juce::Component& b,
+                                 juce::Component& d, juce::Component& e)
+            {
+                const int w = std::max (44, row.getWidth() / 4);
+                a.setBounds (row.removeFromLeft (w));
+                b.setBounds (row.removeFromLeft (w));
+                d.setBounds (row.removeFromLeft (w));
+                e.setBounds (row);
+            };
+            placeFour (row1, designButton_, bypassButton_, phaseButton_,
+                       analyzerButton_);
+            placeFour (row2, detectorButton_, keyButton_, linkButton_,
+                       characterButton_);
+            return;
+        }
+
+        title_.setVisible (true);
+        const int buttonWidth = std::max (44, bounds.getWidth() / 10);
+        const int titleWidth = std::max (0, bounds.getWidth() - 8 * buttonWidth);
         title_.setBounds (bounds.removeFromLeft (titleWidth));
         designButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         bypassButton_.setBounds (bounds.removeFromLeft (buttonWidth));
@@ -242,7 +287,8 @@ public:
         analyzerButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         detectorButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         keyButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        linkButton_.setBounds (bounds);
+        linkButton_.setBounds (bounds.removeFromLeft (buttonWidth));
+        characterButton_.setBounds (bounds);
     }
 
     void timerCallback() override
@@ -261,6 +307,7 @@ private:
     juce::TextButton detectorButton_ { "Detector RMS" };
     juce::TextButton keyButton_ { "Key Internal" };
     juce::TextButton linkButton_ { "Link On" };
+    juce::TextButton characterButton_ { "CHAR Pure" };
 };
 
 //==============================================================================
@@ -1178,7 +1225,9 @@ void ParametricEQEditor::applyLayout()
         layoutMode_ = LayoutMode::CompactPhone;
 
     auto bounds = getLocalBounds();
-    const int topBarHeight = std::min (56, std::max (44, height / 12));
+    const int topBarHeight = width < 430
+                           ? std::min (104, std::max (88, height / 6))
+                           : std::min (56, std::max (44, height / 12));
     topBar_->setBounds (bounds.removeFromTop (topBarHeight));
 
     // Portrait-capable, compact devices use a bottom contextual sheet; the
