@@ -64,6 +64,7 @@ public:
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
     juce::TextButton& getDynEnableButtonForTesting();
+    juce::TextButton& getDynFilterButtonForTesting();
     juce::Slider& getDynRangeSliderForTesting();
     bool isBandDynamicActiveForTesting (int band) const;
     double getDisplayedDynamicGainDbForTesting (int band) const;
