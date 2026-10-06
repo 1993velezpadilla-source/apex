@@ -6,8 +6,8 @@
  #ifndef NOMINMAX
   #define NOMINMAX 1
  #endif
- #include <objbase.h>
  #include <windows.h>
+ #include <objbase.h>
  #ifdef near
   #undef near
  #endif
