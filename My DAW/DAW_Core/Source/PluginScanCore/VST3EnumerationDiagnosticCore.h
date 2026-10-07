@@ -8,11 +8,11 @@
  #endif
  #include <windows.h>
  #include <objbase.h>
- #pragma push_macro("near")
- #pragma push_macro("far")
- #pragma push_macro("small")
- #pragma push_macro("min")
- #pragma push_macro("max")
+ // Parse SDK headers that this translation unit may include later while the
+ // Windows compatibility macros are still available. Keep them out of APEX
+ // code below: names such as `near` and `fonts.small` are valid C++ identifiers.
+ #include <commctrl.h>
+ #include <gdiplus.h>
  #ifdef near
   #undef near
  #endif
@@ -96,10 +96,3 @@ struct VST3EnumerationDiagnosticPlatform final
 
 } // namespace DAW
 
-#if JUCE_WINDOWS
- #pragma pop_macro("max")
- #pragma pop_macro("min")
- #pragma pop_macro("small")
- #pragma pop_macro("far")
- #pragma pop_macro("near")
-#endif
