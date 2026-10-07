@@ -14,6 +14,12 @@ projects, dependency contracts and compatibility patches, scripts and project
 documentation are retained. Similar names are not treated as duplicate content.
 SignalSmith libraries are pinned Git submodules.
 
+The unreferenced Desktop tree `My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch2`
+is preserved byte for byte at `reference-source/signalsmith-stretch2`. The existing
+dependency contract explicitly forbids that tree in the active source index; the
+application and test projects use the declared pinned submodules instead. No
+reference-library files are discarded and the original Desktop tree is unchanged.
+
 Compiled output, IDE caches, crash dumps, installed SDKs, installers, local
 recordings, old executable deliveries and historical generated build trees are
 not build inputs. They remain in the original backup. A source ZIP is a source
