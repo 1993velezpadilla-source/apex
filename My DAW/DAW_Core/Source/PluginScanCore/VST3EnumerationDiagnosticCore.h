@@ -8,6 +8,11 @@
  #endif
  #include <windows.h>
  #include <objbase.h>
+ #pragma push_macro("near")
+ #pragma push_macro("far")
+ #pragma push_macro("small")
+ #pragma push_macro("min")
+ #pragma push_macro("max")
  #ifdef near
   #undef near
  #endif
@@ -90,3 +95,11 @@ struct VST3EnumerationDiagnosticPlatform final
 };
 
 } // namespace DAW
+
+#if JUCE_WINDOWS
+ #pragma pop_macro("max")
+ #pragma pop_macro("min")
+ #pragma pop_macro("small")
+ #pragma pop_macro("far")
+ #pragma pop_macro("near")
+#endif
