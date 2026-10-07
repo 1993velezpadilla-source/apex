@@ -19,7 +19,7 @@ $verifyScript = Join-Path $PSScriptRoot 'verify_dependencies.ps1'
 
 & $powerShellExe -NoProfile -ExecutionPolicy Bypass -File $verifyScript
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[WARN] dependency verification failed - continuing build anyway"
+    throw "Dependency verification failed with exit code $LASTEXITCODE; build cancelled."
 }
 
 $target = if ($Rebuild) { 'Rebuild' } else { 'Build' }
