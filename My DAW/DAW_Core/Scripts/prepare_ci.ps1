@@ -9,7 +9,9 @@ $downloadUrl = 'https://github.com/juce-framework/JUCE/releases/download/8.0.12/
 New-Item -ItemType Directory -Path $sdkDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
     $temporary = $archive + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    $previousProgress = $ProgressPreference
     try {
+        $ProgressPreference = 'SilentlyContinue'
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $downloadUrl -OutFile $temporary -UseBasicParsing
         $hash = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash
@@ -17,6 +19,7 @@ if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
         Move-Item -LiteralPath $temporary -Destination $archive
     }
     finally {
+        $ProgressPreference = $previousProgress
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
     }
 }

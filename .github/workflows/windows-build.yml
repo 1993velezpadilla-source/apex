@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: apex-windows-${{ github.ref }}
+  group: apex-windows-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   windows:
