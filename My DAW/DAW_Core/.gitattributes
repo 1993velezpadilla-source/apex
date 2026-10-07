@@ -1,4 +1,6 @@
 * text=auto
+# Patch bytes are SHA-256 pinned in the dependency contract.
+*.patch -text
 *.md text eol=lf
 *.json text eol=lf
 *.jucer text eol=lf

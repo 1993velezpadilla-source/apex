@@ -403,6 +403,7 @@
                        extraCompilerFlags="/utf-8 /bigobj /I&quot;..\..\..\Source&quot; /I&quot;..\..\..\Source\ThirdParty&quot; /I&quot;..\..\..\Source\ThirdParty\signalsmith-stretch&quot; /I&quot;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK&quot;"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
+        <MODULEPATH id="juce_audio_devices" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
         <MODULEPATH id="juce_core" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
         <MODULEPATH id="juce_events" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
         <MODULEPATH id="juce_data_structures" path="../../Sdk setups/juce-8.0.12-windows/JUCE/modules"/>
