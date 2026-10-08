@@ -281,8 +281,14 @@ public:
         s.clipDspCount = clipDspMap_.size();
         s.clipPitchCount = clipPitchCoreMap_.size();
         s.clipTapeStopCount = clipTapeStopProcessorMap_.size();
-        s.clipRenderCursorCount = std::max(lastClipRenderEndOffset_.size(),
-                                           lastClipRenderPath_.size());
+        // Identity direct reads invalidate the logical cursor with a path sentinel.
+        // Count only live continuity entries; keep map nodes allocated on the audio thread.
+        for (const auto& entry : lastClipRenderEndOffset_)
+        {
+            const auto path = lastClipRenderPath_.find(entry.first);
+            if (path == lastClipRenderPath_.end() || path->second != kIdentityDirectRenderPath)
+                ++s.clipRenderCursorCount;
+        }
         s.trackVolumeRampCount = trackVolumeRampMap_.size();
         s.trackMuteFadeCount = muteFadeMap_.size();
         s.connectionRampCount = connectionGainRamps_.size();
@@ -1013,6 +1019,8 @@ private:
     std::unordered_map<ClipID, int, JuceStringHash>            lastClipRenderMode_;
     std::unordered_map<ClipID, bool, JuceStringHash>           lastClipUsingTunedAudio_;
     std::unordered_map<ClipID, double, JuceStringHash>         lastClipSourceSampleRate_;
+    static constexpr int kIdentityDirectRenderPath = std::numeric_limits<int>::min();
+
     // Tracks which RenderPath last used the per-clip dspCore so we can reset
     // it when switching between StretchThenPitch and Normal/StretchOnly.
     // Without this, the dspCore retains Stretch-only WSOLA state when the path
@@ -3778,7 +3786,8 @@ private:
                     // with Normal/StretchOnly full-state processing.
                     const auto lastPathIt = lastClipRenderPath_.find(clip->getID());
                     const bool samePath = (lastPathIt == lastClipRenderPath_.end())
-                                       || (lastPathIt->second != (int)RenderPath::StretchThenPitch);
+                                       || (lastPathIt->second != (int)RenderPath::StretchThenPitch
+                                           && lastPathIt->second != kIdentityDirectRenderPath);
                     const auto continuityPlan = SoundEngine::ApexFallbackTimePitchContractCore::makeContinuityPlan(
                         renderedLastBlock,
                         continuousOffset,
@@ -3863,17 +3872,9 @@ private:
                                 dst[s] += sample * fadeGain;
                             }
 
-                            const auto renderStatePlan = SoundEngine::ApexClipRenderStateBookkeepingCore::makeCompletedRenderPlan(
-                                engineClipOffset,
-                                count,
-                                processCounter_,
-                                tpMode,
-                                (int)RenderPath::Normal);
-                            lastClipRenderEndOffset_[clip->getID()] = renderStatePlan.endOffset;
-                            lastClipRenderBlock_[clip->getID()]     = renderStatePlan.processBlock;
-                            lastClipRenderMode_[clip->getID()]      = renderStatePlan.mode;
-                            // Record path so a later switch to Normal resets the dspCore.
-                            lastClipRenderPath_[clip->getID()]      = renderStatePlan.path;
+                            // This direct-read path advances no DSP cursor. Mark prior continuity
+                            // state invalid without erasing map nodes from the realtime thread.
+                            lastClipRenderPath_[clip->getID()] = kIdentityDirectRenderPath;
                             continue;
                         }
 

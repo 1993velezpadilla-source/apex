@@ -18,6 +18,7 @@ if ($Name) { $testArguments += "--name=$Name" }
 if ($Seed) { $testArguments += "--seed=$Seed" }
 $testArguments += "--results-json=$resultsPath"
 $fixtureEnvironment = @{
+    APEX_TEST_CRASH_DUMP=(Join-Path $runDir 'native-crash.dmp')
     APEX_TEST_VST3_PATH=$fixtureBundle
     APEX_TEST_VST3_MONO_PATH=$monoFixtureBundle
     APEX_TEST_VST3_FAULT_PATH=$faultFixtureBundle
@@ -39,7 +40,10 @@ try {
     }
     $quotedArguments = ($testArguments | ForEach-Object { '"' + $_.Replace('"','\"') + '"' }) -join ' '
     Write-Host "[test] Running APEXTests $Configuration; logs: $runDir"
-    $process = Start-Process -FilePath $exePath -ArgumentList $quotedArguments -WorkingDirectory $exeDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    # Source-contract tests resolve Source/ relative to the application root.
+    # Executable and plugin fixture paths are already absolute; using the EXE
+    # directory here falsely reports missing source in a complete checkout.
+    $process = Start-Process -FilePath $exePath -ArgumentList $quotedArguments -WorkingDirectory $repositoryRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     # Keep the native handle open until the exit code has been read, including
     # for a runner that exits before Start-Process returns.
     $null = $process.Handle
@@ -76,7 +80,7 @@ $seedInt = [long]0
 if ($Seed) { $seedInt = if ($Seed -match '^0[xX]') { [Convert]::ToInt64($Seed.Substring(2),16) } else { [long]$Seed } }
 [IO.File]::WriteAllText((Join-Path $runDir 'run-status.json'),([ordered]@{status=$resultStatus;error=$resultsError} | ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
 $artifacts = @()
-foreach ($leaf in @('stdout.txt','stderr.txt','results.json','run-status.json')) {
+foreach ($leaf in @('stdout.txt','stderr.txt','results.json','run-status.json','native-crash.dmp')) {
     $path = Join-Path $runDir $leaf
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         $artifacts += [ordered]@{path=$leaf;bytes=[long](Get-Item -LiteralPath $path).Length;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
