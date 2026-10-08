@@ -134,27 +134,20 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
     // Wire mixer FPS callback so the HUD can display it.
     mixerFpsFn_ = mixer ? [mixer]() { return mixer->getMixerPaintFps(); }
                         : std::function<double()>{};
-    updatePresentationDemand();
+    requestPresentationUpdates();
 }
 
-void BubblegumCableOverlayComponent::updatePresentationDemand()
+void BubblegumCableOverlayComponent::requestPresentationUpdates()
 {
-    auto& clock = ApexPresentationClock::instance();
-    if (isShowing())
-    {
-        if (!presentationUpdateActive_)
-            presentationUpdateActive_ = clock.requestContinuousUpdate(this) != 0;
-    }
-    else if (presentationUpdateActive_)
-    {
-        clock.releaseContinuousUpdate(this);
-        presentationUpdateActive_ = false;
-    }
+    if (presentationUpdateActive_)
+        return;
+
+    presentationUpdateActive_ =
+        ApexPresentationClock::instance().requestContinuousUpdate(this) != 0;
 }
 
 void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
 {
-    updatePresentationDemand();
     if (isShowing())
         requestTopologyRefresh();
     else
