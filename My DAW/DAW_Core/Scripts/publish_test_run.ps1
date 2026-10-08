@@ -18,6 +18,7 @@ if ($Name) { $testArguments += "--name=$Name" }
 if ($Seed) { $testArguments += "--seed=$Seed" }
 $testArguments += "--results-json=$resultsPath"
 $fixtureEnvironment = @{
+    APEX_TEST_CRASH_DUMP=(Join-Path $runDir 'native-crash.dmp')
     APEX_TEST_VST3_PATH=$fixtureBundle
     APEX_TEST_VST3_MONO_PATH=$monoFixtureBundle
     APEX_TEST_VST3_FAULT_PATH=$faultFixtureBundle
