@@ -315,6 +315,27 @@ public:
             expect(autosave.shutdown(), "completed manager job should drain");
         }
 
+        beginTest("plugin-only edits inside the throttle window still require autosave");
+        {
+            testProjectState = "plugin-throttle";
+            ScopedPersistenceDirectory files("plugin_throttle");
+            const auto projectFile = files.directory.getChildFile("project.dawproj");
+            DAW::ProjectManager project;
+            DAW::AutosaveManagerCore autosave;
+            expect(prepareManagerForIntegrationTest(project, autosave, projectFile));
+
+            autosave.markDirty("plugin.first_edit");
+            expect(autosave.isAutosaveDirty());
+            autosave.markCleanManualSave();
+            expect(!autosave.isAutosaveDirty());
+            // This second edit is inside kPluginThrottleSecs. It must still be
+            // scheduled even if no third parameter change ever arrives.
+            autosave.markDirty("plugin.second_edit");
+            expect(autosave.isAutosaveDirty());
+            expect(autosave.isUserDirty());
+            expect(autosave.shutdown());
+        }
+
         beginTest("edits after an in-flight snapshot remain autosave-dirty");
         {
             testProjectState = "revision-before";
