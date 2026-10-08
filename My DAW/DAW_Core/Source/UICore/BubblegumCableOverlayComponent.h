@@ -35,7 +35,9 @@ public:
     {
         setOpaque(false);
         setInterceptsMouseClicks(true, false);  // receive mouseMove for tooltips; hitTest=false blocks no clicks
-        ApexPresentationClock::instance().addReceiver(this);
+        auto& presentationClock = ApexPresentationClock::instance();
+        presentationClock.addReceiver(this);
+        presentationUpdateActive_ = presentationClock.requestContinuousUpdate(this) != 0;
     }
 
     ~BubblegumCableOverlayComponent() override;
@@ -129,7 +131,7 @@ public:
 
 private:
     void handlePresentationVisibilityChange();
-    void updatePresentationDemand();
+    void requestPresentationUpdates();
 
     BubblegumV2System* bgV2_       = nullptr;
     MixerPanel*        mixerPanel_ = nullptr;
