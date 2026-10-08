@@ -20,6 +20,8 @@ jobs:
           persist-credentials: false
       - name: Prepare pinned dependencies
         run: .\Scripts\prepare_ci.ps1
+      - name: Build production app with diagnostic symbols
+        run: .\Scripts\build_apex.ps1 -Configuration Release -Rebuild -Unsigned
       - name: Color picker lifetime regression
         id: picker
         continue-on-error: true
