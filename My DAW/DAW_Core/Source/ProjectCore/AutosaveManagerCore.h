@@ -113,8 +113,7 @@ private:
     // Kicks off background write. Must be called from message thread.
     void performAutosaveAsync();
 
-    // Plugin-state throttle: accumulate plugin-only dirty events, fire at most
-    // once per kPluginThrottleSecs.
+    // Limit plugin-only bookkeeping frequency; never suppress autosave-dirty.
     static constexpr int kPluginThrottleSecs = 10;
     juce::Time lastPluginOnlyDirtyTime_;
 
