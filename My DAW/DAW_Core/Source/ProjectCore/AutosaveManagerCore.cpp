@@ -109,16 +109,18 @@ void AutosaveManagerCore::markDirty(const juce::String& reason)
     // An older in-flight autosave must never acknowledge a newer revision.
     ++dirtyRevision_;
     userDirty_.store(true);
+    // Setting this flag is cheap; throttling repeated plugin notifications
+    // must never suppress the only unsaved parameter edit.
+    autosaveDirty_.store(true);
 
     if (isPluginChange)
     {
         auto now = juce::Time::getCurrentTime();
         if ((now - lastPluginOnlyDirtyTime_).inSeconds() < kPluginThrottleSecs)
-            return;   // throttle — don't set autosaveDirty_ yet
+            return;   // throttle bookkeeping only; dirty is already recorded
         lastPluginOnlyDirtyTime_ = now;
     }
 
-    autosaveDirty_.store(true);
 }
 
 void AutosaveManagerCore::markCleanManualSave()
