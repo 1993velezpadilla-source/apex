@@ -87,12 +87,18 @@ void BubblegumCableOverlayComponent::setCableAccentColour(juce::Colour colour)
 
 BubblegumCableOverlayComponent::~BubblegumCableOverlayComponent()
 {
-    stopTimer();
     unbind();
+    ApexPresentationClock::instance().removeReceiver(this);
 }
 
 void BubblegumCableOverlayComponent::unbind() noexcept
 {
+    if (presentationUpdateActive_)
+    {
+        ApexPresentationClock::instance().releaseContinuousUpdate(this);
+        presentationUpdateActive_ = false;
+    }
+
     onTick = {};
     attachRoutingGraphListener(nullptr);
     bgV2_ = nullptr;
@@ -108,9 +114,8 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
     bgV2_        = bgV2;
     mixerPanel_  = mixer;
     viewport_    = viewport;
-    lastTimerSec_ = juce::Time::getMillisecondCounterHiRes() * 0.001;
     visualTime_ = 0.0;
-    timerDt_ = 1.0f / 60.0f;
+    presentationDt_ = 1.0f / 60.0f;
     snapshotCacheValid_ = false;
     cachedSendRecords_.clear();
     cachedSnapshots_.clear();
@@ -129,6 +134,35 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
     // Wire mixer FPS callback so the HUD can display it.
     mixerFpsFn_ = mixer ? [mixer]() { return mixer->getMixerPaintFps(); }
                         : std::function<double()>{};
+    updatePresentationDemand();
+}
+
+void BubblegumCableOverlayComponent::updatePresentationDemand()
+{
+    auto& clock = ApexPresentationClock::instance();
+    if (isShowing())
+    {
+        if (!presentationUpdateActive_)
+            presentationUpdateActive_ = clock.requestContinuousUpdate(this) != 0;
+    }
+    else if (presentationUpdateActive_)
+    {
+        clock.releaseContinuousUpdate(this);
+        presentationUpdateActive_ = false;
+    }
+}
+
+void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
+{
+    updatePresentationDemand();
+    if (isShowing())
+        requestTopologyRefresh();
+    else
+    {
+        wasRendering_ = false;
+        snapshotCacheValid_ = false;
+        compositeFrameDirty_ = true;
+    }
 }
 
 bool BubblegumCableOverlayComponent::shouldRender() const
@@ -144,12 +178,10 @@ bool BubblegumCableOverlayComponent::shouldRender() const
     return mixerPanel_->areCablesVisible();
 }
 
-void BubblegumCableOverlayComponent::timerCallback()
+void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
 {
     const double timerStart = juce::Time::getMillisecondCounterHiRes();
     const double nowSec = timerStart * 0.001;
-    if (lastTimerSec_ <= 0.0)
-        lastTimerSec_ = nowSec;
 
     if (viewport_ && bgV2_)
     {
@@ -178,11 +210,10 @@ void BubblegumCableOverlayComponent::timerCallback()
         }
     }
 
-    const double dt = juce::jlimit(0.0, 1.0 / 60.0, nowSec - lastTimerSec_);
-    lastTimerSec_ = nowSec;
-    timerDt_ = (float)dt;
+    const double dt = juce::jlimit(0.0, 1.0 / 60.0, deltaSeconds);
+    presentationDt_ = (float)dt;
 
-    ++timerTickCount_;
+    ++presentationTickCount_;
 
     osDragFade_.tick(dt);
     osDragFade_.triggerFadeIn();  // always allow fade-in; envelope handles timing
@@ -194,7 +225,7 @@ void BubblegumCableOverlayComponent::timerCallback()
     if (bgV2_)
         bgV2_->setSidechainCablesVisible(shouldRender());
 
-    timingHUD_.recordTimer(juce::Time::getMillisecondCounterHiRes() - timerStart);
+    timingHUD_.recordPresentationTick(juce::Time::getMillisecondCounterHiRes() - timerStart);
 
     if (onTick)
         onTick();
@@ -605,7 +636,7 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
 
         const bool snapSendCableMotion =
             juce::Time::getMillisecondCounterHiRes() * 0.001 < snapMotionUntilSec_;
-        renderCore_.paintAll(offG, cachedSnapshots_, vis, (float)visualTime_, timerDt_, &cableRenderStats, snapSendCableMotion);
+        renderCore_.paintAll(offG, cachedSnapshots_, vis, (float)visualTime_, presentationDt_, &cableRenderStats, snapSendCableMotion);
 
         // Send/master cable endpoint anchors (click → toggle Active/Bypassed).
         for (const auto& s : cachedSnapshots_)
