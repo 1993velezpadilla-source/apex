@@ -56,7 +56,7 @@ inline LONG WINAPI reportNativeCrash(EXCEPTION_POINTERS* exception)
                 const auto previousPC = frame.AddrPC.Offset;
                 if (!walk(IMAGE_FILE_MACHINE_AMD64, process, GetCurrentThread(), &frame,
                           &context, nullptr, functionTable, moduleBase, nullptr)
-                    || frame.AddrPC.Offset == previousPC)
+                    || (index > 0 && frame.AddrPC.Offset == previousPC))
                     break;
             }
         }

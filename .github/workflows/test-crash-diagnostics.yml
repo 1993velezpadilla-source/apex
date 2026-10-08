@@ -20,6 +20,14 @@ jobs:
           persist-credentials: false
       - name: Prepare pinned dependencies
         run: .\Scripts\prepare_ci.ps1
+      - name: Color picker lifetime regression
+        id: picker
+        continue-on-error: true
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category APEX.QuickTrackPopup -Seed 0xA9E12026
+      - name: Persistence source contracts
+        id: persistence
+        continue-on-error: true
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category Persistence -Seed 0xA9E12026
       - name: Isolate Quick Workflow
         id: focused
         continue-on-error: true
