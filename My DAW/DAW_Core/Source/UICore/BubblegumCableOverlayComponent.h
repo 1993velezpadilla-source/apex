@@ -298,7 +298,7 @@ private:
         double setupMs[kWindow]  = {};
         double renderMs[kWindow] = {};
         double totalMs[kWindow]  = {};
-        double timerMs[kWindow]  = {};
+        double presentationTickMs[kWindow] = {};
         int    snapCount[kWindow]= {};
         int    cacheHits[kWindow] = {};
         int    cacheMisses[kWindow] = {};
@@ -319,7 +319,7 @@ private:
             if (filled < kWindow) ++filled;
         }
 
-        void recordTimer(double ms) { timerMs[head] = ms; }
+        void recordPresentationTick(double ms) { presentationTickMs[head] = ms; }
 
         double avg(const double* arr) const
         {
@@ -336,7 +336,7 @@ private:
             double aSetup  = avg(setupMs);
             double aRender = avg(renderMs);
             double aTotal  = avg(totalMs);
-            double aTimer  = avg(timerMs);
+            double aTick  = avg(presentationTickMs);
             int    aSnaps  = (filled > 0) ? snapCount[(head - 1 + kWindow) % kWindow] : 0;
             int totalHits = 0;
             int totalMisses = 0;
@@ -356,7 +356,7 @@ private:
                 << "  Setup/maps: " << juce::String(aSetup,  2) << " ms\n"
                 << "  paintAll:   " << juce::String(aRender, 2) << " ms\n"
                 << "Cable cache: " << totalHits << " H / " << totalMisses << " M\n"
-                << "Timer cb:     " << juce::String(aTimer,  2) << " ms\n"
+                << "Presentation: " << juce::String(aTick,  2) << " ms\n"
                 << "Snapshots:    " << aSnaps << "\n"
                 << "Budget @60Hz: 16ms";
 
