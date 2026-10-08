@@ -1,17 +1,17 @@
 // ===========================================================================
 // BubblegumRefreshTests.cpp
 //
-// Tests the restored Bubblegum presentation contract.  The application target
+// Tests the restored Bubblegum presentation contract. The application target
 // owns BubblegumCableOverlayComponent.cpp; the headless test target does not
-// link that UI translation unit.  The scheduler probe below therefore mirrors
-// the small, observable timer contract while the routing/state/animation tests
-// exercise the real Bubblegum cores and the real RoutingGraph.
+// link that UI translation unit. The scheduler probe below mirrors the
+// observable presentation-tick decisions while the routing/state/animation
+// tests exercise the real Bubblegum cores and the real RoutingGraph.
 //
 // Contract under test:
 //
-//     juce::Timer @ 60 Hz
+//     ApexPresentationClock::TickReceiver
+//       -> onPresentationTick(deltaSeconds)
 //       -> poll Mixer/scroll motion
-//       -> timerCallback()
 //       -> onTick()
 //       -> refresh cable state / advance animation
 //       -> repaint only when needed
@@ -48,14 +48,14 @@ namespace
 using namespace DAW;
 
 // ---------------------------------------------------------------------------
-// Test-side representation of the legacy timer decisions.
+// Test-side representation of presentation-tick decisions.
 //
 // This intentionally contains no source-selection or geometry-revision gate.
-// It models only the behavior that is observable at the timer boundary:
-// polling invalidates presentation state, onTick is dispatched every timer
-// call, and repaint is requested only for visible dirty work (or a clear).
+// It models only the behavior that is observable at the tick boundary:
+// polling invalidates presentation state, onTick is dispatched every tick, and
+// repaint is requested only for visible dirty work (or a clear).
 // ---------------------------------------------------------------------------
-struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
+struct PresentationRefreshProbe final : RoutingGraph::Listener
 {
     bool overlayVisible = true;
     bool cablesVisible = true;
@@ -66,7 +66,7 @@ struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
     int lastScrollX = std::numeric_limits<int>::min();
     int lastScrollY = std::numeric_limits<int>::min();
 
-    int timerCallbackCount = 0;
+    int presentationTickCount = 0;
     int onTickCount = 0;
     int paintedTickCount = 0;
     int gatedTickCount = 0;
@@ -86,12 +86,12 @@ struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
     void connectionRemoved(const RouteID&) override { requestTopologyRefresh(); }
     void graphChanged() override { requestTopologyRefresh(); }
 
-    void timerCallback(int scrollX, int scrollY,
+    void presentationTick(int scrollX, int scrollY,
                        bool sidechainAnimating = false)
     {
-        ++timerCallbackCount;
+        ++presentationTickCount;
 
-        // Legacy motion polling: no callback/revision authority is involved.
+        // Motion polling: no callback/revision authority is involved.
         if (scrollX != lastScrollX || scrollY != lastScrollY)
         {
             lastScrollX = scrollX;
@@ -183,7 +183,7 @@ struct Harness
     BubblegumSendStateCore sends;
     QuickTrackColorSystem colors { 70707 };
     QuickTrackBuilderCore builder { tracks, graph, masterRoute, sends, colors };
-    LegacyTimerRefreshProbe refresh;
+    PresentationRefreshProbe refresh;
 
     Harness()
     {
@@ -231,60 +231,60 @@ public:
 
     void runTest() override
     {
-        beginTest("OverlayUsesLegacyTimerAt60Hz");
+        beginTest("OverlayUsesSharedPresentationClock");
         {
             using Overlay = BubblegumCableOverlayComponent;
-            static_assert(std::is_base_of<juce::Timer, Overlay>::value,
-                          "Bubblegum overlay must own the JUCE timer path");
+            static_assert(std::is_base_of<ApexPresentationClock::TickReceiver, Overlay>::value,
+                          "Bubblegum overlay must receive the shared presentation clock");
+            static_assert(! std::is_base_of<juce::Timer, Overlay>::value,
+                          "Bubblegum overlay must not own an independent timer");
 
-            const auto timerCallback = &Overlay::timerCallback;
-            expect(timerCallback != nullptr,
-                   "Bubblegum timerCallback remains the timer entry point");
-            expectEquals(Overlay::kLegacyTimerHz, 60,
-                         "legacy Bubblegum timer cadence is 60 Hz");
+            const auto tick = &Overlay::onPresentationTick;
+            expect(tick != nullptr,
+                   "onPresentationTick is the shared clock entry point");
         }
 
-        beginTest("TimerCallbackDispatchesOnTickAndGatesRepaint");
+        beginTest("PresentationTickDispatchesOnTickAndGatesRepaint");
         {
-            LegacyTimerRefreshProbe probe;
+            PresentationRefreshProbe probe;
             probe.onTick = [this, &probe]
             {
-                expect(probe.timerCallbackCount > 0,
-                       "onTick runs from inside timerCallback");
+                expect(probe.presentationTickCount > 0,
+                       "onTick runs from inside presentationTick");
             };
 
             // Static, clean frames are gated rather than repainting the whole
-            // Mixer on every timer callback.
-            probe.timerCallback(0, 0);
+            // Mixer on every presentation tick.
+            probe.presentationTick(0, 0);
             probe.snapshotCacheValid = true;
             probe.compositeFrameDirty = false;
-            probe.timerCallback(0, 0);
+            probe.presentationTick(0, 0);
 
-            expectEquals(probe.timerCallbackCount, 2,
-                         "timer callback is invoked for each legacy tick");
+            expectEquals(probe.presentationTickCount, 2,
+                         "presentation tick is invoked for each clock update");
             expectEquals(probe.onTickCount, 2,
-                         "onTick is dispatched through the timer path");
+                         "onTick is dispatched through the presentation path");
             expect(probe.gatedTickCount > 0,
                    "clean frames remain repaint-gated");
             expect(probe.paintedTickCount > 0,
                    "the initial dirty frame is eligible for repaint");
         }
 
-        beginTest("MixerAndScrollMotionAreDetectedByPolling");
+        beginTest("MixerAndScrollMotionAreDetectedByPresentationTicks");
         {
-            LegacyTimerRefreshProbe probe;
-            probe.timerCallback(10, 0);
+            PresentationRefreshProbe probe;
+            probe.presentationTick(10, 0);
             probe.snapshotCacheValid = true;
             probe.compositeFrameDirty = false;
             const int paintedBeforeStaticFrame = probe.paintedTickCount;
 
-            probe.timerCallback(10, 0);
+            probe.presentationTick(10, 0);
             expectEquals(probe.paintedTickCount, paintedBeforeStaticFrame,
                          "unchanged polled geometry does not repaint");
 
-            probe.timerCallback(42, 0);
+            probe.presentationTick(42, 0);
             expect(probe.paintedTickCount > paintedBeforeStaticFrame,
-                   "scroll motion invalidates the legacy presentation cache");
+                   "scroll motion invalidates the presentation cache");
             expectEquals(probe.lastScrollX, 42,
                          "legacy polling stores the latest scroll position");
         }
