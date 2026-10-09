@@ -7,6 +7,7 @@
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
 #include "../../../Source/Automation/AutomationGestureQueueCore.h"
 #include "../../../Source/Automation/AutomationClockCore.h"
+#include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -445,3 +446,85 @@ public:
 };
 
 static AutomationTransportEdgeTests automationTransportEdgeTests;
+
+/**
+    A plugin recorder must use the actual audio-engine PPQ, not 44.1 kHz/120
+    BPM regardless of the user's project. Its throttle must be expressed in
+    SAMPLES using the active device sample rate.
+*/
+class PluginAutomationRealTimebaseTests final : public juce::UnitTest
+{
+public:
+    PluginAutomationRealTimebaseTests()
+        : juce::UnitTest("automation.plugin-timebase-and-write-spacing.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        DAW::LastTouchedPluginParameter target;
+        target.trackId = "automation_timebase_probe_48k";
+        target.pluginSlotIndex = 0;
+        target.pluginInstanceId = "unit_test_plugin";
+        target.pluginDisplayName = "Unit Test VST3";
+        target.parameterId = "gain";
+        target.parameterName = "Gain";
+        target.normalizedValue = 0.33f;
+
+        beginTest("15ms write spacing uses actual 48kHz device rate");
+        DAW::PluginAutomationRecorderCore recorder;
+        recorder.markWritten(target, 48000);
+        expect(!recorder.shouldWritePoint(target, 48600, 48000.0),
+               "600 samples is only 12.5ms at 48k, so an unchanged value is throttled");
+        expect(recorder.shouldWritePoint(target, 48720, 48000.0),
+               "720 samples at 48k is exactly 15ms");
+        auto changed = target;
+        changed.normalizedValue = 0.8f;
+        expect(recorder.shouldWritePoint(changed, 48600, 48000.0),
+               "a meaningful value change must not be discarded");
+
+        beginTest("plugin lane mirrors audio engine PPQ, never fixed 44.1kHz/120BPM");
+        auto& clock = AutomationClock::getInstance();
+        const auto oldClock = clock.snapshot();
+        auto& arms = AutomationTransportState::getInstance();
+        const bool oldArmed = arms.isRecordArmed();
+        const auto oldMode = DAW::PluginAutomationRecorderCore::getGlobalMode();
+
+        auto& keys = AutomationParameterKeyRegistry::getInstance();
+        const auto key = AutomationParameterKeyRegistry::pluginParamKey(
+            target.trackId, target.pluginSlotIndex, target.pluginDisplayName, target.parameterId);
+        const auto id = keys.getOrCreateID(key);
+        auto& store = AutomationLaneStore::getInstance();
+        store.removeLane(id);
+
+        DAW::AutomationManagerCore manager;
+        DAW::PluginAutomationGestureCore gestures;
+        recorder.setSubsystems(&manager, &gestures, [] { return true; }, [] { return int64_t(48000); });
+        recorder.setSampleRateProvider([] { return 48000.0; });
+        arms.setRecordArmed(true);
+        DAW::PluginAutomationRecorderCore::setGlobalMode(DAW::AutomationWriteMode::Write);
+        clock.publishFromAudioThread(7.25, 1.0 / 48000.0, true);
+        recorder.writeFinalPoint(target, true);
+
+        auto lane = store.findLane(id);
+        expect(lane != nullptr, "plugin Write must create a mirrored PPQ lane");
+        if (lane)
+        {
+            auto points = lane->getSnapshot();
+            expect(points != nullptr && points->size() == 1);
+            if (points != nullptr && points->size() == 1)
+            {
+                expectWithinAbsoluteError((*points)[0].timePPQ, 7.25, 1.0e-9,
+                    "the engine's 7.25 PPQ position must be used unchanged");
+                expectWithinAbsoluteError((*points)[0].normalizedValue, 0.33f, 1.0e-6f);
+            }
+        }
+
+        store.removeLane(id);
+        clock.publishFromAudioThread(oldClock.blockStartPPQ, oldClock.ppqPerSample,
+                                     oldClock.transportRolling);
+        arms.setRecordArmed(oldArmed);
+        DAW::PluginAutomationRecorderCore::setGlobalMode(oldMode);
+    }
+};
+
+static PluginAutomationRealTimebaseTests pluginAutomationRealTimebaseTests;
