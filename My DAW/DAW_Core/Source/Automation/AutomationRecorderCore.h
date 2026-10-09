@@ -51,6 +51,7 @@ namespace apex::automation
             , clock     (c)
             , armState  (transport)
         {
+            lastObservedArmed = armState.isRecordArmed();
             startTimerHz (kDrainHz);
         }
 
@@ -104,9 +105,10 @@ namespace apex::automation
             JUCE_ASSERT_MESSAGE_THREAD;
 
             const bool rewound = handleTransportEdges();
+            const bool punchedOut = handleRecordArmEdges();
 
             AutomationGestureQueue::Event e;
-            if (rewound)
+            if (rewound || punchedOut || !armState.isRecordArmed())
             {
                 // A queue event carries PPQ but no loop-iteration identity.
                 // Values pending at a backward seek cannot safely be assigned
@@ -177,6 +179,38 @@ namespace apex::automation
                 ? position.blockStartPPQ
                 : std::numeric_limits<double>::quiet_NaN();
             return backwardsSeek;
+        }
+
+        bool handleRecordArmEdges()
+        {
+            const bool armedNow = armState.isRecordArmed();
+            const bool punchedOut = lastObservedArmed && !armedNow;
+            lastObservedArmed = armedNow;
+            if (!punchedOut)
+                return false;
+
+            // Record-arm falling while Play continues is a Punch-Out edge.
+            // The recorder must not leave open sessions/latches writing after
+            // that boundary. Finalize at the observed playhead without
+            // pretending to provide sample-accurate punch timing.
+            const auto snapshot = clock.snapshot();
+            for (auto& [id, s] : sessions)
+            {
+                if (!s.open) continue;
+                if (snapshot.transportRolling
+                    && std::isfinite(snapshot.blockStartPPQ)
+                    && snapshot.blockStartPPQ >= s.lastPPQ)
+                {
+                    if (s.mode == AutomationMode::Write || s.mode == AutomationMode::Latch)
+                        finishSustainAtStop(s, snapshot.blockStartPPQ);
+                    else
+                        finishGestureAt(s, snapshot.blockStartPPQ);
+                }
+                closeSession(s, true);
+            }
+            sessions.clear();
+            modeState.clearAllLatches();
+            return true; // Pending queue events have no arm-epoch identifier.
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)
@@ -272,43 +306,7 @@ namespace apex::automation
                         break;
                     }
 
-                    if (s.mode == AutomationMode::Touch)
-                    {
-                        if (! s.rawPoints.empty()
-                            && s.rawPoints.back().timePPQ < e.ppqAtCapture)
-                            s.rawPoints.back().curveType = CurveType::Hold;
-
-                        s.rawPoints.push_back ({ e.ppqAtCapture,
-                                                 originalValueAt (s, e.ppqAtCapture),
-                                                 CurveType::Linear, 0.0f });
-                        s.lastPPQ = e.ppqAtCapture;
-                    }
-                    else if (s.mode == AutomationMode::Trim)
-                    {
-                        // Preserve the shifted original curve until release,
-                        // then return to the unshifted curve at the boundary.
-                        if (e.ppqAtCapture > s.lastPPQ)
-                        {
-                            const double gap = e.ppqAtCapture - s.lastPPQ;
-                            const double beforeRelease = e.ppqAtCapture
-                                - std::min (1.0e-6, gap * 0.5);
-                            s.rawPoints.push_back ({
-                                beforeRelease,
-                                juce::jlimit (0.0f, 1.0f,
-                                    originalValueAt (s, beforeRelease) + s.trimLastOffset),
-                                CurveType::Hold, 0.0f });
-                            if (! s.trimOffsets.empty())
-                                s.trimOffsets.back().curveType = CurveType::Hold;
-                            s.trimOffsets.push_back ({ beforeRelease, s.trimLastOffset,
-                                                       CurveType::Hold, 0.0f });
-                        }
-                        s.rawPoints.push_back ({ e.ppqAtCapture,
-                                                 originalValueAt (s, e.ppqAtCapture),
-                                                 CurveType::Linear, 0.0f });
-                        s.trimOffsets.push_back ({ e.ppqAtCapture, 0.0f,
-                                                   CurveType::Linear, 0.0f });
-                        s.lastPPQ = e.ppqAtCapture;
-                    }
+                    finishGestureAt (s, e.ppqAtCapture);
 
                     closeSession (s, true);
                     sessions.erase (it);
@@ -396,6 +394,48 @@ namespace apex::automation
                 s.trimOffsets.push_back ({ tail.timePPQ, s.trimLastOffset,
                                            CurveType::Linear, 0.0f });
             }
+        }
+
+        void finishGestureAt (Session& s, double atPPQ)
+        {
+            if (s.mode == AutomationMode::Touch)
+            {
+                if (! s.rawPoints.empty()
+                    && s.rawPoints.back().timePPQ < atPPQ)
+                    s.rawPoints.back().curveType = CurveType::Hold;
+
+                s.rawPoints.push_back ({ atPPQ,
+                                         originalValueAt (s, atPPQ),
+                                         CurveType::Linear, 0.0f });
+                s.lastPPQ = atPPQ;
+            }
+            else if (s.mode == AutomationMode::Trim)
+            {
+                // Preserve the shifted original curve until release,
+                // then return to the unshifted curve at the boundary.
+                if (atPPQ > s.lastPPQ)
+                {
+                    const double gap = atPPQ - s.lastPPQ;
+                    const double beforeRelease = atPPQ
+                        - std::min (1.0e-6, gap * 0.5);
+                    s.rawPoints.push_back ({
+                        beforeRelease,
+                        juce::jlimit (0.0f, 1.0f,
+                            originalValueAt (s, beforeRelease) + s.trimLastOffset),
+                        CurveType::Hold, 0.0f });
+                    if (! s.trimOffsets.empty())
+                        s.trimOffsets.back().curveType = CurveType::Hold;
+                    s.trimOffsets.push_back ({ beforeRelease, s.trimLastOffset,
+                                               CurveType::Hold, 0.0f });
+                }
+                s.rawPoints.push_back ({ atPPQ,
+                                         originalValueAt (s, atPPQ),
+                                         CurveType::Linear, 0.0f });
+                s.trimOffsets.push_back ({ atPPQ, 0.0f,
+                                           CurveType::Linear, 0.0f });
+                s.lastPPQ = atPPQ;
+            }
+
         }
 
         void finishSustainAtStop (Session& s, double stopPPQ)
@@ -545,6 +585,7 @@ namespace apex::automation
         // Message-thread-only last rolling PPQ. Tracking this independently
         // of the Play/Stop flag catches seek/loop wraps that never Stop.
         double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
+        bool lastObservedArmed = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationRecorder)
     };
