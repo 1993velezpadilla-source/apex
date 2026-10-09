@@ -5,6 +5,12 @@
 #include "../../../Source/Automation/AutomationModeStateCore.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
+#include "../../../Source/Automation/AutomationGestureQueueCore.h"
+#include <array>
+#include <atomic>
+#include <memory>
+#include <thread>
+#include <vector>
 
 using namespace apex::automation;
 
@@ -219,3 +225,172 @@ public:
 };
 
 static AutomationRtAccessTests automationRtAccessTests;
+
+/**
+    The recorder has ONE message-thread consumer, but native controls and
+    hosted VST3 parameter callbacks can push from MANY producer threads.
+    This test prevents a reservation-before-publication race in which the
+    consumer previously read unwritten/mismatched events.
+*/
+class AutomationGestureQueueMpscTests final : public juce::UnitTest
+{
+public:
+    AutomationGestureQueueMpscTests()
+        : juce::UnitTest("automation.gesture-mpsc-publication.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Queue = AutomationGestureQueue;
+        using Event = Queue::Event;
+
+        beginTest("FIFO and exact full-capacity boundary with wraparound");
+        {
+            // The queue is intentionally large; keep it off the test thread's
+            // relatively small Windows stack.
+            auto q = std::make_unique<Queue>();
+            for (std::size_t i = 0; i < Queue::kCapacity; ++i)
+            {
+                Event e;
+                e.paramID = static_cast<ParameterID>(i + 1);
+                e.normalizedValue = static_cast<float>(i % 100) / 100.0f;
+                if (!q->push(e))
+                {
+                    expect(false, "queue became full before its published capacity");
+                    return;
+                }
+            }
+            Event extra;
+            extra.paramID = 99999;
+            expect(!q->push(extra), "a full queue must refuse to overwrite pending gestures");
+            expectEquals(static_cast<int>(q->getOverflowCount()), 1);
+
+            bool valid = true;
+            for (std::size_t i = 0; i < Queue::kCapacity / 2; ++i)
+            {
+                Event out;
+                if (!q->pop(out) || out.paramID != i + 1)
+                    valid = false;
+            }
+            for (std::size_t i = 0; i < Queue::kCapacity / 2; ++i)
+            {
+                Event e;
+                e.paramID = static_cast<ParameterID>(Queue::kCapacity + i + 1);
+                if (!q->push(e))
+                    valid = false;
+            }
+            for (std::size_t i = Queue::kCapacity / 2; i < Queue::kCapacity * 3 / 2; ++i)
+            {
+                Event out;
+                if (!q->pop(out) || out.paramID != i + 1)
+                    valid = false;
+            }
+            Event out;
+            expect(valid, "payloads must remain FIFO and unique across wraparound");
+            expect(!q->pop(out), "a fully drained queue must be empty");
+        }
+
+        beginTest("four concurrent plugin/UI producers never expose unpublished events");
+        {
+            constexpr int kProducers = 4;
+            constexpr int kPerProducer = 3072;
+            auto q = std::make_unique<Queue>();
+            std::atomic<bool> begin { false };
+            std::atomic<bool> abort { false };
+            std::atomic<int> finished { 0 };
+            std::vector<std::thread> producers;
+            producers.reserve(kProducers);
+
+            for (int producer = 0; producer < kProducers; ++producer)
+            {
+                producers.emplace_back([&, producer]
+                {
+                    while (!begin.load(std::memory_order_acquire))
+                        std::this_thread::yield();
+
+                    for (int n = 0; n < kPerProducer; ++n)
+                    {
+                        Event e;
+                        e.paramID = static_cast<ParameterID>(producer * kPerProducer + n + 1);
+                        e.kind = n % 3 == 0 ? Queue::EventKind::GestureBegin
+                               : n % 3 == 1 ? Queue::EventKind::ValueChange
+                                            : Queue::EventKind::GestureEnd;
+                        e.source = ChangeSource::Plugin;
+                        e.normalizedValue = static_cast<float>(n) / kPerProducer;
+                        e.ppqAtCapture = producer * 100000.0 + n;
+                        while (!q->push(e))
+                        {
+                            if (abort.load(std::memory_order_acquire))
+                                return;
+                            std::this_thread::yield();
+                        }
+                    }
+                    finished.fetch_add(1, std::memory_order_release);
+                });
+            }
+
+            std::array<int, kProducers> receivedPerProducer {};
+            int received = 0;
+            bool integrityOk = true;
+            begin.store(true, std::memory_order_release);
+            const double deadlineMs = juce::Time::getMillisecondCounterHiRes() + 20000.0;
+
+            while (received < kProducers * kPerProducer
+                   && juce::Time::getMillisecondCounterHiRes() < deadlineMs)
+            {
+                Event out;
+                if (!q->pop(out))
+                {
+                    std::this_thread::yield();
+                    continue;
+                }
+
+                const auto index = static_cast<int>(out.paramID) - 1;
+                if (index < 0 || index >= kProducers * kPerProducer)
+                {
+                    integrityOk = false;
+                    continue;
+                }
+
+                const int producer = index / kPerProducer;
+                const int n = index % kPerProducer;
+                if (receivedPerProducer[producer] != n
+                    || out.source != ChangeSource::Plugin
+                    || out.kind != (n % 3 == 0 ? Queue::EventKind::GestureBegin
+                                  : n % 3 == 1 ? Queue::EventKind::ValueChange
+                                               : Queue::EventKind::GestureEnd)
+                    || out.ppqAtCapture != producer * 100000.0 + n
+                    || std::abs(out.normalizedValue - (static_cast<float>(n) / kPerProducer)) > 1.0e-6f)
+                    integrityOk = false;
+
+                ++receivedPerProducer[producer];
+                ++received;
+            }
+
+            // All writers eventually finish because this is a bounded test.
+            // Any timeout is a real regression: drain remaining slots first
+            // so writers can finish, then report the timeout as a failure.
+            if (received < kProducers * kPerProducer)
+            {
+                const auto rescueDeadline = juce::Time::getMillisecondCounterHiRes() + 5000.0;
+                while (finished.load(std::memory_order_acquire) < kProducers
+                       && juce::Time::getMillisecondCounterHiRes() < rescueDeadline)
+                {
+                    Event out;
+                    if (!q->pop(out))
+                        std::this_thread::yield();
+                }
+            }
+            abort.store(true, std::memory_order_release);
+            for (auto& t : producers)
+                t.join();
+
+            expectEquals(received, kProducers * kPerProducer,
+                         "all gesture events must be consumed exactly once");
+            expect(integrityOk, "consumer observed a missing, reordered or partially written gesture");
+            Event out;
+            expect(!q->pop(out), "queue must be empty after all concurrent producers finish");
+        }
+    }
+};
+
+static AutomationGestureQueueMpscTests automationGestureQueueMpscTests;
