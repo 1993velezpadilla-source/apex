@@ -923,3 +923,121 @@ public:
 };
 
 static AutomationLoopRewindTests automationLoopRewindTests;
+
+/**
+    A Punch-Out is a record-arm falling edge while transport keeps rolling.
+    It must finalize the currently recorded value at the punch boundary,
+    clear Latch, and exclude gesture events pending from the old arm epoch.
+    Punch-In must start an independent new session without restarting Play.
+*/
+class AutomationPunchArmBoundaryTests final : public juce::UnitTest
+{
+public:
+    AutomationPunchArmBoundaryTests()
+        : juce::UnitTest("automation.punch-record-arm-boundary.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76005;
+
+        for (const auto mode : { AutomationMode::Latch,
+                                 AutomationMode::Write,
+                                 AutomationMode::Touch })
+        {
+            const juce::String modeName =
+                mode == AutomationMode::Latch ? "Latch"
+                : mode == AutomationMode::Write ? "Write" : "Touch";
+            beginTest(modeName + ": Punch-Out finalizes old take and drops stale events");
+
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arms;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* param = registry.createParameter(id, "Punch boundary probe", ParameterRange{});
+            expect(param != nullptr, "fixture parameter registered");
+            if (param == nullptr) return;
+
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.1f, CurveType::Linear, 0.0f},
+                {2.0, 0.3f, CurveType::Linear, 0.0f},
+                {4.0, 0.7f, CurveType::Linear, 0.0f},
+                {6.0, 0.9f, CurveType::Linear, 0.0f}
+            });
+            modes.setMode(id, mode);
+            arms.setRecordArmed(true);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+
+            auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                               double ppq, float value)
+            {
+                AutomationGestureQueue::Event e;
+                e.paramID = id;
+                e.kind = kind;
+                e.source = ChangeSource::User;
+                e.ppqAtCapture = ppq;
+                e.normalizedValue = value;
+                return queue->push(e);
+            };
+            if (mode != AutomationMode::Write)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.5, 0.2f));
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.0, 0.8f));
+            if (mode == AutomationMode::Latch || mode == AutomationMode::Write)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 2.25, 0.8f));
+            recorder.drainForTests();
+
+            if (mode != AutomationMode::Touch)
+                expect(modes.latchHeldRT(id), "Latch or Write holds after release");
+
+            // Play continues. The queued .95 belongs to the previous arm
+            // interval; a falling arm edge must not record it.
+            clock.publishFromAudioThread(3.0, 0.001, true);
+            arms.setRecordArmed(false);
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.8, 0.95f));
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Punch-Out clears held value");
+            expect(!arms.isRecordArmed(), "transport remains disarmed");
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "committed automation lane exists");
+            if (lane == nullptr) return;
+            auto snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "Punch-Out saved points");
+            if (snap == nullptr || snap->empty()) return;
+
+            const float punchValue = mode == AutomationMode::Touch ? 0.5f : 0.8f;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                      punchValue, 1.0e-5f,
+                                      "Punch-Out commits correct boundary without stale .95");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                      0.7f, 1.0e-5f,
+                                      "original automation following Punch-Out preserved");
+
+            beginTest(modeName + ": Punch-In starts independently without stopping transport");
+            arms.setRecordArmed(true);
+            recorder.drainForTests();
+            if (mode != AutomationMode::Write)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
+            if (mode == AutomationMode::Touch)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 5.0, 0.25f));
+            recorder.drainForTests();
+
+            snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "second take recorded");
+            if (snap == nullptr || snap->empty()) return;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
+                                      0.25f, 1.0e-5f,
+                                      "second armed interval writes to a fresh session");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                      0.8f, 1.0e-5f,
+                                      "second take cannot corrupt earlier recorded interval");
+        }
+    }
+};
+
+static AutomationPunchArmBoundaryTests automationPunchArmBoundaryTests;
