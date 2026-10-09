@@ -1425,3 +1425,97 @@ public:
 };
 
 static AutomationTrimCapturedGestureTests automationTrimCapturedGestureTests;
+
+/**
+    Native parameter listeners receive UI dispatcher notifications later.
+    The timestamp must be captured by the original control operation, not
+    rounded up to dispatcher time, for begin, value and gesture end.
+*/
+class AutomationNativeCapturePPQTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeCapturePPQTests()
+        : juce::UnitTest("automation.native-gesture-timestamp-capture.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76010;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Delayed capture clock probe", ParameterRange{});
+        expect(param != nullptr, "native parameter registered");
+        if (param == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        param->writeValue(0.2f, ChangeSource::Automation);
+        modes.setMode(id, AutomationMode::Trim);
+        arms.setRecordArmed(true);
+
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*param);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        beginTest("native begin and value timestamps survive 60 Hz notification delay");
+        param->beginGesture(); // Actual PPQ 1.0, normalized .2
+        clock.publishFromAudioThread(1.25, 0.001, true);
+        param->setValueFromUser(0.4f); // Actual PPQ 1.25
+        // Deliberately defer both notifications to a later PPQ.
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        param->dispatchPendingNotifications(0.4f, ChangeSource::User);
+        expectWithinAbsoluteError(param->getCapturedGestureBeginPPQ(), 1.0,
+                                  1.0e-8, "begin PPQ is not notification PPQ");
+        expectWithinAbsoluteError(param->getCapturedValueChangePPQ(), 1.25,
+                                  1.0e-8, "value PPQ is not notification PPQ");
+        recorder.drainForTests();
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "Trim recording created the lane");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "captured points published");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.25),
+                                  0.425f, 1.0e-5f,
+                                  "source at true movement time +.2");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 0.5),
+                                  0.15f, 1.0e-5f,
+                                  "original section before touch survives");
+
+        beginTest("native GestureEnd PPQ does not shift to delayed notification time");
+        clock.publishFromAudioThread(4.0, 0.001, true);
+        param->endGesture(); // Actual PPQ 4.0
+        clock.publishFromAudioThread(5.0, 0.001, true);
+        param->dispatchPendingNotifications(0.4f, ChangeSource::User);
+        expectWithinAbsoluteError(param->getCapturedGestureEndPPQ(), 4.0,
+                                  1.0e-8, "release PPQ is not notification PPQ");
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "release points committed");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                  0.5f, 1.0e-5f,
+                                  "underlying knot remains offset until real release");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                  0.7f, 1.0e-5f,
+                                  "rejoins source curve at real end PPQ 4");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.5),
+                                  0.75f, 1.0e-5f,
+                                  "automation after actual release is untouched");
+
+        bridge.detachFromParameter(id);
+    }
+};
+
+static AutomationNativeCapturePPQTests automationNativeCapturePPQTests;
