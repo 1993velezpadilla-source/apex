@@ -435,9 +435,17 @@ namespace apex::automation
                 std::stable_sort (working.begin(), working.end());
             }
 
-            const auto simplified = simplify (working, kSimplifyEpsilon);
-            for (const auto& bp : simplified)
-                merged.push_back (bp);
+            // Trim's imported source knots are structural: RDP only
+            // measures linear value error and may delete a Hold/Smooth
+            // breakpoint whose curve type matters for playback.
+            // Keep them all in Trim; ordinary Touch/Write/Latch retain RDP.
+            if (session != nullptr && session->mode == AutomationMode::Trim)
+                merged.insert (merged.end(), working.begin(), working.end());
+            else
+            {
+                const auto simplified = simplify (working, kSimplifyEpsilon);
+                merged.insert (merged.end(), simplified.begin(), simplified.end());
+            }
             lane.replacePoints (std::move (merged));
         }
 
