@@ -7,6 +7,7 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <memory>
+#include <cmath>
 
 namespace apex::automation
 {
@@ -49,6 +50,7 @@ namespace apex::automation
             if (nativeListeners.count (id)) return;
 
             auto lst = std::make_unique<NativeListener> (queue, clock, id);
+            p.bindGestureCaptureClock (&clock);
             p.addListener (lst.get());
             nativeListeners.emplace (id, std::move (lst));
         }
@@ -58,7 +60,10 @@ namespace apex::automation
             auto it = nativeListeners.find (id);
             if (it == nativeListeners.end()) return;
             if (auto* p = registry.find (id))
+            {
                 p->removeListener (it->second.get());
+                p->unbindGestureCaptureClock (&clock);
+            }
             nativeListeners.erase (it);
         }
 
@@ -66,7 +71,10 @@ namespace apex::automation
         {
             for (auto& [id, lst] : nativeListeners)
                 if (auto* p = registry.find (id))
+                {
                     p->removeListener (lst.get());
+                    p->unbindGestureCaptureClock (&clock);
+                }
             nativeListeners.clear();
         }
 
@@ -178,7 +186,7 @@ namespace apex::automation
                             ParameterID             id)
                 : queue (q), clock (c), paramID (id) {}
 
-            void parameterValueChanged (AutomationParameter&,
+            void parameterValueChanged (AutomationParameter& p,
                                         float        newNormalized,
                                         ChangeSource source) override
             {
@@ -190,7 +198,9 @@ namespace apex::automation
                 e.kind            = AutomationGestureQueue::EventKind::ValueChange;
                 e.source          = source;
                 e.normalizedValue = newNormalized;
-                e.ppqAtCapture    = clock.snapshot().blockStartPPQ;
+                const double capturedPPQ = p.getCapturedValueChangePPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
                 queue.push (e);
             }
 
@@ -204,17 +214,21 @@ namespace apex::automation
                 // Use the snapshot taken in AutomationParameter::beginGesture.
                 e.normalizedValue  = p.getValueAtGestureBegin();
                 e.hasStartValue    = true;
-                e.ppqAtCapture     = clock.snapshot().blockStartPPQ;
+                const double capturedPPQ = p.getCapturedGestureBeginPPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
                 queue.push (e);
             }
 
-            void parameterGestureEnded (AutomationParameter&) override
+            void parameterGestureEnded (AutomationParameter& p) override
             {
                 AutomationGestureQueue::Event e;
                 e.paramID      = paramID;
                 e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
                 e.source       = ChangeSource::User;
-                e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+                const double capturedPPQ = p.getCapturedGestureEndPPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
                 queue.push (e);
             }
 
