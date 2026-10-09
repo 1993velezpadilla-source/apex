@@ -5,6 +5,7 @@
 #include "LastTouchedPluginParameterCore.h"
 #include "../Automation/AutomationLaneStoreCore.h"
 #include "../Automation/AutomationTransportStateCore.h"
+#include "../Automation/AutomationClockCore.h"
 #include "../Automation/AutomationParameterKeyCore.h"
 
 namespace DAW {
@@ -24,6 +25,7 @@ class PluginAutomationRecorderCore
 public:
     using IsPlayingFn = std::function<bool()>;
     using PositionFn = std::function<int64_t()>;
+    using SampleRateFn = std::function<double()>;
     using LaneWrittenFn = std::function<void(const LastTouchedPluginParameter&, const juce::String&)>;
 
     void setSubsystems(AutomationManagerCore* automationManager,
@@ -35,6 +37,13 @@ public:
         gestureCore_ = gestureCore;
         isPlaying_ = std::move(isPlaying);
         position_ = std::move(position);
+    }
+
+    // ApplicationCore supplies the active device sample rate. No fixed
+    // 44.1 kHz assumption when throttling plugin parameter writing.
+    void setSampleRateProvider(SampleRateFn provider)
+    {
+        sampleRate_ = std::move(provider);
     }
 
     void start60Hz() { startTimerHz(60); }
@@ -107,7 +116,7 @@ public:
         coreLane.setParameterName(target.pluginDisplayName + " / " + target.parameterName);
         coreLane.setVisible(true);
         automationManager_->addOrReplacePoint(target.trackId, parameterId, timeSamples, target.normalizedValue, false);
-        mirrorToApexLane(target, timeSamples);
+        mirrorToApexLane(target);
         automationManager_->publishSnapshot();
         markWritten(target, timeSamples);
         notifyLaneWritten(target, parameterId);
@@ -132,14 +141,15 @@ private:
                 continue;
 
             const auto key = PluginAutomationGestureCore::makeKey(target);
-            if (!firstPointWritten_.count(key) || shouldWritePoint(target, timeSamples, 1000.0 / 60.0))
+            const double activeSampleRate = sampleRate_ ? sampleRate_() : 0.0;
+            if (!firstPointWritten_.count(key) || shouldWritePoint(target, timeSamples, activeSampleRate))
             {
                 const auto parameterId = AutomationManagerCore::makePluginParameterId(target);
                 auto& coreLane = automationManager_->getOrCreateLane(target.trackId, parameterId);
                 coreLane.setParameterName(target.pluginDisplayName + " / " + target.parameterName);
                 coreLane.setVisible(true);
                 automationManager_->addOrReplacePoint(target.trackId, parameterId, timeSamples, target.normalizedValue, true);
-                mirrorToApexLane(target, timeSamples);
+                mirrorToApexLane(target);
                 firstPointWritten_.insert(key);
                 markWritten(target, timeSamples);
                 if (++frameCounter_ % 4 == 0)
@@ -154,6 +164,7 @@ private:
     PluginAutomationGestureCore* gestureCore_ = nullptr;
     IsPlayingFn isPlaying_;
     PositionFn position_;
+    SampleRateFn sampleRate_;
     LaneWrittenFn onLaneWritten_;
     std::set<juce::String> firstPointWritten_;
     int frameCounter_ = 0;
@@ -163,20 +174,26 @@ private:
     int64_t lastWriteTimeSamples_ = std::numeric_limits<int64_t>::min();
     float lastWriteValue_ = 0.0f;
 
-    void mirrorToApexLane(const LastTouchedPluginParameter& target, int64_t timeSamples)
+    void mirrorToApexLane(const LastTouchedPluginParameter& target)
     {
         if (!target.isValid())
             return;
 
-        constexpr double fallbackSampleRate = 44100.0;
-        constexpr double fallbackBpm = 120.0;
+        // The audio engine publishes the actual transport PPQ every block
+        // using the live project tempo/sample rate. Mirror to the SAME PPQ
+        // clock as the automation evaluator: converting raw sample positions
+        // using fixed 44100/120 shifted recorded plugin curves on 48 kHz
+        // devices and projects with a different tempo.
+        const auto clock = apex::automation::AutomationClock::getInstance().snapshot();
+        if (!clock.transportRolling || !std::isfinite(clock.blockStartPPQ))
+            return;
         const auto key = apex::automation::AutomationParameterKeyRegistry::pluginParamKey(
             target.trackId, target.pluginSlotIndex, target.pluginDisplayName, target.parameterId);
         const auto id = apex::automation::AutomationParameterKeyRegistry::getInstance().getOrCreateID(key);
         auto& lane = apex::automation::AutomationLaneStore::getInstance().getOrCreateLane(id);
         auto snap = lane.getSnapshot();
         apex::automation::AutomationLane::PointVector next = snap ? *snap : apex::automation::AutomationLane::PointVector{};
-        const double ppq = ((double)timeSamples / fallbackSampleRate) * (fallbackBpm / 60.0);
+        const double ppq = clock.blockStartPPQ;
         const float value = juce::jlimit(0.0f, 1.0f, target.normalizedValue);
 
         for (auto& point : next)
