@@ -2283,6 +2283,12 @@ MainComponent::MainComponent()
         clipPropertiesWindow_->setClip(&clip, &appCore_.getAudioFileManager(), appCore_.getCurrentSampleRate());
         clipPropertiesWindow_->setKnownPlugins(&appCore_.getPluginScanner().getKnownPlugins());
         clipPropertiesWindow_->setClipRegionPluginCore(&appCore_.getClipRegionPluginCore());
+        clipPropertiesWindow_->getPanel().onClipFxChanged = [this]()
+        {
+            // Every successful bypass, remove, or reorder must enter the
+            // project's manual-save and autosave dirty pipeline.
+            appCore_.markProjectDirty("plugin_clip_fx_changed");
+        };
 
         // Do NOT activate automation mode here. Opening clip properties must
         // not switch the clip into the automation editor — that made every
@@ -2397,6 +2403,7 @@ MainComponent::MainComponent()
                 return;
             }
 
+            appCore_.markProjectDirty("plugin_clip_fx_added");
             auto entries = appCore_.getClipRegionPluginCore().getEntriesForClip(c.getID());
             if (entries.empty()) return;
             auto instanceId = entries.back().instanceId;
