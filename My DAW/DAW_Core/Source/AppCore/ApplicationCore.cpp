@@ -267,6 +267,7 @@ void ApplicationCore::initialize()
                                                 &pluginAutomationGestureCore_,
                                                 [this] { return transport_ != nullptr && transport_->isPlaying(); },
                                                 [this] { return transport_ != nullptr ? (int64_t)transport_->getPosition() : 0; });
+    pluginAutomationRecorderCore_.setSampleRateProvider([this] { return currentSampleRate_; });
     pluginAutomationRecorderCore_.setLaneWrittenCallback([this](const LastTouchedPluginParameter& target, const juce::String& parameterId)
     {
         if (trackManager_ == nullptr || !target.isValid())
