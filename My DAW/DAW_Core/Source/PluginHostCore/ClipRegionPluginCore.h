@@ -316,6 +316,29 @@ public:
             entry->bypassed.store (bypassed, std::memory_order_release);
     }
 
+    /** Move one clip's live processor to a new index without recreating it.
+     *  Called on the message thread. The audio thread reads a newly published
+     *  immutable ordering on its next block, while keeping every Entry alive.
+     */
+    bool moveEntry(const ClipID& clipId, int fromIndex, int toIndex)
+    {
+        auto it = entriesByClip_.find(clipId);
+        if (it == entriesByClip_.end())
+            return false;
+
+        auto& entries = it->second;
+        const int count = static_cast<int>(entries.size());
+        if (fromIndex < 0 || fromIndex >= count
+            || toIndex < 0 || toIndex >= count || fromIndex == toIndex)
+            return false;
+
+        auto moved = std::move(entries[static_cast<size_t>(fromIndex)]);
+        entries.erase(entries.begin() + fromIndex);
+        entries.insert(entries.begin() + toIndex, std::move(moved));
+        publishEntries();
+        return true;
+    }
+
     void removeEntry(const ClipID& clipId, const juce::String& instanceId)
     {
         auto it = entriesByClip_.find(clipId);
