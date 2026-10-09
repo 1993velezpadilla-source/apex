@@ -306,13 +306,16 @@ namespace apex::automation
             switch (e.kind)
             {
                 case AutomationGestureQueue::EventKind::GestureBegin:
-                    openSessionIfNeeded (*param, mode, e.ppqAtCapture);
+                    openSessionIfNeeded (*param, mode, e.ppqAtCapture,
+                                         e.hasStartValue ? e.normalizedValue
+                                                         : param->getNormalizedValue());
                     break;
 
                 case AutomationGestureQueue::EventKind::ValueChange:
                 {
                     if (mode == AutomationMode::Write)
-                        openSessionIfNeeded (*param, mode, e.ppqAtCapture);
+                        openSessionIfNeeded (*param, mode, e.ppqAtCapture,
+                                             param->getNormalizedValue());
 
                     auto it = sessions.find (e.paramID);
                     if (it == sessions.end() || ! it->second.open) break;
@@ -371,7 +374,8 @@ namespace apex::automation
 
         void openSessionIfNeeded (AutomationParameter& param,
                                   AutomationMode       mode,
-                                  double               atPPQ)
+                                  double               atPPQ,
+                                  float                gestureStartValue)
         {
             auto& s = sessions[param.getID()];
             if (s.open) return;
@@ -405,7 +409,9 @@ namespace apex::automation
             s.rawPoints.push_back ({ atPPQ, s.priorLaneValue,
                                      CurveType::Linear, 0.0f });
             s.lastValue = s.priorLaneValue;
-            s.trimGestureOrigin = param.getNormalizedValue();
+            // Do not read today's parameter value after the producer
+            // already wrote several drag values before recorder drain.
+            s.trimGestureOrigin = juce::jlimit (0.0f, 1.0f, gestureStartValue);
             s.trimLastOffset = 0.0f;
             s.trimOffsets.clear();
             if (mode == AutomationMode::Trim)
