@@ -820,3 +820,106 @@ public:
 };
 
 static AutomationTrimRelativeTests automationTrimRelativeTests;
+
+/**
+    Backward Playhead movement while transport stays rolling is a loop/seek
+    boundary, not a valid monotonic automation interval. One recorded session
+    must never bridge two musical positions from different loop passes.
+*/
+class AutomationLoopRewindTests final : public juce::UnitTest
+{
+public:
+    AutomationLoopRewindTests()
+        : juce::UnitTest("automation.loop-rewind-session-boundary.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76004;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Loop fence probe", ParameterRange{});
+        expect(param != nullptr, "parameter must register");
+        if (param == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {6.0, 0.7f, CurveType::Linear, 0.0f},
+            {8.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Latch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(4.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind, double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        beginTest("a Latch release is held within its own loop pass");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 5.0, 0.6f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 5.25, 0.8f));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 5.5, 0.8f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "Latch held in first pass");
+
+        clock.publishFromAudioThread(6.0, 0.001, true);
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "normal forward playback keeps Latch");
+
+        // Event captured before the wrap, but still pending when the message
+        // thread sees the new lap. Without loop identity it is ambiguous.
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 6.5, 0.95f));
+        beginTest("backward rolling seek fences old take, flushes ambiguous queue");
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(id),
+               "Latch release must not leak into a different loop pass");
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "recorded lane exists");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "first pass was committed");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 5.25),
+                                  0.8f, 1.0e-5f,
+                                  "first pass's recorded value remains");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.0),
+                                  0.2f, 1.0e-5f,
+                                  "a loop jump does not overwrite the earlier position");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 6.5),
+                                  0.75f, 1.0e-5f,
+                                  "ambiguous queued value is not written to another lap");
+
+        beginTest("fresh gesture after wrap records independently");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.25, 0.2f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.5, 0.35f));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 1.75, 0.35f));
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "second-pass lane persisted");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.5),
+                                  0.35f, 1.0e-5f,
+                                  "new loop-pass touch is recorded");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 5.25),
+                                  0.8f, 1.0e-5f,
+                                  "new pass does not corrupt previous captured range");
+    }
+};
+
+static AutomationLoopRewindTests automationLoopRewindTests;
