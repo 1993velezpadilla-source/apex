@@ -99,7 +99,11 @@ namespace apex::automation
 
         void handleTransportEdges()
         {
-            if (clock.consumeTransportStoppedEdge())
+            // One observation per timer tick: a separate Stop call followed
+            // by Start used to consume the Start transition before it could
+            // close/reset the recorder's previous session state.
+            const auto edges = clock.consumeTransportEdges();
+            if (edges.stopped)
             {
                 for (auto& [id, s] : sessions)
                     if (s.open) closeSession (s, true);
@@ -107,7 +111,7 @@ namespace apex::automation
                 modeState.clearAllLatches();
             }
 
-            if (clock.consumeTransportStartedEdge())
+            if (edges.started)
                 sessions.clear();
         }
 
