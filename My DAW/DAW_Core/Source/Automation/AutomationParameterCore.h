@@ -85,6 +85,13 @@ namespace apex::automation
             return gestureActive.load (std::memory_order_acquire);
         }
 
+        // The UI dispatcher can notify gesture listeners after multiple
+        // parameter value writes. Preserve the actual gesture-start value.
+        float getValueAtGestureBegin() const noexcept
+        {
+            return gestureBeginValueN.load (std::memory_order_acquire);
+        }
+
         // ----- Value writers ----------------------------------------------
 
         // Called by APEX UI widgets when the user drags/clicks the control.
@@ -124,6 +131,7 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (true, std::memory_order_acq_rel);
             if (! wasActive)
             {
+                gestureBeginValueN.store (getNormalizedValue(), std::memory_order_release);
                 pendingGestureBegin.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -216,6 +224,7 @@ namespace apex::automation
         std::atomic<float>         currentValueN       { 0.0f };
         std::atomic<std::uint64_t> version             { 0 };
         std::atomic<bool>          gestureActive       { false };
+        std::atomic<float>         gestureBeginValueN  { 0.0f };
         std::atomic<bool>          pendingGestureBegin { false };
         std::atomic<bool>          pendingGestureEnd   { false };
         std::atomic<std::uint8_t>  lastSource          {
