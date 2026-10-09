@@ -466,7 +466,18 @@ public:
             {
                 const TrackID src = result.created[0].trackId;
                 const TrackID dst = result.created[1].trackId;
-                auto* originalSend = h.sends.createSend(h.graph, src, dst, 0.75f);
+                h.sends.createSend(h.graph, src, dst, 0.75f);
+                auto* sourceNode = h.graph.getNodeByTrackId(src);
+                auto* destinationNode = h.graph.getNodeByTrackId(dst);
+                DAW::RoutingConnection* originalSend = nullptr;
+                if (sourceNode != nullptr && destinationNode != nullptr)
+                    for (auto* conn : h.graph.getOutputConnections(sourceNode->id))
+                        if (conn != nullptr && conn->destNodeId == destinationNode->id
+                            && DAW::BubblegumSendStateCore::isSendConnection(conn->type))
+                        {
+                            originalSend = conn;
+                            break;
+                        }
                 expect(originalSend != nullptr, "fixture must contain a send");
 
                 if (originalSend != nullptr)
