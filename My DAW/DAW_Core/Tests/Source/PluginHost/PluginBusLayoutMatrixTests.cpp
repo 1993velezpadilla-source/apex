@@ -1986,6 +1986,26 @@ public:
         expect(!reinstalled.restoreProjectState(retained, formatManager,
                     [](const DAW::ClipID&) { return false; }, error));
         expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+
+        beginTest("deleting one clip releases only its FX and preserves other clips");
+        const DAW::ClipID otherClipId = "roundtrip_clip_B";
+        auto another = reinstalled.loadForClip(
+            otherClipId, makeDescription(*makeSpecForUid(kUidStereo)), formatManager);
+        expect(another.success, another.message);
+        reinstalled.removeAllEntriesForClip(clipId);
+        expect(reinstalled.getEntriesForClip(clipId).empty());
+        expect(!reinstalled.hasPluginsForClip(clipId));
+        expect(reinstalled.hasPluginsForClip(otherClipId));
+        if (another.success)
+            expect(reinstalled.findEntryById(otherClipId,
+                reinstalled.getEntriesForClip(otherClipId)[0].instanceId)->instance != nullptr);
+        juce::ValueTree surviving;
+        expect(reinstalled.captureProjectState(surviving, error), error);
+        expectEquals(surviving.getNumChildren(), 1,
+                     "deleted clip FX must not remain in the saved project");
+        if (surviving.getNumChildren() == 1)
+            expectEquals(surviving.getChild(0).getProperty("clipId").toString(), otherClipId);
+
         original.releaseResources();
         reopened.releaseResources();
         missingHost.releaseResources();
