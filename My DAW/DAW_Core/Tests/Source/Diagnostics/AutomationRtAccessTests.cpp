@@ -1742,3 +1742,91 @@ public:
 };
 
 static AutomationHiddenTransportTurnaroundTests automationHiddenTransportTurnaroundTests;
+
+/**
+    Hosted AudioProcessor parameter notifications can arrive on an audio
+    thread while the message thread attaches, detaches or remaps a plugin.
+    A mutable unordered_map lookup in that callback is a C++ data race and
+    can invalidate the map while a reader is inside find().
+*/
+class AutomationPluginBridgeSnapshotTests final : public juce::UnitTest
+{
+public:
+    AutomationPluginBridgeSnapshotTests()
+        : juce::UnitTest("automation.hosted-plugin-bridge-snapshot.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID firstID = 76013, secondID = 76014;
+        AutomationParameterRegistry registry;
+        AutomationClock clock;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        juce::AudioProcessorGraph processor;
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+
+        beginTest("hosted plugin mapping publishes before callback registration");
+        bridge.attachToPlugin(processor, {{3, firstID}});
+        bridge.audioProcessorParameterChanged(&processor, 3, 0.3f);
+        AutomationGestureQueue::Event event;
+        expect(queue->pop(event), "registered plugin maps its callback");
+        expectEquals(static_cast<int>(event.paramID),
+                     static_cast<int>(firstID), "initial parameter identity");
+        bridge.audioProcessorParameterChanged(&processor, 4, 0.3f);
+        expect(!queue->pop(event), "unknown index does not create an event");
+
+        beginTest("concurrent callbacks see only complete immutable bindings");
+        std::atomic<bool> start { false };
+        std::atomic<int> callbackCount { 0 };
+        std::thread callbackThread([&]
+        {
+            while (!start.load(std::memory_order_acquire)) {}
+            for (int i = 0; i < 10000; ++i)
+            {
+                bridge.audioProcessorParameterChanged(&processor, 3, 0.5f);
+                callbackCount.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+
+        start.store(true, std::memory_order_release);
+        for (int i = 0; i < 192; ++i)
+        {
+            if ((i % 7) == 0)
+                bridge.detachFromPlugin(processor);
+            else
+                bridge.attachToPlugin(processor,
+                    {{3, (i % 2) == 0 ? firstID : secondID}});
+        }
+
+        callbackThread.join();
+        expect(callbackCount.load(std::memory_order_relaxed) == 10000,
+               "every producer callback returned without data races");
+        int consumed = 0;
+        bool badID = false;
+        while (queue->pop(event))
+        {
+            ++consumed;
+            if (event.paramID != firstID && event.paramID != secondID)
+                badID = true;
+        }
+        expect(!badID, "callback sees only complete published mappings");
+        expect(consumed > 0, "at least one mapping produced events");
+
+        beginTest("fully detached plugin callback is safely ignored");
+        bridge.detachFromPlugin(processor);
+        bridge.audioProcessorParameterChanged(&processor, 3, 0.7f);
+        expect(!queue->pop(event), "detached plugin has no published mapping");
+        bridge.attachToPlugin(processor, {{3, secondID}});
+        bridge.audioProcessorParameterChanged(&processor, 3, 0.8f);
+        expect(queue->pop(event), "reattached plugin can record again");
+        expectEquals(static_cast<int>(event.paramID),
+                     static_cast<int>(secondID), "remapped identity is current");
+        bridge.detachFromAllPlugins();
+        bridge.audioProcessorParameterChanged(&processor, 3, 0.9f);
+        expect(!queue->pop(event), "detachAll withdraws all mappings");
+    }
+};
+
+static AutomationPluginBridgeSnapshotTests automationPluginBridgeSnapshotTests;
