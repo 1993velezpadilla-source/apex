@@ -1830,3 +1830,128 @@ public:
 };
 
 static AutomationPluginBridgeSnapshotTests automationPluginBridgeSnapshotTests;
+
+/**
+    Changing a parameter from Touch/Trim/Latch into Read while Play remains
+    active must terminate the previous recording session, including when no
+    further GestureEnd / ValueChange arrives. Queued events from an unknown
+    mode epoch must never cause a stale session to be reopened accidentally.
+*/
+class AutomationModeSwitchFenceTests final : public juce::UnitTest
+{
+public:
+    AutomationModeSwitchFenceTests()
+        : juce::UnitTest("automation.mode-switch-session-fence.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        for (const auto mode : { AutomationMode::Touch,
+                                 AutomationMode::Trim,
+                                 AutomationMode::Latch,
+                                 AutomationMode::Write })
+        {
+            const juce::String modeName =
+                mode == AutomationMode::Touch ? "Touch" :
+                mode == AutomationMode::Trim ? "Trim" :
+                mode == AutomationMode::Latch ? "Latch" : "Write";
+            beginTest(modeName + " -> Read during rolling Play");
+
+            constexpr ParameterID id = 76015;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arms;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* param = registry.createParameter(id, "Mode switch probe", ParameterRange{});
+            expect(param != nullptr, "fixture parameter exists");
+            if (param == nullptr) return;
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.1f, CurveType::Linear, 0.0f},
+                {2.0, 0.3f, CurveType::Linear, 0.0f},
+                {4.0, 0.7f, CurveType::Linear, 0.0f},
+                {6.0, 0.9f, CurveType::Linear, 0.0f}
+            });
+
+            param->writeValue(0.2f, ChangeSource::Automation);
+            modes.setMode(id, mode);
+            arms.setRecordArmed(true);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+
+            auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                               double ppq, float value)
+            {
+                AutomationGestureQueue::Event e;
+                e.paramID = id;
+                e.kind = kind;
+                e.source = ChangeSource::User;
+                e.ppqAtCapture = ppq;
+                e.normalizedValue = value;
+                if (kind == AutomationGestureQueue::EventKind::GestureBegin)
+                    e.hasStartValue = true;
+                return queue->push(e);
+            };
+
+            if (mode != AutomationMode::Write)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin,
+                               1.0, 0.2f));
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                           1.25, mode == AutomationMode::Trim ? 0.4f : 0.8f));
+            if (mode == AutomationMode::Latch || mode == AutomationMode::Write)
+                expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd,
+                               1.5, 0.8f));
+            recorder.drainForTests();
+
+            if (mode == AutomationMode::Latch || mode == AutomationMode::Write)
+                expect(modes.latchHeldRT(id), "writing mode retains last value");
+
+            clock.publishFromAudioThread(3.0, 0.001, true);
+            modes.setMode(id, AutomationMode::Read);
+            // These events cannot be attributed to either mode without a
+            // producer-side mode epoch. Discard them at the mode boundary.
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                           2.75, 0.95f));
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "switch to Read clears retained value");
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "lane exists");
+            if (lane == nullptr) return;
+            auto snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "lane committed");
+            if (snap == nullptr || snap->empty()) return;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 0.5),
+                                      0.15f, 1.0e-5f,
+                                      "pre-gesture source curve preserved");
+            const float writtenAtTwo = mode == AutomationMode::Trim ? 0.5f : 0.8f;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                      writtenAtTwo, 1.0e-5f,
+                                      "active gesture preserved through mode boundary");
+            const float writtenAtBoundary =
+                (mode == AutomationMode::Touch || mode == AutomationMode::Trim)
+                    ? 0.5f : 0.8f;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                      writtenAtBoundary, 1.0e-5f,
+                                      "old session ended at observed mode switch PPQ");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                      0.7f, 1.0e-5f,
+                                      "future source automation remains untouched");
+
+            beginTest(modeName + " -> Read: stale events cannot write further");
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                           4.5, 0.99f));
+            recorder.drainForTests();
+            snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "Read keeps existing lane");
+            if (snap == nullptr || snap->empty()) return;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.5),
+                                      0.75f, 1.0e-5f,
+                                      "Read mode does not append stale automation");
+        }
+    }
+};
+
+static AutomationModeSwitchFenceTests automationModeSwitchFenceTests;
