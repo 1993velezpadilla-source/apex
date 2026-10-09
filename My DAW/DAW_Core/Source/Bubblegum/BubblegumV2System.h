@@ -162,7 +162,7 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
 
         for (auto* conn : routingGraph->getAllConnections())
         {
-            if (conn == nullptr || conn->type != ConnectionType::Send)
+            if (conn == nullptr || !BubblegumSendStateCore::isSendConnection(conn->type))
                 continue;
 
             auto* srcNode = routingGraph->getNode(conn->sourceNodeId);
@@ -253,7 +253,7 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
         RoutingConnection* sendConn = nullptr;
         for (auto* conn : routingGraph->getOutputConnections(srcNode->id))
         {
-            if (conn != nullptr && conn->destNodeId == dstNode->id && conn->type == ConnectionType::Send)
+            if (conn != nullptr && conn->destNodeId == dstNode->id && BubblegumSendStateCore::isSendConnection(conn->type))
             {
                 sendConn = conn;
                 break;
@@ -312,7 +312,7 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
         RoutingConnection* sendConn = nullptr;
         for (auto* conn : routingGraph->getOutputConnections(srcNode->id))
         {
-            if (conn != nullptr && conn->destNodeId == dstNode->id && conn->type == ConnectionType::Send)
+            if (conn != nullptr && conn->destNodeId == dstNode->id && BubblegumSendStateCore::isSendConnection(conn->type))
             {
                 sendConn = conn;
                 break;
