@@ -112,7 +112,16 @@ namespace apex::automation
             }
 
             if (edges.started)
+            {
+                // A Stop/Play turnaround between 90 Hz recorder ticks may
+                // hide the intermediate Stop. Commit any buffered points
+                // before resetting the take, and never carry Latch across
+                // a new transport start.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession(session, true);
                 sessions.clear();
+                modeState.clearAllLatches();
+            }
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)
