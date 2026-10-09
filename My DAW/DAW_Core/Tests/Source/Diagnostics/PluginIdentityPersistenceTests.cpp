@@ -2,6 +2,7 @@
 #include "../../../Source/PluginScanCore/PluginScanResultCore.h"
 #include "../../../Source/PluginStorageCore/PluginCacheCore.h"
 #include "../../../Source/PluginStorageCore/PluginDescriptionPersistenceCore.h"
+#include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 
 class PluginIdentityPersistenceTests final : public juce::UnitTest
 {
@@ -91,6 +92,58 @@ public:
             expectEquals(restored.deprecatedUid, source.deprecatedUid);
             expectEquals((int) tree.getProperty("identitySchemaVersion"),
                          DAW::PluginDescriptionPersistenceCore::currentIdentitySchemaVersion);
+        }
+
+        beginTest("copying a clip preserves missing plugin FX and opaque presets");
+        {
+            juce::ScopedJuceInitialiser_GUI gui;
+            juce::PluginDescription description;
+            description.name = "Unavailable Clip FX";
+            description.pluginFormatName = "UnavailableTestFormat";
+            description.fileOrIdentifier = "missing-plugin-123";
+            juce::ValueTree root("ClipRegionPlugins");
+            juce::ValueTree clip("ClipFxClip");
+            clip.setProperty("clipId", "missing-source", nullptr);
+            for (int i = 0; i < 2; ++i)
+            {
+                juce::ValueTree slot("ClipFxSlot");
+                slot.setProperty("instanceId", "original-" + juce::String(i), nullptr);
+                slot.setProperty("bypassed", i == 1, nullptr);
+                slot.addChild(DAW::PluginDescriptionPersistenceCore::toValueTree(description), -1, nullptr);
+                juce::ValueTree state("State");
+                const juce::uint32 marker = i == 0 ? 0x12345678u : 0x456789abu;
+                state.setProperty("data", juce::Base64::toBase64(&marker, sizeof(marker)), nullptr);
+                slot.addChild(state, -1, nullptr);
+                clip.addChild(slot, -1, nullptr);
+            }
+            root.addChild(clip, -1, nullptr);
+
+            juce::AudioPluginFormatManager noPlugins;
+            DAW::ClipRegionPluginCore fx;
+            fx.prepare(48000.0, 128);
+            juce::String diagnostic;
+            expect(fx.restoreProjectState(root, noPlugins,
+                [](const DAW::ClipID& id) { return id == "missing-source"; }, diagnostic));
+            expectEquals(static_cast<int>(fx.captureClipState("missing-source").size()), 2);
+            expect(fx.cloneClipState("missing-source", "missing-copy", noPlugins));
+            const auto source = fx.captureClipState("missing-source");
+            const auto copied = fx.captureClipState("missing-copy");
+            expectEquals(static_cast<int>(copied.size()), 2);
+            if (source.size() == 2 && copied.size() == 2)
+            {
+                for (size_t i = 0; i < 2; ++i)
+                {
+                    expect(source[i].unresolved && copied[i].unresolved);
+                    expectEquals(copied[i].state.toBase64Encoding(),
+                                 source[i].state.toBase64Encoding());
+                    expect(copied[i].instanceId != source[i].instanceId);
+                    expectEquals((int) copied[i].bypassed, (int) source[i].bypassed);
+                }
+            }
+            juce::ValueTree persisted;
+            expect(fx.captureProjectState(persisted, diagnostic), diagnostic);
+            expectEquals(persisted.getNumChildren(), 2);
+            fx.releaseResources();
         }
 
         beginTest("legacy version-6 description keeps old uniqueId meaning");
