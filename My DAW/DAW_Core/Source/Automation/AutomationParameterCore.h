@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <limits>
+#include <cmath>
 
 namespace apex::automation
 {
@@ -129,6 +130,7 @@ namespace apex::automation
         // Called by APEX UI widgets when the user drags/clicks the control.
         void setValueFromUser (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
             latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
             writeValue (newNormalized, ChangeSource::User);
             forwardToPluginIfBound (newNormalized);
@@ -138,6 +140,7 @@ namespace apex::automation
         // playback. MUST be lock-free and allocation-free.
         void setValueFromAutomation (float newNormalized) noexcept
         {
+            if (!std::isfinite (newNormalized)) return;
             writeValue (newNormalized, ChangeSource::Automation);
             if (auto* p = pluginParam.load (std::memory_order_acquire))
                 p->setValue (std::clamp (newNormalized, 0.0f, 1.0f));
@@ -147,6 +150,7 @@ namespace apex::automation
         // the parameter itself.
         void setValueFromPlugin (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
             latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
             writeValue (newNormalized, ChangeSource::Plugin);
         }
@@ -154,6 +158,7 @@ namespace apex::automation
         // For preset loads, undo, scripted assignment, etc.
         void setValueProgrammatic (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
             writeValue (newNormalized, ChangeSource::Programmatic);
             forwardToPluginIfBound (newNormalized);
         }
@@ -236,6 +241,9 @@ namespace apex::automation
         // PluginInstanceCore::applyAutomationAtSample.
         void writeValue (float newNormalized, ChangeSource src) noexcept
         {
+            // std::clamp and jlimit do not sanitize NaN; malformed hosted
+            // plugin values must never poison realtime parameter atomics.
+            if (!std::isfinite (newNormalized)) return;
             newNormalized = std::clamp (newNormalized, 0.0f, 1.0f);
             currentValueN.store (newNormalized, std::memory_order_release);
             lastSource.store (static_cast<std::uint8_t> (src),
@@ -245,6 +253,7 @@ namespace apex::automation
 
         void forwardToPluginIfBound (float newNormalized) noexcept
         {
+            if (!std::isfinite (newNormalized)) return;
             if (auto* p = pluginParam.load (std::memory_order_acquire))
                 p->setValueNotifyingHost (std::clamp (newNormalized, 0.0f, 1.0f));
         }
