@@ -1955,3 +1955,114 @@ public:
 };
 
 static AutomationModeSwitchFenceTests automationModeSwitchFenceTests;
+
+/**
+    When two parameters are automated simultaneously, switching mode on one
+    parameter must not erase pending gestures for the other parameter.
+    Global queue drain on any mode change silently loses unrelated takes.
+*/
+class AutomationModeSwitchIsolationTests final : public juce::UnitTest
+{
+public:
+    AutomationModeSwitchIsolationTests()
+        : juce::UnitTest("automation.mode-switch-per-param-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID latchID = 76016, touchID = 76017;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* latchParam = registry.createParameter(
+            latchID, "Mode switch Latch", ParameterRange{});
+        auto* touchParam = registry.createParameter(
+            touchID, "Unrelated Touch", ParameterRange{});
+        expect(latchParam != nullptr && touchParam != nullptr,
+               "two independent parameters registered");
+        if (latchParam == nullptr || touchParam == nullptr) return;
+
+        const auto original = std::vector<Breakpoint>{
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        };
+        lanes.getOrCreateLane(latchID).replacePoints(original);
+        lanes.getOrCreateLane(touchID).replacePoints(original);
+        modes.setMode(latchID, AutomationMode::Latch);
+        modes.setMode(touchID, AutomationMode::Touch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto push = [&](ParameterID id, AutomationGestureQueue::EventKind kind,
+                        double ppq, float value)
+        {
+            AutomationGestureQueue::Event event;
+            event.paramID = id;
+            event.kind = kind;
+            event.source = ChangeSource::User;
+            event.ppqAtCapture = ppq;
+            event.normalizedValue = value;
+            return queue->push(event);
+        };
+
+        beginTest("two live sessions share the recorder");
+        expect(push(latchID, AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+        expect(push(latchID, AutomationGestureQueue::EventKind::ValueChange, 1.25, 0.8f));
+        expect(push(latchID, AutomationGestureQueue::EventKind::GestureEnd, 1.5, 0.8f));
+        expect(push(touchID, AutomationGestureQueue::EventKind::GestureBegin, 1.5, 0.2f));
+        expect(push(touchID, AutomationGestureQueue::EventKind::ValueChange, 2.0, 0.9f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(latchID), "Latch session held");
+
+        beginTest("Latch -> Read must not discard Touch events queued this tick");
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        modes.setMode(latchID, AutomationMode::Read);
+        expect(push(latchID, AutomationGestureQueue::EventKind::ValueChange,
+                    2.75, 0.95f)); // Stale event from switched mode.
+        expect(push(touchID, AutomationGestureQueue::EventKind::ValueChange,
+                    2.75, 0.45f)); // Must still record.
+        recorder.drainForTests();
+
+        expect(!modes.latchHeldRT(latchID), "Latch released by mode switch");
+        auto left = lanes.findLane(latchID);
+        auto right = lanes.findLane(touchID);
+        expect(left != nullptr && right != nullptr, "both lanes persist");
+        if (left == nullptr || right == nullptr) return;
+        auto leftSnap = left->getSnapshot(), rightSnap = right->getSnapshot();
+        expect(leftSnap != nullptr && rightSnap != nullptr, "both curves published");
+        if (leftSnap == nullptr || rightSnap == nullptr) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*leftSnap, 4.0),
+                                  0.7f, 1.0e-5f,
+                                  "stale Latch event cannot overwrite future source");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*rightSnap, 2.75),
+                                  0.45f, 1.0e-5f,
+                                  "unrelated Touch value survives the mode boundary");
+
+        beginTest("unrelated Touch session can finish normally afterwards");
+        expect(push(touchID, AutomationGestureQueue::EventKind::GestureEnd,
+                    3.5, 0.45f));
+        recorder.drainForTests();
+        rightSnap = right->getSnapshot();
+        expect(rightSnap != nullptr && !rightSnap->empty(), "Touch curve committed");
+        if (rightSnap == nullptr || rightSnap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*rightSnap, 2.75),
+                                  0.45f, 1.0e-5f,
+                                  "Touch point is not erased by later release");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*rightSnap, 3.5),
+                                  0.6f, 1.0e-5f,
+                                  "Touch returns to its own original curve");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*rightSnap, 4.5),
+                                  0.75f, 1.0e-5f,
+                                  "Touch release preserves the future curve");
+    }
+};
+
+static AutomationModeSwitchIsolationTests automationModeSwitchIsolationTests;
