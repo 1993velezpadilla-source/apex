@@ -116,6 +116,98 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
         }
     }
 
+    /**
+     * Tear down project-scoped send parameter/listener registrations BEFORE
+     * replacing a project's routing and automation trees. Old IDs are not
+     * authoritative in the new session; leaving them registered can route a
+     * newly restored curve to a connection from the previous project.
+     *
+     * Message thread only. Must be invoked before APEXAutomation restore:
+     * removeNativeParameter() also removes the previous project's lane.
+     */
+    void releaseProjectSendAutomationBindings()
+    {
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto& registry = sys.getRegistry();
+        for (auto id : openSendLevelGestures)
+            if (auto* param = registry.find(id))
+                param->endGesture();
+        openSendLevelGestures.clear();
+
+        for (const auto& binding : sendAutomationBindings)
+        {
+            if (auto* param = registry.find(binding.first))
+                param->removeListener(this);
+            sys.removeNativeParameter(binding.first);
+        }
+        sendAutomationBindings.clear();
+    }
+
+    /**
+     * Rebind only the saved lanes that actually exist on live Send edges.
+     * ProjectManager restores RoutingGraph + APEXAutomation first, so stable
+     * source-track/route IDs and lane/mode state are already authoritative.
+     *
+     * No beginGesture(), no setValueFromUser(), and NO mutation of the
+     * saved lane or static send gain: automation playback owns those values.
+     */
+    void rebindPersistedSendAutomation()
+    {
+        if (routingGraph == nullptr)
+            return;
+
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto& keys = apex::automation::AutomationParameterKeyRegistry::getInstance();
+        auto& lanes = sys.getLaneStore();
+
+        for (auto* conn : routingGraph->getAllConnections())
+        {
+            if (conn == nullptr || !BubblegumSendStateCore::isSendConnection(conn->type))
+                continue;
+
+            auto* srcNode = routingGraph->getNode(conn->sourceNodeId);
+            auto* dstNode = routingGraph->getNode(conn->destNodeId);
+            if (srcNode == nullptr || dstNode == nullptr
+                || srcNode->trackId.isEmpty() || dstNode->trackId.isEmpty())
+                continue;
+
+            const auto bindIfSaved = [&](bool bypass)
+            {
+                const auto key = bypass
+                    ? apex::automation::AutomationParameterKeyRegistry::trackSendBypassKey(srcNode->trackId, conn->id)
+                    : apex::automation::AutomationParameterKeyRegistry::trackSendLevelKey(srcNode->trackId, conn->id);
+                const auto id = keys.findID(key);
+                if (id == apex::automation::kInvalidParameterID)
+                    return;
+
+                const auto lane = lanes.findLane(id);
+                if (lane == nullptr || lane->isEmpty())
+                    return;
+
+                auto* param = sys.getRegistry().find(id);
+                if (param == nullptr)
+                {
+                    apex::automation::ParameterRange range;
+                    range.minValue = 0.0f;
+                    range.maxValue = 1.0f;
+                    range.defaultValue = bypass ? 0.0f : 0.5f;
+                    range.isStepped = bypass;
+                    range.numSteps = bypass ? 2 : 0;
+                    param = sys.createNativeParameter(id,
+                        "Send " + conn->id + (bypass ? " Bypass" : " Level"), range);
+                }
+                if (param == nullptr)
+                    return;
+
+                sendAutomationBindings[id] = { srcNode->trackId, dstNode->trackId, conn->id, bypass };
+                param->addListener(this);
+            };
+
+            bindIfSaved(false);
+            bindIfSaved(true);
+        }
+    }
+
     void parameterGestureBegan (apex::automation::AutomationParameter&) override {}
     void parameterGestureEnded (apex::automation::AutomationParameter&) override {}
 
@@ -161,7 +253,7 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
         RoutingConnection* sendConn = nullptr;
         for (auto* conn : routingGraph->getOutputConnections(srcNode->id))
         {
-            if (conn != nullptr && conn->destNodeId == dstNode->id && conn->type == ConnectionType::Send)
+            if (conn != nullptr && conn->destNodeId == dstNode->id && BubblegumSendStateCore::isSendConnection(conn->type))
             {
                 sendConn = conn;
                 break;
@@ -220,7 +312,7 @@ struct BubblegumV2System : public apex::automation::AutomationParameter::Listene
         RoutingConnection* sendConn = nullptr;
         for (auto* conn : routingGraph->getOutputConnections(srcNode->id))
         {
-            if (conn != nullptr && conn->destNodeId == dstNode->id && conn->type == ConnectionType::Send)
+            if (conn != nullptr && conn->destNodeId == dstNode->id && BubblegumSendStateCore::isSendConnection(conn->type))
             {
                 sendConn = conn;
                 break;
