@@ -569,6 +569,26 @@ namespace apex::automation
                     if (bp.timePPQ < startPPQ || bp.timePPQ > endPPQ)
                         merged.push_back (bp);
 
+            // An immediate knob change can share GestureBegin's PPQ (the
+            // native UI dispatcher coalesces multiple updates). Its new
+            // value then wins the deduplication at startPPQ. Without an
+            // anchor immediately BEFORE startPPQ, interpolation bends the
+            // entire earlier curve towards that touched value.
+            //
+            // Keep the exact original automation up to the representable
+            // instant before touch, including for same-timestamp Begin/Value.
+            // This is intentionally separate from the recorded points and
+            // uses the gesture's immutable source curve, not the live edit.
+            if (session != nullptr && session->originalCurve != nullptr
+                && ! session->originalCurve->empty()
+                && std::isfinite(startPPQ) && startPPQ > 0.0)
+            {
+                const double beforeTouch = std::nextafter(startPPQ, 0.0);
+                merged.push_back ({ beforeTouch,
+                    AutomationLane::evaluateAt (*session->originalCurve, beforeTouch),
+                    CurveType::Linear, 0.0f });
+            }
+
             std::vector<Breakpoint> working (newRawPoints);
             if (session != nullptr && session->mode == AutomationMode::Trim
                 && session->originalCurve != nullptr && ! session->trimOffsets.empty())
