@@ -8,6 +8,7 @@
 #include "../../../Source/Automation/AutomationGestureQueueCore.h"
 #include "../../../Source/Automation/AutomationClockCore.h"
 #include "../../../Source/Automation/AutomationRecorderCore.h"
+#include "../../../Source/Automation/AutomationGestureBridgeCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -1334,3 +1335,93 @@ public:
 };
 
 static AutomationQueueOverflowFenceTests automationQueueOverflowFenceTests;
+
+/**
+    Regression: UI notifications for native parameters are delayed. A user can
+    begin a Trim gesture at .2, move to .4, and *then* the dispatcher delivers
+    GestureBegin plus ValueChange in one tick. Trim must use the begin-time
+    value .2, not the already-updated live parameter .4.
+*/
+class AutomationTrimCapturedGestureTests final : public juce::UnitTest
+{
+public:
+    AutomationTrimCapturedGestureTests()
+        : juce::UnitTest("automation.trim-begin-value-capture.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76009;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Trim delayed UI probe", ParameterRange{});
+        expect(param != nullptr, "parameter must register");
+        if (param == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Trim);
+        arms.setRecordArmed(true);
+        param->writeValue(0.2f, ChangeSource::Automation);
+
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*param);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        beginTest("gesture begin captures old value before deferred UI dispatch");
+        param->beginGesture();
+        expectWithinAbsoluteError(param->getValueAtGestureBegin(), 0.2f,
+                                  1.0e-5f, "pre-drag normalized value captured");
+        param->setValueFromUser(0.4f);
+        expectWithinAbsoluteError(param->getNormalizedValue(), 0.4f,
+                                  1.0e-5f, "user change already visible");
+
+        // Both notifications happen at PPQ 1.25, *after* the user change.
+        clock.publishFromAudioThread(1.25, 0.001, true);
+        param->dispatchPendingNotifications(0.4f, ChangeSource::User);
+        recorder.drainForTests();
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "Trim lane exists");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "Trim event recorded");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.25),
+                                  0.425f, 1.0e-5f,
+                                  "source .225 plus captured gesture delta +.2");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 0.5),
+                                  0.15f, 1.0e-5f,
+                                  "source automation before gesture preserved");
+
+        beginTest("the delayed gesture can still end and rejoin original curve");
+        param->endGesture();
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        param->dispatchPendingNotifications(0.4f, ChangeSource::User);
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "lane retained after release");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                  0.5f, 1.0e-5f,
+                                  "original source knot shifted by actual delta");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                  0.5f, 1.0e-5f,
+                                  "Trim release returns to source curve");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.5),
+                                  0.6f, 1.0e-5f,
+                                  "automation after release unchanged");
+    }
+};
+
+static AutomationTrimCapturedGestureTests automationTrimCapturedGestureTests;

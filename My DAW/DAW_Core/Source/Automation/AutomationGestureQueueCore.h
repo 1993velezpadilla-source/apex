@@ -41,6 +41,10 @@ namespace apex::automation
             ChangeSource  source          = ChangeSource::User;
             float         normalizedValue = 0.0f;
             double        ppqAtCapture    = 0.0;
+            // Set only when GestureBegin contains the real pre-drag value.
+            // Old/non-gesture producers can omit it; the recorder falls back
+            // to its previous behavior rather than assuming zero.
+            bool          hasStartValue   = false;
             std::uint64_t sequence        = 0;
         };
 
