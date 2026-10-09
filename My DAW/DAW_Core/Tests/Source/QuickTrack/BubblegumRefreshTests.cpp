@@ -450,6 +450,97 @@ public:
             }
         }
 
+        beginTest("BubblegumSendAutomationRestoresSavedLevelAndBypassBindings");
+        {
+            juce::ScopedJuceInitialiser_GUI gui;
+            auto& store = apex::automation::AutomationLaneStore::getInstance();
+            auto& keys = apex::automation::AutomationParameterKeyRegistry::getInstance();
+            auto& sys = apex::automation::AutomationSystem::getInstance();
+            const auto previousAutomation = store.getState().createCopy();
+
+            Harness h;
+            const auto* doubles = QuickTrackRoleCatalog::findById("doubles");
+            const auto result = h.builder.createBatch({ { doubles, 2 } });
+            expect(result.ok(), "fixture must contain two real routed tracks");
+            if (result.ok())
+            {
+                const TrackID src = result.created[0].trackId;
+                const TrackID dst = result.created[1].trackId;
+                auto* originalSend = h.sends.createSend(h.graph, src, dst, 0.75f);
+                expect(originalSend != nullptr, "fixture must contain a send");
+
+                if (originalSend != nullptr)
+                {
+                    const auto routeId = originalSend->id;
+                    const auto levelKey = apex::automation::AutomationParameterKeyRegistry::trackSendLevelKey(src, routeId);
+                    const auto bypassKey = apex::automation::AutomationParameterKeyRegistry::trackSendBypassKey(src, routeId);
+                    const auto levelID = keys.getOrCreateID(levelKey);
+                    const auto bypassID = keys.getOrCreateID(bypassKey);
+                    store.getOrCreateLane(levelID).replacePoints(
+                        {{0.0, 0.25f, apex::automation::CurveType::Linear, 0.0f},
+                         {10.0, 0.75f, apex::automation::CurveType::Linear, 0.0f}});
+                    store.getOrCreateLane(bypassID).replacePoints(
+                        {{0.0, 0.0f, apex::automation::CurveType::Hold, 0.0f},
+                         {10.0, 1.0f, apex::automation::CurveType::Hold, 0.0f}});
+
+                    const auto savedRouting = h.graph.getState().createCopy();
+                    const auto savedAutomation = store.getState().createCopy();
+                    BubblegumV2System bubblegum;
+                    bubblegum.init(h.graph, h.tracks);
+
+                    // Recreate the graph and the actual persisted lane state,
+                    // then rebind WITHOUT touching static send values.
+                    h.graph.restoreState(savedRouting);
+                    store.restoreState(savedAutomation);
+                    const auto* restoredSend = h.graph.getAllConnections().size() > 0
+                        ? h.graph.getAllConnections()[h.graph.getAllConnections().size() - 1] : nullptr;
+                    float initialGain = 0.0f;
+                    if (restoredSend != nullptr)
+                        initialGain = restoredSend->gain.load(std::memory_order_relaxed);
+
+                    bubblegum.rebindPersistedSendAutomation();
+                    expectEquals(static_cast<int>(bubblegum.sendAutomationBindings.size()), 2,
+                                 "restored saved send level and bypass lanes must have bindings");
+                    bubblegum.rebindPersistedSendAutomation();
+                    expectEquals(static_cast<int>(bubblegum.sendAutomationBindings.size()), 2,
+                                 "rebind must be idempotent");
+                    if (restoredSend != nullptr)
+                        expectWithinAbsoluteError(restoredSend->gain.load(std::memory_order_relaxed),
+                                                  initialGain, 1.0e-6f,
+                                                  "rebind does not mutate the saved static send level");
+
+                    auto* levelParam = sys.getRegistry().find(levelID);
+                    auto* bypassParam = sys.getRegistry().find(bypassID);
+                    expect(levelParam != nullptr && bypassParam != nullptr,
+                           "restored send automation must have live parameters");
+                    if (levelParam != nullptr && bypassParam != nullptr)
+                    {
+                        bubblegum.parameterValueChanged(*levelParam, 0.20f,
+                                                       apex::automation::ChangeSource::Automation);
+                        bubblegum.parameterValueChanged(*bypassParam, 1.0f,
+                                                       apex::automation::ChangeSource::Automation);
+                        if (restoredSend != nullptr)
+                        {
+                            expectWithinAbsoluteError(
+                                restoredSend->gain.load(std::memory_order_relaxed), 0.40f, 1.0e-6f,
+                                "level playback must update the real routed send");
+                            expect(!restoredSend->active.load(std::memory_order_relaxed),
+                                   "bypass playback must deactivate the real routed send");
+                        }
+                    }
+                    bubblegum.releaseProjectSendAutomationBindings();
+                    expect(bubblegum.sendAutomationBindings.empty(),
+                           "project teardown must detach obsolete send listeners");
+                    expect(sys.getRegistry().find(levelID) == nullptr
+                        && sys.getRegistry().find(bypassID) == nullptr,
+                           "project teardown must unregister previous send parameters");
+                }
+            }
+
+            // Do not leak this unit test's fake project into unrelated tests.
+            store.restoreState(previousAutomation);
+        }
+
         beginTest("QuickSendTogglePreservesRoutingSemantics");
         {
             Harness h;
