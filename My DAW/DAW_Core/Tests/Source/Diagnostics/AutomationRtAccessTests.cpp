@@ -1232,3 +1232,105 @@ public:
 };
 
 static AutomationStopImplicitReleaseTests automationStopImplicitReleaseTests;
+
+/**
+    MPSC producers may overflow the bounded gesture queue. If GestureEnd is
+    lost, continuing a Latch session would keep a stale user value forever.
+    Fence only the valid captured portion and discard all ambiguous events.
+*/
+class AutomationQueueOverflowFenceTests final : public juce::UnitTest
+{
+public:
+    AutomationQueueOverflowFenceTests()
+        : juce::UnitTest("automation.queue-overflow-session-fence.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76008;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Overflow fence probe", ParameterRange{});
+        expect(param != nullptr, "fixture registered");
+        if (param == nullptr) return;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Latch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float value, ChangeSource source)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = source;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        beginTest("a valid Latch session exists before queue overflow");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin,
+                       2.0, 0.3f, ChangeSource::User));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                       2.25, 0.8f, ChangeSource::User));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd,
+                       2.30, 0.8f, ChangeSource::User));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "Latch is held before overflow");
+
+        beginTest("overflow drops an End, then recorder releases stale Latch");
+        for (std::size_t i = 0; i < AutomationGestureQueue::kCapacity; ++i)
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                           2.5, 0.95f, ChangeSource::Programmatic));
+        expect(! enqueue(AutomationGestureQueue::EventKind::GestureEnd,
+                         2.6, 0.95f, ChangeSource::User),
+               "full queue drops incoming GestureEnd");
+        expect(queue->getOverflowCount() > 0, "overflow is observable");
+
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(id), "queue loss clears stale Latch");
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "lane still exists after overflow");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "recorded curve survives");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "last valid captured value is committed");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                  0.7f, 1.0e-5f,
+                                  "overflow cannot overwrite future original curve");
+
+        beginTest("new gestures can record after queue has drained");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin,
+                       3.0, 0.5f, ChangeSource::User));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                       3.25, 0.6f, ChangeSource::User));
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "new session records");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.25),
+                                  0.6f, 1.0e-5f,
+                                  "recording resumes after overflow boundary");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "new session cannot corrupt previous take");
+    }
+};
+
+static AutomationQueueOverflowFenceTests automationQueueOverflowFenceTests;

@@ -52,6 +52,7 @@ namespace apex::automation
             , armState  (transport)
         {
             lastObservedArmed = armState.isRecordArmed();
+            lastObservedOverflow = queue.getOverflowCount();
             startTimerHz (kDrainHz);
         }
 
@@ -104,11 +105,14 @@ namespace apex::automation
         {
             JUCE_ASSERT_MESSAGE_THREAD;
 
+            // Observe data loss FIRST. A Stop or Punch-Out on the same tick
+            // must not extend an incomplete gesture across an unknown gap.
+            const bool overflowed = handleQueueOverflow();
             const bool rewound = handleTransportEdges();
             const bool punchedOut = handleRecordArmEdges();
 
             AutomationGestureQueue::Event e;
-            if (rewound || punchedOut || !armState.isRecordArmed())
+            if (rewound || punchedOut || overflowed || !armState.isRecordArmed())
             {
                 // A queue event carries PPQ but no loop-iteration identity.
                 // Values pending at a backward seek cannot safely be assigned
@@ -222,6 +226,25 @@ namespace apex::automation
             sessions.clear();
             modeState.clearAllLatches();
             return true; // Pending queue events have no arm-epoch identifier.
+        }
+
+        bool handleQueueOverflow()
+        {
+            const auto count = queue.getOverflowCount();
+            if (count == lastObservedOverflow)
+                return false;
+
+            lastObservedOverflow = count;
+            // MPSC overflow may drop GestureBegin, a ValueChange, or
+            // GestureEnd. Never continue a session whose gesture structure
+            // is now unknown: a missing End could hold Latch indefinitely.
+            // Commit only the last valid captured points (not a guessed
+            // Stop/Punch boundary), then reject all currently queued events.
+            for (auto& [id, s] : sessions)
+                if (s.open) closeSession (s, true);
+            sessions.clear();
+            modeState.clearAllLatches();
+            return true;
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)
@@ -617,6 +640,7 @@ namespace apex::automation
         // of the Play/Stop flag catches seek/loop wraps that never Stop.
         double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
         bool lastObservedArmed = false;
+        std::uint64_t lastObservedOverflow = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationRecorder)
     };
