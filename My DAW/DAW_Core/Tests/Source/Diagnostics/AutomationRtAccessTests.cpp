@@ -730,3 +730,93 @@ public:
 };
 
 static AutomationTouchReturnCurveTests automationTouchReturnCurveTests;
+
+/**
+    Trim must apply knob movement as a delta over the original curve,
+    preserving ramps and their knots rather than writing absolute knob values.
+*/
+class AutomationTrimRelativeTests final : public juce::UnitTest
+{
+public:
+    AutomationTrimRelativeTests()
+        : juce::UnitTest("automation.trim-relative-preserve-curve.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76003;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Trim delta probe", ParameterRange{});
+        expect(param != nullptr, "parameter registered");
+        if (param == nullptr) return;
+
+        // Reference curve: PPQ 1=.2, 2=.3, 3=.5, 4=.7, 5=.8.
+        // Moving the parameter from .2 to .4 should produce +.2 relative
+        // to source at every PPQ, not a flat .4 automation section.
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        param->writeValue(0.2f, ChangeSource::Automation);
+        modes.setMode(id, AutomationMode::Trim);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(0.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        beginTest("Trim adds a signed offset to the original moving curve");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.25, 0.4f));
+        recorder.drainForTests(); // Live commit must not destroy source knots.
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 5.0, 0.4f));
+        recorder.drainForTests();
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "Trim lane available");
+        if (lane == nullptr) return;
+        const auto points = lane->getSnapshot();
+        expect(points != nullptr && !points->empty(), "Trim points written");
+        if (points == nullptr || points->empty()) return;
+
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 0.5),
+                                  0.15f, 1.0e-5f,
+                                  "before Trim source curve is unmodified");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 2.0),
+                                  0.5f, 1.0e-5f,
+                                  "Trim at first original knot is source .3 + delta .2");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 3.0),
+                                  0.7f, 1.0e-5f,
+                                  "Trim follows the original ramp instead of writing flat");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 4.0),
+                                  0.9f, 1.0e-5f,
+                                  "Trim preserves second original knot");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 5.0),
+                                  0.8f, 1.0e-5f,
+                                  "Trim release rejoins unmodified source");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 5.5),
+                                  0.85f, 1.0e-5f,
+                                  "future original automation remains intact");
+        expect(!modes.latchHeldRT(id), "Trim is not a Latch hold");
+    }
+};
+
+static AutomationTrimRelativeTests automationTrimRelativeTests;

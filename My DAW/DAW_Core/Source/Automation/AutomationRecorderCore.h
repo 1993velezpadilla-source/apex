@@ -88,6 +88,10 @@ namespace apex::automation
             // portions of the lane. Release returns to this original curve,
             // evaluated at the release time (NOT the touch-start value).
             AutomationLane::Snapshot originalCurve;
+            // Relative Trim offset envelope; signed values are allowed here.
+            std::vector<Breakpoint> trimOffsets;
+            float trimGestureOrigin = 0.0f;
+            float trimLastOffset = 0.0f;
             double                  lastLiveCommitPPQ = -1.0;
             bool                    open              = false;
             bool                    latchSustaining   = false;
@@ -193,15 +197,26 @@ namespace apex::automation
                     if (it == sessions.end() || ! it->second.open) break;
 
                     auto& s = it->second;
-                    s.rawPoints.push_back ({ e.ppqAtCapture, e.normalizedValue,
+                    const float delta = e.normalizedValue - s.trimGestureOrigin;
+                    const float value = s.mode == AutomationMode::Trim
+                        ? juce::jlimit (0.0f, 1.0f,
+                            originalValueAt (s, e.ppqAtCapture) + delta)
+                        : e.normalizedValue;
+                    if (s.mode == AutomationMode::Trim)
+                    {
+                        s.trimLastOffset = delta;
+                        s.trimOffsets.push_back ({ e.ppqAtCapture, delta,
+                                                   CurveType::Linear, 0.0f });
+                    }
+                    s.rawPoints.push_back ({ e.ppqAtCapture, value,
                                              CurveType::Linear, 0.0f });
                     s.lastPPQ   = e.ppqAtCapture;
-                    s.lastValue = e.normalizedValue;
+                    s.lastValue = value;
 
                     if (s.lastLiveCommitPPQ < 0.0
                      || std::abs (s.lastPPQ - s.lastLiveCommitPPQ) >= kLiveCommitStepPPQ)
                     {
-                        commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+                        commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
                         s.lastLiveCommitPPQ = s.lastPPQ;
                     }
 
@@ -226,18 +241,39 @@ namespace apex::automation
 
                     if (s.mode == AutomationMode::Touch)
                     {
-                        // Do not slope the last touched value prematurely
-                        // towards the old curve. Hold it up to GestureEnd.
                         if (! s.rawPoints.empty()
                             && s.rawPoints.back().timePPQ < e.ppqAtCapture)
                             s.rawPoints.back().curveType = CurveType::Hold;
 
-                        const auto releaseValue = (s.originalCurve != nullptr
-                                                    && ! s.originalCurve->empty())
-                            ? AutomationLane::evaluateAt (*s.originalCurve, e.ppqAtCapture)
-                            : s.priorLaneValue;
-                        s.rawPoints.push_back ({ e.ppqAtCapture, releaseValue,
+                        s.rawPoints.push_back ({ e.ppqAtCapture,
+                                                 originalValueAt (s, e.ppqAtCapture),
                                                  CurveType::Linear, 0.0f });
+                        s.lastPPQ = e.ppqAtCapture;
+                    }
+                    else if (s.mode == AutomationMode::Trim)
+                    {
+                        // Preserve the shifted original curve until release,
+                        // then return to the unshifted curve at the boundary.
+                        if (e.ppqAtCapture > s.lastPPQ)
+                        {
+                            const double gap = e.ppqAtCapture - s.lastPPQ;
+                            const double beforeRelease = e.ppqAtCapture
+                                - std::min (1.0e-6, gap * 0.5);
+                            s.rawPoints.push_back ({
+                                beforeRelease,
+                                juce::jlimit (0.0f, 1.0f,
+                                    originalValueAt (s, beforeRelease) + s.trimLastOffset),
+                                CurveType::Hold, 0.0f });
+                            if (! s.trimOffsets.empty())
+                                s.trimOffsets.back().curveType = CurveType::Hold;
+                            s.trimOffsets.push_back ({ beforeRelease, s.trimLastOffset,
+                                                       CurveType::Hold, 0.0f });
+                        }
+                        s.rawPoints.push_back ({ e.ppqAtCapture,
+                                                 originalValueAt (s, e.ppqAtCapture),
+                                                 CurveType::Linear, 0.0f });
+                        s.trimOffsets.push_back ({ e.ppqAtCapture, 0.0f,
+                                                   CurveType::Linear, 0.0f });
                         s.lastPPQ = e.ppqAtCapture;
                     }
 
@@ -284,6 +320,12 @@ namespace apex::automation
             s.rawPoints.push_back ({ atPPQ, s.priorLaneValue,
                                      CurveType::Linear, 0.0f });
             s.lastValue = s.priorLaneValue;
+            s.trimGestureOrigin = param.getNormalizedValue();
+            s.trimLastOffset = 0.0f;
+            s.trimOffsets.clear();
+            if (mode == AutomationMode::Trim)
+                s.trimOffsets.push_back ({ atPPQ, 0.0f,
+                                           CurveType::Linear, 0.0f });
         }
 
         void extendLatchSustainSessions()
@@ -311,10 +353,16 @@ namespace apex::automation
         {
             if (s.rawPoints.size() < 2) return;
             Breakpoint tail = s.rawPoints.back();
-            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
             s.rawPoints.clear();
             s.rawPoints.push_back (tail);
             s.startPPQ = tail.timePPQ;
+            if (s.mode == AutomationMode::Trim)
+            {
+                s.trimOffsets.clear();
+                s.trimOffsets.push_back ({ tail.timePPQ, s.trimLastOffset,
+                                           CurveType::Linear, 0.0f });
+            }
         }
 
         void finishSustainAtStop (Session& s, double stopPPQ)
@@ -334,32 +382,70 @@ namespace apex::automation
         {
             if (! s.open) return;
             s.open = false;
-            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
             modeState.setLatchHeld (s.paramID, false);
         }
 
-        void commitPointsToLane (ParameterID                    paramID,
+        static float originalValueAt (const Session& s, double ppq) noexcept
+        {
+            return s.originalCurve != nullptr && ! s.originalCurve->empty()
+                ? AutomationLane::evaluateAt (*s.originalCurve, ppq)
+                : s.priorLaneValue;
+        }
+
+        void commitPointsToLane (ParameterID paramID,
                                  const std::vector<Breakpoint>& newRawPoints,
-                                 double                         startPPQ,
-                                 double                         endPPQ)
+                                 double startPPQ, double endPPQ,
+                                 const Session* session)
         {
             if (newRawPoints.empty()) return;
 
-            auto& lane  = lanes.getOrCreateLane (paramID);
-            auto  prior = lane.getSnapshot();
-
+            auto& lane = lanes.getOrCreateLane (paramID);
+            auto prior = lane.getSnapshot();
             std::vector<Breakpoint> merged;
-            merged.reserve ((prior ? prior->size() : 0) + newRawPoints.size());
+            merged.reserve ((prior ? prior->size() : 0) + newRawPoints.size()
+                            + (session && session->originalCurve
+                                ? session->originalCurve->size() : 0));
 
             if (prior != nullptr)
                 for (const auto& bp : *prior)
                     if (bp.timePPQ < startPPQ || bp.timePPQ > endPPQ)
                         merged.push_back (bp);
 
-            const auto simplified = simplify (newRawPoints, kSimplifyEpsilon);
-            for (const auto& bp : simplified)
-                merged.push_back (bp);
+            std::vector<Breakpoint> working (newRawPoints);
+            if (session != nullptr && session->mode == AutomationMode::Trim
+                && session->originalCurve != nullptr && ! session->trimOffsets.empty())
+            {
+                // Retain the base curve knots under a time-varying Trim delta.
+                // Otherwise the base curve between knob events is flattened.
+                for (const auto& source : *session->originalCurve)
+                {
+                    if (source.timePPQ <= startPPQ || source.timePPQ >= endPPQ)
+                        continue;
+                    const bool already = std::any_of (working.begin(), working.end(),
+                        [&] (const Breakpoint& p) { return p.timePPQ == source.timePPQ; });
+                    if (already) continue;
+                    const float offset = AutomationLane::evaluateAt (
+                        session->trimOffsets, source.timePPQ);
+                    working.push_back ({
+                        source.timePPQ,
+                        juce::jlimit (0.0f, 1.0f, source.normalizedValue + offset),
+                        source.curveType, source.curveTension });
+                }
+                std::stable_sort (working.begin(), working.end());
+            }
 
+            // Trim's imported source knots are structural: RDP only
+            // measures linear value error and may delete a Hold/Smooth
+            // breakpoint whose curve type matters for playback.
+            // Keep them all in Trim; ordinary Touch/Write/Latch retain RDP.
+            if (session != nullptr && session->mode == AutomationMode::Trim)
+                merged.insert (merged.end(), working.begin(), working.end());
+            else
+            {
+                const auto simplified = simplify (working, kSimplifyEpsilon);
+                merged.insert (merged.end(), simplified.begin(), simplified.end());
+            }
             lane.replacePoints (std::move (merged));
         }
 
