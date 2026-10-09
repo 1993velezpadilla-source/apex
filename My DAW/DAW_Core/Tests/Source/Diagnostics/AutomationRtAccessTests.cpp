@@ -2623,3 +2623,117 @@ public:
 };
 
 static AutomationNativeDirectProducerTests automationNativeDirectProducerTests;
+
+/**
+    Touching a Smooth automation segment cannot be spliced by inserting only
+    one knot just before the gesture. Smoothstep interpolation renormalizes
+    its time against the new, shortened segment length and bends the entire
+    preceding curve even though the producer never edited that earlier time.
+*/
+class AutomationSmoothPreTouchPreservationTests final : public juce::UnitTest
+{
+public:
+    AutomationSmoothPreTouchPreservationTests()
+        : juce::UnitTest("automation.smooth-pre-touch-preservation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+
+        for (float tension : {0.0f, 0.6f, -0.6f})
+        {
+            beginTest("Smooth source segment remains intact before touch, tension "
+                      + juce::String(tension));
+            constexpr ParameterID id = 76024;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arms;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* p = registry.createParameter(id, "Smooth pre-touch", ParameterRange{});
+            expect(p != nullptr, "test parameter registered");
+            if (p == nullptr) return;
+            AutomationLane::PointVector original = {
+                {0.0, 0.1f, CurveType::Smooth, tension},
+                {2.0, 0.9f, CurveType::Linear, 0.0f},
+                {4.0, 0.3f, CurveType::Linear, 0.0f}
+            };
+            lanes.getOrCreateLane(id).replacePoints(original);
+            modes.setMode(id, AutomationMode::Touch);
+            arms.setRecordArmed(true);
+            p->writeValue(0.2f, ChangeSource::Automation);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+
+            auto push = [&] (AutomationGestureQueue::EventKind kind,
+                             double ppq, float value)
+            {
+                AutomationGestureQueue::Event event;
+                event.paramID = id;
+                event.kind = kind;
+                event.source = ChangeSource::User;
+                event.normalizedValue = value;
+                event.ppqAtCapture = ppq;
+                event.hasStartValue =
+                    kind == AutomationGestureQueue::EventKind::GestureBegin;
+                return queue->push(event);
+            };
+
+            expect(push(AutomationGestureQueue::EventKind::GestureBegin, 1.5, 0.2f));
+            expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.5, 0.95f));
+            recorder.drainForTests();
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "recorded lane exists");
+            if (lane == nullptr) return;
+            auto checkEarlier = [&](const char* stage)
+            {
+                const auto snapshot = lane->getSnapshot();
+                expect(snapshot != nullptr, "snapshot exists");
+                if (snapshot == nullptr) return;
+                for (double at : {0.125, 0.25, 0.5, 0.75, 1.0, 1.125, 1.25, 1.375})
+                {
+                    const float expected = AutomationLane::evaluateAt(original, at);
+                    const float actual = AutomationLane::evaluateAt(*snapshot, at);
+                    expectWithinAbsoluteError(actual, expected, 4.0e-5f,
+                        juce::String(stage) + ": unedited Smooth automation at PPQ "
+                            + juce::String(at));
+                }
+            };
+
+            checkEarlier("first same-timestamp touch");
+            auto snapshot = lane->getSnapshot();
+            expect(snapshot != nullptr && !snapshot->empty(), "first change committed");
+            if (snapshot != nullptr && !snapshot->empty())
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 1.5),
+                                          0.95f, 1.0e-5f,
+                                          "touched value wins at start PPQ");
+
+            expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.75, 0.5f));
+            recorder.drainForTests();
+            checkEarlier("second live commit");
+            snapshot = lane->getSnapshot();
+            expect(snapshot != nullptr && !snapshot->empty(), "second change committed");
+            if (snapshot != nullptr && !snapshot->empty())
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 1.75),
+                                          0.5f, 1.0e-5f,
+                                          "subsequent automation is still recorded");
+
+            expect(push(AutomationGestureQueue::EventKind::GestureEnd, 2.5, 0.5f));
+            recorder.drainForTests();
+            checkEarlier("after releasing control");
+            snapshot = lane->getSnapshot();
+            expect(snapshot != nullptr && !snapshot->empty(), "post-release source persists");
+            if (snapshot != nullptr && !snapshot->empty())
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 3.0),
+                                          AutomationLane::evaluateAt(original, 3.0),
+                                          1.0e-5f, "unchanged later linear source persists");
+        }
+    }
+};
+
+static AutomationSmoothPreTouchPreservationTests
+    automationSmoothPreTouchPreservationTests;

@@ -610,6 +610,42 @@ namespace apex::automation
                 : s.priorLaneValue;
         }
 
+        // Approximate a truncated original Smooth interval with adaptive
+        // linear segments. Smoothstep with tension cannot be represented
+        // exactly after changing its endpoint, but this bounds the audible
+        // source-shape error to roughly one millionth in normalized value
+        // (with finite depth and original float interpolation precision).
+        static void appendSmoothSourceSamples (
+            std::vector<Breakpoint>& out,
+            const AutomationLane::PointVector& original,
+            double leftPPQ, float leftValue,
+            double rightPPQ, float rightValue,
+            int depth)
+        {
+            const double middlePPQ = leftPPQ + (rightPPQ - leftPPQ) * 0.5;
+            if (middlePPQ <= leftPPQ || middlePPQ >= rightPPQ)
+            {
+                out.push_back ({rightPPQ, rightValue, CurveType::Linear, 0.0f});
+                return;
+            }
+
+            const float middleValue = AutomationLane::evaluateAt (original, middlePPQ);
+            const float linearMid = 0.5f * (leftValue + rightValue);
+            // Even a symmetric Smooth curve can match a straight line at its
+            // exact midpoint yet diverge at its quarters. Force 3 levels
+            // before accepting a low midpoint-error subdivision.
+            if (depth < 3 || (depth < 12
+                && std::abs (middleValue - linearMid) > 1.0e-6f))
+            {
+                appendSmoothSourceSamples (out, original,
+                    leftPPQ, leftValue, middlePPQ, middleValue, depth + 1);
+                appendSmoothSourceSamples (out, original,
+                    middlePPQ, middleValue, rightPPQ, rightValue, depth + 1);
+            }
+            else
+                out.push_back ({rightPPQ, rightValue, CurveType::Linear, 0.0f});
+        }
+
         void commitPointsToLane (ParameterID paramID,
                                  const std::vector<Breakpoint>& newRawPoints,
                                  double startPPQ, double endPPQ,
@@ -629,24 +665,55 @@ namespace apex::automation
                     if (bp.timePPQ < startPPQ || bp.timePPQ > endPPQ)
                         merged.push_back (bp);
 
-            // An immediate knob change can share GestureBegin's PPQ (the
-            // native UI dispatcher coalesces multiple updates). Its new
-            // value then wins the deduplication at startPPQ. Without an
-            // anchor immediately BEFORE startPPQ, interpolation bends the
-            // entire earlier curve towards that touched value.
-            //
-            // Keep the exact original automation up to the representable
-            // instant before touch, including for same-timestamp Begin/Value.
-            // This is intentionally separate from the recorded points and
-            // uses the gesture's immutable source curve, not the live edit.
+            // An immediate input can share the gesture-begin PPQ. A guard
+            // immediately before touch prevents the new value from bending
+            // earlier automation. For Linear and Hold source segments the
+            // original outgoing interpolation already works with that guard.
+            // A Smooth source segment is DIFFERENT: shortening its span
+            // changes smoothstep(t), so a single guard still warps the whole
+            // preceding segment. Reconstruct just that truncated segment
+            // adaptively, using the immutable pre-gesture source. This work
+            // runs on the message-thread commit path, never the audio thread.
             if (session != nullptr && session->originalCurve != nullptr
                 && ! session->originalCurve->empty()
                 && std::isfinite(startPPQ) && startPPQ > 0.0)
             {
+                const auto& source = *session->originalCurve;
                 const double beforeTouch = std::nextafter(startPPQ, 0.0);
-                merged.push_back ({ beforeTouch,
-                    AutomationLane::evaluateAt (*session->originalCurve, beforeTouch),
-                    CurveType::Linear, 0.0f });
+                const auto next = std::lower_bound(source.begin(), source.end(), startPPQ,
+                    [] (const Breakpoint& p, double t) { return p.timePPQ < t; });
+
+                if (next != source.begin() && next != source.end())
+                {
+                    const auto& previous = *(next - 1);
+                    if (previous.curveType == CurveType::Smooth
+                        && beforeTouch > previous.timePPQ)
+                    {
+                        // Repeated live commits may already contain previous
+                        // guard samples. Replace them instead of accumulating
+                        // duplicate or stale interpolation nodes.
+                        merged.erase (std::remove_if (merged.begin(), merged.end(),
+                            [&] (const Breakpoint& p)
+                            {
+                                return p.timePPQ >= previous.timePPQ
+                                    && p.timePPQ < startPPQ;
+                            }), merged.end());
+
+                        merged.push_back ({ previous.timePPQ,
+                            previous.normalizedValue, CurveType::Linear, 0.0f });
+                        appendSmoothSourceSamples (merged, source,
+                            previous.timePPQ, previous.normalizedValue,
+                            beforeTouch, AutomationLane::evaluateAt (source, beforeTouch), 0);
+                    }
+                    else
+                        merged.push_back ({ beforeTouch,
+                            AutomationLane::evaluateAt (source, beforeTouch),
+                            CurveType::Linear, 0.0f });
+                }
+                else
+                    merged.push_back ({ beforeTouch,
+                        AutomationLane::evaluateAt (source, beforeTouch),
+                        CurveType::Linear, 0.0f });
             }
 
             std::vector<Breakpoint> working (newRawPoints);
