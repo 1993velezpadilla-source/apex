@@ -56,6 +56,7 @@ public:
         juce::PluginDescription description;
         juce::MemoryBlock state;
         bool bypassed = false;
+        bool unresolved = false; // true when this is an opaque missing-plugin slot
     };
 
     using ClipStateSnapshot = std::vector<EntryStateSnapshot>;
@@ -256,14 +257,18 @@ public:
         snapshot.reserve(it->second.size());
         for (const auto& entry : it->second)
         {
-            if (!entry || !entry->instance)
+            if (!entry)
                 continue;
 
             EntryStateSnapshot saved;
             saved.instanceId = entry->instanceId;
             saved.description = entry->description;
             saved.bypassed = entry->bypassed.load(std::memory_order_acquire);
-            entry->instance->getStateInformation(saved.state);
+            saved.unresolved = entry->instance == nullptr;
+            if (entry->instance)
+                entry->instance->getStateInformation(saved.state);
+            else
+                saved.state = entry->unresolvedState;
             snapshot.push_back(std::move(saved));
         }
         return snapshot;
@@ -661,16 +666,46 @@ private:
         for (const auto& saved : snapshot)
         {
             auto loaded = loadForClip(clipId, saved.description, formatManager);
-            if (!loaded.success || loaded.instance == nullptr)
-                return false;
+            bool usable = loaded.success && loaded.instance != nullptr;
+            if (!usable && !saved.unresolved)
+                return false; // Preserve existing rollback semantics for live FX.
 
-            const auto stateSize = juce::jmin<size_t>(saved.state.getSize(),
-                                                       static_cast<size_t>(std::numeric_limits<int>::max()));
-            if (stateSize > 0)
-                loaded.instance->setStateInformation(saved.state.getData(), static_cast<int>(stateSize));
+            if (usable && saved.state.getSize() > 0)
+            {
+                try
+                {
+                    if (saved.state.getSize() > static_cast<size_t>(std::numeric_limits<int>::max()))
+                        throw std::runtime_error("Clip FX snapshot state exceeds int range");
+                    loaded.instance->setStateInformation(
+                        saved.state.getData(), static_cast<int>(saved.state.getSize()));
+                }
+                catch (...)
+                {
+                    if (!saved.unresolved)
+                        return false; // Failed live processor restore must roll back.
+                    usable = false; // An already missing plugin stays lossless.
+                }
+            }
 
-            if (auto* entry = findEntryByInstance(clipId, loaded.instance))
-                entry->bypassed.store(saved.bypassed, std::memory_order_release);
+            if (usable)
+            {
+                if (auto* entry = findEntryByInstance(clipId, loaded.instance))
+                    entry->bypassed.store(saved.bypassed, std::memory_order_release);
+                continue;
+            }
+
+            // Duplicating/splitting a clip with an unavailable plugin must
+            // preserve its slot, order, bypass and opaque preset state.
+            if (loaded.instance)
+                if (auto* entry = findEntryByInstance(clipId, loaded.instance))
+                    removeEntry(clipId, entry->instanceId);
+            auto unresolved = std::make_shared<Entry>();
+            unresolved->instanceId = makeInstanceId(clipId);
+            unresolved->clipId = clipId;
+            unresolved->description = saved.description;
+            unresolved->bypassed.store(saved.bypassed, std::memory_order_release);
+            unresolved->unresolvedState = saved.state;
+            entriesByClip_[clipId].push_back(std::move(unresolved));
         }
 
         publishEntries();
