@@ -69,11 +69,11 @@ namespace apex::automation
 
         static AutomationRecorder& getInstance();
 
-#if JUCE_UNIT_TESTS
-        // Deterministic message-thread drain for automation regression tests.
-        // Production continues to use the 90 Hz timer.
+        // Explicit message-thread test probe. The APEXTests target does not
+        // define JUCE_UNIT_TESTS even though it compiles JUCE UnitTests; keep
+        // this thin wrapper available in both configurations.
+        // Production still drains through the 90 Hz timer.
         void drainForTests() { timerCallback(); }
-#endif
 
     private:
         struct Session
