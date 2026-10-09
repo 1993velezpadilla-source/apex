@@ -2263,3 +2263,144 @@ public:
 };
 
 static AutomationClockConsistentSnapshotTests automationClockConsistentSnapshotTests;
+
+/**
+    Hosted plugin bugs or corrupt project edits can report NaN/Infinity.
+    Those values must never reach atomic parameter state, the gesture queue,
+    a Trim envelope, or an audio-thread-interpolated automation lane.
+*/
+class AutomationNonFiniteInputTests final : public juce::UnitTest
+{
+public:
+    AutomationNonFiniteInputTests()
+        : juce::UnitTest("automation.reject-nonfinite-input.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float posInf = std::numeric_limits<float>::infinity();
+        const double timeNaN = std::numeric_limits<double>::quiet_NaN();
+        const double timeInf = std::numeric_limits<double>::infinity();
+        constexpr ParameterID id = 76021;
+
+        AutomationParameterRegistry registry;
+        auto* parameter = registry.createParameter(
+            id, "Nonfinite input", ParameterRange{});
+        expect(parameter != nullptr, "parameter registered");
+        if (parameter == nullptr) return;
+        parameter->writeValue(0.3f, ChangeSource::Automation);
+        const auto version = parameter->getVersion();
+
+        beginTest("native input paths never store or forward NaN/Inf");
+        parameter->setValueFromUser(nan);
+        parameter->setValueFromPlugin(posInf);
+        parameter->setValueFromAutomation(nan);
+        parameter->setValueProgrammatic(-posInf);
+        parameter->writeValue(nan, ChangeSource::Automation);
+        expectWithinAbsoluteError(parameter->getNormalizedValue(),
+                                  0.3f, 1.0e-6f, "invalid values rejected");
+        expectEquals(parameter->getVersion(), version,
+                     "invalid values do not publish fake parameter changes");
+
+        beginTest("hosted plugin callbacks reject nonfinite payloads");
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        AutomationClock clock;
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        juce::AudioProcessorGraph graph;
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToPlugin(graph, {{3, id}});
+        bridge.audioProcessorParameterChanged(&graph, 3, nan);
+        bridge.audioProcessorParameterChanged(&graph, 3, posInf);
+        AutomationGestureQueue::Event event;
+        expect(!queue->pop(event), "invalid plugin payloads never enter queue");
+        bridge.audioProcessorParameterChanged(&graph, 3, 0.65f);
+        expect(queue->pop(event), "subsequent finite plugin event is recorded");
+        expectWithinAbsoluteError(event.normalizedValue,
+                                  0.65f, 1.0e-6f, "valid value unchanged");
+        bridge.detachFromAllPlugins();
+
+        beginTest("lane persistence sanitizes invalid knots before sorting");
+        AutomationLane lane(id);
+        lane.replacePoints({
+            {0.0, 0.2f, CurveType::Linear, 0.0f},
+            {timeNaN, 0.9f, CurveType::Linear, 0.0f},
+            {timeInf, 0.9f, CurveType::Linear, 0.0f},
+            {1.0, nan, CurveType::Linear, 0.0f},
+            {2.0, posInf, CurveType::Linear, 0.0f},
+            {4.0, 1.25f, CurveType::Smooth, nan},
+            {6.0, 0.6f, CurveType::Linear, 0.0f}
+        });
+        auto saved = lane.getSnapshot();
+        expect(saved != nullptr && saved->size() == 3,
+               "nonfinite timestamp/value knots removed");
+        if (saved != nullptr && saved->size() == 3)
+        {
+            expectWithinAbsoluteError((*saved)[1].normalizedValue,
+                                      1.0f, 1.0e-6f,
+                                      "out-of-range normalized value clamped");
+            expectWithinAbsoluteError((*saved)[1].curveTension,
+                                      0.0f, 1.0e-6f,
+                                      "nonfinite curve tension reset");
+            const auto middle = AutomationLane::evaluateAt(*saved, 3.0);
+            expect(std::isfinite(middle), "audio curve interpolation stays finite");
+            const auto invalidTime = AutomationLane::evaluateAt(*saved, timeNaN);
+            expect(std::isfinite(invalidTime), "nonfinite playhead never returns NaN");
+        }
+
+        beginTest("recorder drops malformed gesture changes but preserves valid takes");
+        AutomationLaneStore lanes;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        AutomationModeState modes;
+        modes.setMode(id, AutomationMode::Touch);
+        AutomationTransportState arms;
+        arms.setRecordArmed(true);
+        auto recordingQueue = std::make_unique<AutomationGestureQueue>();
+        AutomationRecorder recorder(registry, lanes, modes, *recordingQueue,
+                                    clock, arms);
+        recorder.drainForTests();
+
+        auto enqueue = [&] (AutomationGestureQueue::EventKind kind,
+                            double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            e.hasStartValue = kind == AutomationGestureQueue::EventKind::GestureBegin;
+            return recordingQueue->push(e);
+        };
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.3f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.5, 0.8f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.75, nan));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.8, posInf));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 2.0, 0.8f));
+        recorder.drainForTests();
+
+        auto committed = lanes.findLane(id);
+        expect(committed != nullptr, "recording lane exists");
+        if (committed == nullptr) return;
+        const auto points = committed->getSnapshot();
+        expect(points != nullptr && !points->empty(), "valid recorded points retained");
+        if (points != nullptr && !points->empty())
+        {
+            for (const auto& p : *points)
+                expect(std::isfinite(p.timePPQ)
+                    && std::isfinite(p.normalizedValue), "recorded lane remains finite");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 1.5),
+                                      0.8f, 1.0e-5f, "finite gesture recorded");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 3.0),
+                                      0.5f, 1.0e-5f, "future source curve unaffected");
+        }
+    }
+};
+
+static AutomationNonFiniteInputTests automationNonFiniteInputTests;
