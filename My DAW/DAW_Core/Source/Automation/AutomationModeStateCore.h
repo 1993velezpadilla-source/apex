@@ -31,14 +31,26 @@ namespace apex::automation
         };
 
     public:
+        struct ModeEpoch
+        {
+            std::uint64_t parameter = 0;
+            std::uint64_t globalDefault = 0;
+
+            bool operator!= (const ModeEpoch& rhs) const noexcept
+            {
+                return parameter != rhs.parameter || globalDefault != rhs.globalDefault;
+            }
+        };
+
         AutomationModeState() = default;
 
         // ----- Global default -------------------------------------------
 
         void setGlobalDefaultMode (AutomationMode m) noexcept
         {
-            globalDefault.store (static_cast<std::uint8_t> (m),
-                                 std::memory_order_release);
+            const auto next = static_cast<std::uint8_t> (m);
+            if (globalDefault.exchange (next, std::memory_order_acq_rel) != next)
+                defaultModeEpoch.fetch_add (1, std::memory_order_release);
         }
 
         AutomationMode getGlobalDefaultMode() const noexcept
@@ -53,13 +65,35 @@ namespace apex::automation
         {
             const juce::ScopedLock sl (mapLock);
             auto it = modes.find (id);
+            const auto next = static_cast<std::uint8_t> (m);
             if (it == modes.end())
             {
-                it = modes.emplace (id, std::make_shared<std::atomic<std::uint8_t>> (0)).first;
+                it = modes.emplace (id, std::make_shared<std::atomic<std::uint8_t>> (next)).first;
+                ++modeEpochs[id];  // Adding an override is a state transition.
                 publishLocked();
             }
-            it->second->store (static_cast<std::uint8_t> (m),
-                               std::memory_order_release);
+            else if (it->second->load (std::memory_order_acquire) != next)
+            {
+                it->second->store (next, std::memory_order_release);
+                ++modeEpochs[id];
+            }
+        }
+
+        // Message-thread recorder probe: unlike the current mode enum, this
+        // detects Read->Latch->Read (or Latch->Read->Latch) that completes
+        // entirely between two 90 Hz recorder polls. The epoch of an
+        // overridden parameter excludes global-default changes; unchanged
+        // parameters are therefore not quarantined by an unrelated update.
+        ModeEpoch getModeEpoch (ParameterID id) const noexcept
+        {
+            const juce::ScopedLock sl (mapLock);
+            ModeEpoch result;
+            const auto it = modeEpochs.find (id);
+            if (it != modeEpochs.end())
+                result.parameter = it->second;
+            if (modes.find (id) == modes.end())
+                result.globalDefault = defaultModeEpoch.load (std::memory_order_acquire);
+            return result;
         }
 
         AutomationMode getMode (ParameterID id) const noexcept
@@ -122,13 +156,18 @@ namespace apex::automation
         void clearOverride (ParameterID id)
         {
             const juce::ScopedLock sl (mapLock);
-            modes.erase (id);
-            publishLocked();
+            if (modes.erase (id) != 0)
+            {
+                ++modeEpochs[id];
+                publishLocked();
+            }
         }
 
         void clearAll()
         {
             const juce::ScopedLock sl (mapLock);
+            for (const auto& entry : modes)
+                ++modeEpochs[entry.first];
             modes.clear();
             latched.clear();
             publishLocked();
@@ -254,9 +293,14 @@ namespace apex::automation
 
         std::atomic<std::uint8_t> globalDefault {
             static_cast<std::uint8_t> (AutomationMode::Read) };
+        std::atomic<std::uint64_t> defaultModeEpoch { 0 };
 
         std::unordered_map<ParameterID, std::shared_ptr<std::atomic<std::uint8_t>>> modes;
         std::unordered_map<ParameterID, std::shared_ptr<std::atomic<bool>>>         latched;
+        // Message-thread-only transition counters under mapLock. Keep the
+        // counter after clearOverride so removing/re-adding the same mode
+        // cannot masquerade as a continuous recording session.
+        std::unordered_map<ParameterID, std::uint64_t> modeEpochs;
         mutable juce::CriticalSection mapLock;
 
         std::shared_ptr<const StateSnapshot> published_;
