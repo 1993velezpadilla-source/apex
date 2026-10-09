@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <memory>
 #include <cmath>
+#include <vector>
+#include <atomic>
 
 namespace apex::automation
 {
@@ -83,22 +85,38 @@ namespace apex::automation
         void attachToPlugin (juce::AudioProcessor&                proc,
                              std::unordered_map<int, ParameterID> paramIndexToID)
         {
-            proc.addListener (this);
+            JUCE_ASSERT_MESSAGE_THREAD;
+            const bool firstAttach = pluginIndexMaps.find (&proc) == pluginIndexMaps.end();
             pluginIndexMaps[&proc] = std::move (paramIndexToID);
+            // Publish before registering the listener: a callback fired as
+            // soon as JUCE adds it must already resolve the new mapping.
+            publishPluginIndexMaps();
+            if (firstAttach)
+                proc.addListener (this);
         }
 
         void detachFromPlugin (juce::AudioProcessor& proc)
         {
+            JUCE_ASSERT_MESSAGE_THREAD;
+            if (pluginIndexMaps.erase (&proc) == 0)
+                return;
+            // Remove the mapping before detaching, so any in-flight
+            // callback observing the new snapshot is discarded safely.
+            publishPluginIndexMaps();
             proc.removeListener (this);
-            pluginIndexMaps.erase (&proc);
         }
 
         void detachFromAllPlugins()
         {
-            for (auto& [proc, _] : pluginIndexMaps)
+            JUCE_ASSERT_MESSAGE_THREAD;
+            // Snapshot is published before destroying mutable registration
+            // data; concurrent audio callbacks never inspect that data.
+            auto previous = std::move (pluginIndexMaps);
+            pluginIndexMaps.clear();
+            publishPluginIndexMaps();
+            for (auto& [proc, _] : previous)
                 if (proc != nullptr)
                     proc->removeListener (this);
-            pluginIndexMaps.clear();
         }
 
         // ----- juce::AudioProcessorListener (may be called on audio thread) ---
@@ -168,12 +186,36 @@ namespace apex::automation
         static AutomationGestureBridge& getInstance();
 
     private:
+        using PluginMap = std::unordered_map<juce::AudioProcessor*,
+                                              std::unordered_map<int, ParameterID>>;
+
+        struct PluginMapSnapshot
+        {
+            PluginMap bindings;
+        };
+
+        // Message thread ONLY. The published object is immutable; the audio
+        // thread atomically loads its address and never touches mutable maps.
+        void publishPluginIndexMaps()
+        {
+            auto next = std::make_unique<PluginMapSnapshot>();
+            next->bindings = pluginIndexMaps;
+            auto* immutable = next.get();
+            // Old snapshots stay alive until the bridge is destroyed.
+            // Readers that loaded one before a plugin detaches must never
+            // encounter a freed unordered_map while a callback is running.
+            retainedPluginSnapshots.push_back (std::move (next));
+            publishedPluginMaps.store (immutable, std::memory_order_release);
+        }
+
         ParameterID resolvePluginParam (juce::AudioProcessor* proc,
                                         int                   index) const noexcept
         {
-            auto it = pluginIndexMaps.find (proc);
-            if (it == pluginIndexMaps.end()) return kInvalidParameterID;
-            auto pit = it->second.find (index);
+            const auto* snapshot = publishedPluginMaps.load (std::memory_order_acquire);
+            if (snapshot == nullptr) return kInvalidParameterID;
+            const auto it = snapshot->bindings.find (proc);
+            if (it == snapshot->bindings.end()) return kInvalidParameterID;
+            const auto pit = it->second.find (index);
             return (pit != it->second.end()) ? pit->second : kInvalidParameterID;
         }
 
@@ -241,8 +283,16 @@ namespace apex::automation
         AutomationGestureQueue&      queue;
         AutomationClock&             clock;
 
-        std::unordered_map<ParameterID, std::unique_ptr<NativeListener>>              nativeListeners;
-        std::unordered_map<juce::AudioProcessor*, std::unordered_map<int, ParameterID>> pluginIndexMaps;
+        std::unordered_map<ParameterID, std::unique_ptr<NativeListener>> nativeListeners;
+
+        // Mutable registrations live only on the message thread. Historical
+        // immutable snapshots cost memory per attach/detach, deliberately
+        // trading that off against locks, allocations and use-after-free on
+        // hosted-plugin audio callbacks. A bounded reclamation scheme would
+        // require explicit audio-reader quiescence/epochs.
+        PluginMap pluginIndexMaps;
+        std::vector<std::unique_ptr<const PluginMapSnapshot>> retainedPluginSnapshots;
+        std::atomic<const PluginMapSnapshot*> publishedPluginMaps { nullptr };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationGestureBridge)
     };
