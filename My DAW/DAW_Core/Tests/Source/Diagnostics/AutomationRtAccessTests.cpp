@@ -1041,3 +1041,100 @@ public:
 };
 
 static AutomationPunchArmBoundaryTests automationPunchArmBoundaryTests;
+
+/**
+    A capture-order regression can happen within one recorder timer period,
+    so the rolling clock itself never observes the backward hop. The gesture
+    event boundary must fence the session independently of timer snapshots.
+*/
+class AutomationGesturePpqOrderTests final : public juce::UnitTest
+{
+public:
+    AutomationGesturePpqOrderTests()
+        : juce::UnitTest("automation.gesture-ppq-order-guard.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76006;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Order probe", ParameterRange{});
+        expect(param != nullptr, "fixture parameter");
+        if (param == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {6.0, 0.7f, CurveType::Linear, 0.0f},
+            {8.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Latch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(4.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float normalized)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = normalized;
+            return queue->push(e);
+        };
+
+        beginTest("Latch cannot cross a backward timestamp within one timer tick");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 5.0, 0.6f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 5.25, 0.8f));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 5.4, 0.8f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "Latch held before regressive event");
+
+        // No backwards movement in clock snapshots; only the queued capture
+        // timestamp regresses. This used to shrink s.lastPPQ to 1.0 and
+        // overwrite with a reversed 5.0->1.0 session range.
+        clock.publishFromAudioThread(6.0, 0.001, true);
+        recorder.drainForTests();
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.0, 0.95f));
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(id),
+               "regressive timestamp closes and releases previous session");
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "lane must survive rejected event");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "curve points retained");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.0),
+                                  0.2f, 1.0e-5f,
+                                  "an old loop position cannot be overwritten");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 5.25),
+                                  0.8f, 1.0e-5f,
+                                  "the valid previous pass remains committed");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 7.0),
+                                  0.8f, 1.0e-5f,
+                                  "future original automation survives");
+
+        beginTest("non-finite capture timestamp is ignored");
+        const auto beforeSize = snap->size();
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin,
+                       std::numeric_limits<double>::quiet_NaN(), 0.2f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
+                       std::numeric_limits<double>::infinity(), 0.9f));
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && snap->size() == beforeSize,
+               "invalid PPQ cannot introduce NaN/Inf into the lane");
+    }
+};
+
+static AutomationGesturePpqOrderTests automationGesturePpqOrderTests;
