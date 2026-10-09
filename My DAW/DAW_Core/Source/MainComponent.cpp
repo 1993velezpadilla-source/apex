@@ -2304,7 +2304,7 @@ MainComponent::MainComponent()
         clipFxPanelOpenByClipId_.erase(clipId);
     });
 
-    arrangement_->onOpenClipProperties = [this](DAW::Clip& clip)
+    arrangement_->onOpenClipProperties = [this, closeClipFxEditorWindow](DAW::Clip& clip)
     {
         if (!clipPropertiesWindow_)
             return;
