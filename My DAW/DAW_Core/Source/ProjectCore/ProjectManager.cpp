@@ -18,6 +18,10 @@ void ProjectManager::setSubsystems(const Subsystems& s)
     {
         subs_.clips->onClipRemoved = [this](const ClipID& clipId)
         {
+            // Clip-region processors belong to their clip, not to the track.
+            if (subs_.appCore != nullptr)
+                subs_.appCore->getClipRegionPluginCore().removeAllEntriesForClip(clipId);
+
             if (subs_.automation == nullptr || subs_.clips == nullptr)
                 return;
 
@@ -205,6 +209,16 @@ bool ProjectManager::buildState(juce::ValueTree& state,
         if (pluginState.isValid())
             state.addChild(pluginState.createCopy(), -1, nullptr);
 
+        // Every clip-region processor has its own opaque plugin state.
+        // Failure rejects the entire manual save AND autosave snapshot.
+        juce::ValueTree clipFxState;
+        if (!subs_.appCore->getClipRegionPluginCore().captureProjectState(clipFxState, error))
+        {
+            state = {};
+            return false;
+        }
+        state.addChild(clipFxState, -1, nullptr);
+
         // Quick Track Builder project-scoped role-color families — saved
         // with the project so reload restores exact colors (no rerandomize).
         auto quickTrackColors = subs_.appCore->getQuickTrackColorsState();
@@ -333,6 +347,7 @@ bool ProjectManager::newProject()
             if (subs_.appCore)
             {
                 subs_.appCore->clearAllPluginChains();
+                subs_.appCore->getClipRegionPluginCore().clearAllEntries();
                 subs_.appCore->reloadAudioFiles();
                 // Quick Track Builder: fresh project-scoped role-color map.
                 // The application-global plugin registry and the global
@@ -437,7 +452,11 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
     if (subs_.appCore)
     {
         reportLoadProgress("Clearing previous plugin state", 0.12, {}, 1, 16, false);
-        try { subs_.appCore->clearAllPluginChains(); }
+        try
+        {
+            subs_.appCore->getClipRegionPluginCore().clearAllEntries();
+            subs_.appCore->clearAllPluginChains();
+        }
         catch (const std::exception& e) { recordFailure("PluginChain pre-clear", e.what()); }
         catch (...) { recordFailure("PluginChain pre-clear", "unknown exception"); }
     }
@@ -704,6 +723,30 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
         } catch (...) {
             recordFailure("PluginChains", "unknown exception");
         }
+
+        // Restore per-clip FX after clips exist and while project RT gate is closed.
+        // Preserve unavailable plugins as opaque, serializable missing slots.
+        try
+        {
+            const auto clipFxTree = state.getChildWithName("ClipRegionPlugins");
+            juce::String clipFxDiagnostic;
+            if (!subs_.appCore->getClipRegionPluginCore().restoreProjectState(
+                    clipFxTree,
+                    subs_.appCore->getPluginScanner().getFormatManager(),
+                    [clips = subs_.clips](const ClipID& clipId)
+                    {
+                        return clips != nullptr && clips->getClip(clipId) != nullptr;
+                    },
+                    clipFxDiagnostic))
+                recordFailure("ClipRegionPlugins", clipFxDiagnostic);
+            else if (clipFxDiagnostic.isNotEmpty())
+            {
+                if (lastLoadWarning_.isNotEmpty()) lastLoadWarning_ += "; ";
+                lastLoadWarning_ += "ClipRegionPlugins: " + clipFxDiagnostic;
+            }
+        }
+        catch (const std::exception& e) { recordFailure("ClipRegionPlugins", e.what()); }
+        catch (...) { recordFailure("ClipRegionPlugins", "unknown exception"); }
 
         // v8 -> v9 (part 2): sidechain connections saved with bus index 0 are
         // resolved to the plugin's first non-main auxiliary input bus and
