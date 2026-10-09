@@ -51,20 +51,31 @@ namespace apex::automation
 
         Snapshot snapshot() const noexcept
         {
-            Snapshot s;
-            for (int attempt = 0; attempt < 2; ++attempt)
+            // A bounded seqlock retry must NOT return the last read if it was
+            // torn or observed the writer in its odd phase. Automation time
+            // and transport state must describe the SAME published audio
+            // block. Keep retrying until a fully published even version is
+            // observed; the audio writer remains lock-free/allocation-free.
+            //
+            // This is lock-free but not wait-free for readers: if the single
+            // audio writer is descheduled while the version is odd, readers
+            // retry. Most reads need exactly one attempt.
+            for (;;)
             {
                 const auto v0 = version.load (std::memory_order_acquire);
+                if ((v0 & 1u) != 0u)
+                    continue;
+
+                Snapshot s;
                 s.blockStartPPQ    = blockStartPPQ.load    (std::memory_order_acquire);
                 s.ppqPerSample     = ppqPerSampleRate.load (std::memory_order_acquire);
                 s.transportRolling = rolling.load          (std::memory_order_acquire);
                 s.transportTransitions = transportTransitionCount.load (
                     std::memory_order_acquire);
                 const auto v1 = version.load (std::memory_order_acquire);
-                if (v0 == v1 && (v0 & 1u) == 0u)
+                if (v0 == v1 && (v1 & 1u) == 0u)
                     return s;
             }
-            return s;
         }
 
         double getPlayheadPPQ()     const noexcept { return snapshot().blockStartPPQ; }
