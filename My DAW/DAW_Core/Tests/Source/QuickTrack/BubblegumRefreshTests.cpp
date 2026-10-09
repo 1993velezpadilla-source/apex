@@ -503,8 +503,14 @@ public:
                     // then rebind WITHOUT touching static send values.
                     h.graph.restoreState(savedRouting);
                     store.restoreState(savedAutomation);
-                    const auto* restoredSend = h.graph.getAllConnections().size() > 0
-                        ? h.graph.getAllConnections()[h.graph.getAllConnections().size() - 1] : nullptr;
+                    DAW::RoutingConnection* restoredSend = nullptr;
+                    for (auto* conn : h.graph.getAllConnections())
+                        if (conn != nullptr && conn->id == routeId)
+                        {
+                            restoredSend = conn;
+                            break;
+                        }
+                    expect(restoredSend != nullptr, "stable Send RouteID survives project restore");
                     float initialGain = 0.0f;
                     if (restoredSend != nullptr)
                         initialGain = restoredSend->gain.load(std::memory_order_relaxed);
