@@ -7,6 +7,7 @@
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
 #include "../../../Source/Automation/AutomationGestureQueueCore.h"
 #include "../../../Source/Automation/AutomationClockCore.h"
+#include "../../../Source/Automation/AutomationRecorderCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -528,3 +529,106 @@ public:
 };
 
 static PluginAutomationRealTimebaseTests pluginAutomationRealTimebaseTests;
+
+/**
+    Regression: Latch and Write must hold the user value on release and
+    commit it through the transport Stop playhead. Previously the evaluator
+    overwrote the held value from the stale lane, and the recorder committed
+    only through the final knob movement (leaving a gap until Stop).
+*/
+class AutomationLatchWriteStopTests final : public juce::UnitTest
+{
+public:
+    AutomationLatchWriteStopTests()
+        : juce::UnitTest("automation.latch-write-stop-hold.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76001;
+
+        for (auto mode : { AutomationMode::Latch, AutomationMode::Write })
+        {
+            const juce::String modeName = mode == AutomationMode::Latch ? "Latch" : "Write";
+            beginTest(modeName + ": hold after release and through transport Stop");
+
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arms;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+
+            auto* param = registry.createParameter(id, "Automation hold probe", ParameterRange{});
+            expect(param != nullptr, "test parameter registered");
+            if (param == nullptr)
+                continue;
+
+            // The old lane changes during the held interval: without the
+            // guard, its evaluator would override the released knob value.
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.2f, CurveType::Linear, 0.0f},
+                {3.0, 0.1f, CurveType::Linear, 0.0f},
+                {6.0, 0.4f, CurveType::Linear, 0.0f}
+            });
+            modes.setMode(id, mode);
+            arms.setRecordArmed(true);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+            AutomationEvaluator evaluator(registry, lanes, modes);
+
+            clock.publishFromAudioThread(0.0, 0.001, true);
+            recorder.drainForTests();  // Consume Play before first gesture.
+
+            auto addEvent = [&](AutomationGestureQueue::EventKind kind,
+                                double ppq, float value)
+            {
+                AutomationGestureQueue::Event event;
+                event.paramID = id;
+                event.kind = kind;
+                event.source = ChangeSource::User;
+                event.ppqAtCapture = ppq;
+                event.normalizedValue = value;
+                return queue->push(event);
+            };
+            expect(addEvent(AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+            expect(addEvent(AutomationGestureQueue::EventKind::ValueChange, 1.25, 0.8f));
+            expect(addEvent(AutomationGestureQueue::EventKind::GestureEnd, 1.5, 0.8f));
+            recorder.drainForTests();
+
+            expect(modes.latchHeldRT(id), "release holds Latch/Write until Stop");
+            param->writeValue(0.8f, ChangeSource::User);
+            evaluator.evaluateBlock(2.0, true);
+            expectWithinAbsoluteError(param->getNormalizedValue(), 0.8f, 1.0e-5f,
+                "the old curve cannot overwrite the released user value");
+
+            // Less than the prior 30-PPQ sustain interval: Stop must still
+            // write the final held breakpoint at the true stop playhead.
+            clock.publishFromAudioThread(4.0, 0.001, false);
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Stop releases held mode");
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "recorded lane must remain available");
+            if (lane == nullptr)
+                continue;
+            auto points = lane->getSnapshot();
+            expect(points != nullptr && !points->empty(), "recording must contain points");
+            if (points == nullptr || points->empty())
+                continue;
+
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 3.5),
+                                      0.8f, 1.0e-5f,
+                "held value must persist between final gesture and Stop");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 4.0),
+                                      0.8f, 1.0e-5f,
+                "Stop must close the held range at the actual playhead");
+            evaluator.evaluateBlock(5.0, true);
+            expectWithinAbsoluteError(param->getNormalizedValue(),
+                                      AutomationLane::evaluateAt(*points, 5.0),
+                                      1.0e-5f,
+                "after Stop, playback must again follow the committed lane");
+        }
+    }
+};
+
+static AutomationLatchWriteStopTests automationLatchWriteStopTests;
