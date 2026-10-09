@@ -53,6 +53,7 @@ namespace apex::automation
 
             auto lst = std::make_unique<NativeListener> (queue, clock, id);
             p.bindGestureCaptureClock (&clock);
+            p.bindDirectGestureQueue (&queue);
             p.addListener (lst.get());
             nativeListeners.emplace (id, std::move (lst));
         }
@@ -64,6 +65,7 @@ namespace apex::automation
             if (auto* p = registry.find (id))
             {
                 p->removeListener (it->second.get());
+                p->unbindDirectGestureQueue (&queue);
                 p->unbindGestureCaptureClock (&clock);
             }
             nativeListeners.erase (it);
@@ -75,6 +77,7 @@ namespace apex::automation
                 if (auto* p = registry.find (id))
                 {
                     p->removeListener (lst.get());
+                    p->unbindDirectGestureQueue (&queue);
                     p->unbindGestureCaptureClock (&clock);
                 }
             nativeListeners.clear();
@@ -240,6 +243,11 @@ namespace apex::automation
                 if ((source != ChangeSource::User && source != ChangeSource::Plugin)
                     || !std::isfinite (newNormalized))
                     return;
+                // Direct producer capture has already enqueued EVERY source
+                // movement. UI notifications may coalesce, and sending a
+                // second event from here would duplicate or reorder points.
+                if (p.hasDirectGestureQueue())
+                    return;
 
                 AutomationGestureQueue::Event e;
                 e.paramID         = paramID;
@@ -254,6 +262,8 @@ namespace apex::automation
 
             void parameterGestureBegan (AutomationParameter& p) override
             {
+                if (p.hasDirectGestureQueue())
+                    return;
                 AutomationGestureQueue::Event e;
                 e.paramID          = paramID;
                 e.kind             = AutomationGestureQueue::EventKind::GestureBegin;
@@ -270,6 +280,8 @@ namespace apex::automation
 
             void parameterGestureEnded (AutomationParameter& p) override
             {
+                if (p.hasDirectGestureQueue())
+                    return;
                 AutomationGestureQueue::Event e;
                 e.paramID      = paramID;
                 e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
