@@ -1,9 +1,11 @@
 #pragma once
 
 #include "AutomationTypes.h"
+#include "AutomationClockCore.h"
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
+#include <limits>
 
 namespace apex::automation
 {
@@ -92,11 +94,42 @@ namespace apex::automation
             return gestureBeginValueN.load (std::memory_order_acquire);
         }
 
+        // Native UI notifications are deferred. Capture PPQ at the actual
+        // parameter operation, not at the next 60 Hz dispatcher callback.
+        // When no bridge is attached, the getter returns NaN so its listener
+        // can fall back to its own clock without inventing a timestamp.
+        void bindGestureCaptureClock (AutomationClock* c) noexcept
+        {
+            gestureCaptureClock.store (c, std::memory_order_release);
+        }
+
+        void unbindGestureCaptureClock (AutomationClock* expected) noexcept
+        {
+            gestureCaptureClock.compare_exchange_strong (expected, nullptr,
+                std::memory_order_acq_rel, std::memory_order_acquire);
+        }
+
+        double getCapturedGestureBeginPPQ() const noexcept
+        {
+            return gestureBeginPPQ.load (std::memory_order_acquire);
+        }
+
+        double getCapturedGestureEndPPQ() const noexcept
+        {
+            return gestureEndPPQ.load (std::memory_order_acquire);
+        }
+
+        double getCapturedValueChangePPQ() const noexcept
+        {
+            return latestValueChangePPQ.load (std::memory_order_acquire);
+        }
+
         // ----- Value writers ----------------------------------------------
 
         // Called by APEX UI widgets when the user drags/clicks the control.
         void setValueFromUser (float newNormalized)
         {
+            latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
             writeValue (newNormalized, ChangeSource::User);
             forwardToPluginIfBound (newNormalized);
         }
@@ -114,6 +147,7 @@ namespace apex::automation
         // the parameter itself.
         void setValueFromPlugin (float newNormalized)
         {
+            latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
             writeValue (newNormalized, ChangeSource::Plugin);
         }
 
@@ -132,6 +166,7 @@ namespace apex::automation
             if (! wasActive)
             {
                 gestureBeginValueN.store (getNormalizedValue(), std::memory_order_release);
+                gestureBeginPPQ.store (captureInputPPQ(), std::memory_order_release);
                 pendingGestureBegin.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -142,6 +177,7 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (false, std::memory_order_acq_rel);
             if (wasActive)
             {
+                gestureEndPPQ.store (captureInputPPQ(), std::memory_order_release);
                 pendingGestureEnd.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -213,6 +249,13 @@ namespace apex::automation
                 p->setValueNotifyingHost (std::clamp (newNormalized, 0.0f, 1.0f));
         }
 
+        double captureInputPPQ() const noexcept
+        {
+            if (auto* c = gestureCaptureClock.load (std::memory_order_acquire))
+                return c->snapshot().blockStartPPQ;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
         // Identity
         const ParameterID      paramID;
         const juce::String     name;
@@ -225,6 +268,10 @@ namespace apex::automation
         std::atomic<std::uint64_t> version             { 0 };
         std::atomic<bool>          gestureActive       { false };
         std::atomic<float>         gestureBeginValueN  { 0.0f };
+        std::atomic<AutomationClock*> gestureCaptureClock { nullptr };
+        std::atomic<double> gestureBeginPPQ { std::numeric_limits<double>::quiet_NaN() };
+        std::atomic<double> gestureEndPPQ { std::numeric_limits<double>::quiet_NaN() };
+        std::atomic<double> latestValueChangePPQ { std::numeric_limits<double>::quiet_NaN() };
         std::atomic<bool>          pendingGestureBegin { false };
         std::atomic<bool>          pendingGestureEnd   { false };
         std::atomic<std::uint8_t>  lastSource          {
