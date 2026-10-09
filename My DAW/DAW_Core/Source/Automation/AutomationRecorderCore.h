@@ -105,9 +105,11 @@ namespace apex::automation
         {
             JUCE_ASSERT_MESSAGE_THREAD;
 
+            // Observe data loss FIRST. A Stop or Punch-Out on the same tick
+            // must not extend an incomplete gesture across an unknown gap.
+            const bool overflowed = handleQueueOverflow();
             const bool rewound = handleTransportEdges();
             const bool punchedOut = handleRecordArmEdges();
-            const bool overflowed = handleQueueOverflow();
 
             AutomationGestureQueue::Event e;
             if (rewound || punchedOut || overflowed || !armState.isRecordArmed())
