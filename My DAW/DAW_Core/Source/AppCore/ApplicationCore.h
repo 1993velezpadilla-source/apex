@@ -124,6 +124,16 @@ public:
     {
         beforeClipFxProjectReset_ = std::move(callback);
     }
+    /** Message-thread callback: release plugin editor windows before clip FX is deleted. */
+    void setBeforeClipFxClipRemoved(std::function<void(const ClipID&)> callback)
+    {
+        beforeClipFxClipRemoved_ = std::move(callback);
+    }
+    void notifyBeforeClipFxClipRemoved(const ClipID& clipId)
+    {
+        if (beforeClipFxClipRemoved_)
+            beforeClipFxClipRemoved_(clipId);
+    }
     BubblegumV2System& getBubblegumV2()      { return bubblegumV2_; }
     const BubblegumV2System& getBubblegumV2() const { return bubblegumV2_; }
     FolderBusCore& getFolderBus()              { return folderBus_; }
@@ -454,6 +464,7 @@ private:
     PluginPlayheadInfoCore pluginPlayheadInfoCore_;
     ClipRegionPluginCore clipRegionPluginCore_;
     std::function<void()> beforeClipFxProjectReset_;
+    std::function<void(const ClipID&)> beforeClipFxClipRemoved_;
     std::map<TrackID, std::shared_ptr<PluginChainCore>> pluginChains_;
     int pluginChainPublicationBatchDepth_ = 0;
     FaderRangeCore faderRangeCore_;
