@@ -64,6 +64,28 @@ namespace apex::automation
 
         // ----- Transport edge detection (message thread) ----------------
 
+        struct TransportEdges
+        {
+            bool started = false;
+            bool stopped = false;
+        };
+
+        /**
+            Observe the transport exactly ONCE per recorder timer tick.
+            Calling the separate legacy stopped/started accessors back-to-back
+            consumed the same state transition twice: the stop query changed
+            lastObservedRolling before the start query could see Play.
+        */
+        TransportEdges consumeTransportEdges() noexcept
+        {
+            const bool nowRolling = isTransportRolling();
+            const bool wasRolling = lastObservedRolling.exchange(
+                nowRolling, std::memory_order_acq_rel);
+            return { !wasRolling && nowRolling, wasRolling && !nowRolling };
+        }
+
+        // Backwards-compatible single-edge accessors. Clients that need
+        // BOTH edges in one tick MUST use consumeTransportEdges() above.
         bool consumeTransportStoppedEdge() noexcept
         {
             const bool nowRolling = isTransportRolling();
