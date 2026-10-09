@@ -2,6 +2,7 @@
 
 #include "AutomationTypes.h"
 #include "AutomationClockCore.h"
+#include "AutomationGestureQueueCore.h"
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
@@ -110,6 +111,27 @@ namespace apex::automation
                 std::memory_order_acq_rel, std::memory_order_acquire);
         }
 
+        // The bridge attaches the native recording queue before interaction.
+        // Capture the event at its *producer*, not via the coalescing 60 Hz
+        // widget notifier, which cannot preserve successive fast knob moves.
+        // Queue and clock must outlive this binding; detach on message thread
+        // after input callbacks quiesce, before destruction.
+        void bindDirectGestureQueue (AutomationGestureQueue* q) noexcept
+        {
+            directGestureQueue.store (q, std::memory_order_release);
+        }
+
+        void unbindDirectGestureQueue (AutomationGestureQueue* expected) noexcept
+        {
+            directGestureQueue.compare_exchange_strong (expected, nullptr,
+                std::memory_order_acq_rel, std::memory_order_acquire);
+        }
+
+        bool hasDirectGestureQueue() const noexcept
+        {
+            return directGestureQueue.load (std::memory_order_acquire) != nullptr;
+        }
+
         double getCapturedGestureBeginPPQ() const noexcept
         {
             return gestureBeginPPQ.load (std::memory_order_acquire);
@@ -131,8 +153,11 @@ namespace apex::automation
         void setValueFromUser (float newNormalized)
         {
             if (!std::isfinite (newNormalized)) return;
-            latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
+            const double ppq = captureInputPPQ();
+            latestValueChangePPQ.store (ppq, std::memory_order_release);
             writeValue (newNormalized, ChangeSource::User);
+            publishDirectGesture (AutomationGestureQueue::EventKind::ValueChange,
+                                  ChangeSource::User, newNormalized, ppq, false);
             forwardToPluginIfBound (newNormalized);
         }
 
@@ -151,8 +176,11 @@ namespace apex::automation
         void setValueFromPlugin (float newNormalized)
         {
             if (!std::isfinite (newNormalized)) return;
-            latestValueChangePPQ.store (captureInputPPQ(), std::memory_order_release);
+            const double ppq = captureInputPPQ();
+            latestValueChangePPQ.store (ppq, std::memory_order_release);
             writeValue (newNormalized, ChangeSource::Plugin);
+            publishDirectGesture (AutomationGestureQueue::EventKind::ValueChange,
+                                  ChangeSource::Plugin, newNormalized, ppq, false);
         }
 
         // For preset loads, undo, scripted assignment, etc.
@@ -170,8 +198,12 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (true, std::memory_order_acq_rel);
             if (! wasActive)
             {
-                gestureBeginValueN.store (getNormalizedValue(), std::memory_order_release);
-                gestureBeginPPQ.store (captureInputPPQ(), std::memory_order_release);
+                const float startValue = getNormalizedValue();
+                const double ppq = captureInputPPQ();
+                gestureBeginValueN.store (startValue, std::memory_order_release);
+                gestureBeginPPQ.store (ppq, std::memory_order_release);
+                publishDirectGesture (AutomationGestureQueue::EventKind::GestureBegin,
+                                      ChangeSource::User, startValue, ppq, true);
                 pendingGestureBegin.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -182,7 +214,10 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (false, std::memory_order_acq_rel);
             if (wasActive)
             {
-                gestureEndPPQ.store (captureInputPPQ(), std::memory_order_release);
+                const double ppq = captureInputPPQ();
+                gestureEndPPQ.store (ppq, std::memory_order_release);
+                publishDirectGesture (AutomationGestureQueue::EventKind::GestureEnd,
+                                      ChangeSource::User, getNormalizedValue(), ppq, false);
                 pendingGestureEnd.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -276,6 +311,26 @@ namespace apex::automation
             return std::numeric_limits<double>::quiet_NaN();
         }
 
+        void publishDirectGesture (AutomationGestureQueue::EventKind kind,
+                                   ChangeSource source, float value,
+                                   double ppq, bool hasStartValue) noexcept
+        {
+            if (auto* q = directGestureQueue.load (std::memory_order_acquire))
+            {
+                AutomationGestureQueue::Event e;
+                e.paramID = paramID;
+                e.kind = kind;
+                e.source = source;
+                e.normalizedValue = std::clamp (value, 0.0f, 1.0f);
+                e.ppqAtCapture = ppq;
+                e.hasStartValue = hasStartValue;
+                // A bounded MPSC queue is the only producer-side handoff.
+                // Overflow is recorded by push(), and the recorder fences
+                // old sessions rather than silently accept lost events.
+                (void) q->push (e);
+            }
+        }
+
         // Identity
         const ParameterID      paramID;
         const juce::String     name;
@@ -293,6 +348,7 @@ namespace apex::automation
         std::atomic<bool>          gestureActive       { false };
         std::atomic<float>         gestureBeginValueN  { 0.0f };
         std::atomic<AutomationClock*> gestureCaptureClock { nullptr };
+        std::atomic<AutomationGestureQueue*> directGestureQueue { nullptr };
         std::atomic<double> gestureBeginPPQ { std::numeric_limits<double>::quiet_NaN() };
         std::atomic<double> gestureEndPPQ { std::numeric_limits<double>::quiet_NaN() };
         std::atomic<double> latestValueChangePPQ { std::numeric_limits<double>::quiet_NaN() };
