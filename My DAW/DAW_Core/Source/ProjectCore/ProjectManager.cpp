@@ -350,6 +350,9 @@ bool ProjectManager::newProject()
             if (subs_.transport) { subs_.transport->stop(); subs_.transport->setPosition(0); }
             if (subs_.appCore)
             {
+                // Send automation registrations belong to the project being
+                // discarded. Detach before clearing its curves and routing.
+                subs_.appCore->getBubblegumV2().releaseProjectSendAutomationBindings();
                 subs_.appCore->clearAllPluginChains();
                 subs_.appCore->getClipRegionPluginCore().clearAllEntries();
                 subs_.appCore->reloadAudioFiles();
@@ -358,6 +361,15 @@ bool ProjectManager::newProject()
                 // QuickTrack template store are NOT touched.
                 subs_.appCore->resetQuickTrackColorsForNewProject();
             }
+
+            // New Project must not carry the previous song's recorded
+            // track/plugin/send automation into the next project.
+            if (subs_.automation)
+                subs_.automation->clearAll();
+            apex::automation::AutomationLaneStore::getInstance().clear();
+            auto& modes = apex::automation::AutomationModeState::getInstance();
+            modes.clearAll();
+            modes.setGlobalDefaultMode(apex::automation::AutomationMode::Read);
 
             projectFile_ = juce::File();
             projectName_ = "Untitled";
@@ -458,6 +470,9 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
         reportLoadProgress("Clearing previous plugin state", 0.12, {}, 1, 16, false);
         try
         {
+            // Old Bubblegum listeners refer to the previous project's
+            // RouteIDs and must not outlive a graph/tree replacement.
+            subs_.appCore->getBubblegumV2().releaseProjectSendAutomationBindings();
             subs_.appCore->getClipRegionPluginCore().clearAllEntries();
             subs_.appCore->clearAllPluginChains();
         }
@@ -596,10 +611,17 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
 
     try {
         apex::automation::AutomationLaneStore::getInstance().restoreState(state.getChildWithName("APEXAutomation"));
+        if (subs_.appCore != nullptr)
+        {
+            // Routing and persistent lane keys now exist. Recreate the
+            // parameter-to-live-Send bridges WITHOUT generating gestures,
+            // changing mode, or overwriting saved send gain/bypass.
+            subs_.appCore->getBubblegumV2().rebindPersistedSendAutomation();
+        }
     } catch (const std::exception& e) {
-        recordFailure("APEXAutomation", e.what());
+        recordFailure("APEXAutomation/SendBindings", e.what());
     } catch (...) {
-        recordFailure("APEXAutomation", "unknown exception");
+        recordFailure("APEXAutomation/SendBindings", "unknown exception");
     }
 
     // ── Project migrations (v8 → v9) ─────────────────────────────────────
