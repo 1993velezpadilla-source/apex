@@ -1524,3 +1524,121 @@ public:
 };
 
 static AutomationNativeCapturePPQTests automationNativeCapturePPQTests;
+
+/**
+    A Punch-Out immediately followed by Punch-In can happen entirely between
+    two 90 Hz message-thread recorder ticks. Merely comparing recordArmed's
+    before/after boolean misses this ABA transition and merges two takes.
+*/
+class AutomationArmEpochABATests final : public juce::UnitTest
+{
+public:
+    AutomationArmEpochABATests()
+        : juce::UnitTest("automation.punch-arm-epoch-aba.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76011;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Arm epoch probe", ParameterRange{});
+        expect(param != nullptr, "fixture registered");
+        if (param == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Latch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        beginTest("first pass holds Latch before record-arm ABA");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 2.0, 0.3f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.25, 0.8f));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 2.3, 0.8f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "first Latch must be held");
+
+        beginTest("On-Off-On between timer callbacks closes first session");
+        const auto epoch = arms.getArmTransitionCount();
+        arms.setRecordArmed(false);
+        arms.setRecordArmed(true);
+        expect(arms.isRecordArmed(), "final state is armed");
+        expectEquals(arms.getArmTransitionCount(), epoch + std::uint64_t{2},
+                     "both transitions must be visible despite final On");
+
+        // A late value from the first arm epoch cannot be distinguished
+        // from a newly armed value solely by its captured PPQ.
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.75, 0.95f));
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(id),
+               "old held Latch must release even when final armed state is On");
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "lane retained");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "first take committed");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "first pass value retained");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                  0.8f, 1.0e-5f,
+                                  "first pass extended to the observed punch boundary");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                  0.7f, 1.0e-5f,
+                                  "queued stale .95 never damages future source curve");
+
+        beginTest("a valid fresh Latch in same rolling Play interval works");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "new session published");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
+                                  0.25f, 1.0e-5f,
+                                  "new interval recorded after ABA boundary");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "earlier take not overwritten");
+
+        beginTest("redundant arm writes do not reset a valid session");
+        const auto after = arms.getArmTransitionCount();
+        arms.setRecordArmed(true);
+        expectEquals(arms.getArmTransitionCount(), after,
+                     "setting the same armed value is not a transition");
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "lane remains intact");
+        if (snap != nullptr && !snap->empty())
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
+                                      0.25f, 1.0e-5f,
+                                      "idempotent arm state does not erase current take");
+    }
+};
+
+static AutomationArmEpochABATests automationArmEpochABATests;
