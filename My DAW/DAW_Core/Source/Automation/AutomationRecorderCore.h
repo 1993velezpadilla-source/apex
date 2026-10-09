@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 #include <limits>
+#include <cmath>
 #include <algorithm>
 
 namespace apex::automation
@@ -364,6 +365,14 @@ namespace apex::automation
             // that would reverse its overwrite interval and splice points
             // from different loop passes into a single take.
             if (! std::isfinite (e.ppqAtCapture))
+                return;
+            // Third-party processors can report NaN/Inf for a parameter.
+            // Do not write it to a lane, start a poisoned Trim envelope or
+            // disturb the current session. GestureEnd has no value payload.
+            if ((e.kind == AutomationGestureQueue::EventKind::ValueChange
+                 || (e.kind == AutomationGestureQueue::EventKind::GestureBegin
+                     && e.hasStartValue))
+                && !std::isfinite (e.normalizedValue))
                 return;
 
             auto existing = sessions.find (e.paramID);
