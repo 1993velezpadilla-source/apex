@@ -52,6 +52,7 @@ namespace apex::automation
             , armState  (transport)
         {
             lastObservedArmed = armState.isRecordArmed();
+            lastObservedTransportTransitions = clock.snapshot().transportTransitions;
             lastObservedArmTransitions = armState.getArmTransitionCount();
             lastObservedOverflow = queue.getOverflowCount();
             startTimerHz (kDrainHz);
@@ -135,6 +136,10 @@ namespace apex::automation
             // by Start used to consume the Start transition before it could
             // close/reset the recorder's previous session state.
             const auto edges = clock.consumeTransportEdges();
+            const bool hiddenTransportTurnaround = position.transportRolling
+                && !edges.started && !edges.stopped
+                && position.transportTransitions != lastObservedTransportTransitions;
+            lastObservedTransportTransitions = position.transportTransitions;
             if (edges.stopped)
             {
                 // A released Latch (or Write) gesture has no more ValueChange
@@ -174,6 +179,18 @@ namespace apex::automation
                 modeState.clearAllLatches();
             }
 
+            if (hiddenTransportTurnaround)
+            {
+                // Stop→Play happened entirely between recorder timer ticks.
+                // Closing at the final captured point, rather than pretending
+                // to know the missed Stop PPQ, prevents stale Latch/Write
+                // values and ambiguous queued gestures leaking into a new take.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession (session, true);
+                sessions.clear();
+                modeState.clearAllLatches();
+            }
+
             const bool backwardsSeek = position.transportRolling && !edges.started
                 && std::isfinite (lastObservedPlayheadPPQ)
                 && std::isfinite (position.blockStartPPQ)
@@ -194,7 +211,7 @@ namespace apex::automation
             lastObservedPlayheadPPQ = position.transportRolling
                 ? position.blockStartPPQ
                 : std::numeric_limits<double>::quiet_NaN();
-            return backwardsSeek;
+            return backwardsSeek || hiddenTransportTurnaround;
         }
 
         bool handleRecordArmEdges()
@@ -653,6 +670,7 @@ namespace apex::automation
         // of the Play/Stop flag catches seek/loop wraps that never Stop.
         double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
         bool lastObservedArmed = false;
+        std::uint64_t lastObservedTransportTransitions = 0;
         std::uint64_t lastObservedArmTransitions = 0;
         std::uint64_t lastObservedOverflow = 0;
 
