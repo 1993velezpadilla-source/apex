@@ -2101,7 +2101,9 @@ public:
 
         juce::ScopedJuceInitialiser_GUI gui;
         juce::AudioPluginFormatManager manager;
-        manager.addDefaultFormats();
+        // This JUCE 8 build deliberately deletes addDefaultFormats().
+        // Register the exact VST3 format explicitly for this external canary.
+        manager.addFormat(std::make_unique<juce::VST3PluginFormat>());
         juce::VST3PluginFormat vst3;
         juce::PluginDescription descriptions[2];
         const juce::String paths[] = { reverbPath, delayPath };
