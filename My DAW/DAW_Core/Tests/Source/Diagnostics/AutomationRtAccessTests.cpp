@@ -2404,3 +2404,93 @@ public:
 };
 
 static AutomationNonFiniteInputTests automationNonFiniteInputTests;
+
+/**
+    A UI dispatcher wake-up from GestureBegin/GestureEnd is not a value
+    change. Forwarding it as such creates phantom automation points at the
+    old ValueChange PPQ, sometimes rewinding an otherwise valid touch.
+*/
+class AutomationGestureOnlyDispatchTests final : public juce::UnitTest
+{
+public:
+    AutomationGestureOnlyDispatchTests()
+        : juce::UnitTest("automation.native-gesture-only-no-phantom-value.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76022;
+        AutomationParameterRegistry registry;
+        auto* parameter = registry.createParameter(
+            id, "Gesture-only probe", ParameterRange{});
+        expect(parameter != nullptr, "registered native parameter");
+        if (parameter == nullptr) return;
+
+        AutomationClock clock;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*parameter);
+        AutomationGestureQueue::Event event;
+
+        beginTest("pure GestureBegin dispatches one begin, zero value changes");
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        parameter->beginGesture();
+        clock.publishFromAudioThread(1.5, 0.001, true);
+        parameter->dispatchPendingNotifications(
+            parameter->getNormalizedValue(), parameter->getLastSource());
+        expect(queue->pop(event), "gesture begin emitted");
+        expectEquals(static_cast<int>(event.kind),
+                     static_cast<int>(AutomationGestureQueue::EventKind::GestureBegin),
+                     "first event is GestureBegin");
+        expectWithinAbsoluteError(event.ppqAtCapture, 1.0, 1.0e-8,
+                                  "captured begin timestamp preserved");
+        expect(!queue->pop(event), "no synthetic ValueChange on begin-only tick");
+
+        beginTest("real user write dispatches precisely one value at input PPQ");
+        clock.publishFromAudioThread(2.0, 0.001, true);
+        parameter->setValueFromUser(0.6f);
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        parameter->dispatchPendingNotifications(
+            parameter->getNormalizedValue(), parameter->getLastSource());
+        expect(queue->pop(event), "real value change emitted");
+        expectEquals(static_cast<int>(event.kind),
+                     static_cast<int>(AutomationGestureQueue::EventKind::ValueChange),
+                     "value event kind is correct");
+        expectWithinAbsoluteError(event.normalizedValue, 0.6f, 1.0e-6f,
+                                  "actual moved value preserved");
+        expectWithinAbsoluteError(event.ppqAtCapture, 2.0, 1.0e-8,
+                                  "value uses original input timestamp");
+        expect(!queue->pop(event), "only one value event");
+
+        beginTest("pure GestureEnd dispatches one end, zero value changes");
+        clock.publishFromAudioThread(4.0, 0.001, true);
+        parameter->endGesture();
+        clock.publishFromAudioThread(5.0, 0.001, true);
+        parameter->dispatchPendingNotifications(
+            parameter->getNormalizedValue(), parameter->getLastSource());
+        expect(queue->pop(event), "gesture end emitted");
+        expectEquals(static_cast<int>(event.kind),
+                     static_cast<int>(AutomationGestureQueue::EventKind::GestureEnd),
+                     "event is GestureEnd, not a repeated ValueChange");
+        expectWithinAbsoluteError(event.ppqAtCapture, 4.0, 1.0e-8,
+                                  "captured end PPQ preserved");
+        expect(!queue->pop(event), "end-only tick does not replay stale value");
+
+        beginTest("programmatic and automation writes still notify UI");
+        parameter->setValueProgrammatic(0.25f);
+        parameter->dispatchPendingNotifications(
+            parameter->getNormalizedValue(), parameter->getLastSource());
+        // Programmatic changes still invoke ordinary value listeners; the
+        // bridge intentionally excludes them from recorder events.
+        expect(!queue->pop(event), "programmatic value is not user automation");
+        parameter->setValueFromAutomation(0.35f);
+        parameter->dispatchPendingNotifications(
+            parameter->getNormalizedValue(), parameter->getLastSource());
+        expect(!queue->pop(event), "playback automation is not user recording");
+
+        bridge.detachFromParameter(id);
+    }
+};
+
+static AutomationGestureOnlyDispatchTests automationGestureOnlyDispatchTests;
