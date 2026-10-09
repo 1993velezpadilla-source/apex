@@ -99,7 +99,11 @@ namespace apex::automation
 
         void handleTransportEdges()
         {
-            if (clock.consumeTransportStoppedEdge())
+            // One observation per timer tick: a separate Stop call followed
+            // by Start used to consume the Start transition before it could
+            // close/reset the recorder's previous session state.
+            const auto edges = clock.consumeTransportEdges();
+            if (edges.stopped)
             {
                 for (auto& [id, s] : sessions)
                     if (s.open) closeSession (s, true);
@@ -107,8 +111,17 @@ namespace apex::automation
                 modeState.clearAllLatches();
             }
 
-            if (clock.consumeTransportStartedEdge())
+            if (edges.started)
+            {
+                // A Stop/Play turnaround between 90 Hz recorder ticks may
+                // hide the intermediate Stop. Commit any buffered points
+                // before resetting the take, and never carry Latch across
+                // a new transport start.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession(session, true);
                 sessions.clear();
+                modeState.clearAllLatches();
+            }
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)

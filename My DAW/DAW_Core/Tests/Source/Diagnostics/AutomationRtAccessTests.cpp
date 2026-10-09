@@ -6,6 +6,7 @@
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
 #include "../../../Source/Automation/AutomationGestureQueueCore.h"
+#include "../../../Source/Automation/AutomationClockCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -394,3 +395,53 @@ public:
 };
 
 static AutomationGestureQueueMpscTests automationGestureQueueMpscTests;
+
+/**
+    A single recorder tick must be able to observe a Play or Stop edge.
+    Previously consumeTransportStoppedEdge() mutated the observation cursor
+    before consumeTransportStartedEdge() checked it, swallowing every Start.
+*/
+class AutomationTransportEdgeTests final : public juce::UnitTest
+{
+public:
+    AutomationTransportEdgeTests()
+        : juce::UnitTest("automation.transport-edges-play-stop.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationClock clock;
+
+        beginTest("initially stopped and no spurious transition");
+        auto e = clock.consumeTransportEdges();
+        expect(!e.started && !e.stopped);
+
+        beginTest("Play is reported once, not swallowed by Stop observation");
+        clock.publishFromAudioThread(4.0, 0.0001, true);
+        e = clock.consumeTransportEdges();
+        expect(e.started && !e.stopped);
+        e = clock.consumeTransportEdges();
+        expect(!e.started && !e.stopped);
+
+        beginTest("Stop is reported once");
+        clock.publishFromAudioThread(5.0, 0.0001, false);
+        e = clock.consumeTransportEdges();
+        expect(!e.started && e.stopped);
+        e = clock.consumeTransportEdges();
+        expect(!e.started && !e.stopped);
+
+        beginTest("restart creates a fresh Play edge");
+        clock.publishFromAudioThread(0.0, 0.0002, true);
+        e = clock.consumeTransportEdges();
+        expect(e.started && !e.stopped);
+        clock.publishFromAudioThread(0.5, 0.0002, true);
+        e = clock.consumeTransportEdges();
+        expect(!e.started && !e.stopped);
+
+        beginTest("second Stop produces another edge");
+        clock.publishFromAudioThread(0.5, 0.0002, false);
+        e = clock.consumeTransportEdges();
+        expect(!e.started && e.stopped);
+    }
+};
+
+static AutomationTransportEdgeTests automationTransportEdgeTests;
