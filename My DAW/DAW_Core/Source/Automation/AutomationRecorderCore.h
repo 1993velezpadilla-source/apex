@@ -52,6 +52,7 @@ namespace apex::automation
             , armState  (transport)
         {
             lastObservedArmed = armState.isRecordArmed();
+            lastObservedArmTransitions = armState.getArmTransitionCount();
             lastObservedOverflow = queue.getOverflowCount();
             startTimerHz (kDrainHz);
         }
@@ -109,10 +110,10 @@ namespace apex::automation
             // must not extend an incomplete gesture across an unknown gap.
             const bool overflowed = handleQueueOverflow();
             const bool rewound = handleTransportEdges();
-            const bool punchedOut = handleRecordArmEdges();
+            const bool armTransition = handleRecordArmEdges();
 
             AutomationGestureQueue::Event e;
-            if (rewound || punchedOut || overflowed || !armState.isRecordArmed())
+            if (rewound || armTransition || overflowed || !armState.isRecordArmed())
             {
                 // A queue event carries PPQ but no loop-iteration identity.
                 // Values pending at a backward seek cannot safely be assigned
@@ -199,15 +200,21 @@ namespace apex::automation
         bool handleRecordArmEdges()
         {
             const bool armedNow = armState.isRecordArmed();
-            const bool punchedOut = lastObservedArmed && !armedNow;
+            const auto transitions = armState.getArmTransitionCount();
+            const bool crossedArmBoundary = transitions != lastObservedArmTransitions
+                || armedNow != lastObservedArmed;
             lastObservedArmed = armedNow;
-            if (!punchedOut)
+            lastObservedArmTransitions = transitions;
+            if (!crossedArmBoundary)
                 return false;
 
-            // Record-arm falling while Play continues is a Punch-Out edge.
-            // The recorder must not leave open sessions/latches writing after
-            // that boundary. Finalize at the observed playhead without
-            // pretending to provide sample-accurate punch timing.
+            // Do not infer an arm epoch from the final boolean alone. Two
+            // edges (On->Off->On) within one 90Hz timer period leave On but
+            // MUST end the previous take. A normal Punch-In also discards
+            // pending events from the disarmed period: no queue event carries
+            // an arm-epoch identifier. This may lose events at the boundary,
+            // but cannot blend two takes into one.
+            // The PPQ is observed at the timer tick, not sample-exact.
             const auto snapshot = clock.snapshot();
             for (auto& [id, s] : sessions)
             {
@@ -646,6 +653,7 @@ namespace apex::automation
         // of the Play/Stop flag catches seek/loop wraps that never Stop.
         double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
         bool lastObservedArmed = false;
+        std::uint64_t lastObservedArmTransitions = 0;
         std::uint64_t lastObservedOverflow = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationRecorder)
