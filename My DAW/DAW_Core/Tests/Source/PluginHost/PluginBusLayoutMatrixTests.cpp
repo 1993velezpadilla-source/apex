@@ -1879,4 +1879,120 @@ public:
 
 static ClipRegionPluginReorderRegressionTests clipRegionPluginReorderRegressionTests;
 
+class ClipRegionPluginProjectPersistenceTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginProjectPersistenceTests()
+        : UnitTest("clip-region-fx.project-roundtrip-and-missing-plugin.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        const DAW::ClipID clipId = "roundtrip_clip_A";
+        const auto exists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+
+        DAW::ClipRegionPluginCore original;
+        original.prepare(kRate, kBlock);
+        const auto first = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinA)), formatManager);
+        const auto second = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinB)), formatManager);
+        beginTest("save a two-processor clip chain with stable identity and bypass");
+        expect(first.success, first.message);
+        expect(second.success, second.message);
+        if (!first.success || !second.success) return;
+        auto ordered = original.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(ordered.size()), 2);
+        if (ordered.size() != 2) return;
+        const auto firstId = ordered[0].instanceId;
+        const auto secondId = ordered[1].instanceId;
+        original.setBypassed(clipId, secondId, true);
+        juce::ValueTree projectFx;
+        juce::String error;
+        expect(original.captureProjectState(projectFx, error), error);
+        expect(projectFx.isValid());
+        if (!projectFx.isValid()) return;
+        expectEquals(projectFx.getNumChildren(), 1);
+        expectEquals(projectFx.getChild(0).getNumChildren(), 2);
+
+        auto xml = projectFx.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        auto fromDisk = juce::ValueTree::fromXml(*xml);
+        beginTest("XML round trip restores both live processors and their order");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(kRate, kBlock);
+        expect(reopened.restoreProjectState(fromDisk, formatManager, exists, error), error);
+        expect(error.isEmpty(), "no missing-plugin warnings expected: " + error);
+        const auto live = reopened.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(live.size()), 2);
+        if (live.size() == 2)
+        {
+            expectEquals(live[0].instanceId, firstId);
+            expectEquals(live[1].instanceId, secondId);
+            expect(!live[0].bypassed);
+            expect(live[1].bypassed);
+            expect(reopened.findEntryById(clipId, firstId)->instance != nullptr);
+            expect(reopened.findEntryById(clipId, secondId)->instance != nullptr);
+        }
+
+        beginTest("unavailable plugin is not deleted during subsequent save");
+        juce::AudioPluginFormatManager noPlugins;
+        DAW::ClipRegionPluginCore missingHost;
+        missingHost.prepare(kRate, kBlock);
+        expect(missingHost.restoreProjectState(fromDisk, noPlugins, exists, error),
+               "missing plugin should produce a preservable placeholder: " + error);
+        expect(error.isNotEmpty(), "missing plugins must be reported to project loader");
+        const auto missing = missingHost.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(missing.size()), 2);
+        if (missing.size() == 2)
+        {
+            expectEquals(missing[0].instanceId, firstId);
+            expectEquals(missing[1].instanceId, secondId);
+            expect(missing[1].bypassed);
+            expect(missingHost.findEntryById(clipId, firstId)->instance == nullptr);
+            expect(missingHost.findEntryById(clipId, secondId)->instance == nullptr);
+        }
+        juce::ValueTree retained;
+        expect(missingHost.captureProjectState(retained, error), error);
+        expectEquals(retained.toXmlString(), fromDisk.toXmlString(),
+                     "resaving unresolved slots must preserve opaque state, IDs, and ordering");
+
+        beginTest("reinstalling a missing plugin recreates the preserved processors");
+        DAW::ClipRegionPluginCore reinstalled;
+        reinstalled.prepare(kRate, kBlock);
+        expect(reinstalled.restoreProjectState(retained, formatManager, exists, error), error);
+        expect(error.isEmpty(), error);
+        auto recovered = reinstalled.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(recovered.size()), 2);
+        if (recovered.size() == 2)
+        {
+            expectEquals(recovered[0].instanceId, firstId);
+            expectEquals(recovered[1].instanceId, secondId);
+            expect(recovered[1].bypassed);
+            expect(reinstalled.findEntryById(clipId, firstId)->instance != nullptr);
+        }
+
+        beginTest("corrupt state is rejected before disturbing the live chain");
+        auto corrupt = retained.createCopy();
+        corrupt.getChild(0).getChild(1).setProperty("instanceId", firstId, nullptr);
+        expect(!reinstalled.restoreProjectState(corrupt, formatManager, exists, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+        expect(reinstalled.findEntryById(clipId, firstId)->instance != nullptr);
+
+        beginTest("unknown clip reference is rejected instead of dropping an effect");
+        expect(!reinstalled.restoreProjectState(retained, formatManager,
+                    [](const DAW::ClipID&) { return false; }, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+        original.releaseResources();
+        reopened.releaseResources();
+        missingHost.releaseResources();
+        reinstalled.releaseResources();
+    }
+};
+
+static ClipRegionPluginProjectPersistenceTests clipRegionPluginProjectPersistenceTests;
+
 } // namespace

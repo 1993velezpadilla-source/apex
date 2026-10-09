@@ -4,7 +4,10 @@
 #include "HostedPluginIsolationCore.h"
 #include "../ClipCore/Clip.h"
 #include "../PluginSafetyCore/PluginSafeLoadWrapperCore.h"
+#include "../PluginStorageCore/PluginDescriptionPersistenceCore.h"
 #include <map>
+#include <functional>
+#include <stdexcept>
 #include <memory>
 #include <limits>
 #include <unordered_map>
@@ -35,6 +38,7 @@ public:
         double sampleRate = 44100.0;
         int blockSize = 512;
         std::atomic<bool> bypassed { false };   // atomic: read on the audio thread via the published snapshot
+        juce::MemoryBlock unresolvedState;      // opaque state retained when plugin is missing
     };
 
     struct EntryInfo
@@ -232,7 +236,7 @@ public:
         {
             if (!entry) continue;
             result.push_back({ entry->instanceId,
-                               entry->description.name,
+                               entry->description.name + (entry->instance ? juce::String() : juce::String(" [Missing]")),
                                entry->description.manufacturerName,
                                entry->description.pluginFormatName,
                                entry->bypassed.load (std::memory_order_acquire) });
@@ -263,6 +267,178 @@ public:
             snapshot.push_back(std::move(saved));
         }
         return snapshot;
+    }
+
+
+    /** Capture all per-clip chains. Fail the project save rather than discard an FX state. */
+    bool captureProjectState(juce::ValueTree& state, juce::String& error) const
+    {
+        jassert(juce::MessageManager::existsAndIsCurrentThread());
+        error.clear();
+        state = juce::ValueTree("ClipRegionPlugins");
+        for (const auto& [clipId, entries] : entriesByClip_)
+        {
+            juce::ValueTree clipNode("ClipFxClip");
+            clipNode.setProperty("clipId", clipId, nullptr);
+            for (const auto& entry : entries)
+            {
+                if (!entry) continue;
+                juce::MemoryBlock blob = entry->unresolvedState;
+                if (entry->instance)
+                {
+                    try
+                    {
+                        blob.reset();
+                        entry->instance->getStateInformation(blob);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        error = "Clip '" + clipId + "' FX '" + entry->description.name
+                            + "' capture failed: " + juce::String(e.what());
+                        state = {};
+                        return false;
+                    }
+                    catch (...)
+                    {
+                        error = "Clip '" + clipId + "' FX '" + entry->description.name + "' capture failed";
+                        state = {};
+                        return false;
+                    }
+                }
+                juce::ValueTree slot("ClipFxSlot");
+                slot.setProperty("instanceId", entry->instanceId, nullptr);
+                slot.setProperty("bypassed", entry->bypassed.load(std::memory_order_acquire), nullptr);
+                slot.addChild(PluginDescriptionPersistenceCore::toValueTree(entry->description), -1, nullptr);
+                juce::ValueTree savedState("State");
+                savedState.setProperty("data", blob.getSize() > 0
+                    ? juce::Base64::toBase64(blob.getData(), blob.getSize()) : juce::String(), nullptr);
+                slot.addChild(savedState, -1, nullptr);
+                clipNode.addChild(slot, -1, nullptr);
+            }
+            if (clipNode.getNumChildren() > 0)
+                state.addChild(clipNode, -1, nullptr);
+        }
+        return true;
+    }
+
+    /** Parse and validate first; missing processors become lossless silent placeholders. */
+    bool restoreProjectState(const juce::ValueTree& state,
+                             juce::AudioPluginFormatManager& formatManager,
+                             const std::function<bool(const ClipID&)>& clipExists,
+                             juce::String& diagnostic)
+    {
+        jassert(juce::MessageManager::existsAndIsCurrentThread());
+        diagnostic.clear();
+        if (!state.isValid())
+        {
+            clearAllEntries(); // old projects had no clip-region FX records
+            return true;
+        }
+        if (!state.hasType("ClipRegionPlugins"))
+        {
+            diagnostic = "Invalid ClipRegionPlugins project node";
+            return false;
+        }
+        std::vector<std::pair<ClipID, EntryStateSnapshot>> parsed;
+        juce::StringArray seenIds;
+        for (int c = 0; c < state.getNumChildren(); ++c)
+        {
+            const auto clipNode = state.getChild(c);
+            const ClipID clipId = clipNode.getProperty("clipId").toString();
+            if (!clipNode.hasType("ClipFxClip") || clipId.isEmpty()
+                || (clipExists && !clipExists(clipId)))
+            {
+                diagnostic = "Invalid or missing clip FX owner: " + clipId;
+                return false;
+            }
+            for (int i = 0; i < clipNode.getNumChildren(); ++i)
+            {
+                const auto slot = clipNode.getChild(i);
+                const auto descNode = slot.getChildWithName("Description");
+                const auto dataNode = slot.getChildWithName("State");
+                EntryStateSnapshot saved;
+                saved.instanceId = slot.getProperty("instanceId").toString();
+                if (!slot.hasType("ClipFxSlot") || saved.instanceId.isEmpty()
+                    || seenIds.contains(saved.instanceId) || !descNode.isValid()
+                    || !dataNode.isValid())
+                {
+                    diagnostic = "Malformed or duplicate clip FX instance: " + saved.instanceId;
+                    return false;
+                }
+                seenIds.add(saved.instanceId);
+                saved.description = PluginDescriptionPersistenceCore::fromValueTree(descNode);
+                if (saved.description.pluginFormatName.isEmpty()
+                    || saved.description.fileOrIdentifier.isEmpty())
+                {
+                    diagnostic = "Invalid clip FX plugin identity: " + saved.instanceId;
+                    return false;
+                }
+                saved.bypassed = (bool) slot.getProperty("bypassed", false);
+                const auto base64 = dataNode.getProperty("data").toString();
+                if (base64.isNotEmpty())
+                {
+                    juce::MemoryOutputStream decoded;
+                    if (!juce::Base64::convertFromBase64(decoded, base64))
+                    {
+                        diagnostic = "Invalid clip FX Base64 state: " + saved.instanceId;
+                        return false;
+                    }
+                    saved.state = juce::MemoryBlock(decoded.getData(), decoded.getDataSize());
+                }
+                parsed.emplace_back(clipId, std::move(saved));
+            }
+        }
+
+        clearAllEntries();
+        for (const auto& [clipId, saved] : parsed)
+        {
+            const auto loaded = loadForClip(clipId, saved.description, formatManager);
+            bool usable = loaded.success && loaded.instance != nullptr;
+            if (usable && saved.state.getSize() > 0)
+            {
+                try
+                {
+                    if (saved.state.getSize() > static_cast<size_t>(std::numeric_limits<int>::max()))
+                        throw std::runtime_error("Clip FX state exceeds int range");
+                    loaded.instance->setStateInformation(saved.state.getData(),
+                                                         static_cast<int>(saved.state.getSize()));
+                }
+                catch (...) { usable = false; }
+            }
+            if (usable)
+            {
+                if (auto* entry = findEntryByInstance(clipId, loaded.instance))
+                {
+                    entry->instanceId = saved.instanceId;
+                    entry->bypassed.store(saved.bypassed, std::memory_order_release);
+                }
+            }
+            else
+            {
+                if (loaded.instance)
+                    if (auto* entry = findEntryByInstance(clipId, loaded.instance))
+                        removeEntry(clipId, entry->instanceId);
+                auto unresolved = std::make_shared<Entry>();
+                unresolved->instanceId = saved.instanceId;
+                unresolved->clipId = clipId;
+                unresolved->description = saved.description;
+                unresolved->bypassed.store(saved.bypassed, std::memory_order_release);
+                unresolved->unresolvedState = saved.state;
+                entriesByClip_[clipId].push_back(std::move(unresolved));
+                if (diagnostic.isNotEmpty()) diagnostic += "; ";
+                diagnostic += "Clip '" + clipId + "' plugin '" + saved.description.name
+                    + "' missing: opaque state preserved";
+            }
+        }
+        publishEntries();
+        return true;
+    }
+
+    /** Must be called with realtime callbacks suspended and drained. */
+    void clearAllEntries()
+    {
+        entriesByClip_.clear();
+        publishEntries();
     }
 
     /** Remove the complete runtime chain for one clip. */
@@ -532,7 +708,10 @@ private:
 
     juce::String makeInstanceId(const ClipID& clipId)
     {
-        return clipId + "_clipfx_" + juce::String((juce::int64) nextInstanceId_++);
+        juce::String candidate;
+        do { candidate = clipId + "_clipfx_" + juce::String((juce::int64) nextInstanceId_++); }
+        while (findEntryById(clipId, candidate) != nullptr);
+        return candidate;
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipRegionPluginCore)

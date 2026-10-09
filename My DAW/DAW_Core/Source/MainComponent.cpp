@@ -2266,6 +2266,17 @@ MainComponent::MainComponent()
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->setAutomationManager(&appCore_.getAutomationManager());
 
+    appCore_.setBeforeClipFxProjectReset([this]()
+    {
+        if (clipPropertiesWindow_)
+            clipPropertiesWindow_->clearClip();
+        if (bubbleTaskbar_)
+            for (const auto& window : clipRegionPluginWindows_)
+                if (window != nullptr)
+                    bubbleTaskbar_->unregisterWindow(window->getComponentID());
+        clipRegionPluginWindows_.clear();
+    });
+
     arrangement_->onOpenClipProperties = [this](DAW::Clip& clip)
     {
         if (!clipPropertiesWindow_)
@@ -7390,6 +7401,7 @@ MainComponent::~MainComponent()
     appCore_.getTransport().removeListener(this);
     appCore_.getAutosaveManager().onAutosaveSucceeded = {};
     appCore_.getAutosaveManager().onAutosaveFailed = {};
+    appCore_.setBeforeClipFxProjectReset({});
 
     // 2. The centralized shutdown path joins export before releasing audio.
     shutdownAudio();

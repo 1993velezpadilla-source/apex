@@ -119,6 +119,11 @@ public:
     const PluginPlayheadInfoCore& getPluginPlayheadInfoCore() const noexcept { return pluginPlayheadInfoCore_; }
     ClipRegionPluginCore& getClipRegionPluginCore() noexcept { return clipRegionPluginCore_; }
     const ClipRegionPluginCore& getClipRegionPluginCore() const noexcept { return clipRegionPluginCore_; }
+    /** Close native clip-FX editor windows before any destructive project reset. */
+    void setBeforeClipFxProjectReset(std::function<void()> callback)
+    {
+        beforeClipFxProjectReset_ = std::move(callback);
+    }
     BubblegumV2System& getBubblegumV2()      { return bubblegumV2_; }
     const BubblegumV2System& getBubblegumV2() const { return bubblegumV2_; }
     FolderBusCore& getFolderBus()              { return folderBus_; }
@@ -448,6 +453,7 @@ private:
     PluginScannerCore pluginScanner_;
     PluginPlayheadInfoCore pluginPlayheadInfoCore_;
     ClipRegionPluginCore clipRegionPluginCore_;
+    std::function<void()> beforeClipFxProjectReset_;
     std::map<TrackID, std::shared_ptr<PluginChainCore>> pluginChains_;
     int pluginChainPublicationBatchDepth_ = 0;
     FaderRangeCore faderRangeCore_;
