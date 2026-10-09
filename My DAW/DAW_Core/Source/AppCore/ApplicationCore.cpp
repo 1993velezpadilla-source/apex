@@ -1408,6 +1408,20 @@ bool ApplicationCore::beginProjectStateRestore(uint32_t timeoutMs) noexcept
     if (transport_)
         transport_->stop();
     audioEngine_.clearLiveInputBuffer();
+
+    // Native editor components retain raw references to the processor. Close
+    // them while the audio callback is suspended, BEFORE resetting clip FX.
+    try
+    {
+        if (beforeClipFxProjectReset_)
+            beforeClipFxProjectReset_();
+    }
+    catch (...)
+    {
+        if (!wasAlreadySuspended)
+            projectStateRestoreSuspensionActive_.store(false, std::memory_order_release);
+        return false;
+    }
     return true;
 }
 
