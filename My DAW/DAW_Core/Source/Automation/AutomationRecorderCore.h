@@ -249,6 +249,26 @@ namespace apex::automation
             if (mode == AutomationMode::Off || mode == AutomationMode::Read)
                 return;
 
+            // Capture timestamps can arrive from different producers between
+            // two 90 Hz ticks. A full loop turn can also occur entirely
+            // between ticks, invisible to the rolling-PPQ observer. Never
+            // feed non-finite or backwards PPQ into a monotonic session:
+            // that would reverse its overwrite interval and splice points
+            // from different loop passes into a single take.
+            if (! std::isfinite (e.ppqAtCapture))
+                return;
+
+            auto existing = sessions.find (e.paramID);
+            if (existing != sessions.end() && existing->second.open
+                && e.ppqAtCapture + 1.0e-9 < existing->second.lastPPQ)
+            {
+                closeSession (existing->second, true);
+                sessions.erase (existing);
+                // Event pass identity is unknown. Drop this ambiguous event,
+                // including GestureBegin, rather than inventing a new take.
+                return;
+            }
+
             switch (e.kind)
             {
                 case AutomationGestureQueue::EventKind::GestureBegin:
