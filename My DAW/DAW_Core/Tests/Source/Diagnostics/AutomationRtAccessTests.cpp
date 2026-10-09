@@ -1382,12 +1382,16 @@ public:
         param->beginGesture();
         expectWithinAbsoluteError(param->getValueAtGestureBegin(), 0.2f,
                                   1.0e-5f, "pre-drag normalized value captured");
+        // A newer native PPQ-capture path records the source time, not the
+        // callback time. Advance the source clock before the actual move.
+        clock.publishFromAudioThread(1.25, 0.001, true);
         param->setValueFromUser(0.4f);
         expectWithinAbsoluteError(param->getNormalizedValue(), 0.4f,
                                   1.0e-5f, "user change already visible");
 
-        // Both notifications happen at PPQ 1.25, *after* the user change.
-        clock.publishFromAudioThread(1.25, 0.001, true);
+        // Both callbacks arrive later, at PPQ 2.0, after the actual
+        // GestureBegin at 1.0 and ValueChange at 1.25.
+        clock.publishFromAudioThread(2.0, 0.001, true);
         param->dispatchPendingNotifications(0.4f, ChangeSource::User);
         recorder.drainForTests();
 
@@ -1405,8 +1409,9 @@ public:
                                   "source automation before gesture preserved");
 
         beginTest("the delayed gesture can still end and rejoin original curve");
-        param->endGesture();
         clock.publishFromAudioThread(3.0, 0.001, true);
+        param->endGesture();
+        clock.publishFromAudioThread(4.0, 0.001, true);
         param->dispatchPendingNotifications(0.4f, ChangeSource::User);
         recorder.drainForTests();
         snap = lane->getSnapshot();
