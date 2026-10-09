@@ -2737,3 +2737,111 @@ public:
 
 static AutomationSmoothPreTouchPreservationTests
     automationSmoothPreTouchPreservationTests;
+
+/**
+    A Play edge must quarantine pending gestures from the stopped epoch.
+    The bridge stamps PPQ on events, but not the transport epoch; if the
+    recorder drains after Play resumes, previously queued stopped-time
+    gestures must NOT start a new take. A real post-boundary gesture still
+    records normally on the next recorder tick.
+*/
+class AutomationPlayEdgeQueueFenceTests final : public juce::UnitTest
+{
+public:
+    AutomationPlayEdgeQueueFenceTests()
+        : juce::UnitTest("automation.play-edge-queue-fence.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76025;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* p = registry.createParameter(id, "Play boundary", ParameterRange{});
+        expect(p != nullptr, "parameter registered");
+        if (p == nullptr) return;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Touch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+
+        auto push = [&] (AutomationGestureQueue::EventKind kind,
+                         double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            e.hasStartValue = kind == AutomationGestureQueue::EventKind::GestureBegin;
+            return queue->push(e);
+        };
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "lane exists");
+        if (lane == nullptr) return;
+
+        beginTest("stopped-epoch backlog rejected on first Play edge");
+        clock.publishFromAudioThread(0.5, 0.001, false);
+        recorder.drainForTests();
+        expect(push(AutomationGestureQueue::EventKind::GestureBegin, 0.75, 0.2f));
+        expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.0, 0.95f));
+        expect(push(AutomationGestureQueue::EventKind::GestureEnd, 1.0, 0.95f));
+        clock.publishFromAudioThread(1.25, 0.001, true);
+        recorder.drainForTests();
+        auto snapshot = lane->getSnapshot();
+        expect(snapshot != nullptr && snapshot->size() == 4,
+               "pre-Play knob movements never create recorded breakpoints");
+        if (snapshot != nullptr)
+            expectWithinAbsoluteError(
+                AutomationLane::evaluateAt(*snapshot, 1.0), 0.2f, 1.0e-5f,
+                "stale movements did not overwrite source curve");
+
+        beginTest("fresh gesture recorded after first Play boundary");
+        expect(push(AutomationGestureQueue::EventKind::GestureBegin, 1.5, 0.2f));
+        expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.75, 0.85f));
+        expect(push(AutomationGestureQueue::EventKind::GestureEnd, 2.0, 0.85f));
+        recorder.drainForTests();
+        snapshot = lane->getSnapshot();
+        expect(snapshot != nullptr && !snapshot->empty(), "fresh take persisted");
+        if (snapshot != nullptr && !snapshot->empty())
+        {
+            expectWithinAbsoluteError(
+                AutomationLane::evaluateAt(*snapshot, 1.75), 0.85f, 1.0e-5f,
+                "new gesture recorded at correct timestamp");
+            expectWithinAbsoluteError(
+                AutomationLane::evaluateAt(*snapshot, 3.0), 0.5f, 1.0e-5f,
+                "future source curve preserved after release");
+        }
+
+        beginTest("Stop then Play after a poll also rejects stopped-time events");
+        clock.publishFromAudioThread(3.0, 0.001, false);
+        recorder.drainForTests();
+        expect(push(AutomationGestureQueue::EventKind::GestureBegin, 3.25, 0.5f));
+        expect(push(AutomationGestureQueue::EventKind::ValueChange, 3.5, 0.98f));
+        clock.publishFromAudioThread(4.0, 0.001, true);
+        recorder.drainForTests();
+        snapshot = lane->getSnapshot();
+        expect(snapshot != nullptr && !snapshot->empty(), "recorded lane retained");
+        if (snapshot != nullptr && !snapshot->empty())
+        {
+            expectWithinAbsoluteError(
+                AutomationLane::evaluateAt(*snapshot, 3.5), 0.6f, 1.0e-5f,
+                "stale stopped-time event could not overwrite PPQ 3.5");
+            expectWithinAbsoluteError(
+                AutomationLane::evaluateAt(*snapshot, 4.5), 0.75f, 1.0e-5f,
+                "future source remains unchanged");
+        }
+    }
+};
+static AutomationPlayEdgeQueueFenceTests automationPlayEdgeQueueFenceTests;

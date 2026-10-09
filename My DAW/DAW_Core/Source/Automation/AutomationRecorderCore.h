@@ -225,7 +225,16 @@ namespace apex::automation
             lastObservedPlayheadPPQ = position.transportRolling
                 ? position.blockStartPPQ
                 : std::numeric_limits<double>::quiet_NaN();
-            return backwardsSeek || hiddenTransportTurnaround;
+
+            // A newly observed Play edge has the SAME ambiguity as a
+            // hidden Stop->Play turnaround: the MPSC queue contains no
+            // transport epoch for each event. A knob move captured while
+            // stopped can otherwise be consumed now that Play is true,
+            // creating a take that never happened during recording.
+            // Quarantine pending events on *every* observed start/stop
+            // boundary. Fresh events arriving after this tick can record.
+            return edges.started || edges.stopped
+                || backwardsSeek || hiddenTransportTurnaround;
         }
 
         bool handleRecordArmEdges()
