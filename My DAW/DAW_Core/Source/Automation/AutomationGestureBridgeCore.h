@@ -121,6 +121,21 @@ namespace apex::automation
             e.paramID      = id;
             e.kind         = AutomationGestureQueue::EventKind::GestureBegin;
             e.source       = ChangeSource::Plugin;
+            // Capture while inside the plugin's gesture-begin callback,
+            // before delayed queue processing observes its later new value.
+            // Do not allocate or lock in this potentially audio-thread path.
+            if (proc != nullptr)
+            {
+                const auto& parameters = proc->getParameters();
+                if (juce::isPositiveAndBelow (parameterIndex, parameters.size()))
+                {
+                    if (auto* parameter = parameters.getUnchecked (parameterIndex))
+                    {
+                        e.normalizedValue = juce::jlimit (0.0f, 1.0f, parameter->getValue());
+                        e.hasStartValue = true;
+                    }
+                }
+            }
             e.ppqAtCapture = clock.snapshot().blockStartPPQ;
             queue.push (e);
         }
@@ -179,13 +194,17 @@ namespace apex::automation
                 queue.push (e);
             }
 
-            void parameterGestureBegan (AutomationParameter&) override
+            void parameterGestureBegan (AutomationParameter& p) override
             {
                 AutomationGestureQueue::Event e;
-                e.paramID      = paramID;
-                e.kind         = AutomationGestureQueue::EventKind::GestureBegin;
-                e.source       = ChangeSource::User;
-                e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+                e.paramID          = paramID;
+                e.kind             = AutomationGestureQueue::EventKind::GestureBegin;
+                e.source           = ChangeSource::User;
+                // Deferred UI dispatch may see a much later parameter value.
+                // Use the snapshot taken in AutomationParameter::beginGesture.
+                e.normalizedValue  = p.getValueAtGestureBegin();
+                e.hasStartValue    = true;
+                e.ppqAtCapture     = clock.snapshot().blockStartPPQ;
                 queue.push (e);
             }
 
