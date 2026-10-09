@@ -474,7 +474,24 @@ public:
                         const ClipID& targetClipId,
                         juce::AudioPluginFormatManager& formatManager)
     {
-        return restoreClipState(targetClipId, captureClipState(sourceClipId), formatManager);
+        // A self-copy must not destroy/reinstantiate live processors or change
+        // instance IDs: other editor state may still refer to those IDs.
+        if (sourceClipId == targetClipId)
+            return true;
+
+        // Third-party getStateInformation() can throw. Capture the source
+        // BEFORE touching the target, and refuse the clone on failure rather
+        // than crashing the editor or replacing a valid target chain.
+        ClipStateSnapshot snapshot;
+        try
+        {
+            snapshot = captureClipState(sourceClipId);
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return restoreClipState(targetClipId, snapshot, formatManager);
     }
 
     /** Return source-instance to target-instance IDs in chain order. */
