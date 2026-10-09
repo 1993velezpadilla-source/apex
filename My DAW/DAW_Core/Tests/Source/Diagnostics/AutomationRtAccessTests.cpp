@@ -632,3 +632,101 @@ public:
 };
 
 static AutomationLatchWriteStopTests automationLatchWriteStopTests;
+
+/**
+    Regression: Touch returns to the untouched source curve at gesture end.
+    Live commits must not change the baseline used for the return value.
+    Release must be included in the overwrite interval so intermediate old
+    breakpoints cannot leak through the newly recorded gesture.
+*/
+class AutomationTouchReturnCurveTests final : public juce::UnitTest
+{
+public:
+    AutomationTouchReturnCurveTests()
+        : juce::UnitTest("automation.touch-original-curve-return.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76002;
+
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Touch return probe", ParameterRange{});
+        expect(param != nullptr, "parameter must be registered");
+        if (param == nullptr)
+            return;
+
+        beginTest("Touch return is evaluated from original curve at release PPQ");
+        // Original lane: 1.0 -> .2, 2.0 -> .3, 3.0 -> .5, 4.0 -> .7.
+        // Returning to touch-start .2 instead of release .5 is a regression.
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Touch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+
+        clock.publishFromAudioThread(0.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.25, 0.8f));
+        recorder.drainForTests(); // Live-commit touched points before release.
+
+        auto touched = lanes.findLane(id);
+        expect(touched != nullptr, "Touch live-commits while held");
+        if (touched == nullptr)
+            return;
+        auto intermediate = touched->getSnapshot();
+        expect(intermediate != nullptr && !intermediate->empty());
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 3.0, 0.8f));
+        recorder.drainForTests();
+
+        auto snap = touched->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "Touch ends with a recorded lane");
+        if (snap == nullptr || snap->empty())
+            return;
+
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 0.5),
+                                  0.15f, 1.0e-5f,
+                                  "automation before the touch remains unchanged");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.75),
+                                  0.8f, 1.0e-5f,
+                                  "the last user value holds until release");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                  0.5f, 1.0e-5f,
+                                  "release rejoins source curve at PPQ 3.0, not touch start");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.5),
+                                  0.6f, 1.0e-5f,
+                                  "future portion rejoins original automation curve");
+
+        AutomationEvaluator evaluator(registry, lanes, modes);
+        param->writeValue(0.8f, ChangeSource::User);
+        evaluator.evaluateBlock(3.5, true);
+        expectWithinAbsoluteError(param->getNormalizedValue(), 0.6f, 1.0e-5f,
+                                  "Touch release resumes live playback");
+        expect(!modes.latchHeldRT(id), "Touch does not accidentally latch");
+    }
+};
+
+static AutomationTouchReturnCurveTests automationTouchReturnCurveTests;

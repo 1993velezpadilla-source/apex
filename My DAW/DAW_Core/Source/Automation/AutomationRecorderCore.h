@@ -84,6 +84,10 @@ namespace apex::automation
             double                  lastPPQ           = 0.0;
             float                   lastValue         = 0.0f;
             float                   priorLaneValue    = 0.0f;
+            // Preserve the pre-touch curve while live recording replaces
+            // portions of the lane. Release returns to this original curve,
+            // evaluated at the release time (NOT the touch-start value).
+            AutomationLane::Snapshot originalCurve;
             double                  lastLiveCommitPPQ = -1.0;
             bool                    open              = false;
             bool                    latchSustaining   = false;
@@ -222,8 +226,19 @@ namespace apex::automation
 
                     if (s.mode == AutomationMode::Touch)
                     {
-                        s.rawPoints.push_back ({ e.ppqAtCapture, s.priorLaneValue,
+                        // Do not slope the last touched value prematurely
+                        // towards the old curve. Hold it up to GestureEnd.
+                        if (! s.rawPoints.empty()
+                            && s.rawPoints.back().timePPQ < e.ppqAtCapture)
+                            s.rawPoints.back().curveType = CurveType::Hold;
+
+                        const auto releaseValue = (s.originalCurve != nullptr
+                                                    && ! s.originalCurve->empty())
+                            ? AutomationLane::evaluateAt (*s.originalCurve, e.ppqAtCapture)
+                            : s.priorLaneValue;
+                        s.rawPoints.push_back ({ e.ppqAtCapture, releaseValue,
                                                  CurveType::Linear, 0.0f });
+                        s.lastPPQ = e.ppqAtCapture;
                     }
 
                     closeSession (s, true);
@@ -249,12 +264,13 @@ namespace apex::automation
             s.lastLiveCommitPPQ = -1.0;
 
             auto lane = lanes.findLane (param.getID());
-            const bool laneHasData = (lane != nullptr && ! lane->isEmpty());
+            s.originalCurve = lane != nullptr ? lane->getSnapshot() : nullptr;
+            const bool laneHasData = (s.originalCurve != nullptr
+                                      && ! s.originalCurve->empty());
 
             if (laneHasData)
             {
-                auto snap = lane->getSnapshot();
-                s.priorLaneValue = AutomationLane::evaluateAt (*snap, atPPQ);
+                s.priorLaneValue = AutomationLane::evaluateAt (*s.originalCurve, atPPQ);
             }
             else
             {
