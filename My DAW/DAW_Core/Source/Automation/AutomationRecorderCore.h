@@ -12,6 +12,7 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <vector>
+#include <limits>
 
 namespace apex::automation
 {
