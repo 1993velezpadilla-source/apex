@@ -1010,10 +1010,11 @@ public:
         };
         fxFloatingPanel_->onReorderPlugin = [this](int fromIndex, int toIndex)
         {
-            // Plugin reordering logic (to be implemented in ClipRegionPluginCore)
-            DBG("[ClipFxFloatingPanel] Reorder request: " << fromIndex << " -> " << toIndex);
-            // For now, just refresh to show current order
-            refreshActivePlugins();
+            if (!clip_ || !clipRegionPluginCore_)
+                return;
+
+            if (clipRegionPluginCore_->moveEntry(clip_->getID(), fromIndex, toIndex))
+                refreshActivePlugins();
         };
         fxFloatingPanel_->onClose = [this]
         {
