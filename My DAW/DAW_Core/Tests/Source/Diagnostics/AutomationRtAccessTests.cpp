@@ -1642,3 +1642,103 @@ public:
 };
 
 static AutomationArmEpochABATests automationArmEpochABATests;
+
+/**
+    The audio clock publishes every transport edge. Stop followed by Play
+    inside one recorder timer interval must not look like continuous Play,
+    even if the new playhead position is strictly increasing.
+*/
+class AutomationHiddenTransportTurnaroundTests final : public juce::UnitTest
+{
+public:
+    AutomationHiddenTransportTurnaroundTests()
+        : juce::UnitTest("automation.hidden-stop-start-boundary.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76012;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* param = registry.createParameter(id, "Hidden Stop-Play probe", ParameterRange{});
+        expect(param != nullptr, "registered fixture");
+        if (param == nullptr) return;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Latch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                           double ppq, float value)
+        {
+            AutomationGestureQueue::Event e;
+            e.paramID = id;
+            e.kind = kind;
+            e.source = ChangeSource::User;
+            e.ppqAtCapture = ppq;
+            e.normalizedValue = value;
+            return queue->push(e);
+        };
+
+        beginTest("the first take is held before transport turnaround");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 2.0, 0.3f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.25, 0.8f));
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 2.3, 0.8f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(id), "Latch held in first transport interval");
+        const auto before = clock.snapshot().transportTransitions;
+
+        beginTest("Stop then Play entirely between ticks cannot continue old take");
+        // The final playhead advances, unlike a loop rewind. The old
+        // bool-only detector would see Play both times and no PPQ reversal.
+        clock.publishFromAudioThread(2.5, 0.001, false);
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        expectEquals(clock.snapshot().transportTransitions,
+                     before + std::uint64_t{2},
+                     "clock must record both edges");
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 2.8, 0.95f));
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(id),
+               "old Latch released despite final transport remaining rolling");
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "lane preserved");
+        if (lane == nullptr) return;
+        auto snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "first take committed");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "valid recorded movement retained");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.0),
+                                  0.7f, 1.0e-5f,
+                                  "late value from prior Play interval dropped");
+
+        beginTest("new Play interval can independently record new gesture");
+        expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
+        expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
+        recorder.drainForTests();
+        snap = lane->getSnapshot();
+        expect(snap != nullptr && !snap->empty(), "second take exists");
+        if (snap == nullptr || snap->empty()) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
+                                  0.25f, 1.0e-5f,
+                                  "fresh play interval records correctly");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
+                                  0.8f, 1.0e-5f,
+                                  "fresh play does not overwrite first take");
+    }
+};
+
+static AutomationHiddenTransportTurnaroundTests automationHiddenTransportTurnaroundTests;
