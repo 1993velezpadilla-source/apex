@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 #include <limits>
+#include <algorithm>
 
 namespace apex::automation
 {
@@ -112,21 +113,30 @@ namespace apex::automation
             const bool overflowed = handleQueueOverflow();
             const bool rewound = handleTransportEdges();
             const bool armTransition = handleRecordArmEdges();
-            const bool modeChanged = handleRecordingModeChanges();
+            std::vector<ParameterID> modeChangedParameters;
+            modeChangedParameters.reserve (sessions.size());
+            handleRecordingModeChanges (modeChangedParameters);
 
             AutomationGestureQueue::Event e;
-            if (rewound || armTransition || overflowed || modeChanged
-                || !armState.isRecordArmed())
+            if (rewound || armTransition || overflowed || !armState.isRecordArmed())
             {
-                // A queue event carries PPQ but no loop-iteration identity.
-                // Values pending at a backward seek cannot safely be assigned
-                // to either take. Discard them rather than overwriting a
-                // different lap; fresh gestures are recorded on later ticks.
+                // Transport, arm and queue-loss boundaries invalidate the
+                // entire input stream, independent of ParameterID.
                 while (queue.pop (e)) {}
             }
             else
+            {
                 while (queue.pop (e))
+                {
+                    // A mode change affects ONLY its parameter. Do not drop
+                    // an unrelated knob/track's events in the same 90Hz tick.
+                    if (std::find (modeChangedParameters.begin(),
+                                   modeChangedParameters.end(), e.paramID)
+                        != modeChangedParameters.end())
+                        continue;
                     processEvent (e);
+                }
+            }
 
             extendLatchSustainSessions();
         }
@@ -254,7 +264,7 @@ namespace apex::automation
             return true; // Pending queue events have no arm-epoch identifier.
         }
 
-        bool handleRecordingModeChanges()
+        void handleRecordingModeChanges (std::vector<ParameterID>& affectedParameters)
         {
             // ModeState publishes mutations independently of the recorder's
             // 90 Hz timer. An active Latch/Write take can otherwise stay held
@@ -263,7 +273,6 @@ namespace apex::automation
             // gesture event. Close affected sessions before draining the
             // queued events, whose mode epoch cannot be identified.
             const auto transport = clock.snapshot();
-            bool anyChanged = false;
             for (auto it = sessions.begin(); it != sessions.end();)
             {
                 auto& session = it->second;
@@ -286,10 +295,9 @@ namespace apex::automation
                 }
 
                 closeSession (session, true);
+                affectedParameters.push_back (it->first);
                 it = sessions.erase (it);
-                anyChanged = true;
             }
-            return anyChanged;
         }
 
         bool handleQueueOverflow()
