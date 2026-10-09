@@ -18,9 +18,13 @@ void ProjectManager::setSubsystems(const Subsystems& s)
     {
         subs_.clips->onClipRemoved = [this](const ClipID& clipId)
         {
-            // Clip-region processors belong to their clip, not to the track.
+            // The GUI's native plugin editors hold processor pointers; release
+            // these windows before destroying their clip-owned instances.
             if (subs_.appCore != nullptr)
+            {
+                subs_.appCore->notifyBeforeClipFxClipRemoved(clipId);
                 subs_.appCore->getClipRegionPluginCore().removeAllEntriesForClip(clipId);
+            }
 
             if (subs_.automation == nullptr || subs_.clips == nullptr)
                 return;

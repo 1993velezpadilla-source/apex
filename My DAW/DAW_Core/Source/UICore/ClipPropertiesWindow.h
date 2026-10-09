@@ -823,6 +823,7 @@ public:
     std::function<void(int width, int height)>                       onResizeRequest;
     /** Message-thread notification after a successful clip-FX chain edit. */
     std::function<void()>                                             onClipFxChanged;
+    std::function<void(const juce::String&)>                          onBeforeClipFxRemoved;
 
     ClipPropertiesPanel()
     {
@@ -1012,6 +1013,7 @@ public:
             if (!clip_ || !clipRegionPluginCore_) return;
             if (clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId) == nullptr)
                 return;
+            if (onBeforeClipFxRemoved) onBeforeClipFxRemoved(instanceId);
             clipRegionPluginCore_->removeEntry(clip_->getID(), instanceId);
             if (onClipFxChanged) onClipFxChanged();
             refreshActivePlugins();
@@ -1345,6 +1347,7 @@ private:
             if (!clip_ || !clipRegionPluginCore_) return;
             if (clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId) == nullptr)
                 return;
+            if (onBeforeClipFxRemoved) onBeforeClipFxRemoved(instanceId);
             clipRegionPluginCore_->removeEntry(clip_->getID(), instanceId);
             if (onClipFxChanged) onClipFxChanged();
             refreshActivePlugins();
