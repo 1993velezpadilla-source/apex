@@ -102,17 +102,27 @@ namespace apex::automation
         {
             JUCE_ASSERT_MESSAGE_THREAD;
 
-            handleTransportEdges();
+            const bool rewound = handleTransportEdges();
 
             AutomationGestureQueue::Event e;
-            while (queue.pop (e))
-                processEvent (e);
+            if (rewound)
+            {
+                // A queue event carries PPQ but no loop-iteration identity.
+                // Values pending at a backward seek cannot safely be assigned
+                // to either take. Discard them rather than overwriting a
+                // different lap; fresh gestures are recorded on later ticks.
+                while (queue.pop (e)) {}
+            }
+            else
+                while (queue.pop (e))
+                    processEvent (e);
 
             extendLatchSustainSessions();
         }
 
-        void handleTransportEdges()
+        bool handleTransportEdges()
         {
+            const auto position = clock.snapshot();
             // One observation per timer tick: a separate Stop call followed
             // by Start used to consume the Start transition before it could
             // close/reset the recorder's previous session state.
@@ -144,6 +154,28 @@ namespace apex::automation
                 sessions.clear();
                 modeState.clearAllLatches();
             }
+
+            const bool backwardsSeek = position.transportRolling && !edges.started
+                && std::isfinite (lastObservedPlayheadPPQ)
+                && std::isfinite (position.blockStartPPQ)
+                && position.blockStartPPQ + 1.0e-6 < lastObservedPlayheadPPQ;
+
+            if (backwardsSeek)
+            {
+                // A loop wrap or backward seek while still rolling cannot be
+                // represented by one monotonic session range. Never merge
+                // (e.g.) [7.5 -> 1.0] into a lane. Fence the take at its
+                // last captured PPQ; a new gesture starts a separate take.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession (session, true);
+                sessions.clear();
+                modeState.clearAllLatches();
+            }
+
+            lastObservedPlayheadPPQ = position.transportRolling
+                ? position.blockStartPPQ
+                : std::numeric_limits<double>::quiet_NaN();
+            return backwardsSeek;
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)
@@ -509,6 +541,9 @@ namespace apex::automation
         AutomationTransportState&    armState;
 
         std::unordered_map<ParameterID, Session> sessions;
+        // Message-thread-only last rolling PPQ. Tracking this independently
+        // of the Play/Stop flag catches seek/loop wraps that never Stop.
+        double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationRecorder)
     };
