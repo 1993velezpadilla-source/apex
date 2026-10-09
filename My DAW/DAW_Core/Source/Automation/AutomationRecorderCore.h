@@ -112,9 +112,11 @@ namespace apex::automation
             const bool overflowed = handleQueueOverflow();
             const bool rewound = handleTransportEdges();
             const bool armTransition = handleRecordArmEdges();
+            const bool modeChanged = handleRecordingModeChanges();
 
             AutomationGestureQueue::Event e;
-            if (rewound || armTransition || overflowed || !armState.isRecordArmed())
+            if (rewound || armTransition || overflowed || modeChanged
+                || !armState.isRecordArmed())
             {
                 // A queue event carries PPQ but no loop-iteration identity.
                 // Values pending at a backward seek cannot safely be assigned
@@ -250,6 +252,44 @@ namespace apex::automation
             sessions.clear();
             modeState.clearAllLatches();
             return true; // Pending queue events have no arm-epoch identifier.
+        }
+
+        bool handleRecordingModeChanges()
+        {
+            // ModeState publishes mutations independently of the recorder's
+            // 90 Hz timer. An active Latch/Write take can otherwise stay held
+            // indefinitely after the producer switches that parameter to
+            // Read/Off (or to a different writing mode) without another
+            // gesture event. Close affected sessions before draining the
+            // queued events, whose mode epoch cannot be identified.
+            const auto transport = clock.snapshot();
+            bool anyChanged = false;
+            for (auto it = sessions.begin(); it != sessions.end();)
+            {
+                auto& session = it->second;
+                if (!session.open
+                    || modeState.getMode (it->first) == session.mode)
+                {
+                    ++it;
+                    continue;
+                }
+
+                if (transport.transportRolling
+                    && std::isfinite (transport.blockStartPPQ)
+                    && transport.blockStartPPQ >= session.lastPPQ)
+                {
+                    if (session.mode == AutomationMode::Touch
+                        || session.mode == AutomationMode::Trim)
+                        finishGestureAt (session, transport.blockStartPPQ);
+                    else
+                        finishSustainAtStop (session, transport.blockStartPPQ);
+                }
+
+                closeSession (session, true);
+                it = sessions.erase (it);
+                anyChanged = true;
+            }
+            return anyChanged;
         }
 
         bool handleQueueOverflow()
