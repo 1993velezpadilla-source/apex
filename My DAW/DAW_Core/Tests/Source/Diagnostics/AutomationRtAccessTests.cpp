@@ -2845,3 +2845,156 @@ public:
     }
 };
 static AutomationPlayEdgeQueueFenceTests automationPlayEdgeQueueFenceTests;
+
+/**
+    Cross-component integration gate: producer-side native gestures ->
+    lock-free MPSC -> 90Hz recorder -> immutable lane snapshot ->
+    audio-thread AutomationEvaluator -> normalized parameter state.
+    A family of individually passing unit tests cannot prove the full path
+    is connected or that Stop releases Latch before the next playback pass.
+*/
+class AutomationFullStackRoundTripTests final : public juce::UnitTest
+{
+public:
+    AutomationFullStackRoundTripTests()
+        : juce::UnitTest("automation.full-stack-record-playback-roundtrip.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        const AutomationLane::PointVector original = {
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        };
+
+        beginTest("native Touch: multi-move record -> live lane -> audio evaluator");
+        {
+            constexpr ParameterID id = 76026;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arm;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* parameter = registry.createParameter(
+                id, "Roundtrip Touch", ParameterRange{});
+            expect(parameter != nullptr, "parameter registered");
+            if (parameter == nullptr) return;
+            parameter->writeValue(0.2f, ChangeSource::Automation);
+            lanes.getOrCreateLane(id).replacePoints(original);
+            modes.setMode(id, AutomationMode::Touch);
+            arm.setRecordArmed(true);
+            AutomationGestureBridge bridge(registry, *queue, clock);
+            bridge.attachToParameter(*parameter);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arm);
+            AutomationEvaluator evaluator(registry, lanes, modes);
+
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests(); // Observe arm/Play before capturing.
+            parameter->beginGesture();
+            clock.publishFromAudioThread(1.25, 0.001, true);
+            parameter->setValueFromUser(0.8f);
+            clock.publishFromAudioThread(1.5, 0.001, true);
+            parameter->setValueFromUser(0.2f);
+            clock.publishFromAudioThread(1.75, 0.001, true);
+            parameter->setValueFromUser(0.9f);
+            clock.publishFromAudioThread(2.0, 0.001, true);
+            parameter->endGesture();
+
+            // No 60Hz widget notifications. Every movement was captured at
+            // the producer; the 90Hz recorder must receive all of them.
+            recorder.drainForTests();
+            expect(!parameter->isGestureActive(), "Touch released");
+            const auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "lane persisted");
+            if (lane == nullptr) return;
+            const auto recorded = lane->getSnapshot();
+            expect(recorded != nullptr && !recorded->empty(), "recording created knots");
+            if (recorded == nullptr || recorded->empty()) return;
+
+            const std::array<double, 7> times = {
+                0.5, 1.25, 1.5, 1.75, 2.0, 3.0, 4.5
+            };
+            const std::array<float, 7> expected = {
+                0.15f, 0.8f, 0.2f, 0.9f, 0.3f, 0.5f, 0.75f
+            };
+            for (std::size_t i = 0; i < times.size(); ++i)
+            {
+                const auto fromLane = AutomationLane::evaluateAt(
+                    *recorded, times[i]);
+                expectWithinAbsoluteError(fromLane, expected[i], 1.0e-5f,
+                    "lane point at PPQ " + juce::String(times[i]));
+
+                evaluator.evaluateBlock(times[i], true);
+                expectWithinAbsoluteError(parameter->getNormalizedValue(),
+                    expected[i], 1.0e-5f,
+                    "audio-thread evaluator roundtrip at PPQ "
+                        + juce::String(times[i]));
+            }
+            bridge.detachFromParameter(id);
+        }
+
+        beginTest("Latch: audio evaluator respects held gesture, Stop commits sustain");
+        {
+            constexpr ParameterID id = 76027;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arm;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* parameter = registry.createParameter(
+                id, "Roundtrip Latch", ParameterRange{});
+            expect(parameter != nullptr, "parameter registered");
+            if (parameter == nullptr) return;
+            parameter->writeValue(0.2f, ChangeSource::Automation);
+            lanes.getOrCreateLane(id).replacePoints(original);
+            modes.setMode(id, AutomationMode::Latch);
+            arm.setRecordArmed(true);
+            AutomationGestureBridge bridge(registry, *queue, clock);
+            bridge.attachToParameter(*parameter);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arm);
+            AutomationEvaluator evaluator(registry, lanes, modes);
+
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+            parameter->beginGesture();
+            clock.publishFromAudioThread(1.25, 0.001, true);
+            parameter->setValueFromUser(0.8f);
+            clock.publishFromAudioThread(1.5, 0.001, true);
+            parameter->endGesture();
+            recorder.drainForTests();
+            expect(modes.latchHeldRT(id), "Latch held after released gesture");
+
+            evaluator.evaluateBlock(2.5, true);
+            expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.8f,
+                1.0e-5f, "playback cannot fight the held user value");
+
+            clock.publishFromAudioThread(3.0, 0.001, false);
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Stop released held Latch");
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "Latch lane exists");
+            if (lane == nullptr) return;
+            auto saved = lane->getSnapshot();
+            expect(saved != nullptr && !saved->empty(), "Stop committed Latch");
+            if (saved == nullptr || saved->empty()) return;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*saved, 2.75),
+                0.8f, 1.0e-5f, "last Latch value retained through Stop");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*saved, 3.0),
+                0.8f, 1.0e-5f, "Stop boundary is final sustained value");
+
+            clock.publishFromAudioThread(3.25, 0.001, true);
+            recorder.drainForTests();
+            evaluator.evaluateBlock(4.0, true);
+            expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.7f,
+                1.0e-5f, "new playback pass reads committed lane, not old hold");
+            bridge.detachFromParameter(id);
+        }
+    }
+};
+
+static AutomationFullStackRoundTripTests automationFullStackRoundTripTests;
