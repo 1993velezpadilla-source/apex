@@ -2494,3 +2494,132 @@ public:
 };
 
 static AutomationGestureOnlyDispatchTests automationGestureOnlyDispatchTests;
+
+/**
+    UI dispatcher notifications run at ~60Hz. Multiple user knob movements
+    between ticks MUST be recorded individually, and a delayed dispatcher
+    cannot re-enqueue any of those events or create a phantom movement.
+*/
+class AutomationNativeDirectProducerTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeDirectProducerTests()
+        : juce::UnitTest("automation.native-producer-capture-every-move.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 76023;
+        AutomationParameterRegistry registry;
+        auto* param = registry.createParameter(
+            id, "Rapid Native Fader", ParameterRange{});
+        expect(param != nullptr, "native parameter exists");
+        if (param == nullptr) return;
+        param->writeValue(0.2f, ChangeSource::Automation);
+
+        AutomationClock clock;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*param);
+
+        beginTest("all five events are captured before UI dispatcher wakes");
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        param->beginGesture();
+        clock.publishFromAudioThread(1.25, 0.001, true);
+        param->setValueFromUser(0.8f);
+        clock.publishFromAudioThread(1.5, 0.001, true);
+        param->setValueFromUser(0.2f);
+        clock.publishFromAudioThread(1.75, 0.001, true);
+        param->setValueFromUser(0.9f);
+        clock.publishFromAudioThread(2.0, 0.001, true);
+        param->endGesture();
+
+        // The 60Hz dispatcher did not run during any input above.
+        const std::array<AutomationGestureQueue::EventKind, 5> kinds = {
+            AutomationGestureQueue::EventKind::GestureBegin,
+            AutomationGestureQueue::EventKind::ValueChange,
+            AutomationGestureQueue::EventKind::ValueChange,
+            AutomationGestureQueue::EventKind::ValueChange,
+            AutomationGestureQueue::EventKind::GestureEnd
+        };
+        const std::array<double, 5> times = {1.0, 1.25, 1.5, 1.75, 2.0};
+        const std::array<float, 5> values = {0.2f, 0.8f, 0.2f, 0.9f, 0.9f};
+        AutomationGestureQueue::Event e;
+        for (std::size_t i = 0; i < kinds.size(); ++i)
+        {
+            expect(queue->pop(e), "native producer enqueued its own event");
+            expectEquals(static_cast<int>(e.kind), static_cast<int>(kinds[i]),
+                         "kind matches producer ordering");
+            expectWithinAbsoluteError(e.ppqAtCapture, times[i], 1.0e-8,
+                                      "each event carries its own capture PPQ");
+            expectWithinAbsoluteError(e.normalizedValue, values[i], 1.0e-5f,
+                                      "each intermediate value survived");
+        }
+        expect(!queue->pop(e), "exactly five events recorded");
+
+        beginTest("later coalescing widget dispatch never duplicates recording");
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        param->dispatchPendingNotifications(
+            param->getNormalizedValue(), param->getLastSource());
+        expect(!queue->pop(e), "no delayed duplicates or phantom events");
+
+        beginTest("a fresh rapid gesture preserves non-linear intermediate knots");
+        AutomationLaneStore lanes;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+        AutomationModeState modes;
+        modes.setMode(id, AutomationMode::Touch);
+        AutomationTransportState arms;
+        arms.setRecordArmed(true);
+        auto recordingQueue = std::make_unique<AutomationGestureQueue>();
+        bridge.detachFromParameter(id);
+        AutomationGestureBridge recordingBridge(registry, *recordingQueue, clock);
+        recordingBridge.attachToParameter(*param);
+        AutomationRecorder recorder(registry, lanes, modes, *recordingQueue,
+                                    clock, arms);
+
+        param->writeValue(0.2f, ChangeSource::Automation);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+        param->beginGesture();
+        clock.publishFromAudioThread(1.25, 0.001, true);
+        param->setValueFromUser(0.8f);
+        clock.publishFromAudioThread(1.5, 0.001, true);
+        param->setValueFromUser(0.2f);
+        clock.publishFromAudioThread(1.75, 0.001, true);
+        param->setValueFromUser(0.9f);
+        clock.publishFromAudioThread(2.0, 0.001, true);
+        param->endGesture();
+        // No 60 Hz dispatch; recorder consumes the direct producer stream.
+        recorder.drainForTests();
+
+        auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "recording lane still exists");
+        if (lane != nullptr)
+        {
+            auto snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "rapid moves committed");
+            if (snap != nullptr && !snap->empty())
+            {
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.25),
+                                          0.8f, 1.0e-5f, "first fast movement retained");
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.5),
+                                          0.2f, 1.0e-5f, "second fast movement retained");
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.75),
+                                          0.9f, 1.0e-5f, "third fast movement retained");
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                          0.3f, 1.0e-5f, "Touch release rejoins source");
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                          0.5f, 1.0e-5f, "future source unaffected");
+            }
+        }
+        recordingBridge.detachFromParameter(id);
+    }
+};
+
+static AutomationNativeDirectProducerTests automationNativeDirectProducerTests;
