@@ -20,6 +20,7 @@
 
 #include <JuceHeader.h>
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
+#include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/CommandCore/GeneralCommands.h"
 
@@ -1801,5 +1802,81 @@ public:
 };
 
 static PluginModuleCoexistenceLifecycleTests pluginModuleCoexistenceLifecycleTests;
+
+class ClipRegionPluginReorderRegressionTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginReorderRegressionTests()
+        : UnitTest ("clip-region-fx.reorder-preserves-instances.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat (std::make_unique<MatrixTestPluginFormat>());
+
+        DAW::ClipRegionPluginCore clipFx;
+        clipFx.prepare (kRate, kBlock);
+        const DAW::ClipID clipId = "apex_clip_fx_reorder";
+
+        beginTest ("three instances load and publish in insertion order");
+        auto first = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidStereo)), formatManager);
+        auto middle = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinA)), formatManager);
+        auto last = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinB)), formatManager);
+        expect (first.success, first.message);
+        expect (middle.success, middle.message);
+        expect (last.success, last.message);
+        if (!first.success || !middle.success || !last.success)
+            return;
+
+        const auto initial = clipFx.getEntriesForClip (clipId);
+        expectEquals (static_cast<int> (initial.size()), 3);
+        if (initial.size() != 3)
+            return;
+
+        const auto firstId = initial[0].instanceId;
+        const auto middleId = initial[1].instanceId;
+        const auto lastId = initial[2].instanceId;
+        auto* firstPtr = first.instance;
+        auto* middlePtr = middle.instance;
+        auto* lastPtr = last.instance;
+        clipFx.setBypassed (clipId, middleId, true);
+
+        beginTest ("moving first to last preserves plugin identities and bypass");
+        expect (clipFx.moveEntry (clipId, 0, 2));
+        auto moved = clipFx.getEntriesForClip (clipId);
+        expectEquals (moved[0].instanceId, middleId);
+        expectEquals (moved[1].instanceId, lastId);
+        expectEquals (moved[2].instanceId, firstId);
+        expect (moved[0].bypassed);
+        expect (clipFx.findEntryById (clipId, firstId)->instance.get() == firstPtr);
+        expect (clipFx.findEntryById (clipId, middleId)->instance.get() == middlePtr);
+        expect (clipFx.findEntryById (clipId, lastId)->instance.get() == lastPtr);
+        expect (clipFx.hasPluginsForClip (clipId));
+
+        beginTest ("invalid and no-op moves leave published order unchanged");
+        expect (!clipFx.moveEntry (clipId, -1, 0));
+        expect (!clipFx.moveEntry (clipId, 0, 3));
+        expect (!clipFx.moveEntry (clipId, 1, 1));
+        expect (!clipFx.moveEntry ("missing_clip", 0, 1));
+        auto unchanged = clipFx.getEntriesForClip (clipId);
+        for (size_t i = 0; i < moved.size(); ++i)
+            expectEquals (unchanged[i].instanceId, moved[i].instanceId);
+
+        beginTest ("moving last back to first restores the complete original order");
+        expect (clipFx.moveEntry (clipId, 2, 0));
+        const auto restored = clipFx.getEntriesForClip (clipId);
+        expectEquals (restored[0].instanceId, firstId);
+        expectEquals (restored[1].instanceId, middleId);
+        expectEquals (restored[2].instanceId, lastId);
+        expect (restored[1].bypassed);
+        clipFx.releaseResources();
+    }
+};
+
+static ClipRegionPluginReorderRegressionTests clipRegionPluginReorderRegressionTests;
 
 } // namespace
