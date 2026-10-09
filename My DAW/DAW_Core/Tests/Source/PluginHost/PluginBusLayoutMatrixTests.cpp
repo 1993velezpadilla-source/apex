@@ -1903,6 +1903,16 @@ public:
         expect(first.success, first.message);
         expect(second.success, second.message);
         if (!first.success || !second.success) return;
+        // Distinct non-zero opaque payloads ensure the tests verify actual
+        // preset bytes, not merely a restored processor with a default state.
+        constexpr juce::uint32 kFirstState = 0x4a5b6c7d;
+        constexpr juce::uint32 kSecondState = 0x1a2b3c4d;
+        auto* firstProbe = dynamic_cast<MatrixProbeProcessor*>(first.instance);
+        auto* secondProbe = dynamic_cast<MatrixProbeProcessor*>(second.instance);
+        expect(firstProbe != nullptr && secondProbe != nullptr);
+        if (!firstProbe || !secondProbe) return;
+        firstProbe->spec_.stateMarker = kFirstState;
+        secondProbe->spec_.stateMarker = kSecondState;
         auto ordered = original.getEntriesForClip(clipId);
         expectEquals(static_cast<int>(ordered.size()), 2);
         if (ordered.size() != 2) return;
@@ -1934,8 +1944,20 @@ public:
             expectEquals(live[1].instanceId, secondId);
             expect(!live[0].bypassed);
             expect(live[1].bypassed);
-            expect(reopened.findEntryById(clipId, firstId)->instance != nullptr);
-            expect(reopened.findEntryById(clipId, secondId)->instance != nullptr);
+            auto* liveFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, firstId)->instance.get());
+            auto* liveSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, secondId)->instance.get());
+            expect(liveFirst != nullptr && liveSecond != nullptr);
+            if (liveFirst && liveSecond)
+            {
+                expectEquals(static_cast<int>(liveFirst->lastStateMarker),
+                             static_cast<int>(kFirstState),
+                             "first opaque VST preset must survive XML/processor restore");
+                expectEquals(static_cast<int>(liveSecond->lastStateMarker),
+                             static_cast<int>(kSecondState),
+                             "second opaque VST preset must survive XML/processor restore");
+            }
         }
 
         beginTest("unavailable plugin is not deleted during subsequent save");
@@ -1952,8 +1974,28 @@ public:
             expectEquals(missing[0].instanceId, firstId);
             expectEquals(missing[1].instanceId, secondId);
             expect(missing[1].bypassed);
-            expect(missingHost.findEntryById(clipId, firstId)->instance == nullptr);
-            expect(missingHost.findEntryById(clipId, secondId)->instance == nullptr);
+            auto* missingFirst = missingHost.findEntryById(clipId, firstId);
+            auto* missingSecond = missingHost.findEntryById(clipId, secondId);
+            expect(missingFirst != nullptr && missingSecond != nullptr);
+            if (missingFirst && missingSecond)
+            {
+                expect(missingFirst->instance == nullptr);
+                expect(missingSecond->instance == nullptr);
+                expectEquals(static_cast<int>(missingFirst->unresolvedState.getSize()), 4);
+                expectEquals(static_cast<int>(missingSecond->unresolvedState.getSize()), 4);
+                if (missingFirst->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingFirst->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kFirstState));
+                }
+                if (missingSecond->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingSecond->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kSecondState));
+                }
+            }
         }
         juce::ValueTree retained;
         expect(missingHost.captureProjectState(retained, error), error);
@@ -1972,7 +2014,18 @@ public:
             expectEquals(recovered[0].instanceId, firstId);
             expectEquals(recovered[1].instanceId, secondId);
             expect(recovered[1].bypassed);
-            expect(reinstalled.findEntryById(clipId, firstId)->instance != nullptr);
+            auto* recoveredFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, firstId)->instance.get());
+            auto* recoveredSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, secondId)->instance.get());
+            expect(recoveredFirst != nullptr && recoveredSecond != nullptr);
+            if (recoveredFirst && recoveredSecond)
+            {
+                expectEquals(static_cast<int>(recoveredFirst->lastStateMarker),
+                             static_cast<int>(kFirstState));
+                expectEquals(static_cast<int>(recoveredSecond->lastStateMarker),
+                             static_cast<int>(kSecondState));
+            }
         }
 
         beginTest("corrupt state is rejected before disturbing the live chain");
