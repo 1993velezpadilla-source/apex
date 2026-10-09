@@ -69,6 +69,12 @@ namespace apex::automation
 
         static AutomationRecorder& getInstance();
 
+#if JUCE_UNIT_TESTS
+        // Deterministic message-thread drain for automation regression tests.
+        // Production continues to use the 90 Hz timer.
+        void drainForTests() { timerCallback(); }
+#endif
+
     private:
         struct Session
         {
@@ -105,8 +111,16 @@ namespace apex::automation
             const auto edges = clock.consumeTransportEdges();
             if (edges.stopped)
             {
+                // A released Latch (or Write) gesture has no more ValueChange
+                // events. Preserve its last value all the way to the actual
+                // Stop playhead, not just to the final knob movement.
+                const double stopPPQ = clock.getPlayheadPPQ();
                 for (auto& [id, s] : sessions)
-                    if (s.open) closeSession (s, true);
+                    if (s.open)
+                    {
+                        finishSustainAtStop (s, stopPPQ);
+                        closeSession (s, true);
+                    }
                 sessions.clear();
                 modeState.clearAllLatches();
             }
@@ -285,6 +299,19 @@ namespace apex::automation
             s.rawPoints.clear();
             s.rawPoints.push_back (tail);
             s.startPPQ = tail.timePPQ;
+        }
+
+        void finishSustainAtStop (Session& s, double stopPPQ)
+        {
+            // No PPQ wrap inference: a backward jump requires its own
+            // loop/punch policy and must never overwrite a previous take.
+            if ((s.mode != AutomationMode::Latch && s.mode != AutomationMode::Write)
+                || ! std::isfinite(stopPPQ) || stopPPQ <= s.lastPPQ)
+                return;
+
+            s.rawPoints.push_back ({ stopPPQ, s.lastValue,
+                                     CurveType::Linear, 0.0f });
+            s.lastPPQ = stopPPQ;
         }
 
         void closeSession (Session& s, bool)
