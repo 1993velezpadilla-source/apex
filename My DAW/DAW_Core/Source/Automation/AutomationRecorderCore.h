@@ -86,6 +86,7 @@ namespace apex::automation
         {
             ParameterID             paramID           = kInvalidParameterID;
             AutomationMode          mode              = AutomationMode::Touch;
+            AutomationModeState::ModeEpoch modeEpoch;
             double                  startPPQ          = 0.0;
             double                  lastPPQ           = 0.0;
             float                   lastValue         = 0.0f;
@@ -277,7 +278,8 @@ namespace apex::automation
             {
                 auto& session = it->second;
                 if (!session.open
-                    || modeState.getMode (it->first) == session.mode)
+                    || (modeState.getMode (it->first) == session.mode
+                        && !(modeState.getModeEpoch (it->first) != session.modeEpoch)))
                 {
                     ++it;
                     continue;
@@ -454,6 +456,7 @@ namespace apex::automation
 
             s.paramID         = param.getID();
             s.mode            = mode;
+            s.modeEpoch       = modeState.getModeEpoch (param.getID());
             s.startPPQ        = atPPQ;
             s.lastPPQ         = atPPQ;
             s.open            = true;

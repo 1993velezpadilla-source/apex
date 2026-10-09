@@ -2066,3 +2066,135 @@ public:
 };
 
 static AutomationModeSwitchIsolationTests automationModeSwitchIsolationTests;
+
+/**
+    Mode enums alone have the same ABA bug as record-arm and transport.
+    Latch->Read->Latch inside one 90Hz recorder period must fence the old
+    session, and the new fence must not discard another parameter's events.
+*/
+class AutomationModeEpochABATests final : public juce::UnitTest
+{
+public:
+    AutomationModeEpochABATests()
+        : juce::UnitTest("automation.mode-epoch-aba-and-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID latchID = 76018, touchID = 76019;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState arms;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        auto* latchParam = registry.createParameter(
+            latchID, "ABA Latch", ParameterRange{});
+        auto* touchParam = registry.createParameter(
+            touchID, "ABA independent Touch", ParameterRange{});
+        expect(latchParam != nullptr && touchParam != nullptr, "registered parameters");
+        if (latchParam == nullptr || touchParam == nullptr) return;
+
+        const auto original = std::vector<Breakpoint>{
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {2.0, 0.3f, CurveType::Linear, 0.0f},
+            {4.0, 0.7f, CurveType::Linear, 0.0f},
+            {6.0, 0.9f, CurveType::Linear, 0.0f}
+        };
+        lanes.getOrCreateLane(latchID).replacePoints(original);
+        lanes.getOrCreateLane(touchID).replacePoints(original);
+        modes.setMode(latchID, AutomationMode::Latch);
+        modes.setMode(touchID, AutomationMode::Touch);
+        arms.setRecordArmed(true);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        recorder.drainForTests();
+
+        const auto enqueue = [&] (ParameterID id,
+                                  AutomationGestureQueue::EventKind kind,
+                                  double ppq, float value)
+        {
+            AutomationGestureQueue::Event event;
+            event.paramID = id;
+            event.kind = kind;
+            event.source = ChangeSource::User;
+            event.ppqAtCapture = ppq;
+            event.normalizedValue = value;
+            return queue->push(event);
+        };
+
+        beginTest("Latch and Touch can have independent open sessions");
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::ValueChange, 1.25, 0.8f));
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::GestureEnd, 1.5, 0.8f));
+        expect(enqueue(touchID, AutomationGestureQueue::EventKind::GestureBegin, 1.5, 0.2f));
+        expect(enqueue(touchID, AutomationGestureQueue::EventKind::ValueChange, 2.0, 0.9f));
+        recorder.drainForTests();
+        expect(modes.latchHeldRT(latchID), "Latch held before ABA toggle");
+
+        beginTest("Latch -> Read -> Latch between timer polls fences old take");
+        const auto initialEpoch = modes.getModeEpoch(latchID);
+        const auto touchEpoch = modes.getModeEpoch(touchID);
+        modes.setMode(latchID, AutomationMode::Read);
+        modes.setMode(latchID, AutomationMode::Latch);
+        expectEquals(static_cast<int>(modes.getMode(latchID)),
+                     static_cast<int>(AutomationMode::Latch), "final enum unchanged");
+        expect(modes.getModeEpoch(latchID) != initialEpoch,
+               "per-parameter transition epoch detects both edges");
+        expect(!(modes.getModeEpoch(touchID) != touchEpoch),
+               "unrelated Touch mode epoch unchanged");
+        const auto epochAfter = modes.getModeEpoch(latchID);
+        modes.setMode(latchID, AutomationMode::Latch);
+        expect(!(modes.getModeEpoch(latchID) != epochAfter),
+               "idempotent mode set is not a new transition");
+
+        clock.publishFromAudioThread(3.0, 0.001, true);
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::ValueChange, 2.75, 0.95f));
+        expect(enqueue(touchID, AutomationGestureQueue::EventKind::ValueChange, 2.75, 0.45f));
+        recorder.drainForTests();
+        expect(!modes.latchHeldRT(latchID),
+               "old held Latch released even when final mode is unchanged");
+
+        auto first = lanes.findLane(latchID);
+        auto second = lanes.findLane(touchID);
+        expect(first != nullptr && second != nullptr, "both lanes survive ABA");
+        if (first == nullptr || second == nullptr) return;
+        auto firstSnap = first->getSnapshot(), secondSnap = second->getSnapshot();
+        expect(firstSnap != nullptr && secondSnap != nullptr, "snapshots published");
+        if (firstSnap == nullptr || secondSnap == nullptr) return;
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*firstSnap, 2.25),
+                                  0.8f, 1.0e-5f, "old take was preserved");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*firstSnap, 4.0),
+                                  0.7f, 1.0e-5f, "stale Latch value not recorded");
+        expectWithinAbsoluteError(AutomationLane::evaluateAt(*secondSnap, 2.75),
+                                  0.45f, 1.0e-5f, "unrelated Touch event was recorded");
+
+        beginTest("new Latch gesture works after ABA boundary");
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
+        expect(enqueue(latchID, AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
+        recorder.drainForTests();
+        firstSnap = first->getSnapshot();
+        expect(firstSnap != nullptr && !firstSnap->empty(), "fresh take committed");
+        if (firstSnap != nullptr && !firstSnap->empty())
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*firstSnap, 4.75),
+                                      0.25f, 1.0e-5f, "new take is independent");
+
+        beginTest("override and global-default ABA are also observable");
+        const auto beforeOverride = modes.getModeEpoch(latchID);
+        modes.clearOverride(latchID);
+        modes.setMode(latchID, AutomationMode::Latch);
+        expect(modes.getModeEpoch(latchID) != beforeOverride,
+               "removing and re-adding override advances parameter epoch");
+        constexpr ParameterID inheritedID = 76020;
+        const auto beforeDefault = modes.getModeEpoch(inheritedID);
+        modes.setGlobalDefaultMode(AutomationMode::Off);
+        modes.setGlobalDefaultMode(AutomationMode::Read);
+        expect(modes.getModeEpoch(inheritedID) != beforeDefault,
+               "inherited mode records hidden default-mode toggle");
+        expect(modes.getModeEpoch(touchID).globalDefault == 0,
+               "explicit Touch override ignores global-default toggles");
+    }
+};
+
+static AutomationModeEpochABATests automationModeEpochABATests;
