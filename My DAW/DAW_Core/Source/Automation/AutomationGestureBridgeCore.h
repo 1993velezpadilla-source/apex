@@ -125,6 +125,7 @@ namespace apex::automation
                                              int                   parameterIndex,
                                              float                 newValue) override
         {
+            if (!std::isfinite (newValue)) return;
             const ParameterID id = resolvePluginParam (proc, parameterIndex);
             if (id == kInvalidParameterID) return;
 
@@ -157,8 +158,12 @@ namespace apex::automation
                 {
                     if (auto* parameter = parameters.getUnchecked (parameterIndex))
                     {
-                        e.normalizedValue = juce::jlimit (0.0f, 1.0f, parameter->getValue());
-                        e.hasStartValue = true;
+                        const float start = parameter->getValue();
+                        if (std::isfinite (start))
+                        {
+                            e.normalizedValue = juce::jlimit (0.0f, 1.0f, start);
+                            e.hasStartValue = true;
+                        }
                     }
                 }
             }
@@ -232,7 +237,8 @@ namespace apex::automation
                                         float        newNormalized,
                                         ChangeSource source) override
             {
-                if (source != ChangeSource::User && source != ChangeSource::Plugin)
+                if ((source != ChangeSource::User && source != ChangeSource::Plugin)
+                    || !std::isfinite (newNormalized))
                     return;
 
                 AutomationGestureQueue::Event e;
@@ -255,7 +261,7 @@ namespace apex::automation
                 // Deferred UI dispatch may see a much later parameter value.
                 // Use the snapshot taken in AutomationParameter::beginGesture.
                 e.normalizedValue  = p.getValueAtGestureBegin();
-                e.hasStartValue    = true;
+                e.hasStartValue    = std::isfinite (e.normalizedValue);
                 const double capturedPPQ = p.getCapturedGestureBeginPPQ();
                 e.ppqAtCapture = std::isfinite (capturedPPQ)
                     ? capturedPPQ : clock.snapshot().blockStartPPQ;
