@@ -57,12 +57,12 @@ namespace apex::automation
             if (! modeState.isReadingRT (id))
                 return;
 
-            // User gesture wins. After releasing a Latch gesture the
-            // recorder holds the last user value until transport Stop;
-            // re-evaluating the old lane here would fight that value on
-            // every audio block before the sustained curve is committed.
+            // User gesture wins. Latch and Write keep the last user value
+            // after release until transport Stop. Re-evaluating the old lane
+            // during this hold would fight the value on every audio block.
+            const auto mode = modeState.getModeRT (id);
             if (p.isGestureActive()
-                || (modeState.getModeRT (id) == AutomationMode::Latch
+                || ((mode == AutomationMode::Latch || mode == AutomationMode::Write)
                     && modeState.latchHeldRT (id)))
                 return;
 
