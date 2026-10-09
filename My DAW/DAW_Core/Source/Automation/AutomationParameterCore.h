@@ -219,10 +219,20 @@ namespace apex::automation
             if (pendingGestureBegin.exchange (false, std::memory_order_acq_rel))
                 listeners.call ([this] (Listener& l) { l.parameterGestureBegan (*this); });
 
-            listeners.call ([this, latestNormalized, latestSource] (Listener& l)
+            // GestureBegin / GestureEnd also advance the broad version
+            // counter to wake the UI dispatcher. They are NOT value writes.
+            // Reporting parameterValueChanged on a gesture-only tick creates
+            // a phantom ValueChange in the recorder with a stale timestamp,
+            // even though the producer never moved the control.
+            const auto currentValueVersion = valueVersion.load (std::memory_order_acquire);
+            if (currentValueVersion != lastDispatchedValueVersion)
             {
-                l.parameterValueChanged (*this, latestNormalized, latestSource);
-            });
+                lastDispatchedValueVersion = currentValueVersion;
+                listeners.call ([this, latestNormalized, latestSource] (Listener& l)
+                {
+                    l.parameterValueChanged (*this, latestNormalized, latestSource);
+                });
+            }
 
             if (pendingGestureEnd.exchange (false, std::memory_order_acq_rel))
                 listeners.call ([this] (Listener& l) { l.parameterGestureEnded (*this); });
@@ -248,6 +258,7 @@ namespace apex::automation
             currentValueN.store (newNormalized, std::memory_order_release);
             lastSource.store (static_cast<std::uint8_t> (src),
                               std::memory_order_release);
+            valueVersion.fetch_add (1, std::memory_order_acq_rel);
             version.fetch_add (1, std::memory_order_acq_rel);
         }
 
@@ -275,6 +286,10 @@ namespace apex::automation
         // State (all atomic; readable from any thread)
         std::atomic<float>         currentValueN       { 0.0f };
         std::atomic<std::uint64_t> version             { 0 };
+        // Changes only on actual value writes, unlike version which also
+        // signals gesture edges. Read by the message-thread UI dispatcher.
+        std::atomic<std::uint64_t> valueVersion        { 0 };
+        std::uint64_t lastDispatchedValueVersion = 0; // message thread only
         std::atomic<bool>          gestureActive       { false };
         std::atomic<float>         gestureBeginValueN  { 0.0f };
         std::atomic<AutomationClock*> gestureCaptureClock { nullptr };
