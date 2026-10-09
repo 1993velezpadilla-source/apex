@@ -2198,3 +2198,68 @@ public:
 };
 
 static AutomationModeEpochABATests automationModeEpochABATests;
+
+/**
+    Regression for torn snapshots under concurrent audio publications.
+    Both PPQ and per-sample increment encode the same block sequence. The
+    message-thread reader must never receive values from different blocks,
+    even after colliding with the writer on multiple consecutive retries.
+*/
+class AutomationClockConsistentSnapshotTests final : public juce::UnitTest
+{
+public:
+    AutomationClockConsistentSnapshotTests()
+        : juce::UnitTest("automation.clock-seqlock-consistency.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        beginTest("one reader, concurrent audio writer, no mixed block fields");
+        AutomationClock clock;
+        constexpr int iterations = 150000;
+        std::atomic<bool> begin { false };
+        std::atomic<bool> done { false };
+        std::thread writer([&]
+        {
+            while (!begin.load(std::memory_order_acquire))
+                std::this_thread::yield();
+
+            for (int block = 1; block <= iterations; ++block)
+                clock.publishFromAudioThread(static_cast<double>(block),
+                                             static_cast<double>(block) * 2.0,
+                                             true);
+            done.store(true, std::memory_order_release);
+        });
+
+        std::uint64_t observations = 0;
+        bool sawTornSnapshot = false;
+        begin.store(true, std::memory_order_release);
+        while (!done.load(std::memory_order_acquire) || observations < iterations)
+        {
+            const auto observed = clock.snapshot();
+            const auto expectedIncrement = observed.blockStartPPQ * 2.0;
+            if (observed.ppqPerSample != expectedIncrement
+                || observed.transportTransitions > 1)
+                sawTornSnapshot = true;
+            ++observations;
+            if (observations >= static_cast<std::uint64_t>(iterations * 4))
+                break;
+        }
+
+        writer.join();
+        expect(!sawTornSnapshot, "snapshot must never mix fields from different blocks");
+        expect(observations >= 1, "at least one snapshot captured");
+        const auto finalState = clock.snapshot();
+        expectWithinAbsoluteError(finalState.blockStartPPQ,
+                                  static_cast<double>(iterations),
+                                  1.0e-8, "final PPQ is last published block");
+        expectWithinAbsoluteError(finalState.ppqPerSample,
+                                  static_cast<double>(iterations) * 2.0,
+                                  1.0e-8, "final increment matches the same block");
+        expect(finalState.transportRolling, "transport remained rolling");
+        expectEquals(finalState.transportTransitions, std::uint64_t{1},
+                     "only initial Stop->Play transition happened");
+    }
+};
+
+static AutomationClockConsistentSnapshotTests automationClockConsistentSnapshotTests;
