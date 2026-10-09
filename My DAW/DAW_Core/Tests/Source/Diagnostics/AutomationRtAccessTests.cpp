@@ -295,6 +295,7 @@ public:
             constexpr int kPerProducer = 3072;
             auto q = std::make_unique<Queue>();
             std::atomic<bool> begin { false };
+            std::atomic<bool> abort { false };
             std::atomic<int> finished { 0 };
             std::vector<std::thread> producers;
             producers.reserve(kProducers);
@@ -317,7 +318,11 @@ public:
                         e.normalizedValue = static_cast<float>(n) / kPerProducer;
                         e.ppqAtCapture = producer * 100000.0 + n;
                         while (!q->push(e))
+                        {
+                            if (abort.load(std::memory_order_acquire))
+                                return;
                             std::this_thread::yield();
+                        }
                     }
                     finished.fetch_add(1, std::memory_order_release);
                 });
@@ -375,6 +380,7 @@ public:
                         std::this_thread::yield();
                 }
             }
+            abort.store(true, std::memory_order_release);
             for (auto& t : producers)
                 t.join();
 
