@@ -139,7 +139,18 @@ namespace apex::automation
                 for (auto& [id, s] : sessions)
                     if (s.open)
                     {
-                        finishSustainAtStop (s, stopPPQ);
+                        // Stopping with a hand still on a Touch/Trim
+                        // control is an implicit gesture release. Without
+                        // restoring the pre-gesture curve, its final written
+                        // value can remain latched into future playback.
+                        if (std::isfinite (stopPPQ) && stopPPQ >= s.lastPPQ)
+                        {
+                            if (s.mode == AutomationMode::Touch
+                                || s.mode == AutomationMode::Trim)
+                                finishGestureAt (s, stopPPQ);
+                            else
+                                finishSustainAtStop (s, stopPPQ);
+                        }
                         closeSession (s, true);
                     }
                 sessions.clear();

@@ -1138,3 +1138,97 @@ public:
 };
 
 static AutomationGesturePpqOrderTests automationGesturePpqOrderTests;
+
+/**
+    A real Stop can happen while the user is still touching a control.
+    Touch and Trim must rejoin the original curve at Stop even if JUCE never
+    emitted GestureEnd first.
+*/
+class AutomationStopImplicitReleaseTests final : public juce::UnitTest
+{
+public:
+    AutomationStopImplicitReleaseTests()
+        : juce::UnitTest("automation.stop-implicit-gesture-release.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+
+        for (const auto mode : { AutomationMode::Touch, AutomationMode::Trim })
+        {
+            beginTest(mode == AutomationMode::Touch
+                          ? "Touch Stop restores underlying curve"
+                          : "Trim Stop restores underlying curve");
+            constexpr ParameterID id = 76007;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arms;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            auto* param = registry.createParameter(id, "Stop release probe", ParameterRange{});
+            expect(param != nullptr, "registered parameter");
+            if (param == nullptr) return;
+
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.1f, CurveType::Linear, 0.0f},
+                {2.0, 0.3f, CurveType::Linear, 0.0f},
+                {4.0, 0.7f, CurveType::Linear, 0.0f},
+                {6.0, 0.9f, CurveType::Linear, 0.0f}
+            });
+            param->writeValue(0.2f, ChangeSource::Automation);
+            modes.setMode(id, mode);
+            arms.setRecordArmed(true);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arms);
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+
+            auto enqueue = [&](AutomationGestureQueue::EventKind kind,
+                               double ppq, float normalized)
+            {
+                AutomationGestureQueue::Event e;
+                e.paramID = id;
+                e.kind = kind;
+                e.source = ChangeSource::User;
+                e.ppqAtCapture = ppq;
+                e.normalizedValue = normalized;
+                return queue->push(e);
+            };
+
+            expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 1.0, 0.2f));
+            expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.25,
+                           mode == AutomationMode::Trim ? 0.4f : 0.8f));
+            recorder.drainForTests();
+            // No GestureEnd: the user presses Stop while touching the knob.
+            clock.publishFromAudioThread(3.0, 0.001, false);
+            recorder.drainForTests();
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "recorded lane available");
+            if (lane == nullptr) return;
+            const auto snap = lane->getSnapshot();
+            expect(snap != nullptr && !snap->empty(), "curve survives stop");
+            if (snap == nullptr || snap->empty()) return;
+
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 0.5),
+                                      0.15f, 1.0e-5f,
+                                      "pre-touch automation is unmodified");
+            if (mode == AutomationMode::Touch)
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                          0.8f, 1.0e-5f,
+                                          "Touch holds the written value up to Stop");
+            else
+                expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
+                                          0.5f, 1.0e-5f,
+                                          "Trim preserves base curve plus delta up to Stop");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.0),
+                                      0.5f, 1.0e-5f,
+                                      "Stop restores original value at exact Stop PPQ");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.5),
+                                      0.6f, 1.0e-5f,
+                                      "following curve is preserved, not stuck on user value");
+        }
+    }
+};
+
+static AutomationStopImplicitReleaseTests automationStopImplicitReleaseTests;
