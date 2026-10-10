@@ -5,6 +5,7 @@
 #include "../../../Source/Automation/AutomationModeStateCore.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
+#include "../../../Source/Automation/AutomationUIDispatcherCore.h"
 #include "../../../Source/Automation/AutomationGestureQueueCore.h"
 #include "../../../Source/Automation/AutomationClockCore.h"
 #include "../../../Source/Automation/AutomationRecorderCore.h"
@@ -3101,3 +3102,112 @@ public:
     }
 };
 static AutomationClockRealtimeCaptureTests automationClockRealtimeCaptureTests;
+
+/**
+    The 60Hz dispatcher invokes listeners that may remove or replace native
+    controls during a project change. Iterating the registry's mutable map
+    through forEach() while holding its lock invalidates the current iterator
+    when a callback unregisters itself. A pinned immutable snapshot must
+    finish its tick safely, and a new parameter reusing an ID/version must
+    still get its first value notification.
+*/
+class AutomationDispatcherReentrantRegistryTests final : public juce::UnitTest
+{
+public:
+    AutomationDispatcherReentrantRegistryTests()
+        : juce::UnitTest("automation.ui-dispatcher-reentrant-registry.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+
+        constexpr ParameterID firstID = 76032;
+        constexpr ParameterID secondID = 76033;
+
+        struct Listener final : AutomationParameter::Listener
+        {
+            AutomationParameterRegistry* registry = nullptr;
+            ParameterID removeID = kInvalidParameterID;
+            int notifications = 0;
+            float lastValue = -1.0f;
+
+            void parameterValueChanged (AutomationParameter&,
+                                        float value, ChangeSource) override
+            {
+                ++notifications;
+                lastValue = value;
+                if (registry != nullptr && removeID != kInvalidParameterID)
+                {
+                    // Unregister the parameter whose listener is CURRENTLY
+                    // being invoked. The old mutable-map iteration could
+                    // increment an invalidated unordered_map iterator.
+                    auto* r = registry;
+                    registry = nullptr;
+                    r->unregisterParameter (removeID);
+                }
+            }
+        };
+
+        AutomationParameterRegistry registry;
+        auto* first = registry.createParameter(
+            firstID, "Self-removing fader", ParameterRange{});
+        auto* second = registry.createParameter(
+            secondID, "Neighboring fader", ParameterRange{});
+        expect(first != nullptr && second != nullptr, "parameters registered");
+        if (first == nullptr || second == nullptr) return;
+
+        Listener removing;
+        removing.registry = &registry;
+        removing.removeID = firstID;
+        Listener neighbor;
+        first->addListener (&removing);
+        second->addListener (&neighbor);
+        AutomationUIDispatcher dispatcher(registry);
+        dispatcher.pause(); // deterministic manual tick, not an async timer
+
+        beginTest("listener can unregister itself mid-dispatch without invalidation");
+        first->setValueFromUser (0.4f);
+        second->setValueFromUser (0.65f);
+        dispatcher.dispatchOnceForTests();
+        expectEquals(removing.notifications, 1,
+                     "removal callback delivered exactly once");
+        expectEquals(neighbor.notifications, 1,
+                     "neighboring parameter delivered in same pinned snapshot");
+        expectWithinAbsoluteError(neighbor.lastValue, 0.65f, 1.0e-6f,
+                                  "neighbor retained valid value");
+        expect(registry.find(firstID) == nullptr,
+               "first parameter was unregistered by callback");
+
+        beginTest("reusing same ParameterID and version still sends first event");
+        auto* replacement = registry.createParameter(
+            firstID, "Replacement fader", ParameterRange{});
+        expect(replacement != nullptr && replacement != first,
+               "replacement parameter allocated without destroying retired source");
+        if (replacement == nullptr) return;
+        Listener replacementListener;
+        replacement->addListener (&replacementListener);
+        // The original and replacement both advance to version 1.
+        replacement->setValueFromUser(0.9f);
+        expectEquals(replacement->getVersion(), first->getVersion(),
+                     "test reproduces same-ID same-version collision");
+        dispatcher.dispatchOnceForTests();
+        expectEquals(replacementListener.notifications, 1,
+                     "replaced parameter receives its initial notification");
+        expectWithinAbsoluteError(replacementListener.lastValue, 0.9f,
+                                  1.0e-6f, "replacement controls have fresh values");
+        expectEquals(removing.notifications, 1,
+                     "retired parameter does not receive more callbacks");
+
+        beginTest("later stable ticks do not duplicate value notifications");
+        dispatcher.dispatchOnceForTests();
+        expectEquals(replacementListener.notifications, 1);
+        expectEquals(neighbor.notifications, 1);
+
+        first->removeListener(&removing);
+        second->removeListener(&neighbor);
+        replacement->removeListener(&replacementListener);
+    }
+};
+static AutomationDispatcherReentrantRegistryTests
+    automationDispatcherReentrantRegistryTests;
