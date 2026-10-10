@@ -307,7 +307,7 @@ namespace apex::automation
         double captureInputPPQ() const noexcept
         {
             if (auto* c = gestureCaptureClock.load (std::memory_order_acquire))
-                return c->snapshot().blockStartPPQ;
+                return c->captureInputPPQ();
             return std::numeric_limits<double>::quiet_NaN();
         }
 
