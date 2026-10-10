@@ -2998,3 +2998,106 @@ public:
 };
 
 static AutomationFullStackRoundTripTests automationFullStackRoundTripTests;
+
+/**
+    AudioProcessorListener callbacks and native producer operations can run
+    on realtime threads. They need PPQ only, and must never enter the full
+    clock snapshot's unbounded seqlock retry if the audio writer stalls in
+    its odd publication phase. The single-atomic capture path remains valid
+    and monotonic even while another thread publishes blocks.
+*/
+class AutomationClockRealtimeCaptureTests final : public juce::UnitTest
+{
+public:
+    AutomationClockRealtimeCaptureTests()
+        : juce::UnitTest("automation.rt-clock-single-atomic-capture.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID nativeID = 76028;
+        constexpr ParameterID pluginID = 76029;
+
+        AutomationParameterRegistry registry;
+        auto* native = registry.createParameter(
+            nativeID, "Realtime capture", ParameterRange{});
+        expect(native != nullptr, "native control exists");
+        if (native == nullptr) return;
+        AutomationClock clock;
+        clock.publishFromAudioThread(1.0, 0.001, true);
+        auto queue = std::make_unique<AutomationGestureQueue>();
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*native);
+        juce::AudioProcessorGraph plugin;
+        bridge.attachToPlugin(plugin, {{7, pluginID}});
+
+        beginTest("concurrent clock publication never stalls PPQ-only producers");
+        std::atomic<bool> ready { false };
+        std::thread writer ([&]
+        {
+            while (!ready.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            for (int block = 2; block <= 40000; ++block)
+                clock.publishFromAudioThread(double(block), 0.001, true);
+        });
+        ready.store(true, std::memory_order_release);
+
+        double previousPPQ = 1.0;
+        bool monotonic = true;
+        bool finite = true;
+        for (int n = 0; n < 30000; ++n)
+        {
+            const double now = clock.captureInputPPQ();
+            finite = finite && std::isfinite(now);
+            monotonic = monotonic && now >= previousPPQ;
+            previousPPQ = now;
+            if (n == 500 || n == 1000 || n == 1500)
+            {
+                clock.captureInputPPQ();
+                bridge.audioProcessorParameterChanged(
+                    &plugin, 7, 0.1f * float(n / 500));
+            }
+        }
+        writer.join();
+        expect(finite, "single-field PPQ capture remains finite");
+        expect(monotonic, "monotonic publisher never goes backwards");
+        expectWithinAbsoluteError(clock.captureInputPPQ(), 40000.0, 1.0e-8,
+                                  "latest published audio block is readable");
+
+        beginTest("plugin callbacks retain PPQ in bounded queue");
+        AutomationGestureQueue::Event event;
+        for (int i = 0; i < 3; ++i)
+        {
+            expect(queue->pop(event), "plugin callback reached queue");
+            expectEquals(event.paramID, pluginID, "plugin mapping preserved");
+            expectEquals(static_cast<int>(event.kind),
+                static_cast<int>(AutomationGestureQueue::EventKind::ValueChange),
+                "plugin value event kind");
+            expect(std::isfinite(event.ppqAtCapture)
+                && event.ppqAtCapture >= 1.0
+                && event.ppqAtCapture <= 40000.0,
+                "plugin callback timestamp is a published PPQ");
+        }
+        expect(!queue->pop(event), "no duplicate plugin messages");
+
+        beginTest("native control operations use same producer fast-path");
+        clock.publishFromAudioThread(50000.0, 0.001, true);
+        native->beginGesture();
+        clock.publishFromAudioThread(50000.25, 0.001, true);
+        native->setValueFromUser(0.6f);
+        clock.publishFromAudioThread(50000.5, 0.001, true);
+        native->endGesture();
+        for (double ppq : {50000.0, 50000.25, 50000.5})
+        {
+            expect(queue->pop(event), "native producer captured gesture event");
+            expectEquals(event.paramID, nativeID, "native ID preserved");
+            expectWithinAbsoluteError(event.ppqAtCapture, ppq, 1.0e-8,
+                                      "native PPQ captured at input operation");
+        }
+        expect(!queue->pop(event), "no additional native events");
+        bridge.detachFromAllParameters();
+        bridge.detachFromAllPlugins();
+    }
+};
+static AutomationClockRealtimeCaptureTests automationClockRealtimeCaptureTests;
