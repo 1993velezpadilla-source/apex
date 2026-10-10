@@ -137,7 +137,7 @@ namespace apex::automation
             e.kind            = AutomationGestureQueue::EventKind::ValueChange;
             e.source          = ChangeSource::Plugin;
             e.normalizedValue = juce::jlimit (0.0f, 1.0f, newValue);
-            e.ppqAtCapture    = clock.snapshot().blockStartPPQ;
+            e.ppqAtCapture    = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -170,7 +170,7 @@ namespace apex::automation
                     }
                 }
             }
-            e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+            e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -184,7 +184,7 @@ namespace apex::automation
             e.paramID      = id;
             e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
             e.source       = ChangeSource::Plugin;
-            e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+            e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -256,7 +256,7 @@ namespace apex::automation
                 e.normalizedValue = newNormalized;
                 const double capturedPPQ = p.getCapturedValueChangePPQ();
                 e.ppqAtCapture = std::isfinite (capturedPPQ)
-                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
@@ -274,7 +274,7 @@ namespace apex::automation
                 e.hasStartValue    = std::isfinite (e.normalizedValue);
                 const double capturedPPQ = p.getCapturedGestureBeginPPQ();
                 e.ppqAtCapture = std::isfinite (capturedPPQ)
-                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
@@ -288,7 +288,7 @@ namespace apex::automation
                 e.source       = ChangeSource::User;
                 const double capturedPPQ = p.getCapturedGestureEndPPQ();
                 e.ppqAtCapture = std::isfinite (capturedPPQ)
-                    ? capturedPPQ : clock.snapshot().blockStartPPQ;
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
