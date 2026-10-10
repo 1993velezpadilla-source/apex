@@ -5078,6 +5078,10 @@ void MainComponent::upgradeProjectFile(const juce::File& file)
 
 void MainComponent::projectLoaded()
 {
+    // Restore/New Project starts a new autosave recovery session. Completions
+    // from the previous project must not clear this session's pending edits.
+    appCore_.getAutosaveManager().onProjectLoaded();
+
     // A loaded/new project invalidates every recorded command - the old
     // entries reference track/clip IDs that no longer exist. Every major
     // DAW starts a fresh history per project; replaying a stale command
