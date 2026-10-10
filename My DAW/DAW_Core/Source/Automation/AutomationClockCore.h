@@ -78,6 +78,19 @@ namespace apex::automation
             }
         }
 
+        // RT/input callback fast path: a single atomic read of PPQ, WITHOUT
+        // entering snapshot()'s unbounded version-retry loop. A hosted plugin
+        // can notify us from the audio thread while the sole clock writer is
+        // publishing on another thread. If that writer is preempted with its
+        // version odd, spinning in an audio/plugin callback is unacceptable.
+        // A PPQ-only capture does not require the rolling/tempo pair to be
+        // mutually consistent; consumers requiring a full multi-field state
+        // should use snapshot() on the message thread instead.
+        double captureInputPPQ() const noexcept
+        {
+            return blockStartPPQ.load (std::memory_order_acquire);
+        }
+
         double getPlayheadPPQ()     const noexcept { return snapshot().blockStartPPQ; }
         bool   isTransportRolling() const noexcept { return snapshot().transportRolling; }
 
