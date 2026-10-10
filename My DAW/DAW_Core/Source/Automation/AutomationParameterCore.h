@@ -1,9 +1,13 @@
 #pragma once
 
 #include "AutomationTypes.h"
+#include "AutomationClockCore.h"
+#include "AutomationGestureQueueCore.h"
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
+#include <limits>
+#include <cmath>
 
 namespace apex::automation
 {
@@ -85,12 +89,75 @@ namespace apex::automation
             return gestureActive.load (std::memory_order_acquire);
         }
 
+        // The UI dispatcher can notify gesture listeners after multiple
+        // parameter value writes. Preserve the actual gesture-start value.
+        float getValueAtGestureBegin() const noexcept
+        {
+            return gestureBeginValueN.load (std::memory_order_acquire);
+        }
+
+        // Native UI notifications are deferred. Capture PPQ at the actual
+        // parameter operation, not at the next 60 Hz dispatcher callback.
+        // When no bridge is attached, the getter returns NaN so its listener
+        // can fall back to its own clock without inventing a timestamp.
+        void bindGestureCaptureClock (AutomationClock* c) noexcept
+        {
+            gestureCaptureClock.store (c, std::memory_order_release);
+        }
+
+        void unbindGestureCaptureClock (AutomationClock* expected) noexcept
+        {
+            gestureCaptureClock.compare_exchange_strong (expected, nullptr,
+                std::memory_order_acq_rel, std::memory_order_acquire);
+        }
+
+        // The bridge attaches the native recording queue before interaction.
+        // Capture the event at its *producer*, not via the coalescing 60 Hz
+        // widget notifier, which cannot preserve successive fast knob moves.
+        // Queue and clock must outlive this binding; detach on message thread
+        // after input callbacks quiesce, before destruction.
+        void bindDirectGestureQueue (AutomationGestureQueue* q) noexcept
+        {
+            directGestureQueue.store (q, std::memory_order_release);
+        }
+
+        void unbindDirectGestureQueue (AutomationGestureQueue* expected) noexcept
+        {
+            directGestureQueue.compare_exchange_strong (expected, nullptr,
+                std::memory_order_acq_rel, std::memory_order_acquire);
+        }
+
+        bool hasDirectGestureQueue() const noexcept
+        {
+            return directGestureQueue.load (std::memory_order_acquire) != nullptr;
+        }
+
+        double getCapturedGestureBeginPPQ() const noexcept
+        {
+            return gestureBeginPPQ.load (std::memory_order_acquire);
+        }
+
+        double getCapturedGestureEndPPQ() const noexcept
+        {
+            return gestureEndPPQ.load (std::memory_order_acquire);
+        }
+
+        double getCapturedValueChangePPQ() const noexcept
+        {
+            return latestValueChangePPQ.load (std::memory_order_acquire);
+        }
+
         // ----- Value writers ----------------------------------------------
 
         // Called by APEX UI widgets when the user drags/clicks the control.
         void setValueFromUser (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
+            const double ppq = captureInputPPQ();
+            latestValueChangePPQ.store (ppq, std::memory_order_release);
             writeValue (newNormalized, ChangeSource::User);
+            publishDirectGesture (AutomationGestureQueue::EventKind::ValueChange,
+                                  ChangeSource::User, newNormalized, ppq, false);
             forwardToPluginIfBound (newNormalized);
         }
 
@@ -98,6 +165,7 @@ namespace apex::automation
         // playback. MUST be lock-free and allocation-free.
         void setValueFromAutomation (float newNormalized) noexcept
         {
+            if (!std::isfinite (newNormalized)) return;
             writeValue (newNormalized, ChangeSource::Automation);
             if (auto* p = pluginParam.load (std::memory_order_acquire))
                 p->setValue (std::clamp (newNormalized, 0.0f, 1.0f));
@@ -107,12 +175,18 @@ namespace apex::automation
         // the parameter itself.
         void setValueFromPlugin (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
+            const double ppq = captureInputPPQ();
+            latestValueChangePPQ.store (ppq, std::memory_order_release);
             writeValue (newNormalized, ChangeSource::Plugin);
+            publishDirectGesture (AutomationGestureQueue::EventKind::ValueChange,
+                                  ChangeSource::Plugin, newNormalized, ppq, false);
         }
 
         // For preset loads, undo, scripted assignment, etc.
         void setValueProgrammatic (float newNormalized)
         {
+            if (!std::isfinite (newNormalized)) return;
             writeValue (newNormalized, ChangeSource::Programmatic);
             forwardToPluginIfBound (newNormalized);
         }
@@ -124,6 +198,12 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (true, std::memory_order_acq_rel);
             if (! wasActive)
             {
+                const float startValue = getNormalizedValue();
+                const double ppq = captureInputPPQ();
+                gestureBeginValueN.store (startValue, std::memory_order_release);
+                gestureBeginPPQ.store (ppq, std::memory_order_release);
+                publishDirectGesture (AutomationGestureQueue::EventKind::GestureBegin,
+                                      ChangeSource::User, startValue, ppq, true);
                 pendingGestureBegin.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -134,6 +214,10 @@ namespace apex::automation
             const bool wasActive = gestureActive.exchange (false, std::memory_order_acq_rel);
             if (wasActive)
             {
+                const double ppq = captureInputPPQ();
+                gestureEndPPQ.store (ppq, std::memory_order_release);
+                publishDirectGesture (AutomationGestureQueue::EventKind::GestureEnd,
+                                      ChangeSource::User, getNormalizedValue(), ppq, false);
                 pendingGestureEnd.store (true, std::memory_order_release);
                 version.fetch_add (1, std::memory_order_acq_rel);
             }
@@ -170,10 +254,20 @@ namespace apex::automation
             if (pendingGestureBegin.exchange (false, std::memory_order_acq_rel))
                 listeners.call ([this] (Listener& l) { l.parameterGestureBegan (*this); });
 
-            listeners.call ([this, latestNormalized, latestSource] (Listener& l)
+            // GestureBegin / GestureEnd also advance the broad version
+            // counter to wake the UI dispatcher. They are NOT value writes.
+            // Reporting parameterValueChanged on a gesture-only tick creates
+            // a phantom ValueChange in the recorder with a stale timestamp,
+            // even though the producer never moved the control.
+            const auto currentValueVersion = valueVersion.load (std::memory_order_acquire);
+            if (currentValueVersion != lastDispatchedValueVersion)
             {
-                l.parameterValueChanged (*this, latestNormalized, latestSource);
-            });
+                lastDispatchedValueVersion = currentValueVersion;
+                listeners.call ([this, latestNormalized, latestSource] (Listener& l)
+                {
+                    l.parameterValueChanged (*this, latestNormalized, latestSource);
+                });
+            }
 
             if (pendingGestureEnd.exchange (false, std::memory_order_acq_rel))
                 listeners.call ([this] (Listener& l) { l.parameterGestureEnded (*this); });
@@ -192,17 +286,49 @@ namespace apex::automation
         // PluginInstanceCore::applyAutomationAtSample.
         void writeValue (float newNormalized, ChangeSource src) noexcept
         {
+            // std::clamp and jlimit do not sanitize NaN; malformed hosted
+            // plugin values must never poison realtime parameter atomics.
+            if (!std::isfinite (newNormalized)) return;
             newNormalized = std::clamp (newNormalized, 0.0f, 1.0f);
             currentValueN.store (newNormalized, std::memory_order_release);
             lastSource.store (static_cast<std::uint8_t> (src),
                               std::memory_order_release);
+            valueVersion.fetch_add (1, std::memory_order_acq_rel);
             version.fetch_add (1, std::memory_order_acq_rel);
         }
 
         void forwardToPluginIfBound (float newNormalized) noexcept
         {
+            if (!std::isfinite (newNormalized)) return;
             if (auto* p = pluginParam.load (std::memory_order_acquire))
                 p->setValueNotifyingHost (std::clamp (newNormalized, 0.0f, 1.0f));
+        }
+
+        double captureInputPPQ() const noexcept
+        {
+            if (auto* c = gestureCaptureClock.load (std::memory_order_acquire))
+                return c->captureInputPPQ();
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        void publishDirectGesture (AutomationGestureQueue::EventKind kind,
+                                   ChangeSource source, float value,
+                                   double ppq, bool hasStartValue) noexcept
+        {
+            if (auto* q = directGestureQueue.load (std::memory_order_acquire))
+            {
+                AutomationGestureQueue::Event e;
+                e.paramID = paramID;
+                e.kind = kind;
+                e.source = source;
+                e.normalizedValue = std::clamp (value, 0.0f, 1.0f);
+                e.ppqAtCapture = ppq;
+                e.hasStartValue = hasStartValue;
+                // A bounded MPSC queue is the only producer-side handoff.
+                // Overflow is recorded by push(), and the recorder fences
+                // old sessions rather than silently accept lost events.
+                (void) q->push (e);
+            }
         }
 
         // Identity
@@ -215,7 +341,17 @@ namespace apex::automation
         // State (all atomic; readable from any thread)
         std::atomic<float>         currentValueN       { 0.0f };
         std::atomic<std::uint64_t> version             { 0 };
+        // Changes only on actual value writes, unlike version which also
+        // signals gesture edges. Read by the message-thread UI dispatcher.
+        std::atomic<std::uint64_t> valueVersion        { 0 };
+        std::uint64_t lastDispatchedValueVersion = 0; // message thread only
         std::atomic<bool>          gestureActive       { false };
+        std::atomic<float>         gestureBeginValueN  { 0.0f };
+        std::atomic<AutomationClock*> gestureCaptureClock { nullptr };
+        std::atomic<AutomationGestureQueue*> directGestureQueue { nullptr };
+        std::atomic<double> gestureBeginPPQ { std::numeric_limits<double>::quiet_NaN() };
+        std::atomic<double> gestureEndPPQ { std::numeric_limits<double>::quiet_NaN() };
+        std::atomic<double> latestValueChangePPQ { std::numeric_limits<double>::quiet_NaN() };
         std::atomic<bool>          pendingGestureBegin { false };
         std::atomic<bool>          pendingGestureEnd   { false };
         std::atomic<std::uint8_t>  lastSource          {

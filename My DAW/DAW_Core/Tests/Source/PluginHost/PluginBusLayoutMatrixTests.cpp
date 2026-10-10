@@ -20,6 +20,7 @@
 
 #include <JuceHeader.h>
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
+#include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/CommandCore/GeneralCommands.h"
 
@@ -1801,5 +1802,428 @@ public:
 };
 
 static PluginModuleCoexistenceLifecycleTests pluginModuleCoexistenceLifecycleTests;
+
+class ClipRegionPluginReorderRegressionTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginReorderRegressionTests()
+        : UnitTest ("clip-region-fx.reorder-preserves-instances.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat (std::make_unique<MatrixTestPluginFormat>());
+
+        DAW::ClipRegionPluginCore clipFx;
+        clipFx.prepare (kRate, kBlock);
+        const DAW::ClipID clipId = "apex_clip_fx_reorder";
+
+        beginTest ("three instances load and publish in insertion order");
+        auto first = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidStereo)), formatManager);
+        auto middle = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinA)), formatManager);
+        auto last = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinB)), formatManager);
+        expect (first.success, first.message);
+        expect (middle.success, middle.message);
+        expect (last.success, last.message);
+        if (!first.success || !middle.success || !last.success)
+            return;
+
+        const auto initial = clipFx.getEntriesForClip (clipId);
+        expectEquals (static_cast<int> (initial.size()), 3);
+        if (initial.size() != 3)
+            return;
+
+        const auto firstId = initial[0].instanceId;
+        const auto middleId = initial[1].instanceId;
+        const auto lastId = initial[2].instanceId;
+        auto* firstPtr = first.instance;
+        auto* middlePtr = middle.instance;
+        auto* lastPtr = last.instance;
+        clipFx.setBypassed (clipId, middleId, true);
+
+        beginTest ("moving first to last preserves plugin identities and bypass");
+        expect (clipFx.moveEntry (clipId, 0, 2));
+        auto moved = clipFx.getEntriesForClip (clipId);
+        expectEquals (moved[0].instanceId, middleId);
+        expectEquals (moved[1].instanceId, lastId);
+        expectEquals (moved[2].instanceId, firstId);
+        expect (moved[0].bypassed);
+        expect (clipFx.findEntryById (clipId, firstId)->instance.get() == firstPtr);
+        expect (clipFx.findEntryById (clipId, middleId)->instance.get() == middlePtr);
+        expect (clipFx.findEntryById (clipId, lastId)->instance.get() == lastPtr);
+        expect (clipFx.hasPluginsForClip (clipId));
+
+        beginTest ("invalid and no-op moves leave published order unchanged");
+        expect (!clipFx.moveEntry (clipId, -1, 0));
+        expect (!clipFx.moveEntry (clipId, 0, 3));
+        expect (!clipFx.moveEntry (clipId, 1, 1));
+        expect (!clipFx.moveEntry ("missing_clip", 0, 1));
+        auto unchanged = clipFx.getEntriesForClip (clipId);
+        for (size_t i = 0; i < moved.size(); ++i)
+            expectEquals (unchanged[i].instanceId, moved[i].instanceId);
+
+        beginTest ("moving last back to first restores the complete original order");
+        expect (clipFx.moveEntry (clipId, 2, 0));
+        const auto restored = clipFx.getEntriesForClip (clipId);
+        expectEquals (restored[0].instanceId, firstId);
+        expectEquals (restored[1].instanceId, middleId);
+        expectEquals (restored[2].instanceId, lastId);
+        expect (restored[1].bypassed);
+        clipFx.releaseResources();
+    }
+};
+
+static ClipRegionPluginReorderRegressionTests clipRegionPluginReorderRegressionTests;
+
+class ClipRegionPluginProjectPersistenceTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginProjectPersistenceTests()
+        : UnitTest("clip-region-fx.project-roundtrip-and-missing-plugin.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        const DAW::ClipID clipId = "roundtrip_clip_A";
+        const auto exists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+
+        DAW::ClipRegionPluginCore original;
+        original.prepare(kRate, kBlock);
+        const auto first = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinA)), formatManager);
+        const auto second = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinB)), formatManager);
+        beginTest("save a two-processor clip chain with stable identity and bypass");
+        expect(first.success, first.message);
+        expect(second.success, second.message);
+        if (!first.success || !second.success) return;
+        // Distinct non-zero opaque payloads ensure the tests verify actual
+        // preset bytes, not merely a restored processor with a default state.
+        constexpr juce::uint32 kFirstState = 0x4a5b6c7d;
+        constexpr juce::uint32 kSecondState = 0x1a2b3c4d;
+        auto* firstProbe = dynamic_cast<MatrixProbeProcessor*>(first.instance);
+        auto* secondProbe = dynamic_cast<MatrixProbeProcessor*>(second.instance);
+        expect(firstProbe != nullptr && secondProbe != nullptr);
+        if (!firstProbe || !secondProbe) return;
+        firstProbe->spec_.stateMarker = kFirstState;
+        secondProbe->spec_.stateMarker = kSecondState;
+        auto ordered = original.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(ordered.size()), 2);
+        if (ordered.size() != 2) return;
+        const auto firstId = ordered[0].instanceId;
+        const auto secondId = ordered[1].instanceId;
+        original.setBypassed(clipId, secondId, true);
+        juce::ValueTree projectFx;
+        juce::String error;
+        expect(original.captureProjectState(projectFx, error), error);
+        expect(projectFx.isValid());
+        if (!projectFx.isValid()) return;
+        expectEquals(projectFx.getNumChildren(), 1);
+        expectEquals(projectFx.getChild(0).getNumChildren(), 2);
+
+        auto xml = projectFx.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        auto fromDisk = juce::ValueTree::fromXml(*xml);
+        beginTest("XML round trip restores both live processors and their order");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(kRate, kBlock);
+        expect(reopened.restoreProjectState(fromDisk, formatManager, exists, error), error);
+        expect(error.isEmpty(), "no missing-plugin warnings expected: " + error);
+        const auto live = reopened.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(live.size()), 2);
+        if (live.size() == 2)
+        {
+            expectEquals(live[0].instanceId, firstId);
+            expectEquals(live[1].instanceId, secondId);
+            expect(!live[0].bypassed);
+            expect(live[1].bypassed);
+            auto* liveFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, firstId)->instance.get());
+            auto* liveSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, secondId)->instance.get());
+            expect(liveFirst != nullptr && liveSecond != nullptr);
+            if (liveFirst && liveSecond)
+            {
+                expectEquals(static_cast<int>(liveFirst->lastStateMarker),
+                             static_cast<int>(kFirstState),
+                             "first opaque VST preset must survive XML/processor restore");
+                expectEquals(static_cast<int>(liveSecond->lastStateMarker),
+                             static_cast<int>(kSecondState),
+                             "second opaque VST preset must survive XML/processor restore");
+            }
+        }
+
+        beginTest("unavailable plugin is not deleted during subsequent save");
+        juce::AudioPluginFormatManager noPlugins;
+        DAW::ClipRegionPluginCore missingHost;
+        missingHost.prepare(kRate, kBlock);
+        expect(missingHost.restoreProjectState(fromDisk, noPlugins, exists, error),
+               "missing plugin should produce a preservable placeholder: " + error);
+        expect(error.isNotEmpty(), "missing plugins must be reported to project loader");
+        const auto missing = missingHost.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(missing.size()), 2);
+        if (missing.size() == 2)
+        {
+            expectEquals(missing[0].instanceId, firstId);
+            expectEquals(missing[1].instanceId, secondId);
+            expect(missing[1].bypassed);
+            auto* missingFirst = missingHost.findEntryById(clipId, firstId);
+            auto* missingSecond = missingHost.findEntryById(clipId, secondId);
+            expect(missingFirst != nullptr && missingSecond != nullptr);
+            if (missingFirst && missingSecond)
+            {
+                expect(missingFirst->instance == nullptr);
+                expect(missingSecond->instance == nullptr);
+                expectEquals(static_cast<int>(missingFirst->unresolvedState.getSize()), 4);
+                expectEquals(static_cast<int>(missingSecond->unresolvedState.getSize()), 4);
+                if (missingFirst->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingFirst->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kFirstState));
+                }
+                if (missingSecond->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingSecond->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kSecondState));
+                }
+            }
+        }
+        juce::ValueTree retained;
+        expect(missingHost.captureProjectState(retained, error), error);
+        expectEquals(retained.toXmlString(), fromDisk.toXmlString(),
+                     "resaving unresolved slots must preserve opaque state, IDs, and ordering");
+
+        beginTest("reinstalling a missing plugin recreates the preserved processors");
+        DAW::ClipRegionPluginCore reinstalled;
+        reinstalled.prepare(kRate, kBlock);
+        expect(reinstalled.restoreProjectState(retained, formatManager, exists, error), error);
+        expect(error.isEmpty(), error);
+        auto recovered = reinstalled.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(recovered.size()), 2);
+        if (recovered.size() == 2)
+        {
+            expectEquals(recovered[0].instanceId, firstId);
+            expectEquals(recovered[1].instanceId, secondId);
+            expect(recovered[1].bypassed);
+            auto* recoveredFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, firstId)->instance.get());
+            auto* recoveredSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, secondId)->instance.get());
+            expect(recoveredFirst != nullptr && recoveredSecond != nullptr);
+            if (recoveredFirst && recoveredSecond)
+            {
+                expectEquals(static_cast<int>(recoveredFirst->lastStateMarker),
+                             static_cast<int>(kFirstState));
+                expectEquals(static_cast<int>(recoveredSecond->lastStateMarker),
+                             static_cast<int>(kSecondState));
+            }
+        }
+
+        beginTest("corrupt state is rejected before disturbing the live chain");
+        auto corrupt = retained.createCopy();
+        corrupt.getChild(0).getChild(1).setProperty("instanceId", firstId, nullptr);
+        expect(!reinstalled.restoreProjectState(corrupt, formatManager, exists, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+        expect(reinstalled.findEntryById(clipId, firstId)->instance != nullptr);
+
+        beginTest("unknown clip reference is rejected instead of dropping an effect");
+        expect(!reinstalled.restoreProjectState(retained, formatManager,
+                    [](const DAW::ClipID&) { return false; }, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+
+        beginTest("deleting one clip releases only its FX and preserves other clips");
+        const DAW::ClipID otherClipId = "roundtrip_clip_B";
+        auto another = reinstalled.loadForClip(
+            otherClipId, makeDescription(*makeSpecForUid(kUidStereo)), formatManager);
+        expect(another.success, another.message);
+        reinstalled.removeAllEntriesForClip(clipId);
+        expect(reinstalled.getEntriesForClip(clipId).empty());
+        expect(!reinstalled.hasPluginsForClip(clipId));
+        expect(reinstalled.hasPluginsForClip(otherClipId));
+        if (another.success)
+            expect(reinstalled.findEntryById(otherClipId,
+                reinstalled.getEntriesForClip(otherClipId)[0].instanceId)->instance != nullptr);
+        juce::ValueTree surviving;
+        expect(reinstalled.captureProjectState(surviving, error), error);
+        expectEquals(surviving.getNumChildren(), 1,
+                     "deleted clip FX must not remain in the saved project");
+        if (surviving.getNumChildren() == 1)
+            expectEquals(surviving.getChild(0).getProperty("clipId").toString(), otherClipId);
+
+        original.releaseResources();
+        reopened.releaseResources();
+        missingHost.releaseResources();
+        reinstalled.releaseResources();
+    }
+};
+
+static ClipRegionPluginProjectPersistenceTests clipRegionPluginProjectPersistenceTests;
+
+
+/**
+ * Independent real-world integration canary. CI downloads two open-source
+ * VST3 binaries and sets the environment variables before this test runs.
+ * Unlike MatrixTestPluginFormat, these processors are NOT synthetic mocks.
+ */
+class ExternalOpenSourceVST3ClipFxTests final : public juce::UnitTest
+{
+public:
+    ExternalOpenSourceVST3ClipFxTests()
+        : UnitTest("external-vst3.wet-effects-project-roundtrip.v1", "ExternalVST3") {}
+
+    void runTest() override
+    {
+        const bool required = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_REQUIRED", "") == "1";
+        const auto reverbPath = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_WETREVERB", "");
+        const auto delayPath = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_WETDELAY", "");
+
+        beginTest("two independent GitHub release VST3 bundles are present");
+        if (reverbPath.isEmpty() || delayPath.isEmpty())
+        {
+            if (required)
+                expect(false, "External VST3 required, but CI download paths are absent");
+            else
+                logMessage("SKIP external VST3: run pinned-download workflow to execute");
+            return;
+        }
+
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager manager;
+        // This JUCE 8 build deliberately deletes addDefaultFormats().
+        // Register the exact VST3 format explicitly for this external canary.
+        manager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+        juce::VST3PluginFormat vst3;
+        juce::PluginDescription descriptions[2];
+        const juce::String paths[] = { reverbPath, delayPath };
+        const juce::String expectedNames[] = { "WetReverb", "WetDelay" };
+        for (int i = 0; i < 2; ++i)
+        {
+            const juce::File bundle(paths[i]);
+            expect(bundle.isDirectory(), expectedNames[i] + " VST3 bundle must exist");
+            if (!bundle.isDirectory()) return;
+
+            juce::OwnedArray<juce::PluginDescription> found;
+            try { vst3.findAllTypesForFile(found, bundle.getFullPathName()); }
+            catch (const std::exception& e)
+            {
+                expect(false, expectedNames[i] + " VST3 enumeration threw: " + juce::String(e.what()));
+                return;
+            }
+            catch (...) { expect(false, expectedNames[i] + " VST3 enumeration threw"); return; }
+            expect(found.size() > 0, expectedNames[i] + " must expose a real VST3 component");
+            if (found.isEmpty()) return;
+            descriptions[i] = *found.getFirst();
+            expectEquals(descriptions[i].pluginFormatName, juce::String("VST3"));
+            logMessage("External VST3 found: " + descriptions[i].name
+                       + " vendor=" + descriptions[i].manufacturerName);
+        }
+
+        const DAW::ClipID clipId = "external_mit_effects";
+        DAW::ClipRegionPluginCore chain;
+        chain.prepare(48000.0, 128);
+        beginTest("load third-party VST3 through production ClipRegionPluginCore");
+        const auto reverb = chain.loadForClip(clipId, descriptions[0], manager);
+        expect(reverb.success && reverb.instance != nullptr,
+               "real reverb instantiation: " + reverb.message);
+        if (!reverb.success || !reverb.instance) return;
+        const auto delay = chain.loadForClip(clipId, descriptions[1], manager);
+        expect(delay.success && delay.instance != nullptr,
+               "real delay instantiation: " + delay.message);
+        if (!delay.success || !delay.instance) return;
+
+        const auto before = chain.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(before.size()), 2);
+        if (before.size() != 2) return;
+        const auto reverbId = before[0].instanceId;
+        const auto delayId = before[1].instanceId;
+
+        beginTest("parameter change and 128-sample stereo DSP yield finite audio");
+        const auto& params = reverb.instance->getParameters();
+        expect(!params.isEmpty(), "actual open-source VST3 should expose host parameters");
+        if (!params.isEmpty())
+            params[0]->setValueNotifyingHost(0.37f);
+        juce::AudioBuffer<float> buffer(2, 128);
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                buffer.setSample(ch, sample, sample == 0 ? 0.3f : 0.0f);
+        chain.processClipBlock(clipId, buffer, 128);
+        bool finite = true;
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                finite = finite && std::isfinite(buffer.getSample(ch, sample));
+        expect(finite, "third-party VST3 DSP produced NaN/Inf");
+        chain.setBypassed(clipId, delayId, true);
+
+        beginTest("save binary state, identity, order and bypass into project XML");
+        juce::ValueTree state;
+        juce::String error;
+        expect(chain.captureProjectState(state, error), error);
+        expect(state.isValid());
+        if (!state.isValid()) return;
+        expectEquals(state.getNumChildren(), 1);
+        expectEquals(state.getChild(0).getNumChildren(), 2);
+        const auto firstState = state.getChild(0).getChild(0).getChildWithName("State");
+        const auto secondState = state.getChild(0).getChild(1).getChildWithName("State");
+        expect(firstState.getProperty("data").toString().isNotEmpty(),
+               "real reverb must supply opaque VST3 state");
+        expect(secondState.getProperty("data").toString().isNotEmpty(),
+               "real delay must supply opaque VST3 state");
+        auto xml = state.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        auto saved = juce::ValueTree::fromXml(*xml);
+
+        beginTest("unavailable third-party VST3s retain exact opaque state bytes");
+        juce::AudioPluginFormatManager missing;
+        DAW::ClipRegionPluginCore offline;
+        offline.prepare(48000.0, 128);
+        const auto clipExists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+        expect(offline.restoreProjectState(saved, missing, clipExists, error), error);
+        auto offlineEntries = offline.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(offlineEntries.size()), 2);
+        if (offlineEntries.size() != 2)
+            return;
+        expect(offline.findEntryById(clipId, reverbId)->instance == nullptr);
+        expect(offline.findEntryById(clipId, delayId)->instance == nullptr);
+        juce::ValueTree preserved;
+        expect(offline.captureProjectState(preserved, error), error);
+        expectEquals(preserved.toXmlString(), saved.toXmlString(),
+                     "lossless missing-VST3 project resave");
+
+        beginTest("reinstall real VST3s and restore processor identity and bypass");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(48000.0, 128);
+        expect(reopened.restoreProjectState(preserved, manager, clipExists, error), error);
+        expect(error.isEmpty(), "real VST3 recovery must not create missing slots: " + error);
+        auto after = reopened.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(after.size()), 2);
+        if (after.size() == 2)
+        {
+            expectEquals(after[0].instanceId, reverbId);
+            expectEquals(after[1].instanceId, delayId);
+            expect(after[1].bypassed);
+            expect(reopened.findEntryById(clipId, reverbId)->instance != nullptr);
+            expect(reopened.findEntryById(clipId, delayId)->instance != nullptr);
+        }
+
+        chain.releaseResources();
+        offline.releaseResources();
+        reopened.releaseResources();
+    }
+};
+
+static ExternalOpenSourceVST3ClipFxTests externalOpenSourceVST3ClipFxTests;
 
 } // namespace

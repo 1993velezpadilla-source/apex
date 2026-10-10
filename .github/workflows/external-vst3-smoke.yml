@@ -1,0 +1,48 @@
+name: External open-source VST3 smoke
+on:
+  push:
+    paths:
+      - .github/workflows/external-vst3-smoke.yml
+      - "My DAW/DAW_Core/Scripts/fetch_external_vst3.ps1"
+      - "My DAW/DAW_Core/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp"
+  pull_request:
+    paths:
+      - .github/workflows/external-vst3-smoke.yml
+      - "My DAW/DAW_Core/Scripts/fetch_external_vst3.ps1"
+      - "My DAW/DAW_Core/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apex-external-vst3-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  real-vst3:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Prepare pinned APEX test toolchain
+        run: .\Scripts\prepare_ci.ps1
+      - name: Download SHA256-pinned, MIT-licensed third-party VST3 binaries
+        run: .\Scripts\fetch_external_vst3.ps1
+      - name: Build and test real WetReverb + WetDelay in APEX host
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Name external-vst3.wet-effects-project-roundtrip.v1 -Seed 0xA9E12026
+      - name: Preserve real-plugin test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-external-vst3-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn

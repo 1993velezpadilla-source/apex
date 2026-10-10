@@ -2266,7 +2266,45 @@ MainComponent::MainComponent()
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->setAutomationManager(&appCore_.getAutomationManager());
 
-    arrangement_->onOpenClipProperties = [this](DAW::Clip& clip)
+    appCore_.setBeforeClipFxProjectReset([this]()
+    {
+        if (clipPropertiesWindow_)
+            clipPropertiesWindow_->clearClip();
+        if (bubbleTaskbar_)
+            for (const auto& window : clipRegionPluginWindows_)
+                if (window != nullptr)
+                    bubbleTaskbar_->unregisterWindow(window->getComponentID());
+        clipRegionPluginWindows_.clear();
+    });
+
+    // Native VST3 windows own editors referencing the processor. Never free
+    // a clip plugin while its editor window is still on screen or on taskbar.
+    auto closeClipFxEditorWindow = [this](const juce::String& instanceId)
+    {
+        if (bubbleTaskbar_)
+            bubbleTaskbar_->unregisterWindow(instanceId);
+        auto it = std::find_if(clipRegionPluginWindows_.begin(),
+                               clipRegionPluginWindows_.end(),
+            [&instanceId](const std::unique_ptr<juce::DocumentWindow>& window)
+            {
+                return window != nullptr && window->getComponentID() == instanceId;
+            });
+        if (it != clipRegionPluginWindows_.end())
+            clipRegionPluginWindows_.erase(it);
+    };
+
+    appCore_.setBeforeClipFxClipRemoved([this, closeClipFxEditorWindow](const DAW::ClipID& clipId)
+    {
+        // Clear any clip properties raw pointer before deletion.
+        if (clipPropertiesWindow_ && clipPropertiesWindow_->isShowingClip(clipId))
+            clipPropertiesWindow_->clearClip();
+        const auto entries = appCore_.getClipRegionPluginCore().getEntriesForClip(clipId);
+        for (const auto& entry : entries)
+            closeClipFxEditorWindow(entry.instanceId);
+        clipFxPanelOpenByClipId_.erase(clipId);
+    });
+
+    arrangement_->onOpenClipProperties = [this, closeClipFxEditorWindow](DAW::Clip& clip)
     {
         if (!clipPropertiesWindow_)
             return;
@@ -2283,6 +2321,13 @@ MainComponent::MainComponent()
         clipPropertiesWindow_->setClip(&clip, &appCore_.getAudioFileManager(), appCore_.getCurrentSampleRate());
         clipPropertiesWindow_->setKnownPlugins(&appCore_.getPluginScanner().getKnownPlugins());
         clipPropertiesWindow_->setClipRegionPluginCore(&appCore_.getClipRegionPluginCore());
+        clipPropertiesWindow_->getPanel().onClipFxChanged = [this]()
+        {
+            // Every successful bypass, remove, or reorder must enter the
+            // project's manual-save and autosave dirty pipeline.
+            appCore_.markProjectDirty("plugin_clip_fx_changed");
+        };
+        clipPropertiesWindow_->getPanel().onBeforeClipFxRemoved = closeClipFxEditorWindow;
 
         // Do NOT activate automation mode here. Opening clip properties must
         // not switch the clip into the automation editor — that made every
@@ -2397,6 +2442,7 @@ MainComponent::MainComponent()
                 return;
             }
 
+            appCore_.markProjectDirty("plugin_clip_fx_added");
             auto entries = appCore_.getClipRegionPluginCore().getEntriesForClip(c.getID());
             if (entries.empty()) return;
             auto instanceId = entries.back().instanceId;
@@ -5032,6 +5078,10 @@ void MainComponent::upgradeProjectFile(const juce::File& file)
 
 void MainComponent::projectLoaded()
 {
+    // Restore/New Project starts a new autosave recovery session. Completions
+    // from the previous project must not clear this session's pending edits.
+    appCore_.getAutosaveManager().onProjectLoaded();
+
     // A loaded/new project invalidates every recorded command - the old
     // entries reference track/clip IDs that no longer exist. Every major
     // DAW starts a fresh history per project; replaying a stale command
@@ -7383,6 +7433,8 @@ MainComponent::~MainComponent()
     appCore_.getTransport().removeListener(this);
     appCore_.getAutosaveManager().onAutosaveSucceeded = {};
     appCore_.getAutosaveManager().onAutosaveFailed = {};
+    appCore_.setBeforeClipFxProjectReset({});
+    appCore_.setBeforeClipFxClipRemoved({});
 
     // 2. The centralized shutdown path joins export before releasing audio.
     shutdownAudio();

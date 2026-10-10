@@ -821,6 +821,9 @@ public:
     std::function<void(Clip&, const juce::PluginDescription&)>       onOpenClipRegionPlugin;
     std::function<void(Clip&, const juce::String&)>                  onOpenActiveClipRegionPlugin;
     std::function<void(int width, int height)>                       onResizeRequest;
+    /** Message-thread notification after a successful clip-FX chain edit. */
+    std::function<void()>                                             onClipFxChanged;
+    std::function<void(const juce::String&)>                          onBeforeClipFxRemoved;
 
     ClipPropertiesPanel()
     {
@@ -999,21 +1002,32 @@ public:
         {
             if (!clip_ || !clipRegionPluginCore_) return;
             if (auto* entry = clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId))
+            {
                 clipRegionPluginCore_->setBypassed(clip_->getID(), instanceId, !entry->bypassed);
+                if (onClipFxChanged) onClipFxChanged();
+            }
             refreshActivePlugins();
         };
         fxFloatingPanel_->onRemovePlugin = [this](const juce::String& instanceId)
         {
             if (!clip_ || !clipRegionPluginCore_) return;
+            if (clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId) == nullptr)
+                return;
+            if (onBeforeClipFxRemoved) onBeforeClipFxRemoved(instanceId);
             clipRegionPluginCore_->removeEntry(clip_->getID(), instanceId);
+            if (onClipFxChanged) onClipFxChanged();
             refreshActivePlugins();
         };
         fxFloatingPanel_->onReorderPlugin = [this](int fromIndex, int toIndex)
         {
-            // Plugin reordering logic (to be implemented in ClipRegionPluginCore)
-            DBG("[ClipFxFloatingPanel] Reorder request: " << fromIndex << " -> " << toIndex);
-            // For now, just refresh to show current order
-            refreshActivePlugins();
+            if (!clip_ || !clipRegionPluginCore_)
+                return;
+
+            if (clipRegionPluginCore_->moveEntry(clip_->getID(), fromIndex, toIndex))
+            {
+                if (onClipFxChanged) onClipFxChanged();
+                refreshActivePlugins();
+            }
         };
         fxFloatingPanel_->onClose = [this]
         {
@@ -1322,13 +1336,20 @@ private:
         {
             if (!clip_ || !clipRegionPluginCore_) return;
             if (auto* entry = clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId))
+            {
                 clipRegionPluginCore_->setBypassed(clip_->getID(), instanceId, !entry->bypassed);
+                if (onClipFxChanged) onClipFxChanged();
+            }
             refreshActivePlugins();
         };
         activeListModel_.onRemove = [this](const juce::String& instanceId)
         {
             if (!clip_ || !clipRegionPluginCore_) return;
+            if (clipRegionPluginCore_->findEntryById(clip_->getID(), instanceId) == nullptr)
+                return;
+            if (onBeforeClipFxRemoved) onBeforeClipFxRemoved(instanceId);
             clipRegionPluginCore_->removeEntry(clip_->getID(), instanceId);
+            if (onClipFxChanged) onClipFxChanged();
             refreshActivePlugins();
         };
         return &activeListModel_;

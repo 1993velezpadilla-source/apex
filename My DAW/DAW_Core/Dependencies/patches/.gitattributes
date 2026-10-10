@@ -1,1 +1,2 @@
-*.patch text eol=lf -whitespace
+# These files are SHA-256 locked against their original bytes.
+*.patch -text !eol -whitespace

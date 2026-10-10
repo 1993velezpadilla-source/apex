@@ -1,17 +1,17 @@
 // ===========================================================================
 // BubblegumRefreshTests.cpp
 //
-// Tests the restored Bubblegum presentation contract.  The application target
+// Tests the restored Bubblegum presentation contract. The application target
 // owns BubblegumCableOverlayComponent.cpp; the headless test target does not
-// link that UI translation unit.  The scheduler probe below therefore mirrors
-// the small, observable timer contract while the routing/state/animation tests
-// exercise the real Bubblegum cores and the real RoutingGraph.
+// link that UI translation unit. The scheduler probe below mirrors the
+// observable presentation-tick decisions while the routing/state/animation
+// tests exercise the real Bubblegum cores and the real RoutingGraph.
 //
 // Contract under test:
 //
-//     juce::Timer @ 60 Hz
+//     ApexPresentationClock::TickReceiver
+//       -> onPresentationTick(deltaSeconds)
 //       -> poll Mixer/scroll motion
-//       -> timerCallback()
 //       -> onTick()
 //       -> refresh cable state / advance animation
 //       -> repaint only when needed
@@ -48,14 +48,14 @@ namespace
 using namespace DAW;
 
 // ---------------------------------------------------------------------------
-// Test-side representation of the legacy timer decisions.
+// Test-side representation of presentation-tick decisions.
 //
 // This intentionally contains no source-selection or geometry-revision gate.
-// It models only the behavior that is observable at the timer boundary:
-// polling invalidates presentation state, onTick is dispatched every timer
-// call, and repaint is requested only for visible dirty work (or a clear).
+// It models only the behavior that is observable at the tick boundary:
+// polling invalidates presentation state, onTick is dispatched every tick, and
+// repaint is requested only for visible dirty work (or a clear).
 // ---------------------------------------------------------------------------
-struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
+struct PresentationRefreshProbe final : RoutingGraph::Listener
 {
     bool overlayVisible = true;
     bool cablesVisible = true;
@@ -66,7 +66,7 @@ struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
     int lastScrollX = std::numeric_limits<int>::min();
     int lastScrollY = std::numeric_limits<int>::min();
 
-    int timerCallbackCount = 0;
+    int presentationTickCount = 0;
     int onTickCount = 0;
     int paintedTickCount = 0;
     int gatedTickCount = 0;
@@ -86,12 +86,12 @@ struct LegacyTimerRefreshProbe final : RoutingGraph::Listener
     void connectionRemoved(const RouteID&) override { requestTopologyRefresh(); }
     void graphChanged() override { requestTopologyRefresh(); }
 
-    void timerCallback(int scrollX, int scrollY,
+    void presentationTick(int scrollX, int scrollY,
                        bool sidechainAnimating = false)
     {
-        ++timerCallbackCount;
+        ++presentationTickCount;
 
-        // Legacy motion polling: no callback/revision authority is involved.
+        // Motion polling: no callback/revision authority is involved.
         if (scrollX != lastScrollX || scrollY != lastScrollY)
         {
             lastScrollX = scrollX;
@@ -183,7 +183,7 @@ struct Harness
     BubblegumSendStateCore sends;
     QuickTrackColorSystem colors { 70707 };
     QuickTrackBuilderCore builder { tracks, graph, masterRoute, sends, colors };
-    LegacyTimerRefreshProbe refresh;
+    PresentationRefreshProbe refresh;
 
     Harness()
     {
@@ -231,60 +231,60 @@ public:
 
     void runTest() override
     {
-        beginTest("OverlayUsesLegacyTimerAt60Hz");
+        beginTest("OverlayUsesSharedPresentationClock");
         {
             using Overlay = BubblegumCableOverlayComponent;
-            static_assert(std::is_base_of<juce::Timer, Overlay>::value,
-                          "Bubblegum overlay must own the JUCE timer path");
+            static_assert(std::is_base_of<ApexPresentationClock::TickReceiver, Overlay>::value,
+                          "Bubblegum overlay must receive the shared presentation clock");
+            static_assert(! std::is_base_of<juce::Timer, Overlay>::value,
+                          "Bubblegum overlay must not own an independent timer");
 
-            const auto timerCallback = &Overlay::timerCallback;
-            expect(timerCallback != nullptr,
-                   "Bubblegum timerCallback remains the timer entry point");
-            expectEquals(Overlay::kLegacyTimerHz, 60,
-                         "legacy Bubblegum timer cadence is 60 Hz");
+            const auto tick = &Overlay::onPresentationTick;
+            expect(tick != nullptr,
+                   "onPresentationTick is the shared clock entry point");
         }
 
-        beginTest("TimerCallbackDispatchesOnTickAndGatesRepaint");
+        beginTest("PresentationTickDispatchesOnTickAndGatesRepaint");
         {
-            LegacyTimerRefreshProbe probe;
+            PresentationRefreshProbe probe;
             probe.onTick = [this, &probe]
             {
-                expect(probe.timerCallbackCount > 0,
-                       "onTick runs from inside timerCallback");
+                expect(probe.presentationTickCount > 0,
+                       "onTick runs from inside presentationTick");
             };
 
             // Static, clean frames are gated rather than repainting the whole
-            // Mixer on every timer callback.
-            probe.timerCallback(0, 0);
+            // Mixer on every presentation tick.
+            probe.presentationTick(0, 0);
             probe.snapshotCacheValid = true;
             probe.compositeFrameDirty = false;
-            probe.timerCallback(0, 0);
+            probe.presentationTick(0, 0);
 
-            expectEquals(probe.timerCallbackCount, 2,
-                         "timer callback is invoked for each legacy tick");
+            expectEquals(probe.presentationTickCount, 2,
+                         "presentation tick is invoked for each clock update");
             expectEquals(probe.onTickCount, 2,
-                         "onTick is dispatched through the timer path");
+                         "onTick is dispatched through the presentation path");
             expect(probe.gatedTickCount > 0,
                    "clean frames remain repaint-gated");
             expect(probe.paintedTickCount > 0,
                    "the initial dirty frame is eligible for repaint");
         }
 
-        beginTest("MixerAndScrollMotionAreDetectedByPolling");
+        beginTest("MixerAndScrollMotionAreDetectedByPresentationTicks");
         {
-            LegacyTimerRefreshProbe probe;
-            probe.timerCallback(10, 0);
+            PresentationRefreshProbe probe;
+            probe.presentationTick(10, 0);
             probe.snapshotCacheValid = true;
             probe.compositeFrameDirty = false;
             const int paintedBeforeStaticFrame = probe.paintedTickCount;
 
-            probe.timerCallback(10, 0);
+            probe.presentationTick(10, 0);
             expectEquals(probe.paintedTickCount, paintedBeforeStaticFrame,
                          "unchanged polled geometry does not repaint");
 
-            probe.timerCallback(42, 0);
+            probe.presentationTick(42, 0);
             expect(probe.paintedTickCount > paintedBeforeStaticFrame,
-                   "scroll motion invalidates the legacy presentation cache");
+                   "scroll motion invalidates the presentation cache");
             expectEquals(probe.lastScrollX, 42,
                          "legacy polling stores the latest scroll position");
         }
@@ -448,6 +448,114 @@ public:
                 expect(hasDestination(recordsB, busB),
                        "source B selection exposes source B's Send records");
             }
+        }
+
+        beginTest("BubblegumSendAutomationRestoresSavedLevelAndBypassBindings");
+        {
+            juce::ScopedJuceInitialiser_GUI gui;
+            auto& store = apex::automation::AutomationLaneStore::getInstance();
+            auto& keys = apex::automation::AutomationParameterKeyRegistry::getInstance();
+            auto& sys = apex::automation::AutomationSystem::getInstance();
+            const auto previousAutomation = store.getState().createCopy();
+
+            Harness h;
+            const auto* doubles = QuickTrackRoleCatalog::findById("doubles");
+            const auto result = h.builder.createBatch({ { doubles, 2 } });
+            expect(result.ok(), "fixture must contain two real routed tracks");
+            if (result.ok())
+            {
+                const TrackID src = result.created[0].trackId;
+                const TrackID dst = result.created[1].trackId;
+                h.sends.createSend(h.graph, src, dst, 0.75f);
+                auto* sourceNode = h.graph.getNodeByTrackId(src);
+                auto* destinationNode = h.graph.getNodeByTrackId(dst);
+                DAW::RoutingConnection* originalSend = nullptr;
+                if (sourceNode != nullptr && destinationNode != nullptr)
+                    for (auto* conn : h.graph.getOutputConnections(sourceNode->id))
+                        if (conn != nullptr && conn->destNodeId == destinationNode->id
+                            && DAW::BubblegumSendStateCore::isSendConnection(conn->type))
+                        {
+                            originalSend = conn;
+                            break;
+                        }
+                expect(originalSend != nullptr, "fixture must contain a send");
+
+                if (originalSend != nullptr)
+                {
+                    const auto routeId = originalSend->id;
+                    const auto levelKey = apex::automation::AutomationParameterKeyRegistry::trackSendLevelKey(src, routeId);
+                    const auto bypassKey = apex::automation::AutomationParameterKeyRegistry::trackSendBypassKey(src, routeId);
+                    const auto levelID = keys.getOrCreateID(levelKey);
+                    const auto bypassID = keys.getOrCreateID(bypassKey);
+                    store.getOrCreateLane(levelID).replacePoints(
+                        {{0.0, 0.25f, apex::automation::CurveType::Linear, 0.0f},
+                         {10.0, 0.75f, apex::automation::CurveType::Linear, 0.0f}});
+                    store.getOrCreateLane(bypassID).replacePoints(
+                        {{0.0, 0.0f, apex::automation::CurveType::Hold, 0.0f},
+                         {10.0, 1.0f, apex::automation::CurveType::Hold, 0.0f}});
+
+                    const auto savedRouting = h.graph.getState().createCopy();
+                    const auto savedAutomation = store.getState().createCopy();
+                    BubblegumV2System bubblegum;
+                    bubblegum.init(h.graph, h.tracks);
+
+                    // Recreate the graph and the actual persisted lane state,
+                    // then rebind WITHOUT touching static send values.
+                    h.graph.restoreState(savedRouting);
+                    store.restoreState(savedAutomation);
+                    DAW::RoutingConnection* restoredSend = nullptr;
+                    for (auto* conn : h.graph.getAllConnections())
+                        if (conn != nullptr && conn->id == routeId)
+                        {
+                            restoredSend = conn;
+                            break;
+                        }
+                    expect(restoredSend != nullptr, "stable Send RouteID survives project restore");
+                    float initialGain = 0.0f;
+                    if (restoredSend != nullptr)
+                        initialGain = restoredSend->gain.load(std::memory_order_relaxed);
+
+                    bubblegum.rebindPersistedSendAutomation();
+                    expectEquals(static_cast<int>(bubblegum.sendAutomationBindings.size()), 2,
+                                 "restored saved send level and bypass lanes must have bindings");
+                    bubblegum.rebindPersistedSendAutomation();
+                    expectEquals(static_cast<int>(bubblegum.sendAutomationBindings.size()), 2,
+                                 "rebind must be idempotent");
+                    if (restoredSend != nullptr)
+                        expectWithinAbsoluteError(restoredSend->gain.load(std::memory_order_relaxed),
+                                                  initialGain, 1.0e-6f,
+                                                  "rebind does not mutate the saved static send level");
+
+                    auto* levelParam = sys.getRegistry().find(levelID);
+                    auto* bypassParam = sys.getRegistry().find(bypassID);
+                    expect(levelParam != nullptr && bypassParam != nullptr,
+                           "restored send automation must have live parameters");
+                    if (levelParam != nullptr && bypassParam != nullptr)
+                    {
+                        bubblegum.parameterValueChanged(*levelParam, 0.20f,
+                                                       apex::automation::ChangeSource::Automation);
+                        bubblegum.parameterValueChanged(*bypassParam, 1.0f,
+                                                       apex::automation::ChangeSource::Automation);
+                        if (restoredSend != nullptr)
+                        {
+                            expectWithinAbsoluteError(
+                                restoredSend->gain.load(std::memory_order_relaxed), 0.40f, 1.0e-6f,
+                                "level playback must update the real routed send");
+                            expect(!restoredSend->active.load(std::memory_order_relaxed),
+                                   "bypass playback must deactivate the real routed send");
+                        }
+                    }
+                    bubblegum.releaseProjectSendAutomationBindings();
+                    expect(bubblegum.sendAutomationBindings.empty(),
+                           "project teardown must detach obsolete send listeners");
+                    expect(sys.getRegistry().find(levelID) == nullptr
+                        && sys.getRegistry().find(bypassID) == nullptr,
+                           "project teardown must unregister previous send parameters");
+                }
+            }
+
+            // Do not leak this unit test's fake project into unrelated tests.
+            store.restoreState(previousAutomation);
         }
 
         beginTest("QuickSendTogglePreservesRoutingSemantics");

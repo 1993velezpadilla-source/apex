@@ -29,7 +29,12 @@ namespace apex::automation
 
             blockStartPPQ.store    (playheadPPQAtBlockStart, std::memory_order_release);
             ppqPerSampleRate.store (ppqPerSample,            std::memory_order_release);
-            rolling.store          (transportRolling,        std::memory_order_release);
+            // Count every true Play/Stop transition on the audio writer.
+            // A Stop→Play turnaround between two 90 Hz recorder polls has
+            // the same final rolling bool, but must still fence old takes.
+            if (rolling.exchange (transportRolling, std::memory_order_acq_rel)
+                != transportRolling)
+                transportTransitionCount.fetch_add (1, std::memory_order_release);
 
             version.fetch_add (1, std::memory_order_acq_rel);
         }
@@ -41,22 +46,49 @@ namespace apex::automation
             double blockStartPPQ    = 0.0;
             double ppqPerSample     = 0.0;
             bool   transportRolling = false;
+            std::uint64_t transportTransitions = 0;
         };
 
         Snapshot snapshot() const noexcept
         {
-            Snapshot s;
-            for (int attempt = 0; attempt < 2; ++attempt)
+            // A bounded seqlock retry must NOT return the last read if it was
+            // torn or observed the writer in its odd phase. Automation time
+            // and transport state must describe the SAME published audio
+            // block. Keep retrying until a fully published even version is
+            // observed; the audio writer remains lock-free/allocation-free.
+            //
+            // This is lock-free but not wait-free for readers: if the single
+            // audio writer is descheduled while the version is odd, readers
+            // retry. Most reads need exactly one attempt.
+            for (;;)
             {
                 const auto v0 = version.load (std::memory_order_acquire);
+                if ((v0 & 1u) != 0u)
+                    continue;
+
+                Snapshot s;
                 s.blockStartPPQ    = blockStartPPQ.load    (std::memory_order_acquire);
                 s.ppqPerSample     = ppqPerSampleRate.load (std::memory_order_acquire);
                 s.transportRolling = rolling.load          (std::memory_order_acquire);
+                s.transportTransitions = transportTransitionCount.load (
+                    std::memory_order_acquire);
                 const auto v1 = version.load (std::memory_order_acquire);
-                if (v0 == v1 && (v0 & 1u) == 0u)
+                if (v0 == v1 && (v1 & 1u) == 0u)
                     return s;
             }
-            return s;
+        }
+
+        // RT/input callback fast path: a single atomic read of PPQ, WITHOUT
+        // entering snapshot()'s unbounded version-retry loop. A hosted plugin
+        // can notify us from the audio thread while the sole clock writer is
+        // publishing on another thread. If that writer is preempted with its
+        // version odd, spinning in an audio/plugin callback is unacceptable.
+        // A PPQ-only capture does not require the rolling/tempo pair to be
+        // mutually consistent; consumers requiring a full multi-field state
+        // should use snapshot() on the message thread instead.
+        double captureInputPPQ() const noexcept
+        {
+            return blockStartPPQ.load (std::memory_order_acquire);
         }
 
         double getPlayheadPPQ()     const noexcept { return snapshot().blockStartPPQ; }
@@ -64,6 +96,28 @@ namespace apex::automation
 
         // ----- Transport edge detection (message thread) ----------------
 
+        struct TransportEdges
+        {
+            bool started = false;
+            bool stopped = false;
+        };
+
+        /**
+            Observe the transport exactly ONCE per recorder timer tick.
+            Calling the separate legacy stopped/started accessors back-to-back
+            consumed the same state transition twice: the stop query changed
+            lastObservedRolling before the start query could see Play.
+        */
+        TransportEdges consumeTransportEdges() noexcept
+        {
+            const bool nowRolling = isTransportRolling();
+            const bool wasRolling = lastObservedRolling.exchange(
+                nowRolling, std::memory_order_acq_rel);
+            return { !wasRolling && nowRolling, wasRolling && !nowRolling };
+        }
+
+        // Backwards-compatible single-edge accessors. Clients that need
+        // BOTH edges in one tick MUST use consumeTransportEdges() above.
         bool consumeTransportStoppedEdge() noexcept
         {
             const bool nowRolling = isTransportRolling();
@@ -95,6 +149,7 @@ namespace apex::automation
         std::atomic<double>        blockStartPPQ       { 0.0 };
         std::atomic<double>        ppqPerSampleRate    { 0.0 };
         std::atomic<bool>          rolling             { false };
+        std::atomic<std::uint64_t> transportTransitionCount { 0 };
         std::atomic<std::uint64_t> version             { 0 };
         std::atomic<bool>          lastObservedRolling { false };
 

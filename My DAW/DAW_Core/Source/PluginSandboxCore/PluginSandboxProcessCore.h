@@ -3,7 +3,7 @@
 #include "PluginSandboxAudioTransportCore.h"
 #include "PluginSandboxAutomationTransportCore.h"   // Phase E2A (additive)
 #include "PluginSandboxDiagnosticsCore.h"
-#include <juce_audio_processors_headless/format_types/juce_VST3EnumerationDiagnostic.h>
+#include "../PluginScanCore/VST3EnumerationDiagnosticCore.h"
 
 #include <mutex>
 
@@ -263,8 +263,8 @@ public:
               arguments.add("--test-plugin-create-fail-before-instance");
         #endif
         if (juce::JUCEApplicationBase::getCommandLineParameters()
-                .contains (juce::VST3EnumerationDiagnostic::kCommandLineFlag))
-            arguments.add (juce::VST3EnumerationDiagnostic::kCommandLineFlag);
+                .contains (VST3EnumerationDiagnosticCore::kCommandLineFlag))
+            arguments.add (VST3EnumerationDiagnosticCore::kCommandLineFlag);
         if (options.enableAutomationTransport && automationTransport_.isPrepared())
             arguments.add("--automation-shm=" + automationTransport_.mappingName());
 

@@ -1,0 +1,2 @@
+# Keep the preserved reference tree byte-identical to the exported Desktop files.
+signalsmith-stretch2/** -text !eol -whitespace

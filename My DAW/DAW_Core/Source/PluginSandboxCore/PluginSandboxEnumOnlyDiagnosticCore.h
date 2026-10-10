@@ -3,7 +3,7 @@
 #include "PluginSandboxProtocolCore.h"
 #include "../PluginScanCore/PluginScanAuditLogCore.h"
 #include "../PluginScanCore/PluginScanFormatsCore.h"
-#include <juce_audio_processors_headless/format_types/juce_VST3EnumerationDiagnostic.h>
+#include "../PluginScanCore/VST3EnumerationDiagnosticCore.h"
 
 #include <condition_variable>
 #include <chrono>
@@ -156,7 +156,7 @@ public:
             + " workingDirectory=" + quote(currentWorkingDirectory())
             + " messageManagerPresent=" + juce::String(messageManagerPresent ? 1 : 0)
             + " messageThread=" + juce::String(messageThread ? 1 : 0)
-            + " comApartment=" + juce::VST3EnumerationDiagnosticPlatform::comApartment()
+            + " comApartment=" + VST3EnumerationDiagnosticPlatform::comApartment()
             + " descriptions=" + juce::String(descriptionCount)
             + " elapsedMs=" + juce::String(elapsedMs, 3)
             + " ceilingMs="
@@ -179,7 +179,7 @@ public:
                   << " messageManagerPresent=" << (messageManagerPresent ? 1 : 0)
                   << " messageThread=" << (messageThread ? 1 : 0)
                   << " comApartment="
-                  << juce::VST3EnumerationDiagnosticPlatform::comApartment()
+                  << VST3EnumerationDiagnosticPlatform::comApartment()
                   << " descriptions=" << descriptionCount
                   << " elapsedMs=" << elapsedMs
                   << " ceilingMs=" << command.ceilingMilliseconds
@@ -197,12 +197,12 @@ public:
 private:
     static juce::String processId()
     {
-        return juce::VST3EnumerationDiagnosticPlatform::currentProcessId();
+        return VST3EnumerationDiagnosticPlatform::currentProcessId();
     }
 
     static juce::String threadId()
     {
-        return juce::VST3EnumerationDiagnosticPlatform::currentThreadId();
+        return VST3EnumerationDiagnosticPlatform::currentThreadId();
     }
 
     static juce::String currentWorkingDirectory()

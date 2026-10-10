@@ -18,6 +18,14 @@ void ProjectManager::setSubsystems(const Subsystems& s)
     {
         subs_.clips->onClipRemoved = [this](const ClipID& clipId)
         {
+            // The GUI's native plugin editors hold processor pointers; release
+            // these windows before destroying their clip-owned instances.
+            if (subs_.appCore != nullptr)
+            {
+                subs_.appCore->notifyBeforeClipFxClipRemoved(clipId);
+                subs_.appCore->getClipRegionPluginCore().removeAllEntriesForClip(clipId);
+            }
+
             if (subs_.automation == nullptr || subs_.clips == nullptr)
                 return;
 
@@ -205,6 +213,16 @@ bool ProjectManager::buildState(juce::ValueTree& state,
         if (pluginState.isValid())
             state.addChild(pluginState.createCopy(), -1, nullptr);
 
+        // Every clip-region processor has its own opaque plugin state.
+        // Failure rejects the entire manual save AND autosave snapshot.
+        juce::ValueTree clipFxState;
+        if (!subs_.appCore->getClipRegionPluginCore().captureProjectState(clipFxState, error))
+        {
+            state = {};
+            return false;
+        }
+        state.addChild(clipFxState, -1, nullptr);
+
         // Quick Track Builder project-scoped role-color families — saved
         // with the project so reload restores exact colors (no rerandomize).
         auto quickTrackColors = subs_.appCore->getQuickTrackColorsState();
@@ -332,13 +350,26 @@ bool ProjectManager::newProject()
             if (subs_.transport) { subs_.transport->stop(); subs_.transport->setPosition(0); }
             if (subs_.appCore)
             {
+                // Send automation registrations belong to the project being
+                // discarded. Detach before clearing its curves and routing.
+                subs_.appCore->getBubblegumV2().releaseProjectSendAutomationBindings();
                 subs_.appCore->clearAllPluginChains();
+                subs_.appCore->getClipRegionPluginCore().clearAllEntries();
                 subs_.appCore->reloadAudioFiles();
                 // Quick Track Builder: fresh project-scoped role-color map.
                 // The application-global plugin registry and the global
                 // QuickTrack template store are NOT touched.
                 subs_.appCore->resetQuickTrackColorsForNewProject();
             }
+
+            // New Project must not carry the previous song's recorded
+            // track/plugin/send automation into the next project.
+            if (subs_.automation)
+                subs_.automation->clearAll();
+            apex::automation::AutomationLaneStore::getInstance().clear();
+            auto& modes = apex::automation::AutomationModeState::getInstance();
+            modes.clearAll();
+            modes.setGlobalDefaultMode(apex::automation::AutomationMode::Read);
 
             projectFile_ = juce::File();
             projectName_ = "Untitled";
@@ -437,7 +468,14 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
     if (subs_.appCore)
     {
         reportLoadProgress("Clearing previous plugin state", 0.12, {}, 1, 16, false);
-        try { subs_.appCore->clearAllPluginChains(); }
+        try
+        {
+            // Old Bubblegum listeners refer to the previous project's
+            // RouteIDs and must not outlive a graph/tree replacement.
+            subs_.appCore->getBubblegumV2().releaseProjectSendAutomationBindings();
+            subs_.appCore->getClipRegionPluginCore().clearAllEntries();
+            subs_.appCore->clearAllPluginChains();
+        }
         catch (const std::exception& e) { recordFailure("PluginChain pre-clear", e.what()); }
         catch (...) { recordFailure("PluginChain pre-clear", "unknown exception"); }
     }
@@ -573,10 +611,17 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
 
     try {
         apex::automation::AutomationLaneStore::getInstance().restoreState(state.getChildWithName("APEXAutomation"));
+        if (subs_.appCore != nullptr)
+        {
+            // Routing and persistent lane keys now exist. Recreate the
+            // parameter-to-live-Send bridges WITHOUT generating gestures,
+            // changing mode, or overwriting saved send gain/bypass.
+            subs_.appCore->getBubblegumV2().rebindPersistedSendAutomation();
+        }
     } catch (const std::exception& e) {
-        recordFailure("APEXAutomation", e.what());
+        recordFailure("APEXAutomation/SendBindings", e.what());
     } catch (...) {
-        recordFailure("APEXAutomation", "unknown exception");
+        recordFailure("APEXAutomation/SendBindings", "unknown exception");
     }
 
     // ── Project migrations (v8 → v9) ─────────────────────────────────────
@@ -704,6 +749,30 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
         } catch (...) {
             recordFailure("PluginChains", "unknown exception");
         }
+
+        // Restore per-clip FX after clips exist and while project RT gate is closed.
+        // Preserve unavailable plugins as opaque, serializable missing slots.
+        try
+        {
+            const auto clipFxTree = state.getChildWithName("ClipRegionPlugins");
+            juce::String clipFxDiagnostic;
+            if (!subs_.appCore->getClipRegionPluginCore().restoreProjectState(
+                    clipFxTree,
+                    subs_.appCore->getPluginScanner().getFormatManager(),
+                    [clips = subs_.clips](const ClipID& clipId)
+                    {
+                        return clips != nullptr && clips->getClip(clipId) != nullptr;
+                    },
+                    clipFxDiagnostic))
+                recordFailure("ClipRegionPlugins", clipFxDiagnostic);
+            else if (clipFxDiagnostic.isNotEmpty())
+            {
+                if (lastLoadWarning_.isNotEmpty()) lastLoadWarning_ += "; ";
+                lastLoadWarning_ += "ClipRegionPlugins: " + clipFxDiagnostic;
+            }
+        }
+        catch (const std::exception& e) { recordFailure("ClipRegionPlugins", e.what()); }
+        catch (...) { recordFailure("ClipRegionPlugins", "unknown exception"); }
 
         // v8 -> v9 (part 2): sidechain connections saved with bus index 0 are
         // resolved to the plugin's first non-main auxiliary input bus and

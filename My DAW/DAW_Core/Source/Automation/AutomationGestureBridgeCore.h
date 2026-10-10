@@ -7,6 +7,9 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <memory>
+#include <cmath>
+#include <vector>
+#include <atomic>
 
 namespace apex::automation
 {
@@ -49,6 +52,8 @@ namespace apex::automation
             if (nativeListeners.count (id)) return;
 
             auto lst = std::make_unique<NativeListener> (queue, clock, id);
+            p.bindGestureCaptureClock (&clock);
+            p.bindDirectGestureQueue (&queue);
             p.addListener (lst.get());
             nativeListeners.emplace (id, std::move (lst));
         }
@@ -58,7 +63,11 @@ namespace apex::automation
             auto it = nativeListeners.find (id);
             if (it == nativeListeners.end()) return;
             if (auto* p = registry.find (id))
+            {
                 p->removeListener (it->second.get());
+                p->unbindDirectGestureQueue (&queue);
+                p->unbindGestureCaptureClock (&clock);
+            }
             nativeListeners.erase (it);
         }
 
@@ -66,7 +75,11 @@ namespace apex::automation
         {
             for (auto& [id, lst] : nativeListeners)
                 if (auto* p = registry.find (id))
+                {
                     p->removeListener (lst.get());
+                    p->unbindDirectGestureQueue (&queue);
+                    p->unbindGestureCaptureClock (&clock);
+                }
             nativeListeners.clear();
         }
 
@@ -75,22 +88,38 @@ namespace apex::automation
         void attachToPlugin (juce::AudioProcessor&                proc,
                              std::unordered_map<int, ParameterID> paramIndexToID)
         {
-            proc.addListener (this);
+            JUCE_ASSERT_MESSAGE_THREAD;
+            const bool firstAttach = pluginIndexMaps.find (&proc) == pluginIndexMaps.end();
             pluginIndexMaps[&proc] = std::move (paramIndexToID);
+            // Publish before registering the listener: a callback fired as
+            // soon as JUCE adds it must already resolve the new mapping.
+            publishPluginIndexMaps();
+            if (firstAttach)
+                proc.addListener (this);
         }
 
         void detachFromPlugin (juce::AudioProcessor& proc)
         {
+            JUCE_ASSERT_MESSAGE_THREAD;
+            if (pluginIndexMaps.erase (&proc) == 0)
+                return;
+            // Remove the mapping before detaching, so any in-flight
+            // callback observing the new snapshot is discarded safely.
+            publishPluginIndexMaps();
             proc.removeListener (this);
-            pluginIndexMaps.erase (&proc);
         }
 
         void detachFromAllPlugins()
         {
-            for (auto& [proc, _] : pluginIndexMaps)
+            JUCE_ASSERT_MESSAGE_THREAD;
+            // Snapshot is published before destroying mutable registration
+            // data; concurrent audio callbacks never inspect that data.
+            auto previous = std::move (pluginIndexMaps);
+            pluginIndexMaps.clear();
+            publishPluginIndexMaps();
+            for (auto& [proc, _] : previous)
                 if (proc != nullptr)
                     proc->removeListener (this);
-            pluginIndexMaps.clear();
         }
 
         // ----- juce::AudioProcessorListener (may be called on audio thread) ---
@@ -99,6 +128,7 @@ namespace apex::automation
                                              int                   parameterIndex,
                                              float                 newValue) override
         {
+            if (!std::isfinite (newValue)) return;
             const ParameterID id = resolvePluginParam (proc, parameterIndex);
             if (id == kInvalidParameterID) return;
 
@@ -107,7 +137,7 @@ namespace apex::automation
             e.kind            = AutomationGestureQueue::EventKind::ValueChange;
             e.source          = ChangeSource::Plugin;
             e.normalizedValue = juce::jlimit (0.0f, 1.0f, newValue);
-            e.ppqAtCapture    = clock.snapshot().blockStartPPQ;
+            e.ppqAtCapture    = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -121,7 +151,26 @@ namespace apex::automation
             e.paramID      = id;
             e.kind         = AutomationGestureQueue::EventKind::GestureBegin;
             e.source       = ChangeSource::Plugin;
-            e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+            // Capture while inside the plugin's gesture-begin callback,
+            // before delayed queue processing observes its later new value.
+            // Do not allocate or lock in this potentially audio-thread path.
+            if (proc != nullptr)
+            {
+                const auto& parameters = proc->getParameters();
+                if (juce::isPositiveAndBelow (parameterIndex, parameters.size()))
+                {
+                    if (auto* parameter = parameters.getUnchecked (parameterIndex))
+                    {
+                        const float start = parameter->getValue();
+                        if (std::isfinite (start))
+                        {
+                            e.normalizedValue = juce::jlimit (0.0f, 1.0f, start);
+                            e.hasStartValue = true;
+                        }
+                    }
+                }
+            }
+            e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -135,7 +184,7 @@ namespace apex::automation
             e.paramID      = id;
             e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
             e.source       = ChangeSource::Plugin;
-            e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+            e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
 
@@ -145,12 +194,36 @@ namespace apex::automation
         static AutomationGestureBridge& getInstance();
 
     private:
+        using PluginMap = std::unordered_map<juce::AudioProcessor*,
+                                              std::unordered_map<int, ParameterID>>;
+
+        struct PluginMapSnapshot
+        {
+            PluginMap bindings;
+        };
+
+        // Message thread ONLY. The published object is immutable; the audio
+        // thread atomically loads its address and never touches mutable maps.
+        void publishPluginIndexMaps()
+        {
+            auto next = std::make_unique<PluginMapSnapshot>();
+            next->bindings = pluginIndexMaps;
+            auto* immutable = next.get();
+            // Old snapshots stay alive until the bridge is destroyed.
+            // Readers that loaded one before a plugin detaches must never
+            // encounter a freed unordered_map while a callback is running.
+            retainedPluginSnapshots.push_back (std::move (next));
+            publishedPluginMaps.store (immutable, std::memory_order_release);
+        }
+
         ParameterID resolvePluginParam (juce::AudioProcessor* proc,
                                         int                   index) const noexcept
         {
-            auto it = pluginIndexMaps.find (proc);
-            if (it == pluginIndexMaps.end()) return kInvalidParameterID;
-            auto pit = it->second.find (index);
+            const auto* snapshot = publishedPluginMaps.load (std::memory_order_acquire);
+            if (snapshot == nullptr) return kInvalidParameterID;
+            const auto it = snapshot->bindings.find (proc);
+            if (it == snapshot->bindings.end()) return kInvalidParameterID;
+            const auto pit = it->second.find (index);
             return (pit != it->second.end()) ? pit->second : kInvalidParameterID;
         }
 
@@ -163,11 +236,17 @@ namespace apex::automation
                             ParameterID             id)
                 : queue (q), clock (c), paramID (id) {}
 
-            void parameterValueChanged (AutomationParameter&,
+            void parameterValueChanged (AutomationParameter& p,
                                         float        newNormalized,
                                         ChangeSource source) override
             {
-                if (source != ChangeSource::User && source != ChangeSource::Plugin)
+                if ((source != ChangeSource::User && source != ChangeSource::Plugin)
+                    || !std::isfinite (newNormalized))
+                    return;
+                // Direct producer capture has already enqueued EVERY source
+                // movement. UI notifications may coalesce, and sending a
+                // second event from here would duplicate or reorder points.
+                if (p.hasDirectGestureQueue())
                     return;
 
                 AutomationGestureQueue::Event e;
@@ -175,27 +254,41 @@ namespace apex::automation
                 e.kind            = AutomationGestureQueue::EventKind::ValueChange;
                 e.source          = source;
                 e.normalizedValue = newNormalized;
-                e.ppqAtCapture    = clock.snapshot().blockStartPPQ;
+                const double capturedPPQ = p.getCapturedValueChangePPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
-            void parameterGestureBegan (AutomationParameter&) override
+            void parameterGestureBegan (AutomationParameter& p) override
             {
+                if (p.hasDirectGestureQueue())
+                    return;
                 AutomationGestureQueue::Event e;
-                e.paramID      = paramID;
-                e.kind         = AutomationGestureQueue::EventKind::GestureBegin;
-                e.source       = ChangeSource::User;
-                e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+                e.paramID          = paramID;
+                e.kind             = AutomationGestureQueue::EventKind::GestureBegin;
+                e.source           = ChangeSource::User;
+                // Deferred UI dispatch may see a much later parameter value.
+                // Use the snapshot taken in AutomationParameter::beginGesture.
+                e.normalizedValue  = p.getValueAtGestureBegin();
+                e.hasStartValue    = std::isfinite (e.normalizedValue);
+                const double capturedPPQ = p.getCapturedGestureBeginPPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
-            void parameterGestureEnded (AutomationParameter&) override
+            void parameterGestureEnded (AutomationParameter& p) override
             {
+                if (p.hasDirectGestureQueue())
+                    return;
                 AutomationGestureQueue::Event e;
                 e.paramID      = paramID;
                 e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
                 e.source       = ChangeSource::User;
-                e.ppqAtCapture = clock.snapshot().blockStartPPQ;
+                const double capturedPPQ = p.getCapturedGestureEndPPQ();
+                e.ppqAtCapture = std::isfinite (capturedPPQ)
+                    ? capturedPPQ : clock.captureInputPPQ();
                 queue.push (e);
             }
 
@@ -208,8 +301,16 @@ namespace apex::automation
         AutomationGestureQueue&      queue;
         AutomationClock&             clock;
 
-        std::unordered_map<ParameterID, std::unique_ptr<NativeListener>>              nativeListeners;
-        std::unordered_map<juce::AudioProcessor*, std::unordered_map<int, ParameterID>> pluginIndexMaps;
+        std::unordered_map<ParameterID, std::unique_ptr<NativeListener>> nativeListeners;
+
+        // Mutable registrations live only on the message thread. Historical
+        // immutable snapshots cost memory per attach/detach, deliberately
+        // trading that off against locks, allocations and use-after-free on
+        // hosted-plugin audio callbacks. A bounded reclamation scheme would
+        // require explicit audio-reader quiescence/epochs.
+        PluginMap pluginIndexMaps;
+        std::vector<std::unique_ptr<const PluginMapSnapshot>> retainedPluginSnapshots;
+        std::atomic<const PluginMapSnapshot*> publishedPluginMaps { nullptr };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationGestureBridge)
     };

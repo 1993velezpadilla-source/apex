@@ -1,0 +1,46 @@
+name: Test crash diagnostics
+on:
+  push:
+    branches: [codex/apex-test-crash-20261008]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 100
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Prepare pinned dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build production app with diagnostic symbols
+        run: .\Scripts\build_apex.ps1 -Configuration Release -Rebuild -Unsigned
+      - name: Color picker lifetime regression
+        id: picker
+        continue-on-error: true
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category APEX.QuickTrackPopup -Seed 0xA9E12026
+      - name: Persistence source contracts
+        id: persistence
+        continue-on-error: true
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category Persistence -Seed 0xA9E12026
+      - name: Isolate Quick Workflow
+        id: focused
+        continue-on-error: true
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category APEX.QuickWorkflow -Seed 0xA9E12026
+      - name: Reproduce full-suite crash with symbols
+        if: always() && steps.focused.outcome != 'cancelled'
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Seed 0xA9E12026
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-native-crash-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn

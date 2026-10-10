@@ -1,0 +1,55 @@
+name: Windows build and tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apex-windows-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Repository and evidence contracts
+        run: |
+          .\Scripts\test_repository_policy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_validate_test_evidence.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_test_result_tools.ps1
+      - name: Download and verify pinned dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build application without signing
+        run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
+      - name: Run complete test suite
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-test-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
+      - name: Publish verified application build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apex-Windows-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
+          if-no-files-found: error

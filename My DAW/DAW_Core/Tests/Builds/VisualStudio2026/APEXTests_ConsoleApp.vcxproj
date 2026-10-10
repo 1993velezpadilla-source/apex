@@ -67,7 +67,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;C:\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_CONSOLE;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PROJUCER_VERSION=0x8000c;JUCE_MODULE_AVAILABLE_juce_audio_basics=1;JUCE_MODULE_AVAILABLE_juce_audio_devices=1;JUCE_MODULE_AVAILABLE_juce_audio_formats=1;JUCE_MODULE_AVAILABLE_juce_audio_processors=1;JUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;JUCE_MODULE_AVAILABLE_juce_gui_extra=1;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STRICT_REFCOUNTEDPOINTER=1;JUCE_STANDALONE_APPLICATION=1;JUCE_ENABLE_ALLOCATION_HOOKS=1;APEX_ENABLE_TEST_HOOKS=1;JUCE_MODAL_LOOPS_PERMITTED=1;JUCE_PLUGINHOST_VST3=1;APEX_TEST_CONFIGURATION=Debug;JUCER_VS2026_78A5042=1;JUCE_APP_VERSION=1.0.0;JUCE_APP_VERSION_HEX=0x10000;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
@@ -82,7 +82,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;C:\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_CONSOLE;WIN32;_WINDOWS;DEBUG;_DEBUG;JUCE_PROJUCER_VERSION=0x8000c;JUCE_MODULE_AVAILABLE_juce_audio_basics=1;JUCE_MODULE_AVAILABLE_juce_audio_devices=1;JUCE_MODULE_AVAILABLE_juce_audio_formats=1;JUCE_MODULE_AVAILABLE_juce_audio_processors=1;JUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;JUCE_MODULE_AVAILABLE_juce_gui_extra=1;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STRICT_REFCOUNTEDPOINTER=1;JUCE_STANDALONE_APPLICATION=1;JUCE_ENABLE_ALLOCATION_HOOKS=1;APEX_ENABLE_TEST_HOOKS=1;JUCE_MODAL_LOOPS_PERMITTED=1;JUCE_PLUGINHOST_VST3=1;APEX_TEST_CONFIGURATION=Debug;JUCER_VS2026_78A5042=1;JUCE_APP_VERSION=1.0.0;JUCE_APP_VERSION_HEX=0x10000;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
@@ -111,7 +111,7 @@
     <ClCompile>
       <Optimization>Full</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;C:\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_CONSOLE;WIN32;_WINDOWS;NDEBUG;JUCE_PROJUCER_VERSION=0x8000c;JUCE_MODULE_AVAILABLE_juce_audio_basics=1;JUCE_MODULE_AVAILABLE_juce_audio_devices=1;JUCE_MODULE_AVAILABLE_juce_audio_formats=1;JUCE_MODULE_AVAILABLE_juce_audio_processors=1;JUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;JUCE_MODULE_AVAILABLE_juce_gui_extra=1;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STRICT_REFCOUNTEDPOINTER=1;JUCE_STANDALONE_APPLICATION=1;JUCE_ENABLE_ALLOCATION_HOOKS=1;APEX_ENABLE_TEST_HOOKS=1;JUCE_MODAL_LOOPS_PERMITTED=1;JUCE_PLUGINHOST_VST3=1;APEX_TEST_CONFIGURATION=Release;JUCER_VS2026_78A5042=1;JUCE_APP_VERSION=1.0.0;JUCE_APP_VERSION_HEX=0x10000;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
@@ -126,7 +126,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;C:\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\JuceLibraryCode;..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_CONSOLE;WIN32;_WINDOWS;NDEBUG;JUCE_PROJUCER_VERSION=0x8000c;JUCE_MODULE_AVAILABLE_juce_audio_basics=1;JUCE_MODULE_AVAILABLE_juce_audio_devices=1;JUCE_MODULE_AVAILABLE_juce_audio_formats=1;JUCE_MODULE_AVAILABLE_juce_audio_processors=1;JUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;JUCE_MODULE_AVAILABLE_juce_gui_extra=1;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STRICT_REFCOUNTEDPOINTER=1;JUCE_STANDALONE_APPLICATION=1;JUCE_ENABLE_ALLOCATION_HOOKS=1;APEX_ENABLE_TEST_HOOKS=1;JUCE_MODAL_LOOPS_PERMITTED=1;JUCE_PLUGINHOST_VST3=1;APEX_TEST_CONFIGURATION=Release;JUCER_VS2026_78A5042=1;JUCE_APP_VERSION=1.0.0;JUCE_APP_VERSION_HEX=0x10000;JucePlugin_Build_VST=0;JucePlugin_Build_VST3=0;JucePlugin_Build_AU=0;JucePlugin_Build_AUv3=0;JucePlugin_Build_AAX=0;JucePlugin_Build_Standalone=0;JucePlugin_Build_Unity=0;JucePlugin_Build_LV2=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
@@ -453,286 +453,286 @@
     <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\juce_audio_basics.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioDeviceManager.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioDeviceManager.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODevice.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODevice.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODeviceType.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODeviceType.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_SampleRateHelpers.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_SampleRateHelpers.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoints.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoints.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPInput.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPInput.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPIOHelpers.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPIOHelpers.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualInput.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualInput.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualOutput.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualOutput.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPOutput.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPOutput.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPSession.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPSession.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPVirtualEndpoint.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPVirtualEndpoint.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDeviceListConnectionBroadcaster.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDeviceListConnectionBroadcaster.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDevices.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDevices.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_MidiMessageCollector.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_MidiMessageCollector.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_WaitFreeListeners.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_WaitFreeListeners.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioLoader.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioLoader.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AudioStreamAAudio.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AudioStreamAAudio.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AdpfWrapper.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AdpfWrapper.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioSourceCaller.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioSourceCaller.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioStream.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioStream.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioStreamBuilder.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioStreamBuilder.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\DataConversionFlowGraph.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\DataConversionFlowGraph.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FilterAudioStream.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FilterAudioStream.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockAdapter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockAdapter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockReader.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockReader.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockWriter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockWriter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\LatencyTuner.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\LatencyTuner.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\OboeExtensions.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\OboeExtensions.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\QuirksManager.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\QuirksManager.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceFloatCaller.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceFloatCaller.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI16Caller.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI16Caller.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI24Caller.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI24Caller.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI32Caller.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI32Caller.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\StabilizedCallback.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\StabilizedCallback.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\Trace.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\Trace.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\Utilities.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\Utilities.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\Version.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\Version.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoBuffer.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoBuffer.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoController.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoController.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerBase.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerBase.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerIndirect.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerIndirect.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\IntegerRatio.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\IntegerRatio.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\LinearResampler.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\LinearResampler.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\MultiChannelResampler.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\MultiChannelResampler.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResampler.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResampler.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerMono.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerMono.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerStereo.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerStereo.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResampler.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResampler.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResamplerStereo.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResamplerStereo.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ChannelCountConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ChannelCountConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ClipToRange.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ClipToRange.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowGraphNode.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowGraphNode.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\Limiter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\Limiter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ManyToMultiConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ManyToMultiConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoBlend.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoBlend.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoToMultiConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoToMultiConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToManyConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToManyConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToMonoConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToMonoConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\RampLinear.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\RampLinear.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SampleRateConverter.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SampleRateConverter.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkFloat.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkFloat.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI8_24.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI8_24.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI16.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI16.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI24.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI24.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI32.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI32.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceFloat.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceFloat.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI8_24.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI8_24.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI16.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI16.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI24.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI24.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI32.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI32.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioInputStreamOpenSLES.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioInputStreamOpenSLES.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioOutputStreamOpenSLES.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioOutputStreamOpenSLES.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamBuffered.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamBuffered.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamOpenSLES.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamOpenSLES.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\EngineOpenSLES.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\EngineOpenSLES.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OpenSLESUtilities.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OpenSLESUtilities.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OutputMixerOpenSLES.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OutputMixerOpenSLES.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_ALSA_linux.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_ALSA_linux.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_ASIO_windows.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_ASIO_windows.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Audio_android.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Audio_android.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Audio_ios.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Audio_ios.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_CoreAudio_mac.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_CoreAudio_mac.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_DirectSound_windows.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_DirectSound_windows.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_JackAudio.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_JackAudio.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Midi_android.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Midi_android.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Midi_linux.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Midi_linux.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Midi_windows.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Midi_windows.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Oboe_android.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Oboe_android.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_OpenSL_android.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_OpenSL_android.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_WASAPI_windows.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_WASAPI_windows.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\sources\juce_AudioSourcePlayer.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\sources\juce_AudioSourcePlayer.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\sources\juce_AudioTransportSource.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\sources\juce_AudioTransportSource.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\juce_audio_devices.cpp">
+    <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\juce_audio_devices.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\flac\libFLAC\deduplication\bitreader_read_rice_signed_block.c">
@@ -3083,110 +3083,110 @@
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\utilities\juce_Reverb.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\utilities\juce_SmoothedValue.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_basics\juce_audio_basics.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioDeviceManager.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODevice.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODeviceType.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\audio_io\juce_SystemAudioVolume.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPBlock.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPDisconnectionListener.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoint.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpointId.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoints.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPInput.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualInput.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualOutput.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPOutput.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPSession.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPStaticDeviceInfo.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPVirtualEndpoint.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDevices.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_MidiMessageCollector.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_ScheduledEventThread.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\midi_io\juce_WaitFreeListeners.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\asio\asio.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\asio\asiosys.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\asio\iasiodrv.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStream.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamBase.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamBuilder.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamCallback.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Definitions.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FifoBuffer.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FifoControllerBase.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FullDuplexStream.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\LatencyTuner.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Oboe.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\OboeExtensions.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\ResultWithValue.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\StabilizedCallback.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Utilities.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Version.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioExtensions.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioLoader.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AudioStreamAAudio.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AdpfWrapper.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioClock.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioSourceCaller.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\DataConversionFlowGraph.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FilterAudioStream.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockAdapter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockReader.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockWriter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\MonotonicCounter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\OboeDebug.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\QuirksManager.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceFloatCaller.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI16Caller.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI24Caller.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI32Caller.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\Trace.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoController.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerIndirect.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\HyperbolicCosineWindow.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\IntegerRatio.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\KaiserWindow.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\LinearResampler.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\MultiChannelResampler.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResampler.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerMono.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerStereo.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\ResamplerDefinitions.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResampler.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResamplerStereo.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ChannelCountConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ClipToRange.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowGraphNode.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowgraphUtilities.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\Limiter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ManyToMultiConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoBlend.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoToMultiConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToManyConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToMonoConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\RampLinear.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SampleRateConverter.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkFloat.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI8_24.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI16.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI24.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI32.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceFloat.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI8_24.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI16.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI24.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI32.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioInputStreamOpenSLES.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioOutputStreamOpenSLES.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamBuffered.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamOpenSLES.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\EngineOpenSLES.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OpenSLESUtilities.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OutputMixerOpenSLES.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_ALSA_weak_linux.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_Audio_ios.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\juce_HighPerformanceAudioHelpers_android.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\sources\juce_AudioSourcePlayer.h"/>
-    <ClInclude Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\sources\juce_AudioTransportSource.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioDeviceManager.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODevice.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_AudioIODeviceType.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\audio_io\juce_SystemAudioVolume.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPBlock.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPDisconnectionListener.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoint.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpointId.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPEndpoints.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPInput.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualInput.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPLegacyVirtualOutput.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPOutput.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPSession.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPStaticDeviceInfo.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\ump\juce_UMPVirtualEndpoint.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_MidiDevices.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_MidiMessageCollector.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_ScheduledEventThread.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\midi_io\juce_WaitFreeListeners.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\asio\asio.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\asio\asiosys.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\asio\iasiodrv.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStream.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamBase.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamBuilder.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\AudioStreamCallback.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Definitions.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FifoBuffer.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FifoControllerBase.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\FullDuplexStream.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\LatencyTuner.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Oboe.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\OboeExtensions.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\ResultWithValue.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\StabilizedCallback.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Utilities.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\include\oboe\Version.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioExtensions.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AAudioLoader.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\aaudio\AudioStreamAAudio.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AdpfWrapper.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioClock.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\AudioSourceCaller.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\DataConversionFlowGraph.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FilterAudioStream.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockAdapter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockReader.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\FixedBlockWriter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\MonotonicCounter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\OboeDebug.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\QuirksManager.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceFloatCaller.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI16Caller.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI24Caller.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\SourceI32Caller.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\Trace.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoController.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\fifo\FifoControllerIndirect.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\HyperbolicCosineWindow.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\IntegerRatio.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\KaiserWindow.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\LinearResampler.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\MultiChannelResampler.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResampler.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerMono.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\PolyphaseResamplerStereo.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\ResamplerDefinitions.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResampler.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\SincResamplerStereo.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ChannelCountConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ClipToRange.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowGraphNode.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\FlowgraphUtilities.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\Limiter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\ManyToMultiConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoBlend.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MonoToMultiConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToManyConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\MultiToMonoConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\RampLinear.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SampleRateConverter.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkFloat.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI8_24.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI16.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI24.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SinkI32.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceFloat.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI8_24.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI16.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI24.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\SourceI32.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioInputStreamOpenSLES.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioOutputStreamOpenSLES.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamBuffered.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\AudioStreamOpenSLES.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\EngineOpenSLES.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OpenSLESUtilities.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\opensles\OutputMixerOpenSLES.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_ALSA_weak_linux.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_Audio_ios.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\juce_HighPerformanceAudioHelpers_android.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\sources\juce_AudioSourcePlayer.h"/>
+    <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\sources\juce_AudioTransportSource.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\juce_audio_devices.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\flac\libFLAC\include\private\bitmath.h"/>
     <ClInclude Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\flac\libFLAC\include\private\bitreader.h"/>
@@ -4345,11 +4345,11 @@
     <ClInclude Include="..\..\JuceLibraryCode\JuceHeader.h"/>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\asio\LICENSE.txt"/>
-    <None Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\common\README.md"/>
-    <None Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\README.md"/>
-    <None Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\CMakeLists.txt"/>
-    <None Include="..\..\..\..\..\..\..\..\..\..\JUCE\modules\juce_audio_devices\native\oboe\README.md"/>
+    <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\asio\LICENSE.txt"/>
+    <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\common\README.md"/>
+    <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\README.md"/>
+    <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\CMakeLists.txt"/>
+    <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_devices\native\oboe\README.md"/>
     <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\flac\Flac Licence.txt"/>
     <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\flac\JUCE_CHANGES.txt"/>
     <None Include="..\..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_audio_formats\codecs\oggvorbis\libvorbis-1.3.7\README.md"/>

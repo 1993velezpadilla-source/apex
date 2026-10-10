@@ -267,6 +267,7 @@ void ApplicationCore::initialize()
                                                 &pluginAutomationGestureCore_,
                                                 [this] { return transport_ != nullptr && transport_->isPlaying(); },
                                                 [this] { return transport_ != nullptr ? (int64_t)transport_->getPosition() : 0; });
+    pluginAutomationRecorderCore_.setSampleRateProvider([this] { return currentSampleRate_; });
     pluginAutomationRecorderCore_.setLaneWrittenCallback([this](const LastTouchedPluginParameter& target, const juce::String& parameterId)
     {
         if (trackManager_ == nullptr || !target.isValid())
@@ -1408,6 +1409,20 @@ bool ApplicationCore::beginProjectStateRestore(uint32_t timeoutMs) noexcept
     if (transport_)
         transport_->stop();
     audioEngine_.clearLiveInputBuffer();
+
+    // Native editor components retain raw references to the processor. Close
+    // them while the audio callback is suspended, BEFORE resetting clip FX.
+    try
+    {
+        if (beforeClipFxProjectReset_)
+            beforeClipFxProjectReset_();
+    }
+    catch (...)
+    {
+        if (!wasAlreadySuspended)
+            projectStateRestoreSuspensionActive_.store(false, std::memory_order_release);
+        return false;
+    }
     return true;
 }
 

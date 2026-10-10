@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 
 namespace apex::automation
@@ -52,6 +53,24 @@ namespace apex::automation
 
         void replacePoints (PointVector newPoints)
         {
+            // Persistence/import and hostile plugin input can bypass the
+            // recorder's own validation. Drop invalid knots BEFORE sorting:
+            // NaN in a std::sort comparator violates strict weak ordering.
+            // Only edits/replacement pay this cost; the audio reader is
+            // unchanged and receives clean immutable snapshots.
+            newPoints.erase (std::remove_if (newPoints.begin(), newPoints.end(),
+                [] (const Breakpoint& p)
+                {
+                    return !std::isfinite (p.timePPQ)
+                        || !std::isfinite (p.normalizedValue);
+                }), newPoints.end());
+            for (auto& p : newPoints)
+            {
+                p.normalizedValue = std::clamp (p.normalizedValue, 0.0f, 1.0f);
+                if (!std::isfinite (p.curveTension))
+                    p.curveTension = 0.0f;
+            }
+
             // stable_sort keeps insertion order for equal timePPQ so the
             // "last added wins" dedupe below is deterministic (std::sort is
             // unstable and left the surviving point unspecified).
@@ -128,6 +147,7 @@ namespace apex::automation
         static float evaluateAt (const PointVector& pts, double timePPQ) noexcept
         {
             if (pts.empty()) return 0.0f;
+            if (!std::isfinite (timePPQ)) return pts.front().normalizedValue;
 
             if (timePPQ <= pts.front().timePPQ)
                 return pts.front().normalizedValue;

@@ -12,6 +12,9 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <vector>
+#include <limits>
+#include <cmath>
+#include <algorithm>
 
 namespace apex::automation
 {
@@ -50,6 +53,10 @@ namespace apex::automation
             , clock     (c)
             , armState  (transport)
         {
+            lastObservedArmed = armState.isRecordArmed();
+            lastObservedTransportTransitions = clock.snapshot().transportTransitions;
+            lastObservedArmTransitions = armState.getArmTransitionCount();
+            lastObservedOverflow = queue.getOverflowCount();
             startTimerHz (kDrainHz);
         }
 
@@ -69,15 +76,30 @@ namespace apex::automation
 
         static AutomationRecorder& getInstance();
 
+        // Explicit message-thread test probe. The APEXTests target does not
+        // define JUCE_UNIT_TESTS even though it compiles JUCE UnitTests; keep
+        // this thin wrapper available in both configurations.
+        // Production still drains through the 90 Hz timer.
+        void drainForTests() { timerCallback(); }
+
     private:
         struct Session
         {
             ParameterID             paramID           = kInvalidParameterID;
             AutomationMode          mode              = AutomationMode::Touch;
+            AutomationModeState::ModeEpoch modeEpoch;
             double                  startPPQ          = 0.0;
             double                  lastPPQ           = 0.0;
             float                   lastValue         = 0.0f;
             float                   priorLaneValue    = 0.0f;
+            // Preserve the pre-touch curve while live recording replaces
+            // portions of the lane. Release returns to this original curve,
+            // evaluated at the release time (NOT the touch-start value).
+            AutomationLane::Snapshot originalCurve;
+            // Relative Trim offset envelope; signed values are allowed here.
+            std::vector<Breakpoint> trimOffsets;
+            float trimGestureOrigin = 0.0f;
+            float trimLastOffset = 0.0f;
             double                  lastLiveCommitPPQ = -1.0;
             bool                    open              = false;
             bool                    latchSustaining   = false;
@@ -88,27 +110,225 @@ namespace apex::automation
         {
             JUCE_ASSERT_MESSAGE_THREAD;
 
-            handleTransportEdges();
+            // Observe data loss FIRST. A Stop or Punch-Out on the same tick
+            // must not extend an incomplete gesture across an unknown gap.
+            const bool overflowed = handleQueueOverflow();
+            const bool rewound = handleTransportEdges();
+            const bool armTransition = handleRecordArmEdges();
+            std::vector<ParameterID> modeChangedParameters;
+            modeChangedParameters.reserve (sessions.size());
+            handleRecordingModeChanges (modeChangedParameters);
 
             AutomationGestureQueue::Event e;
-            while (queue.pop (e))
-                processEvent (e);
+            if (rewound || armTransition || overflowed || !armState.isRecordArmed())
+            {
+                // Transport, arm and queue-loss boundaries invalidate the
+                // entire input stream, independent of ParameterID.
+                while (queue.pop (e)) {}
+            }
+            else
+            {
+                while (queue.pop (e))
+                {
+                    // A mode change affects ONLY its parameter. Do not drop
+                    // an unrelated knob/track's events in the same 90Hz tick.
+                    if (std::find (modeChangedParameters.begin(),
+                                   modeChangedParameters.end(), e.paramID)
+                        != modeChangedParameters.end())
+                        continue;
+                    processEvent (e);
+                }
+            }
 
             extendLatchSustainSessions();
         }
 
-        void handleTransportEdges()
+        bool handleTransportEdges()
         {
-            if (clock.consumeTransportStoppedEdge())
+            const auto position = clock.snapshot();
+            // One observation per timer tick: a separate Stop call followed
+            // by Start used to consume the Start transition before it could
+            // close/reset the recorder's previous session state.
+            const auto edges = clock.consumeTransportEdges();
+            const bool hiddenTransportTurnaround = position.transportRolling
+                && !edges.started && !edges.stopped
+                && position.transportTransitions != lastObservedTransportTransitions;
+            lastObservedTransportTransitions = position.transportTransitions;
+            if (edges.stopped)
             {
+                // A released Latch (or Write) gesture has no more ValueChange
+                // events. Preserve its last value all the way to the actual
+                // Stop playhead, not just to the final knob movement.
+                const double stopPPQ = clock.getPlayheadPPQ();
                 for (auto& [id, s] : sessions)
-                    if (s.open) closeSession (s, true);
+                    if (s.open)
+                    {
+                        // Stopping with a hand still on a Touch/Trim
+                        // control is an implicit gesture release. Without
+                        // restoring the pre-gesture curve, its final written
+                        // value can remain latched into future playback.
+                        if (std::isfinite (stopPPQ) && stopPPQ >= s.lastPPQ)
+                        {
+                            if (s.mode == AutomationMode::Touch
+                                || s.mode == AutomationMode::Trim)
+                                finishGestureAt (s, stopPPQ);
+                            else
+                                finishSustainAtStop (s, stopPPQ);
+                        }
+                        closeSession (s, true);
+                    }
                 sessions.clear();
                 modeState.clearAllLatches();
             }
 
-            if (clock.consumeTransportStartedEdge())
+            if (edges.started)
+            {
+                // A Stop/Play turnaround between 90 Hz recorder ticks may
+                // hide the intermediate Stop. Commit any buffered points
+                // before resetting the take, and never carry Latch across
+                // a new transport start.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession(session, true);
                 sessions.clear();
+                modeState.clearAllLatches();
+            }
+
+            if (hiddenTransportTurnaround)
+            {
+                // Stop→Play happened entirely between recorder timer ticks.
+                // Closing at the final captured point, rather than pretending
+                // to know the missed Stop PPQ, prevents stale Latch/Write
+                // values and ambiguous queued gestures leaking into a new take.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession (session, true);
+                sessions.clear();
+                modeState.clearAllLatches();
+            }
+
+            const bool backwardsSeek = position.transportRolling && !edges.started
+                && std::isfinite (lastObservedPlayheadPPQ)
+                && std::isfinite (position.blockStartPPQ)
+                && position.blockStartPPQ + 1.0e-6 < lastObservedPlayheadPPQ;
+
+            if (backwardsSeek)
+            {
+                // A loop wrap or backward seek while still rolling cannot be
+                // represented by one monotonic session range. Never merge
+                // (e.g.) [7.5 -> 1.0] into a lane. Fence the take at its
+                // last captured PPQ; a new gesture starts a separate take.
+                for (auto& [id, session] : sessions)
+                    if (session.open) closeSession (session, true);
+                sessions.clear();
+                modeState.clearAllLatches();
+            }
+
+            lastObservedPlayheadPPQ = position.transportRolling
+                ? position.blockStartPPQ
+                : std::numeric_limits<double>::quiet_NaN();
+
+            // A newly observed Play edge has the SAME ambiguity as a
+            // hidden Stop->Play turnaround: the MPSC queue contains no
+            // transport epoch for each event. A knob move captured while
+            // stopped can otherwise be consumed now that Play is true,
+            // creating a take that never happened during recording.
+            // Quarantine pending events on *every* observed start/stop
+            // boundary. Fresh events arriving after this tick can record.
+            return edges.started || edges.stopped
+                || backwardsSeek || hiddenTransportTurnaround;
+        }
+
+        bool handleRecordArmEdges()
+        {
+            const bool armedNow = armState.isRecordArmed();
+            const auto transitions = armState.getArmTransitionCount();
+            const bool crossedArmBoundary = transitions != lastObservedArmTransitions
+                || armedNow != lastObservedArmed;
+            lastObservedArmed = armedNow;
+            lastObservedArmTransitions = transitions;
+            if (!crossedArmBoundary)
+                return false;
+
+            // Do not infer an arm epoch from the final boolean alone. Two
+            // edges (On->Off->On) within one 90Hz timer period leave On but
+            // MUST end the previous take. A normal Punch-In also discards
+            // pending events from the disarmed period: no queue event carries
+            // an arm-epoch identifier. This may lose events at the boundary,
+            // but cannot blend two takes into one.
+            // The PPQ is observed at the timer tick, not sample-exact.
+            const auto snapshot = clock.snapshot();
+            for (auto& [id, s] : sessions)
+            {
+                if (!s.open) continue;
+                if (snapshot.transportRolling
+                    && std::isfinite(snapshot.blockStartPPQ)
+                    && snapshot.blockStartPPQ >= s.lastPPQ)
+                {
+                    if (s.mode == AutomationMode::Write || s.mode == AutomationMode::Latch)
+                        finishSustainAtStop(s, snapshot.blockStartPPQ);
+                    else
+                        finishGestureAt(s, snapshot.blockStartPPQ);
+                }
+                closeSession(s, true);
+            }
+            sessions.clear();
+            modeState.clearAllLatches();
+            return true; // Pending queue events have no arm-epoch identifier.
+        }
+
+        void handleRecordingModeChanges (std::vector<ParameterID>& affectedParameters)
+        {
+            // ModeState publishes mutations independently of the recorder's
+            // 90 Hz timer. An active Latch/Write take can otherwise stay held
+            // indefinitely after the producer switches that parameter to
+            // Read/Off (or to a different writing mode) without another
+            // gesture event. Close affected sessions before draining the
+            // queued events, whose mode epoch cannot be identified.
+            const auto transport = clock.snapshot();
+            for (auto it = sessions.begin(); it != sessions.end();)
+            {
+                auto& session = it->second;
+                if (!session.open
+                    || (modeState.getMode (it->first) == session.mode
+                        && !(modeState.getModeEpoch (it->first) != session.modeEpoch)))
+                {
+                    ++it;
+                    continue;
+                }
+
+                if (transport.transportRolling
+                    && std::isfinite (transport.blockStartPPQ)
+                    && transport.blockStartPPQ >= session.lastPPQ)
+                {
+                    if (session.mode == AutomationMode::Touch
+                        || session.mode == AutomationMode::Trim)
+                        finishGestureAt (session, transport.blockStartPPQ);
+                    else
+                        finishSustainAtStop (session, transport.blockStartPPQ);
+                }
+
+                closeSession (session, true);
+                affectedParameters.push_back (it->first);
+                it = sessions.erase (it);
+            }
+        }
+
+        bool handleQueueOverflow()
+        {
+            const auto count = queue.getOverflowCount();
+            if (count == lastObservedOverflow)
+                return false;
+
+            lastObservedOverflow = count;
+            // MPSC overflow may drop GestureBegin, a ValueChange, or
+            // GestureEnd. Never continue a session whose gesture structure
+            // is now unknown: a missing End could hold Latch indefinitely.
+            // Commit only the last valid captured points (not a guessed
+            // Stop/Punch boundary), then reject all currently queued events.
+            for (auto& [id, s] : sessions)
+                if (s.open) closeSession (s, true);
+            sessions.clear();
+            modeState.clearAllLatches();
+            return true;
         }
 
         void processEvent (const AutomationGestureQueue::Event& e)
@@ -147,30 +367,72 @@ namespace apex::automation
             if (mode == AutomationMode::Off || mode == AutomationMode::Read)
                 return;
 
+            // Capture timestamps can arrive from different producers between
+            // two 90 Hz ticks. A full loop turn can also occur entirely
+            // between ticks, invisible to the rolling-PPQ observer. Never
+            // feed non-finite or backwards PPQ into a monotonic session:
+            // that would reverse its overwrite interval and splice points
+            // from different loop passes into a single take.
+            if (! std::isfinite (e.ppqAtCapture))
+                return;
+            // Third-party processors can report NaN/Inf for a parameter.
+            // Do not write it to a lane, start a poisoned Trim envelope or
+            // disturb the current session. GestureEnd has no value payload.
+            if ((e.kind == AutomationGestureQueue::EventKind::ValueChange
+                 || (e.kind == AutomationGestureQueue::EventKind::GestureBegin
+                     && e.hasStartValue))
+                && !std::isfinite (e.normalizedValue))
+                return;
+
+            auto existing = sessions.find (e.paramID);
+            if (existing != sessions.end() && existing->second.open
+                && e.ppqAtCapture + 1.0e-9 < existing->second.lastPPQ)
+            {
+                closeSession (existing->second, true);
+                sessions.erase (existing);
+                // Event pass identity is unknown. Drop this ambiguous event,
+                // including GestureBegin, rather than inventing a new take.
+                return;
+            }
+
             switch (e.kind)
             {
                 case AutomationGestureQueue::EventKind::GestureBegin:
-                    openSessionIfNeeded (*param, mode, e.ppqAtCapture);
+                    openSessionIfNeeded (*param, mode, e.ppqAtCapture,
+                                         e.hasStartValue ? e.normalizedValue
+                                                         : param->getNormalizedValue());
                     break;
 
                 case AutomationGestureQueue::EventKind::ValueChange:
                 {
                     if (mode == AutomationMode::Write)
-                        openSessionIfNeeded (*param, mode, e.ppqAtCapture);
+                        openSessionIfNeeded (*param, mode, e.ppqAtCapture,
+                                             param->getNormalizedValue());
 
                     auto it = sessions.find (e.paramID);
                     if (it == sessions.end() || ! it->second.open) break;
 
                     auto& s = it->second;
-                    s.rawPoints.push_back ({ e.ppqAtCapture, e.normalizedValue,
+                    const float delta = e.normalizedValue - s.trimGestureOrigin;
+                    const float value = s.mode == AutomationMode::Trim
+                        ? juce::jlimit (0.0f, 1.0f,
+                            originalValueAt (s, e.ppqAtCapture) + delta)
+                        : e.normalizedValue;
+                    if (s.mode == AutomationMode::Trim)
+                    {
+                        s.trimLastOffset = delta;
+                        s.trimOffsets.push_back ({ e.ppqAtCapture, delta,
+                                                   CurveType::Linear, 0.0f });
+                    }
+                    s.rawPoints.push_back ({ e.ppqAtCapture, value,
                                              CurveType::Linear, 0.0f });
                     s.lastPPQ   = e.ppqAtCapture;
-                    s.lastValue = e.normalizedValue;
+                    s.lastValue = value;
 
                     if (s.lastLiveCommitPPQ < 0.0
                      || std::abs (s.lastPPQ - s.lastLiveCommitPPQ) >= kLiveCommitStepPPQ)
                     {
-                        commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+                        commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
                         s.lastLiveCommitPPQ = s.lastPPQ;
                     }
 
@@ -193,11 +455,7 @@ namespace apex::automation
                         break;
                     }
 
-                    if (s.mode == AutomationMode::Touch)
-                    {
-                        s.rawPoints.push_back ({ e.ppqAtCapture, s.priorLaneValue,
-                                                 CurveType::Linear, 0.0f });
-                    }
+                    finishGestureAt (s, e.ppqAtCapture);
 
                     closeSession (s, true);
                     sessions.erase (it);
@@ -208,13 +466,15 @@ namespace apex::automation
 
         void openSessionIfNeeded (AutomationParameter& param,
                                   AutomationMode       mode,
-                                  double               atPPQ)
+                                  double               atPPQ,
+                                  float                gestureStartValue)
         {
             auto& s = sessions[param.getID()];
             if (s.open) return;
 
             s.paramID         = param.getID();
             s.mode            = mode;
+            s.modeEpoch       = modeState.getModeEpoch (param.getID());
             s.startPPQ        = atPPQ;
             s.lastPPQ         = atPPQ;
             s.open            = true;
@@ -222,12 +482,13 @@ namespace apex::automation
             s.lastLiveCommitPPQ = -1.0;
 
             auto lane = lanes.findLane (param.getID());
-            const bool laneHasData = (lane != nullptr && ! lane->isEmpty());
+            s.originalCurve = lane != nullptr ? lane->getSnapshot() : nullptr;
+            const bool laneHasData = (s.originalCurve != nullptr
+                                      && ! s.originalCurve->empty());
 
             if (laneHasData)
             {
-                auto snap = lane->getSnapshot();
-                s.priorLaneValue = AutomationLane::evaluateAt (*snap, atPPQ);
+                s.priorLaneValue = AutomationLane::evaluateAt (*s.originalCurve, atPPQ);
             }
             else
             {
@@ -241,6 +502,14 @@ namespace apex::automation
             s.rawPoints.push_back ({ atPPQ, s.priorLaneValue,
                                      CurveType::Linear, 0.0f });
             s.lastValue = s.priorLaneValue;
+            // Do not read today's parameter value after the producer
+            // already wrote several drag values before recorder drain.
+            s.trimGestureOrigin = juce::jlimit (0.0f, 1.0f, gestureStartValue);
+            s.trimLastOffset = 0.0f;
+            s.trimOffsets.clear();
+            if (mode == AutomationMode::Trim)
+                s.trimOffsets.push_back ({ atPPQ, 0.0f,
+                                           CurveType::Linear, 0.0f });
         }
 
         void extendLatchSustainSessions()
@@ -268,42 +537,228 @@ namespace apex::automation
         {
             if (s.rawPoints.size() < 2) return;
             Breakpoint tail = s.rawPoints.back();
-            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
             s.rawPoints.clear();
             s.rawPoints.push_back (tail);
             s.startPPQ = tail.timePPQ;
+            if (s.mode == AutomationMode::Trim)
+            {
+                s.trimOffsets.clear();
+                s.trimOffsets.push_back ({ tail.timePPQ, s.trimLastOffset,
+                                           CurveType::Linear, 0.0f });
+            }
+        }
+
+        void finishGestureAt (Session& s, double atPPQ)
+        {
+            if (s.mode == AutomationMode::Touch)
+            {
+                if (! s.rawPoints.empty()
+                    && s.rawPoints.back().timePPQ < atPPQ)
+                    s.rawPoints.back().curveType = CurveType::Hold;
+
+                s.rawPoints.push_back ({ atPPQ,
+                                         originalValueAt (s, atPPQ),
+                                         CurveType::Linear, 0.0f });
+                s.lastPPQ = atPPQ;
+            }
+            else if (s.mode == AutomationMode::Trim)
+            {
+                // Preserve the shifted original curve until release,
+                // then return to the unshifted curve at the boundary.
+                if (atPPQ > s.lastPPQ)
+                {
+                    const double gap = atPPQ - s.lastPPQ;
+                    const double beforeRelease = atPPQ
+                        - std::min (1.0e-6, gap * 0.5);
+                    s.rawPoints.push_back ({
+                        beforeRelease,
+                        juce::jlimit (0.0f, 1.0f,
+                            originalValueAt (s, beforeRelease) + s.trimLastOffset),
+                        CurveType::Hold, 0.0f });
+                    if (! s.trimOffsets.empty())
+                        s.trimOffsets.back().curveType = CurveType::Hold;
+                    s.trimOffsets.push_back ({ beforeRelease, s.trimLastOffset,
+                                               CurveType::Hold, 0.0f });
+                }
+                s.rawPoints.push_back ({ atPPQ,
+                                         originalValueAt (s, atPPQ),
+                                         CurveType::Linear, 0.0f });
+                s.trimOffsets.push_back ({ atPPQ, 0.0f,
+                                           CurveType::Linear, 0.0f });
+                s.lastPPQ = atPPQ;
+            }
+
+        }
+
+        void finishSustainAtStop (Session& s, double stopPPQ)
+        {
+            // No PPQ wrap inference: a backward jump requires its own
+            // loop/punch policy and must never overwrite a previous take.
+            if ((s.mode != AutomationMode::Latch && s.mode != AutomationMode::Write)
+                || ! std::isfinite(stopPPQ) || stopPPQ <= s.lastPPQ)
+                return;
+
+            s.rawPoints.push_back ({ stopPPQ, s.lastValue,
+                                     CurveType::Linear, 0.0f });
+            s.lastPPQ = stopPPQ;
         }
 
         void closeSession (Session& s, bool)
         {
             if (! s.open) return;
             s.open = false;
-            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ);
+            commitPointsToLane (s.paramID, s.rawPoints, s.startPPQ, s.lastPPQ, &s);
             modeState.setLatchHeld (s.paramID, false);
         }
 
-        void commitPointsToLane (ParameterID                    paramID,
+        static float originalValueAt (const Session& s, double ppq) noexcept
+        {
+            return s.originalCurve != nullptr && ! s.originalCurve->empty()
+                ? AutomationLane::evaluateAt (*s.originalCurve, ppq)
+                : s.priorLaneValue;
+        }
+
+        // Approximate a truncated original Smooth interval with adaptive
+        // linear segments. Smoothstep with tension cannot be represented
+        // exactly after changing its endpoint, but this bounds the audible
+        // source-shape error to roughly one millionth in normalized value
+        // (with finite depth and original float interpolation precision).
+        static void appendSmoothSourceSamples (
+            std::vector<Breakpoint>& out,
+            const AutomationLane::PointVector& original,
+            double leftPPQ, float leftValue,
+            double rightPPQ, float rightValue,
+            int depth)
+        {
+            const double middlePPQ = leftPPQ + (rightPPQ - leftPPQ) * 0.5;
+            if (middlePPQ <= leftPPQ || middlePPQ >= rightPPQ)
+            {
+                out.push_back ({rightPPQ, rightValue, CurveType::Linear, 0.0f});
+                return;
+            }
+
+            const float middleValue = AutomationLane::evaluateAt (original, middlePPQ);
+            const float linearMid = 0.5f * (leftValue + rightValue);
+            // Even a symmetric Smooth curve can match a straight line at its
+            // exact midpoint yet diverge at its quarters. Force 3 levels
+            // before accepting a low midpoint-error subdivision.
+            if (depth < 3 || (depth < 12
+                && std::abs (middleValue - linearMid) > 1.0e-6f))
+            {
+                appendSmoothSourceSamples (out, original,
+                    leftPPQ, leftValue, middlePPQ, middleValue, depth + 1);
+                appendSmoothSourceSamples (out, original,
+                    middlePPQ, middleValue, rightPPQ, rightValue, depth + 1);
+            }
+            else
+                out.push_back ({rightPPQ, rightValue, CurveType::Linear, 0.0f});
+        }
+
+        void commitPointsToLane (ParameterID paramID,
                                  const std::vector<Breakpoint>& newRawPoints,
-                                 double                         startPPQ,
-                                 double                         endPPQ)
+                                 double startPPQ, double endPPQ,
+                                 const Session* session)
         {
             if (newRawPoints.empty()) return;
 
-            auto& lane  = lanes.getOrCreateLane (paramID);
-            auto  prior = lane.getSnapshot();
-
+            auto& lane = lanes.getOrCreateLane (paramID);
+            auto prior = lane.getSnapshot();
             std::vector<Breakpoint> merged;
-            merged.reserve ((prior ? prior->size() : 0) + newRawPoints.size());
+            merged.reserve ((prior ? prior->size() : 0) + newRawPoints.size()
+                            + (session && session->originalCurve
+                                ? session->originalCurve->size() : 0));
 
             if (prior != nullptr)
                 for (const auto& bp : *prior)
                     if (bp.timePPQ < startPPQ || bp.timePPQ > endPPQ)
                         merged.push_back (bp);
 
-            const auto simplified = simplify (newRawPoints, kSimplifyEpsilon);
-            for (const auto& bp : simplified)
-                merged.push_back (bp);
+            // An immediate input can share the gesture-begin PPQ. A guard
+            // immediately before touch prevents the new value from bending
+            // earlier automation. For Linear and Hold source segments the
+            // original outgoing interpolation already works with that guard.
+            // A Smooth source segment is DIFFERENT: shortening its span
+            // changes smoothstep(t), so a single guard still warps the whole
+            // preceding segment. Reconstruct just that truncated segment
+            // adaptively, using the immutable pre-gesture source. This work
+            // runs on the message-thread commit path, never the audio thread.
+            if (session != nullptr && session->originalCurve != nullptr
+                && ! session->originalCurve->empty()
+                && std::isfinite(startPPQ) && startPPQ > 0.0)
+            {
+                const auto& source = *session->originalCurve;
+                const double beforeTouch = std::nextafter(startPPQ, 0.0);
+                const auto next = std::lower_bound(source.begin(), source.end(), startPPQ,
+                    [] (const Breakpoint& p, double t) { return p.timePPQ < t; });
 
+                if (next != source.begin() && next != source.end())
+                {
+                    const auto& previous = *(next - 1);
+                    if (previous.curveType == CurveType::Smooth
+                        && beforeTouch > previous.timePPQ)
+                    {
+                        // Repeated live commits may already contain previous
+                        // guard samples. Replace them instead of accumulating
+                        // duplicate or stale interpolation nodes.
+                        merged.erase (std::remove_if (merged.begin(), merged.end(),
+                            [&] (const Breakpoint& p)
+                            {
+                                return p.timePPQ >= previous.timePPQ
+                                    && p.timePPQ < startPPQ;
+                            }), merged.end());
+
+                        merged.push_back ({ previous.timePPQ,
+                            previous.normalizedValue, CurveType::Linear, 0.0f });
+                        appendSmoothSourceSamples (merged, source,
+                            previous.timePPQ, previous.normalizedValue,
+                            beforeTouch, AutomationLane::evaluateAt (source, beforeTouch), 0);
+                    }
+                    else
+                        merged.push_back ({ beforeTouch,
+                            AutomationLane::evaluateAt (source, beforeTouch),
+                            CurveType::Linear, 0.0f });
+                }
+                else
+                    merged.push_back ({ beforeTouch,
+                        AutomationLane::evaluateAt (source, beforeTouch),
+                        CurveType::Linear, 0.0f });
+            }
+
+            std::vector<Breakpoint> working (newRawPoints);
+            if (session != nullptr && session->mode == AutomationMode::Trim
+                && session->originalCurve != nullptr && ! session->trimOffsets.empty())
+            {
+                // Retain the base curve knots under a time-varying Trim delta.
+                // Otherwise the base curve between knob events is flattened.
+                for (const auto& source : *session->originalCurve)
+                {
+                    if (source.timePPQ <= startPPQ || source.timePPQ >= endPPQ)
+                        continue;
+                    const bool already = std::any_of (working.begin(), working.end(),
+                        [&] (const Breakpoint& p) { return p.timePPQ == source.timePPQ; });
+                    if (already) continue;
+                    const float offset = AutomationLane::evaluateAt (
+                        session->trimOffsets, source.timePPQ);
+                    working.push_back ({
+                        source.timePPQ,
+                        juce::jlimit (0.0f, 1.0f, source.normalizedValue + offset),
+                        source.curveType, source.curveTension });
+                }
+                std::stable_sort (working.begin(), working.end());
+            }
+
+            // Trim's imported source knots are structural: RDP only
+            // measures linear value error and may delete a Hold/Smooth
+            // breakpoint whose curve type matters for playback.
+            // Keep them all in Trim; ordinary Touch/Write/Latch retain RDP.
+            if (session != nullptr && session->mode == AutomationMode::Trim)
+                merged.insert (merged.end(), working.begin(), working.end());
+            else
+            {
+                const auto simplified = simplify (working, kSimplifyEpsilon);
+                merged.insert (merged.end(), simplified.begin(), simplified.end());
+            }
             lane.replacePoints (std::move (merged));
         }
 
@@ -367,6 +822,13 @@ namespace apex::automation
         AutomationTransportState&    armState;
 
         std::unordered_map<ParameterID, Session> sessions;
+        // Message-thread-only last rolling PPQ. Tracking this independently
+        // of the Play/Stop flag catches seek/loop wraps that never Stop.
+        double lastObservedPlayheadPPQ = std::numeric_limits<double>::quiet_NaN();
+        bool lastObservedArmed = false;
+        std::uint64_t lastObservedTransportTransitions = 0;
+        std::uint64_t lastObservedArmTransitions = 0;
+        std::uint64_t lastObservedOverflow = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationRecorder)
     };
