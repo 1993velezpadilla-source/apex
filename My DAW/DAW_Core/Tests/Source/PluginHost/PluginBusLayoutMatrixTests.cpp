@@ -2159,33 +2159,40 @@ public:
             const auto& params = processors[plugin]->getParameters();
             for (int i = 0; i < params.size(); ++i)
             {
-                // The first automatable VST3 parameter can be a stepped
-                // enum/switch. Some plugins report the requested normalized
-                // value immediately but persist a snapped enum option, e.g.
-                // 0.83 -> 0.75. Selecting that parameter gives a false
-                // state-roundtrip failure. Test continuous knobs explicitly.
+                // Both of these test plugins expose *discrete* parameters:
+                // WetReverb mode has five positions and WetDelay time has
+                // six. Select a real automatable control regardless of step
+                // count, but choose a canonical grid-aligned target below.
                 if (params[i] != nullptr && params[i]->isAutomatable()
-                    && !params[i]->isMetaParameter()
-                    && params[i]->getNumSteps() > 1000)
+                    && !params[i]->isMetaParameter())
                 {
                     parameterIndices[plugin] = i;
                     break;
                 }
             }
             expect(parameterIndices[plugin] >= 0,
-                   pluginNames[plugin] + " must expose a continuous, automatable, non-meta parameter");
+                   pluginNames[plugin] + " must expose an automatable, non-meta parameter");
             if (parameterIndices[plugin] < 0)
                 return;
 
             auto* parameter = params[parameterIndices[plugin]];
             const float oldValue = parameter->getValue();
-            const float targetValue = oldValue > 0.5f ? 0.17f : 0.83f;
+            const float requested = oldValue > 0.5f ? 0.17f : 0.83f;
+            const int steps = parameter->getNumSteps();
+            // Normalized VST3 enum values are canonical i/(steps-1).
+            // Passing e.g. 0.83 to a five-mode reverb can read back 0.83
+            // immediately but serialize mode index 3, which restores as
+            // 0.75. Align the actual requested value with the discrete grid.
+            // Continuous and unknown-step parameters keep their raw target.
+            const float targetValue = steps > 1 && steps <= 1000
+                ? std::round (requested * float(steps - 1)) / float(steps - 1)
+                : requested;
             parameter->setValueNotifyingHost(targetValue);
             savedParameterValues[plugin] = parameter->getValue();
             logMessage(pluginNames[plugin] + " roundtrip parameter #" 
                 + juce::String(parameterIndices[plugin]) + " name=\""
                 + parameter->getName(128) + "\" steps="
-                + juce::String(parameter->getNumSteps()) + " initial="
+                + juce::String(steps) + " initial="
                 + juce::String(oldValue, 6) + " target="
                 + juce::String(targetValue, 6) + " accepted="
                 + juce::String(savedParameterValues[plugin], 6));
