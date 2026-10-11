@@ -1030,6 +1030,34 @@ public:
             });
         }
 
+        // ── Production GUI launch smoke for Windows CI ────────────────────
+        // Unlike the unit-test executable, this launches the actual DAW with
+        // the real MainComponent, plugin host, audio-device initialization,
+        // window peer and JUCE message loop. The delayed check cannot run
+        // unless initialise() returns and the message loop starts pumping.
+        // No synthetic project load, audio playback or plugin interaction is
+        // claimed by this narrow startup readiness probe.
+        if (processArguments.contains ("--apex-ci-launch-smoke"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                const bool ready = mainWindow != nullptr
+                    && mainWindow->getPeer() != nullptr
+                    && mainWindow->getMainComponent() != nullptr
+                    && mainWindow->getWidth() > 0
+                    && mainWindow->getHeight() > 0
+                    && mainWindow->getMainComponent()->getWidth() > 0
+                    && mainWindow->getMainComponent()->getHeight() > 0;
+
+                juce::Logger::writeToLog (ready
+                    ? "[APEX CI STARTUP] PASS: real DAW window, component and JUCE loop ready"
+                    : "[APEX CI STARTUP] FAIL: real DAW window/component not ready");
+
+                setApplicationReturnValue (ready ? 0 : 1);
+                quit();
+            });
+        }
+
         // ── Timeline benchmark mode ──────────────────────────────────────
         // Activated by --timeline-benchmark flag. Runs inside the real app
         // with normal JUCE repaint scheduling and message-thread dispatch.
