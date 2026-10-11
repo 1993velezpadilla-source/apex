@@ -2159,14 +2159,21 @@ public:
             const auto& params = processors[plugin]->getParameters();
             for (int i = 0; i < params.size(); ++i)
             {
-                if (params[i] != nullptr && params[i]->isAutomatable() && !params[i]->isMetaParameter())
+                // The first automatable VST3 parameter can be a stepped
+                // enum/switch. Some plugins report the requested normalized
+                // value immediately but persist a snapped enum option, e.g.
+                // 0.83 -> 0.75. Selecting that parameter gives a false
+                // state-roundtrip failure. Test continuous knobs explicitly.
+                if (params[i] != nullptr && params[i]->isAutomatable()
+                    && !params[i]->isMetaParameter()
+                    && params[i]->getNumSteps() > 1000)
                 {
                     parameterIndices[plugin] = i;
                     break;
                 }
             }
             expect(parameterIndices[plugin] >= 0,
-                   pluginNames[plugin] + " must have an automatable, non-meta parameter");
+                   pluginNames[plugin] + " must expose a continuous, automatable, non-meta parameter");
             if (parameterIndices[plugin] < 0)
                 return;
 
@@ -2175,6 +2182,13 @@ public:
             const float targetValue = oldValue > 0.5f ? 0.17f : 0.83f;
             parameter->setValueNotifyingHost(targetValue);
             savedParameterValues[plugin] = parameter->getValue();
+            logMessage(pluginNames[plugin] + " roundtrip parameter #" 
+                + juce::String(parameterIndices[plugin]) + " name=\""
+                + parameter->getName(128) + "\" steps="
+                + juce::String(parameter->getNumSteps()) + " initial="
+                + juce::String(oldValue, 6) + " target="
+                + juce::String(targetValue, 6) + " accepted="
+                + juce::String(savedParameterValues[plugin], 6));
             expect(std::isfinite(savedParameterValues[plugin])
                        && std::abs(savedParameterValues[plugin] - oldValue) > 0.02f,
                    pluginNames[plugin] + " must actually accept a distinct parameter value");
