@@ -1058,6 +1058,89 @@ public:
             });
         }
 
+        // ── Real-project persistence smoke (production executable only) ──
+        // Run the actual project manager behind the real DAW UI, not the
+        // lightweight test-double ProjectManager used by APEXTests. This
+        // opt-in CI mode saves a fresh session, resets it, reloads the XML,
+        // and confirms that the live MainComponent survives the restore.
+        // Only a unique disposable OS temp file is used; never user projects.
+        if (processArguments.contains ("--apex-ci-project-roundtrip"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                const auto temporary = juce::File::getSpecialLocation (
+                    juce::File::tempDirectory).getNonexistentChildFile (
+                        "apex-ci-project-roundtrip", ".dawproj", false);
+                juce::String error;
+                bool success = false;
+
+                try
+                {
+                    auto* component = mainWindow != nullptr
+                        ? mainWindow->getMainComponent() : nullptr;
+                    if (component == nullptr || mainWindow->getPeer() == nullptr)
+                        error = "production window/MainComponent unavailable";
+                    else
+                    {
+                        auto& projects = component->getAppCore().getProjectManager();
+
+                        if (! projects.newProject())
+                            error = "newProject failed: " + projects.getLastLoadError();
+                        else if (! projects.saveToFile (temporary))
+                            error = "saveToFile failed: " + projects.getLastSaveError();
+                        else if (! temporary.existsAsFile()
+                                 || temporary.getSize() <= 0)
+                            error = "saved .dawproj file was empty or missing";
+                        else
+                        {
+                            auto xml = juce::XmlDocument::parse (temporary);
+                            if (xml == nullptr || ! xml->hasTagName ("DAWProject"))
+                                error = "saved .dawproj XML has no valid DAWProject root";
+                            else if (! projects.newProject())
+                                error = "second newProject failed: " + projects.getLastLoadError();
+                            else if (! projects.loadFromFile (temporary))
+                                error = "loadFromFile failed: " + projects.getLastLoadError();
+                            else if (projects.getProjectFile() != temporary
+                                     || projects.getProjectName()
+                                          != temporary.getFileNameWithoutExtension())
+                                error = "reloaded project identity did not match saved file";
+                            else if (mainWindow == nullptr
+                                     || mainWindow->getMainComponent() == nullptr
+                                     || mainWindow->getMainComponent()->getWidth() <= 0
+                                     || mainWindow->getMainComponent()->getHeight() <= 0)
+                                error = "MainComponent invalid after project restore";
+                            else
+                                success = true;
+                        }
+                    }
+                }
+                catch (const std::exception& ex)
+                {
+                    error = "unhandled project roundtrip exception: "
+                        + juce::String (ex.what());
+                }
+                catch (...)
+                {
+                    error = "unknown exception during production project roundtrip";
+                }
+
+                // Do not leave behind a potentially authoritative recovery
+                // project. The path was generated uniquely for this CI mode.
+                const bool deleted = temporary.deleteFile();
+                if (! deleted && temporary.existsAsFile())
+                {
+                    success = false;
+                    error += " (temporary project cleanup failed)";
+                }
+
+                juce::Logger::writeToLog (success
+                    ? "[APEX CI PROJECT] PASS: real application new/save/new/load/UI roundtrip"
+                    : "[APEX CI PROJECT] FAIL: " + error);
+                setApplicationReturnValue (success ? 0 : 1);
+                quit();
+            });
+        }
+
         // ── Timeline benchmark mode ──────────────────────────────────────
         // Activated by --timeline-benchmark flag. Runs inside the real app
         // with normal JUCE repaint scheduling and message-thread dispatch.
