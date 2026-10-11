@@ -2149,11 +2149,59 @@ public:
         const auto reverbId = before[0].instanceId;
         const auto delayId = before[1].instanceId;
 
-        beginTest("parameter change and 128-sample stereo DSP yield finite audio");
-        const auto& params = reverb.instance->getParameters();
-        expect(!params.isEmpty(), "actual open-source VST3 should expose host parameters");
-        if (!params.isEmpty())
-            params[0]->setValueNotifyingHost(0.37f);
+        beginTest("both third-party VST3 parameter changes are applied before state capture");
+        juce::AudioProcessor* processors[] = { reverb.instance, delay.instance };
+        const juce::String pluginNames[] = { "WetReverb", "WetDelay" };
+        int parameterIndices[] = { -1, -1 };
+        float savedParameterValues[] = { 0.0f, 0.0f };
+        for (int plugin = 0; plugin < 2; ++plugin)
+        {
+            const auto& params = processors[plugin]->getParameters();
+            for (int i = 0; i < params.size(); ++i)
+            {
+                // Both of these test plugins expose *discrete* parameters:
+                // WetReverb mode has five positions and WetDelay time has
+                // six. Select a real automatable control regardless of step
+                // count, but choose a canonical grid-aligned target below.
+                if (params[i] != nullptr && params[i]->isAutomatable()
+                    && !params[i]->isMetaParameter())
+                {
+                    parameterIndices[plugin] = i;
+                    break;
+                }
+            }
+            expect(parameterIndices[plugin] >= 0,
+                   pluginNames[plugin] + " must expose an automatable, non-meta parameter");
+            if (parameterIndices[plugin] < 0)
+                return;
+
+            auto* parameter = params[parameterIndices[plugin]];
+            const float oldValue = parameter->getValue();
+            const float requested = oldValue > 0.5f ? 0.17f : 0.83f;
+            const int steps = parameter->getNumSteps();
+            // Normalized VST3 enum values are canonical i/(steps-1).
+            // Passing e.g. 0.83 to a five-mode reverb can read back 0.83
+            // immediately but serialize mode index 3, which restores as
+            // 0.75. Align the actual requested value with the discrete grid.
+            // Continuous and unknown-step parameters keep their raw target.
+            const float targetValue = steps > 1 && steps <= 1000
+                ? std::round (requested * float(steps - 1)) / float(steps - 1)
+                : requested;
+            parameter->setValueNotifyingHost(targetValue);
+            savedParameterValues[plugin] = parameter->getValue();
+            logMessage(pluginNames[plugin] + " roundtrip parameter #" 
+                + juce::String(parameterIndices[plugin]) + " name=\""
+                + parameter->getName(128) + "\" steps="
+                + juce::String(steps) + " initial="
+                + juce::String(oldValue, 6) + " target="
+                + juce::String(targetValue, 6) + " accepted="
+                + juce::String(savedParameterValues[plugin], 6));
+            expect(std::isfinite(savedParameterValues[plugin])
+                       && std::abs(savedParameterValues[plugin] - oldValue) > 0.02f,
+                   pluginNames[plugin] + " must actually accept a distinct parameter value");
+        }
+
+        beginTest("128-sample stereo DSP with both real plugins yields finite audio");
         juce::AudioBuffer<float> buffer(2, 128);
         for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
             for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
@@ -2216,6 +2264,27 @@ public:
             expect(after[1].bypassed);
             expect(reopened.findEntryById(clipId, reverbId)->instance != nullptr);
             expect(reopened.findEntryById(clipId, delayId)->instance != nullptr);
+        }
+
+        beginTest("real VST3 parameter values survive missing-plugin save and reinstall");
+        const juce::String instanceIds[] = { reverbId, delayId };
+        for (int plugin = 0; plugin < 2; ++plugin)
+        {
+            const auto* entry = reopened.findEntryById(clipId, instanceIds[plugin]);
+            expect(entry != nullptr && entry->instance != nullptr,
+                   pluginNames[plugin] + " must have a restored processor");
+            if (entry == nullptr || entry->instance == nullptr)
+                continue;
+
+            const auto& restoredParameters = entry->instance->getParameters();
+            expect(restoredParameters.size() > parameterIndices[plugin],
+                   pluginNames[plugin] + " parameter ordering must remain stable");
+            if (restoredParameters.size() <= parameterIndices[plugin])
+                continue;
+
+            expectWithinAbsoluteError(restoredParameters[parameterIndices[plugin]]->getValue(),
+                                      savedParameterValues[plugin], 0.015f,
+                                      pluginNames[plugin] + " parameter must match the saved value");
         }
 
         chain.releaseResources();
