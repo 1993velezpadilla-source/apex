@@ -15,35 +15,42 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
     throw "Production APEX executable is missing: $exe"
 }
 
-# This exercises DAW_Core.exe, NOT the APEXTests test runner. The executable
-# constructs MainComponent and its actual JUCE window, lets the message loop
-# pump for four seconds, checks readiness, then quits with an explicit status.
-# Use a hard process deadline so a hung initialization cannot stall CI forever.
-$process = $null
-try {
-    Write-Host "[app-smoke] Launching real DAW $Configuration|x64: $exe"
-    $process = Start-Process -FilePath $exe `
-                             -ArgumentList '--apex-ci-launch-smoke' `
-                             -WorkingDirectory (Split-Path -Parent $exe) `
-                             -PassThru
+# Use the real DAW executable, NOT APEXTests. Each isolated process must
+# initialize its full MainComponent and JUCE message loop and quit cleanly.
+# First probe: production window startup. Second: actual ProjectManager
+# new/save/new/load roundtrip inside the running application. No user project
+# is touched by the CI-only persistence probe.
+$smokes = @(
+    @{ Flag = '--apex-ci-launch-smoke'; Label = 'real GUI startup' },
+    @{ Flag = '--apex-ci-project-roundtrip'; Label = 'real project new/save/new/load' }
+)
 
-    if (-not $process.WaitForExit(90000)) {
-        throw "DAW GUI startup did not exit within the 90-second safety deadline."
-    }
+foreach ($smoke in $smokes) {
+    $process = $null
+    try {
+        Write-Host "[app-smoke] Launching $Configuration|x64 $($smoke.Label): $exe"
+        $process = Start-Process -FilePath $exe `
+                                 -ArgumentList $smoke.Flag `
+                                 -WorkingDirectory (Split-Path -Parent $exe) `
+                                 -PassThru
 
-    # WaitForExit() has completed; refresh ExitCode from the process handle.
-    if ($process.ExitCode -ne 0) {
-        throw "DAW GUI initialization smoke failed with exit code $($process.ExitCode)."
-    }
-
-    Write-Host "[PASS] Real APEX DAW GUI initialized, message loop ran, and app exited cleanly ($Configuration)."
-}
-finally {
-    if ($null -ne $process) {
-        if (-not $process.HasExited) {
-            Write-Warning "[app-smoke] Terminating hung DAW process $($process.Id)"
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        if (-not $process.WaitForExit(90000)) {
+            throw "$($smoke.Label) did not exit within the 90-second safety deadline."
         }
-        $process.Dispose()
+
+        if ($process.ExitCode -ne 0) {
+            throw "$($smoke.Label) failed with exit code $($process.ExitCode)."
+        }
+
+        Write-Host "[PASS] APEX $Configuration|x64: $($smoke.Label) completed cleanly."
+    }
+    finally {
+        if ($null -ne $process) {
+            if (-not $process.HasExited) {
+                Write-Warning "[app-smoke] Terminating hung DAW process $($process.Id)"
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+            $process.Dispose()
+        }
     }
 }
