@@ -4,6 +4,7 @@ on:
     paths:
       - '.github/workflows/polarity-windows-integration.yml'
       - 'My DAW/DAW_Core/Scripts/prepare_ci.ps1'
+      - 'My DAW/DAW_Core/Dependencies/**'
       - 'My DAW/DAW_Core/Source/TrackCore/**'
       - 'My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h'
       - 'My DAW/DAW_Core/Source/UICore/MixerPanel.h'
@@ -13,6 +14,7 @@ on:
     paths:
       - '.github/workflows/polarity-windows-integration.yml'
       - 'My DAW/DAW_Core/Scripts/prepare_ci.ps1'
+      - 'My DAW/DAW_Core/Dependencies/**'
       - 'My DAW/DAW_Core/Source/TrackCore/**'
       - 'My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h'
       - 'My DAW/DAW_Core/Source/UICore/MixerPanel.h'
