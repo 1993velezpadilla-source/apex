@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../TrackCore/Track.h"
+#include "../TrackCore/TrackPolarityCore.h"
 #include "../ClipCore/Clip.h"
 #include "../TransportCore/TransportController.h"
 #include "../RoutingCore/RoutingGraph.h"
@@ -2423,6 +2424,9 @@ private:
         }
 #endif
 
+        // Invert before sends and routing: all tap paths hear identical polarity.
+        track->applyPolarityTo(trackBuf, numSamples);
+
         const float leftGain  = volumeRamp.getCurrentLeftGain();
         const float rightGain = volumeRamp.getCurrentRightGain();
 
@@ -2509,7 +2513,11 @@ private:
             if (edge.sourceNodeId != nodeMeta->id) continue;
             logExportRouteIfNeeded(logRoutesThisBlock, edge);
             if (!edge.active || edge.bypassed) continue;
-            if (edge.type == ConnectionType::Sidechain)
+            // PreSend is already emitted once from the pre-fader tap above.
+            // Including it here again caused the same send to be added
+            // a SECOND time post-fader (and muddied Ø/null tests).
+            if (edge.type == ConnectionType::PreSend
+                || edge.type == ConnectionType::Sidechain)
                 continue;
             if (!isStemProgrammeEdgeAllowed(edge)) continue;
 
@@ -2663,6 +2671,10 @@ private:
                     transport_ ? transport_->getTempo() : 120.0, numSamples);
             }
         }
+
+        // Bus polarity is applied after inserts and before fader/routing.
+        if (busTrack != nullptr)
+            busTrack->applyPolarityTo(nodeBuf, numSamples);
 
         // Bus mute — snapshot-aware
         float busGain = busTrack ? busTrack->getVolume() : 1.0f;
@@ -2853,6 +2865,9 @@ private:
                 if (it != chainsSnap->end() && it->second)
                     it->second->processBlock(trackBuffer_, numSamples);
             }
+
+            // Maintain the same polarity semantics if the routing graph is absent.
+            track->applyPolarityTo(trackBuffer_, numSamples);
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(track->getVolume());

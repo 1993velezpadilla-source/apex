@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../UtilityCore/Types.h"
+#include "TrackPolarityCore.h"
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
 #include "../InputMonitorCore/InputFxChain.h"
 #include "../InputMonitorCore/InputTrimCore.h"
@@ -49,6 +50,18 @@ public:
     
     bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
     void setSoloed(bool shouldBeSoloed);
+
+    // Channel polarity inversion (both channels for stereo); not a time shift.
+    bool isPolarityInverted() const noexcept { return polarityInverted_.load(std::memory_order_relaxed); }
+    void setPolarityInverted(bool inverted);
+    // Audio-thread-only production render; GUI updates only the atomic target.
+    // The per-track state carries the transition across buffers and prevents
+    // hard sign discontinuities on user Ø toggles.
+    void applyPolarityTo(juce::AudioBuffer<float>& audio, int samples) noexcept
+    {
+        TrackPolarityCore::applyWithTransition(audio, samples,
+            isPolarityInverted(), polarityTransition_);
+    }
     
     bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
     void setArmed(bool shouldBeArmed);
@@ -256,6 +269,8 @@ private:
     juce::String name_;
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
+    std::atomic<bool> polarityInverted_{false};
+    TrackPolarityCore::TransitionState polarityTransition_; // audio thread owns this
     std::atomic<bool> armed_{false};
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};

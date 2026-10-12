@@ -2,7 +2,7 @@
 #include <JuceHeader.h>
 #include "PluginScanJobBuilderCore.h"
 #include "PluginScanResultCore.h"
-#include <juce_audio_processors_headless/format_types/juce_VST3EnumerationDiagnostic.h>
+#include "VST3EnumerationDiagnosticCore.h"
 
 namespace DAW {
 
@@ -24,8 +24,8 @@ public:
             + " --scan-file-size " + juce::String(job.fileSize);
 
         if (juce::JUCEApplicationBase::getCommandLineParameters()
-                .contains (juce::VST3EnumerationDiagnostic::kCommandLineFlag))
-            command += juce::String (" ") + juce::VST3EnumerationDiagnostic::kCommandLineFlag;
+                .contains (VST3EnumerationDiagnosticCore::kCommandLineFlag))
+            command += juce::String (" ") + VST3EnumerationDiagnosticCore::kCommandLineFlag;
 
         return command;
     }

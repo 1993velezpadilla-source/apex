@@ -1,0 +1,82 @@
+name: Windows mixer polarity integration
+on:
+  push:
+    paths:
+      - '.github/workflows/polarity-windows-integration.yml'
+      - 'My DAW/DAW_Core/Scripts/prepare_ci.ps1'
+      - 'My DAW/DAW_Core/Dependencies/**'
+      - 'My DAW/DAW_Core/Source/TrackCore/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
+      - 'My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h'
+      - 'My DAW/DAW_Core/Source/UICore/MixerPanel.h'
+      - 'My DAW/DAW_Core/Tests/Source/Smoke/RunnerSmokeTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Source/QuickTrack/TrackCreationInputTests.cpp'
+  pull_request:
+    paths:
+      - '.github/workflows/polarity-windows-integration.yml'
+      - 'My DAW/DAW_Core/Scripts/prepare_ci.ps1'
+      - 'My DAW/DAW_Core/Dependencies/**'
+      - 'My DAW/DAW_Core/Source/TrackCore/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
+      - 'My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h'
+      - 'My DAW/DAW_Core/Source/UICore/MixerPanel.h'
+      - 'My DAW/DAW_Core/Tests/Source/Smoke/RunnerSmokeTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Source/QuickTrack/TrackCreationInputTests.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apex-polarity-windows-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows APEX ${{ matrix.configuration }} / polarity routed audio
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Check repository and evidence policy
+        run: |
+          .\Scripts\test_repository_policy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_validate_test_evidence.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Materialize locked JUCE and test toolchain
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build full APEX desktop executable
+        run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
+      - name: Prove polarity DSP, persistence, master guard, null cancellation
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
+      - name: Prove real AudioEngine routed polarity and restored signals
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.TrackCreation -Name TrackCreation.Input -Seed 0xA9E12026
+      - name: Preserve deterministic test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-polarity-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
+      - name: Publish compiled desktop build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apex-Polarity-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
+          if-no-files-found: error
