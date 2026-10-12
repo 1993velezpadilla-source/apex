@@ -3391,4 +3391,96 @@ public:
 };
 static PluginLoadRecoveryHistoryTests pluginLoadRecoveryHistoryTests;
 
+/** Recovery Safe Mode must keep the project lossless even if an in-process
+    plugin cannot be constructed. Every slot after it remains recoverable. */
+class LosslessPluginRestoreSafeModeTests final : public juce::UnitTest
+{
+public:
+    LosslessPluginRestoreSafeModeTests()
+        : juce::UnitTest("plugin.recovery-lossless-safe-restore.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::AudioPluginFormatManager fm;
+        fm.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        const auto before = makeDescription(*makeSpecForUid(kUidFamilyBase));
+        const auto suspect = makeDescription(*makeSpecForUid(kUidStereo));
+        const auto after = makeDescription(*makeSpecForUid(kUidFamilyPro));
+
+        DAW::PluginChainCore original;
+        original.prepare(kRate, 128);
+        juce::String error;
+        expectEquals(original.appendPlugin(before, fm, error, true), 0);
+        expectEquals(original.appendPlugin(suspect, fm, error, true), 1);
+        expectEquals(original.appendPlugin(after, fm, error, true), 2);
+        const auto originalState = original.getState();
+        expectEquals(originalState.getNumChildren(), 3);
+        if (originalState.getNumChildren() != 3) return;
+        const auto suspectTree = originalState.getChild(1);
+        const auto opaqueOriginal = suspectTree.getChildWithName("State")
+            .getProperty("data").toString();
+        const auto originalInstanceId = suspectTree.getProperty("pluginInstanceId")
+            .toString();
+
+        beginTest("safe restore skips ONLY exact suspect UID/path and keeps other slots usable");
+        DAW::PluginChainCore recovered;
+        recovered.prepare(kRate, 128);
+        recovered.setRecoveryQuarantineDescriptions({suspect});
+        juce::String restoreError;
+        expect(recovered.restoreState(originalState, fm, restoreError),
+               "safe restore should succeed without instantiating the suspect: " + restoreError);
+        expectEquals(recovered.getDeferredRecoverySlotCount(), 1);
+        expect(recovered.getSlot(0) != nullptr, "preceding plugin restored");
+        expect(recovered.getSlot(1) == nullptr, "suspect not created inside DAW");
+        expect(recovered.getSlot(2) != nullptr, "following plugin restored");
+        const auto savedGhost = recovered.getDeferredRecoverySlot(1);
+        expect(savedGhost.isValid(), "deferred slot retained as saved ValueTree");
+        expectEquals(savedGhost.getProperty("pluginInstanceId").toString(),
+                     originalInstanceId);
+
+        beginTest("saving Safe Mode project retains opaque plugin blob and identity");
+        const auto safeState = recovered.getState();
+        expectEquals(safeState.getNumChildren(), 3);
+        if (safeState.getNumChildren() == 3)
+        {
+            const auto savedSlot = safeState.getChild(1);
+            expectEquals(savedSlot.getProperty("pluginInstanceId").toString(),
+                         originalInstanceId);
+            expectEquals(savedSlot.getChildWithName("State").getProperty("data").toString(),
+                         opaqueOriginal);
+            const auto xml = safeState.createXml();
+            expect(xml != nullptr);
+            if (xml != nullptr)
+            {
+                const auto roundTrip = juce::ValueTree::fromXml(*xml);
+                expectEquals(roundTrip.getChild(1)
+                    .getChildWithName("State").getProperty("data").toString(),
+                    opaqueOriginal, "payload survives disk-equivalent serialization");
+            }
+        }
+
+        beginTest("moving/deleting other slots does not lose deferred state");
+        expect(recovered.moveSlot(1, 2), "moving a deferred placeholder is allowed");
+        expect(recovered.getDeferredRecoverySlot(1).isValid() == false);
+        expect(recovered.getDeferredRecoverySlot(2).isValid());
+        recovered.removePlugin(0);
+        expectEquals(recovered.getDeferredRecoverySlotCount(), 1);
+        expect(recovered.getDeferredRecoverySlot(1).isValid(),
+               "ghost index remapped after preceding plugin removal");
+        const auto movedState = recovered.getState();
+        expectEquals(movedState.getChild(1)
+            .getChildWithName("State").getProperty("data").toString(), opaqueOriginal);
+
+        beginTest("explicit normal reopen can restore all plugins from original project");
+        recovered.setRecoveryQuarantineDescriptions({});
+        expect(recovered.restoreState(originalState, fm, restoreError),
+               "restored original project must still be loadable");
+        expectEquals(recovered.getDeferredRecoverySlotCount(), 0);
+        expect(recovered.getSlot(0) != nullptr);
+        expect(recovered.getSlot(1) != nullptr);
+        expect(recovered.getSlot(2) != nullptr);
+    }
+};
+static LosslessPluginRestoreSafeModeTests losslessPluginRestoreSafeModeTests;
+
 } // namespace

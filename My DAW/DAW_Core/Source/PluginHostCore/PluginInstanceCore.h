@@ -4,6 +4,7 @@
 #include "../KeyBindingCore/KeyBindingManager.h"
 #include "../AutomationCore/PluginAutomationGestureCore.h"
 #include "../PluginSafetyCore/PluginSehGuardCore.h"
+#include "../PluginSafetyCore/PluginLoadRecoveryCore.h"
 #include "../PluginSafetyCore/PluginQuarantineCore.h"
 #include "../AutomationCore/PluginAutomationRecorderCore.h"
 #include "../AutomationCore/LastTouchedPluginParameterCore.h"
@@ -2147,10 +2148,17 @@ public:
 
         logOpen("createInstance_success", "pluginInstanceValid=1");
         logOpen("createEditor_start", "pluginInstanceValid=1");
+        // Editor creation is another third-party in-process crash boundary.
+        // Its own short-lived marker must be cleared before returning to the
+        // ordinary JUCE event loop (no marker remains while merely idle).
+        PluginLoadRecoveryCore::ScopedOperation editorAttempt(
+            PluginLoadRecoveryCore::getInstance(),
+            plugin_->getPluginDescription(), "plugin_editor_create");
         juce::AudioProcessorEditor* ed = nullptr;
         auto sehResult = DAW::safelyCreateEditor(plugin_.get(), ed);
         if (!sehResult.succeeded)
         {
+            editorAttempt.fail("Plugin editor creation failed or returned no native view");
             if (sehResult.exceptionCode != 0)
             {
                 logOpen("failed", "reason=SEH_ACCESS_VIOLATION code=0x"
@@ -2166,6 +2174,7 @@ public:
             }
             return;
         }
+        editorAttempt.succeed();
         logOpen("createEditor_success",
                 "editorValid=1 width=" + juce::String(ed->getWidth())
                 + " height=" + juce::String(ed->getHeight())
