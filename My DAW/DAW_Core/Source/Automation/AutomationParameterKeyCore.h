@@ -217,6 +217,33 @@ namespace apex::automation
             return state;
         }
 
+        /** Start a fresh song without leaking keys from the previous project.
+         *  The persistent Master track is NOT destroyed by deleteAllTracks(),
+         *  so keep only its four native mixer bindings alive. Keep nextID
+         *  monotonic: an editor/RT snapshot may temporarily retain old IDs,
+         *  and recycling them could address an unrelated live parameter.
+         *  Call only after the project restore callback barrier is acquired.
+         */
+        void resetForNewProject()
+        {
+            const juce::ScopedLock sl (mapsLock);
+            KeyToIDMap retained;
+            for (const auto& key : {
+                    trackVolumeKey ("master"), trackPanKey ("master"),
+                    trackMuteKey ("master"), trackSoloKey ("master") })
+            {
+                auto it = keyToID.find (key);
+                if (it != keyToID.end())
+                    retained.emplace (it->first, it->second);
+            }
+            keyToID.swap (retained);
+            idToKey.clear();
+            for (const auto& [key, id] : keyToID)
+                idToKey.emplace (id, key);
+            // Do not rewind nextID — live objects may still own historical IDs.
+            publishLocked();
+        }
+
         void restoreState (const juce::ValueTree& state)
         {
             if (! state.isValid()) return;

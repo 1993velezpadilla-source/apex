@@ -85,6 +85,43 @@ public:
             }
         }
 
+        beginTest ("New Project drops stale keys but preserves Master identity");
+        {
+            AutomationParameterKeyRegistry reg;
+            const auto masterVolume = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackVolumeKey("master"));
+            const auto masterSolo = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackSoloKey("master"));
+            const auto oldTrack = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_OLDER"));
+            const auto oldPlugin = reg.getOrCreateID(
+                "plugin.TRK_OLDER.slot0.Example.cutoff");
+            const auto oldSend = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackSendLevelKey("TRK_OLDER", "route"));
+            const juce::String oldTrackKey =
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_OLDER");
+            const auto previous = reg.getKeySnapshotRT();
+            const auto generation = reg.getChangeGeneration();
+
+            reg.resetForNewProject();
+            expect(reg.getChangeGeneration() > generation);
+            expectEquals(reg.findIDRT(
+                AutomationParameterKeyRegistry::trackVolumeKey("master")), masterVolume);
+            expectEquals(reg.findIDRT(
+                AutomationParameterKeyRegistry::trackSoloKey("master")), masterSolo);
+            expectEquals(reg.findIDRT(oldTrackKey), kInvalidParameterID);
+            expect(reg.findKey(oldPlugin).isEmpty());
+            expect(reg.findKey(oldSend).isEmpty());
+            expect(previous != nullptr && previous->count(oldTrackKey) == 1);
+            const auto newTrack = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_NEW"));
+            expect(newTrack > oldSend);
+            expect(newTrack != oldTrack);
+            // Saving Untitled must not serialize aliases from the old song.
+            const auto state = reg.getState();
+            expectEquals(state.getNumChildren(), 3); // Master volume + solo + new track
+        }
+
         beginTest ("lane store RT snapshot and lane lifetime");
         {
             AutomationLaneStore store;
