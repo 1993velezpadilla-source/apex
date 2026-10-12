@@ -14,6 +14,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify pinned Signalsmith Stretch revision
+        shell: bash
+        run: |
+          test "$(git -C "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" rev-parse HEAD)" = "57b93f4e9206a089a45387eaa39bdc9f310d3308"
       - name: Build with C++17 sanitizers and warnings as errors
         shell: bash
         run: |
@@ -23,6 +29,11 @@ jobs:
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" -o tune_live_voice_test
           ./tune_live_voice_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -I"My DAW/DAW_Core/Source/ThirdParty" \
+            -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" -o tune_live_wet_test
+          ./tune_live_wet_test
   msvc-windows:
     runs-on: windows-2022
     steps:
