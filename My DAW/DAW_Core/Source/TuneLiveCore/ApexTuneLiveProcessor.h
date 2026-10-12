@@ -106,7 +106,7 @@ public:
     float detectedFrequencyHz() const noexcept {return lastHz_.load(std::memory_order_relaxed);}
     int getLatencyForDisplay() const noexcept {return dsp_.latencySamples();}
     bool hasEditor() const override { return true; }
-    juce::AudioProcessorEditor* createEditor() override { return new juce::GenericAudioProcessorEditor(*this); }
+    juce::AudioProcessorEditor* createEditor() override; // APEX native custom UI below
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -152,3 +152,9 @@ private:
 };
 
 }} // namespace APEX::TuneLive
+
+#include "../TuneLiveUI/ApexTuneLiveEditor.h"
+inline juce::AudioProcessorEditor* APEX::TuneLive::Processor::createEditor()
+{
+    return new APEX::TuneLive::Editor (*this);
+}
