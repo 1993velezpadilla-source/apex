@@ -463,6 +463,7 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
         label_.setText(track_.getName(), juce::dontSendNotification);
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
+        polarityBtn_.active = track_.isPolarityInverted();
         armBtn_.active  = track_.isArmed();
         autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
         autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
@@ -819,8 +820,14 @@ muteBtn_.setBounds(nextButtonBounds());
 
         // Automation mode button — one row below M/S/R, full strip width
         {
-            auto autoRow = b.removeFromTop(16).reduced(4, 1);
-            autoModeBtn_.setBounds (autoRow);
+            // Keep a dedicated, directly clickable polarity control on every
+            // non-master strip without squeezing M/S/R/Trim into tiny buttons.
+            auto autoRow = b.removeFromTop(24).reduced(4, 1);
+            auto polarityCell = autoRow.removeFromRight(juce::jmin(30, juce::jmax(22, autoRow.getWidth() / 3)));
+            autoRow.removeFromRight(2);
+            autoModeBtn_.setBounds(autoRow);
+            polarityBtn_.setBounds(polarityCell);
+            polarityBtn_.setVisible(true);
         }
 
 // Input button + pan knob
@@ -1625,6 +1632,7 @@ private:
     juce::TextButton pianoBtn_;
 SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     SmallButton  soloBtn_ { "S", juce::Colour(0xFFD4AF37) };
+    SmallButton  polarityBtn_ { juce::String::fromUTF8("\xC3\x98"), juce::Colour(0xFF00B3A4) };
     SmallButton  armBtn_  { "R", juce::Colour(0xFF8B0000) };
     SmallButton  preFaderBtn_ { "POST", juce::Colour(0xFF00B3A4) };  // POST/PRE send tap point
     SmallButton  inputBtn_ { "T", juce::Colour(0xFF7C3AED) };  // compact square trim button
@@ -2557,11 +2565,13 @@ private:
         // Buttons
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
+        polarityBtn_.active = track_.isPolarityInverted();
         armBtn_.active  = track_.isArmed();
 
         // Tooltip text for mixer channel strip buttons
         muteBtn_.tooltipText   = "Mute (M)\nMute this track. The track will produce no audio output during playback.";
         soloBtn_.tooltipText   = "Solo (S)\nSolo this track. All other non-soloed tracks are muted. Hold Ctrl for latch-solo.";
+        polarityBtn_.tooltipText = "Polarity Invert (\xC3\x98)\nReverse this track\'s audio polarity on all output channels. Useful for checking multi-mic cancellation. This is not time or frequency-dependent phase alignment.";
         armBtn_.tooltipText    = "Record Arm (R)\nArm this track for recording. When armed, incoming audio or MIDI will be captured on record.";
         autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.";
         inputBtn_.tooltipText  = "Input Trim\nOpen the input trim panel to adjust gain, phase, and routing before the track.";
@@ -2594,6 +2604,10 @@ private:
                 soloParameter_->endGesture();
             }
             if (onSoloToggled) onSoloToggled(newState);
+        };
+        polarityBtn_.onClick = [this]
+        {
+            track_.setPolarityInverted(polarityBtn_.active);
         };
         armBtn_.onClick  = [this] { if (onArmToggled)  onArmToggled(armBtn_.active); };
         armBtn_.onRightClick = [this](const juce::MouseEvent& e)
@@ -2647,6 +2661,7 @@ inputBtn_.onClick = [this]
 
         addAndMakeVisible(muteBtn_);
         addAndMakeVisible(soloBtn_);
+        addAndMakeVisible(polarityBtn_);
         addAndMakeVisible(armBtn_);
         addAndMakeVisible(inputBtn_);
         addAndMakeVisible(preFaderBtn_);
@@ -3006,6 +3021,8 @@ inputBtn_.onClick = [this]
         muteBtn_.setBounds(muteSoloRow.removeFromLeft(msButtonW));
         muteSoloRow.removeFromLeft(msButtonGap);
         soloBtn_.setBounds(muteSoloRow);
+        polarityBtn_.setBounds({});
+        polarityBtn_.setVisible(false);
 
         // Automation mode button on master
         {
