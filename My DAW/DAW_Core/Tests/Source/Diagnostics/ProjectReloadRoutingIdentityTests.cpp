@@ -17,6 +17,8 @@
 #include <JuceHeader.h>
 #include "../../../Source/RoutingCore/RoutingGraph.h"
 #include "../../../Source/UtilityCore/Types.h"
+#include "../../../Source/TrackCore/Track.h"
+#include "../../../Source/Automation/AutomationParameterKeyCore.h"
 
 #include <set>
 
@@ -224,3 +226,83 @@ public:
 };
 
 ProjectReloadRestoredNodesIdentityStableTest projectReloadRestoredNodesIdentityStableTest;
+
+/**
+    Track deletion Undo cannot regenerate a TrackID. APEX automation, sends,
+    plugins and routing resolve keys by that identity, not by track name.
+    The production TrackManager restore path used to call createTrack()
+    (new ID) and Track::restoreState never modified that constructor ID.
+*/
+class UndoTrackIdentityPreservesAutomationKeysTest final : public juce::UnitTest
+{
+public:
+    UndoTrackIdentityPreservesAutomationKeysTest()
+        : UnitTest("ProjectReload.UndoTrackIdentityPreservesAutomationKeys",
+                   "ProjectReload") {}
+
+    void runTest() override
+    {
+        DAW::TrackManager tracks;
+        auto* original = tracks.createTrack("Undo Fader");
+        expect(original != nullptr, "source track created");
+        if (original == nullptr) return;
+
+        original->setVolume(0.42f);
+        const auto savedID = original->getID();
+        const auto savedState = original->getState();
+        const auto expectedAutomationKey =
+            apex::automation::AutomationParameterKeyRegistry::trackVolumeKey(savedID);
+
+        beginTest("Delete → Undo reconstructs the original stable TrackID");
+        expect(tracks.deleteTrack(savedID), "real track removed");
+        expect(tracks.getTrack(savedID) == nullptr, "old track no longer live");
+        auto* revived = tracks.recreateTrackFromState(savedState);
+        expect(revived != nullptr, "Undo recreated track");
+        if (revived == nullptr) return;
+        expectEquals(revived->getID(), savedID,
+                     "Undo must recover the original ID, not generate a fresh ID");
+        expect(tracks.getTrack(savedID) == revived,
+               "canonical track lookup finds revived identity");
+        expectWithinAbsoluteError(revived->getVolume(), 0.42f, 1.0e-6f,
+                                  "saved mixer fader state survived Undo");
+        expectEquals(
+            apex::automation::AutomationParameterKeyRegistry::trackVolumeKey(revived->getID()),
+            expectedAutomationKey, "original automation key still binds after Undo");
+
+        beginTest("recreating a live ID refuses duplicate track identity");
+        const auto beforeDuplicate = tracks.getNumTracks();
+        expect(tracks.recreateTrackFromState(savedState) == nullptr,
+               "duplicate undo rejected");
+        expectEquals(tracks.getNumTracks(), beforeDuplicate,
+                     "refused duplicate does not change track count");
+
+        beginTest("new track after Undo has unique identity");
+        auto* later = tracks.createTrack("Brand New Track");
+        expect(later != nullptr, "follow-up track created");
+        if (later != nullptr)
+            expect(later->getID() != savedID,
+                   "ID generator never collides with revived track");
+
+        beginTest("MIDI track Undo retains its saved identity and role");
+        auto* midi = tracks.createMidiTrack("Undo MIDI");
+        expect(midi != nullptr, "MIDI source created");
+        if (midi != nullptr)
+        {
+            const auto midiID = midi->getID();
+            const auto midiState = midi->getState();
+            expect(tracks.deleteTrack(midiID), "MIDI source removed");
+            auto* revivedMidi = tracks.recreateTrackFromState(midiState);
+            expect(revivedMidi != nullptr, "MIDI Undo recreated track");
+            if (revivedMidi != nullptr)
+            {
+                expectEquals(revivedMidi->getID(), midiID,
+                             "MIDI track identity restored");
+                expectEquals(static_cast<int>(revivedMidi->getRole()),
+                             static_cast<int>(DAW::TrackRole::MIDI),
+                             "MIDI track role retained");
+            }
+        }
+    }
+};
+static UndoTrackIdentityPreservesAutomationKeysTest
+    undoTrackIdentityPreservesAutomationKeysTest;
