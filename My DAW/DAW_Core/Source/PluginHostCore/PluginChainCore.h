@@ -9,6 +9,7 @@
 #include "../AutomationCore/AutomationSmootherCore.h"
 #include "../PluginScanCore/PluginScanAuditLogCore.h"
 #include "../PluginSafetyCore/PluginSafeLoadWrapperCore.h"
+#include "../PluginSafetyCore/PluginLoadRecoveryCore.h"
 #include "../PluginSandboxCore/PluginSandboxPreparationCore.h"
 #include "../PluginUICore/PluginUserFacingFailureMessageCore.h"
 #include "../Automation/AutomationSystemCore.h"
@@ -572,6 +573,9 @@ public:
                 + " format=\"" + desc.pluginFormatName + "\""
                 + " existingSlotCount=" + juce::String((int) slots_.size()));
 
+        // A fatal process crash during plugin create/prepare leaves a durable
+        // suspect marker for next launch; normal returns clear it via RAII.
+        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(desc, "plugin_chain_append");
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_append");
         auto instance = std::move(safeLoad.instance);
@@ -795,6 +799,7 @@ private:
                 + " plugin=\"" + desc.name + "\""
                 + " format=\"" + desc.pluginFormatName + "\"");
 
+        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(desc, "plugin_chain_load");
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_load");
         auto instance = std::move(safeLoad.instance);
