@@ -132,6 +132,22 @@ namespace apex::automation
             const ParameterID id = resolvePluginParam (proc, parameterIndex);
             if (id == kInvalidParameterID) return;
 
+            // A plugin editor writes its own JUCE parameter, bypassing the
+            // AutomationParameter setter. Without this mirror the timeline
+            // records the gesture but the automation atomic/UI stay stale.
+            // Do not call setValueFromPlugin(): it would enqueue a second
+            // ValueChange with a different producer timestamp.
+            if (auto parameter = registry.findRT (id))
+            {
+                // An APEX widget may have already captured this move as
+                // User and forwarded it to the plugin. Do not echo it back
+                // as a separate Plugin movement.
+                if (parameter->getLastSource() == ChangeSource::User
+                    && std::abs (parameter->getNormalizedValue() - newValue) < 1.0e-6f)
+                    return;
+                parameter->writeValue (newValue, ChangeSource::Plugin);
+            }
+
             AutomationGestureQueue::Event e;
             e.paramID         = id;
             e.kind            = AutomationGestureQueue::EventKind::ValueChange;
@@ -170,6 +186,13 @@ namespace apex::automation
                     }
                 }
             }
+            if (auto parameter = registry.findRT (id))
+            {
+                if (e.hasStartValue)
+                    parameter->writeValue (e.normalizedValue, ChangeSource::Plugin);
+                parameter->beginHostedPluginGesture (
+                    e.hasStartValue ? e.normalizedValue : parameter->getNormalizedValue());
+            }
             e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
@@ -184,6 +207,8 @@ namespace apex::automation
             e.paramID      = id;
             e.kind         = AutomationGestureQueue::EventKind::GestureEnd;
             e.source       = ChangeSource::Plugin;
+            if (auto parameter = registry.findRT (id))
+                parameter->endHostedPluginGesture();
             e.ppqAtCapture = clock.captureInputPPQ();
             queue.push (e);
         }
