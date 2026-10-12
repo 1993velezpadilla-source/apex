@@ -52,7 +52,11 @@ product with stable APEX parameter IDs and APEX UI language.
   scale parameters at ABI indices 343..347 (DSP and UI still need a full gate).
 - Rich output spectrum controls and production metering QA.
 - Undo/redo and A/B state comparison at plugin scope.
-- Copy/paste bands and preset exchange helpers.
+- [x] Native band copy/paste across APEX EQ instances via a GUI-thread
+  clipboard. Copies 14 normalized hosted band fields (including placement,
+  dynamics and detector filter), inserts into a new disabled slot without
+  mutating the source, and uses automation gestures. CI pending.
+- Preset exchange helpers and full parameter-state sharing across formats.
 - Piano-frequency overlay and expanded frequency labels.
 - Surround/immersive channel placement once the APEX host exposes those layouts.
 - Standalone VST3/CLAP/AU/AAX wrappers only if/when APEX product packaging requires
@@ -97,3 +101,12 @@ A behavioral-parity roadmap is not evidence of feature completion. Pro-Q 4's
 proprietary exact filter designs, spectral/dynamic matching algorithms and
 third-party cross-plugin instance control are not part of this code. Independent
 APEX implementation only: no FabFilter assets, internals, presets or UI cloning.
+
+## Native band clipboard acceptance (unmerged extension)
+
+- APEX COPY and PASTE remain at least 44px high on a 320px-wide phone.
+- Copies the selected enabled band; pastes into a new available slot without
+  replacing active bands. All per-band values go through existing hosted
+  parameter notifications; global detector settings are intentionally global.
+- Clipboard is in-process across APEX native EQ editors, not OS clipboard or
+  an interchange format. Test the full dynamic/placement/filter state roundtrip.
