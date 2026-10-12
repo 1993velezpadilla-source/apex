@@ -1025,11 +1025,11 @@ void ApplicationCore::checkAndShowRecoveryPromptIfNeeded(juce::Component* parent
             .withIconType(juce::MessageBoxIconType::WarningIcon)
             .withTitle("APEX Plugin Recovery")
             .withMessage(
-                "The previous session stopped while initializing a plugin.\\n\\n"
+                "The previous session stopped while initializing a plugin.\n\n"
                 "Possible plugin: " + suspect.name
-                + "\\nFormat: " + suspect.format
-                + "\\nStage: " + suspect.stage
-                + "\\n\\nAPEX cannot prove this plugin caused the crash. "
+                + "\nFormat: " + suspect.format
+                + "\nStage: " + suspect.stage
+                + "\n\nAPEX cannot prove this plugin caused the crash. "
                   "Open in Safe Mode to skip loading this component once "
                   "while preserving its saved settings and automation. "
                   "All other plugins will still be loaded normally.")
