@@ -3508,13 +3508,15 @@ public:
 
         beginTest("RT pan playback makes no heap allocations");
         modes.setMode(id, AutomationMode::Read);
+        float sum = 0.0f;
         {
             juce::UnitTestAllocationChecker checker(*this);
-            float sum = 0.0f;
             for (int i = 0; i < 300; ++i)
                 sum += play(1.0, true);
-            expectWithinAbsoluteError(sum, 0.0f, 1.0e-5f);
         }
+        // Assertions may allocate test-report Strings: never run them under
+        // the realtime allocation guard itself.
+        expectWithinAbsoluteError(sum, 0.0f, 1.0e-5f);
     }
 };
 static AutomationNativePanAudioPlaybackTests automationNativePanAudioPlaybackTests;
@@ -3595,13 +3597,13 @@ public:
 
         beginTest("RT mute evaluation performs no heap allocations");
         modes.setMode(id, AutomationMode::Read);
+        int mutedBlocks = 0;
         {
             juce::UnitTestAllocationChecker allocationGuard(*this);
-            int mutedBlocks = 0;
             for (int i = 0; i < 300; ++i)
                 mutedBlocks += play(2.0, true) ? 1 : 0;
-            expectEquals(mutedBlocks, 300);
         }
+        expectEquals(mutedBlocks, 300);
     }
 };
 static AutomationNativeMuteAudioPlaybackTests automationNativeMuteAudioPlaybackTests;
@@ -3681,13 +3683,13 @@ public:
         expect(!read(0.0, true).anyActive);
         beginTest("no heap allocations in Solo callback");
         modes.setMode(leaf, AutomationMode::Read);
+        int count = 0;
         {
             juce::UnitTestAllocationChecker checker(*this);
-            int count = 0;
             for (int i = 0; i < 200; ++i)
                 count += read(2.0, true).anyActive ? 1 : 0;
-            expectEquals(count, 200);
         }
+        expectEquals(count, 200);
     }
 };
 static AutomationNativeSoloAudioPlaybackTests automationNativeSoloAudioPlaybackTests;
