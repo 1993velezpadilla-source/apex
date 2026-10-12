@@ -1,11 +1,13 @@
 #include "ParametricEQTestUtils.h"
 #include "../../../Source/ParametricEQCore/ParametricEQProcessor.h"
+#include "../../../Source/ParametricEQCore/ParametricEQSpectralDynamicsCore.h"
 
 #include <array>
 #include <cmath>
 #include <limits>
 #include <set>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -57,6 +59,7 @@ public:
         testBypassContract();
         testOutputStageAndPhase9Abi();
         testRealtimeAllocation();
+        testSpectralEngineStandalone();
     }
 
 private:
@@ -469,6 +472,140 @@ private:
             scaled.getCurrentEngineForTesting().getMagnitudeDb (1000.0),
             3.0, 0.03,
             "50% gain scale must halve static EQ gain before coefficient design");
+    }
+
+
+    void testSpectralEngineStandalone()
+    {
+        beginTest ("standalone APEX spectral STFT: exact reported delay, "
+                   "neutral reconstruction and block independence");
+        constexpr int total = 16384;
+        const std::array<int, 4> blocks {{64, 128, 256, 512}};
+        for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        {
+            std::vector<float> source (total), output (total);
+            for (int i = 0; i < total; ++i)
+                source[static_cast<std::size_t> (i)] = static_cast<float> (
+                    0.2 * std::sin (2.0 * juce::MathConstants<double>::pi
+                        * 1000.0 * i / rate)
+                    + 0.07 * std::sin (2.0
+                        * juce::MathConstants<double>::pi * 4700.0
+                        * i / rate));
+            for (int block : blocks)
+            {
+                auto engine = std::make_unique<SpectralDynamicsCore>();
+                engine->prepare (rate);
+                std::array<SpectralDynamicsCore::Band, kMaxBands> bands {};
+                for (int offset = 0; offset < total; offset += block)
+                {
+                    const int samples = std::min (block, total - offset);
+                    std::copy (source.begin() + offset,
+                               source.begin() + offset + samples,
+                               output.begin() + offset);
+                    float* channels[] { output.data() + offset };
+                    engine->process (channels, 1, samples, bands);
+                }
+                double maxError = 0.0;
+                double preDelayPeak = 0.0;
+                for (int i = 0; i < total; ++i)
+                {
+                    expect (std::isfinite (output[static_cast<std::size_t> (i)]),
+                            "reconstructed audio must be finite");
+                    if (i < SpectralDynamicsCore::kLatencySamples)
+                        preDelayPeak = std::max (preDelayPeak, std::abs (
+                            static_cast<double> (output[
+                                static_cast<std::size_t> (i)])));
+                    else
+                        maxError = std::max (maxError, std::abs (
+                            static_cast<double> (output[
+                                static_cast<std::size_t> (i)])
+                            - source[static_cast<std::size_t> (
+                                i - SpectralDynamicsCore::kLatencySamples)]));
+                }
+                expect (preDelayPeak < 1.0e-7,
+                    "no pre-echo before fixed lookahead latency");
+                expect (maxError < 1.0e-4,
+                    "sqrt-Hann overlap/add unity reconstruction must "
+                    "match precisely for rate " + juce::String (rate)
+                    + " block " + juce::String (block));
+            }
+        }
+
+        beginTest ("selective spectral band attenuates an excited resonance, "
+                   "leaving an unrelated frequency essentially unchanged");
+        constexpr double rate = 48000.0;
+        constexpr int length = 32768;
+        std::vector<float> input (length), output (length);
+        for (int i = 0; i < length; ++i)
+        {
+            const double t = static_cast<double> (i) / rate;
+            input[static_cast<std::size_t> (i)] = static_cast<float> (
+                0.16 * std::sin (2.0 * juce::MathConstants<double>::pi
+                    * 1000.0 * t)
+                + 0.16 * std::sin (2.0 * juce::MathConstants<double>::pi
+                    * 5000.0 * t));
+        }
+        auto engine = std::make_unique<SpectralDynamicsCore>();
+        engine->prepare (rate);
+        std::array<SpectralDynamicsCore::Band, kMaxBands> bands {};
+        auto& selected = bands[0];
+        selected.enabled = true;
+        selected.shape = FilterShape::Bell;
+        selected.placement = ChannelPlacement::Stereo;
+        selected.frequencyHz = 1000.0;
+        selected.q = 10.0;
+        selected.density = 1.0;
+        selected.tilt = false;
+        selected.dynamic.enabled = true;
+        selected.dynamic.thresholdDb = -36.0;
+        selected.dynamic.rangeDb = 18.0;
+        selected.dynamic.attackSeconds = 0.002;
+        selected.dynamic.releaseSeconds = 0.03;
+        output = input;
+        for (int offset = 0; offset < length; offset += 128)
+        {
+            float* channels[] { output.data() + offset };
+            engine->process (channels, 1, std::min (128, length - offset), bands);
+        }
+        auto amplitude = [] (const std::vector<float>& audio, int start,
+                             int count, double hz)
+        {
+            double c = 0.0, s = 0.0;
+            for (int i = 0; i < count; ++i)
+            {
+                const double angle = 2.0
+                    * juce::MathConstants<double>::pi * hz * i / 48000.0;
+                const double value = audio[
+                    static_cast<std::size_t> (start + i)];
+                c += value * std::cos (angle);
+                s += value * std::sin (angle);
+            }
+            return (2.0 / count) * std::hypot (c, s);
+        };
+        constexpr int measure = 4800; // coherent DFT period for both tones
+        const double before1 = amplitude (input, 20000, measure, 1000.0);
+        const double after1 = amplitude (output, 20000
+            + SpectralDynamicsCore::kLatencySamples, measure, 1000.0);
+        const double before5 = amplitude (input, 20000, measure, 5000.0);
+        const double after5 = amplitude (output, 20000
+            + SpectralDynamicsCore::kLatencySamples, measure, 5000.0);
+        expect (after1 < before1 * 0.72,
+                "narrow spectral action must reduce triggered 1 kHz tone");
+        expect (std::abs (after5 / before5 - 1.0) < 0.06,
+                "unrelated 5 kHz tone must remain essentially intact");
+
+        beginTest ("spectral STFT guards nonfinite input and is usable in stereo");
+        std::array<float, 2048> l {}, r {};
+        l[0] = std::numeric_limits<float>::quiet_NaN();
+        r[9] = std::numeric_limits<float>::infinity();
+        float* stereo[] { l.data(), r.data() };
+        auto clean = std::make_unique<SpectralDynamicsCore>();
+        clean->prepare (48000.0);
+        clean->process (stereo, 2, static_cast<int> (l.size()), bands);
+        for (int i = 0; i < static_cast<int> (l.size()); ++i)
+            expect (std::isfinite (l[static_cast<std::size_t> (i)])
+                && std::isfinite (r[static_cast<std::size_t> (i)]),
+                "spectral engine must not publish nonfinite audio");
     }
 
     void testRealtimeAllocation()
