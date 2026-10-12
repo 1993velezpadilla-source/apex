@@ -24,8 +24,9 @@ public:
     struct Attempt
     {
         bool valid = false;
-        juce::String name, format, identifier, stage;
+        juce::String name, format, identifier, stage, trackId;
         int uniqueId = 0;
+        int slotIndex = -1;   // -1 when the producing chain had no slot identity
         juce::int64 startedUnixMs = 0;
     };
 
@@ -49,6 +50,8 @@ public:
             attempt.format = xml->getStringAttribute("format");
             attempt.identifier = xml->getStringAttribute("identifier");
             attempt.stage = xml->getStringAttribute("stage");
+            attempt.trackId = xml->getStringAttribute("trackId");
+            attempt.slotIndex = xml->getIntAttribute("slotIndex", -1);
             attempt.uniqueId = xml->getIntAttribute("uniqueId");
             attempt.startedUnixMs = xml->getStringAttribute("startedUnixMs").getLargeIntValue();
             attempt.valid = attempt.stage.isNotEmpty()
@@ -73,6 +76,8 @@ public:
         xml.setAttribute("format", attempt.format);
         xml.setAttribute("identifier", attempt.identifier);
         xml.setAttribute("stage", attempt.stage);
+        xml.setAttribute("trackId", attempt.trackId);
+        xml.setAttribute("slotIndex", attempt.slotIndex);
         xml.setAttribute("uniqueId", attempt.uniqueId);
         xml.setAttribute("startedUnixMs", juce::String(attempt.startedUnixMs));
 
@@ -100,11 +105,26 @@ public:
             && attempt.uniqueId == description.uniqueId;
     }
 
+    /** If the crashing load had a stable track/slot identity, never suppress
+        a different instance of the SAME VST3 component elsewhere in the
+        project. Older markers lacking the optional fields retain the
+        conservative component-level fallback (the user still opts in). */
+    static bool mayBeSameSlot(const Attempt& attempt,
+                              const juce::PluginDescription& description,
+                              const juce::String& trackId, int slotIndex)
+    {
+        return mayBeSamePlugin(attempt, description)
+            && (attempt.trackId.isEmpty() || attempt.trackId == trackId)
+            && (attempt.slotIndex < 0 || attempt.slotIndex == slotIndex);
+    }
+
     class ScopedAttempt final
     {
     public:
         ScopedAttempt(const juce::PluginDescription& desc,
-                      const juce::String& stage)
+                      const juce::String& stage,
+                      const juce::String& trackId = {},
+                      int slotIndex = -1)
         {
             // Reading the previous launch MUST precede our write.
             (void) PluginLoadRecoveryCore::getStartupSuspect();
@@ -114,6 +134,8 @@ public:
             marker.format = desc.pluginFormatName;
             marker.identifier = desc.fileOrIdentifier;
             marker.stage = stage;
+            marker.trackId = trackId;
+            marker.slotIndex = slotIndex;
             marker.uniqueId = desc.uniqueId;
             marker.startedUnixMs = juce::Time::currentTimeMillis();
             active = writePendingAttempt(getMarkerFile(), marker);
