@@ -3918,3 +3918,73 @@ public:
     }
 };
 static AutomationLegacyModeRestoreTests automationLegacyModeRestoreTests;
+
+/** A discrete parameter must NOT interpolate between automation points:
+ *  the atomic seen by mixer/plugin UI must transition at the breakpoint,
+ *  matching the native stepped Mute/Solo audio path.
+ */
+class AutomationSteppedEvaluatorTests final : public juce::UnitTest
+{
+public:
+    AutomationSteppedEvaluatorTests()
+        : juce::UnitTest("automation.evaluator-stepped-hold.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        constexpr ParameterID steppedID = 79181, continuousID = 79182;
+        ParameterRange steppedRange;
+        steppedRange.isStepped = true;
+        steppedRange.numSteps = 2;
+        auto* switchParam = registry.createParameter(
+            steppedID, "Discrete bypass", steppedRange);
+        auto* gainParam = registry.createParameter(
+            continuousID, "Continuous gain", {});
+        expect(switchParam != nullptr && gainParam != nullptr);
+        if (switchParam == nullptr || gainParam == nullptr) return;
+        modes.setMode(steppedID, AutomationMode::Read);
+        modes.setMode(continuousID, AutomationMode::Read);
+        const AutomationLane::PointVector points {
+            {0.0, 0.0f, CurveType::Smooth, 0.0f},
+            {4.0, 1.0f, CurveType::Linear, 0.0f}
+        };
+        lanes.getOrCreateLane(steppedID).replacePoints(points);
+        lanes.getOrCreateLane(continuousID).replacePoints(points);
+        AutomationEvaluator evaluator(registry, lanes, modes);
+
+        beginTest("stepped holds through a malformed Smooth segment");
+        evaluator.evaluateBlock(2.0, true);
+        expectWithinAbsoluteError(switchParam->getNormalizedValue(), 0.0f, 1.0e-6f);
+        expectWithinAbsoluteError(gainParam->getNormalizedValue(), 0.5f, 1.0e-6f);
+        evaluator.evaluateBlock(3.999, true);
+        expectWithinAbsoluteError(switchParam->getNormalizedValue(), 0.0f, 1.0e-6f);
+        evaluator.evaluateBlock(4.0, true);
+        expectWithinAbsoluteError(switchParam->getNormalizedValue(), 1.0f, 1.0e-6f);
+
+        beginTest("stopped transport and Off mode do not override user value");
+        switchParam->writeValue(0.0f, ChangeSource::User);
+        evaluator.evaluateBlock(4.0, false);
+        expectWithinAbsoluteError(switchParam->getNormalizedValue(), 0.0f, 1.0e-6f);
+        modes.setMode(steppedID, AutomationMode::Off);
+        evaluator.evaluateBlock(4.0, true);
+        expectWithinAbsoluteError(switchParam->getNormalizedValue(), 0.0f, 1.0e-6f);
+
+        beginTest("stepped evaluator stays allocation-free on audio callback");
+        modes.setMode(steppedID, AutomationMode::Read);
+        int heldReads = 0;
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            for (int i = 0; i < 256; ++i)
+            {
+                evaluator.evaluateBlock(2.0, true);
+                if (switchParam->getNormalizedValue() == 0.0f)
+                    ++heldReads;
+            }
+        }
+        expectEquals(heldReads, 256);
+    }
+};
+static AutomationSteppedEvaluatorTests automationSteppedEvaluatorTests;

@@ -72,7 +72,25 @@ namespace apex::automation
             auto snap = lane->getSnapshot();
             if (snap == nullptr || snap->empty()) return;
 
-            const float v = AutomationLane::evaluateAt (*snap, playheadPPQ);
+            // A stepped (enum/switch/boolean) control must retain its
+            // preceding value until the next breakpoint, even if a saved
+            // or imported lane incorrectly marks the segment Linear/Smooth.
+            // Interpolation here made the UI/plugin-facing atomic switch
+            // EARLIER than the direct mute/solo DSP path at the same PPQ.
+            float v;
+            if (p.getRange().isStepped)
+            {
+                const auto upper = std::upper_bound(
+                    snap->begin(), snap->end(), playheadPPQ,
+                    [] (double t, const Breakpoint& bp)
+                    {
+                        return t < bp.timePPQ;
+                    });
+                v = (upper == snap->begin()
+                         ? snap->front() : *(upper - 1)).normalizedValue;
+            }
+            else
+                v = AutomationLane::evaluateAt (*snap, playheadPPQ);
 
             // Avoid churning version counters on float-precision noise.
             const float current = p.getNormalizedValue();
