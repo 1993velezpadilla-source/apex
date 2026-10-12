@@ -30,6 +30,7 @@
 #include <cstring>
 #include <vector>
 #include <utility>
+#include <array>
 
 #if JUCE_WINDOWS
  #include <windows.h>
