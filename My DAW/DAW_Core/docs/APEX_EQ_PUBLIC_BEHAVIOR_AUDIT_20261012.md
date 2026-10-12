@@ -38,7 +38,7 @@ Primary public documentation:
 | PRE/POST analyzer + transient band audition | PRESENT | External analyzer, pitch identification, configurable resolution |
 | APEX Spectrum Grab peak preview | PRESENT ON THIS CHILD BRANCH | Windows CI + music test, not FabFilter's exact detector |
 | Copy/paste all per-band hosted settings | PRESENT ON THIS CHILD BRANCH | Windows CI + cross-session verification |
-| EQ Match with reference audio | MISSING | Capture temporal averaging, optional external/file ref, bounded fitting |
+| Guided EQ Match reference/current input using PRE analyzer | NEW ON CHILD BRANCH | 32 fresh snapshots per stage, median level normalization, bounded <=8 band fitting; no file, external instance or saved reference |
 | Cross-instance panel and collision analysis | MISSING | DAW track registry and immutable snapshots of instance graphs |
 | Cross-plugin instance control (Pro-C 3/Pro-DS/Pro-G) | MISSING | Native APEX multi-plugin host metadata and design contract |
 | Output gain / pan / polarity / auto gain / scale | PARAMETERS/DSP IN EQ BRANCH | Editor, true loudness compensation and meters |
@@ -77,7 +77,7 @@ Primary public documentation:
 
 ## Evidence status
 
-The child PR implements Spectrum Grab and native clipboard code/tests, but
+The child PR implements Spectrum Grab, native clipboard and guided two-stage\nEQ Match code/tests, but
 **no Windows CI or audio hardware GREEN evidence was available when this audit
 was written**. The owner must accept and merge the parent flagship branch
 before these changes can ship in an APEX installer. A 1:1 result, including all
