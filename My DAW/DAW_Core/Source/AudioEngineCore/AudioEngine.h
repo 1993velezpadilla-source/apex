@@ -2513,7 +2513,11 @@ private:
             if (edge.sourceNodeId != nodeMeta->id) continue;
             logExportRouteIfNeeded(logRoutesThisBlock, edge);
             if (!edge.active || edge.bypassed) continue;
-            if (edge.type == ConnectionType::Sidechain)
+            // PreSend is already emitted once from the pre-fader tap above.
+            // Including it here again caused the same send to be added
+            // a SECOND time post-fader (and muddied Ø/null tests).
+            if (edge.type == ConnectionType::PreSend
+                || edge.type == ConnectionType::Sidechain)
                 continue;
             if (!isStemProgrammeEdgeAllowed(edge)) continue;
 
