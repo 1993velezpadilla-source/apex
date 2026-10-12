@@ -347,8 +347,13 @@ namespace apex::automation
         {
             // Batch: suppress per-mutation publishes inside clear() and
             // getOrCreateLane(), then publish exactly once at the end.
-            ++publishBatchDepth_;
-            clear();
+            {
+                // ScopedValueSetter restores the previous nesting depth even if
+                // ValueTree conversion or a lane allocation throws. The last
+                // complete RT snapshot remains published on failure.
+                const juce::ScopedValueSetter<int> batchDepthGuard (
+                    publishBatchDepth_, publishBatchDepth_ + 1);
+                clear();
 
             if (state.isValid())
             {
@@ -397,7 +402,7 @@ namespace apex::automation
             }
             }
 
-            --publishBatchDepth_;
+            } // batchDepthGuard restores the previous depth before publication
             const juce::ScopedLock sl (mapLock);
             publishLocked();
         }

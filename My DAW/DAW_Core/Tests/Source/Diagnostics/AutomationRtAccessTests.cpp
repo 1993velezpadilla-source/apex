@@ -3730,3 +3730,55 @@ public:
     }
 };
 static AutomationNativeSoloAudioPlaybackTests automationNativeSoloAudioPlaybackTests;
+
+// A restore must publish one coherent map, release its batch suppression,
+// and leave previous RT snapshots alive until their readers finish.
+class AutomationLaneRestoreBatchTests final : public juce::UnitTest
+{
+public:
+    AutomationLaneRestoreBatchTests()
+        : juce::UnitTest("automation.lane-restore-batch-publication.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationLaneStore lanes;
+        constexpr ParameterID restoredID = 78121;
+        constexpr ParameterID subsequentID = 78122;
+        lanes.getOrCreateLane(restoredID).replacePoints({
+            {0.0, 0.2f, CurveType::Linear, 0.0f},
+            {1.0, 0.8f, CurveType::Linear, 0.0f}
+        });
+        const auto saved = lanes.getState();
+        const auto oldRTSnapshot = lanes.getLaneSnapshotRT();
+        lanes.clear();
+
+        beginTest("restore publishes once and preserves old RT snapshot lifetime");
+        const auto generationBefore = lanes.getChangeGeneration();
+        lanes.restoreState(saved);
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (generationBefore + 1));
+        const auto restored = lanes.findLaneRT(restoredID);
+        expect(restored != nullptr);
+        if (restored != nullptr)
+        {
+            const auto points = restored->getSnapshot();
+            expect(points != nullptr && points->size() == 2);
+        }
+        expect(oldRTSnapshot != nullptr &&
+               oldRTSnapshot->find(restoredID) != oldRTSnapshot->end());
+
+        beginTest("invalid legacy tree clears and subsequent mutations publish");
+        const auto beforeEmpty = lanes.getChangeGeneration();
+        lanes.restoreState(juce::ValueTree{});
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (beforeEmpty + 1));
+        expect(lanes.findLaneRT(restoredID) == nullptr);
+        const auto beforeNext = lanes.getChangeGeneration();
+        lanes.getOrCreateLane(subsequentID);
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (beforeNext + 1));
+        expect(lanes.findLaneRT(subsequentID) != nullptr);
+    }
+};
+static AutomationLaneRestoreBatchTests automationLaneRestoreBatchTests;
