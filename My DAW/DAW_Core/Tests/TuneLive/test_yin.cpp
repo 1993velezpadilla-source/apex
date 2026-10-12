@@ -9,7 +9,7 @@ int main() {
             APEX::TuneLive::PitchTracker tracker;
             tracker.prepare(sr);
             for (int i = 0; i < sr * 0.35; ++i)
-                tracker.push(0.40f * std::sin(6.283185307179586 * hz * i / sr));
+                tracker.push(static_cast<float>(0.40 * std::sin(6.283185307179586 * hz * i / sr)));
             const auto result = tracker.latest();
             if (!result.voiced || std::abs(result.hz - hz) > hz * 0.015) {
                 std::cerr << "FAIL: rate=" << sr << " f0=" << hz
