@@ -35,10 +35,10 @@ jobs:
           persist-credentials: false
       - name: Prepare pinned APEX test toolchain
         run: .\Scripts\prepare_ci.ps1
-      - name: Download SHA256-pinned, MIT-licensed third-party VST3 binaries
+      - name: Download 5 SHA256-pinned MIT VST3 categories (reverb/delay/EQ/compressor/chorus)
         run: .\Scripts\fetch_external_vst3.ps1
-      - name: Build and test real WetReverb + WetDelay in APEX host
-        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Name external-vst3.wet-effects-project-roundtrip.v1 -Seed 0xA9E12026
+      - name: Validate 5 real VST3 categories through generic APEX host
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category ExternalVST3 -Seed 0xA9E12026
       - name: Preserve real-plugin test evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,4 +1,4 @@
-# MIT third-party VST3 binaries for ephemeral CI only. No redistributing.
+# MIT open-source VST3 binaries for ephemeral CI only. Five effect categories; no redistributing.
 # Pinned to release-asset SHA256 published by GitHub. Never execute installers.
 [CmdletBinding()]
 param()
@@ -16,6 +16,23 @@ $assets = @(
         Name = 'WetDelay'
         Url = 'https://github.com/yonie/WetDelay/releases/download/v1.3.1/WetDelay-v1.3.1.zip'
         Sha256 = '35689b1072d3e5f65b791cddf0dcdbe0390f2ae16ae4f368aef8792d8c87b775'
+    },
+    # Three NON-reverb/non-delay processors; hashes are the publisher's
+    # exact GitHub release-asset SHA256 digests (checked 2026-10-12).
+    [pscustomobject]@{
+        Name = 'WetEQ'
+        Url = 'https://github.com/yonie/WetEQ/releases/download/v1.2.1/WetEQ-v1.2.1.zip'
+        Sha256 = '856c47c221ee07fbc25fcc481612de78e23b43dbb8e0bb96b555bc0cbedc244f'
+    },
+    [pscustomobject]@{
+        Name = 'WetCompressor'
+        Url = 'https://github.com/yonie/WetCompressor/releases/download/v1.1.1/WetCompressor-v1.1.1.zip'
+        Sha256 = '72b13d1b974ad2aefda4f7d7a85c496529a2c0f5519cd81764e6bb28569acd83'
+    },
+    [pscustomobject]@{
+        Name = 'WetChorus'
+        Url = 'https://github.com/yonie/WetChorus/releases/download/v1.0.1/WetChorus-v1.0.1.zip'
+        Sha256 = '19e821333b7047814cd463ba321fca37c6888b3abcb1449321ced2d30677eb43'
     }
 )
 foreach ($item in $assets) {
