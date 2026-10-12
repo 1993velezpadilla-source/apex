@@ -53,6 +53,12 @@ namespace apex::automation
                                      transportRolling);
         }
 
+        /** Offline bounce evaluates PPQ lanes without mutating the live transport clock. */
+        void onOfflineBlockStart (double exportPPQAtBlockStart) noexcept
+        {
+            evaluator.evaluateBlock (exportPPQAtBlockStart, true);
+        }
+
         // ----- Native parameter registration ----------------------------
 
         AutomationParameter* createNativeParameter (ParameterID    id,
