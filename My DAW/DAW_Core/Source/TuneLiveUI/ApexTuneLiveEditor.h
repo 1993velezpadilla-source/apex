@@ -120,14 +120,14 @@ public:
         g.setColour(juce::Colour::fromRGB(34,32,44));
         g.fillRoundedRectangle(juce::Rectangle<float>(18.0f,70.0f,r.getWidth()-36.0f,131.0f),13.0f);
         g.setColour(juce::Colour::fromRGB(242,190,126));
-        g.setFont(juce::Font(juce::FontOptions(27.0f,juce::Font::bold)));
+        g.setFont(juce::Font(juce::FontOptions(27.0f).withStyle("Bold")));
         g.drawText("APEX  /  TUNE LIVE",24,15,getWidth()-48,38,juce::Justification::centredLeft);
         g.setColour(juce::Colour::fromRGB(176,165,180));
         g.setFont(juce::Font(juce::FontOptions(12.0f)));
         g.drawText("NATIVE VOCAL CORRECTION  -  POWERED BY BUBBLEGUM ENGINE",
                    25,49,getWidth()-48,17,juce::Justification::centredLeft);
         g.setColour(juce::Colour::fromRGB(174,165,180));
-        g.setFont(juce::Font(juce::FontOptions(12.0f,juce::Font::bold)));
+        g.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
         g.drawText("TRACKED PITCH",40,84,150,18,juce::Justification::centredLeft);
         g.drawText("KEY",getWidth()-330,84,90,18,juce::Justification::centredLeft);
         g.drawText("SCALE",getWidth()-205,84,150,18,juce::Justification::centredLeft);
@@ -135,7 +135,7 @@ public:
         g.setColour(juce::Colour::fromRGB(39,36,48));
         g.fillRoundedRectangle(juce::Rectangle<float>(18.0f,211.0f,r.getWidth()-36.0f,202.0f),12.0f);
         g.setColour(juce::Colour::fromRGB(167,158,172));
-        g.setFont(juce::Font(juce::FontOptions(12.0f,juce::Font::bold)));
+        g.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
         g.drawText("MUSICAL CONTROL",36,225,getWidth()-72,18,juce::Justification::centredLeft);
         g.setColour(juce::Colour::fromRGB(113,105,126));
         g.drawHorizontalLine(424,22.0f,static_cast<float>(getWidth()-22));
