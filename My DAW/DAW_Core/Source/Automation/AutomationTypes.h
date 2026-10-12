@@ -32,6 +32,22 @@ namespace apex::automation
         Trim  = 5    // offset existing automation by the user's movement
     };
 
+    // The mixer mode button exposes all six automation modes.
+    // Keep its cycle explicit and testable (Trim must be reachable).
+    inline constexpr AutomationMode nextMixerAutomationMode (AutomationMode mode) noexcept
+    {
+        switch (mode)
+        {
+            case AutomationMode::Off:   return AutomationMode::Read;
+            case AutomationMode::Read:  return AutomationMode::Touch;
+            case AutomationMode::Touch: return AutomationMode::Latch;
+            case AutomationMode::Latch: return AutomationMode::Write;
+            case AutomationMode::Write: return AutomationMode::Trim;
+            case AutomationMode::Trim:  return AutomationMode::Off;
+            default:                    return AutomationMode::Off;
+        }
+    }
+
     // ----- Curve segment types --------------------------------------------
 
     enum class CurveType : std::uint8_t

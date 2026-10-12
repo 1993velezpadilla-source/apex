@@ -3298,3 +3298,44 @@ public:
 };
 static AutomationMixerStripRebindPersistenceTests
     automationMixerStripRebindPersistenceTests;
+
+/**
+    A visible mixer automation button must cycle through every mode and not
+    omit Trim. The button now uses the same pure policy as this test.
+*/
+class AutomationMixerModeCycleTests final : public juce::UnitTest
+{
+public:
+    AutomationMixerModeCycleTests()
+        : juce::UnitTest("automation.mixer-mode-cycle-includes-trim.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        beginTest("mode button reaches all six unique modes and wraps to Off");
+        constexpr std::array<AutomationMode, 6> expected = {
+            AutomationMode::Read, AutomationMode::Touch,
+            AutomationMode::Latch, AutomationMode::Write,
+            AutomationMode::Trim, AutomationMode::Off
+        };
+        auto current = AutomationMode::Off;
+        for (const auto next : expected)
+        {
+            current = nextMixerAutomationMode(current);
+            expectEquals(static_cast<int>(current), static_cast<int>(next),
+                         "mixer mode cycle follows documented order");
+        }
+        expectEquals(static_cast<int>(current),
+                     static_cast<int>(AutomationMode::Off),
+                     "full cycle returns to the initial OFF state");
+
+        beginTest("restored Touch and Trim modes advance from actual state");
+        expectEquals(static_cast<int>(
+                         nextMixerAutomationMode(AutomationMode::Touch)),
+                     static_cast<int>(AutomationMode::Latch));
+        expectEquals(static_cast<int>(
+                         nextMixerAutomationMode(AutomationMode::Trim)),
+                     static_cast<int>(AutomationMode::Off));
+    }
+};
+static AutomationMixerModeCycleTests automationMixerModeCycleTests;
