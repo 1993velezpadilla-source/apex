@@ -20,6 +20,7 @@
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4447,3 +4448,86 @@ public:
     }
 };
 static AutomationV2CurveTransformTests automationV2CurveTransformTests;
+
+
+class AutomationV2CurveMorphTests final : public juce::UnitTest
+{
+public:
+    AutomationV2CurveMorphTests()
+      : juce::UnitTest("automation.v2-curve-snapshot-morph.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationCurveMorphCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using DAW::AutomationLaneCore;
+        std::vector<AutomationPoint> left{
+            {0, 0.0f, AutomationCurveType::Hold, -0.5f},
+            {48000, 0.0f, AutomationCurveType::Smooth, 0.6f}};
+        std::vector<AutomationPoint> right{
+            {0, 1.0f, AutomationCurveType::Linear, 0.25f},
+            {24000, 1.0f, AutomationCurveType::Linear, 0.25f},
+            {48000, 1.0f, AutomationCurveType::Linear, 0.25f}};
+        std::vector<AutomationPoint> result;
+
+        beginTest("Blend 0 and 1 preserve exact source curves");
+        expect(AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, left, right, 0.0f, result));
+        expectEquals((int)result.size(), 2);
+        if (result.size() == 2)
+        {
+            expect(result[0].curveToNext == AutomationCurveType::Hold);
+            expectWithinAbsoluteError(result[1].tensionToNext, 0.6f, 0.00001f);
+        }
+        expect(AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, left, right, 1.0f, result));
+        expectEquals((int)result.size(), 3);
+        if (result.size() == 3)
+            expect(result[0].curveToNext == AutomationCurveType::Linear);
+
+        beginTest("Midpoint blend is bounded and samples distinct curve timestamps");
+        expect(AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, left, right, 0.5f, result));
+        expect(result.size() > 3);
+        expect(result.size() <= AutomationCurveMorphCore::maxOutputKnots);
+        for (size_t i = 0; i < result.size(); ++i)
+        {
+            expect(std::isfinite(result[i].value));
+            expectWithinAbsoluteError(result[i].value, 0.5f, 0.00001f);
+            if (i > 0)
+                expect(result[i].timeSamples > result[i - 1].timeSamples);
+        }
+
+        beginTest("Negative, NaN, unordered and empty curves never overwrite output");
+        const auto savedSize = result.size();
+        expect(!AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, left, right, -0.1f, result));
+        expect(!AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, left, right,
+            std::numeric_limits<float>::quiet_NaN(), result));
+        expect(!AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, {}, right, 0.5f, result));
+        auto unordered = left;
+        unordered.front().timeSamples = 55000;
+        expect(!AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackVolumeParameterId, unordered, right, 0.5f, result));
+        expectEquals((int)result.size(), (int)savedSize);
+
+        beginTest("Pan morph remains in bipolar range and reopens with correct points");
+        std::vector<AutomationPoint> panA{{0, -1.0f}, {48000, -1.0f}};
+        std::vector<AutomationPoint> panB{{0, 1.0f}, {48000, 1.0f}};
+        expect(AutomationCurveMorphCore::blend(
+            AutomationLaneCore::trackPanParameterId, panA, panB, 0.5f, result));
+        for (const auto& pt : result)
+            expectWithinAbsoluteError(pt.value, 0.0f, 0.00001f);
+
+        AutomationLaneCore playback("morph-track", AutomationLaneCore::trackPanParameterId);
+        playback.points = result;
+        playback.sortAndResolveDuplicates();
+        AutomationLaneCore opened("morph-track", AutomationLaneCore::trackPanParameterId);
+        opened.restoreState(playback.getState());
+        expectEquals(opened.getNumPoints(), playback.getNumPoints());
+    }
+};
+static AutomationV2CurveMorphTests automationV2CurveMorphTests;
