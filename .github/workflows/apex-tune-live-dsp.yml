@@ -1,0 +1,32 @@
+name: Tune Live portable DSP regression
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - '.github/workflows/apex-tune-live-dsp.yml'
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+  workflow_dispatch:
+
+jobs:
+  gcc-ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with C++17 sanitizers and warnings as errors
+        shell: bash
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp" -o tune_live_yin_test
+          ./tune_live_yin_test
+  msvc-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Compile portable pitch tracker on MSVC
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_yin_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp"
+          tune_live_yin_test.exe
