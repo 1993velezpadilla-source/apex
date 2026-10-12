@@ -2493,6 +2493,109 @@ public:
                             categories[i] + " automation target did not survive reopening");
                 }
             }
+        // Beyond parameter state/preset round-tripping, verify the plugin's
+        // own editor gesture actually reaches the APEX recorder and evaluator.
+        // IDs, control names, ranges and categories are NOT hard-coded in the
+        // automation production path; indices were discovered above.
+        beginTest("VST3 native editor gestures -> Touch lane -> PPQ evaluator (3 categories)");
+        {
+            using namespace apex::automation;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arm;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            AutomationGestureBridge bridge(registry, *queue, clock);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arm);
+            AutomationEvaluator evaluator(registry, lanes, modes);
+            AutomationParameter* mirrors[3] = {nullptr, nullptr, nullptr};
+            const ParameterID ids[3] = {92011u, 92012u, 92013u};
+            float expectedRecorded[3] = {};
+            const double movePPQs[3] = {1.5, 2.0, 2.5};
+            arm.setRecordArmed(true);
+
+            for (int i = 0; i < 3; ++i)
+            {
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                ParameterRange range;
+                range.defaultValue = pluginParam->getValue();
+                const int steps = pluginParam->getNumSteps();
+                range.isStepped = steps > 1 && steps <= 1000;
+                range.numSteps = range.isStepped ? steps : 0;
+                mirrors[i] = registry.createParameter(
+                    ids[i], categories[i] + " hosted control", range,
+                    ParameterScope::Plugin, static_cast<PluginInstanceID>(i + 1));
+                expect(mirrors[i] != nullptr);
+                if (mirrors[i] == nullptr) return;
+                mirrors[i]->bindToPluginParameter(pluginParam);
+                bridge.attachToPlugin(*processors[i], {{indices[i], ids[i]}});
+                modes.setMode(ids[i], AutomationMode::Touch);
+                lanes.getOrCreateLane(ids[i]).replacePoints({
+                    {0.0, 0.1f, CurveType::Linear, 0.0f},
+                    {4.0, 0.5f, CurveType::Linear, 0.0f},
+                    {8.0, 0.9f, CurveType::Linear, 0.0f}
+                });
+            }
+
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+            for (int i = 0; i < 3; ++i)
+            {
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                const float previous = pluginParam->getValue();
+                const float requested = previous > 0.5f ? 0.1f : 0.9f;
+                const int steps = pluginParam->getNumSteps();
+                const float target = steps > 1 && steps <= 1000
+                    ? std::round(requested * float(steps - 1)) / float(steps - 1)
+                    : requested;
+
+                clock.publishFromAudioThread(movePPQs[i] - 0.1, 0.001, true);
+                pluginParam->beginChangeGesture();
+                expect(mirrors[i]->isGestureActive(),
+                       categories[i] + " plugin begin must suppress Touch read");
+                clock.publishFromAudioThread(movePPQs[i], 0.001, true);
+                pluginParam->setValueNotifyingHost(target);
+                expectedRecorded[i] = pluginParam->getValue();
+                expectWithinAbsoluteError(mirrors[i]->getNormalizedValue(),
+                    expectedRecorded[i], 0.02f,
+                    categories[i] + " plugin move must update APEX atomic");
+                evaluator.evaluateBlock(movePPQs[i], true);
+                expectWithinAbsoluteError(mirrors[i]->getNormalizedValue(),
+                    expectedRecorded[i], 0.02f,
+                    categories[i] + " Touch playback must not fight plugin editor");
+                clock.publishFromAudioThread(movePPQs[i] + 0.1, 0.001, true);
+                pluginParam->endChangeGesture();
+                expect(!mirrors[i]->isGestureActive(),
+                       categories[i] + " plugin end must release Touch");
+
+                recorder.drainForTests();
+                const auto* lane = lanes.findLane(ids[i]);
+                expect(lane != nullptr, categories[i] + " must create a Touch lane");
+                if (lane == nullptr) continue;
+                const auto snap = lane->getSnapshot();
+                expect(snap != nullptr && !snap->empty(),
+                       categories[i] + " must record plugin PPQ movement");
+                if (snap == nullptr || snap->empty()) continue;
+                expectWithinAbsoluteError(
+                    AutomationLane::evaluateAt(*snap, movePPQs[i]),
+                    expectedRecorded[i], 0.03f,
+                    categories[i] + " Touch sample must survive lane recording");
+                // The audio evaluator reads the actual committed PPQ lane,
+                // not a copied plugin knob value or hard-coded effect name.
+                mirrors[i]->writeValue(0.0f, ChangeSource::Programmatic);
+                evaluator.evaluateBlock(movePPQs[i], true);
+                expectWithinAbsoluteError(
+                    mirrors[i]->getNormalizedValue(), expectedRecorded[i], 0.03f,
+                    categories[i] + " committed lane must drive APEX playback atomic");
+            }
+
+            for (int i = 0; i < 3; ++i)
+                bridge.detachFromPlugin(*processors[i]);
+            // This gate proves editor capture and PPQ evaluator atomics, not
+            // sample-accurate VST3 IParameterChanges or hardware audio E2E.
+        }
+
         chain.releaseResources();
         missing.releaseResources();
         reopened.releaseResources();
