@@ -134,16 +134,16 @@ public:
                     voicedTarget_ = f0.voiced ? 1.0f : 0.0f;
                 }
                 voicedMix_ += (voicedTarget_ - voicedMix_) * static_cast<float>(1.0 / (rate_*0.008 + 1.0));
+                // Advance common stereo wet ramp once per sample (not once per channel).
+                const float wetTarget = bypass ? 0.0f : mix;
+                manualWetMix_ += (wetTarget - manualWetMix_)
+                    * static_cast<float>(1.0 / (rate_*0.008 + 1.0));
+                const float wetAmount = manualWetMix_ * voicedMix_;
                 for (int ch=0; ch<channels; ++ch) {
                     const float dryInput = in[ch][i];
                     float* delaySamples = delay_.getWritePointer(ch);
                     delaySamples[delayPos_] = dryInput;
                     const float dry = latency_ == 0 ? dryInput : delaySamples[(delayPos_+1)%delayLen];
-                    // 8ms sample ramp on bypass/mix avoids hard-cut clicks.
-                    const float wetTarget = bypass ? 0.0f : mix;
-                    manualWetMix_ += (wetTarget - manualWetMix_)
-                        * static_cast<float>(1.0 / (rate_*0.008 + 1.0));
-                    const float wetAmount = manualWetMix_ * voicedMix_;
                     buffer.getWritePointer(ch)[offset+i] = dry*(1.0f-wetAmount) + out[ch][i]*wetAmount;
                 }
                 delayPos_ = (delayPos_+1)%delayLen;
