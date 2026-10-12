@@ -34,6 +34,50 @@ APEX. No proprietary Antares/Auto-Tune code, binaries, or presets are copied.
   chunks. The generic editor is accessible, but a dedicated final UI has
   **not** been implemented.
 
+## Live insert monitoring (code-path audit)
+
+The production `AudioEngine::processTrackNodeExt` adds eligible live hardware
+input into the track buffer **before** invoking
+`chain.processBlockWithAutomation`. Therefore, when APEX Native Tune Live is
+present as an insert on a monitored track, its processing sits directly in
+the monitored voice route, not solely in a post-recording clip-render step.
+
+Monitoring choices in `AudioEngine::shouldMonitorLiveInputForTrack`:
+- **On**: track hears hardware input through its normal plugin chain.
+- **Auto**: requires armed track and recording (or stopped transport).
+- **Off**: no live mic through that track's insert chain.
+
+**Hardware note**: with Apollo Console/UAD direct monitor still audible at the
+same time, users may hear both Console's dry/DSP vocal and the APEX delayed
+insert path. These two paths are different latency domains and should not be
+judged as one effect. For APEX Tone Live monitoring, compare using headphones
+and ONE monitoring path at a time; avoid monitoring-loop feedback. Keep UAD
+DSP monitoring as an independent user choice, never replace it automatically.
+An insert is not equivalent to Apollo's near-zero-latency hardware monitoring.
+
+## Sound-first acceptance target (producer beta)
+
+A reference worth studying is **Vocal Tune PRO** by Davy Wentzler, which
+publishes live key/scale, retune amount, retune speed, and delayed/ramped
+artificial vibrato controls. We are implementing original DSP and APEX UI,
+not copying code or trade dress.
+
+**Natural mode should be the default.** Prove stable musical pitch under
+small vibrato (no staircase/wobble), preserve vocal envelope and brightness,
+keep consonants/breaths intelligible, and avoid octave-jump glitches. Full
+wet correction should work during live monitoring from a mono microphone,
+and bypass should not change output timing. Formant compensation is
+implemented as an optional Signalsmith feature, but real voice listening
+tests have **not** certified its transparency. Pitch target hysteresis and
+Humanize now reduce ping-pong and overcorrecting natural micro-inflections.
+
+The actual JUCE processor delegates to the **same DspCore** exercised by
+portable wet-audio tests, rather than a duplicated simulation of tuning.
+Acceptance requires actual wet audio: detuned A4 settles within 18 cents;
+bypass preserves the input F0, and no NaN/Inf reaches the output. This synthetic
+test does not prove musical quality; human evaluation with dry vocal samples
+and Apollo monitoring remains necessary.
+
 ## Evidence / current limits
 
 `Tests/TuneLive/test_yin.cpp` is a **portable unit** checking 12 sinusoidal
