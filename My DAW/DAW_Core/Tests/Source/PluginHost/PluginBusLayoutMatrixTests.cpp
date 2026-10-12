@@ -1213,6 +1213,7 @@ public:
         testManualValuesAreAuthoritative();
         testPassiveMirrorDoesNotCreateRecordingGesture();
         testTouchGestureOverridesLiveDsp();
+        testPluginGestureRecordsAndAudiblyPlaysBack();
         testDiscreteParameterSwitchesAtBlockBoundary();
         testDiscreteApexPpqLanesHoldUntilExactKnot();
         testReorderKeepsInstanceValues();
@@ -1503,6 +1504,108 @@ private:
                 "real DSP switches only at PPQ " + juce::String(probe.ppq));
         }
         lanes.removeLane(id);
+    }
+
+    void testPluginGestureRecordsAndAudiblyPlaysBack()
+    {
+        beginTest("hosted plugin editor Touch -> 90Hz recorder -> PPQ lane -> audible DSP");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& recorder = apex::automation::AutomationRecorder::getInstance();
+        auto& clock = system.getClock();
+        auto& lanes = system.getLaneStore();
+        const juce::String trackId = "apex-inprocess-touch-to-dsp-roundtrip-20261012";
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        probe->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false, "hosted plugin exists"); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "production host mapped a real plugin parameter");
+            return;
+        }
+        auto* mirrored = system.getRegistry().find(id);
+        expect(mirrored != nullptr && mirrored->getBoundPluginParameter() == parameter,
+               "native VST3 callback and chain DSP resolve the same parameter identity");
+        if (mirrored == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.2f, Curve::Hold, 0.0f},
+            {4.0, 0.2f, Curve::Hold, 0.0f}
+        });
+        system.setMode(id, Mode::Touch);
+        system.armRecording(true);
+        clock.publishFromAudioThread(1.0, 1.0 / 24000.0, true);
+        recorder.drainForTests(); // Explicitly fence Play/arm changes BEFORE gesture.
+
+        clock.publishFromAudioThread(1.1, 1.0 / 24000.0, true);
+        parameter->beginChangeGesture();
+        clock.publishFromAudioThread(1.25, 1.0 / 24000.0, true);
+        parameter->setValueNotifyingHost(0.8f);
+        clock.publishFromAudioThread(1.5, 1.0 / 24000.0, true);
+        parameter->setValueNotifyingHost(0.3f);
+        clock.publishFromAudioThread(1.75, 1.0 / 24000.0, true);
+        parameter->endChangeGesture();
+        expect(!mirrored->isGestureActive(), "native Touch gesture released");
+        recorder.drainForTests();
+
+        const auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "native editor movement committed to lane");
+        const auto snap = lane != nullptr ? lane->getSnapshot() : nullptr;
+        expect(snap != nullptr && !snap->empty(), "committed PPQ automation exists");
+        if (snap != nullptr && !snap->empty())
+        {
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 1.25),
+                0.8f, 0.005f, "first native plugin move captured at exact PPQ");
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 1.5),
+                0.3f, 0.005f, "second native plugin move captured at exact PPQ");
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 2.0),
+                0.2f, 0.005f, "Touch rejoined original curve after gesture release");
+        }
+
+        // Disable capture, then exercise actual real-time audio processing.
+        // No unit-test-only setter is used for the plugin's playback value:
+        // the complete production PluginChainCore resolves the recorded lane.
+        system.armRecording(false);
+        recorder.drainForTests();
+        juce::AudioBuffer<float> audio(2, 128);
+        auto renderAtPPQ = [&](double ppq)
+        {
+            const int64_t sample = static_cast<int64_t>(ppq * 24000.0);
+            system.onAudioBlockStart(ppq, 1.0 / 24000.0, true);
+            for (int block = 0; block < 96; ++block)
+            {
+                chain.applyAutomationAtSample(trackId, nullptr, sample, kRate, 120.0, 128);
+                fillTonePair(audio, 128, 0.5f, 0.5f);
+                chain.processBlock(audio, 128);
+            }
+            return audio.getSample(0, 127);
+        };
+        expectWithinAbsoluteError(renderAtPPQ(1.25), 0.4f, 0.005f,
+            "recorded plugin Touch 0.8 yields 0.4 audio sample");
+        expectWithinAbsoluteError(renderAtPPQ(2.0), 0.1f, 0.005f,
+            "released Touch returns to original 0.2 lane in audible DSP");
+
+        clock.publishFromAudioThread(0.0, 1.0 / 24000.0, false);
+        recorder.drainForTests();
+        system.armRecording(false);
+        recorder.drainForTests();
+        lanes.removeLane(id);
+        system.setMode(id, Mode::Read);
     }
 
     void testReorderKeepsInstanceValues()
