@@ -3988,3 +3988,117 @@ public:
     }
 };
 static AutomationSteppedEvaluatorTests automationSteppedEvaluatorTests;
+
+
+/**
+    Final UI-to-DSP wiring gate (not a mock button policy):
+    a real JUCE Slider + production SliderAutomationAttachment produces
+    user changes, the 90Hz recorder writes PPQ knots, the audio evaluator
+    replays them in Read, and the 60Hz dispatcher changes the visible slider
+    WITHOUT creating a second user gesture/phantom Write.
+    Uses deterministic clock/dispatcher ticks, not wall-clock sleeps.
+*/
+class AutomationGuiSliderRecordReplayTests final : public juce::UnitTest
+{
+public:
+    AutomationGuiSliderRecordReplayTests()
+        : juce::UnitTest("automation.gui-slider-write-replay-dispatch.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        constexpr ParameterID id = 79963;
+
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        AutomationClock clock;
+        AutomationTransportState armed;
+        auto queue = std::make_unique<AutomationGestureQueue>();
+
+        auto* parameter = registry.createParameter(
+            id, "Real JUCE mixer fader", ParameterRange{});
+        expect(parameter != nullptr);
+        if (parameter == nullptr) return;
+
+        modes.setMode(id, AutomationMode::Write);
+        armed.setRecordArmed(true);
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.15f, CurveType::Linear, 0.0f},
+            {8.0, 0.15f, CurveType::Linear, 0.0f}
+        });
+
+        AutomationGestureBridge bridge(registry, *queue, clock);
+        bridge.attachToParameter(*parameter);
+        AutomationRecorder recorder(registry, lanes, modes, *queue, clock, armed);
+        AutomationEvaluator evaluator(registry, lanes, modes);
+        AutomationUIDispatcher dispatcher(registry);
+        dispatcher.pause();
+
+        juce::Slider fader;
+        fader.setSliderStyle(juce::Slider::LinearHorizontal);
+        fader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+
+        {
+            SliderAutomationAttachment attachment(*parameter, fader);
+
+            beginTest("visible JUCE control records PPQ Write movements");
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+
+            clock.publishFromAudioThread(1.25, 0.001, true);
+            fader.setValue(0.70, juce::sendNotificationSync);
+            expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.70f,
+                                      1.0e-5f, "slider event reaches parameter immediately");
+
+            clock.publishFromAudioThread(1.50, 0.001, true);
+            fader.setValue(0.35, juce::sendNotificationSync);
+            expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.35f,
+                                      1.0e-5f, "second movement is not coalesced");
+
+            recorder.drainForTests();
+            expect(modes.latchHeldRT(id), "Write keeps the last user value until Stop");
+            clock.publishFromAudioThread(2.0, 0.001, false);
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Stop ends Write hold");
+
+            auto lane = lanes.findLane(id);
+            expect(lane != nullptr, "GUI movements must create a committed lane");
+            if (lane == nullptr) return;
+            auto points = lane->getSnapshot();
+            expect(points != nullptr && !points->empty(), "recorded lane has breakpoints");
+            if (points == nullptr || points->empty()) return;
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 1.25),
+                                      0.70f, 0.02f, "first GUI move recorded at producer PPQ");
+            expectWithinAbsoluteError(AutomationLane::evaluateAt(*points, 1.50),
+                                      0.35f, 0.02f, "second GUI move recorded at producer PPQ");
+
+            beginTest("Read automation moves the actual slider without feedback Write");
+            modes.setMode(id, AutomationMode::Read);
+            parameter->setValueProgrammatic(0.02f);
+            dispatcher.dispatchOnceForTests();
+            expectWithinAbsoluteError(static_cast<float>(fader.getValue()),
+                                      0.02f, 1.0e-5f, "dispatcher initializes slider");
+
+            evaluator.evaluateBlock(1.25, true);
+            dispatcher.dispatchOnceForTests();
+            expectWithinAbsoluteError(static_cast<float>(fader.getValue()),
+                                      parameter->getNormalizedValue(), 1.0e-5f,
+                                      "DSP Read update propagated to visible JUCE slider");
+            expectWithinAbsoluteError(static_cast<float>(fader.getValue()),
+                                      AutomationLane::evaluateAt(*points, 1.25),
+                                      0.02f, "displayed value matches the persisted lane");
+
+            AutomationGestureQueue::Event unwanted;
+            expect(!queue->pop(unwanted),
+                   "automated UI redraw cannot generate user/plugin Write events");
+            dispatcher.dispatchOnceForTests();
+            expect(!queue->pop(unwanted),
+                   "no duplicate events on second unchanged 60Hz dispatcher tick");
+        }
+
+        bridge.detachFromParameter(id);
+    }
+};
+static AutomationGuiSliderRecordReplayTests automationGuiSliderRecordReplayTests;
