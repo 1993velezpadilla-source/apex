@@ -9,6 +9,7 @@
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
 
 namespace DAW {
 
@@ -1172,6 +1173,42 @@ private:
             addLfoItem("Square · 1 bar", AutomationMusicalLfoCore::Shape::Square);
             addLfoItem("Saw · 1 bar", AutomationMusicalLfoCore::Shape::Saw);
             menu.addSubMenu("Generate 1-Bar LFO Curve (Undoable)", lfoMenu);
+        }
+
+        if (isDrawingEnabled() && AutomationCurveTransformCore::supports(parameterId_))
+        {
+            juce::PopupMenu transformations;
+            const auto addTransform = [this, &transformations](
+                const juce::String& label, AutomationCurveTransformCore::Operation op)
+            {
+                transformations.addItem(label, [this, op]()
+                {
+                    auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                    if (!lane.isEnabled() || lane.points.empty())
+                        return;
+
+                    std::vector<AutomationPoint> transformed;
+                    if (!AutomationCurveTransformCore::transform(parameterId_, op, lane.points,
+                            sampleRate_, tempoBpm_, transformed))
+                        return;
+
+                    const auto before = lane.getState();
+                    lane.points = std::move(transformed);
+                    lane.sortAndResolveDuplicates();
+                    undoManager_.doAction(std::make_unique<MovePointAction>(
+                        helper_, trackId_, parameterId_, before, lane.getState()));
+                    syncApexLaneFromCoreLane();
+                    helper_.publishSnapshot();
+                    selectedPointIndex_ = -1;
+                    invalidateCurvePath();
+                    repaint();
+                });
+            };
+            addTransform("Invert Values", AutomationCurveTransformCore::Operation::InvertValues);
+            addTransform("Compress Levels 50%", AutomationCurveTransformCore::Operation::CompressHalf);
+            addTransform("Expand Levels 200%", AutomationCurveTransformCore::Operation::ExpandDouble);
+            addTransform("Shift Right 1 Beat", AutomationCurveTransformCore::Operation::ShiftRightBeat);
+            menu.addSubMenu("Transform Entire Curve (Undoable)", transformations);
         }
 
         menu.showMenuAsync(
