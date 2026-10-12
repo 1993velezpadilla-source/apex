@@ -49,7 +49,7 @@ LONG CALLBACK PluginCrashGuardCore::apexPluginCrashVEH(PEXCEPTION_POINTERS exInf
     crashLog += "Faulting instruction: 0x" + juce::String::toHexString((juce::int64)faultAddr) + "\n";
     crashLog += "Access address: 0x" + juce::String::toHexString((juce::int64)accessAddr) + "\n";
     crashLog += "Thread ID: " + juce::String((int)GetCurrentThreadId()) + "\n";
-    crashLog += "\nThe DAW will close. Your project has been saved to the crash recovery file.\n";
+    crashLog += "\nAPEX recorded a diagnostic crash report. Project recovery has NOT been verified.\n";
 
     // Determine crash log path
     auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
