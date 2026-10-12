@@ -116,6 +116,14 @@ public:
 
         registerAdditionalNativeAutomationParameters();
 
+        // Rebuilding a strip must reflect the project's saved mode instead
+        // of falsely displaying OFF while the fader is still in Touch/Read.
+        // The volume parameter is the track-wide mode indicator authority.
+        const auto& savedModes = apex::automation::AutomationModeState::getInstance();
+        currentAutoMode_ = volumeParameter_ != nullptr
+            ? savedModes.getMode (volumeParameter_->getID())
+            : savedModes.getGlobalDefaultMode();
+
         initChildren();
     }
 
@@ -1605,16 +1613,7 @@ private:
 
     static apex::automation::AutomationMode nextAutoMode (apex::automation::AutomationMode m) noexcept
     {
-        using M = apex::automation::AutomationMode;
-        switch (m)
-        {
-            case M::Off:   return M::Read;
-            case M::Read:  return M::Touch;
-            case M::Touch: return M::Latch;
-            case M::Latch: return M::Write;
-            case M::Write: return M::Off;
-            default:       return M::Off;
-        }
+        return apex::automation::nextMixerAutomationMode(m);
     }
     // ===== End Phase 1C ===================================================
 
@@ -2563,7 +2562,7 @@ private:
         muteBtn_.tooltipText   = "Mute (M)\nMute this track. The track will produce no audio output during playback.";
         soloBtn_.tooltipText   = "Solo (S)\nSolo this track. All other non-soloed tracks are muted. Hold Ctrl for latch-solo.";
         armBtn_.tooltipText    = "Record Arm (R)\nArm this track for recording. When armed, incoming audio or MIDI will be captured on record.";
-        autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.";
+        autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write -> Trim.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.\nTrim: offsets the existing automation while dragging.";
         inputBtn_.tooltipText  = "Input Trim\nOpen the input trim panel to adjust gain, phase, and routing before the track.";
         preFaderBtn_.tooltipText = "Send Pre/Post-Fader\nShows the pre/post-fader state of sends leaving this track.\n- = no sends, POST = all post-fader, PRE = all pre-fader, MIX = mixed.\nClick to toggle (per-target menu when multiple sends exist).";
         trackLensBtn_.tooltipText = "Track Lens\nToggle the track lens view for advanced clip inspection.";
@@ -2624,7 +2623,12 @@ private:
         };
         autoModeBtn_.onClick = [this]
         {
-            currentAutoMode_ = nextAutoMode (currentAutoMode_);
+            // Mode may have changed via session restore or another control.
+            // Advance from authoritative state, not a stale display cache.
+            const auto liveMode = volumeParameter_ != nullptr
+                ? apex::automation::AutomationModeState::getInstance().getMode (volumeParameter_->getID())
+                : currentAutoMode_;
+            currentAutoMode_ = nextAutoMode (liveMode);
             autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
             autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
             broadcastModeToAllTrackParameters (currentAutoMode_);
