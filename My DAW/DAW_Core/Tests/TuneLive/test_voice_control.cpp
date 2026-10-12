@@ -23,12 +23,42 @@ int main() {
     assert(backNear.targetMidi==62); // hysteresis on downward crossing
     const auto backFar=tune.update(pitch(60.60f),natural);
     assert(backFar.targetMidi==60);
+    // Humanize is a sustained-note behaviour: establish the note centre,
+    // then add a quick inflection. A one-frame note onset is fully corrected.
     tune.reset();
+    for (int i=0; i<100; ++i) tune.update(pitch(60.0f),natural);
     const auto robot=tune.update(pitch(60.25f),natural);
     natural.humanize=1.0f;
     tune.reset();
+    for (int i=0; i<100; ++i) tune.update(pitch(60.0f),natural);
     const auto expressive=tune.update(pitch(60.25f),natural);
-    assert(std::abs(expressive.shiftSemitones) < std::abs(robot.shiftSemitones));
+    assert(std::abs(expressive.shiftSemitones) < std::abs(robot.shiftSemitones)*0.20f);
+    // 5Hz human vibrato, +/-25 cents: a natural correction must preserve
+    // at least 60% of the expressive variation, while robotic correction
+    // should fully target the musical centre.
+    auto vibratoRms = [](float humanize) {
+        VoiceControl vocal;
+        VoiceSettings p{};
+        p.root=0; p.scale=1; p.correction=1.0f;
+        p.humanize=humanize;
+        p.hopMilliseconds=5.33333f;
+        double squared=0.0;
+        int n=0;
+        for(int i=0;i<400;++i) {
+            const double time=i*p.hopMilliseconds/1000.0;
+            const float sung=60.0f+0.25f*std::sin(static_cast<float>(6.283185307179586*5.0*time));
+            const auto d=vocal.update(pitch(sung),p);
+            if(i>=100) {const double error=sung+d.shiftSemitones-60.0; squared+=error*error; ++n;}
+        }
+        return std::sqrt(squared/n);
+    };
+    const double naturalVibrato=vibratoRms(0.85f);
+    const double roboticVibrato=vibratoRms(0.0f);
+    const double originalVibrato=0.25/std::sqrt(2.0);
+    assert(naturalVibrato > originalVibrato*0.60);
+    assert(naturalVibrato < originalVibrato*1.20);
+    assert(roboticVibrato < originalVibrato*0.10);
+
     // Invalid F0 and unvoiced bursts must not drive an insane transpose.
     assert(!tune.update({0.0f,0.0f,false},natural).voiced);
     assert(!tune.update({NAN,0.99f,true},natural).voiced);
@@ -38,5 +68,5 @@ int main() {
     natural.root=1; // Db major: C is not legal, must move to Db
     const auto after=tune.update(pitch(60.15f),natural);
     assert(after.targetMidi==61);
-    std::cout << "PASS: stable note hysteresis; expressive humanize; key switch; unvoiced/NaN gates\n";
+    std::cout << "PASS: stable notes; 5Hz vibrato preservation; key switch; unvoiced/NaN gates\n";
 }
