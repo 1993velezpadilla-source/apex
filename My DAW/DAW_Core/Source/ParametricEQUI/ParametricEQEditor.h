@@ -65,6 +65,8 @@ public:
     juce::TextButton& getCopyButtonForTesting();
     juce::TextButton& getPasteButtonForTesting();
     juce::TextButton& getMatchButtonForTesting();
+    juce::TextButton& getMatchSaveButtonForTesting();
+    juce::TextButton& getMatchLoadButtonForTesting();
     void feedMatchSpectrumForTesting (const float* db, int bins, double binHz);
     void setGrabSpectrumForTesting (const float* db, int bins, double binHz);
     juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const;
