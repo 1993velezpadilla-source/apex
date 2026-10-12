@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <vector>
 #include "../UtilityCore/Types.h"
+#include "../Automation/AutomationTypes.h"
 
 namespace DAW {
 
@@ -17,6 +18,17 @@ struct FolderBusSnapshot
 {
     // Effective mute set: a track is in here if it or any ancestor is muted.
     std::unordered_set<TrackID> effectivelyMutedTracks;
+
+    // Precomputed ancestor path for realtime native mute evaluation.
+    // A child may be unmuted only when its own and EVERY parent mute resolve
+    // false. UI snapshots alone cannot account for playing PPQ mute lanes.
+    struct MuteAncestorState
+    {
+        apex::automation::ParameterID parameterID = apex::automation::kInvalidParameterID;
+        bool manualMuted = false;
+        bool automationMuted = false;
+    };
+    std::unordered_map<TrackID, std::vector<MuteAncestorState>> muteAncestorChains;
 
     // Effective solo set: empty = no solo active (all tracks pass).
     // Non-empty: only tracks in this set are audible.

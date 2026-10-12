@@ -13,6 +13,7 @@
 #include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../../../Source/Automation/AutomationTrackPanPlaybackCore.h"
+#include "../../../Source/Automation/AutomationTrackMutePlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -3518,3 +3519,90 @@ public:
     }
 };
 static AutomationNativePanAudioPlaybackTests automationNativePanAudioPlaybackTests;
+
+
+/** Native mute is discrete and must silence actual DSP independently of UI. */
+class AutomationNativeMuteAudioPlaybackTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeMuteAudioPlaybackTests()
+        : juce::UnitTest("automation.native-mute-stepped-audio-playback.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        constexpr ParameterID id = 77033;
+        auto* mute = registry.createParameter(id, "Production Mute", {});
+        expect(mute != nullptr);
+        if (mute == nullptr) return;
+
+        const auto play = [&] (double ppq, bool rolling, bool fallback = false,
+                              bool automationMuted = false)
+        {
+            return getNativeTrackMuteRT(id, fallback, ppq, rolling,
+                                        automationMuted, registry, lanes, modes);
+        };
+
+        beginTest("no lane or invalid ID preserves manual mute");
+        modes.setMode(id, AutomationMode::Read);
+        expect(!play(1.0, true));
+        expect(play(1.0, true, true));
+        expect(getNativeTrackMuteRT(kInvalidParameterID, true, 1.0, true,
+                                   false, registry, lanes, modes));
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {2.0, 1.0f, CurveType::Smooth, 0.0f},
+            {4.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+
+        beginTest("mute only changes at knots; never half-mutes before a knot");
+        expect(!play(0.0, true));
+        expect(!play(1.999, true));
+        expect(play(2.0, true));
+        expect(play(3.99, true));
+        expect(!play(4.0, true));
+        expect(!play(4.0, true, true)); // lane explicitly unmutes manual mute
+
+        beginTest("Off, stopped, disabled automation and invalid clock");
+        modes.setMode(id, AutomationMode::Off);
+        expect(play(0.0, true, true));
+        modes.setMode(id, AutomationMode::Read);
+        expect(play(2.0, false, true));
+        expect(play(2.0, true, true, true));
+        expect(play(std::numeric_limits<double>::quiet_NaN(), true, true));
+
+        beginTest("Touch overrides a lane while held then returns");
+        modes.setMode(id, AutomationMode::Touch);
+        mute->beginGesture();
+        mute->setValueFromUser(1.0f);
+        expect(play(0.0, true));
+        mute->endGesture();
+        expect(!play(0.0, true));
+
+        beginTest("Latch and Write hold gesture value until latch cleared");
+        for (auto mode : {AutomationMode::Latch, AutomationMode::Write})
+        {
+            modes.setMode(id, mode);
+            modes.setLatchHeld(id, true);
+            expect(play(0.0, true));
+            modes.setLatchHeld(id, false);
+            expect(!play(0.0, true));
+        }
+
+        beginTest("RT mute evaluation performs no heap allocations");
+        modes.setMode(id, AutomationMode::Read);
+        int mutedBlocks = 0;
+        {
+            juce::UnitTestAllocationChecker allocationGuard(*this);
+            for (int i = 0; i < 300; ++i)
+                mutedBlocks += play(2.0, true) ? 1 : 0;
+        }
+        expectEquals(mutedBlocks, 300);
+    }
+};
+static AutomationNativeMuteAudioPlaybackTests automationNativeMuteAudioPlaybackTests;

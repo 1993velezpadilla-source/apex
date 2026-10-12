@@ -182,6 +182,34 @@ public:
         DAW::FolderBusSnapshot snap;
         snap.effectivelyMutedTracks = folderBusMute_.buildEffectiveMuteSet(*trackManager_, folderBus_);
         snap.effectiveSoloSet       = folderBusSolo_.buildEffectiveSoloSet(*trackManager_, folderBus_);
+
+        // Publish lineage once on the message thread. The audio callback
+        // consumes only immutable IDs and booleans, never walks folder maps.
+        const auto publishAncestors = [this, &snap] (const Track* track)
+        {
+            if (track == nullptr) return;
+            std::vector<DAW::FolderBusSnapshot::MuteAncestorState> ancestors;
+            for (const auto& ancestorId : folderBus_.getAncestorChain(track->getID()))
+            {
+                const auto* parent = trackManager_->getTrack(ancestorId);
+                if (parent == nullptr && trackManager_->hasMasterTrack())
+                {
+                    const auto* master = trackManager_->getMasterTrack();
+                    if (master != nullptr && master->getID() == ancestorId)
+                        parent = master;
+                }
+                if (parent != nullptr)
+                    ancestors.push_back({ parent->getNativeMuteAutomationIDRT(),
+                                          parent->isMuted(), parent->isAutomationMuted() });
+            }
+            if (!ancestors.empty())
+                snap.muteAncestorChains.emplace(track->getID(), std::move(ancestors));
+        };
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+            publishAncestors(trackManager_->getTrack(i));
+        if (trackManager_->hasMasterTrack())
+            publishAncestors(trackManager_->getMasterTrack());
+
         folderBusStateModel_.update(std::move(snap));
     }
 

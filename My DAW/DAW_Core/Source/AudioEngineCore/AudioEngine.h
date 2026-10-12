@@ -27,6 +27,7 @@
 #include "../Automation/AutomationSystemCore.h"
 #include "../Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../Automation/AutomationTrackPanPlaybackCore.h"
+#include "../Automation/AutomationTrackMutePlaybackCore.h"
 #include "../TapeStop/TapeStopProcessorCore.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 // TimePitch DSP nuclei
@@ -1249,6 +1250,40 @@ private:
             clock.captureInputPPQ(), clock.isTransportRollingRT(),
             track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
             system.getModeState());
+    }
+
+    // Resolve a stepped PPQ mute in DSP, including every ancestor FolderBus.
+    // The message thread precomputes the ancestor chain in the immutable
+    // FolderBusSnapshot: no folder traversal, String key or mutex on RT.
+    bool resolveNativeMutedRT (const Track& track,
+                               const FolderBusSnapshot* fbSnap) const noexcept
+    {
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        const double ppq = clock.captureInputPPQ();
+        const bool rolling = clock.isTransportRollingRT();
+        const auto readMute = [&] (apex::automation::ParameterID id,
+                                  bool manual, bool automationMuted) noexcept
+        {
+            return apex::automation::getNativeTrackMuteRT(
+                id, manual, ppq, rolling, automationMuted,
+                system.getRegistry(), system.getLaneStore(), system.getModeState());
+        };
+
+        if (readMute(track.getNativeMuteAutomationIDRT(),
+                     track.isMuted(), track.isAutomationMuted()))
+            return true;
+
+        if (fbSnap != nullptr)
+        {
+            auto path = fbSnap->muteAncestorChains.find(track.getID());
+            if (path != fbSnap->muteAncestorChains.end())
+                for (const auto& ancestor : path->second)
+                    if (readMute(ancestor.parameterID, ancestor.manualMuted,
+                                 ancestor.automationMuted))
+                        return true;
+        }
+        return false;
     }
 
     VolumeRampCore& getOrCreateVolumeRamp(const TrackID& trackId)
@@ -2500,15 +2535,17 @@ private:
         bool audible;
         if (fbSnap)
         {
-            bool effMuted = fbSnap->effectivelyMutedTracks.count(track->getID()) > 0;
+            bool effMuted = resolveNativeMutedRT(*track, fbSnap);
             audible = !effMuted;
             if (offlineStemRenderMask_ == nullptr && !fbSnap->effectiveSoloSet.empty())
                 audible = audible && fbSnap->effectiveSoloSet.count(track->getID()) > 0;
         }
         else
         {
-            audible = !track->isMuted();
-            if (offlineStemRenderMask_ == nullptr && anySolo) audible = track->isSoloed();
+            audible = !resolveNativeMutedRT(*track, nullptr);
+            // Solo may narrow audibility but must NEVER unmute a muted track.
+            if (offlineStemRenderMask_ == nullptr && anySolo)
+                audible = audible && track->isSoloed();
         }
 
         auto& muteFade = getOrCreateMuteFade(track->getID());
@@ -2720,11 +2757,8 @@ private:
         if (busTrack != nullptr)
             busGain = resolveNativeFaderGainRT(*busTrack, busGain);
 
-        bool  busMuted;
-        if (fbSnap && busTrack)
-            busMuted = fbSnap->effectivelyMutedTracks.count(busTrack->getID()) > 0;
-        else
-            busMuted = busTrack ? busTrack->isMuted() : false;
+        const bool busMuted = busTrack != nullptr
+            && resolveNativeMutedRT(*busTrack, fbSnap);
 
         MuteFadeCore* busMuteFade = nullptr;
         const float* busMuteRamp = nullptr;
@@ -2876,8 +2910,8 @@ private:
             auto* track = tracks_->getTrack(i);
             if (!track) continue;
 
-            bool audible = !track->isMuted();
-            if (anySolo) audible = track->isSoloed();
+            bool audible = !resolveNativeMutedRT(*track, nullptr);
+            if (anySolo) audible = audible && track->isSoloed();
 
             trackBuffer_.clear();
 
