@@ -819,10 +819,14 @@ muteBtn_.setBounds(nextButtonBounds());
         if (!isMaster)
             inputBtn_.setBounds(nextButtonBounds());
 
-        // Automation mode button — one row below M/S/R, full strip width
+        // Ø is adjacent to automation without overlapping the clip indicator
+        // or the PRE/POST send tap in the next row.
         {
-            auto autoRow = b.removeFromTop(16).reduced(4, 1);
-            autoModeBtn_.setBounds (autoRow);
+            auto autoRow = b.removeFromTop(18).reduced(4, 1);
+            phaseBtn_.setVisible(true);
+            phaseBtn_.setBounds(autoRow.removeFromLeft(24));
+            autoRow.removeFromLeft(3);
+            autoModeBtn_.setBounds(autoRow);
         }
 
 // Input button + pan knob
@@ -832,10 +836,7 @@ muteBtn_.setBounds(nextButtonBounds());
             preFaderBtn_.setVisible(true);
             // Compact PRE/POST send button — leaves the rest of the row
             // empty so Quick Send double-clicks have more room to land.
-            preFaderBtn_.setBounds(inputRow.removeFromLeft(24).withSizeKeepingCentre(22, 16));
-            inputRow.removeFromLeft(4);
-            phaseBtn_.setVisible(true);
-            phaseBtn_.setBounds(inputRow.removeFromLeft(26).withSizeKeepingCentre(24, 16));
+            preFaderBtn_.setBounds(inputRow.removeFromLeft(14).withSizeKeepingCentre(14, 14));
         }
         else
         {
