@@ -82,6 +82,7 @@ struct MatrixSpec
     bool stateThrows              = false;
     float gain                    = 1.0f;
     bool parameterControlsGain    = false;
+    bool parameterIsBoolean      = false;   // true: discrete VST3 choice/switch probe
     juce::uint32 stateMarker      = 0;        // written to state / recorded from state
     juce::String modulePath;                  // non-empty => instance retains a mock module
 };
@@ -113,7 +114,10 @@ public:
         // path (configureSlotAutomation) is exercised by identity tests.
         // (AudioPluginInstance hides addParameter as private in JUCE 8; the
         // qualified AudioProcessor path is the repo's proven G10 pattern.)
-        juce::AudioProcessor::addParameter (new juce::AudioParameterFloat ("param0", "Param 0", 0.0f, 1.0f, 0.5f));
+        if (spec_.parameterIsBoolean)
+            juce::AudioProcessor::addParameter (new juce::AudioParameterBool ("param0", "Param 0", false));
+        else
+            juce::AudioProcessor::addParameter (new juce::AudioParameterFloat ("param0", "Param 0", 0.0f, 1.0f, 0.5f));
     }
 
     static juce::AudioProcessor::BusesProperties buildBuses (const MatrixSpec& s)
@@ -1209,6 +1213,7 @@ public:
         testManualValuesAreAuthoritative();
         testPassiveMirrorDoesNotCreateRecordingGesture();
         testTouchGestureOverridesLiveDsp();
+        testDiscreteParameterSwitchesAtBlockBoundary();
         testReorderKeepsInstanceValues();
         testReorderKeepsAutomationOwner();
         testLegacyLanesFollowThePlugin();
@@ -1390,6 +1395,56 @@ private:
 
         lanes.removeLane(id);
         modes.setMode(id, Mode::Read);
+    }
+
+    void testDiscreteParameterSwitchesAtBlockBoundary()
+    {
+        beginTest("discrete plugin switch is not smoothed across automation blocks");
+        DAW::AutomationManagerCore manager;
+        DAW::PluginChainCore chain;
+        chain.setAutomationManager(&manager);
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        spec.parameterIsBoolean = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-discrete-step-block-boundary-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* p = slot->getProcessor()->getParameters()[0];
+        expect(p->isDiscrete(), "host sees a discrete plugin parameter");
+        const auto legacy = "plugin.0." + slot->getPluginInstanceId() + ".param0";
+        manager.addPoint(trackId, legacy, 0, 0.0f);
+        manager.addPoint(trackId, legacy, 2400, 1.0f);
+        manager.addPoint(trackId, legacy, 4800, 0.0f);
+        const auto snap = manager.getSnapshotPublisher().get();
+        juce::AudioBuffer<float> audio(2, 128);
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 0, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 0.0f, 1.0e-6f,
+            "switch starts OFF");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.0f, 1.0e-6f,
+            "OFF processes silent audio");
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 2400, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 1.0f, 1.0e-6f,
+            "switch turns ON immediately at the automation boundary");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.5f, 1.0e-6f,
+            "ON is audible in the first callback, not delayed by a 10ms ramp");
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 4800, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 0.0f, 1.0e-6f,
+            "switch turns OFF immediately at the next automation boundary");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.0f, 1.0e-6f,
+            "OFF mutes in the first callback");
     }
 
     void testReorderKeepsInstanceValues()

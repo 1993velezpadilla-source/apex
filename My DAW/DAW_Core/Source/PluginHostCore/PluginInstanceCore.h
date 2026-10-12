@@ -1722,7 +1722,11 @@ public:
             // is block-size invariant (256/512/1024/2048/non-power-of-two).
             float& lastVal = lastAutomationValues_[(size_t) i];
             float smoothedValue = newValue;
-            if (std::abs (lastVal - newValue) > 0.0001f)
+            // Plugin-declared discrete parameters are switches/choices. A
+            // one-pole ramp between their normalized states delays the actual
+            // transition (a bool can stay OFF for multiple audio callbacks).
+            // Preserve exact steps; smooth only genuinely continuous values.
+            if (! info.isDiscrete && std::abs (lastVal - newValue) > 0.0001f)
             {
                 const float coeff = AutomationSmootherCore::makeCoeff (sampleRate, 0.010);
                 smoothedValue = AutomationSmootherCore::advance (lastVal, newValue, coeff, numSamples);
@@ -1890,6 +1894,7 @@ public:
         std::uint64_t keyGeneration = ~0ull;
         std::uint32_t ordinal = 0;  // E2A parameterOrdinal == worker index
         bool representable = false; // ordinal < 128 (frozen E2A domain)
+        bool isDiscrete = false;     // verified worker parameter metadata
     };
 
     /** Phase E2B (control plane): build sandbox RT automation bindings from
