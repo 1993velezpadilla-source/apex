@@ -56,7 +56,7 @@ public:
         add(kMix, "tunelive.mix", "Wet Mix", 1.0f);
         add(kBypass, "tunelive.bypass", "Bypass", 0.0f, 2);
         // APPEND after V1 stable IDs: existing project automation stays compatible.
-        add(kHumanize, "tunelive.humanize", "Humanize", 0.35f);
+        add(kHumanize, "tunelive.humanize", "Humanize", 0.70f);
         add(kNoteStability, "tunelive.noteStability", "Note Stability", 0.40f);
         add(kPreserveFormants, "tunelive.preserveFormants", "Preserve Formants", 1.0f, 2);
     }
