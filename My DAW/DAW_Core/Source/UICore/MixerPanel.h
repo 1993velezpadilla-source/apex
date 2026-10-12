@@ -464,6 +464,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
         armBtn_.active  = track_.isArmed();
+        phaseBtn_.active = track_.isPolarityInverted();
+        phaseBtn_.repaint();
         autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
         autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
         panKnob_.value  = track_.getPan();
@@ -830,12 +832,17 @@ muteBtn_.setBounds(nextButtonBounds());
             preFaderBtn_.setVisible(true);
             // Compact PRE/POST send button — leaves the rest of the row
             // empty so Quick Send double-clicks have more room to land.
-            preFaderBtn_.setBounds(inputRow.removeFromLeft(14).withSizeKeepingCentre(14, 14));
+            preFaderBtn_.setBounds(inputRow.removeFromLeft(24).withSizeKeepingCentre(22, 16));
+            inputRow.removeFromLeft(4);
+            phaseBtn_.setVisible(true);
+            phaseBtn_.setBounds(inputRow.removeFromLeft(26).withSizeKeepingCentre(24, 16));
         }
         else
         {
             preFaderBtn_.setVisible(false);
             preFaderBtn_.setBounds({});
+            phaseBtn_.setVisible(false);
+            phaseBtn_.setBounds({});
         }
 
         auto panRow = b.removeFromTop(30);
@@ -1625,6 +1632,7 @@ private:
     juce::TextButton pianoBtn_;
 SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     SmallButton  soloBtn_ { "S", juce::Colour(0xFFD4AF37) };
+    SmallButton  phaseBtn_ { "Ø", juce::Colour(0xFF49C8D1) };
     SmallButton  armBtn_  { "R", juce::Colour(0xFF8B0000) };
     SmallButton  preFaderBtn_ { "POST", juce::Colour(0xFF00B3A4) };  // POST/PRE send tap point
     SmallButton  inputBtn_ { "T", juce::Colour(0xFF7C3AED) };  // compact square trim button
@@ -2558,10 +2566,12 @@ private:
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
         armBtn_.active  = track_.isArmed();
+        phaseBtn_.active = track_.isPolarityInverted();
 
         // Tooltip text for mixer channel strip buttons
         muteBtn_.tooltipText   = "Mute (M)\nMute this track. The track will produce no audio output during playback.";
         soloBtn_.tooltipText   = "Solo (S)\nSolo this track. All other non-soloed tracks are muted. Hold Ctrl for latch-solo.";
+        phaseBtn_.tooltipText = "Invert Polarity (Ø)\nFlip all channels of this track/bus (multiply by -1). Useful for multi-mic or DI comparison. Does not time-align tracks or correct frequency-dependent phase shifts.";
         armBtn_.tooltipText    = "Record Arm (R)\nArm this track for recording. When armed, incoming audio or MIDI will be captured on record.";
         autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.";
         inputBtn_.tooltipText  = "Input Trim\nOpen the input trim panel to adjust gain, phase, and routing before the track.";
@@ -2594,6 +2604,10 @@ private:
                 soloParameter_->endGesture();
             }
             if (onSoloToggled) onSoloToggled(newState);
+        };
+        phaseBtn_.onClick = [this]
+        {
+            track_.setPolarityInverted(phaseBtn_.active);
         };
         armBtn_.onClick  = [this] { if (onArmToggled)  onArmToggled(armBtn_.active); };
         armBtn_.onRightClick = [this](const juce::MouseEvent& e)
@@ -2647,6 +2661,7 @@ inputBtn_.onClick = [this]
 
         addAndMakeVisible(muteBtn_);
         addAndMakeVisible(soloBtn_);
+        addAndMakeVisible(phaseBtn_);
         addAndMakeVisible(armBtn_);
         addAndMakeVisible(inputBtn_);
         addAndMakeVisible(preFaderBtn_);
@@ -2996,6 +3011,9 @@ inputBtn_.onClick = [this]
 
         // ── Persistent block: mute/solo + fader+mini-meter ───────────
         auto persistArea = b;
+
+        phaseBtn_.setVisible(false);
+        phaseBtn_.setBounds({});
 
         // Mute/Solo row at top of persistent block
         auto muteSoloRow = persistArea.removeFromTop(persistentMuteSoloH).reduced(8, 1);
