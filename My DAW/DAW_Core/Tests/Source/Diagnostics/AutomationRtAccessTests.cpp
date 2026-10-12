@@ -3988,3 +3988,54 @@ public:
     }
 };
 static AutomationSteppedEvaluatorTests automationSteppedEvaluatorTests;
+
+/** Offline export must evaluate the exported PPQ lane without manufacturing
+    transport edges or replacing the live PPQ seen by gesture producers. */
+class AutomationOfflineClockIsolationTests final : public juce::UnitTest
+{
+public:
+    AutomationOfflineClockIsolationTests()
+        : juce::UnitTest("automation.offline-clock-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        auto& system = AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        constexpr ParameterID id = 914001;
+        constexpr double ppqPerSample = 120.0 / (60.0 * 48000.0);
+
+        // The live transport is stopped; an export must not start a
+        // recording session, even transiently between 90 Hz recorder polls.
+        clock.publishFromAudioThread(3.0, ppqPerSample, false);
+        const auto before = clock.snapshot();
+        auto* param = system.getRegistry().createParameter(
+            id, "Offline export clock canary", ParameterRange{});
+        expect(param != nullptr);
+        if (param == nullptr)
+            return;
+        system.getModeState().setMode(id, AutomationMode::Read);
+        system.getLaneStore().getOrCreateLane(id).replacePoints({
+            {0.0, 0.1f, CurveType::Linear, 0.0f},
+            {4.0, 0.9f, CurveType::Linear, 0.0f}
+        });
+
+        beginTest("export evaluates its PPQ rather than the stopped live PPQ");
+        system.onOfflineBlockStart(4.0);
+        expectWithinAbsoluteError(param->getNormalizedValue(), 0.9f, 1.0e-6f);
+        system.onOfflineBlockStart(0.0);
+        expectWithinAbsoluteError(param->getNormalizedValue(), 0.1f, 1.0e-6f);
+
+        beginTest("export does not publish fake transport edges or live PPQ");
+        const auto after = clock.snapshot();
+        expect(before.blockStartPPQ == after.blockStartPPQ);
+        expect(before.ppqPerSample == after.ppqPerSample);
+        expect(before.transportRolling == after.transportRolling);
+        expect(before.transportTransitions == after.transportTransitions);
+
+        system.getLaneStore().removeLane(id);
+        system.getModeState().clearOverride(id);
+        system.getRegistry().unregisterParameter(id);
+    }
+};
+static AutomationOfflineClockIsolationTests automationOfflineClockIsolationTests;
