@@ -64,7 +64,7 @@ public:
             || attempt.identifier.isEmpty() || attempt.format.isEmpty())
             return false;
 
-        if (!file.getParentDirectory().createDirectory())
+        if (file.getParentDirectory().createDirectory().failed())
             return false;
 
         juce::XmlElement xml("APEXPluginLoadAttempt");
