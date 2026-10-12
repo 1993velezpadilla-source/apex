@@ -19,6 +19,7 @@
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4360,3 +4361,89 @@ public:
     }
 };
 static AutomationV2FreehandStrokeTests automationV2FreehandStrokeTests;
+
+
+class AutomationV2CurveTransformTests final : public juce::UnitTest
+{
+public:
+    AutomationV2CurveTransformTests()
+      : juce::UnitTest("automation.v2-curve-transform.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationCurveTransformCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        const std::vector<AutomationPoint> source {
+            {0, 0.20f, AutomationCurveType::Hold, -0.75f},
+            {24000, 0.75f, AutomationCurveType::Smooth, 0.40f},
+            {48000, 0.95f, AutomationCurveType::Linear, 0.0f}
+        };
+        std::vector<AutomationPoint> result;
+
+        beginTest("Volume vertical inversion preserves segment shapes and timestamps");
+        expect(AutomationCurveTransformCore::transform(
+            AutomationLaneCore::trackVolumeParameterId,
+            AutomationCurveTransformCore::Operation::InvertValues,
+            source, 48000.0, 120.0, result));
+        expectEquals((int)result.size(), 3);
+        if (result.size() == 3)
+        {
+            expectWithinAbsoluteError(result[0].value, 1.80f, 0.00001f);
+            expectWithinAbsoluteError(result[1].value, 1.25f, 0.00001f);
+            expect(result[0].curveToNext == AutomationCurveType::Hold);
+            expect(result[1].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(result[0].tensionToNext, -0.75f, 0.00001f);
+            expectEquals((juce::int64)result[1].timeSamples, (juce::int64)24000);
+        }
+
+        beginTest("Half and double scaling are clamped to correct parameter domain");
+        expect(AutomationCurveTransformCore::transform(
+            AutomationLaneCore::trackPanParameterId,
+            AutomationCurveTransformCore::Operation::CompressHalf,
+            source, 48000.0, 120.0, result));
+        if (result.size() == 3)
+            expectWithinAbsoluteError(result[0].value, 0.10f, 0.00001f);
+        expect(AutomationCurveTransformCore::transform(
+            AutomationLaneCore::trackPanParameterId,
+            AutomationCurveTransformCore::Operation::ExpandDouble,
+            source, 48000.0, 120.0, result));
+        if (result.size() == 3)
+            expectWithinAbsoluteError(result[2].value, 1.0f, 0.00001f);
+
+        beginTest("Shift by exact tempo-aware beat, never by pixels");
+        expect(AutomationCurveTransformCore::transform(
+            AutomationLaneCore::trackVolumeParameterId,
+            AutomationCurveTransformCore::Operation::ShiftRightBeat,
+            source, 48000.0, 120.0, result));
+        if (result.size() == 3)
+        {
+            expectEquals((juce::int64)result[0].timeSamples, (juce::int64)24000);
+            expectEquals((juce::int64)result[1].timeSamples, (juce::int64)48000);
+            expectEquals((juce::int64)result[2].timeSamples, (juce::int64)72000);
+        }
+
+        beginTest("Reject unsafe operation inputs without clobbering destination");
+        const auto originalSize = result.size();
+        expect(!AutomationCurveTransformCore::transform(
+            "track.mute", AutomationCurveTransformCore::Operation::InvertValues,
+            source, 48000.0, 120.0, result));
+        expect(!AutomationCurveTransformCore::transform(
+            AutomationLaneCore::trackVolumeParameterId,
+            AutomationCurveTransformCore::Operation::ShiftRightBeat,
+            source, 48000.0, std::numeric_limits<double>::quiet_NaN(), result));
+        expectEquals((int)result.size(), (int)originalSize);
+
+        beginTest("Transformed curves retain exact state across save/reopen");
+        AutomationLaneCore lane("curve-test", AutomationLaneCore::trackVolumeParameterId);
+        lane.points = result;
+        lane.sortAndResolveDuplicates();
+        const auto saved = lane.getState();
+        AutomationLaneCore restored("curve-test", AutomationLaneCore::trackVolumeParameterId);
+        restored.restoreState(saved);
+        expectEquals(restored.getNumPoints(), lane.getNumPoints());
+    }
+};
+static AutomationV2CurveTransformTests automationV2CurveTransformTests;
