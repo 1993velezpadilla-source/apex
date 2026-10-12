@@ -3506,13 +3506,15 @@ public:
 
         beginTest("RT pan playback makes no heap allocations");
         modes.setMode(id, AutomationMode::Read);
+        float sum = 0.0f;
         {
             juce::UnitTestAllocationChecker checker(*this);
-            float sum = 0.0f;
             for (int i = 0; i < 300; ++i)
                 sum += play(1.0, true);
-            expectWithinAbsoluteError(sum, 0.0f, 1.0e-5f);
         }
+        // Assertions may allocate test-report Strings: never run them under
+        // the realtime allocation guard itself.
+        expectWithinAbsoluteError(sum, 0.0f, 1.0e-5f);
     }
 };
 static AutomationNativePanAudioPlaybackTests automationNativePanAudioPlaybackTests;
