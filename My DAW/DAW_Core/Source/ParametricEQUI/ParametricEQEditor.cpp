@@ -1,5 +1,6 @@
 #include "ParametricEQEditor.h"
 #include "../ParametricEQCore/ParametricEQSketchCore.h"
+#include "../ParametricEQCore/ParametricEQSpectrumGrabCore.h"
 
 #include <array>
 #include <cstring>
@@ -321,6 +322,7 @@ public:
     {
         setInterceptsMouseClicks (true, true);
         addAndMakeVisible (sketchButton_);
+        addAndMakeVisible (grabButton_);
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
         sketchButton_.setColour (juce::TextButton::buttonColourId,
@@ -328,6 +330,8 @@ public:
         sketchButton_.onClick = [this]
         {
             sketchArmed_ = sketchButton_.getToggleState();
+            if (sketchArmed_)
+                clearGrabPreview();
             if (! sketchArmed_)
             {
                 sketching_ = false;
@@ -339,6 +343,46 @@ public:
                 sketchArmed_ ? Palette::accentActive() : Palette::surfaceHover());
             repaint();
         };
+
+        grabButton_.setTitle ("Freeze PRE-EQ resonances; tap a marker to cut");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+                               Palette::surfaceHover());
+        grabButton_.onClick = [this]
+        {
+            if (grabArmed_)
+            {
+                clearGrabPreview();
+                repaint();
+                return;
+            }
+            if (processor_.getAnalyzerMode()
+                == APEX::Analysis::SpectrumTapMode::Closed)
+                return;
+            auto snapshot = processor_.getAnalyzer().acquireSnapshot();
+            // Require the actual pre-EQ feed; post-EQ resonance suggestions
+            // would be biased by the very cuts the producer is making.
+            if (! snapshot.isValid() || ! snapshot.preActive()
+                || snapshot.preDb() == nullptr)
+                return;
+            grabPlan_ = SpectrumGrab::analyze (snapshot.preDb(),
+                APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins,
+                snapshot.binHz());
+            grabArmed_ = grabPlan_.count > 0;
+            grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
+            grabButton_.setColour (juce::TextButton::buttonColourId,
+                grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+            if (grabArmed_ && sketchArmed_)
+            {
+                sketchArmed_ = false;
+                sketching_ = false;
+                sketchPointCount_ = 0;
+                sketchButton_.setToggleState (false, juce::dontSendNotification);
+                sketchButton_.setButtonText ("SKETCH");
+                sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                        Palette::surfaceHover());
+            }
+            repaint();
+        };
         startTimerHz (25);
     }
 
@@ -346,6 +390,7 @@ public:
     {
         curveDirty_ = true;
         sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
+        grabButton_.setBounds (108, 8, 92, ParametricEQEditor::kTouchTarget);
     }
 
     void paint (juce::Graphics& g) override
@@ -393,6 +438,8 @@ public:
                 juce::PathStrokeType::rounded));
         }
         drawNodes (g, bounds);
+        if (grabArmed_)
+            drawGrabPeaks (g);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -405,6 +452,11 @@ public:
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
+        if (hit < 0 && grabArmed_ && useGrabPeak (event.position))
+        {
+            longPressFired_ = true;
+            return;
+        }
         if (sketchArmed_ && hit < 0)
         {
             sketching_ = true;
@@ -528,6 +580,21 @@ public:
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
     juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
+    juce::TextButton& getGrabButtonForTesting() noexcept { return grabButton_; }
+    void setGrabSpectrumForTesting (const float* db, int bins, double binHz)
+    {
+        grabPlan_ = SpectrumGrab::analyze (db, bins, binHz);
+        grabArmed_ = grabPlan_.count > 0;
+        grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+            grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+        repaint();
+    }
+    juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const
+    {
+        return ! grabArmed_ || index < 0 || index >= grabPlan_.count ? juce::Rectangle<int>()
+            : grabPeakBounds (grabPlan_.peaks[static_cast<std::size_t> (index)]);
+    }
 
 private:
     void timerCallback() override
@@ -589,6 +656,83 @@ private:
 
         if (changed)
             repaint();
+    }
+
+
+    juce::Rectangle<int> grabPeakBounds (const GrabPeak& peak) const
+    {
+        const int x = static_cast<int> (std::lround (
+            xForFrequency (peak.frequencyHz, std::max (1, getWidth()))));
+        return { x - ParametricEQEditor::kTouchTarget / 2, 58,
+                 ParametricEQEditor::kTouchTarget,
+                 ParametricEQEditor::kTouchTarget };
+    }
+
+    void clearGrabPreview()
+    {
+        grabArmed_ = false;
+        grabPlan_ = {};
+        grabButton_.setButtonText ("GRAB");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+                              Palette::surfaceHover());
+    }
+
+    void drawGrabPeaks (juce::Graphics& g)
+    {
+        for (int i = 0; i < grabPlan_.count; ++i)
+        {
+            const auto& peak = grabPlan_.peaks[static_cast<std::size_t> (i)];
+            const auto marker = grabPeakBounds (peak);
+            const auto centre = marker.getCentre().toFloat();
+            g.setColour (Palette::selected().withAlpha (0.85f));
+            g.fillEllipse (centre.x - 7.0f, centre.y - 7.0f, 14.0f, 14.0f);
+            g.setColour (Palette::background());
+            g.drawEllipse (centre.x - 7.0f, centre.y - 7.0f, 14.0f,
+                           14.0f, 1.5f);
+            g.setColour (Palette::text());
+            const juce::String label = peak.frequencyHz < 1000.0
+                ? juce::String (static_cast<int> (std::lround (peak.frequencyHz))) + " Hz"
+                : juce::String (peak.frequencyHz / 1000.0, 1) + "k";
+            g.drawFittedText (label, marker.withY (102).withHeight (20),
+                              juce::Justification::centred, 1);
+        }
+    }
+
+    bool useGrabPeak (juce::Point<float> position)
+    {
+        for (int i = 0; i < grabPlan_.count; ++i)
+        {
+            const auto& peak = grabPlan_.peaks[static_cast<std::size_t> (i)];
+            if (! grabPeakBounds (peak).toFloat().contains (position))
+                continue;
+            const auto slot = firstDisabledBand();
+            if (! slot.has_value())
+                return false;
+            const int band = *slot;
+            auto setBandUnits = [this, band] (BandParameterOffset offset,
+                                             float units)
+            {
+                const auto id = parameterIndex (band, offset);
+                auto* parameter = processor_.getParametricEQParameter (id);
+                notifyParameter (processor_, id,
+                                 parameter->toNormalised (units));
+            };
+            setBandUnits (BandParameterOffset::Shape,
+                          static_cast<float> (FilterShape::Bell));
+            setBandUnits (BandParameterOffset::Frequency,
+                          static_cast<float> (peak.frequencyHz));
+            setBandUnits (BandParameterOffset::Gain, -3.0f);
+            setBandUnits (BandParameterOffset::Q,
+                          static_cast<float> (peak.suggestedQ));
+            notifyParameter (processor_, parameterIndex (
+                band, BandParameterOffset::Enabled), 1.0f);
+            clearGrabPreview();  // one-shot; never mutates existing bands
+            owner_.selectBand (band);
+            curveDirty_ = true;
+            repaint();
+            return true;
+        }
+        return false;
     }
 
     void drawGrid (juce::Graphics& g, juce::Rectangle<float> bounds)
@@ -886,6 +1030,9 @@ private:
     std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
         spectrumCopy_ {};
     juce::TextButton sketchButton_ { "SKETCH" };
+    juce::TextButton grabButton_ { "GRAB" };
+    GrabPlan grabPlan_ {};
+    bool grabArmed_ = false;
     std::array<SketchPoint, SketchPlanner::kMaximumInputPoints> sketchPoints_ {};
     int sketchPointCount_ = 0;
     bool sketchArmed_ = false;
@@ -1471,6 +1618,23 @@ juce::TextButton& ParametricEQEditor::getPhaseButtonForTesting()
 juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
 {
     return graph_->getSketchButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getGrabButtonForTesting()
+{
+    return graph_->getGrabButtonForTesting();
+}
+
+void ParametricEQEditor::setGrabSpectrumForTesting (
+    const float* db, int bins, double binHz)
+{
+    graph_->setGrabSpectrumForTesting (db, bins, binHz);
+}
+
+juce::Rectangle<int> ParametricEQEditor::getGrabPeakBoundsForTesting (
+    int index) const
+{
+    return graph_->getGrabPeakBoundsForTesting (index);
 }
 
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()
