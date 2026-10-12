@@ -1207,6 +1207,7 @@ public:
     void runTest() override
     {
         testManualValuesAreAuthoritative();
+        testTouchGestureOverridesLiveDsp();
         testReorderKeepsInstanceValues();
         testReorderKeepsAutomationOwner();
         testLegacyLanesFollowThePlugin();
@@ -1248,6 +1249,96 @@ private:
         for (int i = 0; i < 5; ++i)
             expectWithinAbsoluteError(chain.getSlot(i)->getProcessor()->getParameters()[0]->getValue(),
                                       1.0f, 1.0e-6f, "manual unity remains authoritative");
+    }
+
+    void testTouchGestureOverridesLiveDsp()
+    {
+        beginTest("native plugin editor Touch gesture wins over PPQ lane in DSP");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Source = apex::automation::ChangeSource;
+
+        const juce::String trackId = "apex-touch-gain-dsp-gesture-20261012";
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        const int slotIndex = chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec));
+        expectEquals(slotIndex, 0);
+        if (slotIndex != 0) return;
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        expect(slot != nullptr);
+        if (slot == nullptr) return;
+        auto* plugin = slot->getProcessor();
+        expect(plugin != nullptr);
+        if (plugin == nullptr) return;
+        auto* p = plugin->getParameters()[0];
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto* mirror = sys.getRegistry().find(id);
+        expect(mirror != nullptr && mirror->getBoundPluginParameter() == p);
+        if (mirror == nullptr) return;
+
+        auto& lanes = sys.getLaneStore();
+        auto& modes = sys.getModeState();
+        modes.setMode(id, Mode::Touch);
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.2f, apex::automation::CurveType::Hold, 0.0f},
+            {4.0, 0.2f, apex::automation::CurveType::Hold, 0.0f}
+        });
+
+        // Establish live Read playback and the smoother's settled value.
+        juce::AudioBuffer<float> audio(2, 64);
+        for (int block = 0; block < 128; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.2f, 1.0e-3f,
+            "PPQ lane drives real parameter before gesture");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.1f, 1.0e-3f,
+            "real plugin audio reflects 0.2 gain");
+
+        p->beginChangeGesture();
+        p->setValueNotifyingHost(0.9f);
+        expect(mirror->isGestureActive(),
+            "plugin gesture must reach APEX before next audio callback");
+        expect(mirror->getLastSource() == Source::Plugin,
+            "plugin editor value is mirrored as Plugin, not Automation");
+
+        for (int block = 128; block < 136; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.9f, 1.0e-3f,
+            "automated lane must not overwrite active plugin gesture");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.45f, 1.0e-3f,
+            "real audio follows plugin editor while Touch is active");
+
+        p->endChangeGesture();
+        expect(!mirror->isGestureActive(), "Touch released");
+        for (int block = 136; block < 264; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.2f, 1.0e-3f,
+            "Touch release returns DSP to committed PPQ lane");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.1f, 1.0e-3f,
+            "real audio returns to playback value after release");
+
+        lanes.removeLane(id);
+        modes.setMode(id, Mode::Read);
     }
 
     void testReorderKeepsInstanceValues()

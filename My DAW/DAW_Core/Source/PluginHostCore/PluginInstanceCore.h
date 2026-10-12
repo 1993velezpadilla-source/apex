@@ -1659,6 +1659,31 @@ public:
                 binding.keyGeneration = keyGen;
             }
 
+            // User gestures are DSP-authoritative while active. The generic
+            // PPQ evaluator already yields to Touch/Trim and held Latch/Write,
+            // but this in-process plugin sink previously ignored that fence
+            // and reapplied the old lane over a plugin editor drag on every
+            // block. Keep smoother history current, so returning to playback
+            // after release starts at the actual manual parameter value.
+            if (binding.apexPid != apex::automation::kInvalidParameterID)
+            {
+                auto mirrored = registry.findRT(binding.apexPid);
+                if (mirrored != nullptr
+                    && mirrored->getBoundPluginParameter() == pluginParam)
+                {
+                    const auto& modeState = apex::automation::AutomationModeState::getInstance();
+                    const auto mode = modeState.getModeRT(binding.apexPid);
+                    const bool held = (mode == apex::automation::AutomationMode::Latch
+                                       || mode == apex::automation::AutomationMode::Write)
+                                   && modeState.latchHeldRT(binding.apexPid);
+                    if (mirrored->isGestureActive() || held)
+                    {
+                        lastAutomationValues_[(size_t)i] = currentValue;
+                        continue;
+                    }
+                }
+            }
+
             // Canonical source precedence (legacy lane → APEX lane-store →
             // manual bridge) lives in ONE shared evaluator used identically by
             // the InProcess and Sandboxed sinks — execution mode must never
