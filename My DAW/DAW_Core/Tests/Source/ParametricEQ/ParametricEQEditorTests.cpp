@@ -1,9 +1,12 @@
 #include "ParametricEQTestUtils.h"
 #include "../../../Source/ParametricEQCore/ParametricEQProcessor.h"
+#include "../../../Source/ParametricEQCore/ParametricEQSpectrumGrabCore.h"
+#include "../../../Source/ParametricEQCore/ParametricEQMatchCore.h"
 #include "../../../Source/ParametricEQUI/ParametricEQEditor.h"
 
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -67,6 +70,9 @@ public:
         testAuditionHoldGestureLifecycle();
         testLongPressCreatesBand();
         testSketchGestureCreatesBands();
+        testSpectrumGrabAndTouchToBand();
+        testNativeBandCopyPasteAcrossInstances();
+        testMeasuredEqMatchAndGuidedNativeApply();
         testPhaseSelectorDrivesCanonicalParameter();
     }
 
@@ -348,6 +354,304 @@ private:
                       "Sketch returns to one-shot idle mode after commit");
         expect (editor->getSelectedBandForTesting() >= 0,
                 "last created Sketch band becomes selected");
+    }
+
+
+    void testSpectrumGrabAndTouchToBand()
+    {
+        beginTest ("Spectrum Grab detects true resonances, rejects flat/NaN, "
+                   "and inserts a native EQ band via a 44px touch marker");
+        constexpr int bins = APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins;
+        constexpr double binHz = 48000.0
+            / APEX::Analysis::SpectrumAnalyzerCore::kFftSize;
+        std::array<float, bins> spectrum {};
+        spectrum.fill (-40.0f);
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz).count, 0,
+            "a flat loud spectrum has no narrow resonances");
+        spectrum.fill (-120.0f);
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz).count, 0,
+            "silence must not create candidates");
+        expectEquals (SpectrumGrab::analyze (
+            nullptr, bins, binHz).count, 0, "null frame");
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, std::numeric_limits<double>::quiet_NaN())
+            .count, 0, "nonfinite bin frequency");
+
+        for (int bin = 0; bin < bins; ++bin)
+        {
+            const double f = std::max (1.0, bin * binHz);
+            const double low = std::log2 (f / 1500.0) / 0.025;
+            const double high = std::log2 (f / 5400.0) / 0.030;
+            spectrum[static_cast<std::size_t> (bin)] = static_cast<float> (
+                -92.0 + 75.0 * std::exp (-0.5 * low * low)
+                      + 60.0 * std::exp (-0.5 * high * high));
+        }
+        const auto plan = SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz);
+        expect (plan.count >= 2, "both resonances should be detected");
+        bool foundLow = false, foundHigh = false;
+        for (int i = 0; i < plan.count; ++i)
+        {
+            const auto& peak = plan.peaks[static_cast<std::size_t> (i)];
+            expect (std::isfinite (peak.frequencyHz)
+                    && std::isfinite (peak.suggestedQ));
+            expect (peak.suggestedQ >= 0.7 && peak.suggestedQ <= 20.0);
+            foundLow |= std::abs (peak.frequencyHz - 1500.0) < 50.0;
+            foundHigh |= std::abs (peak.frequencyHz - 5400.0) < 80.0;
+        }
+        expect (foundLow && foundHigh, "resonance center frequencies");
+
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        processor.prepareToPlay (48000.0, 512);
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (1280, 720);
+        auto& grab = editor->getGrabButtonForTesting();
+        expect (grab.getBounds().getHeight()
+                >= ParametricEQEditor::kTouchTarget);
+        expect (! grab.getBounds().intersects (
+            editor->getSketchButtonForTesting().getBounds()),
+            "touch buttons do not overlap");
+        editor->setGrabSpectrumForTesting (spectrum.data(), bins, binHz);
+        expectEquals (juce::String ("GRAB ON"), grab.getButtonText());
+        const auto marker = editor->getGrabPeakBoundsForTesting (0);
+        expect (marker.getWidth() >= ParametricEQEditor::kTouchTarget);
+        editor->injectGraphMouseDownForTesting (marker.getCentre().toFloat());
+        editor->injectGraphMouseUpForTesting (marker.getCentre().toFloat());
+        const auto* enabled = processor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled));
+        expect (enabled->getBool(), "tapping Grab marker enables a native band");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), plan.peaks[0].frequencyHz,
+            40.0, "grab frequency is published to the stable parameter");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                    ->getUnitsValue()), -3.0, 0.1,
+            "initial resonance cut starts at -3 dB");
+        expectEquals (juce::String ("GRAB"), grab.getButtonText(),
+                      "one-shot preview automatically disarms");
+    }
+
+
+    void testNativeBandCopyPasteAcrossInstances()
+    {
+        beginTest ("APEX copy/paste transfers full native band to another EQ "
+                   "instance without mutating the source or parameter ABI");
+        auto sourceStorage = std::make_unique<Processor>();
+        auto destinationStorage = std::make_unique<Processor>();
+        auto& source = *sourceStorage;
+        auto& destination = *destinationStorage;
+        enableBell (source, 0, 2400.0f, -6.5f, 3.2f);
+        setUnits (source, placementParameterIndex (0), 4.0f);
+        setUnits (source, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (source, dynamicParameterIndex (
+            0, DynamicBandOffset::Range), -4.0f);
+        setUnits (source, dynamicFilterParameterIndex (0), 1.0f);
+        source.prepareToPlay (48000.0, 256);
+        destination.prepareToPlay (48000.0, 256);
+        auto sourceEditor = std::make_unique<ParametricEQEditor> (source);
+        auto targetEditor = std::make_unique<ParametricEQEditor> (destination);
+        sourceEditor->setSize (320, 568);
+        targetEditor->setSize (320, 568);
+        sourceEditor->setSelectedBandForTesting (0);
+
+        auto& copy = sourceEditor->getCopyButtonForTesting();
+        auto& paste = targetEditor->getPasteButtonForTesting();
+        const auto sourceGraph = sourceEditor->getGraphBoundsForTesting();
+        const auto targetGraph = targetEditor->getGraphBoundsForTesting();
+        expect (copy.getBounds().getHeight() >= 44
+                && paste.getBounds().getHeight() >= 44,
+                "clipboard controls are touch-safe");
+        expect (copy.getRight() <= sourceGraph.getWidth()
+                && paste.getRight() <= targetGraph.getWidth(),
+                "clipboard controls fit on narrow phones");
+
+        juce::MessageManager::getInstance();
+        copy.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        paste.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (destination.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled))->getBool(),
+            "paste enabled a new band in another native EQ instance");
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                ->getUnitsValue()), 2400.0, 1.0);
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                ->getUnitsValue()), -6.5, 0.05);
+        expectEquals (destination.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 4);
+        expect (destination.getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool());
+        expect (destination.getParametricEQParameter (
+            dynamicFilterParameterIndex (0))->getBool());
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range))
+                ->getUnitsValue()), -4.0, 0.1);
+        expectEquals (targetEditor->getSelectedBandForTesting(), 0);
+        // Source and destination are independent native processor instances.
+        expectWithinAbsoluteError (static_cast<double> (
+            source.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                ->getUnitsValue()), -6.5, 0.05);
+    }
+
+    void testMeasuredEqMatchAndGuidedNativeApply()
+    {
+        beginTest ("APEX Match measured PRE reference versus input, level "
+                   "invariance, safety guards and guided hosted band insert");
+        constexpr int bins = APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins;
+        constexpr double binHz = 48000.0
+            / APEX::Analysis::SpectrumAnalyzerCore::kFftSize;
+        std::array<float, bins> input {}, reference {}, silent {};
+        input.fill (-44.0f);
+        silent.fill (-120.0f);
+        for (int bin = 0; bin < bins; ++bin)
+        {
+            const double hz = std::max (1.0, bin * binHz);
+            const double normalized = std::log2 (hz / 1400.0) / 0.20;
+            reference[static_cast<std::size_t> (bin)] = static_cast<float> (
+                -44.0 + 8.5 * std::exp (-0.5 * normalized * normalized));
+        }
+
+        MatchCapture referenceCapture, inputCapture;
+        expect (! referenceCapture.append (nullptr, bins, binHz),
+                "null frame is rejected");
+        expect (! referenceCapture.append (silent.data(), bins, binHz),
+                "silence must never count as a reference frame");
+        auto corrupt = reference;
+        corrupt.fill (std::numeric_limits<float>::quiet_NaN());
+        expect (! referenceCapture.append (corrupt.data(), bins, binHz),
+                "NaN frames are rejected atomically");
+        expectEquals (referenceCapture.frameCount(), 0,
+                      "invalid frames did not advance capture");
+
+        for (int frame = 0; frame < MatchCapture::kRequiredFrames; ++frame)
+        {
+            expect (referenceCapture.append (reference.data(), bins, binHz),
+                    "reference capture must accept finite live frames");
+            expect (inputCapture.append (input.data(), bins, binHz),
+                    "input capture must accept finite live frames");
+        }
+        expect (referenceCapture.ready() && inputCapture.ready());
+        expect (! inputCapture.append (input.data(), bins, binHz),
+                "bounded capture stops at its fixed frame budget");
+        const auto fitted = MatchEngine::fit (referenceCapture, inputCapture);
+        expect (fitted.count >= 1,
+                "reference 1.4 kHz peak must yield an APEX fit proposal");
+        bool located = false;
+        for (int i = 0; i < fitted.count; ++i)
+        {
+            const auto& suggestion = fitted.bands[
+                static_cast<std::size_t> (i)];
+            located |= std::abs (suggestion.frequencyHz - 1400.0) < 250.0;
+            expect (std::isfinite (suggestion.frequencyHz)
+                && std::isfinite (suggestion.gainDb)
+                && std::isfinite (suggestion.q),
+                "match suggestions must be finite");
+            expect (std::abs (suggestion.gainDb) <= 9.001,
+                    "matching must remain bounded to +/-9 dB");
+        }
+        expect (located, "native fitter found the deliberately colored range");
+
+        MatchCapture louder;
+        auto boosted = input;
+        boosted.fill (-29.0f);  // 15 dB whole-signal level difference
+        for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
+            expect (louder.append (boosted.data(), bins, binHz));
+        expectEquals (MatchEngine::fit (louder, inputCapture).count, 0,
+            "level-only difference is not a tonal mismatch");
+        expectEquals (MatchEngine::fit (referenceCapture, MatchCapture {})
+            .count, 0, "partial/empty input must not create bands");
+
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        processor.prepareToPlay (48000.0, 512);
+        processor.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (320, 568);
+        auto& match = editor->getMatchButtonForTesting();
+        expect (match.getBounds().getHeight() >= 44,
+                "EQ MATCH touch button fits compact phone");
+        expect (match.getBounds().getRight()
+                <= editor->getGraphBoundsForTesting().getWidth());
+        juce::MessageManager::getInstance();
+        auto click = [&match]()
+        {
+            match.triggerClick();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        };
+        click();
+        expectEquals (juce::String ("REF..."), match.getButtonText());
+        for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
+            editor->feedMatchSpectrumForTesting (
+                reference.data(), bins, binHz);
+        expectEquals (juce::String ("GET INPUT"), match.getButtonText());
+
+        // A second EQ instance can explicitly adopt the measured reference
+        // without borrowing the first processor's lifetime or analyzer frame.
+        auto& save = editor->getMatchSaveButtonForTesting();
+        auto& load = editor->getMatchLoadButtonForTesting();
+        expect (save.getBounds().getHeight() >= 44
+            && load.getBounds().getHeight() >= 44);
+        expect (! match.getBounds().intersects (save.getBounds()));
+        expect (! save.getBounds().intersects (load.getBounds()));
+        save.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("SAVED"), save.getButtonText());
+        auto secondProcessorStorage = std::make_unique<Processor>();
+        auto& secondProcessor = *secondProcessorStorage;
+        secondProcessor.prepareToPlay (48000.0, 512);
+        secondProcessor.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
+        auto secondEditor = std::make_unique<ParametricEQEditor> (
+            secondProcessor);
+        secondEditor->setSize (320, 568);
+        secondEditor->getMatchLoadButtonForTesting().triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("GET INPUT"),
+            secondEditor->getMatchButtonForTesting().getButtonText(),
+            "a second EQ instance loaded the independently owned reference");
+
+        click();
+        expectEquals (juce::String ("INPUT..."), match.getButtonText());
+        for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
+            editor->feedMatchSpectrumForTesting (input.data(), bins, binHz);
+        expectEquals (juce::String ("APPLY EQ"), match.getButtonText());
+        click();
+        int inserted = 0;
+        for (int band = 0; band < kMaxBands; ++band)
+            inserted += processor.getParametricEQParameter (
+                parameterIndex (band, BandParameterOffset::Enabled))->getBool()
+                ? 1 : 0;
+        expect (inserted >= 1, "Apply inserts real APEX EQ bands");
+        expectEquals (juce::String ("EQ MATCH"), match.getButtonText(),
+                      "matching resets after a completed apply");
+
+        // The second instance uses the shared reference against its own
+        // input, applying a *new* band without changing the source instance.
+        auto& secondMatch = secondEditor->getMatchButtonForTesting();
+        secondMatch.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("INPUT..."), secondMatch.getButtonText());
+        for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
+            secondEditor->feedMatchSpectrumForTesting (
+                input.data(), bins, binHz);
+        expectEquals (juce::String ("APPLY EQ"), secondMatch.getButtonText());
+        secondMatch.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (secondProcessor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled))->getBool(),
+            "second plugin independently fits and applies shared reference");
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()

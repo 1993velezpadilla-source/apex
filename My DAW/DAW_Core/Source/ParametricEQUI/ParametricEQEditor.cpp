@@ -1,5 +1,7 @@
 #include "ParametricEQEditor.h"
 #include "../ParametricEQCore/ParametricEQSketchCore.h"
+#include "../ParametricEQCore/ParametricEQSpectrumGrabCore.h"
+#include "../ParametricEQCore/ParametricEQMatchCore.h"
 
 #include <array>
 #include <cstring>
@@ -31,6 +33,48 @@ struct Palette
     static juce::Colour danger() { return juce::Colour (0xffe83535); }
     static juce::Colour positive() { return juce::Colour (0xff14b87a); }
 };
+
+// Local APEX clipboard; valid across native EQ editor instances on the
+// JUCE message thread. This copies hosted parameter VALUES only, never
+// processor/audio objects. The first seven IDs of each band are frozen.
+struct NativeBandClipboard
+{
+    static constexpr int kSlots = 14;
+    std::array<float, kSlots> normalised {};
+    bool valid = false;
+};
+
+struct SharedMatchReference
+{
+    MatchCapture reference;
+    bool valid = false;
+};
+
+SharedMatchReference& sharedMatchReference()
+{
+    // In-process and GUI-message-thread only; a copied capture owns all of
+    // its data, not the analyzer snapshot or a processor pointer.
+    static SharedMatchReference shared;
+    return shared;
+}
+
+NativeBandClipboard& nativeBandClipboard()
+{
+    static NativeBandClipboard clipboard;
+    return clipboard;
+}
+
+int clipboardParameterIndex (int band, int slot) noexcept
+{
+    if (slot < 7)
+        return parameterIndex (band, static_cast<BandParameterOffset> (slot));
+    if (slot == 7)
+        return placementParameterIndex (band);
+    if (slot < 13)
+        return dynamicParameterIndex (
+            band, static_cast<DynamicBandOffset> (slot - 8));
+    return dynamicFilterParameterIndex (band);
+}
 
 void notifyParameter (Processor& processor, int index, float normalised)
 {
@@ -321,6 +365,12 @@ public:
     {
         setInterceptsMouseClicks (true, true);
         addAndMakeVisible (sketchButton_);
+        addAndMakeVisible (grabButton_);
+        addAndMakeVisible (copyButton_);
+        addAndMakeVisible (pasteButton_);
+        addAndMakeVisible (matchButton_);
+        addAndMakeVisible (matchSaveButton_);
+        addAndMakeVisible (matchLoadButton_);
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
         sketchButton_.setColour (juce::TextButton::buttonColourId,
@@ -328,6 +378,11 @@ public:
         sketchButton_.onClick = [this]
         {
             sketchArmed_ = sketchButton_.getToggleState();
+            if (sketchArmed_)
+            {
+                clearGrabPreview();
+                resetMatchCapture();
+            }
             if (! sketchArmed_)
             {
                 sketching_ = false;
@@ -339,6 +394,93 @@ public:
                 sketchArmed_ ? Palette::accentActive() : Palette::surfaceHover());
             repaint();
         };
+
+        grabButton_.setTitle ("Freeze PRE-EQ resonances; tap a marker to cut");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+                               Palette::surfaceHover());
+        grabButton_.onClick = [this]
+        {
+            if (grabArmed_)
+            {
+                clearGrabPreview();
+                repaint();
+                return;
+            }
+            if (processor_.getAnalyzerMode()
+                == APEX::Analysis::SpectrumTapMode::Closed)
+                return;
+            auto snapshot = processor_.getAnalyzer().acquireSnapshot();
+            // Require the actual pre-EQ feed; post-EQ resonance suggestions
+            // would be biased by the very cuts the producer is making.
+            if (! snapshot.isValid() || ! snapshot.preActive()
+                || snapshot.preDb() == nullptr)
+                return;
+            grabPlan_ = SpectrumGrab::analyze (snapshot.preDb(),
+                APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins,
+                snapshot.binHz());
+            grabArmed_ = grabPlan_.count > 0;
+            if (grabArmed_)
+                resetMatchCapture();
+            matchButton_.setVisible (! grabArmed_);
+            matchSaveButton_.setVisible (! grabArmed_);
+            matchLoadButton_.setVisible (! grabArmed_);
+            grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
+            grabButton_.setColour (juce::TextButton::buttonColourId,
+                grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+            if (grabArmed_ && sketchArmed_)
+            {
+                sketchArmed_ = false;
+                sketching_ = false;
+                sketchPointCount_ = 0;
+                sketchButton_.setToggleState (false, juce::dontSendNotification);
+                sketchButton_.setButtonText ("SKETCH");
+                sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                        Palette::surfaceHover());
+            }
+            repaint();
+        };
+        copyButton_.setTitle ("Copy all selected band parameters");
+        pasteButton_.setTitle ("Paste as a new band without overwriting");
+        copyButton_.setColour (juce::TextButton::buttonColourId,
+                              Palette::surfaceHover());
+        pasteButton_.setColour (juce::TextButton::buttonColourId,
+                               Palette::surfaceHover());
+        copyButton_.onClick = [this] { copySelectedBand(); };
+        pasteButton_.onClick = [this] { pasteNewBand(); };
+        matchButton_.setTitle (
+            "EQ Match: collect PRE spectrum of reference, then current input; "
+            "apply native fitted APEX bands after both are captured");
+        matchButton_.setColour (juce::TextButton::buttonColourId,
+                                Palette::surfaceHover());
+        matchButton_.onClick = [this] { advanceMatch(); };
+        matchSaveButton_.setTitle (
+            "Save the measured PRE-EQ reference for other APEX EQ instances "
+            "in this running application");
+        matchLoadButton_.setTitle (
+            "Use the reference previously shared by another APEX EQ instance");
+        matchSaveButton_.onClick = [this]
+        {
+            if (! matchReference_.ready())
+                return;
+            auto& shared = sharedMatchReference();
+            shared.reference = matchReference_;
+            shared.valid = true;
+            matchSaveButton_.setButtonText ("SAVED");
+        };
+        matchLoadButton_.onClick = [this]
+        {
+            const auto& shared = sharedMatchReference();
+            if (! shared.valid || ! shared.reference.ready())
+                return;
+            matchReference_ = shared.reference;
+            matchInput_.reset();
+            matchStage_ = MatchStage::ReferenceReady;
+            lastMatchSpectrumIndex_ = lastSpectrumIndex_;
+            matchButton_.setButtonText ("GET INPUT");
+            matchButton_.setColour (juce::TextButton::buttonColourId,
+                                    Palette::positive());
+            repaint();
+        };
         startTimerHz (25);
     }
 
@@ -346,6 +488,14 @@ public:
     {
         curveDirty_ = true;
         sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
+        grabButton_.setBounds (108, 8, 92, ParametricEQEditor::kTouchTarget);
+        copyButton_.setBounds (208, 8, 44, ParametricEQEditor::kTouchTarget);
+        pasteButton_.setBounds (258, 8, 58, ParametricEQEditor::kTouchTarget);
+        matchButton_.setBounds (8, 58, 110, ParametricEQEditor::kTouchTarget);
+        matchSaveButton_.setBounds (122, 58, 92,
+                                    ParametricEQEditor::kTouchTarget);
+        matchLoadButton_.setBounds (218, 58, 92,
+                                    ParametricEQEditor::kTouchTarget);
     }
 
     void paint (juce::Graphics& g) override
@@ -393,6 +543,8 @@ public:
                 juce::PathStrokeType::rounded));
         }
         drawNodes (g, bounds);
+        if (grabArmed_)
+            drawGrabPeaks (g);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -405,6 +557,11 @@ public:
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
+        if (hit < 0 && grabArmed_ && useGrabPeak (event.position))
+        {
+            longPressFired_ = true;
+            return;
+        }
         if (sketchArmed_ && hit < 0)
         {
             sketching_ = true;
@@ -528,6 +685,36 @@ public:
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
     juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
+    juce::TextButton& getGrabButtonForTesting() noexcept { return grabButton_; }
+    juce::TextButton& getCopyButtonForTesting() noexcept { return copyButton_; }
+    juce::TextButton& getPasteButtonForTesting() noexcept { return pasteButton_; }
+    juce::TextButton& getMatchButtonForTesting() noexcept { return matchButton_; }
+    juce::TextButton& getMatchSaveButtonForTesting() noexcept
+    {
+        return matchSaveButton_;
+    }
+    juce::TextButton& getMatchLoadButtonForTesting() noexcept
+    {
+        return matchLoadButton_;
+    }
+    void feedMatchSpectrumForTesting (const float* db, int bins, double binHz)
+    {
+        captureMatchFrame (db, bins, binHz);
+    }
+    void setGrabSpectrumForTesting (const float* db, int bins, double binHz)
+    {
+        grabPlan_ = SpectrumGrab::analyze (db, bins, binHz);
+        grabArmed_ = grabPlan_.count > 0;
+        grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+            grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
+        repaint();
+    }
+    juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const
+    {
+        return ! grabArmed_ || index < 0 || index >= grabPlan_.count ? juce::Rectangle<int>()
+            : grabPeakBounds (grabPlan_.peaks[static_cast<std::size_t> (index)]);
+    }
 
 private:
     void timerCallback() override
@@ -546,6 +733,26 @@ private:
             if (snapshot.isValid() && snapshot.index() != lastSpectrumIndex_)
             {
                 lastSpectrumIndex_ = snapshot.index();
+                if (matchStage_ == MatchStage::CapturingReference
+                    || matchStage_ == MatchStage::CapturingInput)
+                {
+                    if (snapshot.discontinuous())
+                    {
+                        // Seeking or queue loss breaks measurement continuity.
+                        if (matchStage_ == MatchStage::CapturingReference)
+                            matchReference_.reset();
+                        else
+                            matchInput_.reset();
+                    }
+                    if (snapshot.preActive() && snapshot.preDb() != nullptr
+                        && snapshot.index() != lastMatchSpectrumIndex_)
+                    {
+                        lastMatchSpectrumIndex_ = snapshot.index();
+                        captureMatchFrame (snapshot.preDb(),
+                            APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins,
+                            snapshot.binHz());
+                    }
+                }
                 const float* source = snapshot.postActive() ? snapshot.postDb()
                                                             : snapshot.preDb();
                 std::memcpy (spectrumCopy_.data(), source,
@@ -589,6 +796,269 @@ private:
 
         if (changed)
             repaint();
+    }
+
+
+    enum class MatchStage
+    {
+        Idle, CapturingReference, ReferenceReady,
+        CapturingInput, InputReady
+    };
+
+    void resetMatchCapture()
+    {
+        matchReference_.reset();
+        matchInput_.reset();
+        matchStage_ = MatchStage::Idle;
+        lastMatchSpectrumIndex_ = -1;
+        matchButton_.setButtonText ("EQ MATCH");
+        matchSaveButton_.setButtonText ("REF SAVE");
+        matchButton_.setColour (juce::TextButton::buttonColourId,
+                                Palette::surfaceHover());
+    }
+
+    void captureMatchFrame (const float* db, int bins, double binHz)
+    {
+        MatchCapture* capture = nullptr;
+        if (matchStage_ == MatchStage::CapturingReference)
+            capture = &matchReference_;
+        else if (matchStage_ == MatchStage::CapturingInput)
+            capture = &matchInput_;
+        if (capture == nullptr || ! capture->append (db, bins, binHz))
+            return;
+
+        if (capture->ready())
+        {
+            if (matchStage_ == MatchStage::CapturingReference)
+            {
+                matchStage_ = MatchStage::ReferenceReady;
+                matchButton_.setButtonText ("GET INPUT");
+            }
+            else
+            {
+                matchStage_ = MatchStage::InputReady;
+                matchButton_.setButtonText ("APPLY EQ");
+            }
+            matchButton_.setColour (juce::TextButton::buttonColourId,
+                                    Palette::positive());
+        }
+        repaint();
+    }
+
+    void advanceMatch()
+    {
+        if (matchStage_ == MatchStage::CapturingReference
+            || matchStage_ == MatchStage::CapturingInput)
+        {
+            // A second press cancels instead of accidentally advancing.
+            resetMatchCapture();
+            return;
+        }
+
+        if (matchStage_ == MatchStage::InputReady)
+        {
+            const auto plan = MatchEngine::fit (matchReference_, matchInput_);
+            int lastBand = -1;
+            for (int proposal = 0;
+                 proposal < std::min (plan.count, 8); ++proposal)
+            {
+                const auto slot = firstDisabledBand();
+                if (! slot.has_value())
+                    break;
+                const int band = *slot;
+                const auto& suggestion =
+                    plan.bands[static_cast<std::size_t> (proposal)];
+                auto setUnits = [this, band] (BandParameterOffset offset,
+                                              float value)
+                {
+                    const int id = parameterIndex (band, offset);
+                    auto* parameter = processor_.getParametricEQParameter (id);
+                    notifyParameter (processor_, id,
+                                     parameter->toNormalised (value));
+                };
+                setUnits (BandParameterOffset::Shape,
+                    static_cast<float> (suggestion.shape));
+                setUnits (BandParameterOffset::Frequency,
+                    static_cast<float> (suggestion.frequencyHz));
+                setUnits (BandParameterOffset::Gain,
+                    static_cast<float> (std::clamp (
+                        suggestion.gainDb, -9.0, 9.0)));
+                setUnits (BandParameterOffset::Q,
+                    static_cast<float> (suggestion.q));
+                notifyParameter (processor_, parameterIndex (
+                    band, BandParameterOffset::Enabled), 1.0f);
+                lastBand = band;
+            }
+            resetMatchCapture();
+            curveDirty_ = true;
+            if (lastBand >= 0)
+                owner_.selectBand (lastBand);
+            repaint();
+            return;
+        }
+
+        // Never assume the analyzer was active or generate synthetic data.
+        if ((static_cast<int> (processor_.getAnalyzerMode()) & 1) == 0)
+        {
+            matchButton_.setButtonText ("PRE OFF");
+            return;
+        }
+
+        if (matchStage_ == MatchStage::ReferenceReady)
+        {
+            matchInput_.reset();
+            matchStage_ = MatchStage::CapturingInput;
+            matchButton_.setButtonText ("INPUT...");
+        }
+        else
+        {
+            matchReference_.reset();
+            matchInput_.reset();
+            matchStage_ = MatchStage::CapturingReference;
+            matchButton_.setButtonText ("REF...");
+        }
+        lastMatchSpectrumIndex_ = lastSpectrumIndex_;
+        if (grabArmed_)
+            clearGrabPreview();
+        if (sketchArmed_)
+        {
+            sketchArmed_ = false;
+            sketching_ = false;
+            sketchPointCount_ = 0;
+            sketchButton_.setToggleState (false, juce::dontSendNotification);
+            sketchButton_.setButtonText ("SKETCH");
+            sketchButton_.setColour (juce::TextButton::buttonColourId,
+                                    Palette::surfaceHover());
+        }
+        matchButton_.setColour (juce::TextButton::buttonColourId,
+                                Palette::accentActive());
+        repaint();
+    }
+
+    void copySelectedBand()
+    {
+        const int source = owner_.getSelectedBandForTesting();
+        if (source < 0 || source >= kMaxBands)
+            return;
+        auto* enabled = processor_.getParametricEQParameter (
+            parameterIndex (source, BandParameterOffset::Enabled));
+        if (enabled == nullptr || ! enabled->getBool())
+            return;
+
+        auto& clipboard = nativeBandClipboard();
+        clipboard.valid = false;
+        for (int slot = 0; slot < NativeBandClipboard::kSlots; ++slot)
+        {
+            const auto* parameter = processor_.getParametricEQParameter (
+                clipboardParameterIndex (source, slot));
+            if (parameter == nullptr)
+                return;
+            clipboard.normalised[static_cast<std::size_t> (slot)]
+                = parameter->getValue();
+        }
+        clipboard.valid = true;
+    }
+
+    void pasteNewBand()
+    {
+        const auto& clipboard = nativeBandClipboard();
+        if (! clipboard.valid)
+            return;
+        const auto free = firstDisabledBand();
+        if (! free.has_value())
+            return;
+        const int band = *free;
+        // The Enabled flag is LAST so no intermediate half-configured
+        // band gets switched on. Every edit goes through the APEX host
+        // automation gesture bridge rather than manipulating DSP state.
+        for (int slot = 1; slot < NativeBandClipboard::kSlots; ++slot)
+            notifyParameter (processor_, clipboardParameterIndex (band, slot),
+                clipboard.normalised[static_cast<std::size_t> (slot)]);
+        notifyParameter (processor_, parameterIndex (
+            band, BandParameterOffset::Enabled), 1.0f);
+        clearGrabPreview();
+        owner_.selectBand (band);
+        curveDirty_ = true;
+        repaint();
+    }
+
+    juce::Rectangle<int> grabPeakBounds (const GrabPeak& peak) const
+    {
+        const int x = static_cast<int> (std::lround (
+            xForFrequency (peak.frequencyHz, std::max (1, getWidth()))));
+        return { x - ParametricEQEditor::kTouchTarget / 2, 58,
+                 ParametricEQEditor::kTouchTarget,
+                 ParametricEQEditor::kTouchTarget };
+    }
+
+    void clearGrabPreview()
+    {
+        grabArmed_ = false;
+        matchButton_.setVisible (true);
+        matchSaveButton_.setVisible (true);
+        matchLoadButton_.setVisible (true);
+        grabPlan_ = {};
+        grabButton_.setButtonText ("GRAB");
+        grabButton_.setColour (juce::TextButton::buttonColourId,
+                              Palette::surfaceHover());
+    }
+
+    void drawGrabPeaks (juce::Graphics& g)
+    {
+        for (int i = 0; i < grabPlan_.count; ++i)
+        {
+            const auto& peak = grabPlan_.peaks[static_cast<std::size_t> (i)];
+            const auto marker = grabPeakBounds (peak);
+            const auto centre = marker.getCentre().toFloat();
+            g.setColour (Palette::selected().withAlpha (0.85f));
+            g.fillEllipse (centre.x - 7.0f, centre.y - 7.0f, 14.0f, 14.0f);
+            g.setColour (Palette::background());
+            g.drawEllipse (centre.x - 7.0f, centre.y - 7.0f, 14.0f,
+                           14.0f, 1.5f);
+            g.setColour (Palette::text());
+            const juce::String label = peak.frequencyHz < 1000.0
+                ? juce::String (static_cast<int> (std::lround (peak.frequencyHz))) + " Hz"
+                : juce::String (peak.frequencyHz / 1000.0, 1) + "k";
+            g.drawFittedText (label, marker.withY (102).withHeight (20),
+                              juce::Justification::centred, 1);
+        }
+    }
+
+    bool useGrabPeak (juce::Point<float> position)
+    {
+        for (int i = 0; i < grabPlan_.count; ++i)
+        {
+            const auto& peak = grabPlan_.peaks[static_cast<std::size_t> (i)];
+            if (! grabPeakBounds (peak).toFloat().contains (position))
+                continue;
+            const auto slot = firstDisabledBand();
+            if (! slot.has_value())
+                return false;
+            const int band = *slot;
+            auto setBandUnits = [this, band] (BandParameterOffset offset,
+                                             float units)
+            {
+                const auto id = parameterIndex (band, offset);
+                auto* parameter = processor_.getParametricEQParameter (id);
+                notifyParameter (processor_, id,
+                                 parameter->toNormalised (units));
+            };
+            setBandUnits (BandParameterOffset::Shape,
+                          static_cast<float> (FilterShape::Bell));
+            setBandUnits (BandParameterOffset::Frequency,
+                          static_cast<float> (peak.frequencyHz));
+            setBandUnits (BandParameterOffset::Gain, -3.0f);
+            setBandUnits (BandParameterOffset::Q,
+                          static_cast<float> (peak.suggestedQ));
+            notifyParameter (processor_, parameterIndex (
+                band, BandParameterOffset::Enabled), 1.0f);
+            clearGrabPreview();  // one-shot; never mutates existing bands
+            owner_.selectBand (band);
+            curveDirty_ = true;
+            repaint();
+            return true;
+        }
+        return false;
     }
 
     void drawGrid (juce::Graphics& g, juce::Rectangle<float> bounds)
@@ -886,6 +1356,18 @@ private:
     std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
         spectrumCopy_ {};
     juce::TextButton sketchButton_ { "SKETCH" };
+    juce::TextButton grabButton_ { "GRAB" };
+    juce::TextButton copyButton_ { "COPY" };
+    juce::TextButton pasteButton_ { "PASTE" };
+    juce::TextButton matchButton_ { "EQ MATCH" };
+    juce::TextButton matchSaveButton_ { "REF SAVE" };
+    juce::TextButton matchLoadButton_ { "REF LOAD" };
+    MatchCapture matchReference_;
+    MatchCapture matchInput_;
+    MatchStage matchStage_ = MatchStage::Idle;
+    int lastMatchSpectrumIndex_ = -1;
+    GrabPlan grabPlan_ {};
+    bool grabArmed_ = false;
     std::array<SketchPoint, SketchPlanner::kMaximumInputPoints> sketchPoints_ {};
     int sketchPointCount_ = 0;
     bool sketchArmed_ = false;
@@ -1471,6 +1953,54 @@ juce::TextButton& ParametricEQEditor::getPhaseButtonForTesting()
 juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
 {
     return graph_->getSketchButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getGrabButtonForTesting()
+{
+    return graph_->getGrabButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getCopyButtonForTesting()
+{
+    return graph_->getCopyButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getPasteButtonForTesting()
+{
+    return graph_->getPasteButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getMatchButtonForTesting()
+{
+    return graph_->getMatchButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getMatchSaveButtonForTesting()
+{
+    return graph_->getMatchSaveButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getMatchLoadButtonForTesting()
+{
+    return graph_->getMatchLoadButtonForTesting();
+}
+
+void ParametricEQEditor::feedMatchSpectrumForTesting (
+    const float* db, int bins, double binHz)
+{
+    graph_->feedMatchSpectrumForTesting (db, bins, binHz);
+}
+
+void ParametricEQEditor::setGrabSpectrumForTesting (
+    const float* db, int bins, double binHz)
+{
+    graph_->setGrabSpectrumForTesting (db, bins, binHz);
+}
+
+juce::Rectangle<int> ParametricEQEditor::getGrabPeakBoundsForTesting (
+    int index) const
+{
+    return graph_->getGrabPeakBoundsForTesting (index);
 }
 
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()

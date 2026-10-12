@@ -1,6 +1,7 @@
 # APEX Flagship EQ — Pro-Q-4-class parity plan
 
-Status: implementation branch `feature/apex-flagship-eq-v1`
+Status: implementation branch `feature/apex-flagship-eq-v1`, with unmerged
+Spectrum Grab extension `feature/apex-eq-spectrum-grab-20261012`.
 
 ## Product rule
 
@@ -40,12 +41,30 @@ product with stable APEX parameter IDs and APEX UI language.
 
 - Spectral dynamics: frequency-selective dynamic action inside a band's pass region.
 - Dedicated sidechain-listen workflow (per-band detector filtering is now implemented).
-- Spectrum Grab style peak suggestions.
-- EQ Match capture, target curve generation and bounded band fitting.
+- [x] Spectrum Grab resonance preview: bounded pre-EQ log-frequency prominence
+  detector, frozen GUI snapshot, selectable 44px markers, one-shot new bell
+  cut-band insertion through host-notified existing parameter IDs; tests added.
+  **Pro-Q workflow approximation**, not its exact algorithm; awaiting Windows CI
+  and hands-on audio validation.
+- [x] Initial native APEX EQ Match: guided two-stage capture from the
+  PRE-EQ analyzer, 32 accepted fresh frames per stage, fixed-capacity power
+  averaging on a 96-point log-frequency grid, median level normalization,
+  +/-9 dB bounded differential and existing APEX Sketch fitting. User clicks
+  APPLY EQ to add at most 8 new bands. REF SAVE / REF LOAD exchange a
+  copied reference spectrum across native EQ instances within the running
+  APEX process (no raw plugin pointers, analyzer ownership or external audio
+  routing). No disk/file reference input yet;
+  Windows CI and real audio QA still pending.
 - Cross-instance registry, collision visualization and native APEX track metadata.
-- Output gain / auto gain, output spectrum controls and richer metering.
+- [x] Branch processor declares output gain, pan, polarity, auto-gain and gain
+  scale parameters at ABI indices 343..347 (DSP and UI still need a full gate).
+- Rich output spectrum controls and production metering QA.
 - Undo/redo and A/B state comparison at plugin scope.
-- Copy/paste bands and preset exchange helpers.
+- [x] Native band copy/paste across APEX EQ instances via a GUI-thread
+  clipboard. Copies 14 normalized hosted band fields (including placement,
+  dynamics and detector filter), inserts into a new disabled slot without
+  mutating the source, and uses automation gestures. CI pending.
+- Preset exchange helpers and full parameter-state sharing across formats.
 - Piano-frequency overlay and expanded frequency labels.
 - Surround/immersive channel placement once the APEX host exposes those layouts.
 - Standalone VST3/CLAP/AU/AAX wrappers only if/when APEX product packaging requires
@@ -70,3 +89,49 @@ bounded transitions, finite-value guards, and truthful latency reporting.
 9. Full Debug and Release Windows builds.
 10. Full APEXTests Debug and Release runs with seed `0xA9E12026`.
 11. Manual audio + GUI validation before calling the feature production-ready.
+
+## Spectrum Grab acceptance (unmerged extension)
+
+1. Enable PRE or PRE+POST analysis, play audio, press **GRAB**; no capture
+   from analyzer OFF or POST-only mode and no stale samples are invented.
+2. The APEX-branded graph freezes at most 8 high-prominence resonance markers.
+   Broad/noisy and flat spectra must not trigger candidate spamming.
+3. Tap a 44px marker to append **one** Bell band with a conservative -3 dB cut
+   and a measured Q; the original 0..347 host parameter identity is unchanged.
+4. Manual edits remain possible, Grab never overwrites an existing band, and
+   one-shot preview disarms on insertion; no new DSP callback operations.
+5. CI Windows Debug/Release, tests and hands-on live analyzer inspection must
+   succeed before merging. Not production-certified on documentation alone.
+
+## Feature-scope caveat
+
+A behavioral-parity roadmap is not evidence of feature completion. Pro-Q 4's
+proprietary exact filter designs, spectral/dynamic matching algorithms and
+third-party cross-plugin instance control are not part of this code. Independent
+APEX implementation only: no FabFilter assets, internals, presets or UI cloning.
+
+## Native band clipboard acceptance (unmerged extension)
+
+- APEX COPY and PASTE remain at least 44px high on a 320px-wide phone.
+- Copies the selected enabled band; pastes into a new available slot without
+  replacing active bands. All per-band values go through existing hosted
+  parameter notifications; global detector settings are intentionally global.
+- Clipboard is in-process across APEX native EQ editors, not OS clipboard or
+  an interchange format. Test the full dynamic/placement/filter state roundtrip.
+
+## EQ Match acceptance (unmerged extension)
+
+- Turn PRE analyzer on, play a representative passage, press EQ MATCH to
+  capture a **reference** (32 distinct finite power FFT snapshots).
+- Play the material to be corrected, press GET INPUT to capture it; silence,
+  nonfinite frames, unsupported sample rates and missing snapshots do not
+  advance capture. Press APPLY EQ to publish at most 8 standard hosted bands.
+- Reject an unchanged or level-only difference. Match curve is bounded to
+  +/-9 dB, not a proof of a perceptually optimal fit.
+- Capture uses the currently selected track's PRE-EQ audio at two separate
+  moments. The in-process REF SAVE / REF LOAD buttons let other APEX EQ
+  instances reuse a copied tonal profile. Live external/sidechain capture,
+  persistent reference files, matching-detail slider and preview rollback
+  remain outstanding. This is **not full FabFilter EQ Match parity**.
+- All work belongs to the message thread and FFT worker. Audio callback
+  never performs fitting, allocation or UI publication.

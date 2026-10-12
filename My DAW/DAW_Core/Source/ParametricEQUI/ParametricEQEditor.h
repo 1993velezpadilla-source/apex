@@ -61,6 +61,15 @@ public:
     juce::TextButton& getAuditionButtonForTesting();
     juce::TextButton& getPhaseButtonForTesting();
     juce::TextButton& getSketchButtonForTesting();
+    juce::TextButton& getGrabButtonForTesting();
+    juce::TextButton& getCopyButtonForTesting();
+    juce::TextButton& getPasteButtonForTesting();
+    juce::TextButton& getMatchButtonForTesting();
+    juce::TextButton& getMatchSaveButtonForTesting();
+    juce::TextButton& getMatchLoadButtonForTesting();
+    void feedMatchSpectrumForTesting (const float* db, int bins, double binHz);
+    void setGrabSpectrumForTesting (const float* db, int bins, double binHz);
+    juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const;
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
     juce::TextButton& getDynEnableButtonForTesting();
