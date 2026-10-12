@@ -8,6 +8,7 @@
 #include "../RecordingCore/LiveRecordWaveformCore.h"
 #include <atomic>
 #include <cmath>
+#include "../DSPCore/TrackPolarityCore.h"
 
 namespace DAW {
 
@@ -49,6 +50,14 @@ public:
     
     bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
     void setSoloed(bool shouldBeSoloed);
+
+    // Mixer Ø: invert the polarity of the whole channel/bus, not its timing.
+    bool isPolarityInverted() const noexcept { return polarityInverted_.load(std::memory_order_relaxed); }
+    void setPolarityInverted(bool inverted);
+    void applyOutputPolarity(juce::AudioBuffer<float>& audio, int numSamples) noexcept
+    {
+        polarityCore_.process(audio, numSamples, isPolarityInverted());
+    }
     
     bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
     void setArmed(bool shouldBeArmed);
@@ -256,6 +265,8 @@ private:
     juce::String name_;
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
+    std::atomic<bool> polarityInverted_{false};
+    TrackPolarityCore polarityCore_;
     std::atomic<bool> armed_{false};
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
