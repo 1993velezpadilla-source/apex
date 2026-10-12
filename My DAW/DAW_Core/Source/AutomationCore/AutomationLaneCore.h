@@ -347,7 +347,7 @@ public:
     juce::ValueTree getState() const
     {
         juce::ValueTree state("AutomationLane");
-        state.setProperty("parameterId", parameterId_, nullptr);
+        state.setProperty("parameterId", getParameterId(), nullptr);
         state.setProperty("parameterName", parameterName_, nullptr);
         state.setProperty("defaultValue", defaultValue_, nullptr);
         state.setProperty("visible", visible_, nullptr);
