@@ -1207,6 +1207,7 @@ public:
     void runTest() override
     {
         testManualValuesAreAuthoritative();
+        testPassiveMirrorDoesNotCreateRecordingGesture();
         testTouchGestureOverridesLiveDsp();
         testReorderKeepsInstanceValues();
         testReorderKeepsAutomationOwner();
@@ -1249,6 +1250,56 @@ private:
         for (int i = 0; i < 5; ++i)
             expectWithinAbsoluteError(chain.getSlot(i)->getProcessor()->getParameters()[0]->getValue(),
                                       1.0f, 1.0e-6f, "manual unity remains authoritative");
+    }
+
+    void testPassiveMirrorDoesNotCreateRecordingGesture()
+    {
+        beginTest("passive host-side VST3 mirror does not fabricate Write movement");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Kind = apex::automation::AutomationGestureQueue::EventKind;
+        using Source = apex::automation::ChangeSource;
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-passive-mirror-no-fake-write-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* processor = slot->getProcessor();
+        if (processor == nullptr) { expect(false); return; }
+        auto* p = processor->getParameters()[0];
+
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto* mirrored = sys.getRegistry().find(id);
+        expect(mirrored != nullptr && mirrored->getBoundPluginParameter() == p);
+        if (mirrored == nullptr) return;
+
+        // A private processor change without a host notification can be
+        // discovered during audio processing. That is a state-sync operation,
+        // not a manual touch or a new point on a recording lane.
+        auto& queue = sys.getQueue();
+        apex::automation::AutomationGestureQueue::Event event;
+        while (queue.pop(event)) {} // isolate this test from earlier fixtures
+        p->setValue(0.75f);
+        expectWithinAbsoluteError(mirrored->getNormalizedValue(), 0.5f, 1.0e-4f,
+            "mirror starts stale before host-side synchronization");
+        chain.applyAutomationAtSample(trackId, nullptr, 0, kRate, 120.0, 64);
+        expectWithinAbsoluteError(mirrored->getNormalizedValue(), 0.75f, 1.0e-4f,
+            "processor authority updates the mirror without an automation lane");
+        bool phantomWrite = false;
+        while (queue.pop(event))
+            if (event.paramID == id && event.kind == Kind::ValueChange
+                && event.source == Source::Plugin)
+                phantomWrite = true;
+        expect(!phantomWrite,
+            "host-side synchronization must not enter the producer recording queue");
     }
 
     void testTouchGestureOverridesLiveDsp()
