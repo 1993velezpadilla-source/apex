@@ -2571,7 +2571,7 @@ public:
                        categories[i] + " plugin end must release Touch");
 
                 recorder.drainForTests();
-                const auto* lane = lanes.findLane(ids[i]);
+                const auto lane = lanes.findLane(ids[i]);
                 expect(lane != nullptr, categories[i] + " must create a Touch lane");
                 if (lane == nullptr) continue;
                 const auto snap = lane->getSnapshot();
