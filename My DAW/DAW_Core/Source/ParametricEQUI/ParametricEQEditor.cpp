@@ -33,6 +33,34 @@ struct Palette
     static juce::Colour positive() { return juce::Colour (0xff14b87a); }
 };
 
+// Local APEX clipboard; valid across native EQ editor instances on the
+// JUCE message thread. This copies hosted parameter VALUES only, never
+// processor/audio objects. The first seven IDs of each band are frozen.
+struct NativeBandClipboard
+{
+    static constexpr int kSlots = 14;
+    std::array<float, kSlots> normalised {};
+    bool valid = false;
+};
+
+NativeBandClipboard& nativeBandClipboard()
+{
+    static NativeBandClipboard clipboard;
+    return clipboard;
+}
+
+int clipboardParameterIndex (int band, int slot) noexcept
+{
+    if (slot < 7)
+        return parameterIndex (band, static_cast<BandParameterOffset> (slot));
+    if (slot == 7)
+        return placementParameterIndex (band);
+    if (slot < 13)
+        return dynamicParameterIndex (
+            band, static_cast<DynamicBandOffset> (slot - 8));
+    return dynamicFilterParameterIndex (band);
+}
+
 void notifyParameter (Processor& processor, int index, float normalised)
 {
     auto* parameter = processor.getParametricEQParameter (index);
@@ -323,6 +351,8 @@ public:
         setInterceptsMouseClicks (true, true);
         addAndMakeVisible (sketchButton_);
         addAndMakeVisible (grabButton_);
+        addAndMakeVisible (copyButton_);
+        addAndMakeVisible (pasteButton_);
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
         sketchButton_.setColour (juce::TextButton::buttonColourId,
@@ -383,6 +413,14 @@ public:
             }
             repaint();
         };
+        copyButton_.setTitle ("Copy all selected band parameters");
+        pasteButton_.setTitle ("Paste as a new band without overwriting");
+        copyButton_.setColour (juce::TextButton::buttonColourId,
+                              Palette::surfaceHover());
+        pasteButton_.setColour (juce::TextButton::buttonColourId,
+                               Palette::surfaceHover());
+        copyButton_.onClick = [this] { copySelectedBand(); };
+        pasteButton_.onClick = [this] { pasteNewBand(); };
         startTimerHz (25);
     }
 
@@ -391,6 +429,8 @@ public:
         curveDirty_ = true;
         sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
         grabButton_.setBounds (108, 8, 92, ParametricEQEditor::kTouchTarget);
+        copyButton_.setBounds (208, 8, 44, ParametricEQEditor::kTouchTarget);
+        pasteButton_.setBounds (258, 8, 58, ParametricEQEditor::kTouchTarget);
     }
 
     void paint (juce::Graphics& g) override
@@ -581,6 +621,8 @@ public:
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
     juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
     juce::TextButton& getGrabButtonForTesting() noexcept { return grabButton_; }
+    juce::TextButton& getCopyButtonForTesting() noexcept { return copyButton_; }
+    juce::TextButton& getPasteButtonForTesting() noexcept { return pasteButton_; }
     void setGrabSpectrumForTesting (const float* db, int bins, double binHz)
     {
         grabPlan_ = SpectrumGrab::analyze (db, bins, binHz);
@@ -658,6 +700,53 @@ private:
             repaint();
     }
 
+
+    void copySelectedBand()
+    {
+        const int source = owner_.getSelectedBandForTesting();
+        if (source < 0 || source >= kMaxBands)
+            return;
+        auto* enabled = processor_.getParametricEQParameter (
+            parameterIndex (source, BandParameterOffset::Enabled));
+        if (enabled == nullptr || ! enabled->getBool())
+            return;
+
+        auto& clipboard = nativeBandClipboard();
+        clipboard.valid = false;
+        for (int slot = 0; slot < NativeBandClipboard::kSlots; ++slot)
+        {
+            const auto* parameter = processor_.getParametricEQParameter (
+                clipboardParameterIndex (source, slot));
+            if (parameter == nullptr)
+                return;
+            clipboard.normalised[static_cast<std::size_t> (slot)]
+                = parameter->getValue();
+        }
+        clipboard.valid = true;
+    }
+
+    void pasteNewBand()
+    {
+        const auto& clipboard = nativeBandClipboard();
+        if (! clipboard.valid)
+            return;
+        const auto free = firstDisabledBand();
+        if (! free.has_value())
+            return;
+        const int band = *free;
+        // The Enabled flag is LAST so no intermediate half-configured
+        // band gets switched on. Every edit goes through the APEX host
+        // automation gesture bridge rather than manipulating DSP state.
+        for (int slot = 1; slot < NativeBandClipboard::kSlots; ++slot)
+            notifyParameter (processor_, clipboardParameterIndex (band, slot),
+                clipboard.normalised[static_cast<std::size_t> (slot)]);
+        notifyParameter (processor_, parameterIndex (
+            band, BandParameterOffset::Enabled), 1.0f);
+        clearGrabPreview();
+        owner_.selectBand (band);
+        curveDirty_ = true;
+        repaint();
+    }
 
     juce::Rectangle<int> grabPeakBounds (const GrabPeak& peak) const
     {
@@ -1031,6 +1120,8 @@ private:
         spectrumCopy_ {};
     juce::TextButton sketchButton_ { "SKETCH" };
     juce::TextButton grabButton_ { "GRAB" };
+    juce::TextButton copyButton_ { "COPY" };
+    juce::TextButton pasteButton_ { "PASTE" };
     GrabPlan grabPlan_ {};
     bool grabArmed_ = false;
     std::array<SketchPoint, SketchPlanner::kMaximumInputPoints> sketchPoints_ {};
@@ -1623,6 +1714,16 @@ juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
 juce::TextButton& ParametricEQEditor::getGrabButtonForTesting()
 {
     return graph_->getGrabButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getCopyButtonForTesting()
+{
+    return graph_->getCopyButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getPasteButtonForTesting()
+{
+    return graph_->getPasteButtonForTesting();
 }
 
 void ParametricEQEditor::setGrabSpectrumForTesting (
