@@ -616,7 +616,17 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
     }
 
     try {
-        apex::automation::AutomationLaneStore::getInstance().restoreState(state.getChildWithName("APEXAutomation"));
+        // A legacy project may predate APEXAutomation / KeyRegistry / ModeState.
+        // Do not carry the previously opened song's keys or Write/Latch modes
+        // into it. Existing track IDs are rebound below after lane restoration.
+        const auto apexState = state.getChildWithName("APEXAutomation");
+        if (!apexState.getChildWithName("KeyRegistry").isValid())
+            apex::automation::AutomationParameterKeyRegistry::getInstance()
+                .resetForNewProject();
+        if (!apexState.isValid())
+            apex::automation::AutomationModeState::getInstance()
+                .restoreState(juce::ValueTree{});
+        apex::automation::AutomationLaneStore::getInstance().restoreState(apexState);
         // KeyRegistry::restoreState may remap numeric ParameterIDs when the
         // project changes. Refresh EVERY track's RT-only native-fader handle
         // after that restore, including hidden/collapsed tracks and Master.

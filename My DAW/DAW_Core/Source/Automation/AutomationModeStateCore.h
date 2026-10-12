@@ -246,10 +246,22 @@ namespace apex::automation
 
         void restoreState (const juce::ValueTree& state)
         {
-            if (! state.isValid()) return;
-            ++publishBatchDepth_;
-            clearAll();
-            const auto defaultMode = static_cast<AutomationMode> (
+            // Older projects may not contain a ModeState subtree. A missing
+            // subtree means the old song's Write/Latch state must be discarded,
+            // not silently inherited by the newly opened song.
+            if (! state.isValid())
+            {
+                clearAll();
+                setGlobalDefaultMode (AutomationMode::Read);
+                return;
+            }
+            {
+                // Restore the batch depth even if a malformed ValueTree or
+                // failed allocation throws. No RT map publication mid-restore.
+                const juce::ScopedValueSetter<int> batchDepthGuard (
+                    publishBatchDepth_, publishBatchDepth_ + 1);
+                clearAll();
+                const auto defaultMode = static_cast<AutomationMode> (
                 juce::jlimit (0, 5, (int) state.getProperty ("globalDefault", (int) AutomationMode::Read)));
             setGlobalDefaultMode (defaultMode);
             for (int i = 0; i < state.getNumChildren(); ++i)
@@ -264,7 +276,7 @@ namespace apex::automation
                     juce::jlimit (0, 5, (int) entry.getProperty ("mode", (int) AutomationMode::Read)));
                 setMode (id, mode);
             }
-            --publishBatchDepth_;
+            } // Batch guard leaves the previous depth unchanged.
             const juce::ScopedLock sl (mapLock);
             publishLocked();
         }
