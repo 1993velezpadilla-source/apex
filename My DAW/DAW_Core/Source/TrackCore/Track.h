@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../Automation/AutomationTypes.h"
 #include "../UtilityCore/Types.h"
+#include "TrackPolarityCore.h"
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
 #include "../InputMonitorCore/InputFxChain.h"
 #include "../InputMonitorCore/InputTrimCore.h"
@@ -50,6 +51,16 @@ public:
     
     bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
     void setSoloed(bool shouldBeSoloed);
+
+    // Ø polarity invert is independent of native parameter automation.
+    bool isPolarityInverted() const noexcept { return polarityInverted_.load(std::memory_order_relaxed); }
+    void setPolarityInverted(bool inverted);
+    // Called solely on the audio thread; transitions remain per-track.
+    void applyPolarityTo(juce::AudioBuffer<float>& audio, int samples) noexcept
+    {
+        TrackPolarityCore::applyWithTransition(audio, samples,
+            isPolarityInverted(), polarityTransition_);
+    }
     
     bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
     void setArmed(bool shouldBeArmed);
@@ -294,6 +305,8 @@ private:
     juce::String name_;
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
+    std::atomic<bool> polarityInverted_{false};
+    TrackPolarityCore::TransitionState polarityTransition_;
     std::atomic<bool> armed_{false};
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
