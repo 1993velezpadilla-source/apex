@@ -17,6 +17,7 @@
 #include "../../../Source/Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
+#include "../../../Source/AutomationCore/AutomationClipRegionCore.h"
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
@@ -4564,6 +4565,18 @@ public:
         restored.setEnabled(false);
         restored.restoreState(legacy);
         expectEquals(restored.isEnabled(), true);
+
+        beginTest("Restored lane identity reaches legacy clip capture");
+        DAW::AutomationLaneCore reused("track-01", DAW::AutomationLaneCore::trackPanParameterId);
+        reused.restoreState(original.getState());
+        expectEquals(reused.getParameterId(), juce::String(DAW::AutomationLaneCore::trackVolumeParameterId));
+        expectEquals(reused.parameterId, reused.getParameterId());
+        DAW::AutomationClipRegionCore captured;
+        captured.startSample = 0;
+        captured.lengthSamples = 48000;
+        captured.captureFromLaneRange(reused);
+        expectEquals(captured.parameterId, reused.getParameterId());
+        expectEquals((int)captured.localPoints.size(), reused.getNumPoints());
 
         beginTest("Global manager state also roundtrips lane enabled flags");
         DAW::AutomationManagerCore manager;
