@@ -3373,7 +3373,7 @@ public:
         const auto play = [&] (double ppq, bool rolling)
         {
             return getNativeTrackVolumeGainRT(id, fallbackGain, ppq,
-                                              rolling, registry, lanes,
+                                              rolling, false, registry, lanes,
                                               modes, taper);
         };
 
@@ -3387,6 +3387,15 @@ public:
                                   taper.normToGain(0.80f), 1.0e-5f);
         expectWithinAbsoluteError(play(1.0, false), fallbackGain, 1.0e-5f,
                                   "stopped transport does not read automation");
+
+        beginTest("track automation mute bypasses the lane without muting audio");
+        expectWithinAbsoluteError(getNativeTrackVolumeGainRT(
+            id, fallbackGain, 1.0, true, true,
+            registry, lanes, modes, taper), fallbackGain, 1.0e-5f,
+            "automation mute returns the regular track volume");
+        expectWithinAbsoluteError(play(1.0, true),
+                                  taper.normToGain(0.50f), 1.0e-5f,
+                                  "clearing automation mute resumes Read immediately");
 
         beginTest("Off bypasses lane completely");
         modes.setMode(id, AutomationMode::Off);
@@ -3417,7 +3426,7 @@ public:
 
         beginTest("missing/invalid key and malformed clock remain neutral");
         expectWithinAbsoluteError(getNativeTrackVolumeGainRT(
-            kInvalidParameterID, fallbackGain, 1.0, true,
+            kInvalidParameterID, fallbackGain, 1.0, true, false,
             registry, lanes, modes, taper), fallbackGain, 1.0e-5f);
         expectWithinAbsoluteError(play(std::numeric_limits<double>::quiet_NaN(),
                                        true), fallbackGain, 1.0e-5f);
