@@ -4047,6 +4047,10 @@ public:
             clock.publishFromAudioThread(1.0, 0.001, true);
             recorder.drainForTests();
 
+            // Model the GUI drag begin/end boundaries explicitly. Values
+            // themselves still flow through the REAL JUCE Slider attachment;
+            // gesture notifications go through the production native bridge.
+            parameter->beginGesture();
             clock.publishFromAudioThread(1.25, 0.001, true);
             fader.setValue(0.70, juce::sendNotificationSync);
             expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.70f,
@@ -4057,6 +4061,8 @@ public:
             expectWithinAbsoluteError(parameter->getNormalizedValue(), 0.35f,
                                       1.0e-5f, "second movement is not coalesced");
 
+            clock.publishFromAudioThread(1.75, 0.001, true);
+            parameter->endGesture();
             recorder.drainForTests();
             expect(modes.latchHeldRT(id), "Write keeps the last user value until Stop");
             clock.publishFromAudioThread(2.0, 0.001, false);
