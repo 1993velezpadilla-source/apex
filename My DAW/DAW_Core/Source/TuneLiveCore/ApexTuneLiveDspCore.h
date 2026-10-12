@@ -18,7 +18,7 @@ struct DspSettings {
     int scale=0;                   // Chromatic=0, Major=1, NaturalMinor=2
     float wet=1.0f;               // 0..1
     bool bypass=false;
-    float humanize=0.35f;         // 0..1; preserve small natural inflections
+    float humanize=0.70f;         // 0..1; preserve small natural inflections
     float stability=0.40f;        // 0..1 note-target hysteresis
     bool preserveFormants=true;
 };
@@ -74,7 +74,8 @@ public:
                                std::clamp(user.scale,0,2),
                                user.correction,
                                std::clamp(user.humanize,0.0f,1.0f),
-                               std::clamp(user.stability,0.0f,1.0f)*0.35f};
+                               std::clamp(user.stability,0.0f,1.0f)*0.35f,
+                               static_cast<float>(tracker_.analysisWindowMs()/8.0)};
         const double retuneMs=1.0+149.0*static_cast<double>(user.retune);
         const float wetStep=static_cast<float>(1.0/(rate_*0.008+1.0));
         for(int offset=0;offset<n;) {
