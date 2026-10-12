@@ -46,7 +46,12 @@ product with stable APEX parameter IDs and APEX UI language.
   cut-band insertion through host-notified existing parameter IDs; tests added.
   **Pro-Q workflow approximation**, not its exact algorithm; awaiting Windows CI
   and hands-on audio validation.
-- EQ Match capture, target curve generation and bounded band fitting.
+- [x] Initial native APEX EQ Match: guided two-stage capture from the
+  PRE-EQ analyzer, 32 accepted fresh frames per stage, fixed-capacity power
+  averaging on a 96-point log-frequency grid, median level normalization,
+  +/-9 dB bounded differential and existing APEX Sketch fitting. User clicks
+  APPLY EQ to add at most 8 new bands. No external/file reference input yet;
+  Windows CI and real audio QA still pending.
 - Cross-instance registry, collision visualization and native APEX track metadata.
 - [x] Branch processor declares output gain, pan, polarity, auto-gain and gain
   scale parameters at ABI indices 343..347 (DSP and UI still need a full gate).
@@ -110,3 +115,19 @@ APEX implementation only: no FabFilter assets, internals, presets or UI cloning.
   parameter notifications; global detector settings are intentionally global.
 - Clipboard is in-process across APEX native EQ editors, not OS clipboard or
   an interchange format. Test the full dynamic/placement/filter state roundtrip.
+
+## EQ Match acceptance (unmerged extension)
+
+- Turn PRE analyzer on, play a representative passage, press EQ MATCH to
+  capture a **reference** (32 distinct finite power FFT snapshots).
+- Play the material to be corrected, press GET INPUT to capture it; silence,
+  nonfinite frames, unsupported sample rates and missing snapshots do not
+  advance capture. Press APPLY EQ to publish at most 8 standard hosted bands.
+- Reject an unchanged or level-only difference. Match curve is bounded to
+  +/-9 dB, not a proof of a perceptually optimal fit.
+- Capture uses the currently selected track's PRE-EQ audio at two separate
+  moments. External/sidechain capture, file-import, cross-instance references,
+  saved reference files, matching-detail slider and preview rollback remain
+  outstanding. This is **not full FabFilter EQ Match parity**.
+- All work belongs to the message thread and FFT worker. Audio callback
+  never performs fitting, allocation or UI publication.
