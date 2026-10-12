@@ -12,6 +12,7 @@
 #include "../../../Source/Automation/AutomationGestureBridgeCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/Automation/AutomationTrackVolumePlaybackCore.h"
+#include "../../../Source/Automation/AutomationTrackPanPlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -3433,3 +3434,85 @@ public:
     }
 };
 static AutomationNativeFaderAudioPlaybackTests automationNativeFaderAudioPlaybackTests;
+
+
+/**
+    Pan must follow saved PPQ curves in AudioEngine even without an open mixer.
+    A valid curve takes precedence over the legacy sample-domain pan lane.
+*/
+class AutomationNativePanAudioPlaybackTests final : public juce::UnitTest
+{
+public:
+    AutomationNativePanAudioPlaybackTests()
+        : juce::UnitTest("automation.native-pan-direct-audio-playback.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        constexpr ParameterID id = 77032;
+        constexpr float manualPan = -0.30f;
+        auto* pan = registry.createParameter(id, "Production Pan", {});
+        expect(pan != nullptr);
+        if (pan == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {2.0, 1.0f, CurveType::Linear, 0.0f}
+        });
+        const auto play = [&] (double ppq, bool rolling)
+        {
+            return getNativeTrackPanRT(id, manualPan, ppq, rolling, false,
+                                       registry, lanes, modes);
+        };
+
+        beginTest("Read drives L/C/R audio without a GUI listener");
+        modes.setMode(id, AutomationMode::Read);
+        expectWithinAbsoluteError(play(0.0, true), -1.0f, 1.0e-5f);
+        expectWithinAbsoluteError(play(1.0, true), 0.0f, 1.0e-5f);
+        expectWithinAbsoluteError(play(2.0, true), 1.0f, 1.0e-5f);
+
+        beginTest("stopped transport, Off and automation mute preserve manual pan");
+        expectWithinAbsoluteError(play(1.0, false), manualPan, 1.0e-5f);
+        expectWithinAbsoluteError(getNativeTrackPanRT(
+            id, manualPan, 1.0, true, true, registry, lanes, modes),
+            manualPan, 1.0e-5f);
+        modes.setMode(id, AutomationMode::Off);
+        expectWithinAbsoluteError(play(1.0, true), manualPan, 1.0e-5f);
+
+        beginTest("Touch follows live gesture and returns to saved envelope");
+        modes.setMode(id, AutomationMode::Touch);
+        pan->beginGesture();
+        pan->setValueFromUser(0.9f);
+        expectWithinAbsoluteError(play(1.0, true), 0.8f, 1.0e-5f);
+        pan->endGesture();
+        expectWithinAbsoluteError(play(1.0, true), 0.0f, 1.0e-5f);
+
+        beginTest("Latch sustains the live pan, then returns to lane");
+        modes.setMode(id, AutomationMode::Latch);
+        modes.setLatchHeld(id, true);
+        expectWithinAbsoluteError(play(0.5, true), 0.8f, 1.0e-5f);
+        modes.setLatchHeld(id, false);
+        expectWithinAbsoluteError(play(0.5, true), -0.5f, 1.0e-5f);
+
+        beginTest("invalid key and clock use neutral fallback");
+        expectWithinAbsoluteError(getNativeTrackPanRT(
+            kInvalidParameterID, manualPan, 1.0, true, false,
+            registry, lanes, modes), manualPan, 1.0e-5f);
+        expectWithinAbsoluteError(play(std::numeric_limits<double>::quiet_NaN(),
+                                       true), manualPan, 1.0e-5f);
+
+        beginTest("RT pan playback makes no heap allocations");
+        modes.setMode(id, AutomationMode::Read);
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            float sum = 0.0f;
+            for (int i = 0; i < 300; ++i)
+                sum += play(1.0, true);
+            expectWithinAbsoluteError(sum, 0.0f, 1.0e-5f);
+        }
+    }
+};
+static AutomationNativePanAudioPlaybackTests automationNativePanAudioPlaybackTests;

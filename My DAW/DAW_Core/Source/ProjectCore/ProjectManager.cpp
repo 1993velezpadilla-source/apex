@@ -619,15 +619,17 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
         {
             using Keys = apex::automation::AutomationParameterKeyRegistry;
             auto& keys = Keys::getInstance();
-            const auto rebindFader = [&keys] (Track* t)
+            const auto rebindNativeControls = [&keys] (Track* t)
             {
-                if (t != nullptr)
-                    t->bindNativeVolumeAutomationID (
-                        keys.getOrCreateID (Keys::trackVolumeKey (t->getID())));
+                if (t == nullptr) return;
+                t->bindNativeVolumeAutomationID (
+                    keys.getOrCreateID (Keys::trackVolumeKey (t->getID())));
+                t->bindNativePanAutomationID (
+                    keys.getOrCreateID (Keys::trackPanKey (t->getID())));
             };
             for (auto* t : subs_.tracks->getAllTracks())
-                rebindFader (t);
-            rebindFader (subs_.tracks->getMasterTrack());
+                rebindNativeControls (t);
+            rebindNativeControls (subs_.tracks->getMasterTrack());
         }
         if (subs_.appCore != nullptr)
         {

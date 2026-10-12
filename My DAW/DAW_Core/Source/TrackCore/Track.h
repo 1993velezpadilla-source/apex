@@ -84,6 +84,16 @@ public:
     {
         nativeVolumeAutomationID_.store(id, std::memory_order_release);
     }
+    // Stable PPQ native-pan automation identity for direct audio-thread reads.
+    // Rebound after key-registry restore, without String work in processBlock.
+    apex::automation::ParameterID getNativePanAutomationIDRT() const noexcept
+    {
+        return nativePanAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativePanAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativePanAutomationID_.store(id, std::memory_order_release);
+    }
     void setVolume(float newVolume);
     
     float getPan() const { return pan_.load(std::memory_order_relaxed); }
@@ -273,6 +283,7 @@ private:
     std::atomic<bool> monitoring_{false};
     std::atomic<float> volume_{1.0f}; // 0.0 to ~+6 dB
     std::atomic<apex::automation::ParameterID> nativeVolumeAutomationID_ { apex::automation::kInvalidParameterID };
+    std::atomic<apex::automation::ParameterID> nativePanAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
     std::atomic<bool> automationVisible_{false};
     std::atomic<bool> automationMuted_{false};
