@@ -1021,8 +1021,10 @@ private:
         {
             menu.addItem("Replace Entire Curve (Undoable)", [this]()
             {
-                auto* lane = helper_.findLane(trackId_, parameterId_);
-                if (lane == nullptr || !lane->isEnabled())
+                // findLane() intentionally exposes a const view. Edits must
+                // use the message-thread mutable getOrCreateLane() API.
+                auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                if (!lane.isEnabled())
                     return;
 
                 std::vector<AutomationPoint> pasted;
@@ -1030,10 +1032,10 @@ private:
                          .makePastedPoints(parameterId_, sampleRate_, tempoBpm_, pasted))
                     return;
 
-                const auto before = lane->getState();
-                lane->points = std::move(pasted);
-                lane->sortAndResolveDuplicates();
-                const auto after = lane->getState();
+                const auto before = lane.getState();
+                lane.points = std::move(pasted);
+                lane.sortAndResolveDuplicates();
+                const auto after = lane.getState();
 
                 // A single atomic history entry (rather than one per point).
                 undoManager_.doAction(std::make_unique<MovePointAction>(
