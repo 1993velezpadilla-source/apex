@@ -403,13 +403,14 @@ public:
 
         output.clear(0, safeSamples);
 
-        // The live callback is gated during offline bounce, so publish its
-        // independent timeline for all native PPQ automation before DSP reads.
+        // Evaluate export PPQ automation without publishing fake Play/Stop
+        // transitions to the live recorder's clock. DSP consumers receive
+        // the offline sample position explicitly below.
         const double exportBpm = transport_ != nullptr ? transport_->getTempo() : 120.0;
         const double exportPpqPerSample = sampleRate_ > 0.0
             ? exportBpm / (60.0 * sampleRate_) : 0.0;
-        apex::automation::AutomationSystem::getInstance().onAudioBlockStart(
-            (double)timelineSample * exportPpqPerSample, exportPpqPerSample, true);
+        apex::automation::AutomationSystem::getInstance().onOfflineBlockStart(
+            (double)timelineSample * exportPpqPerSample);
 
         PluginTransportSnapshot previousPlayheadSnapshot;
         if (pluginPlayheadInfo_ != nullptr)
