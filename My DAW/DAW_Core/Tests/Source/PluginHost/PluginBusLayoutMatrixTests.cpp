@@ -3314,6 +3314,8 @@ public:
         pending.identifier = "C:/Example/Untrusted.vst3";
         pending.uniqueId = 0x12345;
         pending.stage = "plugin_chain_append";
+        pending.trackId = "track-A";
+        pending.slotIndex = 2;
         pending.startedUnixMs = 123456789;
         expect(PluginLoadRecoveryCore::writePendingAttempt(file, pending));
         const auto persisted = PluginLoadRecoveryCore::readPendingAttempt(file);
@@ -3322,6 +3324,8 @@ public:
         expectEquals(persisted.format, pending.format);
         expectEquals(persisted.identifier, pending.identifier);
         expectEquals(persisted.stage, pending.stage);
+        expectEquals(persisted.trackId, pending.trackId);
+        expectEquals(persisted.slotIndex, pending.slotIndex);
         expectEquals(persisted.uniqueId, pending.uniqueId);
         expectEquals(persisted.startedUnixMs, pending.startedUnixMs);
 
@@ -3332,6 +3336,11 @@ public:
         expected.fileOrIdentifier = pending.identifier;
         expected.uniqueId = pending.uniqueId;
         expect(PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected));
+        expect(PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-A", 2));
+        expect(!PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-A", 3),
+               "same plugin component in another slot must still load");
+        expect(!PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-B", 2),
+               "same plugin component on another track must still load");
         expected.uniqueId += 1;
         expect(!PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected),
                "another plugin component in the same shell must not be accused");
@@ -3437,6 +3446,40 @@ public:
         expect(recovered.hasPlugin(0) && recovered.hasPlugin(1) && recovered.hasPlugin(2),
                "all original plugin instances restored normally on user retry");
         expect(!recovered.isRecoveryDeferredSlot(1), "successful retry clears recovery state");
+
+        beginTest("one suspect instance never suppresses an identical VST3 on another track/slot");
+        DAW::PluginChainCore duplicateSource;
+        duplicateSource.prepare(kRate, 128);
+        duplicateSource.setAutomationContext("recovery-dup-A", nullptr, nullptr);
+        auto desc = makeDescription(*makeSpecForUid(kUidFamilyBase));
+        expectEquals(duplicateSource.appendPlugin(desc, formats, error, true), 0);
+        expectEquals(duplicateSource.appendPlugin(desc, formats, error, true), 1);
+        const auto duplicateProject = duplicateSource.getState();
+        suspect.name = desc.name;
+        suspect.format = desc.pluginFormatName;
+        suspect.identifier = desc.fileOrIdentifier;
+        suspect.uniqueId = desc.uniqueId;
+        suspect.trackId = "recovery-dup-A";
+        suspect.slotIndex = 1;
+
+        DAW::PluginChainCore sameTrack;
+        sameTrack.prepare(kRate, 128);
+        sameTrack.setAutomationContext("recovery-dup-A", nullptr, nullptr);
+        expect(sameTrack.restoreState(duplicateProject, formats, error, &suspect));
+        expect(sameTrack.hasPlugin(0), "other instance of same VST3 must be active");
+        expect(!sameTrack.hasPlugin(1), "only exact suspect track/slot is deferred");
+        expect(sameTrack.isRecoveryDeferredSlot(1));
+
+        DAW::PluginChainCore otherTrack;
+        otherTrack.prepare(kRate, 128);
+        otherTrack.setAutomationContext("recovery-dup-B", nullptr, nullptr);
+        expect(otherTrack.restoreState(duplicateProject, formats, error, &suspect));
+        expect(otherTrack.hasPlugin(0) && otherTrack.hasPlugin(1),
+               "same VST3 on unrelated track is never blacklisted");
+
+        sameTrack.releaseResources();
+        otherTrack.releaseResources();
+        duplicateSource.releaseResources();
         recovered.releaseResources();
         original.releaseResources();
     }
