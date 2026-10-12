@@ -1879,7 +1879,7 @@ public:
                     "plugin_ui_flow.log",
                     "PluginChainCore::restoreState safely deferred suspect plugin"
                         " slotIndex=" + juce::String(deferredIndex)
-                        + " plugin=\\"" + desc.name + "\\""
+                        + " plugin=\"" + desc.name + "\""
                         + " format=" + desc.pluginFormatName);
                 continue;
             }
