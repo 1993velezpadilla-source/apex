@@ -91,6 +91,14 @@ namespace apex::automation
             return blockStartPPQ.load (std::memory_order_acquire);
         }
 
+        // RT fast path: a single atomic read. NEVER call snapshot() inside
+        // the audio callback: its retry loop could spin if the clock writer
+        // was interrupted in the odd phase on a different callback thread.
+        bool isTransportRollingRT() const noexcept
+        {
+            return rolling.load (std::memory_order_acquire);
+        }
+
         double getPlayheadPPQ()     const noexcept { return snapshot().blockStartPPQ; }
         bool   isTransportRolling() const noexcept { return snapshot().transportRolling; }
 
