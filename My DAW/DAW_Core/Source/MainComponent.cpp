@@ -6691,24 +6691,15 @@ void MainComponent::trackRemoved(const DAW::TrackID& removedId)
     if (appCore_.getTrackManager().isRestoringState())
         return;
 
-    // A genuine track deletion is the project-data boundary. The mixer may
-    // rebuild/detach its strips without deleting any track, so their
-    // unregister callbacks must NOT own this cleanup. Include sends and
-    // hosted-plugin parameter keys belonging to this exact track identity.
-    auto& keys = apex::automation::AutomationParameterKeyRegistry::getInstance();
-    auto& lanes = apex::automation::AutomationLaneStore::getInstance();
-    auto& modes = apex::automation::AutomationModeState::getInstance();
-    const auto forgetPrefix = [&](const juce::String& prefix)
-    {
-        for (const auto& [key, id] : keys.findAllKeysWithPrefix(prefix))
-        {
-            juce::ignoreUnused(key);
-            modes.clearOverride(id);
-        }
-        lanes.removeLanesWithKeyPrefix(prefix);
-    };
-    forgetPrefix("track." + removedId + ".");
-    forgetPrefix("plugin." + removedId + ".");
+    // Track removal is undoable: DeleteTrackCommand::undo recreates the SAME
+    // TrackID from Track::getState(). Neither this listener nor MixerStrip
+    // destruction may erase its separate APEXAutomation lanes/mode overrides,
+    // otherwise Undo resurrects a silent track with no recorded movements.
+    // Retain the keyed envelopes as undo tombstones for this project. They
+    // cannot drive a deleted track (no bound live parameters); New Project
+    // explicitly clears the entire store. Persistent tombstone pruning must
+    // be undo-history aware rather than performed here.
+    juce::ignoreUnused (removedId);
 
     if (!topologyMutationInProgress_)
         appCore_.markProjectDirty("track_removed");
