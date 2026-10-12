@@ -1,6 +1,7 @@
 # APEX Flagship EQ — Pro-Q-4-class parity plan
 
-Status: implementation branch `feature/apex-flagship-eq-v1`
+Status: implementation branch `feature/apex-flagship-eq-v1`, with unmerged
+Spectrum Grab extension `feature/apex-eq-spectrum-grab-20261012`.
 
 ## Product rule
 
@@ -40,10 +41,16 @@ product with stable APEX parameter IDs and APEX UI language.
 
 - Spectral dynamics: frequency-selective dynamic action inside a band's pass region.
 - Dedicated sidechain-listen workflow (per-band detector filtering is now implemented).
-- Spectrum Grab style peak suggestions.
+- [x] Spectrum Grab resonance preview: bounded pre-EQ log-frequency prominence
+  detector, frozen GUI snapshot, selectable 44px markers, one-shot new bell
+  cut-band insertion through host-notified existing parameter IDs; tests added.
+  **Pro-Q workflow approximation**, not its exact algorithm; awaiting Windows CI
+  and hands-on audio validation.
 - EQ Match capture, target curve generation and bounded band fitting.
 - Cross-instance registry, collision visualization and native APEX track metadata.
-- Output gain / auto gain, output spectrum controls and richer metering.
+- [x] Branch processor declares output gain, pan, polarity, auto-gain and gain
+  scale parameters at ABI indices 343..347 (DSP and UI still need a full gate).
+- Rich output spectrum controls and production metering QA.
 - Undo/redo and A/B state comparison at plugin scope.
 - Copy/paste bands and preset exchange helpers.
 - Piano-frequency overlay and expanded frequency labels.
@@ -70,3 +77,23 @@ bounded transitions, finite-value guards, and truthful latency reporting.
 9. Full Debug and Release Windows builds.
 10. Full APEXTests Debug and Release runs with seed `0xA9E12026`.
 11. Manual audio + GUI validation before calling the feature production-ready.
+
+## Spectrum Grab acceptance (unmerged extension)
+
+1. Enable PRE or PRE+POST analysis, play audio, press **GRAB**; no capture
+   from analyzer OFF or POST-only mode and no stale samples are invented.
+2. The APEX-branded graph freezes at most 8 high-prominence resonance markers.
+   Broad/noisy and flat spectra must not trigger candidate spamming.
+3. Tap a 44px marker to append **one** Bell band with a conservative -3 dB cut
+   and a measured Q; the original 0..347 host parameter identity is unchanged.
+4. Manual edits remain possible, Grab never overwrites an existing band, and
+   one-shot preview disarms on insertion; no new DSP callback operations.
+5. CI Windows Debug/Release, tests and hands-on live analyzer inspection must
+   succeed before merging. Not production-certified on documentation alone.
+
+## Feature-scope caveat
+
+A behavioral-parity roadmap is not evidence of feature completion. Pro-Q 4's
+proprietary exact filter designs, spectral/dynamic matching algorithms and
+third-party cross-plugin instance control are not part of this code. Independent
+APEX implementation only: no FabFilter assets, internals, presets or UI cloning.
