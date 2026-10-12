@@ -3289,4 +3289,106 @@ public:
 };
 static ExternalOpenSourceVST3DiverseTypesTests externalOpenSourceVST3DiverseTypesTests;
 
+/** In-process recovery metadata must be accurate without a sandbox worker.
+    The test simulates an OS-terminated load by leaving a marker on disk;
+    it does not deliberately crash Windows or implicate a real vendor. */
+class PluginLoadRecoveryHistoryTests final : public juce::UnitTest
+{
+public:
+    PluginLoadRecoveryHistoryTests()
+        : juce::UnitTest("plugin.inprocess-interruption-history.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        auto directory = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("apex-plugin-interruption-gauntlet-" + juce::Uuid().toString());
+        directory.createDirectory();
+        juce::PluginDescription first;
+        first.name = "Identical Display Name";
+        first.pluginFormatName = "VST3";
+        first.fileOrIdentifier = "apex-probe-unique-one.vst3";
+        first.uniqueId = 4101;
+        auto second = first;
+        second.fileOrIdentifier = "apex-probe-unique-two.vst3";
+        second.uniqueId = 4102;
+
+        beginTest("normal successful in-process load leaves no pending marker");
+        {
+            DAW::PluginLoadRecoveryCore service(directory);
+            {
+                DAW::PluginLoadRecoveryCore::ScopedOperation attempt(
+                    service, first, "test_create_prepare");
+                attempt.succeed();
+            }
+            expect(!directory.getChildFile("in_process_pending.xml").existsAsFile());
+            expect(service.findIncident(first) == nullptr,
+                   "a successful plugin operation cannot be called a crash");
+        }
+
+        beginTest("interrupted operation recorded once on next APEX launch");
+        {
+            DAW::PluginLoadRecoveryCore oldSession(directory);
+            expect(oldSession.beginOperation(first, "test_opaque_restore"));
+            expect(directory.getChildFile("in_process_pending.xml").existsAsFile());
+            // Simulates the process being killed. No success/failure or
+            // cleanup callback is issued by oldSession.
+        }
+        {
+            DAW::PluginLoadRecoveryCore reopened(directory);
+            reopened.inspectPreviousLaunch();
+            expect(reopened.interruptedOnPreviousLaunch());
+            const auto* incident = reopened.findIncident(first);
+            expect(incident != nullptr);
+            if (incident != nullptr)
+            {
+                expectEquals(incident->interruptedCount, 1);
+                expectEquals(incident->failedCount, 0);
+                expectEquals(incident->lastStage, juce::String("test_opaque_restore"));
+            }
+            expect(!directory.getChildFile("in_process_pending.xml").existsAsFile());
+            expect(reopened.warningFor(first).contains("does not prove"),
+                   "warning must NOT blame the plugin without evidence");
+            expect(reopened.findIncident(second) == nullptr,
+                   "same display name cannot quarantine an unrelated plugin");
+        }
+        {
+            DAW::PluginLoadRecoveryCore reopenedAgain(directory);
+            reopenedAgain.inspectPreviousLaunch();
+            expect(!reopenedAgain.interruptedOnPreviousLaunch(),
+                   "consumed marker cannot be counted twice");
+            const auto* incident = reopenedAgain.findIncident(first);
+            expect(incident != nullptr);
+            if (incident != nullptr)
+                expectEquals(incident->interruptedCount, 1);
+        }
+
+        beginTest("caught load failure is recorded separately from hard interruption");
+        {
+            DAW::PluginLoadRecoveryCore nextSession(directory);
+            DAW::PluginLoadRecoveryCore::ScopedOperation attempt(
+                nextSession, first, "test_create_prepare");
+            attempt.fail("Caught exception / unavailable module");
+            const auto* incident = nextSession.findIncident(first);
+            expect(incident != nullptr);
+            if (incident != nullptr)
+            {
+                expectEquals(incident->interruptedCount, 1);
+                expectEquals(incident->failedCount, 1);
+                expect(incident->lastError.contains("Caught exception"));
+            }
+            expect(!directory.getChildFile("in_process_pending.xml").existsAsFile());
+            expect(nextSession.clearIncident(first),
+                   "user opt-in dismissal removes that plugin's warning");
+            expect(nextSession.findIncident(first) == nullptr);
+        }
+        {
+            DAW::PluginLoadRecoveryCore afterDismissal(directory);
+            expect(afterDismissal.findIncident(first) == nullptr,
+                   "dismissal persists across launches");
+        }
+        directory.deleteRecursively();
+    }
+};
+static PluginLoadRecoveryHistoryTests pluginLoadRecoveryHistoryTests;
+
 } // namespace
