@@ -69,6 +69,12 @@ void Track::setSoloed(bool shouldBeSoloed)
     notifyPropertyChanged();
 }
 
+void Track::setPolarityInverted(bool inverted)
+{
+    if (polarityInverted_.exchange(inverted, std::memory_order_relaxed) != inverted)
+        notifyPropertyChanged();
+}
+
 void Track::setArmed(bool shouldBeArmed)
 {
     armed_.store(shouldBeArmed, std::memory_order_relaxed);
@@ -148,6 +154,7 @@ juce::ValueTree Track::getState() const
     state.setProperty(IDs::NAME, name_, nullptr);
     state.setProperty(IDs::MUTED, muted_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::SOLOED, soloed_.load(std::memory_order_relaxed), nullptr);
+    state.setProperty("phasePolarityInverted", isPolarityInverted(), nullptr);
     state.setProperty(IDs::ARMED, armed_.load(std::memory_order_relaxed), nullptr);
     state.setProperty("recordMode", recordMode_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::MONITORING, monitoring_.load(std::memory_order_relaxed), nullptr);
@@ -182,6 +189,9 @@ void Track::restoreState(const juce::ValueTree& state)
     name_ = state.getProperty(IDs::NAME, "Untitled Track");
     muted_.store((bool)state.getProperty(IDs::MUTED, false), std::memory_order_relaxed);
     soloed_.store((bool)state.getProperty(IDs::SOLOED, false), std::memory_order_relaxed);
+    const bool inverted = (bool) state.getProperty("phasePolarityInverted", false);
+    polarityInverted_.store(inverted, std::memory_order_relaxed);
+    polarityCore_.reset(inverted);
     armed_.store((bool)state.getProperty(IDs::ARMED, false), std::memory_order_relaxed);
     const int savedRecordMode = (int) state.getProperty("recordMode", (int) TrackRecordMode::Dry);
     recordMode_.store(savedRecordMode == (int) TrackRecordMode::PostFader
