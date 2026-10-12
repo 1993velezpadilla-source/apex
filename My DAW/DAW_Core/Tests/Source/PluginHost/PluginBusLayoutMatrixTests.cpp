@@ -3351,4 +3351,96 @@ public:
 };
 static PluginLoadCrashRecoveryMarkerTests pluginLoadCrashRecoveryMarkerTests;
 
+
+/** Safe project restore must retain the exact saved plugin settings and all
+ * later slot indices WITHOUT constructing the suspect plugin DLL. */
+class PluginRecoveryDeferredRestoreTests final : public juce::UnitTest
+{
+public:
+    PluginRecoveryDeferredRestoreTests()
+        : juce::UnitTest("plugin.recovery.deferred-restore-preserves-state.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        beginTest("suspect in-process plugin is deferred, other saved slots still restore");
+        juce::AudioPluginFormatManager formats;
+        formats.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        DAW::PluginChainCore original;
+        original.prepare(kRate, 128);
+
+        const int ids[] = {kUidStereo, kUidFamilyBase, kUidFamilyPro};
+        juce::String error;
+        for (int i = 0; i < 3; ++i)
+            expectEquals(original.appendPlugin(
+                makeDescription(*makeSpecForUid(ids[i])),
+                formats, error, true), i, "original plugin inserted: " + error);
+        if (original.getNumSlots() != 3) return;
+        original.getSlot(1)->setSlotMixNormalized(0.43f);
+        original.getSlot(1)->setBypassed(true);
+        const auto project = original.getState();
+        expectEquals(project.getNumChildren(), 3);
+        if (project.getNumChildren() != 3) return;
+
+        auto suspectDesc = makeDescription(*makeSpecForUid(ids[1]));
+        DAW::PluginLoadRecoveryCore::Attempt suspect;
+        suspect.valid = true;
+        suspect.name = suspectDesc.name;
+        suspect.format = suspectDesc.pluginFormatName;
+        suspect.identifier = suspectDesc.fileOrIdentifier;
+        suspect.uniqueId = suspectDesc.uniqueId;
+        suspect.stage = "plugin_chain_append";
+
+        DAW::PluginChainCore recovered;
+        recovered.prepare(kRate, 128);
+        expect(recovered.restoreState(project, formats, error, &suspect),
+               "explicit safe restore should not fail the rest of the project: " + error);
+        expectEquals(recovered.getNumSlots(), 3,
+                     "safe restore must retain original slot numbering");
+        expect(recovered.hasPlugin(0), "first unrelated plugin remains active");
+        expect(!recovered.hasPlugin(1), "suspect's native instance must not load");
+        expect(recovered.isRecoveryDeferredSlot(1), "suspect is a recoverable placeholder");
+        expect(recovered.hasPlugin(2), "later plugin loads at its ORIGINAL slot");
+        expect(!recovered.isRecoveryDeferredSlot(2), "innocent neighbor is not deferred");
+
+        const auto preserved = recovered.getRecoveryDeferredSlot(1);
+        expect(preserved.isValid() && preserved.isEquivalentTo(project.getChild(1)),
+               "entire opaque state/layout/identity is preserved unmodified");
+
+        beginTest("safe project save round-trips skipped plugin without erasing its preset");
+        const auto safeSaved = recovered.getState();
+        expectEquals(safeSaved.getNumChildren(), 3,
+                     "saved project must still include all three plugin slots");
+        if (safeSaved.getNumChildren() == 3)
+        {
+            expect(safeSaved.getChild(1).isEquivalentTo(project.getChild(1)),
+                   "deferred slot must retain original plugin preset and identity");
+            expectEquals((int)safeSaved.getChild(2).getProperty("index", -1), 2,
+                         "later plugin original index persists");
+        }
+
+        beginTest("remove/reorder deferred slots keeps project recovery map synchronized");
+        expect(recovered.moveSlot(1, 2), "safe-mode placeholder may be reordered");
+        expect(recovered.isRecoveryDeferredSlot(2), "deferred slot follows reorder");
+        expect(!recovered.isRecoveryDeferredSlot(1), "previous slot now has active plugin");
+        recovered.removePlugin(0);
+        expect(recovered.isRecoveryDeferredSlot(1), "deferred index follows removal");
+        recovered.removePlugin(1);
+        expectEquals(recovered.getNumSlots(), 1,
+                     "removing a placeholder must not hang or delete healthy plugins");
+        expect(!recovered.isRecoveryDeferredSlot(0), "no stale deferred entries");
+        expect(recovered.hasPlugin(0), "remaining plugin still operational");
+
+        beginTest("explicit normal restore retries everything from saved project");
+        expect(recovered.restoreState(project, formats, error),
+               "normal restore must be independent of stale marker: " + error);
+        expectEquals(recovered.getNumSlots(), 3);
+        expect(recovered.hasPlugin(0) && recovered.hasPlugin(1) && recovered.hasPlugin(2),
+               "all original plugin instances restored normally on user retry");
+        expect(!recovered.isRecoveryDeferredSlot(1), "successful retry clears recovery state");
+        recovered.releaseResources();
+        original.releaseResources();
+    }
+};
+static PluginRecoveryDeferredRestoreTests pluginRecoveryDeferredRestoreTests;
+
 } // namespace
