@@ -1574,6 +1574,22 @@ public:
                     if (hasAutomation != nullptr) *hasAutomation = true;
                 }
         }
+        // For a plugin-declared switch/choice, interpolating the stored
+        // curve would turn the next discrete step ON before its breakpoint.
+        // The UI's PPQ evaluator already holds stepped values; the DSP sink
+        // must use the same rule in BOTH in-process and sandboxed modes.
+        const auto evaluateLane = [&binding, ppqPosition] (
+            const apex::automation::AutomationLane::PointVector& points) noexcept
+        {
+            if (! binding.isDiscrete)
+                return apex::automation::AutomationLane::evaluateAt(points, ppqPosition);
+            const auto next = std::upper_bound(
+                points.begin(), points.end(), ppqPosition,
+                [](double ppq, const apex::automation::Breakpoint& point) noexcept
+                { return ppq < point.timePPQ; });
+            return next == points.begin() ? points.front().normalizedValue
+                                          : (next - 1)->normalizedValue;
+        };
         if (binding.apexPid != apex::automation::kInvalidParameterID)
         {
             if (auto apexLane = laneStore.findLaneRT (binding.apexPid))
@@ -1581,7 +1597,7 @@ public:
                 auto snap = apexLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
                 {
-                    newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
+                    newValue = evaluateLane(*snap);
                     if (hasAutomation != nullptr) *hasAutomation = true;
                 }
             }
@@ -1593,7 +1609,7 @@ public:
                 auto snap = bridgeLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
                 {
-                    newValue = apex::automation::AutomationLane::evaluateAt (*snap, ppqPosition);
+                    newValue = evaluateLane(*snap);
                     if (hasAutomation != nullptr) *hasAutomation = true;
                 }
             }
@@ -2383,6 +2399,7 @@ private:
         apex::automation::ParameterID apexPid   = apex::automation::kInvalidParameterID;
         apex::automation::ParameterID bridgePid = apex::automation::kInvalidParameterID;
         std::uint64_t keyGeneration = ~0ull;    // key-registry generation at last resolve
+        bool isDiscrete = false;               // plugin-declared switch/choice
     };
     std::vector<RtAutomationBinding> rtAutomationBindings_;
     std::vector<float> lastAutomationValues_;
@@ -2498,6 +2515,7 @@ private:
         {
             const auto& info = parameterInfos_.getReference(i);
             auto& binding = rtAutomationBindings_[(size_t) i];
+            binding.isDiscrete = info.isDiscrete;
             binding.coreParamId = "plugin." + juce::String (pluginSlotIndex_)
                 + "." + pluginInstanceId_ + "." + info.parameterId;
 
