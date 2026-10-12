@@ -6686,10 +6686,30 @@ bool MainComponent::copyPluginBetweenTracks(const DAW::TrackID& srcTrack,
     return true;
 }
 
-void MainComponent::trackRemoved(const DAW::TrackID&)
+void MainComponent::trackRemoved(const DAW::TrackID& removedId)
 {
     if (appCore_.getTrackManager().isRestoringState())
         return;
+
+    // A genuine track deletion is the project-data boundary. The mixer may
+    // rebuild/detach its strips without deleting any track, so their
+    // unregister callbacks must NOT own this cleanup. Include sends and
+    // hosted-plugin parameter keys belonging to this exact track identity.
+    auto& keys = apex::automation::AutomationParameterKeyRegistry::getInstance();
+    auto& lanes = apex::automation::AutomationLaneStore::getInstance();
+    auto& modes = apex::automation::AutomationModeState::getInstance();
+    const auto forgetPrefix = [&](const juce::String& prefix)
+    {
+        for (const auto& [key, id] : keys.findAllKeysWithPrefix(prefix))
+        {
+            juce::ignoreUnused(key);
+            modes.clearOverride(id);
+        }
+        lanes.removeLanesWithKeyPrefix(prefix);
+    };
+    forgetPrefix("track." + removedId + ".");
+    forgetPrefix("plugin." + removedId + ".");
+
     if (!topologyMutationInProgress_)
         appCore_.markProjectDirty("track_removed");
 
