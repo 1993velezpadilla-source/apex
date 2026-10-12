@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <cstddef>
 #include "../UtilityCore/Types.h"
 #include "../Automation/AutomationTypes.h"
 
@@ -29,6 +30,16 @@ struct FolderBusSnapshot
         bool automationMuted = false;
     };
     std::unordered_map<TrackID, std::vector<MuteAncestorState>> muteAncestorChains;
+
+    // Precomputed solo source/membership; populated off the realtime thread.
+    struct SoloSourceState
+    {
+        apex::automation::ParameterID parameterID = apex::automation::kInvalidParameterID;
+        bool manualSoloed = false;
+        bool automationMuted = false;
+    };
+    std::vector<SoloSourceState> soloSources;
+    std::unordered_map<TrackID, std::vector<std::size_t>> soloAudibleSourceIndices;
 
     // Effective solo set: empty = no solo active (all tracks pass).
     // Non-empty: only tracks in this set are audible.

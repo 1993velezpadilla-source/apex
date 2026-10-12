@@ -28,6 +28,7 @@
 #include "../Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../Automation/AutomationTrackPanPlaybackCore.h"
 #include "../Automation/AutomationTrackMutePlaybackCore.h"
+#include "../Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../TapeStop/TapeStopProcessorCore.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 // TimePitch DSP nuclei
@@ -401,6 +402,14 @@ public:
             return false;
 
         output.clear(0, safeSamples);
+
+        // The live callback is gated during offline bounce, so publish its
+        // independent timeline for all native PPQ automation before DSP reads.
+        const double exportBpm = transport_ != nullptr ? transport_->getTempo() : 120.0;
+        const double exportPpqPerSample = sampleRate_ > 0.0
+            ? exportBpm / (60.0 * sampleRate_) : 0.0;
+        apex::automation::AutomationSystem::getInstance().onAudioBlockStart(
+            (double)timelineSample * exportPpqPerSample, exportPpqPerSample, true);
 
         PluginTransportSnapshot previousPlayheadSnapshot;
         if (pluginPlayheadInfo_ != nullptr)
@@ -2139,6 +2148,13 @@ private:
                              const FolderBusSnapshot* fbSnap,
                              const AutomationSnapshot* automationSnap)
     {
+        // Evaluate each Solo source once per block; membership is immutable.
+        auto& soloSystem = apex::automation::AutomationSystem::getInstance();
+        auto& soloClock = soloSystem.getClock();
+        const auto soloState = apex::automation::evaluateNativeSoloBlockRT(
+            fbSnap, soloClock.captureInputPPQ(), soloClock.isTransportRollingRT(),
+            soloSystem.getRegistry(), soloSystem.getLaneStore(), soloSystem.getModeState());
+
         // Refresh the per-block plugin-chain view from the published
         // snapshot (C3) — one atomic load per block, then lock-free finds.
         pluginChainsBlockSnap_ = getPluginChainsSnapshotRT();
@@ -2190,11 +2206,11 @@ private:
             switch (nodeMeta->type)
             {
                 case RoutingNodeType::Track:
-                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock);
+                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Bus:
                 case RoutingNodeType::FolderBus:
-                    processBusNode(nodeMeta, snap, numSamples, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock);
+                    processBusNode(nodeMeta, snap, numSamples, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Master:
                     processMasterNode(nodeId, numSamples, output);
@@ -2225,13 +2241,14 @@ private:
                           bool isPlaying, SamplePosition position, bool anySolo,
                           const FolderBusSnapshot* fbSnap,
                           const AutomationSnapshot* automationSnap,
-                          bool logRoutesThisBlock)
+                          bool logRoutesThisBlock,
+                           const apex::automation::NativeSoloBlockState& soloState)
     {
         // Thread-local preFx buffer for parallel safety
         thread_local juce::AudioBuffer<float> localPreFx;
         processTrackNodeExt(nodeMeta, snap, numSamples, isPlaying, position,
                             anySolo, fbSnap, automationSnap, logRoutesThisBlock,
-                            trackBuffer_, localPreFx);
+                            trackBuffer_, localPreFx, soloState);
     }
 
     /** Thread-local track buffer redirect for parallel processing.
@@ -2266,7 +2283,8 @@ private:
                              const AutomationSnapshot* automationSnap,
                              bool logRoutesThisBlock,
                              juce::AudioBuffer<float>& trackBuf,
-                             juce::AudioBuffer<float>& preFxBuf)
+                             juce::AudioBuffer<float>& preFxBuf,
+                              const apex::automation::NativeSoloBlockState& soloState)
     {
         auto* track = tracks_->getTrack(nodeMeta->trackId);
         if (!track) return;
@@ -2537,8 +2555,13 @@ private:
         {
             bool effMuted = resolveNativeMutedRT(*track, fbSnap);
             audible = !effMuted;
-            if (offlineStemRenderMask_ == nullptr && !fbSnap->effectiveSoloSet.empty())
-                audible = audible && fbSnap->effectiveSoloSet.count(track->getID()) > 0;
+            if (offlineStemRenderMask_ == nullptr)
+            {
+                auto& soloSys = apex::automation::AutomationSystem::getInstance();
+                audible = audible && apex::automation::isNativeSoloAudibleRT(
+                    track->getID(), fbSnap, soloState,
+                    soloSys.getRegistry(), soloSys.getLaneStore(), soloSys.getModeState());
+            }
         }
         else
         {
@@ -2694,7 +2717,8 @@ private:
                         int numSamples, SamplePosition position, bool anySolo,
                         const FolderBusSnapshot* fbSnap,
                         const AutomationSnapshot* automationSnap,
-                        bool logRoutesThisBlock)
+                        bool logRoutesThisBlock,
+                         const apex::automation::NativeSoloBlockState& soloState)
     {
         auto* nodeBufPtr = findNodeBuffer(nodeMeta->id);
         if (nodeBufPtr == nullptr) return;
@@ -2757,8 +2781,15 @@ private:
         if (busTrack != nullptr)
             busGain = resolveNativeFaderGainRT(*busTrack, busGain);
 
-        const bool busMuted = busTrack != nullptr
+        bool busMuted = busTrack != nullptr
             && resolveNativeMutedRT(*busTrack, fbSnap);
+        if (busTrack != nullptr && fbSnap != nullptr && offlineStemRenderMask_ == nullptr)
+        {
+            auto& soloSys = apex::automation::AutomationSystem::getInstance();
+            busMuted = busMuted || !apex::automation::isNativeSoloAudibleRT(
+                busTrack->getID(), fbSnap, soloState,
+                soloSys.getRegistry(), soloSys.getLaneStore(), soloSys.getModeState());
+        }
 
         MuteFadeCore* busMuteFade = nullptr;
         const float* busMuteRamp = nullptr;
