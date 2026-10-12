@@ -64,7 +64,7 @@ struct AutomationMusicalLfoCore
             switch (shape)
             {
                 case Shape::Sine:     u = 0.5 + 0.5 * std::sin(2.0 * juce::MathConstants<double>::pi * phase); break;
-                case Shape::Triangle: u = 1.0 - std::abs(2.0 - 4.0 * phase); break;
+                case Shape::Triangle: u = 1.0 - std::abs(2.0 * phase - 1.0); break;
                 case Shape::Square:   u = (phase < 0.5 || phase >= 1.0) ? 1.0 : 0.0; break;
                 case Shape::Saw:      u = phase; break;
                 default:             return false;
