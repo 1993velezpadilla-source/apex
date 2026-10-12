@@ -464,6 +464,7 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
         polarityBtn_.active = track_.isPolarityInverted();
+        polarityBtn_.repaint();
         armBtn_.active  = track_.isArmed();
         autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
         autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
