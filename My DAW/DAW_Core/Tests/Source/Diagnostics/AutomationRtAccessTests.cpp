@@ -11,6 +11,7 @@
 #include "../../../Source/Automation/AutomationRecorderCore.h"
 #include "../../../Source/Automation/AutomationGestureBridgeCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
+#include "../../../Source/Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -3339,3 +3340,87 @@ public:
     }
 };
 static AutomationMixerModeCycleTests automationMixerModeCycleTests;
+
+/**
+    The DAW DSP ramps MUST evaluate persisted native fader lanes directly.
+    A mixer UI dispatcher updates at ~60 Hz, and offline export may not run
+    any UI timer: an AudioEngine that reads only Track::getVolume() misses
+    the PPQ automation even while AutomationEvaluator updates its atomics.
+*/
+class AutomationNativeFaderAudioPlaybackTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeFaderAudioPlaybackTests()
+        : juce::UnitTest("automation.native-fader-direct-audio-playback.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        DAW::FaderRangeCore taper;
+        constexpr ParameterID id = 77031;
+        constexpr float fallbackGain = 0.64f;
+
+        auto* fader = registry.createParameter(id, "Production Fader", {});
+        expect(fader != nullptr, "registered native fader");
+        if (fader == nullptr) return;
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.20f, CurveType::Linear, 0.0f},
+            {2.0, 0.80f, CurveType::Linear, 0.0f}
+        });
+        const auto play = [&] (double ppq, bool rolling)
+        {
+            return getNativeTrackVolumeGainRT(id, fallbackGain, ppq,
+                                              rolling, registry, lanes,
+                                              modes, taper);
+        };
+
+        beginTest("Read lane feeds audio DSP directly, without UI dispatcher");
+        modes.setMode(id, AutomationMode::Read);
+        expectWithinAbsoluteError(play(0.0, true),
+                                  taper.normToGain(0.20f), 1.0e-5f);
+        expectWithinAbsoluteError(play(1.0, true),
+                                  taper.normToGain(0.50f), 1.0e-5f);
+        expectWithinAbsoluteError(play(2.0, true),
+                                  taper.normToGain(0.80f), 1.0e-5f);
+        expectWithinAbsoluteError(play(1.0, false), fallbackGain, 1.0e-5f,
+                                  "stopped transport does not read automation");
+
+        beginTest("Off bypasses lane completely");
+        modes.setMode(id, AutomationMode::Off);
+        expectWithinAbsoluteError(play(1.0, true), fallbackGain, 1.0e-5f);
+
+        beginTest("Touch yields to live gesture value, then resumes envelope");
+        modes.setMode(id, AutomationMode::Touch);
+        fader->beginGesture();
+        fader->setValueFromUser(0.91f);
+        expectWithinAbsoluteError(play(1.0, true),
+                                  taper.normToGain(0.91f), 1.0e-5f,
+                                  "audio uses producer atomic before 60Hz UI tick");
+        fader->endGesture();
+        expectWithinAbsoluteError(play(1.0, true),
+                                  taper.normToGain(0.50f), 1.0e-5f,
+                                  "Touch release resumes curve");
+
+        beginTest("Latch sustains touched gain until release at Stop");
+        modes.setMode(id, AutomationMode::Latch);
+        modes.setLatchHeld(id, true);
+        expectWithinAbsoluteError(play(1.5, true),
+                                  taper.normToGain(0.91f), 1.0e-5f,
+                                  "latch suppresses stale breakpoint");
+        modes.setLatchHeld(id, false);
+        expectWithinAbsoluteError(play(1.5, true),
+                                  taper.normToGain(0.65f), 1.0e-5f,
+                                  "released latch resumes curve");
+
+        beginTest("missing/invalid key and malformed clock remain neutral");
+        expectWithinAbsoluteError(getNativeTrackVolumeGainRT(
+            kInvalidParameterID, fallbackGain, 1.0, true,
+            registry, lanes, modes, taper), fallbackGain, 1.0e-5f);
+        expectWithinAbsoluteError(play(std::numeric_limits<double>::quiet_NaN(),
+                                       true), fallbackGain, 1.0e-5f);
+    }
+};
+static AutomationNativeFaderAudioPlaybackTests automationNativeFaderAudioPlaybackTests;
