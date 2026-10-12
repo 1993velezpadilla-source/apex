@@ -49,6 +49,10 @@ public:
     
     bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
     void setSoloed(bool shouldBeSoloed);
+
+    // Channel polarity inversion (both channels for stereo); not a time shift.
+    bool isPolarityInverted() const noexcept { return polarityInverted_.load(std::memory_order_relaxed); }
+    void setPolarityInverted(bool inverted);
     
     bool isArmed() const { return armed_.load(std::memory_order_relaxed); }
     void setArmed(bool shouldBeArmed);
@@ -256,6 +260,7 @@ private:
     juce::String name_;
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
+    std::atomic<bool> polarityInverted_{false};
     std::atomic<bool> armed_{false};
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
