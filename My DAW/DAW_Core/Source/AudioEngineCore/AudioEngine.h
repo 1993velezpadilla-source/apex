@@ -2543,7 +2543,9 @@ private:
         else
         {
             audible = !resolveNativeMutedRT(*track, nullptr);
-            if (offlineStemRenderMask_ == nullptr && anySolo) audible = track->isSoloed();
+            // Solo may narrow audibility but must NEVER unmute a muted track.
+            if (offlineStemRenderMask_ == nullptr && anySolo)
+                audible = audible && track->isSoloed();
         }
 
         auto& muteFade = getOrCreateMuteFade(track->getID());
