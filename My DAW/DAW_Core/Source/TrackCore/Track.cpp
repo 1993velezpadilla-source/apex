@@ -1,6 +1,7 @@
 #include "Track.h"
 #include "../UtilityCore/Types.h"
 #include "../MixerScaleCore/FaderRangeCore.h"
+#include "../Automation/AutomationParameterKeyCore.h"
 #include "../MidiCore/MidiTrackCore.h"
 
 namespace DAW {
@@ -33,6 +34,13 @@ namespace IDs
 Track::Track(const TrackID& id, const juce::String& name)
     : id_(id), name_(name)
 {
+    // Message-thread construction, never from processBlock. Resolve once
+    // into an atomic ID: audio callbacks cannot hash juce::Strings or lock
+    // the automation key registry on every buffer.
+    using Keys = apex::automation::AutomationParameterKeyRegistry;
+    bindNativeVolumeAutomationID (
+        Keys::getInstance().getOrCreateID (Keys::trackVolumeKey (id)));
+
     // Professional default: white — user can color tracks via palette
     color_ = juce::Colours::white;
     automationParameterOrder_.add("track.volume");
