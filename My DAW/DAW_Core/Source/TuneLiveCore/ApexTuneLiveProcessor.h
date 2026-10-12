@@ -79,7 +79,13 @@ public:
         channels_ = juce::jlimit(1, 2, getTotalNumInputChannels());
         setRateAndBufferSizeDetails(rate_, maxBlock_);
         tracker_.prepare(rate_);
-        stretch_.presetCheaper(channels_, rate_);
+        // A vocal-first short-window configuration; the stock cheaper preset
+        // uses a 100ms window, which is unsuitable for live vocal monitoring.
+        // Actual algorithmic latency is queried below, NEVER assumed.
+        stretch_.configure(channels_,
+                           juce::jmax(256, juce::roundToInt(rate_ * 0.040)),
+                           juce::jmax(64, juce::roundToInt(rate_ * 0.010)),
+                           false);
         stretch_.reset();
         stretch_.setTransposeFactor(1.0f);
         latency_ = juce::jmax(0, stretch_.inputLatency() + stretch_.outputLatency());
