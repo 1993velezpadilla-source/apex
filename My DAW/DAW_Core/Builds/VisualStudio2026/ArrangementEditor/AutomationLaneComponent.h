@@ -10,6 +10,7 @@
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
 
 namespace DAW {
 
@@ -1209,6 +1210,40 @@ private:
             addTransform("Expand Levels 200%", AutomationCurveTransformCore::Operation::ExpandDouble);
             addTransform("Shift Right 1 Beat", AutomationCurveTransformCore::Operation::ShiftRightBeat);
             menu.addSubMenu("Transform Entire Curve (Undoable)", transformations);
+        }
+
+        // Creative A/B blend against the copied whole-curve snapshot. This
+        // is OFFLINE point generation, not signal-rate or VST3 parameter DSP.
+        if (isDrawingEnabled()
+            && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
+        {
+            menu.addItem("Morph 50% Toward Copied Curve (Undoable)", [this]()
+            {
+                std::vector<AutomationPoint> target;
+                if (!AutomationLaneCurveClipboardCore::shared()
+                         .makePastedPoints(parameterId_, sampleRate_, tempoBpm_, target))
+                    return;
+
+                auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                if (!lane.isEnabled() || lane.points.empty())
+                    return;
+
+                std::vector<AutomationPoint> blended;
+                if (!AutomationCurveMorphCore::blend(
+                        parameterId_, lane.points, target, 0.5f, blended))
+                    return;
+
+                const auto before = lane.getState();
+                lane.points = std::move(blended);
+                lane.sortAndResolveDuplicates();
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_, before, lane.getState()));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+                selectedPointIndex_ = -1;
+                invalidateCurvePath();
+                repaint();
+            });
         }
 
         menu.showMenuAsync(
