@@ -1134,8 +1134,28 @@ public:
                                 modeState.setMode (faderID, apex::automation::AutomationMode::Latch);
                             }
 
+                            // Deleting a track is undoable. The UI listener
+                            // and strip teardown must not destroy its keyed
+                            // automation before DeleteTrackCommand can revive
+                            // the original TrackID. Exercise that event path
+                            // in the REAL MainComponent prior to saving.
+                            const auto faderTrackState = faderTrack != nullptr
+                                ? faderTrack->getState() : juce::ValueTree();
+                            auto& trackManager = component->getAppCore().getTrackManager();
+
                             if (faderTrack == nullptr)
                                 error = "real TrackManager::createTrack failed";
+                            else if (! trackManager.deleteTrack (faderTrackID))
+                                error = "real track deletion failed in undo persistence gate";
+                            else if (laneStore.findLane (faderID) == nullptr
+                                     || modeState.getMode (faderID)
+                                         != apex::automation::AutomationMode::Latch)
+                                error = "undoable track deletion destroyed its automation or Latch mode";
+                            else if (auto* restoredTrack =
+                                         trackManager.recreateTrackFromState (faderTrackState);
+                                     restoredTrack == nullptr
+                                         || restoredTrack->getID() != faderTrackID)
+                                error = "undo recreated a different track identity";
                             else if (! projects.saveToFile (temporary))
                                 error = "saveToFile failed: " + projects.getLastSaveError();
                             else if (! temporary.existsAsFile()
