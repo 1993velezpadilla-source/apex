@@ -9,6 +9,7 @@
 #include "../AutomationCore/AutomationSmootherCore.h"
 #include "../PluginScanCore/PluginScanAuditLogCore.h"
 #include "../PluginSafetyCore/PluginSafeLoadWrapperCore.h"
+#include "../PluginSafetyCore/PluginLoadRecoveryCore.h"
 #include "../PluginSandboxCore/PluginSandboxPreparationCore.h"
 #include "../PluginUICore/PluginUserFacingFailureMessageCore.h"
 #include "../Automation/AutomationSystemCore.h"
@@ -572,6 +573,15 @@ public:
                 + " format=\"" + desc.pluginFormatName + "\""
                 + " existingSlotCount=" + juce::String((int) slots_.size()));
 
+        // Persistent marker survives a native process termination while
+        // in-process third-party code is being constructed/prepared. An
+        // interrupted attempt is advisory evidence, never crash attribution.
+        auto& recovery = PluginLoadRecoveryCore::getInstance();
+        if (const auto warning = recovery.warningFor(desc); warning.isNotEmpty())
+            PluginScanAuditLogCore::appendLine("plugin_ui_flow.log",
+                "PluginChainCore::appendPlugin recovery warning: " + warning);
+        PluginLoadRecoveryCore::ScopedOperation recoveryAttempt(
+            recovery, desc, "plugin_chain_append");
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_append");
         auto instance = std::move(safeLoad.instance);
@@ -580,6 +590,7 @@ public:
             errorMsg = safeLoad.userFacingMessage.isNotEmpty()
                 ? safeLoad.userFacingMessage
                 : safeLoad.failure.rawErrorText;
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::appendPlugin failure"
@@ -609,12 +620,14 @@ public:
             if (! wrapped->isPrepared())
             {
                 errorMsg = "Plugin failed during prepare and was not inserted.";
+                recoveryAttempt.fail(errorMsg);
                 return -1;
             }
         }
         catch (const std::exception& e)
         {
             errorMsg = "Plugin crashed during prepare: " + juce::String(e.what());
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::appendPlugin prepare EXCEPTION"
@@ -625,6 +638,7 @@ public:
         catch (...)
         {
             errorMsg = "Plugin crashed during prepare (unknown exception)";
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::appendPlugin prepare UNKNOWN EXCEPTION"
@@ -653,6 +667,7 @@ public:
                 " plugin=\"" + desc.name + "\""
                 + " slotIndex=" + juce::String((int) slots_.size() - 1)
                 + " slotCount=" + juce::String((int) slots_.size()));
+        recoveryAttempt.succeed();
         return (int)slots_.size() - 1;
     }
 
@@ -795,6 +810,12 @@ private:
                 + " plugin=\"" + desc.name + "\""
                 + " format=\"" + desc.pluginFormatName + "\"");
 
+        auto& recovery = PluginLoadRecoveryCore::getInstance();
+        if (const auto warning = recovery.warningFor(desc); warning.isNotEmpty())
+            PluginScanAuditLogCore::appendLine("plugin_ui_flow.log",
+                "PluginChainCore::loadPlugin recovery warning: " + warning);
+        PluginLoadRecoveryCore::ScopedOperation recoveryAttempt(
+            recovery, desc, "plugin_chain_load");
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_load");
         auto instance = std::move(safeLoad.instance);
@@ -803,6 +824,7 @@ private:
             errorMsg = safeLoad.userFacingMessage.isNotEmpty()
                 ? safeLoad.userFacingMessage
                 : safeLoad.failure.rawErrorText;
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::loadPlugin failure"
@@ -832,12 +854,14 @@ private:
             if (! wrapped->isPrepared())
             {
                 errorMsg = "Plugin failed during prepare and was not inserted.";
+                recoveryAttempt.fail(errorMsg);
                 return false;
             }
         }
         catch (const std::exception& e)
         {
             errorMsg = "Plugin crashed during prepare: " + juce::String(e.what());
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::loadPlugin prepare EXCEPTION"
@@ -849,6 +873,7 @@ private:
         catch (...)
         {
             errorMsg = "Plugin crashed during prepare (unknown exception)";
+            recoveryAttempt.fail(errorMsg);
             PluginScanAuditLogCore::appendLine(
                 "plugin_ui_flow.log",
                 "PluginChainCore::loadPlugin prepare UNKNOWN EXCEPTION"
@@ -906,6 +931,7 @@ private:
                 " slotIndex=" + juce::String(slotIndex)
                 + " plugin=\"" + desc.name + "\""
                 + " slotCount=" + juce::String((int) slots_.size()));
+        recoveryAttempt.succeed();
         return true;
     }
 
@@ -1850,8 +1876,12 @@ public:
                             {
                                 juce::MemoryBlock block(mo.getData(), mo.getDataSize());
                                 juce::String stateError;
+                                PluginLoadRecoveryCore::ScopedOperation stateAttempt(
+                                    PluginLoadRecoveryCore::getInstance(),
+                                    desc, "plugin_chain_restore_opaque_state");
                                 if (! plugin->restorePluginState(block, stateError))
                                 {
+                                    stateAttempt.fail(stateError);
                                     allSlotsRestored = false;
                                     if (restoreError.isEmpty())
                                         restoreError = "Plugin slot " + juce::String(loadedIndex)
@@ -1865,6 +1895,8 @@ public:
                                             + " error=\"" + stateError + "\"");
                                     plugin->markStateRestoreFailed();
                                 }
+                                else
+                                    stateAttempt.succeed();
                             }
                             else
                             {
