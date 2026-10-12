@@ -2154,6 +2154,21 @@ private:
         const auto soloState = apex::automation::evaluateNativeSoloBlockRT(
             fbSnap, soloClock.captureInputPPQ(), soloClock.isTransportRollingRT(),
             soloSystem.getRegistry(), soloSystem.getLaneStore(), soloSystem.getModeState());
+        // Flat routing has no folder membership: resolve native PPQ Solo once.
+        const bool effectiveAnySolo = fbSnap == nullptr && offlineStemRenderMask_ == nullptr
+            ? apex::automation::hasNativeFlatSoloRT(
+                tracks_->getNumTracks(),
+                [this] (int i) -> apex::automation::NativeFlatSoloSource
+                {
+                    const auto* t = tracks_->getTrack(i);
+                    return t != nullptr
+                        ? apex::automation::NativeFlatSoloSource {
+                            t->getNativeSoloAutomationIDRT(),
+                            t->isSoloed(), t->isAutomationMuted() }
+                        : apex::automation::NativeFlatSoloSource {};
+                }, soloState.ppq, soloState.rolling,
+                soloSystem.getRegistry(), soloSystem.getLaneStore(), soloSystem.getModeState())
+            : anySolo;
 
         // Refresh the per-block plugin-chain view from the published
         // snapshot (C3) — one atomic load per block, then lock-free finds.
@@ -2206,11 +2221,11 @@ private:
             switch (nodeMeta->type)
             {
                 case RoutingNodeType::Track:
-                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
+                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, effectiveAnySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Bus:
                 case RoutingNodeType::FolderBus:
-                    processBusNode(nodeMeta, snap, numSamples, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
+                    processBusNode(nodeMeta, snap, numSamples, position, effectiveAnySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Master:
                     processMasterNode(nodeId, numSamples, output);
@@ -2568,7 +2583,15 @@ private:
             audible = !resolveNativeMutedRT(*track, nullptr);
             // Solo may narrow audibility but must NEVER unmute a muted track.
             if (offlineStemRenderMask_ == nullptr && anySolo)
-                audible = audible && track->isSoloed();
+            {
+                auto& soloSys = apex::automation::AutomationSystem::getInstance();
+                audible = audible && apex::automation::isNativeFlatSoloAudibleRT(
+                    { track->getNativeSoloAutomationIDRT(),
+                      track->isSoloed(), track->isAutomationMuted() },
+                    anySolo, soloState.ppq, soloState.rolling,
+                    soloSys.getRegistry(), soloSys.getLaneStore(),
+                    soloSys.getModeState());
+            }
         }
 
         auto& muteFade = getOrCreateMuteFade(track->getID());
