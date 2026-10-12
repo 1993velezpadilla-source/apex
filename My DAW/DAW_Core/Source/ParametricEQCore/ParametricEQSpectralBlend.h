@@ -28,6 +28,11 @@ public:
     static constexpr int kChannels = SpectralDynamicsCore::kChannels;
     static constexpr int kDelayCapacity = 2048;
 
+    static_assert ((kDelayCapacity & (kDelayCapacity - 1)) == 0,
+                   "spectral delay ring must be a power of two");
+    static_assert (kDelayCapacity >= kLatencySamples + 128,
+                   "aligned dry ring must retain latency plus max chunk");
+
     void prepare (double sampleRate) noexcept
     {
         sampleRate_ = std::isfinite (sampleRate) && sampleRate > 1.0
