@@ -1089,6 +1089,10 @@
         <FILE id="TL_H002" name="ApexTuneLiveProcessor.h" compile="0" resource="0" file="Source/TuneLiveCore/ApexTuneLiveProcessor.h"/>
         <FILE id="TL_H003" name="ApexTuneLiveVoiceControl.h" compile="0" resource="0" file="Source/TuneLiveCore/ApexTuneLiveVoiceControl.h"/>
         <FILE id="TL_H004" name="ApexTuneLiveDspCore.h" compile="0" resource="0" file="Source/TuneLiveCore/ApexTuneLiveDspCore.h"/>
+        <FILE id="TL_H005" name="ApexTuneLivePresets.h" compile="0" resource="0" file="Source/TuneLiveCore/ApexTuneLivePresets.h"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000005B}" name="TuneLiveUI">
+        <FILE id="TLU_H001" name="ApexTuneLiveEditor.h" compile="0" resource="0" file="Source/TuneLiveUI/ApexTuneLiveEditor.h"/>
       </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000047}" name="NativePlugins">
         <FILE id="NP_H01" name="ApexNativePluginFormat.h" compile="0" resource="0" file="Source/PluginHostCore/ApexNativePluginFormat.h"/>
