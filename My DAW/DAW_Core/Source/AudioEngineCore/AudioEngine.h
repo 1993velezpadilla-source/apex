@@ -2425,7 +2425,7 @@ private:
 #endif
 
         // Invert before sends and routing: all tap paths hear identical polarity.
-        TrackPolarityCore::apply(trackBuf, numSamples, track->isPolarityInverted());
+        track->applyPolarityTo(trackBuf, numSamples);
 
         const float leftGain  = volumeRamp.getCurrentLeftGain();
         const float rightGain = volumeRamp.getCurrentRightGain();
@@ -2670,7 +2670,7 @@ private:
 
         // Bus polarity is applied after inserts and before fader/routing.
         if (busTrack != nullptr)
-            TrackPolarityCore::apply(nodeBuf, numSamples, busTrack->isPolarityInverted());
+            busTrack->applyPolarityTo(nodeBuf, numSamples);
 
         // Bus mute — snapshot-aware
         float busGain = busTrack ? busTrack->getVolume() : 1.0f;
@@ -2863,7 +2863,7 @@ private:
             }
 
             // Maintain the same polarity semantics if the routing graph is absent.
-            TrackPolarityCore::apply(trackBuffer_, numSamples, track->isPolarityInverted());
+            track->applyPolarityTo(trackBuffer_, numSamples);
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(track->getVolume());
