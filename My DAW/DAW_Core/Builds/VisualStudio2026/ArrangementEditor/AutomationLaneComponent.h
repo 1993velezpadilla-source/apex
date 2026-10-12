@@ -8,6 +8,7 @@
 #include "AutomationUndoRedoCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
+#include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 
 namespace DAW {
 
@@ -68,6 +69,22 @@ public:
         // Draw points
         drawPoints(g);
 
+        // Transient pencil preview; live DSP is untouched until mouseUp.
+        if (freehandDrawing_ && !freehandStroke_.empty())
+        {
+            juce::Path preview;
+            bool first = true;
+            for (const auto& pt : freehandStroke_)
+            {
+                const float x = timeSamplesToX(pt.timeSamples, b);
+                const float y = valueToY(pt.value, b);
+                if (first) { preview.startNewSubPath(x, y); first = false; }
+                else preview.lineTo(x, y);
+            }
+            g.setColour(juce::Colours::yellow.withAlpha(0.85f));
+            g.strokePath(preview, juce::PathStrokeType(2.0f));
+        }
+
         // Draw tension indicators
         drawTensionIndicators(g);
 
@@ -105,6 +122,16 @@ public:
         tensionDragActive_ = false;
 
         const bool canEdit = isDrawingEnabled();
+        if (freehandArmed_ && !e.mods.isPopupMenu() && canEdit)
+        {
+            freehandArmed_ = false;
+            freehandDrawing_ = true;
+            freehandStroke_.clear();
+            freehandBeforeState_ = laneRef.getState();
+            appendFreehandPoint(e);
+            setMouseCursor(juce::MouseCursor::NormalCursor);
+            return;  // pencil owns this gesture; no point/segment drag
+        }
 
         // Check for point click (highest priority)
         for (size_t i = 0; i < lane->points.size(); ++i)
@@ -191,6 +218,13 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (freehandDrawing_)
+        {
+            appendFreehandPoint(e);
+            repaint();
+            return;
+        }
+
         if (pointDragActive_)
         {
             dragSelectedPoint(e);
@@ -223,6 +257,26 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (freehandDrawing_)
+        {
+            appendFreehandPoint(e);
+            freehandDrawing_ = false;
+            auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+            if (AutomationFreehandStrokeCore::commit(lane, freehandStroke_))
+            {
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_,
+                    freehandBeforeState_, lane.getState()));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+            }
+            freehandBeforeState_ = {};
+            freehandStroke_.clear();
+            invalidateCurvePath();
+            repaint();
+            return;
+        }
+
         if (tensionDragActive_)
         {
             tensionDragActive_ = false;
@@ -578,6 +632,30 @@ private:
     // Complete lane state captured at drag start — the MovePointAction undo
     // payload.  One action per drag gesture, not one per mouse-motion sample.
     juce::ValueTree pointDragBeforeState_;
+
+    // A one-shot touch/mouse pencil gesture. Buffers only UI samples and
+    // commits once, so large gestures do not publish thousands of DSP lanes.
+    bool freehandArmed_ = false;
+    bool freehandDrawing_ = false;
+    std::vector<AutomationPoint> freehandStroke_;
+    juce::ValueTree freehandBeforeState_;
+
+    void appendFreehandPoint(const juce::MouseEvent& e)
+    {
+        AutomationPoint point;
+        point.timeSamples = xToTimeSamples((float)e.x);
+        point.value = yToValue((float)e.y);
+        point.curveToNext = AutomationCurveType::Linear;
+        point.tensionToNext = 0.0f;
+
+        if (!freehandStroke_.empty()
+            && freehandStroke_.back().timeSamples == point.timeSamples)
+            freehandStroke_.back() = point;
+        else if (freehandStroke_.size() < AutomationFreehandStrokeCore::maxStrokePoints)
+            freehandStroke_.push_back(point);
+        else
+            freehandStroke_.back() = point; // always retain newest endpoint
+    }
 
     bool isClickOnPoint(const juce::MouseEvent& e, const AutomationPoint& point)
     {
@@ -976,6 +1054,12 @@ private:
     {
         juce::PopupMenu menu;
         menu.addItem("Add Point", [this, e]() { insertPointAtClickLocation(e); });
+        if (isDrawingEnabled())
+            menu.addItem("Freehand Pencil - Next Drag", [this]()
+            {
+                freehandArmed_ = true;
+                setMouseCursor(juce::MouseCursor::CrosshairCursor);
+            });
         menu.addItem("Add Point Keeping Level", [this, e]() {
             const auto timeSamples = xToTimeSamples((float)e.x);
             selectedPointIndex_ = helper_.insertPointPreservingLevel(trackId_, parameterId_, timeSamples);

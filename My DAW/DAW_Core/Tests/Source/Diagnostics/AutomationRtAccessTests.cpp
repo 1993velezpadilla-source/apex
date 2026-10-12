@@ -18,6 +18,7 @@
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 #include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
+#include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4296,3 +4297,66 @@ public:
     }
 };
 static AutomationV2MusicalLfoTests automationV2MusicalLfoTests;
+
+
+class AutomationV2FreehandStrokeTests final : public juce::UnitTest
+{
+public:
+    AutomationV2FreehandStrokeTests()
+      : juce::UnitTest("automation.v2-freehand-pencil-core.v1", "APEX.Diagnostics") {}
+    void runTest() override
+    {
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationFreehandStrokeCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        beginTest("Stroke replaces selected time region only");
+        AutomationLaneCore lane("v2stroke", AutomationLaneCore::trackVolumeParameterId);
+        lane.addPoint(AutomationPoint{100, 0.1f, AutomationCurveType::Hold, -0.3f});
+        lane.addPoint(AutomationPoint{200, 0.2f, AutomationCurveType::Smooth, 0.3f});
+        lane.addPoint(AutomationPoint{300, 0.3f, AutomationCurveType::Linear, 0.0f});
+        lane.addPoint(AutomationPoint{400, 0.4f, AutomationCurveType::Hold, 0.4f});
+        expect(AutomationFreehandStrokeCore::commit(lane, {
+            AutomationPoint{350, 0.85f}, AutomationPoint{250, 0.55f},
+            AutomationPoint{250, 0.65f}
+        }));
+        expectEquals((int)lane.points.size(), 5);
+        if (lane.points.size() == 5)
+        {
+            expectEquals((juce::int64)lane.points[0].timeSamples, (juce::int64)100);
+            expect(lane.points[0].curveToNext == AutomationCurveType::Hold);
+            expectEquals((juce::int64)lane.points[1].timeSamples, (juce::int64)200);
+            expectEquals((juce::int64)lane.points[2].timeSamples, (juce::int64)250);
+            expectWithinAbsoluteError(lane.points[2].value, 0.65f, 0.00001f);
+            expectEquals((juce::int64)lane.points[3].timeSamples, (juce::int64)350);
+            expectEquals((juce::int64)lane.points[4].timeSamples, (juce::int64)400);
+        }
+
+        beginTest("Invalid stroke rejected without changing lane");
+        auto before = lane.getState().toXmlString();
+        expect(!AutomationFreehandStrokeCore::commit(lane, {
+             AutomationPoint{-1, 0.7f}}));
+        expect(!AutomationFreehandStrokeCore::commit(lane, {
+             AutomationPoint{125, std::numeric_limits<float>::quiet_NaN()}}));
+        expectEquals(lane.getState().toXmlString(), before);
+
+        beginTest("Pencil respects explicit lane enabled state");
+        lane.setEnabled(false);
+        expect(!AutomationFreehandStrokeCore::commit(lane, {
+            AutomationPoint{100, 0.9f}}));
+        lane.setEnabled(true);
+        expect(AutomationFreehandStrokeCore::commit(lane, {
+            AutomationPoint{250, 0.4f}, AutomationPoint{300, 0.95f}}));
+        expect(lane.getNumPoints() >= 2);
+
+        beginTest("Pencil roundtrip retains curve points and timestamps");
+        const auto state = lane.getState();
+        AutomationLaneCore restored("v2stroke", AutomationLaneCore::trackVolumeParameterId);
+        restored.restoreState(state);
+        expectEquals(restored.getNumPoints(), lane.getNumPoints());
+        expectEquals(restored.getParameterId(),
+                     juce::String(AutomationLaneCore::trackVolumeParameterId));
+    }
+};
+static AutomationV2FreehandStrokeTests automationV2FreehandStrokeTests;
