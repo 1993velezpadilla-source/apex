@@ -40,6 +40,8 @@ Track::Track(const TrackID& id, const juce::String& name)
     using Keys = apex::automation::AutomationParameterKeyRegistry;
     bindNativeVolumeAutomationID (
         Keys::getInstance().getOrCreateID (Keys::trackVolumeKey (id)));
+    bindNativePanAutomationID (
+        Keys::getInstance().getOrCreateID (Keys::trackPanKey (id)));
 
     // Professional default: white — user can color tracks via palette
     color_ = juce::Colours::white;

@@ -26,6 +26,7 @@
 #include "../AutomationCore/AutomationManagerCore.h"
 #include "../Automation/AutomationSystemCore.h"
 #include "../Automation/AutomationTrackVolumePlaybackCore.h"
+#include "../Automation/AutomationTrackPanPlaybackCore.h"
 #include "../TapeStop/TapeStopProcessorCore.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 // TimePitch DSP nuclei
@@ -1237,6 +1238,19 @@ private:
             system.getModeState(), *range);
     }
 
+    // PPQ pan is evaluated in DSP even with the mixer panel closed and during
+    // offline bounces. The ParameterID is cached on Track and rebound on load.
+    float resolveNativePanRT (const Track& track, float legacyPan) const noexcept
+    {
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        return apex::automation::getNativeTrackPanRT(
+            track.getNativePanAutomationIDRT(), legacyPan,
+            clock.captureInputPPQ(), clock.isTransportRollingRT(),
+            track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
+            system.getModeState());
+    }
+
     VolumeRampCore& getOrCreateVolumeRamp(const TrackID& trackId)
     {
         auto it = trackVolumeRampMap_.find(trackId);
@@ -2434,6 +2448,7 @@ private:
         // evaluated at block rate; they take precedence over the legacy
         // sample-domain lane when present. No UI dispatch required.
         trackVolume = resolveNativeFaderGainRT(*track, trackVolume);
+        trackPan = resolveNativePanRT(*track, trackPan);
         volumeRamp.setTargetVolume(trackVolume);
         volumeRamp.setTargetPan(trackPan);
 
@@ -2736,7 +2751,7 @@ private:
         {
             auto& busRamp = getOrCreateVolumeRamp(busTrack->getID());
             busRamp.setTargetVolume(busGain);
-            busRamp.setTargetPan(busTrack->getPan());
+            busRamp.setTargetPan(resolveNativePanRT(*busTrack, busTrack->getPan()));
             busRamp.applyToStereoBuffer(bufL, bufR, numSamples);
 
             if (busMuteRamp != nullptr)
@@ -2890,7 +2905,7 @@ private:
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(resolveNativeFaderGainRT(*track, track->getVolume()));
-            volumeRamp.setTargetPan(track->getPan());
+            volumeRamp.setTargetPan(resolveNativePanRT(*track, track->getPan()));
             volumeRamp.generateRamps(numSamples);
 
             const float leftGain  = volumeRamp.getCurrentLeftGain();
