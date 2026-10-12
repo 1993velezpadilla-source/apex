@@ -1214,6 +1214,7 @@ public:
         testPassiveMirrorDoesNotCreateRecordingGesture();
         testTouchGestureOverridesLiveDsp();
         testPluginGestureRecordsAndAudiblyPlaysBack();
+        testInProcessPpqLaneSurvivesSessionReopen();
         testDiscreteParameterSwitchesAtBlockBoundary();
         testDiscreteApexPpqLanesHoldUntilExactKnot();
         testReorderKeepsInstanceValues();
@@ -1606,6 +1607,91 @@ private:
         recorder.drainForTests();
         lanes.removeLane(id);
         system.setMode(id, Mode::Read);
+    }
+
+    void testInProcessPpqLaneSurvivesSessionReopen()
+    {
+        beginTest("in-process VST3 automation survives XML session save/reopen and controls audio");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& lanes = system.getLaneStore();
+        const juce::String track = "apex-inprocess-save-reopen-e2e-20261012";
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        probe->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        chain.setAutomationContext(track, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false, "hosted plugin exists"); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        const auto key = KR::pluginParamKey(track, 0, slot->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "stable plugin parameter identity exists");
+            return;
+        }
+        system.setMode(id, Mode::Read);
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.25f, Curve::Hold, 0.0f},
+            {2.0, 0.75f, Curve::Hold, 0.0f},
+            {4.0, 0.25f, Curve::Hold, 0.0f}
+        });
+
+        // Serialized session payload passes through real XML, not an
+        // in-memory copy of the original lane snapshot.
+        const auto saved = lanes.getState();
+        const auto xml = saved.createXml();
+        expect(xml != nullptr && saved.isValid(), "automation subtree saved");
+        if (xml == nullptr) { lanes.removeLane(id); return; }
+        const auto onDisk = juce::ValueTree::fromXml(*xml);
+        expect(onDisk.isValid(), "automation subtree reopened from XML");
+        if (!onDisk.isValid()) { lanes.removeLane(id); return; }
+
+        // Reopen is observable: drop the published lane, perturb the live
+        // processor's state, then restore only from the persisted project.
+        lanes.removeLane(id);
+        expect(lanes.findLaneRT(id) == nullptr, "old lane no longer published");
+        parameter->setValue(0.95f);
+        lanes.restoreState(onDisk);
+        const auto newId = KR::getInstance().findID(key);
+        expectEquals(newId, id, "plugin's identity survives session reopen");
+        const auto restored = lanes.findLaneRT(newId);
+        expect(restored != nullptr, "lane republished under stable plugin key");
+        if (restored != nullptr)
+        {
+            const auto snap = restored->getSnapshot();
+            expect(snap != nullptr && snap->size() == 3,
+                   "all three automation points round-trip");
+        }
+
+        juce::AudioBuffer<float> audio(2, 128);
+        const struct { double ppq; float output; } checks[] = {
+            {1.0, 0.125f}, {2.0, 0.375f}, {4.0, 0.125f}
+        };
+        for (const auto& check : checks)
+        {
+            const auto sample = static_cast<int64_t>(check.ppq * 24000.0);
+            system.onAudioBlockStart(check.ppq, 1.0 / 24000.0, true);
+            for (int block = 0; block < 96; ++block)
+            {
+                chain.applyAutomationAtSample(track, nullptr, sample, kRate, 120.0, 128);
+                fillTonePair(audio, 128, 0.5f, 0.5f);
+                chain.processBlock(audio, 128);
+            }
+            expectWithinAbsoluteError(audio.getSample(0, 127), check.output, 0.005f,
+                "reopened automation drives DSP at PPQ " + juce::String(check.ppq));
+        }
+        system.onAudioBlockStart(0.0, 1.0 / 24000.0, false);
+        lanes.removeLane(newId);
+        system.setMode(newId, Mode::Read);
     }
 
     void testReorderKeepsInstanceValues()
