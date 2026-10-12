@@ -1214,6 +1214,7 @@ public:
         testPassiveMirrorDoesNotCreateRecordingGesture();
         testTouchGestureOverridesLiveDsp();
         testDiscreteParameterSwitchesAtBlockBoundary();
+        testDiscreteApexPpqLanesHoldUntilExactKnot();
         testReorderKeepsInstanceValues();
         testReorderKeepsAutomationOwner();
         testLegacyLanesFollowThePlugin();
@@ -1445,6 +1446,63 @@ private:
             "switch turns OFF immediately at the next automation boundary");
         expectWithinAbsoluteError(audio.getSample(0, 127), 0.0f, 1.0e-6f,
             "OFF mutes in the first callback");
+    }
+
+    void testDiscreteApexPpqLanesHoldUntilExactKnot()
+    {
+        beginTest("discrete APEX PPQ lane never anticipates a switch breakpoint");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        spec.parameterIsBoolean = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-discrete-ppq-hold-probe-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        expect(parameter->isDiscrete(), "plugin advertises discrete parameter");
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        // Deliberately use Linear curves: a discrete target must STILL hold
+        // the prior value until the exact breakpoint.
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {1.0, 1.0f, CurveType::Linear, 0.0f},
+            {2.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+
+        juce::AudioBuffer<float> audio(2, 128);
+        struct Probe { double ppq; float value; };
+        const Probe probes[] = {
+            {0.0, 0.0f}, {0.75, 0.0f}, {1.0, 1.0f},
+            {1.75, 1.0f}, {2.0, 0.0f}
+        };
+        for (const auto& probe : probes)
+        {
+            // 48kHz @ 120BPM = exactly 24k samples per PPQ.
+            const auto sample = static_cast<int64_t>(probe.ppq * 24000.0);
+            chain.applyAutomationAtSample(
+                trackId, nullptr, sample, kRate, 120.0, 128);
+            fillTonePair(audio, 128, 0.5f, 0.5f);
+            chain.processBlock(audio, 128);
+            expectWithinAbsoluteError(parameter->getValue(), probe.value,
+                1.0e-6f, "VST3 discrete value holds at PPQ " + juce::String(probe.ppq));
+            expectWithinAbsoluteError(audio.getSample(0, 127),
+                0.5f * probe.value, 1.0e-6f,
+                "real DSP switches only at PPQ " + juce::String(probe.ppq));
+        }
+        lanes.removeLane(id);
     }
 
     void testReorderKeepsInstanceValues()
