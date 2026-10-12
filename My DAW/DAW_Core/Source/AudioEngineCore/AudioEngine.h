@@ -2388,6 +2388,11 @@ private:
             }
         }
 
+        // Channel-strip Ø: post-plugin, pre-fader, before both pre/post
+        // sends. One coherent polarity choice across all outgoing routes.
+        // No allocation/locking in the RT callback.
+        track->applyOutputPolarity(trackBuf, numSamples);
+
         // Volume and pan
         auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
         float trackVolume = track->getVolume();
@@ -2664,6 +2669,10 @@ private:
             }
         }
 
+        // Route-owning folder/aux buses expose the same Ø control.
+        if (busTrack != nullptr)
+            busTrack->applyOutputPolarity(nodeBuf, numSamples);
+
         // Bus mute — snapshot-aware
         float busGain = busTrack ? busTrack->getVolume() : 1.0f;
         if (busTrack && automationSnap != nullptr)
@@ -2853,6 +2862,9 @@ private:
                 if (it != chainsSnap->end() && it->second)
                     it->second->processBlock(trackBuffer_, numSamples);
             }
+
+            // Flat compatibility path must honor the same Ø state.
+            track->applyOutputPolarity(trackBuffer_, numSamples);
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(track->getVolume());
