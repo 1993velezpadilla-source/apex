@@ -174,8 +174,11 @@ public:
     bool isRecoveredProject() const noexcept { return isRecoveredProject_; }
     void clearRecoveredFlag()                { isRecoveredProject_ = false; }
 
-    /** Called by MainComponent after it is visible — checks and shows recovery prompt. */
+    /** Called after MainComponent becomes visible: offer an opt-in safe
+        plugin restore if the previous APEX process ended while loading a
+        native plugin, THEN show the existing autosave recovery dialog. */
     void checkAndShowRecoveryPromptIfNeeded(juce::Component* parent);
+    void showAutosaveRecoveryPromptIfNeeded();
 
     /** Rebuild and publish the FolderBus mute/solo snapshot. Call after any mute/solo/topology change. */
     void rebuildFolderBusSnapshot()
@@ -697,6 +700,10 @@ public:
     std::unique_ptr<apex::vocaltune::ApexTuneIntegrationCore> vocalTuneIntegration_;
 
     bool isRecoveredProject_ = false;
+    // Never infer guilt from a stale load marker. The user must explicitly
+    // choose Safe Mode, scoped to the next project plugin-chain restore.
+    PluginLoadRecoveryCore::Attempt pendingSafePluginRestore_;
+    bool pluginRecoveryPromptShown_ = false;
     bool wasRecordingLastTick_ = false;   ///< tracks previous recording state for stop-detection
     bool shutdownComplete_ = false;
 
