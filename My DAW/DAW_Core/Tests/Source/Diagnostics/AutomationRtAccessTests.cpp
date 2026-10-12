@@ -17,6 +17,7 @@
 #include "../../../Source/Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
+#include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4201,3 +4202,97 @@ public:
     }
 };
 static AutomationCurveClipboardTests automationCurveClipboardTests;
+
+
+class AutomationV2MusicalLfoTests final : public juce::UnitTest
+{
+public:
+    AutomationV2MusicalLfoTests()
+        : juce::UnitTest("automation.v2-musical-lfo-real-editor.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationMusicalLfoCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationCurveType;
+        using DAW::AutomationPoint;
+
+        beginTest("All four one-bar generators deterministic at 48kHz/120BPM");
+        std::vector<AutomationPoint> values;
+        for (const auto shape : {
+             AutomationMusicalLfoCore::Shape::Sine,
+             AutomationMusicalLfoCore::Shape::Triangle,
+             AutomationMusicalLfoCore::Shape::Square,
+             AutomationMusicalLfoCore::Shape::Saw })
+        {
+            expect(AutomationMusicalLfoCore::generate(
+                AutomationLaneCore::trackVolumeParameterId, shape,
+                48000.0, 120.0, values));
+            expectEquals((int)values.size(), 65);
+            if (values.size() != 65) continue;
+            expectEquals((juce::int64)values.front().timeSamples, (juce::int64)0);
+            expectEquals((juce::int64)values.back().timeSamples, (juce::int64)96000);
+            for (size_t i = 0; i < values.size(); ++i)
+            {
+                expect(values[i].value >= 0.0f && values[i].value <= 1.0f);
+                expect(std::isfinite(values[i].value));
+                if (i > 0)
+                    expect(values[i].timeSamples > values[i - 1].timeSamples);
+            }
+
+            if (shape == AutomationMusicalLfoCore::Shape::Square)
+            {
+                expect(values[0].curveToNext == AutomationCurveType::Hold);
+                expectWithinAbsoluteError(values[0].value, 1.0f, 0.00001f);
+                expectWithinAbsoluteError(values[32].value, 0.0f, 0.00001f);
+                expectWithinAbsoluteError(values[64].value, 1.0f, 0.00001f);
+            }
+            if (shape == AutomationMusicalLfoCore::Shape::Triangle)
+            {
+                expectWithinAbsoluteError(values[0].value, 0.0f, 0.00001f);
+                expectWithinAbsoluteError(values[32].value, 1.0f, 0.00001f);
+                expectWithinAbsoluteError(values[64].value, 0.0f, 0.00001f);
+            }
+        }
+
+        beginTest("Pan generator reaches full bipolar -1 to +1");
+        expect(AutomationMusicalLfoCore::generate(AutomationLaneCore::trackPanParameterId,
+                AutomationMusicalLfoCore::Shape::Triangle, 48000.0, 120.0, values));
+        if (values.size() == 65)
+        {
+            expectWithinAbsoluteError(values[0].value, -1.0f, 0.00001f);
+            expectWithinAbsoluteError(values[32].value, 1.0f, 0.00001f);
+        }
+
+        beginTest("No generator for mute/solo or pitch, or invalid numeric inputs");
+        expect(!AutomationMusicalLfoCore::supports("track.mute"));
+        expect(!AutomationMusicalLfoCore::supports("track.solo"));
+        expect(!AutomationMusicalLfoCore::supports("clip.test.pitch_shift"));
+        const auto priorSize = values.size();
+        expect(!AutomationMusicalLfoCore::generate("track.mute",
+                 AutomationMusicalLfoCore::Shape::Square, 48000.0, 120.0, values));
+        expect(!AutomationMusicalLfoCore::generate(AutomationLaneCore::trackVolumeParameterId,
+                 AutomationMusicalLfoCore::Shape::Sine, 48000.0,
+                 std::numeric_limits<double>::quiet_NaN(), values));
+        expect(!AutomationMusicalLfoCore::generate(AutomationLaneCore::trackVolumeParameterId,
+                 AutomationMusicalLfoCore::Shape::Sine, 0.0, 120.0, values));
+        expectEquals((int)values.size(), (int)priorSize);
+
+        beginTest("LFO points survive core lane serialization, shapes preserve steps");
+        DAW::AutomationLaneCore replay("LFO-TEST", AutomationLaneCore::trackVolumeParameterId);
+        expect(AutomationMusicalLfoCore::generate(AutomationLaneCore::trackVolumeParameterId,
+                 AutomationMusicalLfoCore::Shape::Square, 48000.0, 120.0, values));
+        replay.points = values;
+        replay.sortAndResolveDuplicates();
+        auto state = replay.getState();
+        DAW::AutomationLaneCore restored("LFO-TEST", AutomationLaneCore::trackVolumeParameterId);
+        restored.restoreState(state);
+        expectEquals((int)restored.points.size(), 65);
+        if (restored.points.size() == 65)
+        {
+            expect(restored.points[31].curveToNext == AutomationCurveType::Hold);
+            expect(restored.points[32].curveToNext == AutomationCurveType::Hold);
+        }
+    }
+};
+static AutomationV2MusicalLfoTests automationV2MusicalLfoTests;
