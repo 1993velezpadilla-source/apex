@@ -44,11 +44,11 @@ public:
 private:
     void testFrozenAbiAndAppendedPlacements()
     {
-        beginTest ("frozen 170-prefix plus append-only Phase 3/5/6/7/8 parameters = 343 stable IDs");
+        beginTest ("frozen 170-prefix, through Phase 9 output stage = 348 stable IDs");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         expectEquals (processor.getParameters().size(), kNumParameters);
-        expectEquals (kNumParameters, 343);
+        expectEquals (kNumParameters, 348);
 
         std::set<std::string> ids;
         for (int index = 0; index < kNumParameters; ++index)
@@ -89,11 +89,21 @@ private:
             else if (index == kCharacterModeParameter)
                 expected = "peq.character";
             else if (index >= kFirstDynamicFilterParameter
-                     && index < kNumParameters)
+                     && index < kOutputGainParameter)
                 expected = "peq.band"
                          + juce::String (index - kFirstDynamicFilterParameter + 1)
                                .paddedLeft ('0', 2)
                          + ".dyn.filter";
+            else if (index == kOutputGainParameter)
+                expected = "peq.output.gain";
+            else if (index == kOutputPanParameter)
+                expected = "peq.output.pan";
+            else if (index == kOutputPhaseInvertParameter)
+                expected = "peq.output.phaseInvert";
+            else if (index == kOutputAutoGainParameter)
+                expected = "peq.output.autoGain";
+            else if (index == kOutputGainScaleParameter)
+                expected = "peq.output.gainScale";
             else
             {
                 const int band = index / 7;
@@ -116,7 +126,7 @@ private:
             expect (parameter->isStorageLockFree(),
                     "atomic storage must be lock-free: " + parameter->paramID);
         }
-        expectEquals (ids.size(), static_cast<std::size_t> (343));
+        expectEquals (ids.size(), static_cast<std::size_t> (348));
         expectEquals (Processor::getParameterId (170),
                       juce::String ("peq.band01.placement"));
         expectEquals (Processor::getParameterId (193),
@@ -141,6 +151,16 @@ private:
                       juce::String ("peq.band01.dyn.filter"));
         expectEquals (Processor::getParameterId (342),
                       juce::String ("peq.band24.dyn.filter"));
+        expectEquals (Processor::getParameterId (343),
+                      juce::String ("peq.output.gain"));
+        expectEquals (Processor::getParameterId (344),
+                      juce::String ("peq.output.pan"));
+        expectEquals (Processor::getParameterId (345),
+                      juce::String ("peq.output.phaseInvert"));
+        expectEquals (Processor::getParameterId (346),
+                      juce::String ("peq.output.autoGain"));
+        expectEquals (Processor::getParameterId (347),
+                      juce::String ("peq.output.gainScale"));
         expect (processor.getBypassParameter()
                 == processor.getParametricEQParameter (kGlobalBypassParameter));
     }
