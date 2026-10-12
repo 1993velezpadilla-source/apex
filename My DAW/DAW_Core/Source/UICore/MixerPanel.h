@@ -163,7 +163,13 @@ public:
                                 apex::automation::ChangeSource         source) override
     {
         if (updatingFromAutomation_) return;
-        juce::ignoreUnused (source);
+        // Mute Automation disables playback modulation, NOT the track audio.
+        // A queued 60Hz dispatcher event must not overwrite the manual
+        // track state after the user mutes its automation. The RT audio
+        // reader independently bypasses muted fader lanes in this state.
+        if (source == apex::automation::ChangeSource::Automation
+            && track_.isAutomationMuted())
+            return;
 
         const juce::ScopedValueSetter<bool> guard (updatingFromAutomation_, true);
 

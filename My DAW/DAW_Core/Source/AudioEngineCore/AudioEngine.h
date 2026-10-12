@@ -25,6 +25,7 @@
 #include "../RenderCore/StemRouteMaskCore.h"
 #include "../AutomationCore/AutomationManagerCore.h"
 #include "../Automation/AutomationSystemCore.h"
+#include "../Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../TapeStop/TapeStopProcessorCore.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 // TimePitch DSP nuclei
@@ -1217,6 +1218,24 @@ public:
     }
 
 private:
+    // Apply the native PPQ-volume envelope before the DSP gain ramp, not by
+    // waiting for the 60 Hz MixerStrip parameter listener. Reuses the atomic
+    // track->ParameterID cache (rebuilt on project load) and immutable RT
+    // snapshots. Must never call a key-registry String/locking API here.
+    float resolveNativeFaderGainRT (const Track& track, float legacyGain) const noexcept
+    {
+        auto* range = FaderRangeCore::getGlobalInstance();
+        if (range == nullptr)
+            return legacyGain;
+
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        return apex::automation::getNativeTrackVolumeGainRT(
+            track.getNativeVolumeAutomationIDRT(), legacyGain,
+            clock.captureInputPPQ(), clock.isTransportRollingRT(),
+            track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
+            system.getModeState(), *range);
+    }
 
     VolumeRampCore& getOrCreateVolumeRamp(const TrackID& trackId)
     {
@@ -2411,6 +2430,10 @@ private:
                     trackPan = lane->getValueAtSample((int64_t)position, trackPan);
         }
 
+        // APEX native Write/Touch/Latch/Trim lanes live in PPQ and are
+        // evaluated at block rate; they take precedence over the legacy
+        // sample-domain lane when present. No UI dispatch required.
+        trackVolume = resolveNativeFaderGainRT(*track, trackVolume);
         volumeRamp.setTargetVolume(trackVolume);
         volumeRamp.setTargetPan(trackPan);
 
@@ -2679,6 +2702,9 @@ private:
                 if (lane->enabled)
                     busGain = lane->getValueAtSample((int64_t)position, busGain);
 
+        if (busTrack != nullptr)
+            busGain = resolveNativeFaderGainRT(*busTrack, busGain);
+
         bool  busMuted;
         if (fbSnap && busTrack)
             busMuted = fbSnap->effectivelyMutedTracks.count(busTrack->getID()) > 0;
@@ -2863,7 +2889,7 @@ private:
             }
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
-            volumeRamp.setTargetVolume(track->getVolume());
+            volumeRamp.setTargetVolume(resolveNativeFaderGainRT(*track, track->getVolume()));
             volumeRamp.setTargetPan(track->getPan());
             volumeRamp.generateRamps(numSamples);
 

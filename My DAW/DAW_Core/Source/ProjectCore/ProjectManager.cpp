@@ -611,6 +611,24 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
 
     try {
         apex::automation::AutomationLaneStore::getInstance().restoreState(state.getChildWithName("APEXAutomation"));
+        // KeyRegistry::restoreState may remap numeric ParameterIDs when the
+        // project changes. Refresh EVERY track's RT-only native-fader handle
+        // after that restore, including hidden/collapsed tracks and Master.
+        // Never perform a String-key lookup from the audio callback.
+        if (subs_.tracks != nullptr)
+        {
+            using Keys = apex::automation::AutomationParameterKeyRegistry;
+            auto& keys = Keys::getInstance();
+            const auto rebindFader = [&keys] (Track* t)
+            {
+                if (t != nullptr)
+                    t->bindNativeVolumeAutomationID (
+                        keys.getOrCreateID (Keys::trackVolumeKey (t->getID())));
+            };
+            for (auto* t : subs_.tracks->getAllTracks())
+                rebindFader (t);
+            rebindFader (subs_.tracks->getMasterTrack());
+        }
         if (subs_.appCore != nullptr)
         {
             // Routing and persistent lane keys now exist. Recreate the

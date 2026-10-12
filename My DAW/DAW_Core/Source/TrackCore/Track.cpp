@@ -1,6 +1,7 @@
 #include "Track.h"
 #include "../UtilityCore/Types.h"
 #include "../MixerScaleCore/FaderRangeCore.h"
+#include "../Automation/AutomationParameterKeyCore.h"
 #include "../MidiCore/MidiTrackCore.h"
 
 namespace DAW {
@@ -33,6 +34,13 @@ namespace IDs
 Track::Track(const TrackID& id, const juce::String& name)
     : id_(id), name_(name)
 {
+    // Message-thread construction, never from processBlock. Resolve once
+    // into an atomic ID: audio callbacks cannot hash juce::Strings or lock
+    // the automation key registry on every buffer.
+    using Keys = apex::automation::AutomationParameterKeyRegistry;
+    bindNativeVolumeAutomationID (
+        Keys::getInstance().getOrCreateID (Keys::trackVolumeKey (id)));
+
     // Professional default: white — user can color tracks via palette
     color_ = juce::Colours::white;
     automationParameterOrder_.add("track.volume");
@@ -288,14 +296,36 @@ Track* TrackManager::createTrack(const juce::String& name)
 
 Track* TrackManager::recreateTrackFromState(const juce::ValueTree& state)
 {
+    // Undo MUST recreate the saved track identity. Creating a fresh track
+    // with createTrack/createMidiTrack generated a different TRK_* ID, while
+    // Track::restoreState intentionally does not modify its constructor ID.
+    // Plugin, send, routing and automation keys all depend on that identity.
+    if (! state.isValid() || state.getType() != IDs::TRACK)
+        return nullptr;
+
+    const auto id = state.getProperty(IDs::ID).toString();
+    if (id.isEmpty() || getTrack (id) != nullptr)
+        return nullptr; // malformed state or duplicate canonical track ID
+
+    const auto name = state.getProperty(IDs::NAME, "Track").toString();
     const auto role = (TrackRole) (int) state.getProperty(IDs::ROLE, (int) TrackRole::Audio);
-    auto* track = (role == TrackRole::MIDI || role == TrackRole::Instrument)
-        ? createMidiTrack(state.getProperty(IDs::NAME, "Track").toString())
-        : createTrack(state.getProperty(IDs::NAME, "Track").toString());
+    Track* track = (role == TrackRole::MIDI || role == TrackRole::Instrument)
+        ? static_cast<Track*> (new MidiTrackCore (id, name))
+        : new Track (id, name);
 
-    if (track != nullptr)
-        track->restoreState(state);
+    track->restoreState (state);
+    track->setIndex (tracks_.size());
+    tracks_.add (track);
 
+    // The restored ID may have come from a later session than the current
+    // counter; never issue it again on a subsequent createTrack().
+    if (id.startsWith ("TRK_"))
+        IDGenerator::seedTrackCounter (
+            id.fromFirstOccurrenceOf ("TRK_", false, false).getIntValue());
+
+    // Publish only after fields and ID agree. Listeners may build mixer
+    // strips immediately and must see the restored state, not defaults.
+    listeners_.call ([track] (Listener& l) { l.trackAdded (track); });
     return track;
 }
 

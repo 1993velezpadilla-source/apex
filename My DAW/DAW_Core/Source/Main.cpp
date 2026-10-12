@@ -1112,7 +1112,51 @@ public:
                             });
                             modeState.setMode (id, apex::automation::AutomationMode::Touch);
 
-                            if (! projects.saveToFile (temporary))
+                            // Also exercise a REAL mixer-track identity, not
+                            // only an independent CI-only parameter key.
+                            // This guards native fader envelopes across the
+                            // actual TrackManager project serialization.
+                            auto* faderTrack = component->getAppCore()
+                                .getTrackManager().createTrack ("APEX CI Automation Fader");
+                            const juce::String faderTrackID = faderTrack != nullptr
+                                ? faderTrack->getID() : juce::String();
+                            const auto faderKey =
+                                apex::automation::AutomationParameterKeyRegistry::trackVolumeKey (faderTrackID);
+                            const auto faderID = faderTrack != nullptr
+                                ? keyRegistry.getOrCreateID (faderKey)
+                                : apex::automation::kInvalidParameterID;
+                            if (faderTrack != nullptr)
+                            {
+                                laneStore.getOrCreateLane (faderID).replacePoints ({
+                                    { 0.50, 0.20f, apex::automation::CurveType::Linear, 0.0f },
+                                    { 2.00, 0.80f, apex::automation::CurveType::Smooth, -0.25f }
+                                });
+                                modeState.setMode (faderID, apex::automation::AutomationMode::Latch);
+                            }
+
+                            // Deleting a track is undoable. The UI listener
+                            // and strip teardown must not destroy its keyed
+                            // automation before DeleteTrackCommand can revive
+                            // the original TrackID. Exercise that event path
+                            // in the REAL MainComponent prior to saving.
+                            const auto faderTrackState = faderTrack != nullptr
+                                ? faderTrack->getState() : juce::ValueTree();
+                            auto& trackManager = component->getAppCore().getTrackManager();
+
+                            if (faderTrack == nullptr)
+                                error = "real TrackManager::createTrack failed";
+                            else if (! trackManager.deleteTrack (faderTrackID))
+                                error = "real track deletion failed in undo persistence gate";
+                            else if (laneStore.findLane (faderID) == nullptr
+                                     || modeState.getMode (faderID)
+                                         != apex::automation::AutomationMode::Latch)
+                                error = "undoable track deletion destroyed its automation or Latch mode";
+                            else if (auto* restoredTrack =
+                                         trackManager.recreateTrackFromState (faderTrackState);
+                                     restoredTrack == nullptr
+                                         || restoredTrack->getID() != faderTrackID)
+                                error = "undo recreated a different track identity";
+                            else if (! projects.saveToFile (temporary))
                                 error = "saveToFile failed: " + projects.getLastSaveError();
                             else if (! temporary.existsAsFile()
                                      || temporary.getSize() <= 0)
@@ -1134,8 +1178,9 @@ public:
                                     else if (! projects.newProject())
                                         error = "second newProject failed: "
                                             + projects.getLastLoadError();
-                                    else if (laneStore.findLane (id) != nullptr)
-                                        error = "newProject retained old song automation";
+                                    else if (laneStore.findLane (id) != nullptr
+                                             || laneStore.findLane (faderID) != nullptr)
+                                        error = "newProject retained old song or mixer-fader automation";
                                     else if (! projects.loadFromFile (temporary))
                                         error = "loadFromFile failed: "
                                             + projects.getLastLoadError();
@@ -1176,8 +1221,33 @@ public:
                                         else if (modeState.getMode (restoredID)
                                                  != apex::automation::AutomationMode::Touch)
                                             error = "Touch automation mode not restored from project";
+                                        else if (component->getAppCore().getTrackManager()
+                                                     .getTrack (faderTrackID) == nullptr)
+                                            error = "real mixer track missing after project reload";
                                         else
-                                            success = true;
+                                        {
+                                            const auto restoredFaderID = keyRegistry.findID (faderKey);
+                                            const auto faderLane = restoredFaderID
+                                                != apex::automation::kInvalidParameterID
+                                                    ? laneStore.findLane (restoredFaderID) : nullptr;
+                                            const auto faderPoints = faderLane != nullptr
+                                                ? faderLane->getSnapshot() : nullptr;
+                                            if (faderPoints == nullptr || faderPoints->size() != 2)
+                                                error = "real mixer fader points lost during session restore";
+                                            else if (std::abs ((*faderPoints)[0].timePPQ - 0.50) > 1.0e-9
+                                                || std::abs ((*faderPoints)[0].normalizedValue - 0.20f) > 1.0e-6f
+                                                || (*faderPoints)[0].curveType != apex::automation::CurveType::Linear
+                                                || std::abs ((*faderPoints)[1].timePPQ - 2.00) > 1.0e-9
+                                                || std::abs ((*faderPoints)[1].normalizedValue - 0.80f) > 1.0e-6f
+                                                || (*faderPoints)[1].curveType != apex::automation::CurveType::Smooth
+                                                || std::abs ((*faderPoints)[1].curveTension + 0.25f) > 1.0e-6f)
+                                                error = "mixer fader breakpoint/curve changed during reload";
+                                            else if (modeState.getMode (restoredFaderID)
+                                                     != apex::automation::AutomationMode::Latch)
+                                                error = "real mixer fader Latch mode not restored";
+                                            else
+                                                success = true;
+                                        }
                                     }
                                 }
                             }
@@ -1204,7 +1274,7 @@ public:
                 }
 
                 juce::Logger::writeToLog (success
-                    ? "[APEX CI PROJECT] PASS: real GUI + 3-point Linear/Smooth/Hold + Touch new/save/new/load roundtrip"
+                    ? "[APEX CI PROJECT] PASS: real GUI + synthetic Touch + native track-volume Latch lanes roundtrip"
                     : "[APEX CI PROJECT] FAIL: " + error);
                 setApplicationReturnValue (success ? 0 : 1);
                 quit();
