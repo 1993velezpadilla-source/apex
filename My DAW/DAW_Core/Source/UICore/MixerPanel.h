@@ -125,6 +125,11 @@ public:
             : savedModes.getGlobalDefaultMode();
 
         initChildren();
+        // initChildren only wires components; its button starts labelled OFF.
+        // Synchronise its visible state immediately, without waiting for an
+        // unrelated Track property notification.
+        autoModeBtn_.label = automationModeLabel (currentAutoMode_);
+        autoModeBtn_.active = currentAutoMode_ != apex::automation::AutomationMode::Off;
     }
 
     ~MixerStrip() override
