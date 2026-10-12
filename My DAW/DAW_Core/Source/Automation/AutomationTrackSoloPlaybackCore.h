@@ -35,7 +35,7 @@ namespace apex::automation
         const auto mode = modes.getModeRT(id);
         if (mode == AutomationMode::Off)
             return manualSolo;
-        const auto* live = registry.findRT(id);
+        const auto live = registry.findRT(id);
         if (live != nullptr
             && (live->isGestureActive()
                 || ((mode == AutomationMode::Latch || mode == AutomationMode::Write)
