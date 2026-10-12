@@ -1703,7 +1703,13 @@ public:
                 if (auto mirrored = registry.findRT(binding.apexPid))
                     if (mirrored->getBoundPluginParameter() == pluginParam
                         && std::abs(mirrored->getNormalizedValue() - currentValue) > 0.0001f)
-                        mirrored->setValueFromPlugin(currentValue);
+                        // Passive DSP/host synchronization is NOT an editor
+                        // gesture. setValueFromPlugin() publishes a producer
+                        // event, which could open a phantom Write take at every
+                        // unrelated processor update. A real editor move is
+                        // already captured through the AudioProcessorListener.
+                        mirrored->writeValue(currentValue,
+                            apex::automation::ChangeSource::Plugin);
                 continue;
             }
 
