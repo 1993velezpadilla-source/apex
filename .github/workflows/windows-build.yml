@@ -38,7 +38,7 @@ jobs:
         run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
       - name: Run complete test suite
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
-      - name: Launch real APEX GUI and verify window initialization
+      - name: Smoke real APEX GUI and project automation persistence
         run: .\Scripts\smoke_apex_app_launch.ps1 -Configuration ${{ matrix.configuration }}
       - name: Preserve test results
         if: always()
