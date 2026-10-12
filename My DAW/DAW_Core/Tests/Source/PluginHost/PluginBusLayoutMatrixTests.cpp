@@ -2529,6 +2529,7 @@ public:
                 expect(mirrors[i] != nullptr);
                 if (mirrors[i] == nullptr) return;
                 mirrors[i]->bindToPluginParameter(pluginParam);
+                bridge.attachToParameter(*mirrors[i]); // match production AutomationSystem
                 bridge.attachToPlugin(*processors[i], {{indices[i], ids[i]}});
                 modes.setMode(ids[i], AutomationMode::Touch);
                 lanes.getOrCreateLane(ids[i]).replacePoints({
@@ -2588,6 +2589,30 @@ public:
                 expectWithinAbsoluteError(
                     mirrors[i]->getNormalizedValue(), expectedRecorded[i], 0.03f,
                     categories[i] + " committed lane must drive APEX playback atomic");
+            }
+
+            beginTest("APEX-originated controls do not echo as duplicate plugin gestures");
+            {
+                constexpr int i = 0;
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                const float prior = pluginParam->getValue();
+                const float requested = prior > 0.5f ? 0.1f : 0.9f;
+                const int steps = pluginParam->getNumSteps();
+                const float canonical = steps > 1 && steps <= 1000
+                    ? std::round(requested * float(steps - 1)) / float(steps - 1)
+                    : requested;
+                mirrors[i]->setValueFromUser(canonical);
+                int userEvents = 0, echoedEvents = 0;
+                AutomationGestureQueue::Event event;
+                while (queue->pop(event))
+                    if (event.paramID == ids[i]
+                        && event.kind == AutomationGestureQueue::EventKind::ValueChange)
+                    {
+                        if (event.source == ChangeSource::User) ++userEvents;
+                        if (event.source == ChangeSource::Plugin) ++echoedEvents;
+                    }
+                expectEquals(userEvents, 1, "direct APEX User capture must happen once");
+                expectEquals(echoedEvents, 0, "plugin callback must not double-record APEX gesture");
             }
 
             for (int i = 0; i < 3; ++i)
