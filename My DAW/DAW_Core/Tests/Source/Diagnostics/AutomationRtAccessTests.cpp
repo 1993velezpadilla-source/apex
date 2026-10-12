@@ -4548,22 +4548,22 @@ public:
         original.setEnabled(false);
 
         const auto state = original.getState();
-        expectEquals((bool)state.getProperty("enabled", true), false);
+        expect(!(bool)state.getProperty("enabled", true));
         DAW::AutomationLaneCore restored("track-01", DAW::AutomationLaneCore::trackVolumeParameterId);
         restored.restoreState(state);
-        expectEquals(restored.isEnabled(), false);
+        expect(!restored.isEnabled());
         expectWithinAbsoluteError(restored.getValueAtSample(24000, 0.9f), 0.9f, 0.00001f);
         expectEquals(restored.getNumPoints(), original.getNumPoints());
 
         beginTest("Enabled lanes persist TRUE, older project files default safely to TRUE");
         original.setEnabled(true);
         restored.restoreState(original.getState());
-        expectEquals(restored.isEnabled(), true);
+        expect(restored.isEnabled());
         auto legacy = original.getState().createCopy();
         legacy.removeProperty("enabled", nullptr);
         restored.setEnabled(false);
         restored.restoreState(legacy);
-        expectEquals(restored.isEnabled(), true);
+        expect(restored.isEnabled());
 
         beginTest("Global manager state also roundtrips lane enabled flags");
         DAW::AutomationManagerCore manager;
@@ -4577,7 +4577,7 @@ public:
         const auto* openedLane = newManager.findLane("v2-track-enabled", DAW::AutomationLaneCore::trackVolumeParameterId);
         expect(openedLane != nullptr);
         if (openedLane)
-            expectEquals(openedLane->isEnabled(), false);
+            expect(!openedLane->isEnabled());
     }
 };
 static AutomationV2LaneEnabledPersistenceTests automationV2LaneEnabledPersistenceTests;
