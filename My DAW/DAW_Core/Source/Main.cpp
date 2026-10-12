@@ -1162,13 +1162,16 @@ public:
                                             error = "automation points missing after real project reload";
                                         else if (std::abs ((*points)[0].timePPQ - 0.25) > 1.0e-9
                                             || std::abs ((*points)[0].normalizedValue - 0.15f) > 1.0e-6f
+                                            || (*points)[0].curveType != apex::automation::CurveType::Linear
+                                            || std::abs ((*points)[0].curveTension) > 1.0e-6f
                                             || std::abs ((*points)[1].timePPQ - 1.50) > 1.0e-9
                                             || std::abs ((*points)[1].normalizedValue - 0.77f) > 1.0e-6f
                                             || (*points)[1].curveType != apex::automation::CurveType::Smooth
                                             || std::abs ((*points)[1].curveTension - 0.35f) > 1.0e-6f
                                             || std::abs ((*points)[2].timePPQ - 2.50) > 1.0e-9
                                             || std::abs ((*points)[2].normalizedValue - 0.30f) > 1.0e-6f
-                                            || (*points)[2].curveType != apex::automation::CurveType::Hold)
+                                            || (*points)[2].curveType != apex::automation::CurveType::Hold
+                                            || std::abs ((*points)[2].curveTension) > 1.0e-6f)
                                             error = "automation PPQ, value, curve or tension changed during reload";
                                         else if (modeState.getMode (restoredID)
                                                  != apex::automation::AutomationMode::Touch)
@@ -1201,7 +1204,7 @@ public:
                 }
 
                 juce::Logger::writeToLog (success
-                    ? "[APEX CI PROJECT] PASS: real application new/save/new/load/UI roundtrip"
+                    ? "[APEX CI PROJECT] PASS: real GUI + 3-point Linear/Smooth/Hold + Touch new/save/new/load roundtrip"
                     : "[APEX CI PROJECT] FAIL: " + error);
                 setApplicationReturnValue (success ? 0 : 1);
                 quit();
