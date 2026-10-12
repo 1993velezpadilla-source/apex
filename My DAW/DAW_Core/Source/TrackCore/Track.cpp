@@ -42,6 +42,8 @@ Track::Track(const TrackID& id, const juce::String& name)
         Keys::getInstance().getOrCreateID (Keys::trackVolumeKey (id)));
     bindNativePanAutomationID (
         Keys::getInstance().getOrCreateID (Keys::trackPanKey (id)));
+    bindNativeMuteAutomationID (
+        Keys::getInstance().getOrCreateID (Keys::trackMuteKey (id)));
 
     // Professional default: white — user can color tracks via palette
     color_ = juce::Colours::white;
