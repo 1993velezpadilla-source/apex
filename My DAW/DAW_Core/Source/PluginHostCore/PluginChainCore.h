@@ -1560,7 +1560,23 @@ public:
         if (currentAutomation != nullptr)
             automationSnap = currentAutomation.get();
 
-        const bool canSlice = numSamples > kAutomationSliceSamples
+        // Even a callback smaller than 64 frames must split when a discrete
+        // switch lands inside it. Otherwise OFF->ON can be audibly delayed to
+        // the following device callback.
+        bool shortBlockHasDiscreteBreakpoint = false;
+        if (numSamples <= kAutomationSliceSamples)
+            for (const auto& slot : snap->slots)
+                if (slot != nullptr && ! slot->isSandboxed()
+                    && slot->samplesUntilNextDiscreteBreakpoint(
+                        trackId, automationSnap, samplePosition, sampleRate,
+                        bpm, numSamples) < numSamples)
+                {
+                    shortBlockHasDiscreteBreakpoint = true;
+                    break;
+                }
+
+        const bool canSlice = (numSamples > kAutomationSliceSamples
+                              || shortBlockHasDiscreteBreakpoint)
             && canRenderAutomationInSlices(trackId, automationSnap,
                                            samplePosition, sampleRate, bpm,
                                            numSamples, *snap)
@@ -1582,7 +1598,18 @@ public:
         int offset = 0;
         while (offset < numSamples)
         {
-            const int sliceSamples = juce::jmin(kAutomationSliceSamples, numSamples - offset);
+            int sliceSamples = juce::jmin(kAutomationSliceSamples, numSamples - offset);
+            // A held discrete lane is allowed to change only at its exact
+            // breakpoint. Cut this slice BEFORE that sample, so the next
+            // processBlock sees the new value at the intended frame. This
+            // does not enlarge the 64-frame scratch or change MIDI offsets.
+            for (const auto& slot : snap->slots)
+                if (slot != nullptr && ! slot->isSandboxed())
+                    sliceSamples = juce::jmin(
+                        sliceSamples,
+                        slot->samplesUntilNextDiscreteBreakpoint(
+                            trackId, automationSnap, samplePosition + offset,
+                            sampleRate, bpm, sliceSamples));
             for (int ch = 0; ch < mainChannelCount; ++ch)
                 automationSliceMainBuffer_.copyFrom(ch, 0, mainBuffer, ch, offset, sliceSamples);
             if (sidechainBuffer != nullptr)

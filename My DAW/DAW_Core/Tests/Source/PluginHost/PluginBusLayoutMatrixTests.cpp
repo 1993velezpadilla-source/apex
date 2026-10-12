@@ -1668,11 +1668,109 @@ public:
         testChangingAutomationUsesShortSlices();
         beginTest("static plugin automation retains the full host block");
         testStaticAutomationKeepsFullBlock();
+        beginTest("discrete PPQ transitions split at exact samples with aligned MIDI");
+        testDiscretePpqSampleBoundaryAndMidi();
+        beginTest("32-sample callback splits at discrete knot instead of delaying");
+        testShortCallbackExactDiscreteBoundary();
     }
 
 private:
     static constexpr int largeBlock = 2048;
     static constexpr const char* trackId = "automation-large-block";
+
+    void testDiscretePpqSampleBoundaryAndMidi()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterIsBoolean = true;
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* observed = probe.get();
+        observed->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        const juce::String track = "discrete-exact-128-vst3-20261012";
+        chain.setAutomationContext(track, nullptr, nullptr);
+        const auto key = KR::pluginParamKey(track, 0, chain.getSlot(0)->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {37.0 / 24000.0, 1.0f, CurveType::Linear, 0.0f},
+            {100.0 / 24000.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+        juce::AudioBuffer<float> audio(2, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 36);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 61, (juce::uint8) 100), 37);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 62, (juce::uint8) 100), 100);
+        chain.processBlockWithAutomation(audio, &midi, nullptr, track,
+                                          nullptr, 0, kRate, 120.0, 128);
+        expectEquals(observed->processObservationCount, 3,
+                     "128 frames split into exact 37/63/28 sample segments");
+        const int samples[] = {0, 36, 37, 99, 100, 127};
+        const float expected[] = {0.0f, 0.0f, 0.5f, 0.5f, 0.0f, 0.0f};
+        for (int i = 0; i < 6; ++i)
+            expectWithinAbsoluteError(audio.getSample(0, samples[i]), expected[i],
+                1.0e-6f, "exact audio at sample " + juce::String(samples[i]));
+        if (observed->processObservationCount >= 3)
+        {
+            for (int i = 0; i < 3; ++i)
+                expectEquals(observed->observedMidiEventCounts[(size_t)i], 1,
+                             "MIDI event not dropped or duplicated across discrete split");
+            expectEquals(observed->observedFirstMidiSamplePositions[0], 36);
+            expectEquals(observed->observedFirstMidiSamplePositions[1], 0);
+            expectEquals(observed->observedFirstMidiSamplePositions[2], 0);
+        }
+        lanes.removeLane(id);
+    }
+
+    void testShortCallbackExactDiscreteBoundary()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 32);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterIsBoolean = true;
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* observed = probe.get();
+        observed->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        const juce::String track = "discrete-exact-32-vst3-20261012";
+        chain.setAutomationContext(track, nullptr, nullptr);
+        const auto key = KR::pluginParamKey(track, 0, chain.getSlot(0)->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "discrete APEX parameter exists");
+            return;
+        }
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {21.0 / 24000.0, 1.0f, CurveType::Linear, 0.0f}
+        });
+        juce::AudioBuffer<float> audio(2, 32);
+        fillTonePair(audio, 32, 0.5f, 0.5f);
+        chain.processBlockWithAutomation(audio, nullptr, nullptr, track,
+                                          nullptr, 0, kRate, 120.0, 32);
+        expectEquals(observed->processObservationCount, 2,
+                     "small callback split into 21 and 11 samples");
+        expectWithinAbsoluteError(audio.getSample(0, 20), 0.0f, 1.0e-6f,
+                                  "sample 20 remains OFF");
+        expectWithinAbsoluteError(audio.getSample(0, 21), 0.5f, 1.0e-6f,
+                                  "sample 21 switches ON without a callback delay");
+        lanes.removeLane(id);
+    }
 
     void testChangingAutomationUsesShortSlices()
     {
