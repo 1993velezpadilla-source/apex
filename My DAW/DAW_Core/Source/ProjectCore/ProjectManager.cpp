@@ -370,6 +370,12 @@ bool ProjectManager::newProject()
             auto& modes = apex::automation::AutomationModeState::getInstance();
             modes.clearAll();
             modes.setGlobalDefaultMode(apex::automation::AutomationMode::Read);
+            // Unlike the native Master strip, regular track/plugin/send keys
+            // belong to the outgoing song. Drop their bindings from both the
+            // control-plane map and RT snapshot before a new song starts.
+            // Preserve Master IDs so its long-lived UI parameters stay valid.
+            apex::automation::AutomationParameterKeyRegistry::getInstance()
+                .resetForNewProject();
 
             projectFile_ = juce::File();
             projectName_ = "Untitled";

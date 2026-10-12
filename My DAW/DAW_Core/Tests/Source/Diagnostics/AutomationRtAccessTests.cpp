@@ -85,6 +85,43 @@ public:
             }
         }
 
+        beginTest ("New Project drops stale keys but preserves Master identity");
+        {
+            AutomationParameterKeyRegistry reg;
+            const auto masterVolume = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackVolumeKey("master"));
+            const auto masterSolo = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackSoloKey("master"));
+            const auto oldTrack = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_OLDER"));
+            const auto oldPlugin = reg.getOrCreateID(
+                "plugin.TRK_OLDER.slot0.Example.cutoff");
+            const auto oldSend = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackSendLevelKey("TRK_OLDER", "route"));
+            const juce::String oldTrackKey =
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_OLDER");
+            const auto previous = reg.getKeySnapshotRT();
+            const auto generation = reg.getChangeGeneration();
+
+            reg.resetForNewProject();
+            expect(reg.getChangeGeneration() > generation);
+            expectEquals(reg.findIDRT(
+                AutomationParameterKeyRegistry::trackVolumeKey("master")), masterVolume);
+            expectEquals(reg.findIDRT(
+                AutomationParameterKeyRegistry::trackSoloKey("master")), masterSolo);
+            expectEquals(reg.findIDRT(oldTrackKey), kInvalidParameterID);
+            expect(reg.findKey(oldPlugin).isEmpty());
+            expect(reg.findKey(oldSend).isEmpty());
+            expect(previous != nullptr && previous->count(oldTrackKey) == 1);
+            const auto newTrack = reg.getOrCreateID(
+                AutomationParameterKeyRegistry::trackMuteKey("TRK_NEW"));
+            expect(newTrack > oldSend);
+            expect(newTrack != oldTrack);
+            // Saving Untitled must not serialize aliases from the old song.
+            const auto state = reg.getState();
+            expectEquals(state.getNumChildren(), 3); // Master volume + solo + new track
+        }
+
         beginTest ("lane store RT snapshot and lane lifetime");
         {
             AutomationLaneStore store;
@@ -3693,3 +3730,143 @@ public:
     }
 };
 static AutomationNativeSoloAudioPlaybackTests automationNativeSoloAudioPlaybackTests;
+
+// Flat routing has no FolderBusSnapshot; a PPQ Solo lane must still gate
+// audible tracks, including the manual/Off/stop/gesture fallbacks.
+class AutomationNativeSoloFlatFallbackTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeSoloFlatFallbackTests()
+        : juce::UnitTest("automation.native-solo-flat-fallback.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        constexpr ParameterID firstID = 79011, secondID = 79012;
+        registry.createParameter(firstID, "Flat Solo A", {});
+        auto* second = registry.createParameter(secondID, "Flat Solo B", {});
+        expect(second != nullptr);
+        if (second == nullptr) return;
+        modes.setMode(firstID, AutomationMode::Read);
+        modes.setMode(secondID, AutomationMode::Read);
+        lanes.getOrCreateLane(secondID).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {2.0, 1.0f, CurveType::Linear, 0.0f}
+        });
+        std::array<NativeFlatSoloSource, 2> sources {{
+            {firstID, false, false}, {secondID, false, false}
+        }};
+        const auto any = [&] (double ppq, bool rolling) noexcept
+        {
+            return hasNativeFlatSoloRT(
+                (int)sources.size(),
+                [&] (int i) noexcept { return sources[(std::size_t)i]; },
+                ppq, rolling, registry, lanes, modes);
+        };
+        const auto audible = [&] (int i, bool active, double ppq, bool rolling)
+        {
+            return isNativeFlatSoloAudibleRT(
+                sources[(std::size_t)i], active, ppq, rolling,
+                registry, lanes, modes);
+        };
+
+        beginTest("flat PPQ Solo narrows only the active track");
+        expect(!any(0.0, true));
+        expect(audible(0, false, 0.0, true));
+        expect(audible(1, false, 0.0, true));
+        expect(any(2.0, true));
+        expect(!audible(0, true, 2.0, true));
+        expect(audible(1, true, 2.0, true));
+
+        beginTest("manual Solo, stopped transport and Off mode");
+        sources[0].manualSoloed = true;
+        expect(any(0.0, true));
+        expect(audible(0, true, 0.0, true));
+        expect(!audible(1, true, 0.0, true));
+        sources[0].manualSoloed = false;
+        expect(!any(2.0, false));
+        modes.setMode(secondID, AutomationMode::Off);
+        expect(!any(2.0, true));
+        modes.setMode(secondID, AutomationMode::Read);
+        sources[1].automationMuted = true;
+        expect(!any(2.0, true));
+        sources[1].automationMuted = false;
+
+        beginTest("Touch gesture takes precedence over an inactive lane");
+        modes.setMode(secondID, AutomationMode::Touch);
+        second->beginGesture();
+        second->setValueFromUser(1.0f);
+        expect(any(0.0, true));
+        expect(audible(1, true, 0.0, true));
+        second->endGesture();
+        expect(!any(0.0, true));
+
+        beginTest("flat Solo callback does not allocate");
+        modes.setMode(secondID, AutomationMode::Read);
+        int count = 0;
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            for (int i = 0; i < 200; ++i)
+                if (any(2.0, true) && audible(1, true, 2.0, true))
+                    ++count;
+        }
+        expectEquals(count, 200);
+    }
+};
+static AutomationNativeSoloFlatFallbackTests automationNativeSoloFlatFallbackTests;
+
+// A restore must publish one coherent map, release its batch suppression,
+// and leave previous RT snapshots alive until their readers finish.
+class AutomationLaneRestoreBatchTests final : public juce::UnitTest
+{
+public:
+    AutomationLaneRestoreBatchTests()
+        : juce::UnitTest("automation.lane-restore-batch-publication.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        AutomationLaneStore lanes;
+        constexpr ParameterID restoredID = 78121;
+        constexpr ParameterID subsequentID = 78122;
+        lanes.getOrCreateLane(restoredID).replacePoints({
+            {0.0, 0.2f, CurveType::Linear, 0.0f},
+            {1.0, 0.8f, CurveType::Linear, 0.0f}
+        });
+        const auto saved = lanes.getState();
+        const auto oldRTSnapshot = lanes.getLaneSnapshotRT();
+        lanes.clear();
+
+        beginTest("restore publishes once and preserves old RT snapshot lifetime");
+        const auto generationBefore = lanes.getChangeGeneration();
+        lanes.restoreState(saved);
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (generationBefore + 1));
+        const auto restored = lanes.findLaneRT(restoredID);
+        expect(restored != nullptr);
+        if (restored != nullptr)
+        {
+            const auto points = restored->getSnapshot();
+            expect(points != nullptr && points->size() == 2);
+        }
+        expect(oldRTSnapshot != nullptr &&
+               oldRTSnapshot->find(restoredID) != oldRTSnapshot->end());
+
+        beginTest("invalid legacy tree clears and subsequent mutations publish");
+        const auto beforeEmpty = lanes.getChangeGeneration();
+        lanes.restoreState(juce::ValueTree{});
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (beforeEmpty + 1));
+        expect(lanes.findLaneRT(restoredID) == nullptr);
+        const auto beforeNext = lanes.getChangeGeneration();
+        lanes.getOrCreateLane(subsequentID);
+        expectEquals((juce::int64) lanes.getChangeGeneration(),
+                     (juce::int64) (beforeNext + 1));
+        expect(lanes.findLaneRT(subsequentID) != nullptr);
+    }
+};
+static AutomationLaneRestoreBatchTests automationLaneRestoreBatchTests;

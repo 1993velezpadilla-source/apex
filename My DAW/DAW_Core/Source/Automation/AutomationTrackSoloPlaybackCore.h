@@ -58,6 +58,44 @@ namespace apex::automation
         return std::isfinite(value) ? value >= 0.5f : manualSolo;
     }
 
+    // Flat/legacy routing has no FolderBusSnapshot membership table. Evaluate
+    // its native Solo sources directly rather than silently falling back to
+    // manual Track::isSoloed(). Caller supplies sources without allocating.
+    struct NativeFlatSoloSource
+    {
+        ParameterID parameterID = kInvalidParameterID;
+        bool manualSoloed = false;
+        bool automationMuted = false;
+    };
+
+    template <typename SourceAtIndex>
+    inline bool hasNativeFlatSoloRT(
+        int count, SourceAtIndex&& sourceAt, double ppq, bool rolling,
+        const AutomationParameterRegistry& registry,
+        const AutomationLaneStore& lanes, const AutomationModeState& modes) noexcept
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            const auto src = sourceAt(i);
+            if (getNativeTrackSoloRT(src.parameterID, src.manualSoloed,
+                                     ppq, rolling, src.automationMuted,
+                                     registry, lanes, modes))
+                return true;
+        }
+        return false;
+    }
+
+    inline bool isNativeFlatSoloAudibleRT(
+        const NativeFlatSoloSource& src, bool anySolo,
+        double ppq, bool rolling,
+        const AutomationParameterRegistry& registry,
+        const AutomationLaneStore& lanes, const AutomationModeState& modes) noexcept
+    {
+        return !anySolo || getNativeTrackSoloRT(
+            src.parameterID, src.manualSoloed, ppq, rolling,
+            src.automationMuted, registry, lanes, modes);
+    }
+
     inline NativeSoloBlockState evaluateNativeSoloBlockRT(
         const DAW::FolderBusSnapshot* snap, double ppq, bool rolling,
         const AutomationParameterRegistry& registry,
