@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../Automation/AutomationTypes.h"
 #include "../UtilityCore/Types.h"
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
 #include "../InputMonitorCore/InputFxChain.h"
@@ -72,6 +73,17 @@ public:
     
     // Level
     float getVolume() const { return volume_.load(std::memory_order_relaxed); }
+    // Stable, project-scoped APEX native automation key for the audio callback.
+    // Updated on the message thread after any key-registry project restore.
+    // The audio thread must NEVER construct Strings or acquire a registry lock.
+    apex::automation::ParameterID getNativeVolumeAutomationIDRT() const noexcept
+    {
+        return nativeVolumeAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativeVolumeAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativeVolumeAutomationID_.store(id, std::memory_order_release);
+    }
     void setVolume(float newVolume);
     
     float getPan() const { return pan_.load(std::memory_order_relaxed); }
@@ -260,6 +272,7 @@ private:
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
     std::atomic<float> volume_{1.0f}; // 0.0 to ~+6 dB
+    std::atomic<apex::automation::ParameterID> nativeVolumeAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
     std::atomic<bool> automationVisible_{false};
     std::atomic<bool> automationMuted_{false};
