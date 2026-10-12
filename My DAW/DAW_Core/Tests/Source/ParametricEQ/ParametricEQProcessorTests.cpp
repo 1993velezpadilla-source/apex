@@ -594,6 +594,59 @@ private:
         expect (std::abs (after5 / before5 - 1.0) < 0.06,
                 "unrelated 5 kHz tone must remain essentially intact");
 
+        beginTest ("stereo Mid/Side frequency masking honors channel placement");
+        // Perfectly anti-correlated signal has zero Mid and full Side.
+        // A Mid-only spectral band must preserve it, while Side must attenuate.
+        auto renderPair = [&selected, &bands] (ChannelPlacement placement)
+        {
+            constexpr int frames = 16384;
+            std::array<float, frames> left {}, right {};
+            for (int i = 0; i < frames; ++i)
+            {
+                const float value = static_cast<float> (
+                    0.25 * std::sin (2.0
+                        * juce::MathConstants<double>::pi * 1000.0
+                        * i / 48000.0));
+                left[static_cast<std::size_t> (i)] = value;
+                right[static_cast<std::size_t> (i)] = -value;
+            }
+            selected.placement = placement;
+            auto stereoEngine = std::make_unique<SpectralDynamicsCore>();
+            stereoEngine->prepare (48000.0);
+            for (int offset = 0; offset < frames; offset += 128)
+            {
+                float* output[] { left.data() + offset, right.data() + offset };
+                stereoEngine->process (output, 2, 128, bands);
+            }
+            double squareSum = 0.0;
+            for (int i = 8192; i < frames; ++i)
+            {
+                const auto value = static_cast<double> (
+                    left[static_cast<std::size_t> (i)]);
+                squareSum += value * value;
+            }
+            return std::sqrt (squareSum / (frames - 8192));
+        };
+        const double midRms = renderPair (ChannelPlacement::Mid);
+        const double sideRms = renderPair (ChannelPlacement::Side);
+        expect (midRms > 0.15,
+            "mid-only spectral attenuation must leave side-only signal intact");
+        expect (sideRms < midRms * 0.72,
+            "side spectral attenuation must reduce anti-phase content");
+
+        beginTest ("STFT callback has no heap allocation after prepare");
+        auto noAllocEngine = std::make_unique<SpectralDynamicsCore>();
+        noAllocEngine->prepare (48000.0);
+        std::array<float, 128> allocationInput {}, allocationRight {};
+        float* allocationChannels[] {
+            allocationInput.data(), allocationRight.data()
+        };
+        {
+            juce::UnitTestAllocationChecker checker (*this);
+            for (int i = 0; i < 40; ++i)
+                noAllocEngine->process (allocationChannels, 2, 128, bands);
+        }
+
         beginTest ("spectral STFT guards nonfinite input and is usable in stereo");
         std::array<float, 2048> l {}, r {};
         l[0] = std::numeric_limits<float>::quiet_NaN();
