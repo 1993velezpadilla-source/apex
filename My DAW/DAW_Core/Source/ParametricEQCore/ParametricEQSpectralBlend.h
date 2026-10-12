@@ -64,50 +64,62 @@ public:
         if (safeChannels <= 0)
             return;
 
-        // Split direct pre-DSP input into the fixed-size, time-aligned dry
-        // delay before the wet STFT overwrites it. The scalar ring never
-        // allocates and is independent of caller's block boundaries.
-        for (int index = 0; index < count; ++index)
+        // Internally cap each work unit: prevents overwriting unread delayed
+        // input when the DAW supplies huge, unexpected offline blocks.
+        // STFT and crossfade timelines stay sample-accurate regardless of
+        // host block segmentation.
+        for (int offset = 0; offset < count; offset += 128)
         {
-            const auto write = static_cast<std::uint32_t> (
-                (counter_ + static_cast<std::uint64_t> (index))
-                & (kDelayCapacity - 1));
+            const int size = std::min (128, count - offset);
+            const auto start = counter_;
+            std::array<float*, kChannels> chunk { nullptr, nullptr };
             for (int channel = 0; channel < safeChannels; ++channel)
+                chunk[static_cast<std::size_t> (channel)] =
+                    samples[channel] != nullptr ? samples[channel] + offset
+                                                : nullptr;
+            for (int index = 0; index < size; ++index)
             {
-                const float input = samples[channel] != nullptr
-                    && std::isfinite (samples[channel][index])
-                    ? samples[channel][index] : 0.0f;
-                dryRing_[static_cast<std::size_t> (channel)][write] = input;
+                const auto write = static_cast<std::uint32_t> (
+                    (start + static_cast<std::uint64_t> (index))
+                    & (kDelayCapacity - 1));
+                for (int channel = 0; channel < safeChannels; ++channel)
+                {
+                    const float input = chunk[
+                        static_cast<std::size_t> (channel)] != nullptr
+                        && std::isfinite (chunk[
+                            static_cast<std::size_t> (channel)][index])
+                        ? chunk[static_cast<std::size_t> (channel)][index]
+                        : 0.0f;
+                    dryRing_[static_cast<std::size_t> (channel)][write]
+                        = input;
+                }
             }
-        }
+            wet_.process (chunk.data(), safeChannels, size, bands);
 
-        wet_.process (samples, safeChannels, count, bands);
-        // Restore the same 1024-sample timeline from dryRing_. We cannot
-        // advance the consumer ring before all writes if count may exceed
-        // kDelayCapacity-kLatencySamples. For that reason, process() chunks
-        // are internally capped to 128 samples in the production adapter.
-        const double target = wetTarget ? 1.0 : 0.0;
-        for (int index = 0; index < count; ++index)
-        {
-            mix_ = target > mix_
-                ? std::min (target, mix_ + crossfadeStep_)
-                : std::max (target, mix_ - crossfadeStep_);
-            const auto read = static_cast<std::uint32_t> (
-                (counter_ + static_cast<std::uint64_t> (index)
-                 + kDelayCapacity - kLatencySamples)
-                & (kDelayCapacity - 1));
-            for (int channel = 0; channel < safeChannels; ++channel)
+            const double target = wetTarget ? 1.0 : 0.0;
+            for (int index = 0; index < size; ++index)
             {
-                if (samples[channel] == nullptr)
-                    continue;
-                const float dry = dryRing_[
-                    static_cast<std::size_t> (channel)][read];
-                const float wet = samples[channel][index];
-                samples[channel][index] = static_cast<float> (
-                    dry + mix_ * (wet - dry));
+                mix_ = target > mix_
+                    ? std::min (target, mix_ + crossfadeStep_)
+                    : std::max (target, mix_ - crossfadeStep_);
+                const auto read = static_cast<std::uint32_t> (
+                    (start + static_cast<std::uint64_t> (index)
+                     + kDelayCapacity - kLatencySamples)
+                    & (kDelayCapacity - 1));
+                for (int channel = 0; channel < safeChannels; ++channel)
+                {
+                    auto* output = chunk[static_cast<std::size_t> (channel)];
+                    if (output == nullptr)
+                        continue;
+                    const float dry = dryRing_[
+                        static_cast<std::size_t> (channel)][read];
+                    const float wet = output[index];
+                    output[index] = static_cast<float> (
+                        dry + mix_ * (wet - dry));
+                }
             }
+            counter_ += static_cast<std::uint64_t> (size);
         }
-        counter_ += static_cast<std::uint64_t> (count);
     }
 
 private:
