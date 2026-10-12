@@ -1,6 +1,7 @@
 #include "ParametricEQTestUtils.h"
 #include "../../../Source/ParametricEQCore/ParametricEQProcessor.h"
 #include "../../../Source/ParametricEQCore/ParametricEQSpectralDynamicsCore.h"
+#include "../../../Source/ParametricEQCore/ParametricEQSpectralBlend.h"
 
 #include <array>
 #include <cmath>
@@ -60,6 +61,7 @@ public:
         testOutputStageAndPhase9Abi();
         testRealtimeAllocation();
         testSpectralEngineStandalone();
+        testSpectralAlignedBlend();
     }
 
 private:
@@ -659,6 +661,109 @@ private:
             expect (std::isfinite (l[static_cast<std::size_t> (i)])
                 && std::isfinite (r[static_cast<std::size_t> (i)]),
                 "spectral engine must not publish nonfinite audio");
+    }
+
+    void testSpectralAlignedBlend()
+    {
+        beginTest ("APEX spectral wet/dry stays PDC-aligned across automation, "
+                   "giant blocks, and time-varying effect mix");
+
+        constexpr int count = 16384;
+        constexpr int latency = SpectralAlignedBlend::kLatencySamples;
+        std::vector<float> source (count), neutral (count), wet (count);
+        for (int sample = 0; sample < count; ++sample)
+            source[static_cast<std::size_t> (sample)] =
+                static_cast<float> (0.3 * std::sin (
+                    juce::MathConstants<double>::twoPi
+                    * 1000.0 * sample / 48000.0));
+
+        std::array<SpectralDynamicsCore::Band, kMaxBands> bands {};
+        bands[0].enabled = true;
+        bands[0].shape = FilterShape::Bell;
+        bands[0].placement = ChannelPlacement::Stereo;
+        bands[0].frequencyHz = 1000.0;
+        bands[0].q = 4.0;
+        bands[0].density = 0.25;
+        bands[0].tilt = false;
+        bands[0].dynamic.enabled = true;
+        bands[0].dynamic.thresholdDb = -36.0;
+        bands[0].dynamic.rangeDb = 12.0;
+        bands[0].dynamic.attackSeconds = 0.003;
+        bands[0].dynamic.releaseSeconds = 0.030;
+
+        auto dryBlend = std::make_unique<SpectralAlignedBlend>();
+        dryBlend->prepare (48000.0);
+        neutral = source;
+        // Deliberately pass one huge block to exercise the ring wrap guard.
+        float* dryPointer[] { neutral.data() };
+        dryBlend->process (dryPointer, 1, count, bands, false);
+        double maxDelayError = 0.0;
+        for (int sample = 0; sample < count; ++sample)
+        {
+            const double delayed = sample >= latency
+                ? source[static_cast<std::size_t> (sample - latency)] : 0.0;
+            maxDelayError = std::max (maxDelayError,
+                std::abs (neutral[static_cast<std::size_t> (sample)]
+                          - delayed));
+        }
+        expect (maxDelayError < 1.0e-7,
+                "100% dry spectral-mode bypass must stay *delayed*, "
+                "never leak undelayed transient");
+
+        auto activeBlend = std::make_unique<SpectralAlignedBlend>();
+        activeBlend->prepare (48000.0);
+        wet = source;
+        // Switch wet target while the signal is running. Large host blocks
+        // are deliberately mixed with small ones.
+        int offset = 0;
+        constexpr int wetStart = 4096;
+        constexpr int wetEnd = 10240;
+        while (offset < count)
+        {
+            const bool enabled = offset >= wetStart && offset < wetEnd;
+            const int size = std::min (
+                offset == 0 ? wetStart : offset == wetStart
+                ? wetEnd - wetStart : count - offset, count - offset);
+            float* pointer[] { wet.data() + offset };
+            activeBlend->process (pointer, 1, size, bands, enabled);
+            offset += size;
+        }
+        double accumulatedWetChange = 0.0;
+        double accumulatedAfterFade = 0.0;
+        for (int sample = 6000; sample < 9000; ++sample)
+            accumulatedWetChange += std::abs (
+                wet[static_cast<std::size_t> (sample)]
+                - neutral[static_cast<std::size_t> (sample)]);
+        for (int sample = 12000; sample < 15360; ++sample)
+            accumulatedAfterFade += std::abs (
+                wet[static_cast<std::size_t> (sample)]
+                - neutral[static_cast<std::size_t> (sample)]);
+        expect (accumulatedWetChange > 12.0,
+                "spectral effect must audibly operate during ON window");
+        expect (accumulatedAfterFade < 1.0e-4,
+                "automated OFF wet mix returns exactly to aligned dry");
+        expect (activeBlend->wetMixForTesting() < 0.0001,
+                "OFF transition fully settled");
+
+        beginTest ("aligned blend callback allocates no memory, even on "
+                   "maximal 24-band spectral runtime");
+        std::array<SpectralDynamicsCore::Band, kMaxBands> allBands {};
+        for (int b = 0; b < kMaxBands; ++b)
+        {
+            auto& band = allBands[static_cast<std::size_t> (b)];
+            band = bands[0];
+            band.frequencyHz = 110.0 * std::pow (1.15, b);
+            band.q = 2.0;
+        }
+        auto rtBlend = std::make_unique<SpectralAlignedBlend>();
+        rtBlend->prepare (48000.0);
+        std::array<float, 128> left {}, right {};
+        float* stereo[] { left.data(), right.data() };
+        {
+            juce::UnitTestAllocationChecker checker (*this);
+            for (int frame = 0; frame < 25; ++frame)
+                rtBlend->process (stereo, 2, 128, allBands, true);
+        }
     }
 
     void testRealtimeAllocation()
