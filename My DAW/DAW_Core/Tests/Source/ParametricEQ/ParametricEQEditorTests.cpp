@@ -1,9 +1,11 @@
 #include "ParametricEQTestUtils.h"
 #include "../../../Source/ParametricEQCore/ParametricEQProcessor.h"
+#include "../../../Source/ParametricEQCore/ParametricEQSpectrumGrabCore.h"
 #include "../../../Source/ParametricEQUI/ParametricEQEditor.h"
 
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -67,6 +69,7 @@ public:
         testAuditionHoldGestureLifecycle();
         testLongPressCreatesBand();
         testSketchGestureCreatesBands();
+        testSpectrumGrabAndTouchToBand();
         testPhaseSelectorDrivesCanonicalParameter();
     }
 
@@ -348,6 +351,87 @@ private:
                       "Sketch returns to one-shot idle mode after commit");
         expect (editor->getSelectedBandForTesting() >= 0,
                 "last created Sketch band becomes selected");
+    }
+
+
+    void testSpectrumGrabAndTouchToBand()
+    {
+        beginTest ("Spectrum Grab detects true resonances, rejects flat/NaN, "
+                   "and inserts a native EQ band via a 44px touch marker");
+        constexpr int bins = APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins;
+        constexpr double binHz = 48000.0
+            / APEX::Analysis::SpectrumAnalyzerCore::kFftSize;
+        std::array<float, bins> spectrum {};
+        spectrum.fill (-40.0f);
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz).count, 0,
+            "a flat loud spectrum has no narrow resonances");
+        spectrum.fill (-120.0f);
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz).count, 0,
+            "silence must not create candidates");
+        expectEquals (SpectrumGrab::analyze (
+            nullptr, bins, binHz).count, 0, "null frame");
+        expectEquals (SpectrumGrab::analyze (
+            spectrum.data(), bins, std::numeric_limits<double>::quiet_NaN())
+            .count, 0, "nonfinite bin frequency");
+
+        for (int bin = 0; bin < bins; ++bin)
+        {
+            const double f = std::max (1.0, bin * binHz);
+            const double low = std::log2 (f / 1500.0) / 0.025;
+            const double high = std::log2 (f / 5400.0) / 0.030;
+            spectrum[static_cast<std::size_t> (bin)] = static_cast<float> (
+                -92.0 + 75.0 * std::exp (-0.5 * low * low)
+                      + 60.0 * std::exp (-0.5 * high * high));
+        }
+        const auto plan = SpectrumGrab::analyze (
+            spectrum.data(), bins, binHz);
+        expect (plan.count >= 2, "both resonances should be detected");
+        bool foundLow = false, foundHigh = false;
+        for (int i = 0; i < plan.count; ++i)
+        {
+            const auto& peak = plan.peaks[static_cast<std::size_t> (i)];
+            expect (std::isfinite (peak.frequencyHz)
+                    && std::isfinite (peak.suggestedQ));
+            expect (peak.suggestedQ >= 0.7 && peak.suggestedQ <= 20.0);
+            foundLow |= std::abs (peak.frequencyHz - 1500.0) < 50.0;
+            foundHigh |= std::abs (peak.frequencyHz - 5400.0) < 80.0;
+        }
+        expect (foundLow && foundHigh, "resonance center frequencies");
+
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        processor.prepareToPlay (48000.0, 512);
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (1280, 720);
+        auto& grab = editor->getGrabButtonForTesting();
+        expect (grab.getBounds().getHeight()
+                >= ParametricEQEditor::kTouchTarget);
+        expect (! grab.getBounds().intersects (
+            editor->getSketchButtonForTesting().getBounds()),
+            "touch buttons do not overlap");
+        editor->setGrabSpectrumForTesting (spectrum.data(), bins, binHz);
+        expectEquals (juce::String ("GRAB ON"), grab.getButtonText());
+        const auto marker = editor->getGrabPeakBoundsForTesting (0);
+        expect (marker.getWidth() >= ParametricEQEditor::kTouchTarget);
+        editor->injectGraphMouseDownForTesting (marker.getCentre().toFloat());
+        editor->injectGraphMouseUpForTesting (marker.getCentre().toFloat());
+        const auto* enabled = processor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled));
+        expect (enabled->getBool(), "tapping Grab marker enables a native band");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), plan.peaks[0].frequencyHz,
+            40.0, "grab frequency is published to the stable parameter");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                    ->getUnitsValue()), -3.0, 0.1,
+            "initial resonance cut starts at -3 dB");
+        expectEquals (juce::String ("GRAB"), grab.getButtonText(),
+                      "one-shot preview automatically disarms");
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()
