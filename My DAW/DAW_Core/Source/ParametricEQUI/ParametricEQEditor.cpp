@@ -44,6 +44,20 @@ struct NativeBandClipboard
     bool valid = false;
 };
 
+struct SharedMatchReference
+{
+    MatchCapture reference;
+    bool valid = false;
+};
+
+SharedMatchReference& sharedMatchReference()
+{
+    // In-process and GUI-message-thread only; a copied capture owns all of
+    // its data, not the analyzer snapshot or a processor pointer.
+    static SharedMatchReference shared;
+    return shared;
+}
+
 NativeBandClipboard& nativeBandClipboard()
 {
     static NativeBandClipboard clipboard;
@@ -355,6 +369,8 @@ public:
         addAndMakeVisible (copyButton_);
         addAndMakeVisible (pasteButton_);
         addAndMakeVisible (matchButton_);
+        addAndMakeVisible (matchSaveButton_);
+        addAndMakeVisible (matchLoadButton_);
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
         sketchButton_.setColour (juce::TextButton::buttonColourId,
@@ -406,6 +422,8 @@ public:
             if (grabArmed_)
                 resetMatchCapture();
             matchButton_.setVisible (! grabArmed_);
+            matchSaveButton_.setVisible (! grabArmed_);
+            matchLoadButton_.setVisible (! grabArmed_);
             grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
             grabButton_.setColour (juce::TextButton::buttonColourId,
                 grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
@@ -435,6 +453,34 @@ public:
         matchButton_.setColour (juce::TextButton::buttonColourId,
                                 Palette::surfaceHover());
         matchButton_.onClick = [this] { advanceMatch(); };
+        matchSaveButton_.setTitle (
+            "Save the measured PRE-EQ reference for other APEX EQ instances "
+            "in this running application");
+        matchLoadButton_.setTitle (
+            "Use the reference previously shared by another APEX EQ instance");
+        matchSaveButton_.onClick = [this]
+        {
+            if (! matchReference_.ready())
+                return;
+            auto& shared = sharedMatchReference();
+            shared.reference = matchReference_;
+            shared.valid = true;
+            matchSaveButton_.setButtonText ("SAVED");
+        };
+        matchLoadButton_.onClick = [this]
+        {
+            const auto& shared = sharedMatchReference();
+            if (! shared.valid || ! shared.reference.ready())
+                return;
+            matchReference_ = shared.reference;
+            matchInput_.reset();
+            matchStage_ = MatchStage::ReferenceReady;
+            lastMatchSpectrumIndex_ = lastSpectrumIndex_;
+            matchButton_.setButtonText ("GET INPUT");
+            matchButton_.setColour (juce::TextButton::buttonColourId,
+                                    Palette::positive());
+            repaint();
+        };
         startTimerHz (25);
     }
 
@@ -446,6 +492,10 @@ public:
         copyButton_.setBounds (208, 8, 44, ParametricEQEditor::kTouchTarget);
         pasteButton_.setBounds (258, 8, 58, ParametricEQEditor::kTouchTarget);
         matchButton_.setBounds (8, 58, 110, ParametricEQEditor::kTouchTarget);
+        matchSaveButton_.setBounds (122, 58, 92,
+                                    ParametricEQEditor::kTouchTarget);
+        matchLoadButton_.setBounds (218, 58, 92,
+                                    ParametricEQEditor::kTouchTarget);
     }
 
     void paint (juce::Graphics& g) override
@@ -639,6 +689,14 @@ public:
     juce::TextButton& getCopyButtonForTesting() noexcept { return copyButton_; }
     juce::TextButton& getPasteButtonForTesting() noexcept { return pasteButton_; }
     juce::TextButton& getMatchButtonForTesting() noexcept { return matchButton_; }
+    juce::TextButton& getMatchSaveButtonForTesting() noexcept
+    {
+        return matchSaveButton_;
+    }
+    juce::TextButton& getMatchLoadButtonForTesting() noexcept
+    {
+        return matchLoadButton_;
+    }
     void feedMatchSpectrumForTesting (const float* db, int bins, double binHz)
     {
         captureMatchFrame (db, bins, binHz);
@@ -754,6 +812,7 @@ private:
         matchStage_ = MatchStage::Idle;
         lastMatchSpectrumIndex_ = -1;
         matchButton_.setButtonText ("EQ MATCH");
+        matchSaveButton_.setButtonText ("REF SAVE");
         matchButton_.setColour (juce::TextButton::buttonColourId,
                                 Palette::surfaceHover());
     }
@@ -936,6 +995,8 @@ private:
     {
         grabArmed_ = false;
         matchButton_.setVisible (true);
+        matchSaveButton_.setVisible (true);
+        matchLoadButton_.setVisible (true);
         grabPlan_ = {};
         grabButton_.setButtonText ("GRAB");
         grabButton_.setColour (juce::TextButton::buttonColourId,
@@ -1299,6 +1360,8 @@ private:
     juce::TextButton copyButton_ { "COPY" };
     juce::TextButton pasteButton_ { "PASTE" };
     juce::TextButton matchButton_ { "EQ MATCH" };
+    juce::TextButton matchSaveButton_ { "REF SAVE" };
+    juce::TextButton matchLoadButton_ { "REF LOAD" };
     MatchCapture matchReference_;
     MatchCapture matchInput_;
     MatchStage matchStage_ = MatchStage::Idle;
@@ -1910,6 +1973,16 @@ juce::TextButton& ParametricEQEditor::getPasteButtonForTesting()
 juce::TextButton& ParametricEQEditor::getMatchButtonForTesting()
 {
     return graph_->getMatchButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getMatchSaveButtonForTesting()
+{
+    return graph_->getMatchSaveButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getMatchLoadButtonForTesting()
+{
+    return graph_->getMatchLoadButtonForTesting();
 }
 
 void ParametricEQEditor::feedMatchSpectrumForTesting (
