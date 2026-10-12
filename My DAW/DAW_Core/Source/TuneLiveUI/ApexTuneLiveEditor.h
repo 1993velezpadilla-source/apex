@@ -98,7 +98,18 @@ public:
             button.onClick=[this,i](){applyStyle(static_cast<VocalStyle>(i));};
             addAndMakeVisible(button);
         }
+        for(auto* label : {&pitchLabel_, &pitchCaption_, &latencyLabel_}) {
+            label->setJustificationType(juce::Justification::centredLeft);
+            label->setColour(juce::Label::textColourId, juce::Colours::white);
+            addAndMakeVisible(*label);
+        }
+        pitchLabel_.setFont(juce::Font(juce::FontOptions(34.0f, juce::Font::bold)));
+        pitchLabel_.setColour(juce::Label::textColourId,
+                              juce::Colour::fromRGB(250,205,151));
+        pitchCaption_.setFont(juce::Font(juce::FontOptions(14.0f)));
+        latencyLabel_.setFont(juce::Font(juce::FontOptions(11.0f)));
         startTimerHz(25); // GUI-only controls and pitch meter.
+        timerCallback();
     }
 
     ~Editor() override { stopTimer(); }
