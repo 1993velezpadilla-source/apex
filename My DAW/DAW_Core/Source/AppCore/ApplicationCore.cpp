@@ -1010,7 +1010,54 @@ bool ApplicationCore::isGamepadEnabled() const
     return gamepadManager_ && gamepadManager_->isEnabled();
 }
 
-void ApplicationCore::checkAndShowRecoveryPromptIfNeeded(juce::Component* /*parent*/)
+void ApplicationCore::checkAndShowRecoveryPromptIfNeeded(juce::Component* parent)
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    // Do not silently blacklist a plugin. Only a leftover plugin LOAD marker
+    // is eligible; it identifies a suspect, not proven fault or a DSP crash.
+    const auto suspect = PluginLoadRecoveryCore::getStartupSuspect();
+    if (suspect.valid && !pluginRecoveryPromptShown_)
+    {
+        pluginRecoveryPromptShown_ = true;
+        juce::WeakReference<ApplicationCore> weakSelf(this);
+        auto options = juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::WarningIcon)
+            .withTitle("APEX Plugin Recovery")
+            .withMessage(
+                "The previous session stopped while initializing a plugin.\\n\\n"
+                "Possible plugin: " + suspect.name
+                + "\\nFormat: " + suspect.format
+                + "\\nStage: " + suspect.stage
+                + "\\n\\nAPEX cannot prove this plugin caused the crash. "
+                  "Open in Safe Mode to skip loading this component once "
+                  "while preserving its saved settings and automation. "
+                  "All other plugins will still be loaded normally.")
+            .withButton("Open in Safe Mode")
+            .withButton("Open Normally");
+        if (parent != nullptr)
+            options = options.withAssociatedComponent(parent);
+
+        juce::AlertWindow::showAsync(options, [weakSelf, suspect](int result)
+        {
+            if (auto* app = weakSelf.get())
+            {
+                if (result == 1)
+                    app->pendingSafePluginRestore_ = suspect;
+
+                // An acknowledged marker must not repeatedly prompt on
+                // subsequent launches. The startup evidence stays cached.
+                PluginLoadRecoveryCore::getMarkerFile().deleteFile();
+                app->showAutosaveRecoveryPromptIfNeeded();
+            }
+        });
+        return;
+    }
+
+    showAutosaveRecoveryPromptIfNeeded();
+}
+
+void ApplicationCore::showAutosaveRecoveryPromptIfNeeded()
 {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
@@ -2084,6 +2131,12 @@ bool ApplicationCore::restorePluginChainsState(const juce::ValueTree& chains,
         error += diagnostic;
     };
 
+    // Consume the explicit recovery selection once for this project load.
+    // Snapshot the decision for all tracks before clearing it; this prevents
+    // an unrelated later project from silently inheriting Safe Mode.
+    const auto recoverySkip = pendingSafePluginRestore_;
+    pendingSafePluginRestore_ = {};
+
     for (int i = 0; i < chains.getNumChildren(); ++i)
     {
         auto trackChain = chains.getChild(i);
@@ -2102,7 +2155,8 @@ bool ApplicationCore::restorePluginChainsState(const juce::ValueTree& chains,
             juce::String chainError;
             if (! chain->restoreState(pluginChainTree,
                                       pluginScanner_.getFormatManager(),
-                                      chainError))
+                                      chainError,
+                                      recoverySkip.valid ? &recoverySkip : nullptr))
             {
                 appendRestoreDiagnostic(
                     "Track '" + trackId + "' plugin restore had rejected slot(s)"
