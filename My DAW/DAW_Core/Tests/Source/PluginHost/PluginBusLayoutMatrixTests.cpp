@@ -3289,4 +3289,66 @@ public:
 };
 static ExternalOpenSourceVST3DiverseTypesTests externalOpenSourceVST3DiverseTypesTests;
 
+
+/** Crash-recovery attribution is deliberately conservative: an interrupted
+ * plugin LOAD can be flagged as suspicious, not proven guilty. The marker
+ * must never delete saved plugins or blacklist unrelated UIDs. */
+class PluginLoadCrashRecoveryMarkerTests final : public juce::UnitTest
+{
+public:
+    PluginLoadCrashRecoveryMarkerTests()
+        : juce::UnitTest("plugin.recovery.inprocess-load-marker.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        using DAW::PluginLoadRecoveryCore;
+        auto file = juce::File::getSpecialLocation(
+            juce::File::tempDirectory)
+            .getNonexistentChildFile("apex_load_recovery_gate_", ".xml", true);
+
+        beginTest("interrupted plugin initialization leaves identifiable disk evidence");
+        PluginLoadRecoveryCore::Attempt pending;
+        pending.valid = true;
+        pending.name = "Independent VST3 Test";
+        pending.format = "VST3";
+        pending.identifier = "C:/Example/Untrusted.vst3";
+        pending.uniqueId = 0x12345;
+        pending.stage = "plugin_chain_append";
+        pending.startedUnixMs = 123456789;
+        expect(PluginLoadRecoveryCore::writePendingAttempt(file, pending));
+        const auto persisted = PluginLoadRecoveryCore::readPendingAttempt(file);
+        expect(persisted.valid);
+        expectEquals(persisted.name, pending.name);
+        expectEquals(persisted.format, pending.format);
+        expectEquals(persisted.identifier, pending.identifier);
+        expectEquals(persisted.stage, pending.stage);
+        expectEquals(persisted.uniqueId, pending.uniqueId);
+        expectEquals(persisted.startedUnixMs, pending.startedUnixMs);
+
+        beginTest("recovery evidence matches path, format and component UID, not brand");
+        juce::PluginDescription expected;
+        expected.name = pending.name;
+        expected.pluginFormatName = pending.format;
+        expected.fileOrIdentifier = pending.identifier;
+        expected.uniqueId = pending.uniqueId;
+        expect(PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected));
+        expected.uniqueId += 1;
+        expect(!PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected),
+               "another plugin component in the same shell must not be accused");
+        expected.uniqueId = pending.uniqueId;
+        expected.fileOrIdentifier = "C:/Example/Different.vst3";
+        expect(!PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected));
+
+        beginTest("malformed, missing and invalid markers never assert a suspect");
+        file.replaceWithText("<partial");
+        expect(!PluginLoadRecoveryCore::readPendingAttempt(file).valid);
+        file.deleteFile();
+        expect(!PluginLoadRecoveryCore::readPendingAttempt(file).valid);
+        pending.format.clear();
+        expect(!PluginLoadRecoveryCore::writePendingAttempt(file, pending));
+        expect(!file.existsAsFile());
+    }
+};
+static PluginLoadCrashRecoveryMarkerTests pluginLoadCrashRecoveryMarkerTests;
+
 } // namespace
