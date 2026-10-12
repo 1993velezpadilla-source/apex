@@ -2909,7 +2909,7 @@ private:
             if (!track) continue;
 
             bool audible = !resolveNativeMutedRT(*track, nullptr);
-            if (anySolo) audible = track->isSoloed();
+            if (anySolo) audible = audible && track->isSoloed();
 
             trackBuffer_.clear();
 
