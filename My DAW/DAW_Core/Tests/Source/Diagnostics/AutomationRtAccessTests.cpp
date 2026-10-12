@@ -4531,3 +4531,53 @@ public:
     }
 };
 static AutomationV2CurveMorphTests automationV2CurveMorphTests;
+
+
+class AutomationV2LaneEnabledPersistenceTests final : public juce::UnitTest
+{
+public:
+    AutomationV2LaneEnabledPersistenceTests()
+      : juce::UnitTest("automation.v2-lane-enabled-project-state.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        beginTest("Per-lane bypass survives save/load and command state restoration");
+        DAW::AutomationLaneCore original("track-01", DAW::AutomationLaneCore::trackVolumeParameterId);
+        original.addPoint(juce::int64(0), 0.8f);
+        original.addPoint(juce::int64(48000), 0.5f);
+        original.setEnabled(false);
+
+        const auto state = original.getState();
+        expect(!(bool)state.getProperty("enabled", true));
+        DAW::AutomationLaneCore restored("track-01", DAW::AutomationLaneCore::trackVolumeParameterId);
+        restored.restoreState(state);
+        expect(!restored.isEnabled());
+        expectWithinAbsoluteError(restored.getValueAtSample(24000, 0.9f), 0.9f, 0.00001f);
+        expectEquals(restored.getNumPoints(), original.getNumPoints());
+
+        beginTest("Enabled lanes persist TRUE, older project files default safely to TRUE");
+        original.setEnabled(true);
+        restored.restoreState(original.getState());
+        expect(restored.isEnabled());
+        auto legacy = original.getState().createCopy();
+        legacy.removeProperty("enabled", nullptr);
+        restored.setEnabled(false);
+        restored.restoreState(legacy);
+        expect(restored.isEnabled());
+
+        beginTest("Global manager state also roundtrips lane enabled flags");
+        DAW::AutomationManagerCore manager;
+        auto& activeLane = manager.getOrCreateLane("v2-track-enabled", DAW::AutomationLaneCore::trackVolumeParameterId);
+        activeLane.addPoint(0, 0.25f);
+        activeLane.setEnabled(false);
+        manager.publishSnapshot();
+        const auto managerState = manager.getState();
+        DAW::AutomationManagerCore newManager;
+        newManager.restoreState(managerState);
+        const auto* openedLane = newManager.findLane("v2-track-enabled", DAW::AutomationLaneCore::trackVolumeParameterId);
+        expect(openedLane != nullptr);
+        if (openedLane)
+            expect(!openedLane->isEnabled());
+    }
+};
+static AutomationV2LaneEnabledPersistenceTests automationV2LaneEnabledPersistenceTests;

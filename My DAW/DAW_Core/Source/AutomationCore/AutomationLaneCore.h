@@ -348,6 +348,7 @@ public:
     {
         juce::ValueTree state("AutomationLane");
         state.setProperty("parameterId", getParameterId(), nullptr);
+        state.setProperty("enabled", enabled, nullptr);
         state.setProperty("parameterName", parameterName_, nullptr);
         state.setProperty("defaultValue", defaultValue_, nullptr);
         state.setProperty("visible", visible_, nullptr);
@@ -373,6 +374,7 @@ public:
         parameterName_ = state.getProperty("parameterName", "").toString();
         defaultValue_ = (float)state.getProperty("defaultValue", 0.0f);
         visible_ = (bool)state.getProperty("visible", false);
+        enabled = (bool)state.getProperty("enabled", true); // Backwards-compatible default.
 
         points_.clear();
         points.clear();
