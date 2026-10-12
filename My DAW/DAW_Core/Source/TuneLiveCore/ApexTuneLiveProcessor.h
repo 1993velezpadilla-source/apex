@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "ApexTuneLivePitchTracker.h"
+#include "ApexTuneLiveVoiceControl.h"
 #include "signalsmith-stretch.h"
 #include <array>
 #include <atomic>
@@ -44,7 +44,8 @@ public:
     static constexpr const char* kPluginName = "APEX Tune Live";
     static constexpr const char* kFileOrIdentifier = "APEX::TuneLive";
     static constexpr const char* kVersion = "0.1.0-beta";
-    enum Index { kAmount, kSpeed, kKey, kScale, kMix, kBypass, kNumParams };
+    enum Index { kAmount, kSpeed, kKey, kScale, kMix, kBypass,
+                 kHumanize, kNoteStability, kPreserveFormants, kNumParams };
 
     Processor() : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -55,6 +56,10 @@ public:
         add(kScale, "tunelive.scale", "Scale (0=Chromatic, 1=Major, 2=Minor)", 0.0f, 3);
         add(kMix, "tunelive.mix", "Wet Mix", 1.0f);
         add(kBypass, "tunelive.bypass", "Bypass", 0.0f, 2);
+        // APPEND after V1 stable IDs: existing project automation stays compatible.
+        add(kHumanize, "tunelive.humanize", "Humanize", 0.35f);
+        add(kNoteStability, "tunelive.noteStability", "Note Stability", 0.40f);
+        add(kPreserveFormants, "tunelive.preserveFormants", "Preserve Formants", 1.0f, 2);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override {
@@ -79,6 +84,7 @@ public:
         channels_ = juce::jlimit(1, 2, getTotalNumInputChannels());
         setRateAndBufferSizeDetails(rate_, maxBlock_);
         tracker_.prepare(rate_);
+        voiceControl_.reset();
         // A vocal-first short-window configuration; the stock cheaper preset
         // uses a 100ms window, which is unsuitable for live vocal monitoring.
         // Actual algorithmic latency is queried below, NEVER assumed.
@@ -88,6 +94,7 @@ public:
                            false);
         stretch_.reset();
         stretch_.setTransposeFactor(1.0f);
+        stretch_.setFormantFactor(1.0f, true); // compensate for pitch movement
         latency_ = juce::jmax(0, stretch_.inputLatency() + stretch_.outputLatency());
         setLatencySamples(latency_);
         wet_.setSize(channels_, maxBlock_, false, false, true);
@@ -96,6 +103,7 @@ public:
         delay_.clear();
         delayPos_ = 0;
         targetSemitones_ = smoothedSemitones_ = 0.0f;
+        trackedHz_ = 0.0f;
         voicedMix_ = voicedTarget_ = 0.0f;
         manualWetMix_ = 0.0f;
         lastHz_.store(0.0f, std::memory_order_relaxed);
@@ -111,12 +119,19 @@ public:
         const int key = juce::jlimit(0, 11, juce::roundToInt(param(kKey)*11.0f));
         const int scale = juce::jlimit(0, 2, juce::roundToInt(param(kScale)*2.0f));
         const double retuneMs = 1.0 + 149.0*static_cast<double>(param(kSpeed));
+        const VoiceSettings settings{key, scale, strength,
+            param(kHumanize), param(kNoteStability)*0.35f};
+        const bool preserveFormants = param(kPreserveFormants) >= 0.5f;
         const int delayLen = delay_.getNumSamples();
         for (int offset=0; offset<n;) {
             const int count = juce::jmin(maxBlock_, n-offset);
             const float response = static_cast<float>(1.0 - std::exp(-count/(rate_*retuneMs*0.001)));
             smoothedSemitones_ += (targetSemitones_ - smoothedSemitones_)*response;
             stretch_.setTransposeFactor(std::pow(2.0f, smoothedSemitones_ / 12.0f));
+            // Correct a shift without dragging the voice's formant envelope.
+            // SignalSmith's base is normalised to sample rate (not Nyquist).
+            stretch_.setFormantFactor(1.0f, preserveFormants);
+            stretch_.setFormantBase(trackedHz_ > 0.0f ? trackedHz_/static_cast<float>(rate_) : 0.0f);
             const float* in[2] = {buffer.getReadPointer(0)+offset,
                                   channels > 1 ? buffer.getReadPointer(1)+offset : nullptr};
             float* out[2] = {wet_.getWritePointer(0),
@@ -126,12 +141,10 @@ public:
                 if (tracker_.push(in[0][i])) {
                     const auto f0 = tracker_.latest();
                     lastHz_.store(f0.voiced ? f0.hz : 0.0f, std::memory_order_relaxed);
-                    if (f0.voiced) {
-                        const float midi = 69.0f + 12.0f*std::log2(f0.hz/440.0f);
-                        const int target = nearestScaleMidi(midi, key, scale);
-                        targetSemitones_ = juce::jlimit(-2.0f, 2.0f, (target - midi)*strength);
-                    } else targetSemitones_ = 0.0f;
-                    voicedTarget_ = f0.voiced ? 1.0f : 0.0f;
+                    const auto decision = voiceControl_.update(f0, settings);
+                    trackedHz_ = decision.voiced ? f0.hz : 0.0f;
+                    targetSemitones_ = decision.shiftSemitones;
+                    voicedTarget_ = decision.voiced ? 1.0f : 0.0f;
                 }
                 voicedMix_ += (voicedTarget_ - voicedMix_) * static_cast<float>(1.0 / (rate_*0.008 + 1.0));
                 // Advance common stereo wet ramp once per sample (not once per channel).
@@ -185,7 +198,9 @@ public:
     }
 private:
     inline static constexpr std::array<const char*,kNumParams> kIds = {
-        "tunelive.amount", "tunelive.speed", "tunelive.key", "tunelive.scale", "tunelive.mix", "tunelive.bypass"};
+        "tunelive.amount", "tunelive.speed", "tunelive.key", "tunelive.scale",
+        "tunelive.mix", "tunelive.bypass", "tunelive.humanize",
+        "tunelive.noteStability", "tunelive.preserveFormants"};
     void add(int index, const char* id, const char* name, float value, int steps=0) {
         auto p = std::make_unique<Parameter>(id, name, value, steps);
         params_[static_cast<std::size_t>(index)] = p.get();
@@ -194,11 +209,12 @@ private:
     float param(int index) const noexcept {return params_[static_cast<std::size_t>(index)]->getValue();}
     std::array<Parameter*,kNumParams> params_{};
     PitchTracker tracker_;
+    VoiceControl voiceControl_;
     signalsmith::stretch::SignalsmithStretch<float> stretch_;
     juce::AudioBuffer<float> wet_, delay_;
     std::atomic<float> lastHz_{0.0f};
     double rate_ = 48000.0;
-    float targetSemitones_ = 0.0f, smoothedSemitones_ = 0.0f;
+    float targetSemitones_ = 0.0f, smoothedSemitones_ = 0.0f, trackedHz_ = 0.0f;
     float voicedMix_ = 0.0f, voicedTarget_ = 0.0f, manualWetMix_ = 0.0f;
     int latency_ = 0, delayPos_ = 0, maxBlock_ = 128, channels_ = 2;
 };
