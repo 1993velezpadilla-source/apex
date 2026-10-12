@@ -6,6 +6,7 @@
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
 #include "../../../Source/Automation/AutomationTransportStateCore.h"
 #include "AutomationUndoRedoCore.h"
+#include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 
 namespace DAW {
 
@@ -273,6 +274,7 @@ public:
             if (undoManager_.canRedo())
             {
                 undoManager_.redo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -285,6 +287,7 @@ public:
             if (undoManager_.canRedo())
             {
                 undoManager_.redo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -297,6 +300,7 @@ public:
             if (undoManager_.canUndo())
             {
                 undoManager_.undo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -997,6 +1001,52 @@ private:
             invalidateCurvePath();
             repaint();
         });
+
+        // Explicit full-lane edit, distinct from point/segment clipboards.
+        // Only an exact parameter match can paste: pan/volume/foreign VST3
+        // ranges must never be silently reinterpreted.
+        menu.addSeparator();
+        if (auto* sourceLane = helper_.findLane(trackId_, parameterId_);
+            sourceLane != nullptr && !sourceLane->points.empty())
+        {
+            menu.addItem("Copy Entire Curve", [this]()
+            {
+                if (auto* lane = helper_.findLane(trackId_, parameterId_))
+                    AutomationLaneCurveClipboardCore::shared().copyFrom(*lane, sampleRate_, tempoBpm_);
+            });
+        }
+
+        if (isDrawingEnabled()
+            && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
+        {
+            menu.addItem("Replace Entire Curve (Undoable)", [this]()
+            {
+                // findLane() intentionally exposes a const view. Edits must
+                // use the message-thread mutable getOrCreateLane() API.
+                auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                if (!lane.isEnabled())
+                    return;
+
+                std::vector<AutomationPoint> pasted;
+                if (!AutomationLaneCurveClipboardCore::shared()
+                         .makePastedPoints(parameterId_, sampleRate_, tempoBpm_, pasted))
+                    return;
+
+                const auto before = lane.getState();
+                lane.points = std::move(pasted);
+                lane.sortAndResolveDuplicates();
+                const auto after = lane.getState();
+
+                // A single atomic history entry (rather than one per point).
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_, before, after));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+                selectedPointIndex_ = -1;
+                invalidateCurvePath();
+                repaint();
+            });
+        }
 
         menu.showMenuAsync(
             juce::PopupMenu::Options()
