@@ -20,6 +20,9 @@ jobs:
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp" -o tune_live_yin_test
           ./tune_live_yin_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" -o tune_live_voice_test
+          ./tune_live_voice_test
   msvc-windows:
     runs-on: windows-2022
     steps:
@@ -30,3 +33,5 @@ jobs:
         run: |
           cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_yin_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp"
           tune_live_yin_test.exe
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp"
+          tune_live_voice_test.exe
