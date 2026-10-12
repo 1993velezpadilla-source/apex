@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../TrackCore/Track.h"
+#include "../TrackCore/TrackPolarityCore.h"
 #include "../ClipCore/Clip.h"
 #include "../TransportCore/TransportController.h"
 #include "../RoutingCore/RoutingGraph.h"
@@ -2423,6 +2424,9 @@ private:
         }
 #endif
 
+        // Invert before sends and routing: all tap paths hear identical polarity.
+        TrackPolarityCore::apply(trackBuf, numSamples, track->isPolarityInverted());
+
         const float leftGain  = volumeRamp.getCurrentLeftGain();
         const float rightGain = volumeRamp.getCurrentRightGain();
 
@@ -2664,6 +2668,10 @@ private:
             }
         }
 
+        // Bus polarity is applied after inserts and before fader/routing.
+        if (busTrack != nullptr)
+            TrackPolarityCore::apply(nodeBuf, numSamples, busTrack->isPolarityInverted());
+
         // Bus mute — snapshot-aware
         float busGain = busTrack ? busTrack->getVolume() : 1.0f;
         if (busTrack && automationSnap != nullptr)
@@ -2853,6 +2861,9 @@ private:
                 if (it != chainsSnap->end() && it->second)
                     it->second->processBlock(trackBuffer_, numSamples);
             }
+
+            // Maintain the same polarity semantics if the routing graph is absent.
+            TrackPolarityCore::apply(trackBuffer_, numSamples, track->isPolarityInverted());
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(track->getVolume());
