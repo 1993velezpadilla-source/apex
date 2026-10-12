@@ -97,6 +97,7 @@ public:
         delayPos_ = 0;
         targetSemitones_ = smoothedSemitones_ = 0.0f;
         voicedMix_ = voicedTarget_ = 0.0f;
+        manualWetMix_ = 0.0f;
         lastHz_.store(0.0f, std::memory_order_relaxed);
     }
     void releaseResources() override { tracker_.reset(); stretch_.reset(); }
@@ -138,7 +139,11 @@ public:
                     float* delaySamples = delay_.getWritePointer(ch);
                     delaySamples[delayPos_] = dryInput;
                     const float dry = latency_ == 0 ? dryInput : delaySamples[(delayPos_+1)%delayLen];
-                    const float wetAmount = bypass ? 0.0f : mix*voicedMix_;
+                    // 8ms sample ramp on bypass/mix avoids hard-cut clicks.
+                    const float wetTarget = bypass ? 0.0f : mix;
+                    manualWetMix_ += (wetTarget - manualWetMix_)
+                        * static_cast<float>(1.0 / (rate_*0.008 + 1.0));
+                    const float wetAmount = manualWetMix_ * voicedMix_;
                     buffer.getWritePointer(ch)[offset+i] = dry*(1.0f-wetAmount) + out[ch][i]*wetAmount;
                 }
                 delayPos_ = (delayPos_+1)%delayLen;
@@ -194,7 +199,7 @@ private:
     std::atomic<float> lastHz_{0.0f};
     double rate_ = 48000.0;
     float targetSemitones_ = 0.0f, smoothedSemitones_ = 0.0f;
-    float voicedMix_ = 0.0f, voicedTarget_ = 0.0f;
+    float voicedMix_ = 0.0f, voicedTarget_ = 0.0f, manualWetMix_ = 0.0f;
     int latency_ = 0, delayPos_ = 0, maxBlock_ = 128, channels_ = 2;
 };
 
