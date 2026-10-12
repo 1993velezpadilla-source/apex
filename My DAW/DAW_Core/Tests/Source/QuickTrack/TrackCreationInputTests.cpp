@@ -274,6 +274,19 @@ public:
                    "normal mono input centered L/R");
 
             track->setPolarityInverted(true);
+            // A real AudioEngine callback starts its 64-sample transition at
+            // the previously established output gain; no +/-1 sign jump.
+            juce::AudioBuffer<float> transition(2, 512);
+            h.engine.setLiveInputBuffer(&input, 512, 1);
+            h.processInto(transition);
+            expect(std::abs(transition.getSample(0, 0) - normal.first) < 0.08f,
+                   "real routed gain ramps continuously at first inverted sample");
+            expect(transition.getSample(0, 100) < -0.2f,
+                   "real routed gain has settled negative by sample 100");
+            expect(std::abs(transition.getSample(0, 0)
+                            - transition.getSample(1, 0)) < 0.002f,
+                   "same transition gain is applied to both output channels");
+
             const auto inverted = captureStereo();
             expect(inverted.first < -0.2f, "actual routed left channel inverted");
             expect(inverted.second < -0.2f, "actual routed right channel inverted");
@@ -283,6 +296,13 @@ public:
                    "normal + inverted right audio cancels");
 
             track->setPolarityInverted(false);
+            h.engine.setLiveInputBuffer(&input, 512, 1);
+            h.processInto(transition);
+            expect(std::abs(transition.getSample(0, 0) - inverted.first) < 0.08f,
+                   "real routed gain ramps continuously when Ø is turned off");
+            expect(transition.getSample(0, 100) > 0.2f,
+                   "real routed gain has settled positive by sample 100");
+
             const auto restored = captureStereo();
             expect(std::abs(normal.first - restored.first) < 0.02f,
                    "turning Ø off restores actual left audio");
