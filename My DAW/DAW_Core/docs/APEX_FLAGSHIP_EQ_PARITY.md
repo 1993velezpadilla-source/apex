@@ -50,7 +50,10 @@ product with stable APEX parameter IDs and APEX UI language.
   PRE-EQ analyzer, 32 accepted fresh frames per stage, fixed-capacity power
   averaging on a 96-point log-frequency grid, median level normalization,
   +/-9 dB bounded differential and existing APEX Sketch fitting. User clicks
-  APPLY EQ to add at most 8 new bands. No external/file reference input yet;
+  APPLY EQ to add at most 8 new bands. REF SAVE / REF LOAD exchange a
+  copied reference spectrum across native EQ instances within the running
+  APEX process (no raw plugin pointers, analyzer ownership or external audio
+  routing). No disk/file reference input yet;
   Windows CI and real audio QA still pending.
 - Cross-instance registry, collision visualization and native APEX track metadata.
 - [x] Branch processor declares output gain, pan, polarity, auto-gain and gain
@@ -126,8 +129,9 @@ APEX implementation only: no FabFilter assets, internals, presets or UI cloning.
 - Reject an unchanged or level-only difference. Match curve is bounded to
   +/-9 dB, not a proof of a perceptually optimal fit.
 - Capture uses the currently selected track's PRE-EQ audio at two separate
-  moments. External/sidechain capture, file-import, cross-instance references,
-  saved reference files, matching-detail slider and preview rollback remain
-  outstanding. This is **not full FabFilter EQ Match parity**.
+  moments. The in-process REF SAVE / REF LOAD buttons let other APEX EQ
+  instances reuse a copied tonal profile. Live external/sidechain capture,
+  persistent reference files, matching-detail slider and preview rollback
+  remain outstanding. This is **not full FabFilter EQ Match parity**.
 - All work belongs to the message thread and FFT worker. Audio callback
   never performs fitting, allocation or UI publication.
