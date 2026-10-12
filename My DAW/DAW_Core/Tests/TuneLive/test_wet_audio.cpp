@@ -73,6 +73,24 @@ int main() {
         std::cerr<<"Bypass failed to preserve source F0\n";
         return 1;
     }
-    std::cout<<"PASS wet correction + bypass pitch identity on actual production DspCore\n";
+    // Sample-accurate PDC: long-term bypass must reproduce the exact
+    // unprocessed source delayed by the reported plugin latency.
+    double sumSquared=0.0;
+    int compared=0;
+    for(int i=frames-16000;i<frames;++i) {
+        const int inputPosition=i-plugin.latencySamples();
+        if(inputPosition<0) continue;
+        const double dry=0.38*std::sin(6.283185307179586*inputHz*inputPosition/sr);
+        const double err=bypassAudio[static_cast<std::size_t>(i)]-dry;
+        sumSquared+=err*err;
+        ++compared;
+    }
+    const double bypassErrorRms=std::sqrt(sumSquared/std::max(1,compared));
+    std::cout<<"bypass_PDC_error_RMS="<<bypassErrorRms<<"\\n";
+    if(bypassErrorRms>1.0e-4) {
+        std::cerr<<"Bypass timing mismatch to host latency disclosure\\n";
+        return 1;
+    }
+    std::cout<<"PASS wet correction + exact PDC-aligned bypass on actual production DspCore\\n";
     return 0;
 }
