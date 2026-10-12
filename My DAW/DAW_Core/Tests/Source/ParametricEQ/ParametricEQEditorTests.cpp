@@ -597,6 +597,31 @@ private:
             editor->feedMatchSpectrumForTesting (
                 reference.data(), bins, binHz);
         expectEquals (juce::String ("GET INPUT"), match.getButtonText());
+
+        // A second EQ instance can explicitly adopt the measured reference
+        // without borrowing the first processor's lifetime or analyzer frame.
+        auto& save = editor->getMatchSaveButtonForTesting();
+        auto& load = editor->getMatchLoadButtonForTesting();
+        expect (save.getBounds().getHeight() >= 44
+            && load.getBounds().getHeight() >= 44);
+        expect (! match.getBounds().intersects (save.getBounds()));
+        expect (! save.getBounds().intersects (load.getBounds()));
+        save.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("SAVED"), save.getButtonText());
+        auto secondProcessorStorage = std::make_unique<Processor>();
+        auto& secondProcessor = *secondProcessorStorage;
+        secondProcessor.prepareToPlay (48000.0, 512);
+        secondProcessor.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
+        auto secondEditor = std::make_unique<ParametricEQEditor> (
+            secondProcessor);
+        secondEditor->setSize (320, 568);
+        secondEditor->getMatchLoadButtonForTesting().triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("GET INPUT"),
+            secondEditor->getMatchButtonForTesting().getButtonText(),
+            "a second EQ instance loaded the independently owned reference");
+
         click();
         expectEquals (juce::String ("INPUT..."), match.getButtonText());
         for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
@@ -611,6 +636,22 @@ private:
         expect (inserted >= 1, "Apply inserts real APEX EQ bands");
         expectEquals (juce::String ("EQ MATCH"), match.getButtonText(),
                       "matching resets after a completed apply");
+
+        // The second instance uses the shared reference against its own
+        // input, applying a *new* band without changing the source instance.
+        auto& secondMatch = secondEditor->getMatchButtonForTesting();
+        secondMatch.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expectEquals (juce::String ("INPUT..."), secondMatch.getButtonText());
+        for (int i = 0; i < MatchCapture::kRequiredFrames; ++i)
+            secondEditor->feedMatchSpectrumForTesting (
+                input.data(), bins, binHz);
+        expectEquals (juce::String ("APPLY EQ"), secondMatch.getButtonText());
+        secondMatch.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (secondProcessor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled))->getBool(),
+            "second plugin independently fits and applies shared reference");
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()
