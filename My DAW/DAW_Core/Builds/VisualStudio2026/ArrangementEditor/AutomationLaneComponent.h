@@ -7,6 +7,7 @@
 #include "../../../Source/Automation/AutomationTransportStateCore.h"
 #include "AutomationUndoRedoCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
+#include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
 
 namespace DAW {
 
@@ -1046,6 +1047,47 @@ private:
                 invalidateCurvePath();
                 repaint();
             });
+        }
+
+        // Producer-friendly one-click musical modulation patterns. Generate
+        // OFFLINE points once; playback consumes normal APEX lane snapshots.
+        if (isDrawingEnabled() && AutomationMusicalLfoCore::supports(parameterId_))
+        {
+            juce::PopupMenu lfoMenu;
+            const auto addLfoItem = [this, &lfoMenu](const juce::String& name,
+                                                    AutomationMusicalLfoCore::Shape shape)
+            {
+                lfoMenu.addItem(name, [this, shape]()
+                {
+                    std::vector<AutomationPoint> generated;
+                    if (!AutomationMusicalLfoCore::generate(parameterId_, shape,
+                            sampleRate_, tempoBpm_, generated))
+                        return;
+
+                    auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                    if (!lane.isEnabled())
+                        return;
+
+                    const auto before = lane.getState();
+                    lane.points = std::move(generated);
+                    lane.sortAndResolveDuplicates();
+                    const auto after = lane.getState();
+
+                    undoManager_.doAction(std::make_unique<MovePointAction>(
+                        helper_, trackId_, parameterId_, before, after));
+                    syncApexLaneFromCoreLane();
+                    helper_.publishSnapshot();
+                    selectedPointIndex_ = -1;
+                    invalidateCurvePath();
+                    repaint();
+                });
+            };
+
+            addLfoItem("Sine · 1 bar", AutomationMusicalLfoCore::Shape::Sine);
+            addLfoItem("Triangle · 1 bar", AutomationMusicalLfoCore::Shape::Triangle);
+            addLfoItem("Square · 1 bar", AutomationMusicalLfoCore::Shape::Square);
+            addLfoItem("Saw · 1 bar", AutomationMusicalLfoCore::Shape::Saw);
+            menu.addSubMenu("Generate 1-Bar LFO Curve (Undoable)", lfoMenu);
         }
 
         menu.showMenuAsync(
