@@ -72,6 +72,8 @@ public:
             twiddles_[static_cast<std::size_t> (index)]
                 = { std::cos (radians), std::sin (radians) };
         }
+        for (auto& cached : maskCache_)
+            cached.valid = false;
         reset();
     }
 
@@ -83,6 +85,7 @@ public:
             for (auto& channel : band)
                 channel.fill (0.0);
         sampleCounter_ = 0;
+        engaged_.fill (false);
     }
 
     double sampleRate() const noexcept { return sampleRate_; }
@@ -99,6 +102,9 @@ public:
         const int channelCount = std::clamp (channels, 0, kChannels);
         if (channelCount == 0)
             return;
+        // Rebuild expensive logarithmic masks only when relevant per-band
+        // controls change, NEVER 24 x 513 exp/log/tanh per FFT hop.
+        updateMaskCaches (bands);
         for (int index = 0; index < count; ++index)
         {
             const std::uint32_t inputIndex = static_cast<std::uint32_t> (
@@ -210,7 +216,9 @@ private:
     }
 
     void applyComponent (int bandIndex, int bin, int envelopeChannel,
-                         Complex& component, const Band& band,
+                         Complex& component,
+                         const DynamicBandParameters& params,
+                         double attackCoefficient, double releaseCoefficient,
                          double weightForBin, double tiltDb) noexcept
     {
         if (weightForBin < 1.0e-5)
@@ -218,7 +226,6 @@ private:
         const double level = 20.0 * std::log10 (std::max (
             1.0e-10, std::abs (component) * binAmplitudeScale_));
         const double levelDb = std::clamp (level + tiltDb, -144.0, 48.0);
-        const auto params = DynamicBandParameters::sanitised (band.dynamic);
         const double target = dynamicGainDbForLevel (
             levelDb, params);
 
@@ -226,15 +233,62 @@ private:
             [static_cast<std::size_t> (envelopeChannel)]
             [static_cast<std::size_t> (bin)];
         const bool attack = std::abs (target) > std::abs (state);
-        const double time = std::max (0.0005,
-            attack ? params.attackSeconds : params.releaseSeconds);
-        const double smoothing = std::exp (
-            -static_cast<double> (kHopSize) / (sampleRate_ * time));
+        const double smoothing = attack ? attackCoefficient
+                                         : releaseCoefficient;
         const double next = smoothing * state + (1.0 - smoothing) * target;
         state = std::isfinite (next) ? next : 0.0;
         const double gainDb = std::clamp (state * weightForBin, -24.0, 24.0);
         const double linearGain = std::pow (10.0, gainDb / 20.0);
         component *= linearGain;
+    }
+
+
+    struct MaskCache
+    {
+        bool valid = false;
+        FilterShape shape = FilterShape::Bell;
+        double frequencyHz = 0.0;
+        double q = 0.0;
+        double density = 0.0;
+        bool tiltEnabled = false;
+        std::array<double, kBins> mask {};
+        std::array<double, kBins> tilt {};
+    };
+
+    void updateMaskCaches (
+        const std::array<Band, kMaxBands>& bands) noexcept
+    {
+        for (int index = 0; index < kMaxBands; ++index)
+        {
+            const auto& band = bands[static_cast<std::size_t> (index)];
+            if (! band.enabled || ! band.dynamic.enabled)
+                continue;
+            auto& cache = maskCache_[static_cast<std::size_t> (index)];
+            if (cache.valid && cache.shape == band.shape
+                && cache.frequencyHz == band.frequencyHz
+                && cache.q == band.q && cache.density == band.density
+                && cache.tiltEnabled == band.tilt)
+                continue;
+            cache.valid = true;
+            cache.shape = band.shape;
+            cache.frequencyHz = band.frequencyHz;
+            cache.q = band.q;
+            cache.density = band.density;
+            cache.tiltEnabled = band.tilt;
+            for (int bin = 0; bin < kBins; ++bin)
+            {
+                const double frequencyHz = bin * sampleRate_ / kFftSize;
+                cache.mask[static_cast<std::size_t> (bin)] =
+                    weight (band, frequencyHz);
+                cache.tilt[static_cast<std::size_t> (bin)] =
+                    band.tilt && frequencyHz > 0.0
+                    && std::isfinite (band.frequencyHz)
+                    && band.frequencyHz > 0.0
+                    ? std::clamp (3.0 * std::log2 (frequencyHz /
+                        std::max (20.0, band.frequencyHz)), -18.0, 18.0)
+                    : 0.0;
+            }
+        }
     }
 
     void applySpectralBands (
@@ -244,30 +298,53 @@ private:
         for (int bandIndex = 0; bandIndex < kMaxBands; ++bandIndex)
         {
             const auto& band = bands[static_cast<std::size_t> (bandIndex)];
-            if (! band.enabled || ! band.dynamic.enabled
-                || ! std::isfinite (band.dynamic.rangeDb)
-                || std::abs (band.dynamic.rangeDb) <= 1.0e-8)
+            const auto& cache = maskCache_[static_cast<std::size_t> (bandIndex)];
+            const bool supported = band.shape == FilterShape::Bell
+                || band.shape == FilterShape::LowShelf
+                || band.shape == FilterShape::HighShelf;
+            const bool active = band.enabled && band.dynamic.enabled
+                && std::isfinite (band.dynamic.rangeDb)
+                && std::abs (band.dynamic.rangeDb) > 1.0e-8 && supported;
+            const bool placementChanged = engaged_[
+                static_cast<std::size_t> (bandIndex)]
+                && oldPlacement_[static_cast<std::size_t> (bandIndex)]
+                   != band.placement;
+            if (! active || ! engaged_[static_cast<std::size_t> (bandIndex)]
+                || placementChanged)
+            {
+                for (auto& envelopeChannel : envelopeDb_[
+                    static_cast<std::size_t> (bandIndex)])
+                    envelopeChannel.fill (0.0);
+            }
+            engaged_[static_cast<std::size_t> (bandIndex)] = active;
+            oldPlacement_[static_cast<std::size_t> (bandIndex)] =
+                band.placement;
+            if (! active)
                 continue;
-            if (band.shape != FilterShape::Bell
-                && band.shape != FilterShape::LowShelf
-                && band.shape != FilterShape::HighShelf)
-                continue;
+
+            const auto params = DynamicBandParameters::sanitised (
+                band.dynamic);
+            const double attackCoefficient = std::exp (
+                -static_cast<double> (kHopSize)
+                    / (sampleRate_ * params.attackSeconds));
+            const double releaseCoefficient = std::exp (
+                -static_cast<double> (kHopSize)
+                    / (sampleRate_ * params.releaseSeconds));
 
             for (int bin = 1; bin < kBins; ++bin)
             {
-                const double frequencyHz = bin * sampleRate_ / kFftSize;
-                const double spectralWeight = weight (band, frequencyHz);
+                const double spectralWeight = cache.mask[
+                    static_cast<std::size_t> (bin)];
                 if (spectralWeight <= 1.0e-5)
                     continue;
-                const double tiltDb = band.tilt ? std::clamp (
-                    3.0 * std::log2 (frequencyHz /
-                        std::max (20.0, band.frequencyHz)),
-                    -18.0, 18.0) : 0.0;
+                const double tiltDb = cache.tilt[
+                    static_cast<std::size_t> (bin)];
 
                 auto& left = spectrum_[0][static_cast<std::size_t> (bin)];
                 if (channelCount < 2)
                 {
-                    applyComponent (bandIndex, bin, 0, left, band,
+                    applyComponent (bandIndex, bin, 0, left, params,
+                                    attackCoefficient, releaseCoefficient,
                                     spectralWeight, tiltDb);
                     continue;
                 }
@@ -275,17 +352,21 @@ private:
                 switch (band.placement)
                 {
                     case ChannelPlacement::Stereo:
-                        applyComponent (bandIndex, bin, 0, left, band,
+                        applyComponent (bandIndex, bin, 0, left, params,
+                                        attackCoefficient, releaseCoefficient,
                                         spectralWeight, tiltDb);
-                        applyComponent (bandIndex, bin, 1, right, band,
+                        applyComponent (bandIndex, bin, 1, right, params,
+                                        attackCoefficient, releaseCoefficient,
                                         spectralWeight, tiltDb);
                         break;
                     case ChannelPlacement::Left:
-                        applyComponent (bandIndex, bin, 0, left, band,
+                        applyComponent (bandIndex, bin, 0, left, params,
+                                        attackCoefficient, releaseCoefficient,
                                         spectralWeight, tiltDb);
                         break;
                     case ChannelPlacement::Right:
-                        applyComponent (bandIndex, bin, 1, right, band,
+                        applyComponent (bandIndex, bin, 1, right, params,
+                                        attackCoefficient, releaseCoefficient,
                                         spectralWeight, tiltDb);
                         break;
                     case ChannelPlacement::Mid:
@@ -294,10 +375,12 @@ private:
                         Complex mid = (left + right) * 0.5;
                         Complex side = (left - right) * 0.5;
                         if (band.placement == ChannelPlacement::Mid)
-                            applyComponent (bandIndex, bin, 0, mid, band,
+                            applyComponent (bandIndex, bin, 0, mid, params,
+                                            attackCoefficient, releaseCoefficient,
                                             spectralWeight, tiltDb);
                         else
-                            applyComponent (bandIndex, bin, 1, side, band,
+                            applyComponent (bandIndex, bin, 1, side, params,
+                                            attackCoefficient, releaseCoefficient,
                                             spectralWeight, tiltDb);
                         left = mid + side;
                         right = mid - side;
@@ -369,6 +452,9 @@ private:
     std::array<std::array<Complex, kFftSize>, kChannels> spectrum_ {};
     std::array<std::array<std::array<double, kBins>, kChannels>, kMaxBands>
         envelopeDb_ {};
+    std::array<MaskCache, kMaxBands> maskCache_ {};
+    std::array<bool, kMaxBands> engaged_ {};
+    std::array<ChannelPlacement, kMaxBands> oldPlacement_ {};
 };
 
 } // namespace APEX::ParametricEQ
