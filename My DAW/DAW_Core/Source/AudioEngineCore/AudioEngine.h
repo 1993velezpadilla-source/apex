@@ -1233,7 +1233,7 @@ private:
         return apex::automation::getNativeTrackVolumeGainRT(
             track.getNativeVolumeAutomationIDRT(), legacyGain,
             clock.captureInputPPQ(), clock.isTransportRollingRT(),
-            system.getRegistry(), system.getLaneStore(),
+            track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
             system.getModeState(), *range);
     }
 
