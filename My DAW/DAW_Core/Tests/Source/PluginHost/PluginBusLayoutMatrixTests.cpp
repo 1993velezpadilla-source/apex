@@ -2295,4 +2295,209 @@ public:
 
 static ExternalOpenSourceVST3ClipFxTests externalOpenSourceVST3ClipFxTests;
 
+/**
+ * Cross-category, REAL VST3 canary: EQ, dynamics and modulation in addition
+ * to the existing independent reverb/delay test. The APEX host handles these
+ * purely as AudioProcessors with automatable parameters; never by category,
+ * branded plugin name, or hard-coded knob index. The CI manifest is only for
+ * locating hash-pinned external test binaries.
+ */
+class ExternalOpenSourceVST3DiverseTypesTests final : public juce::UnitTest
+{
+public:
+    ExternalOpenSourceVST3DiverseTypesTests()
+        : juce::UnitTest("external-vst3.diverse-types-automation-roundtrip.v1",
+                         "ExternalVST3") {}
+
+    void runTest() override
+    {
+        const bool required = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_REQUIRED", "") == "1";
+        const juce::String categories[] = { "EQ", "Compressor", "Chorus" };
+        const juce::String envNames[] = {
+            "APEX_EXTERNAL_VST3_WETEQ",
+            "APEX_EXTERNAL_VST3_WETCOMPRESSOR",
+            "APEX_EXTERNAL_VST3_WETCHORUS"
+        };
+        juce::String paths[3];
+        for (int i = 0; i < 3; ++i)
+            paths[i] = juce::SystemStats::getEnvironmentVariable(envNames[i], "");
+
+        beginTest("three distinct effect categories available as real VST3 bundles");
+        for (int i = 0; i < 3; ++i)
+        {
+            if (paths[i].isEmpty())
+            {
+                if (required)
+                    expect(false, categories[i] + " VST3 missing from pinned CI manifest");
+                else
+                    logMessage("SKIP diverse VST3: run external-vst3-smoke workflow");
+                return;
+            }
+        }
+
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager manager;
+        manager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+        juce::VST3PluginFormat vst3;
+        juce::PluginDescription descriptions[3];
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const juce::File bundle(paths[i]);
+            expect(bundle.isDirectory(), categories[i] + " bundle missing");
+            if (!bundle.isDirectory()) return;
+            juce::OwnedArray<juce::PluginDescription> found;
+            try { vst3.findAllTypesForFile(found, bundle.getFullPathName()); }
+            catch (const std::exception& e)
+            {
+                expect(false, categories[i] + " enumeration exception: " + juce::String(e.what()));
+                return;
+            }
+            catch (...) { expect(false, categories[i] + " enumeration exception"); return; }
+            expect(!found.isEmpty(), categories[i] + " exposes a VST3 component");
+            if (found.isEmpty()) return;
+            descriptions[i] = *found.getFirst();
+            expectEquals(descriptions[i].pluginFormatName, juce::String("VST3"));
+            logMessage("External " + categories[i] + " component="
+                       + descriptions[i].name + " vendor="
+                       + descriptions[i].manufacturerName);
+        }
+
+        // Treat all three categories identically inside the production host.
+        // A failure in a new plugin type must not be masked by the old
+        // reverb/delay fixture passing on its own.
+        const DAW::ClipID clipId = "third_party_multi_category";
+        DAW::ClipRegionPluginCore chain;
+        chain.prepare(48000.0, 128);
+        juce::AudioProcessor* processors[3] = {nullptr, nullptr, nullptr};
+        juce::String instanceIds[3];
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto loaded = chain.loadForClip(clipId, descriptions[i], manager);
+            expect(loaded.success && loaded.instance != nullptr,
+                   categories[i] + " native load failed: " + loaded.message);
+            if (!loaded.success || loaded.instance == nullptr) return;
+            processors[i] = loaded.instance;
+        }
+        const auto loadedEntries = chain.getEntriesForClip(clipId);
+        expectEquals((int)loadedEntries.size(), 3);
+        if (loadedEntries.size() != 3) return;
+        for (int i = 0; i < 3; ++i)
+        {
+            instanceIds[i] = loadedEntries[(size_t)i].instanceId;
+            for (int j = 0; j < i; ++j)
+                expect(instanceIds[i] != instanceIds[j],
+                       "VST3 instances of different categories must have unique IDs");
+        }
+
+        beginTest("arbitrary automatable controls, no hard-coded parameter names");
+        int indices[3] = {-1, -1, -1};
+        float recorded[3] = {};
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto& params = processors[i]->getParameters();
+            int automatableCount = 0;
+            for (int j = 0; j < params.size(); ++j)
+                if (params[j] != nullptr && params[j]->isAutomatable()
+                    && !params[j]->isMetaParameter())
+                {
+                    ++automatableCount;
+                    if (indices[i] < 0) indices[i] = j;
+                }
+            expect(automatableCount >= 2,
+                   categories[i] + " should expose multiple independent automation targets");
+            if (indices[i] < 0) return;
+            auto* p = params[indices[i]];
+            const float previous = p->getValue();
+            const float requested = previous > 0.5f ? 0.15f : 0.85f;
+            const int steps = p->getNumSteps();
+            const float target = steps > 1 && steps <= 1000
+                ? std::round(requested * (float)(steps - 1)) / (float)(steps - 1)
+                : requested;
+            p->setValueNotifyingHost(target);
+            recorded[i] = p->getValue();
+            expect(std::isfinite(recorded[i])
+                   && std::abs(recorded[i] - previous) > 0.02f,
+                   categories[i] + " did not accept host-provided automation value");
+            logMessage(categories[i] + " parameter #" + juce::String(indices[i])
+                       + " name=" + p->getName(128) + " steps="
+                       + juce::String(steps) + " accepted=" + juce::String(recorded[i], 6));
+        }
+
+        beginTest("128-sample real processor chain accepts automation changes");
+        juce::AudioBuffer<float> audio(2, 128);
+        for (int block = 0; block < 3; ++block)
+        {
+            audio.clear();
+            audio.setSample(0, 0, 0.25f);
+            audio.setSample(1, 0, -0.25f);
+            chain.processClipBlock(clipId, audio, 128);
+            bool finite = true;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int s = 0; s < 128; ++s)
+                    finite = finite && std::isfinite(audio.getSample(ch, s));
+            expect(finite, "EQ/compressor/chorus DSP produced non-finite audio");
+        }
+
+        beginTest("cross-category opaque VST3 state round-trips via production project host");
+        juce::ValueTree state;
+        juce::String error;
+        expect(chain.captureProjectState(state, error), error);
+        expect(state.isValid());
+        if (!state.isValid()) return;
+        expectEquals(state.getNumChildren(), 1);
+        if (state.getNumChildren() != 1) return;
+        expectEquals(state.getChild(0).getNumChildren(), 3);
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto serialized = state.getChild(0).getChild(i);
+            expect(serialized.getChildWithName("State").getProperty("data")
+                   .toString().isNotEmpty(),
+                   categories[i] + " opaque state must be serializable");
+        }
+        const auto xml = state.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        const auto saved = juce::ValueTree::fromXml(*xml);
+        const auto exists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+
+        juce::AudioPluginFormatManager unavailable;
+        DAW::ClipRegionPluginCore missing;
+        missing.prepare(48000.0, 128);
+        expect(missing.restoreProjectState(saved, unavailable, exists, error), error);
+        juce::ValueTree preserved;
+        expect(missing.captureProjectState(preserved, error), error);
+        expectEquals(preserved.toXmlString(), saved.toXmlString(),
+                     "missing EQ/compressor/chorus binaries must preserve project bytes");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(48000.0, 128);
+        expect(reopened.restoreProjectState(preserved, manager, exists, error), error);
+        const auto entries = reopened.getEntriesForClip(clipId);
+        expectEquals((int)entries.size(), 3);
+        if (entries.size() == 3)
+            for (int i = 0; i < 3; ++i)
+            {
+                expectEquals(entries[(size_t)i].instanceId, instanceIds[i]);
+                const auto* entry = reopened.findEntryById(clipId, instanceIds[i]);
+                expect(entry != nullptr && entry->instance != nullptr,
+                       categories[i] + " failed to reopen");
+                if (entry != nullptr && entry->instance != nullptr)
+                {
+                    const auto& restoredParams = entry->instance->getParameters();
+                    expect(restoredParams.size() > indices[i],
+                           categories[i] + " changed parameter order");
+                    if (restoredParams.size() > indices[i])
+                        expectWithinAbsoluteError(
+                            restoredParams[indices[i]]->getValue(), recorded[i], 0.02f,
+                            categories[i] + " automation target did not survive reopening");
+                }
+            }
+        chain.releaseResources();
+        missing.releaseResources();
+        reopened.releaseResources();
+    }
+};
+static ExternalOpenSourceVST3DiverseTypesTests externalOpenSourceVST3DiverseTypesTests;
+
 } // namespace
