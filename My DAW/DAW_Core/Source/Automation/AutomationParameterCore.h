@@ -223,6 +223,36 @@ namespace apex::automation
             }
         }
 
+        // Hosted editor gestures arrive through AudioProcessorListener. Mirror
+        // their active state for Touch/Trim playback suppression and UI, but
+        // leave queue publication to AutomationGestureBridge exactly once.
+        // These atomic-only methods may be called from a plugin audio thread.
+        void beginHostedPluginGesture (float normalizedStart) noexcept
+        {
+            if (!std::isfinite (normalizedStart))
+                normalizedStart = getNormalizedValue();
+            const bool wasActive = gestureActive.exchange (true, std::memory_order_acq_rel);
+            if (!wasActive)
+            {
+                gestureBeginValueN.store (
+                    std::clamp (normalizedStart, 0.0f, 1.0f), std::memory_order_release);
+                gestureBeginPPQ.store (captureInputPPQ(), std::memory_order_release);
+                pendingGestureBegin.store (true, std::memory_order_release);
+                version.fetch_add (1, std::memory_order_acq_rel);
+            }
+        }
+
+        void endHostedPluginGesture() noexcept
+        {
+            const bool wasActive = gestureActive.exchange (false, std::memory_order_acq_rel);
+            if (wasActive)
+            {
+                gestureEndPPQ.store (captureInputPPQ(), std::memory_order_release);
+                pendingGestureEnd.store (true, std::memory_order_release);
+                version.fetch_add (1, std::memory_order_acq_rel);
+            }
+        }
+
         // ----- Plugin parameter bridge ------------------------------------
 
         void bindToPluginParameter (juce::AudioProcessorParameter* p) noexcept
