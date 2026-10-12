@@ -25,13 +25,14 @@ namespace apex::automation
         float fallbackGain,
         double blockPPQ,
         bool transportRolling,
+        bool automationMuted,
         const AutomationParameterRegistry& registry,
         const AutomationLaneStore& lanes,
         const AutomationModeState& modes,
         const DAW::FaderRangeCore& faderRange) noexcept
     {
         if (id == kInvalidParameterID || !transportRolling
-            || !std::isfinite(blockPPQ))
+            || automationMuted || !std::isfinite(blockPPQ))
             return fallbackGain;
 
         const auto mode = modes.getModeRT(id);
