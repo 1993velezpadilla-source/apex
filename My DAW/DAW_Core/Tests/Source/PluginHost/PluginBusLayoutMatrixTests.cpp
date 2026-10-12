@@ -2421,7 +2421,7 @@ public:
                    && std::abs(recorded[i] - previous) > 0.02f,
                    categories[i] + " did not accept host-provided automation value");
             logMessage(categories[i] + " parameter #" + juce::String(indices[i])
-                       + " "" + p->getName(128) + "" steps="
+                       + " name=" + p->getName(128) + " steps="
                        + juce::String(steps) + " accepted=" + juce::String(recorded[i], 6));
         }
 
