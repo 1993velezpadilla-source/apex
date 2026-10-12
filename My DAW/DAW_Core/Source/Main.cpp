@@ -30,6 +30,7 @@
 #include <cstring>
 #include <vector>
 #include <utility>
+#include <array>
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -1057,6 +1058,135 @@ public:
                     : "[APEX CI STARTUP] FAIL: real DAW window/component not ready");
 
                 setApplicationReturnValue (ready ? 0 : 1);
+                quit();
+            });
+        }
+
+
+        // ── Production MixerStrip automation UI action/persistence smoke ──
+        // This executes the real UICore/MixerPanel.h MixerStrip lifecycle
+        // inside the actual DAW executable, rather than testing only the
+        // pure enum cycle policy. It runs on JUCE's message thread AFTER
+        // the production MainComponent/window have initialized.
+        if (processArguments.contains ("--apex-ci-mixer-automation-ui"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                juce::String error;
+                try
+                {
+                    auto* component = mainWindow != nullptr
+                        ? mainWindow->getMainComponent() : nullptr;
+                    if (component == nullptr || mainWindow->getPeer() == nullptr)
+                    {
+                        error = "APEX production GUI was not initialized";
+                    }
+                    else
+                    {
+                        using Mode = apex::automation::AutomationMode;
+                        using Keys = apex::automation::AutomationParameterKeyRegistry;
+                        auto& keys = Keys::getInstance();
+                        auto& modes = apex::automation::AutomationModeState::getInstance();
+
+                        // A disposable track avoids touching any real
+                        // project/session or stealing another strip's native
+                        // parameter registration.
+                        DAW::Track track ("apex-ci-automation-mixer-ui",
+                                          "APEX Automation CI Strip");
+                        DAW::FaderRangeCore range;
+                        const auto trackID = track.getID();
+                        const auto volume = keys.getOrCreateID(Keys::trackVolumeKey(trackID));
+                        const auto pan = keys.getOrCreateID(Keys::trackPanKey(trackID));
+                        const auto mute = keys.getOrCreateID(Keys::trackMuteKey(trackID));
+                        const auto solo = keys.getOrCreateID(Keys::trackSoloKey(trackID));
+                        const auto sendLevel = keys.getOrCreateID(
+                            Keys::trackSendLevelKey(trackID, "ci-route"));
+                        const auto sendBypass = keys.getOrCreateID(
+                            Keys::trackSendBypassKey(trackID, "ci-route"));
+                        const auto plugin = keys.getOrCreateID(
+                            Keys::pluginParamKey(trackID, 0, "Synthetic VST3",
+                                                 "Cutoff", 86226));
+                        const auto foreign = keys.getOrCreateID(
+                            Keys::trackVolumeKey("apex-ci-foreign-track"));
+
+                        modes.setMode(volume, Mode::Off);
+                        modes.setMode(foreign, Mode::Trim);
+
+                        const std::array<Mode, 6> expected = {
+                            Mode::Read, Mode::Touch, Mode::Latch,
+                            Mode::Write, Mode::Trim, Mode::Off
+                        };
+                        const std::array<juce::String, 6> expectedLabels = {
+                            "READ", "TCH", "LTCH", "WRT", "TRIM", "OFF"
+                        };
+                        {
+                            DAW::MixerStrip strip (track, range);
+                            strip.setSize (105, 280);
+                            for (size_t i = 0; i < expected.size(); ++i)
+                            {
+                                // The visible button calls this SAME
+                                // production action in MixerPanel.h.
+                                strip.cycleAutomationMode();
+                                if (strip.getDisplayedAutomationMode() != expected[i]
+                                    || strip.getAutomationModeButtonLabel() != expectedLabels[i]
+                                    || modes.getMode(volume) != expected[i]
+                                    || modes.getMode(pan) != expected[i]
+                                    || modes.getMode(mute) != expected[i]
+                                    || modes.getMode(solo) != expected[i]
+                                    || modes.getMode(sendLevel) != expected[i]
+                                    || modes.getMode(sendBypass) != expected[i]
+                                    || modes.getMode(plugin) != expected[i])
+                                {
+                                    error = "mixer UI mode/broadcast mismatch at step "
+                                          + juce::String ((int) i);
+                                    break;
+                                }
+                                if (modes.getMode(foreign) != Mode::Trim)
+                                {
+                                    error = "mixer UI mode leaked to another track";
+                                    break;
+                                }
+                            }
+
+                            // A track property repaint must read the live
+                            // state, never revert to a stale cached button.
+                            if (error.isEmpty())
+                            {
+                                modes.setMode(volume, Mode::Latch);
+                                strip.trackPropertyChanged(&track);
+                                if (strip.getDisplayedAutomationMode() != Mode::Latch
+                                    || strip.getAutomationModeButtonLabel() != "LTCH")
+                                    error = "mixer strip displayed stale restored Latch mode";
+                            }
+                        }
+
+                        // Recreate the whole UI strip and verify its
+                        // persisted mode authority survived widget lifetime.
+                        if (error.isEmpty())
+                        {
+                            DAW::MixerStrip reopened (track, range);
+                            reopened.setSize (105, 280);
+                            if (reopened.getDisplayedAutomationMode() != Mode::Latch
+                                || reopened.getAutomationModeButtonLabel() != "LTCH"
+                                || modes.getMode(volume) != Mode::Latch)
+                                error = "reopened mixer strip lost Latch state";
+                        }
+                    }
+                }
+                catch (const std::exception& ex)
+                {
+                    error = "mixer automation UI exception: " + juce::String(ex.what());
+                }
+                catch (...)
+                {
+                    error = "unknown mixer automation UI exception";
+                }
+
+                const bool success = error.isEmpty();
+                juce::Logger::writeToLog(success
+                    ? "[APEX CI MIXER AUTOMATION UI] PASS: all modes, native/send/VST3 broadcast, isolation, repaint and strip rebind"
+                    : "[APEX CI MIXER AUTOMATION UI] FAIL: " + error);
+                setApplicationReturnValue(success ? 0 : 1);
                 quit();
             });
         }

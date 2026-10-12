@@ -477,12 +477,47 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 
     bool isFaderDragging() const noexcept { return draggingFader_; }
 
+    /** Authoritative, production mixer action, shared by the visible button
+        and keyboard/touch UI. Reads live mode state rather than stale paint
+        cache, and updates all track-native + hosted plugin parameter modes. */
+    void cycleAutomationMode()
+    {
+        const auto liveMode = volumeParameter_ != nullptr
+            ? apex::automation::AutomationModeState::getInstance().getMode(volumeParameter_->getID())
+            : currentAutoMode_;
+        setAutomationModeForTrack(nextAutoMode(liveMode));
+    }
+
+    void setAutomationModeForTrack(apex::automation::AutomationMode mode)
+    {
+        currentAutoMode_ = mode;
+        broadcastModeToAllTrackParameters(mode);
+        autoModeBtn_.label = automationModeLabel(mode);
+        autoModeBtn_.active = mode != apex::automation::AutomationMode::Off;
+        autoModeBtn_.repaint();
+    }
+
+    apex::automation::AutomationMode getDisplayedAutomationMode() const noexcept
+    {
+        return currentAutoMode_;
+    }
+
+    juce::String getAutomationModeButtonLabel() const
+    {
+        return autoModeBtn_.label;
+    }
+
     void trackPropertyChanged(Track*) override
     {
         label_.setText(track_.getName(), juce::dontSendNotification);
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
         armBtn_.active  = track_.isArmed();
+        // External mode changes may have occurred via project restore or
+        // another control; never repaint an outdated cached mode label.
+        currentAutoMode_ = volumeParameter_ != nullptr
+            ? apex::automation::AutomationModeState::getInstance().getMode(volumeParameter_->getID())
+            : apex::automation::AutomationModeState::getInstance().getGlobalDefaultMode();
         autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
         autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
         panKnob_.value  = track_.getPan();
@@ -2632,19 +2667,7 @@ private:
                                        track_.setRecordMode(TrackRecordMode::PostFader);
                                });
         };
-        autoModeBtn_.onClick = [this]
-        {
-            // Mode may have changed via session restore or another control.
-            // Advance from authoritative state, not a stale display cache.
-            const auto liveMode = volumeParameter_ != nullptr
-                ? apex::automation::AutomationModeState::getInstance().getMode (volumeParameter_->getID())
-                : currentAutoMode_;
-            currentAutoMode_ = nextAutoMode (liveMode);
-            autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
-            autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
-            broadcastModeToAllTrackParameters (currentAutoMode_);
-            autoModeBtn_.repaint();
-        };
+        autoModeBtn_.onClick = [this] { cycleAutomationMode(); };
 inputBtn_.onClick = [this]
         {
             inputBtn_.active = false;

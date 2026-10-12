@@ -22,7 +22,8 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
 # is touched by the CI-only persistence probe.
 $smokes = @(
     @{ Flag = '--apex-ci-launch-smoke'; Label = 'real GUI startup' },
-    @{ Flag = '--apex-ci-project-roundtrip'; Label = 'real project new/save/new/load' }
+    @{ Flag = '--apex-ci-project-roundtrip'; Label = 'real project new/save/new/load' },
+    @{ Flag = '--apex-ci-mixer-automation-ui'; Label = 'real MixerStrip automation mode and broadcast UI' }
 )
 
 foreach ($smoke in $smokes) {
