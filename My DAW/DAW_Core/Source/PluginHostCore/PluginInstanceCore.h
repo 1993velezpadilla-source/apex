@@ -1776,6 +1776,104 @@ public:
         }
     }
 
+    /** Earliest sample offset of a discrete breakpoint inside the supplied
+        callback range (or maxSamples if there is none). Called on the audio
+        thread. Only reads precomputed bindings and immutable published lane
+        snapshots; no heap work or locks. Sandboxed plugins preserve their
+        fixed-quantum worker contract and are never split here. */
+    int samplesUntilNextDiscreteBreakpoint(const TrackID& trackId,
+                                           const AutomationSnapshot* automationSnap,
+                                           int64_t samplePosition,
+                                           double sampleRate,
+                                           double bpm,
+                                           int maxSamples) noexcept
+    {
+        if (plugin_ == nullptr || maxSamples <= 1 || sampleRate <= 0.0
+            || bpm <= 0.0 || trackId != trackId_
+            || rtAutomationBindings_.size() < (size_t) parameterInfos_.size())
+            return maxSamples;
+
+        const auto scale = bpm / (60.0 * sampleRate);
+        const auto ppqAtSample = [scale](int64_t sample) noexcept
+        { return static_cast<double>(sample) * scale; };
+        const double startPPQ = ppqAtSample(samplePosition);
+        const double lastPPQ = ppqAtSample(samplePosition + maxSamples - 1);
+        auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
+        auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
+        const auto keyGeneration = keyRegistry.getChangeGeneration();
+        int best = maxSamples;
+
+        for (int i = 0; i < parameterInfos_.size(); ++i)
+        {
+            const auto& info = parameterInfos_.getReference(i);
+            if (! info.isDiscrete)
+                continue;
+            auto& binding = rtAutomationBindings_[(size_t)i];
+            if (binding.keyGeneration != keyGeneration)
+            {
+                binding.apexPid = keyRegistry.findIDRT(binding.apexKey);
+                binding.bridgePid = keyRegistry.findIDRT(binding.bridgeKey);
+                binding.keyGeneration = keyGeneration;
+            }
+
+            if (automationSnap != nullptr)
+                if (const auto* legacy = automationSnap->findLaneRT(trackId, binding.coreParamId))
+                    if (legacy->enabled && ! legacy->points.empty())
+                    {
+                        const auto next = std::upper_bound(
+                            legacy->points.begin(), legacy->points.end(), samplePosition,
+                            [](int64_t sample, const AutomationPoint& point) noexcept
+                            { return sample < point.timeSamples; });
+                        if (next != legacy->points.end()
+                            && next->timeSamples < samplePosition + best)
+                        {
+                            const auto offset = next->timeSamples - samplePosition;
+                            if (offset >= 1)
+                                best = juce::jmin(best, static_cast<int>(offset));
+                        }
+                    }
+
+            const auto considerPPQ = [&](apex::automation::ParameterID id) noexcept
+            {
+                if (id == apex::automation::kInvalidParameterID)
+                    return;
+                auto lane = laneStore.findLaneRT(id);
+                if (lane == nullptr)
+                    return;
+                auto points = lane->getSnapshot();
+                if (points == nullptr || points->empty())
+                    return;
+
+                const auto next = std::upper_bound(
+                    points->begin(), points->end(), startPPQ,
+                    [](double ppq, const apex::automation::Breakpoint& point) noexcept
+                    { return ppq < point.timePPQ; });
+                if (next == points->end() || next->timePPQ > lastPPQ)
+                    return;
+                // Match computeCanonicalTarget's floating-point PPQ position
+                // at integer samples, including knots that land exactly on a
+                // sample boundary. Never round a transition to an earlier sample.
+                const auto raw = (next->timePPQ - startPPQ) / scale;
+                if (! std::isfinite(raw) || raw >= static_cast<double>(best))
+                    return;
+                int candidate = juce::jlimit(1, best, static_cast<int>(std::ceil(raw)));
+                while (candidate > 1
+                    && ppqAtSample(samplePosition + candidate - 1) >= next->timePPQ)
+                    --candidate;
+                while (candidate < best
+                    && ppqAtSample(samplePosition + candidate) < next->timePPQ)
+                    ++candidate;
+                if (candidate < best)
+                    best = candidate;
+            };
+            considerPPQ(binding.apexPid);
+            considerPPQ(binding.bridgePid);
+            if (best <= 1)
+                break;
+        }
+        return best;
+    }
+
     /** Returns true when a plugin parameter's automation changes (or its
         smoother is still converging) during this host block. The audio engine
         uses this to subdivide only blocks that need finer automation timing;
