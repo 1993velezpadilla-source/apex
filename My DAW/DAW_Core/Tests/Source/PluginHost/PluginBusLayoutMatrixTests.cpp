@@ -1215,6 +1215,7 @@ public:
         testTouchGestureOverridesLiveDsp();
         testPluginGestureRecordsAndAudiblyPlaysBack();
         testInProcessPpqLaneSurvivesSessionReopen();
+        testInProcessLatchWriteHoldAndStop();
         testDiscreteParameterSwitchesAtBlockBoundary();
         testDiscreteApexPpqLanesHoldUntilExactKnot();
         testReorderKeepsInstanceValues();
@@ -1692,6 +1693,124 @@ private:
         system.onAudioBlockStart(0.0, 1.0 / 24000.0, false);
         lanes.removeLane(newId);
         system.setMode(newId, Mode::Read);
+    }
+
+    void testInProcessLatchWriteHoldAndStop()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto& recorder = apex::automation::AutomationRecorder::getInstance();
+        auto& clock = sys.getClock();
+        auto& lanes = sys.getLaneStore();
+        auto& modes = sys.getModeState();
+        constexpr double ppqPerSample = 1.0 / 24000.0;
+
+        // Both modes must keep the manually selected processor value audible
+        // AFTER the editor releases it; Stop must commit the held value and
+        // unlock normal Read playback. The entire flow uses the production
+        // in-process host + plugin callbacks + recorder + DSP.
+        for (const auto mode : {Mode::Latch, Mode::Write})
+        {
+            const bool latch = mode == Mode::Latch;
+            beginTest(latch
+                ? "in-process Latch: gesture release keeps DSP value until Stop"
+                : "in-process Write: gesture release keeps DSP value until Stop");
+            const juce::String track = latch
+                ? "apex-e2e-latch-hosted-20261012"
+                : "apex-e2e-write-hosted-20261012";
+
+            DAW::PluginChainCore chain;
+            chain.prepare(kRate, 128);
+            auto spec = *makeSpecForUid(kUidStereo);
+            spec.parameterControlsGain = true;
+            auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+            probe->quietLogging.store(true, std::memory_order_relaxed);
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+            chain.setAutomationContext(track, nullptr, nullptr);
+            auto* slot = chain.getSlot(0);
+            if (slot == nullptr) { expect(false, "plugin slot"); continue; }
+            auto* pluginParameter = slot->getProcessor()->getParameters()[0];
+            const auto key = KR::pluginParamKey(
+                track, 0, slot->getName(), "param0", kUidStereo);
+            const auto id = KR::getInstance().findID(key);
+            if (id == apex::automation::kInvalidParameterID)
+            {
+                expect(false, "stable hosted parameter identity");
+                continue;
+            }
+
+            // Establish a transport/arm epoch with an empty queue. A stopped
+            // knob movement must not sneak into the next recorded pass.
+            clock.publishFromAudioThread(0.0, ppqPerSample, false);
+            recorder.drainForTests();
+            sys.armRecording(false);
+            recorder.drainForTests();
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.2f, Curve::Hold, 0.0f},
+                {4.0, 0.2f, Curve::Hold, 0.0f}
+            });
+            sys.setMode(id, mode);
+            sys.armRecording(true);
+            clock.publishFromAudioThread(0.5, ppqPerSample, true);
+            recorder.drainForTests();
+
+            clock.publishFromAudioThread(1.0, ppqPerSample, true);
+            pluginParameter->beginChangeGesture();
+            clock.publishFromAudioThread(1.25, ppqPerSample, true);
+            pluginParameter->setValueNotifyingHost(0.85f);
+            clock.publishFromAudioThread(1.5, ppqPerSample, true);
+            pluginParameter->endChangeGesture();
+            recorder.drainForTests();
+
+            expect(modes.latchHeldRT(id),
+                "released editor retains value until transport Stop");
+            juce::AudioBuffer<float> audio(2, 128);
+            auto render = [&](double ppq)
+            {
+                const auto sample = static_cast<int64_t>(ppq * 24000.0);
+                for (int block = 0; block < 96; ++block)
+                {
+                    chain.applyAutomationAtSample(
+                        track, nullptr, sample, kRate, 120.0, 128);
+                    fillTonePair(audio, 128, 0.5f, 0.5f);
+                    chain.processBlock(audio, 128);
+                }
+                return audio.getSample(0, 127);
+            };
+            expectWithinAbsoluteError(render(2.5), 0.425f, 0.006f,
+                "released plugin editor value is DSP-authoritative, not stale Read lane");
+
+            // Stop is both the last write point and the authority handoff:
+            // after Stop the old curve may resume outside the write range.
+            clock.publishFromAudioThread(3.0, ppqPerSample, false);
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Stop clears held plugin gesture");
+            const auto newLane = lanes.findLane(id);
+            expect(newLane != nullptr, "recorder committed held automation");
+            if (newLane != nullptr)
+            {
+                const auto snap = newLane->getSnapshot();
+                if (snap != nullptr)
+                {
+                    expectWithinAbsoluteError(
+                        apex::automation::AutomationLane::evaluateAt(*snap, 2.5),
+                        0.85f, 0.006f, "sustained value persisted through Stop");
+                }
+            }
+
+            // The committed take is now ordinary Read playback.
+            sys.setMode(id, Mode::Read);
+            expectWithinAbsoluteError(render(2.5), 0.425f, 0.006f,
+                "committed Latch/Write take replays through processor DSP");
+            expectWithinAbsoluteError(render(5.0), 0.1f, 0.006f,
+                "outside overwritten region original automation still plays");
+            lanes.removeLane(id);
+            sys.setMode(id, Mode::Read);
+            sys.armRecording(false);
+            recorder.drainForTests();
+        }
     }
 
     void testReorderKeepsInstanceValues()
