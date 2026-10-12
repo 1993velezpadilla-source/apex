@@ -49,7 +49,7 @@ public:
             title.setJustificationType(juce::Justification::centred);
             title.setColour(juce::Label::textColourId,
                             juce::Colour::fromRGB(224,214,228));
-            title.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+            title.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
             addAndMakeVisible(title);
 
             auto* bound=&parameter(parameterIds[i]);
@@ -103,7 +103,7 @@ public:
             label->setColour(juce::Label::textColourId, juce::Colours::white);
             addAndMakeVisible(*label);
         }
-        pitchLabel_.setFont(juce::Font(juce::FontOptions(34.0f, juce::Font::bold)));
+        pitchLabel_.setFont(juce::Font(juce::FontOptions(34.0f).withStyle("Bold")));
         pitchLabel_.setColour(juce::Label::textColourId,
                               juce::Colour::fromRGB(250,205,151));
         pitchCaption_.setFont(juce::Font(juce::FontOptions(14.0f)));
