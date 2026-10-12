@@ -70,6 +70,33 @@ public:
         masterTrack.restoreState(modifiedMasterSave);
         expect(!masterTrack.isPolarityInverted());
 
+        beginTest ("smoothed polarity has no hard sign switch at block entry");
+        juce::AudioBuffer<float> smoothBuffer(2, 128);
+        DAW::TrackPolarityCore::TransitionState transition;
+        smoothBuffer.clear();
+        for (int channel = 0; channel < 2; ++channel)
+            for (int sample = 0; sample < 128; ++sample)
+                smoothBuffer.setSample(channel, sample, 0.5f);
+
+        DAW::TrackPolarityCore::applyWithTransition(smoothBuffer, 128, true, transition);
+        expect(std::abs(smoothBuffer.getSample(0, 0) - 0.5f) < 0.02f,
+               "first inverted frame preserves continuity from +0.5 signal");
+        expectWithinAbsoluteError(smoothBuffer.getSample(0, 63), -0.5f, 0.000001f);
+        expectWithinAbsoluteError(smoothBuffer.getSample(1, 64), -0.5f, 0.000001f);
+        expectWithinAbsoluteError(smoothBuffer.getSample(0, 0),
+                                  smoothBuffer.getSample(1, 0), 0.000001f);
+        expectEquals(transition.remainingSamples, 0);
+        expectWithinAbsoluteError(transition.currentGain, -1.0f, 0.000001f);
+
+        // Sample-exact post-transition sign is crucial to multi-mic nulling.
+        smoothBuffer.clear();
+        for (int channel = 0; channel < 2; ++channel)
+            for (int sample = 0; sample < 128; ++sample)
+                smoothBuffer.setSample(channel, sample, 0.5f);
+        DAW::TrackPolarityCore::applyWithTransition(smoothBuffer, 128, true, transition);
+        expectWithinAbsoluteError(smoothBuffer.getSample(0, 0), -0.5f, 0.000001f);
+        expectWithinAbsoluteError(smoothBuffer.getSample(1, 127), -0.5f, 0.000001f);
+
         beginTest ("two identical signals cancel when just one reverses polarity");
         juce::AudioBuffer<float> reference(2, 4), second(2, 4);
         for (int channel = 0; channel < 2; ++channel)
