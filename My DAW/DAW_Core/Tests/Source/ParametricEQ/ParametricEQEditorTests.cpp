@@ -70,6 +70,7 @@ public:
         testLongPressCreatesBand();
         testSketchGestureCreatesBands();
         testSpectrumGrabAndTouchToBand();
+        testNativeBandCopyPasteAcrossInstances();
         testPhaseSelectorDrivesCanonicalParameter();
     }
 
@@ -432,6 +433,75 @@ private:
             "initial resonance cut starts at -3 dB");
         expectEquals (juce::String ("GRAB"), grab.getButtonText(),
                       "one-shot preview automatically disarms");
+    }
+
+
+    void testNativeBandCopyPasteAcrossInstances()
+    {
+        beginTest ("APEX copy/paste transfers full native band to another EQ "
+                   "instance without mutating the source or parameter ABI");
+        auto sourceStorage = std::make_unique<Processor>();
+        auto destinationStorage = std::make_unique<Processor>();
+        auto& source = *sourceStorage;
+        auto& destination = *destinationStorage;
+        enableBell (source, 0, 2400.0f, -6.5f, 3.2f);
+        setUnits (source, placementParameterIndex (0), 4.0f);
+        setUnits (source, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (source, dynamicParameterIndex (
+            0, DynamicBandOffset::Range), -4.0f);
+        setUnits (source, dynamicFilterParameterIndex (0), 1.0f);
+        source.prepareToPlay (48000.0, 256);
+        destination.prepareToPlay (48000.0, 256);
+        auto sourceEditor = std::make_unique<ParametricEQEditor> (source);
+        auto targetEditor = std::make_unique<ParametricEQEditor> (destination);
+        sourceEditor->setSize (320, 568);
+        targetEditor->setSize (320, 568);
+        sourceEditor->setSelectedBandForTesting (0);
+
+        auto& copy = sourceEditor->getCopyButtonForTesting();
+        auto& paste = targetEditor->getPasteButtonForTesting();
+        const auto sourceGraph = sourceEditor->getGraphBoundsForTesting();
+        const auto targetGraph = targetEditor->getGraphBoundsForTesting();
+        expect (copy.getBounds().getHeight() >= 44
+                && paste.getBounds().getHeight() >= 44,
+                "clipboard controls are touch-safe");
+        expect (copy.getRight() <= sourceGraph.getWidth()
+                && paste.getRight() <= targetGraph.getWidth(),
+                "clipboard controls fit on narrow phones");
+
+        juce::MessageManager::getInstance();
+        copy.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        paste.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (destination.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Enabled))->getBool(),
+            "paste enabled a new band in another native EQ instance");
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                ->getUnitsValue()), 2400.0, 1.0);
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                ->getUnitsValue()), -6.5, 0.05);
+        expectEquals (destination.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 4);
+        expect (destination.getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool());
+        expect (destination.getParametricEQParameter (
+            dynamicFilterParameterIndex (0))->getBool());
+        expectWithinAbsoluteError (static_cast<double> (
+            destination.getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range))
+                ->getUnitsValue()), -4.0, 0.1);
+        expectEquals (targetEditor->getSelectedBandForTesting(), 0);
+        // Source and destination are independent native processor instances.
+        expectWithinAbsoluteError (static_cast<double> (
+            source.getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                ->getUnitsValue()), -6.5, 0.05);
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()
