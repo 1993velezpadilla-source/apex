@@ -575,7 +575,8 @@ public:
 
         // A fatal process crash during plugin create/prepare leaves a durable
         // suspect marker for next launch; normal returns clear it via RAII.
-        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(desc, "plugin_chain_append");
+        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(
+            desc, "plugin_chain_append", trackId_, static_cast<int>(slots_.size()));
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_append");
         auto instance = std::move(safeLoad.instance);
@@ -799,7 +800,8 @@ private:
                 + " plugin=\"" + desc.name + "\""
                 + " format=\"" + desc.pluginFormatName + "\"");
 
-        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(desc, "plugin_chain_load");
+        PluginLoadRecoveryCore::ScopedAttempt loadRecoveryGuard(
+            desc, "plugin_chain_load", trackId_, slotIndex);
         auto safeLoad = PluginSafeLoadWrapperCore::createPluginInstance(
             formatManager, desc, sampleRate_, blockSize_, "plugin_chain_load");
         auto instance = std::move(safeLoad.instance);
@@ -1869,7 +1871,8 @@ public:
             // their original indices and continue to load normally.
             if (executionMode == PluginExecutionMode::InProcess
                 && explicitRecoverySkip != nullptr
-                && PluginLoadRecoveryCore::mayBeSamePlugin(*explicitRecoverySkip, desc))
+                && PluginLoadRecoveryCore::mayBeSameSlot(
+                    *explicitRecoverySkip, desc, trackId_, index))
             {
                 const int deferredIndex = static_cast<int>(slots_.size());
                 slots_.push_back(nullptr);
