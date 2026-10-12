@@ -633,6 +633,11 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
                 rebindNativeControls (t);
             rebindNativeControls (subs_.tracks->getMasterTrack());
         }
+        // A saved KeyRegistry can change ParameterID assignments. Folder
+        // lineage snapshots cache ancestor IDs, so republish after rebinding
+        // before the audio engine resumes processing.
+        if (subs_.appCore != nullptr)
+            subs_.appCore->rebuildFolderBusSnapshot();
         if (subs_.appCore != nullptr)
         {
             // Routing and persistent lane keys now exist. Recreate the
