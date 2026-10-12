@@ -245,6 +245,51 @@ public:
             expect(maxAbs < 1.0f, "no overshoot");
         }
 
+        beginTest("MixerPolaritySwitchAffectsRealRoutedAudioWithoutTouchingSource");
+        {
+            EngineHarness h;
+            auto* track = h.addTrack("Snare Bottom");
+            track->setArmed(true);
+
+            juce::AudioBuffer<float> input(1, 512);
+            for (int sample = 0; sample < 512; ++sample)
+                input.setSample(0, sample, 0.5f);
+
+            auto captureStereo = [&h, &input]()
+            {
+                juce::AudioBuffer<float> output(2, 512);
+                // The production volume/mute paths can ramp; use steady state.
+                for (int block = 0; block < 6; ++block)
+                {
+                    h.engine.setLiveInputBuffer(&input, 512, 1);
+                    h.processInto(output);
+                }
+                return std::pair<float, float> { output.getSample(0, 256),
+                                                 output.getSample(1, 256) };
+            };
+
+            const auto normal = captureStereo();
+            expect(normal.first > 0.2f, "normal signal is audible");
+            expect(std::abs(normal.first - normal.second) < 0.002f,
+                   "normal mono input centered L/R");
+
+            track->setPolarityInverted(true);
+            const auto inverted = captureStereo();
+            expect(inverted.first < -0.2f, "actual routed left channel inverted");
+            expect(inverted.second < -0.2f, "actual routed right channel inverted");
+            expect(std::abs(normal.first + inverted.first) < 0.02f,
+                   "normal + inverted left audio cancels");
+            expect(std::abs(normal.second + inverted.second) < 0.02f,
+                   "normal + inverted right audio cancels");
+
+            track->setPolarityInverted(false);
+            const auto restored = captureStereo();
+            expect(std::abs(normal.first - restored.first) < 0.02f,
+                   "turning Ø off restores actual left audio");
+            expect(std::abs(normal.second - restored.second) < 0.02f,
+                   "turning Ø off restores actual right audio");
+        }
+
         beginTest("ImportedStereoPlaybackUnaffected");
         {
             // CONTRACT UNDER TEST (spec): the Mono-1 recording-input default
