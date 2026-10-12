@@ -3870,3 +3870,51 @@ public:
     }
 };
 static AutomationLaneRestoreBatchTests automationLaneRestoreBatchTests;
+
+// Legacy projects without ModeState must not inherit Write/Latch from the
+// previously opened song. All structural mode edits remain RT-published.
+class AutomationLegacyModeRestoreTests final : public juce::UnitTest
+{
+public:
+    AutomationLegacyModeRestoreTests()
+        : juce::UnitTest("automation.legacy-mode-restore-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        auto& keys = AutomationParameterKeyRegistry::getInstance();
+        const juce::String key("test.legacy-mode-restore.parameter");
+        const auto id = keys.getOrCreateID(key);
+        AutomationModeState modes;
+        modes.setMode(id, AutomationMode::Write);
+        modes.setGlobalDefaultMode(AutomationMode::Off);
+
+        beginTest("missing ModeState discards old Write override and Off default");
+        const auto oldRT = modes.getStateSnapshotRT();
+        modes.restoreState(juce::ValueTree{});
+        expectEquals((int) modes.getGlobalDefaultMode(), (int) AutomationMode::Read);
+        expectEquals((int) modes.getModeRT(id), (int) AutomationMode::Read);
+        expect(oldRT != nullptr);
+        expect(modes.getStateSnapshotRT() != oldRT);
+
+        beginTest("saved Latch override and default round-trip by key");
+        juce::ValueTree saved("ModeState");
+        saved.setProperty("globalDefault", (int) AutomationMode::Off, nullptr);
+        juce::ValueTree entry("Mode");
+        entry.setProperty("key", key, nullptr);
+        entry.setProperty("mode", (int) AutomationMode::Latch, nullptr);
+        saved.addChild(entry, -1, nullptr);
+        modes.restoreState(saved);
+        expectEquals((int) modes.getGlobalDefaultMode(), (int) AutomationMode::Off);
+        expectEquals((int) modes.getModeRT(id), (int) AutomationMode::Latch);
+
+        beginTest("valid but empty legacy mode tree resets previous overrides");
+        modes.restoreState(juce::ValueTree("ModeState"));
+        expectEquals((int) modes.getGlobalDefaultMode(), (int) AutomationMode::Read);
+        expectEquals((int) modes.getModeRT(id), (int) AutomationMode::Read);
+        modes.setMode(id, AutomationMode::Touch);
+        expectEquals((int) modes.getModeRT(id), (int) AutomationMode::Touch);
+    }
+};
+static AutomationLegacyModeRestoreTests automationLegacyModeRestoreTests;
