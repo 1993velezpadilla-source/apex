@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <vector>
 
@@ -46,15 +47,17 @@ public:
     /** TRUE FORMAT SWITCH — changes audio gain ceiling, taper, and all geometry. */
     void setRange(Range r)
     {
-        if (r == range_) return;
-        range_ = r;
+        if (r == range_.load(std::memory_order_acquire)) return;
+        // The DSP audio thread reads the fader taper. Publish format changes
+        // atomically so changing +6/+12 cannot race its volume conversion.
+        range_.store(r, std::memory_order_release);
         listeners_.call([](Listener& l) { l.faderRangeChanged(); });
     }
 
-    Range getRange()   const noexcept { return range_; }
+    Range getRange()   const noexcept { return range_.load(std::memory_order_acquire); }
 
     /** Maximum boost dB for this format (+6 or +12). */
-    float getMaxDb()   const noexcept { return range_ == Range::Plus12 ? 12.0f : 6.0f; }
+    float getMaxDb()   const noexcept { return getRange() == Range::Plus12 ? 12.0f : 6.0f; }
 
     /** Minimum dB — effective silence floor, format-agnostic. */
     float getMinDb()   const noexcept { return -96.0f; }
@@ -62,10 +65,10 @@ public:
     /** Normalized position [0..1] where 0 dB (unity) sits on the taper.
      *  +6 format: 0.88 (unity sits high — more resolution below)
      *  +12 format: 0.75 (unity sits lower — SSL-style headroom above) */
-    float getUnityNorm() const noexcept { return range_ == Range::Plus12 ? 0.75f : 0.88f; }
+    float getUnityNorm() const noexcept { return getRange() == Range::Plus12 ? 0.75f : 0.88f; }
 
     /** Power exponent for below-unity taper. Higher = more resolution near unity. */
-    float getTaperExponent() const noexcept { return range_ == Range::Plus12 ? 2.2f : 2.5f; }
+    float getTaperExponent() const noexcept { return getRange() == Range::Plus12 ? 2.2f : 2.5f; }
 
     // ── SINGLE SOURCE OF TRUTH: dB ↔ normalized position (0=bottom, 1=top) ──
     //
@@ -245,7 +248,7 @@ public:
     juce::ValueTree toValueTree() const
     {
         juce::ValueTree vt("FaderRange");
-        vt.setProperty("range", range_ == Range::Plus12 ? "plus12" : "plus6", nullptr);
+        vt.setProperty("range", getRange() == Range::Plus12 ? "plus12" : "plus6", nullptr);
         return vt;
     }
     /** Load format BEFORE any strips paint. Unknown/missing property defaults to Plus6. */
@@ -265,7 +268,7 @@ public:
     static FaderRangeCore* getGlobalInstance() noexcept { return sGlobal_; }
 
 private:
-    Range range_ { Range::Plus6 };   // default +6 — spec requires Plus6 as default
+    std::atomic<Range> range_ { Range::Plus6 };   // default +6 — spec requires Plus6 as default
     juce::ListenerList<Listener> listeners_;
 
     static inline FaderRangeCore* sGlobal_ = nullptr;
