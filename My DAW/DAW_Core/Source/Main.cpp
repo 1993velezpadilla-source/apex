@@ -21,6 +21,9 @@
 #include "PluginSandboxCore/PluginWorkerMainCore.h"
 #include "Benchmark/TimelineBenchmarkController.h"
 #include "ThemeCore/ApexPrimitives.h"
+#include "Automation/AutomationLaneStoreCore.h"
+#include "Automation/AutomationModeStateCore.h"
+#include "Automation/AutomationParameterKeyCore.h"
 #include "UICore/CursorThemeCore.h"
 
 #include <cmath>
@@ -1084,33 +1087,97 @@ public:
                     {
                         auto& projects = component->getAppCore().getProjectManager();
 
+                        // Put real, non-empty APEX automation into the
+                        // production .dawproj. The earlier startup probe only
+                        // tested an empty project and could miss an automation
+                        // serialization/restore regression.
+                        constexpr auto automationKey =
+                            "ci.apex.production.roundtrip.automation";
+                        auto& keyRegistry =
+                            apex::automation::AutomationParameterKeyRegistry::getInstance();
+                        auto& laneStore =
+                            apex::automation::AutomationLaneStore::getInstance();
+                        auto& modeState =
+                            apex::automation::AutomationModeState::getInstance();
+
                         if (! projects.newProject())
                             error = "newProject failed: " + projects.getLastLoadError();
-                        else if (! projects.saveToFile (temporary))
-                            error = "saveToFile failed: " + projects.getLastSaveError();
-                        else if (! temporary.existsAsFile()
-                                 || temporary.getSize() <= 0)
-                            error = "saved .dawproj file was empty or missing";
                         else
                         {
-                            auto xml = juce::XmlDocument::parse (temporary);
-                            if (xml == nullptr || ! xml->hasTagName ("DAWProject"))
-                                error = "saved .dawproj XML has no valid DAWProject root";
-                            else if (! projects.newProject())
-                                error = "second newProject failed: " + projects.getLastLoadError();
-                            else if (! projects.loadFromFile (temporary))
-                                error = "loadFromFile failed: " + projects.getLastLoadError();
-                            else if (projects.getProjectFile() != temporary
-                                     || projects.getProjectName()
-                                          != temporary.getFileNameWithoutExtension())
-                                error = "reloaded project identity did not match saved file";
-                            else if (mainWindow == nullptr
-                                     || mainWindow->getMainComponent() == nullptr
-                                     || mainWindow->getMainComponent()->getWidth() <= 0
-                                     || mainWindow->getMainComponent()->getHeight() <= 0)
-                                error = "MainComponent invalid after project restore";
+                            const auto id = keyRegistry.getOrCreateID (automationKey);
+                            laneStore.getOrCreateLane (id).replacePoints ({
+                                { 0.25, 0.15f, apex::automation::CurveType::Linear, 0.0f },
+                                { 1.50, 0.77f, apex::automation::CurveType::Smooth, 0.35f },
+                                { 2.50, 0.30f, apex::automation::CurveType::Hold, 0.0f }
+                            });
+                            modeState.setMode (id, apex::automation::AutomationMode::Touch);
+
+                            if (! projects.saveToFile (temporary))
+                                error = "saveToFile failed: " + projects.getLastSaveError();
+                            else if (! temporary.existsAsFile()
+                                     || temporary.getSize() <= 0)
+                                error = "saved .dawproj file was empty or missing";
                             else
-                                success = true;
+                            {
+                                auto xml = juce::XmlDocument::parse (temporary);
+                                if (xml == nullptr || ! xml->hasTagName ("DAWProject"))
+                                    error = "saved .dawproj XML has no valid DAWProject root";
+                                else
+                                {
+                                    auto saved = juce::ValueTree::fromXml (*xml);
+                                    auto automationState = saved.getChildWithName ("APEXAutomation");
+                                    if (! automationState.isValid()
+                                        || ! automationState.getChildWithName ("KeyRegistry").isValid()
+                                        || ! automationState.getChildWithName ("ModeState").isValid()
+                                        || ! automationState.getChildWithName ("Lane").isValid())
+                                        error = "saved XML dropped automation lane, key or mode";
+                                    else if (! projects.newProject())
+                                        error = "second newProject failed: "
+                                            + projects.getLastLoadError();
+                                    else if (laneStore.findLane (id) != nullptr)
+                                        error = "newProject retained old song automation";
+                                    else if (! projects.loadFromFile (temporary))
+                                        error = "loadFromFile failed: "
+                                            + projects.getLastLoadError();
+                                    else if (projects.getProjectFile() != temporary
+                                             || projects.getProjectName()
+                                                 != temporary.getFileNameWithoutExtension())
+                                        error = "reloaded project identity did not match saved file";
+                                    else if (mainWindow == nullptr
+                                             || mainWindow->getMainComponent() == nullptr
+                                             || mainWindow->getMainComponent()->getWidth() <= 0
+                                             || mainWindow->getMainComponent()->getHeight() <= 0)
+                                        error = "MainComponent invalid after project restore";
+                                    else
+                                    {
+                                        // Use the restored KEY rather than assuming
+                                        // numeric ParameterIDs stay the same.
+                                        const auto restoredID = keyRegistry.findID (automationKey);
+                                        const auto restoredLane =
+                                            restoredID != apex::automation::kInvalidParameterID
+                                                ? laneStore.findLane (restoredID) : nullptr;
+                                        const auto points = restoredLane != nullptr
+                                            ? restoredLane->getSnapshot() : nullptr;
+                                        if (points == nullptr || points->size() != 3)
+                                            error = "automation points missing after real project reload";
+                                        else if (std::abs ((*points)[0].timePPQ - 0.25) > 1.0e-9
+                                            || std::abs ((*points)[0].normalizedValue - 0.15f) > 1.0e-6f
+                                            || std::abs ((*points)[1].timePPQ - 1.50) > 1.0e-9
+                                            || std::abs ((*points)[1].normalizedValue - 0.77f) > 1.0e-6f
+                                            || (*points)[1].curveType != apex::automation::CurveType::Smooth
+                                            || std::abs ((*points)[1].curveTension - 0.35f) > 1.0e-6f
+                                            || std::abs ((*points)[2].timePPQ - 2.50) > 1.0e-9
+                                            || std::abs ((*points)[2].normalizedValue - 0.30f) > 1.0e-6f
+                                            || (*points)[2].curveType != apex::automation::CurveType::Hold)
+                                            error = "automation PPQ, value, curve or tension changed during reload";
+                                        else if (modeState.getMode (restoredID)
+                                                 != apex::automation::AutomationMode::Touch)
+                                            error = "Touch automation mode not restored from project";
+                                        else
+                                            success = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
