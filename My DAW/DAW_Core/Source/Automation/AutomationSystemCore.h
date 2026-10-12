@@ -53,6 +53,16 @@ namespace apex::automation
                                      transportRolling);
         }
 
+        /** Offline bounce has its own PPQ timeline. Evaluate saved lanes at
+            the export position without publishing a synthetic Play transition
+            into the live clock consumed by the gesture recorder and UI.
+            The audio renderer and plugin chains receive export sample/PPQ
+            explicitly; this is only the block-rate parameter mirror. */
+        void onOfflineBlockStart (double exportPPQAtBlockStart) noexcept
+        {
+            evaluator.evaluateBlock (exportPPQAtBlockStart, true);
+        }
+
         // ----- Native parameter registration ----------------------------
 
         AutomationParameter* createNativeParameter (ParameterID    id,
