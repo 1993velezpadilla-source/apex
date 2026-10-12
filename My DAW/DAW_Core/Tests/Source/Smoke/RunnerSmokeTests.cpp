@@ -66,7 +66,7 @@ public:
         expect(!masterTrack.isPolarityInverted());
 
         auto modifiedMasterSave = saved.createCopy();
-        modifiedMasterSave.setProperty(DAW::IDs::IS_MASTER, true, nullptr);
+        modifiedMasterSave.setProperty(juce::Identifier("isMaster"), true, nullptr);
         masterTrack.restoreState(modifiedMasterSave);
         expect(!masterTrack.isPolarityInverted());
 
