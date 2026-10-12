@@ -1,54 +1,88 @@
-# Mixer Ø / polarity — engineering and acceptance
+# APEX Mixer Ø — implementation and acceptance
 
-## What is implemented on PR #64
-- A dedicated **Ø** toggle appears on regular tracks and bus/folder-bus mixer
-  strips, alongside the automation-mode control. It is not offered on Master.
-- A track-local atomic polarity state is persisted to the project state as
-  `polarityInverted`. Legacy projects default to OFF.
-- Realtime `TrackPolarityCore::apply` negates each audio sample on each existing
-  channel if enabled, after the track/bus plugin chain, before pre- and
-  post-fader sends, the post-fader recording tap, and output routing.
-- The flat graph-free fallback invokes the same processor.
-- A polarity change preserves timeline/clip positions and does not time-stretch,
-  move, offset, or change the stored source waveform.
+## Status — merged into `main` on 2026-10-12
 
-## Terminology
-A polarity inversion multiplies an audio waveform by -1. It is **not**
-a frequency-dependent phase rotation or a time-alignment operation. It can
-cancel an identical, otherwise unaltered parallel signal; it cannot generally
-repair a multi-mic timing offset by itself.
+**The mixer polarity-inversion implementation is complete and merged.**
+Source branches were merged in dependency order: #73 (pre-fader send
+correctness) → #72 (de-click ramp) → #64 (original Ø and complete integration)
+→ `main`, final merge commit `18379b8b5ecc2fe1cff8ebb6044ef3cb1d71b952`.
 
-## Deterministic regressions added
-- `Tests/Source/Smoke/RunnerSmokeTests.cpp`: bypass transparency, stereo
-  inversion/reversibility, mono, matched-signal cancellation, persistence,
-  legacy OFF fallback, and the Master guard.
-- `Tests/Source/QuickTrack/TrackCreationInputTests.cpp`: actual
-  `AudioEngine::process` live mono input through the routed stereo mix,
-  verifying normal → inverted → restored output after settling.
+The final merged **source tree** was verified byte-for-byte identical by its
+Git tree hash (`824a5508014cee215c4705f66fe2bc32b276b60a`) to the
+head of #73, which passed the full Windows **Debug and Release** gauntlet
+in https://github.com/1993velezpadilla-source/apex/actions/runs/38293491934.
 
-## Remaining release gates (not certified by repository policy CI)
-1. Windows x64 Debug and Release app + test binary build.
-2. Focused real-engine test run with zero failures, including the tests above.
-3. Manual mixer hit target and feedback under small strip sizes/high-DPI.
-4. ASIO live input, monitoring and actual audible A/B click behavior at
-   48 kHz / 128 frames.
-5. Regular track, mono, stereo, folder bus, aux/bus, sends, sidechain routing,
-   post-fader recording, offline stem export, project close/reopen,
-   audio-loop playback, and plugin-chain/PDC integration.
-6. If toggling Ø mid-signal clicks, add a dedicated transition de-click method
-   without RT allocation and then rerun null/cancellation regressions.
+The `main` post-merge build/tests are triggered at
+https://github.com/1993velezpadilla-source/apex/actions/runs/38298522439
+and must be reviewed before publishing a final combined product installer.
+This document records the distinction between **merged/CI verified** and
+**manually audited on ASIO hardware**.
 
-## Further professional phase tools: **not implemented**
-- Manual **sample delay** per route to align earlier microphone channels
-  with later arrivals (with validated PDC and offline-render parity).
-- Phase-correlation metering and explicit mono compatibility preview.
-- Automatic alignment **suggestions** from time-windowed cross-correlation,
-  with bounded search, confidence scores and manual audition/approval.
-- Frequency-dependent all-pass phase rotation is a separate DSP design.
+## Implemented production behavior
 
-Avoid pretending the polarity toggle itself performs any of these operations.
+- Dedicated **Ø** mixer button on track, bus and folder-bus strips;
+  Master may display the cell but cannot change polarity.
+- Track-local atomic `polarityInverted` state, serialized into project
+  state; older sessions default to **OFF**.
+- Per-track, audio-thread-owned transition state retargets on user toggle,
+  smoothly ramping +1 → −1 or −1 → +1 across **64 samples**, including
+  across multiple callbacks and mid-ramp reversals.
+- No extra latency, heap allocation or blocking on the ramp path. Stereo
+  channels follow the **same gain curve**; after the ramp the gain is exactly
+  ±1 so deterministic null cancellation is preserved.
+- Polarity executes after inserts, before pre/post sends and route fanout.
+  Bus and flat-fallback processing use the same semantics.
+- Routing fix: a **PreSend is mixed only once**, by the dedicated pre-fader
+  tap, and not duplicated by the post-fader fanout.
+- Changing polarity never alters clip/sample positions or source media.
 
-## Research sources
+## Passed automated acceptance
+
+- Isolated C++17 polarity DSP tests on **Windows MSVC and Linux GCC**,
+  including stereo and mono inversion/reversion, null cancellation, buffer
+  boundaries, bounded transition, transition reversals and exact settled
+  gain.
+- Real Windows JUCE Debug and Release builds of `DAW_Core.exe` and test
+  runner; focused persistence, legacy-OFF, Master guard and null tests.
+- Real production `AudioEngine::process` tests of source on/off
+  inversion, de-click first-sample transition, and routed sends/bus Ø.
+- Pre-fader routing verifies the pre-send output level remains unchanged
+  when the source fader changes; verifies two inversions through source
+  and bus restore the signal.
+- Both Windows configurations published unsigned binaries and test
+  evidence (no hardware audio output was tested by GitHub CI).
+
+Full test runs:
+- #64: https://github.com/1993velezpadilla-source/apex/actions/runs/38289550442
+- #72: https://github.com/1993velezpadilla-source/apex/actions/runs/38292583943
+- #73: https://github.com/1993velezpadilla-source/apex/actions/runs/38293491934
+
+## Manual release qualification — explicitly **not yet verified**
+
+The feature may be tested as a **Windows beta**. A production-ready,
+signed APEX release still requires operator signoff for:
+
+1. Physical ASIO/Apollo Solo playback and live input at 48 kHz / 128
+   samples: listen for clicks at repeated mid-signal Ø toggles.
+2. Mixer touch/high-DPI layout, hover/pressed state and narrow-strip
+   hit targets.
+3. Multichannel sidechains, aux/folder hierarchy, PDC with plugins,
+   post-fader recording taps and offline stems/export parity.
+4. Close/reopen a representative session with multiple sends, mixed
+   mono/stereo tracks, plugins, and older projects.
+5. Merge/reconcile the **separate automation/VST3/Bubblegum** branch
+   stack so a later product build contains all features together.
+
+## Terminology / out of scope
+
+Ø **polarity inversion** negates waveform samples. The optional short
+click-reducing transition does not perform time alignment or spectral phase
+rotation. Frequency-dependent all-pass rotation, sample offset alignment,
+automatic mic alignment and correlation visualization are **separate,
+unimplemented** features.
+
+## Further reading
+
 - Sound On Sound, Mike Senior, *Phase Demystified* (2008):
   https://www.soundonsound.com/techniques/phase-demystified
 - Sound On Sound, Sam Inglis, *Making Multi-mic Recordings Work* (2020):
