@@ -10,6 +10,7 @@
 #include "../../../Source/Automation/AutomationClockCore.h"
 #include "../../../Source/Automation/AutomationRecorderCore.h"
 #include "../../../Source/Automation/AutomationGestureBridgeCore.h"
+#include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -3211,3 +3212,89 @@ public:
 };
 static AutomationDispatcherReentrantRegistryTests
     automationDispatcherReentrantRegistryTests;
+
+/**
+    MixerPanel::rebuildStrips() destroys and recreates every MixerStrip (e.g.
+    reorder, folder collapse, or presentation change). The former
+    AutomationSystem::removeNativeParameter erased the PROJECT lane and mode
+    whenever the last GUI registration detached. The next strip appeared
+    without its recorded fader envelope: a user-visible data-loss bug.
+
+    This pins the same register -> detach -> register lifecycle used by real
+    MixerStrip, without requiring a synthetic track delete.
+*/
+class AutomationMixerStripRebindPersistenceTests final : public juce::UnitTest
+{
+public:
+    AutomationMixerStripRebindPersistenceTests()
+        : juce::UnitTest("automation.mixer-strip-rebind-preserves-lanes.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        auto& system = AutomationSystem::getInstance();
+        auto& keys = AutomationParameterKeyRegistry::getInstance();
+        auto& lanes = system.getLaneStore();
+        auto& modes = system.getModeState();
+
+        const auto id = keys.getOrCreateID(
+            keys.trackVolumeKey("APEX_CI_STRIP_REBIND"));
+        beginTest("attach production native mixer parameter");
+        auto* first = system.createNativeParameter(
+            id, "CI Mixer Volume", ParameterRange{});
+        expect(first != nullptr, "native parameter exists");
+        if (first == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.25, 0.12f, CurveType::Linear, 0.0f},
+            {1.00, 0.70f, CurveType::Smooth, 0.35f},
+            {2.50, 0.40f, CurveType::Hold, 0.0f}
+        });
+        modes.setMode(id, AutomationMode::Touch);
+
+        beginTest("closing/rebuilding mixer strip never erases project data");
+        system.removeNativeParameter(id);
+        expect(system.getRegistry().find(id) == nullptr,
+               "the UI-facing native parameter actually detached");
+        auto savedLane = lanes.findLane(id);
+        expect(savedLane != nullptr,
+               "persistent project lane survives mixer strip destruction");
+        expectEquals(static_cast<int>(modes.getMode(id)),
+                     static_cast<int>(AutomationMode::Touch),
+                     "Touch mode survives parameter detachment");
+        if (savedLane == nullptr) return;
+
+        auto savedPoints = savedLane->getSnapshot();
+        expect(savedPoints != nullptr && savedPoints->size() == 3,
+               "all breakpoints survive UI rebuild");
+        if (savedPoints == nullptr || savedPoints->size() != 3) return;
+        expectWithinAbsoluteError((*savedPoints)[1].normalizedValue,
+                                  0.70f, 1.0e-6f);
+        expectEquals(static_cast<int>((*savedPoints)[1].curveType),
+                     static_cast<int>(CurveType::Smooth));
+
+        beginTest("rebuilt strip rebinds to the original lane and mode");
+        auto* rebound = system.createNativeParameter(
+            id, "CI Mixer Volume Rebound", ParameterRange{});
+        expect(rebound != nullptr,
+               "recreated native mixer parameter registered");
+        expect(lanes.findLane(id) == savedLane,
+               "lane identity and recorded points are retained across rebind");
+        expectEquals(static_cast<int>(modes.getMode(id)),
+                     static_cast<int>(AutomationMode::Touch));
+
+        // Explicit project/track teardown, unlike widget destruction, owns
+        // lane/mode deletion. Release test-owned global state deterministically.
+        system.removeNativeParameter(id);
+        lanes.removeLane(id);
+        modes.clearOverride(id);
+        expect(lanes.findLane(id) == nullptr,
+               "explicit removal deletes lane when requested");
+        expectEquals(static_cast<int>(modes.getMode(id)),
+                     static_cast<int>(modes.getGlobalDefaultMode()),
+                     "explicit mode cleanup returns to the global default");
+    }
+};
+static AutomationMixerStripRebindPersistenceTests
+    automationMixerStripRebindPersistenceTests;
