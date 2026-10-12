@@ -1,0 +1,52 @@
+name: Polarity core (portable C++17)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/polarity-core.yml'
+      - 'My DAW/DAW_Core/Source/TrackCore/TrackPolarityCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/TrackPolarityPortableTests.cpp'
+  pull_request:
+    paths:
+      - '.github/workflows/polarity-core.yml'
+      - 'My DAW/DAW_Core/Source/TrackCore/TrackPolarityCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/TrackPolarityPortableTests.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  polarity-portable:
+    name: Native polarity DSP / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux C++17 compiler and deterministic production-core test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            'My DAW/DAW_Core/Tests/Portable/TrackPolarityPortableTests.cpp' \
+            -o /tmp/apex-polarity-portable
+          /tmp/apex-polarity-portable
+
+      - name: Configure Windows x64 MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Windows C++17 compiler and deterministic production-core test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-polarity-portable.exe "My DAW/DAW_Core/Tests/Portable/TrackPolarityPortableTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC polarity compilation failed" }
+          ./apex-polarity-portable.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC polarity test failed" }

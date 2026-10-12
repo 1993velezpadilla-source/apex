@@ -245,6 +245,149 @@ public:
             expect(maxAbs < 1.0f, "no overshoot");
         }
 
+        beginTest("MixerPolaritySwitchAffectsRealRoutedAudioWithoutTouchingSource");
+        {
+            EngineHarness h;
+            auto* track = h.addTrack("Snare Bottom");
+            track->setArmed(true);
+
+            juce::AudioBuffer<float> input(1, 512);
+            for (int sample = 0; sample < 512; ++sample)
+                input.setSample(0, sample, 0.5f);
+
+            auto captureStereo = [&h, &input]()
+            {
+                juce::AudioBuffer<float> output(2, 512);
+                // The production volume/mute paths can ramp; use steady state.
+                for (int block = 0; block < 6; ++block)
+                {
+                    h.engine.setLiveInputBuffer(&input, 512, 1);
+                    h.processInto(output);
+                }
+                return std::pair<float, float> { output.getSample(0, 256),
+                                                 output.getSample(1, 256) };
+            };
+
+            const auto normal = captureStereo();
+            expect(normal.first > 0.2f, "normal signal is audible");
+            expect(std::abs(normal.first - normal.second) < 0.002f,
+                   "normal mono input centered L/R");
+
+            track->setPolarityInverted(true);
+            // A real AudioEngine callback starts its 64-sample transition at
+            // the previously established output gain; no +/-1 sign jump.
+            juce::AudioBuffer<float> transition(2, 512);
+            h.engine.setLiveInputBuffer(&input, 512, 1);
+            h.processInto(transition);
+            expect(std::abs(transition.getSample(0, 0) - normal.first) < 0.08f,
+                   "real routed gain ramps continuously at first inverted sample");
+            expect(transition.getSample(0, 100) < -0.2f,
+                   "real routed gain has settled negative by sample 100");
+            expect(std::abs(transition.getSample(0, 0)
+                            - transition.getSample(1, 0)) < 0.002f,
+                   "same transition gain is applied to both output channels");
+
+            const auto inverted = captureStereo();
+            expect(inverted.first < -0.2f, "actual routed left channel inverted");
+            expect(inverted.second < -0.2f, "actual routed right channel inverted");
+            expect(std::abs(normal.first + inverted.first) < 0.02f,
+                   "normal + inverted left audio cancels");
+            expect(std::abs(normal.second + inverted.second) < 0.02f,
+                   "normal + inverted right audio cancels");
+
+            track->setPolarityInverted(false);
+            h.engine.setLiveInputBuffer(&input, 512, 1);
+            h.processInto(transition);
+            expect(std::abs(transition.getSample(0, 0) - inverted.first) < 0.08f,
+                   "real routed gain ramps continuously when Ø is turned off");
+            expect(transition.getSample(0, 100) > 0.2f,
+                   "real routed gain has settled positive by sample 100");
+
+            const auto restored = captureStereo();
+            expect(std::abs(normal.first - restored.first) < 0.02f,
+                   "turning Ø off restores actual left audio");
+            expect(std::abs(normal.second - restored.second) < 0.02f,
+                   "turning Ø off restores actual right audio");
+        }
+
+        beginTest("PreFaderSendIsSingleTapAndPolarityFeedsBus");
+        {
+            EngineHarness h;
+            auto* source = h.addTrack("Snare Top");
+            source->setArmed(true);
+            auto* sourceNode = h.graph.getNodeByTrackId(source->getID());
+
+            auto* returnTrack = h.tracks.createTrack("Snare Parallel Bus");
+            returnTrack->setRole(TrackRole::Bus);
+            auto* returnNode = h.graph.addNode("Snare Parallel Bus",
+                                                RoutingNodeType::Bus,
+                                                returnTrack->getID());
+            expect(sourceNode != nullptr && returnNode != nullptr,
+                   "source and bus have routed graph nodes");
+
+            if (sourceNode != nullptr && returnNode != nullptr)
+            {
+                // Isolate one PreSend path. The pre-fader tap must not be
+                // emitted again by the post-fader fanout.
+                const auto removed = h.graph.disconnect(
+                    sourceNode->id, "master", ConnectionType::Direct);
+                auto* preSend = h.graph.connect(
+                    sourceNode->id, returnNode->id, ConnectionType::PreSend);
+                expect(removed, "track direct-master edge removed for send-only test");
+                expect(preSend != nullptr, "pre-fader send to bus connected");
+
+                juce::AudioBuffer<float> input(1, 512);
+                for (int sample = 0; sample < 512; ++sample)
+                    input.setSample(0, sample, 0.5f);
+
+                auto capture = [&]()
+                {
+                    juce::AudioBuffer<float> output(2, 512);
+                    for (int block = 0; block < 8; ++block)
+                    {
+                        h.engine.setLiveInputBuffer(&input, 512, 1);
+                        h.processInto(output);
+                    }
+                    return std::pair<float, float> {
+                        output.getSample(0, 256), output.getSample(1, 256) };
+                };
+
+                source->setVolume(0.1f);
+                const auto sendLowFader = capture();
+                expect(sendLowFader.first > 0.1f,
+                       "real PreSend reaches bus and master with low source fader");
+                expect(std::abs(sendLowFader.first - sendLowFader.second) < 0.005f,
+                       "pre-fader send remains stereo centered");
+
+                source->setVolume(1.0f);
+                const auto sendHighFader = capture();
+                expect(std::abs(sendLowFader.first - sendHighFader.first) < 0.02f,
+                       "one pre-fader send is independent of source fader (no post-fader duplicate)");
+                expect(std::abs(sendLowFader.second - sendHighFader.second) < 0.02f,
+                       "right channel has no duplicate post-fader send");
+
+                source->setPolarityInverted(true);
+                const auto invertedSource = capture();
+                expect(invertedSource.first < -0.1f && invertedSource.second < -0.1f,
+                       "Ø on source affects the pre-fader send after its transition");
+                expect(std::abs(sendHighFader.first + invertedSource.first) < 0.02f,
+                       "inverted source send cancels its normal pre-fader signal");
+
+                returnTrack->setPolarityInverted(true);
+                const auto invertedBoth = capture();
+                expect(invertedBoth.first > 0.1f && invertedBoth.second > 0.1f,
+                       "independent Ø on bus restores positive sign");
+                expect(std::abs(sendHighFader.first - invertedBoth.first) < 0.02f,
+                       "inverting source and bus twice preserves magnitude");
+
+                source->setPolarityInverted(false);
+                returnTrack->setPolarityInverted(false);
+                const auto restored = capture();
+                expect(std::abs(restored.first - sendHighFader.first) < 0.02f,
+                       "restored bus and source preserve normal routed audio");
+            }
+        }
+
         beginTest("ImportedStereoPlaybackUnaffected");
         {
             // CONTRACT UNDER TEST (spec): the Mono-1 recording-input default

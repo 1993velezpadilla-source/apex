@@ -2497,6 +2497,9 @@ private:
             }
         }
 
+        // Ø runs after hosted inserts and before both send taps and fader.
+        track->applyPolarityTo(trackBuf, numSamples);
+
         // Volume and pan
         auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
         float trackVolume = track->getVolume();
@@ -2638,7 +2641,10 @@ private:
             if (edge.sourceNodeId != nodeMeta->id) continue;
             logExportRouteIfNeeded(logRoutesThisBlock, edge);
             if (!edge.active || edge.bypassed) continue;
-            if (edge.type == ConnectionType::Sidechain)
+            // PreSend was already mixed once before the fader. Never
+            // duplicate it in the post-fader fanout.
+            if (edge.type == ConnectionType::PreSend
+                || edge.type == ConnectionType::Sidechain)
                 continue;
             if (!isStemProgrammeEdgeAllowed(edge)) continue;
 
@@ -2793,6 +2799,10 @@ private:
                     transport_ ? transport_->getTempo() : 120.0, numSamples);
             }
         }
+
+        // Independent bus Ø polarity, applied after bus insert processing.
+        if (busTrack != nullptr)
+            busTrack->applyPolarityTo(nodeBuf, numSamples);
 
         // Bus mute — snapshot-aware
         float busGain = busTrack ? busTrack->getVolume() : 1.0f;
@@ -2990,6 +3000,9 @@ private:
                 if (it != chainsSnap->end() && it->second)
                     it->second->processBlock(trackBuffer_, numSamples);
             }
+
+            // Preserve the same Ø contract in graph-free fallback processing.
+            track->applyPolarityTo(trackBuffer_, numSamples);
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
             volumeRamp.setTargetVolume(resolveNativeFaderGainRT(*track, track->getVolume()));
