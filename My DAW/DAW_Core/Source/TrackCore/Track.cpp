@@ -193,7 +193,7 @@ void Track::restoreState(const juce::ValueTree& state)
     name_ = state.getProperty(IDs::NAME, "Untitled Track");
     muted_.store((bool)state.getProperty(IDs::MUTED, false), std::memory_order_relaxed);
     soloed_.store((bool)state.getProperty(IDs::SOLOED, false), std::memory_order_relaxed);
-    polarityInverted_.store(!isMaster_ && (bool) state.getProperty("polarityInverted", false), std::memory_order_relaxed);
+    polarityInverted_.store((bool) state.getProperty("polarityInverted", false), std::memory_order_relaxed);
     armed_.store((bool)state.getProperty(IDs::ARMED, false), std::memory_order_relaxed);
     const int savedRecordMode = (int) state.getProperty("recordMode", (int) TrackRecordMode::Dry);
     recordMode_.store(savedRecordMode == (int) TrackRecordMode::PostFader
@@ -237,6 +237,8 @@ void Track::restoreState(const juce::ValueTree& state)
     quickRoleId_ = state.getProperty("quickRoleId", "").toString();
     parentTrackID_ = state.getProperty(IDs::PARENT_TRACK_ID, "");
     isMaster_ = state.getProperty(IDs::IS_MASTER, false);
+    if (isMaster_)
+        polarityInverted_.store(false, std::memory_order_relaxed);
 
     if (state.hasProperty("inputMonitorMode"))
         monitoringState_.setMode((InputMonitorMode)(int) state.getProperty("inputMonitorMode", (int) InputMonitorMode::Off));
