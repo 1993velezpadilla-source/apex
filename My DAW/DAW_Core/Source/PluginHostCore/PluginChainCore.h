@@ -862,6 +862,9 @@ private:
             return false;
         }
 
+        // A successful explicit reload replaces any deferred saved state
+        // while the original persisted record remains intact until now.
+        deferredRecoverySlots_.erase(slotIndex);
         // Retire the old plugin at this slot (if any)
         if (slotIndex >= 0 && slotIndex < (int)slots_.size() && slots_[slotIndex])
         {
@@ -918,7 +921,19 @@ public:
     void removePlugin(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= (int)slots_.size()) return;
-        if (!slots_[slotIndex]) return;
+        if (!slots_[slotIndex])
+        {
+            // An opt-in recovery placeholder has no native processor, but
+            // occupies a real position in the signal chain and must be
+            // removable without hanging project clear/new-project.
+            slots_.erase(slots_.begin() + slotIndex);
+            bypassCores_.erase(bypassCores_.begin() + slotIndex);
+            shiftRecoverySlotsAfterErase(slotIndex);
+            publishSnapshot();
+            refreshAutomationContexts();
+            notifyChanged();
+            return;
+        }
 
         removeSlotAutomation (slotIndex);
 
@@ -928,6 +943,7 @@ public:
         retireBypassCore(std::move(bypassCores_[slotIndex]));
         slots_.erase(slots_.begin() + slotIndex);
         bypassCores_.erase(bypassCores_.begin() + slotIndex);
+        shiftRecoverySlotsAfterErase(slotIndex);
 
         // Recompute the scratch capacity for the reduced slot set on this
         // message thread (capacity only ever grows — shrinking is avoided by
@@ -1016,6 +1032,11 @@ public:
             movedBindings.emplace(index >= 0 && index < n ? oldToNew[(size_t)index] : index,
                                   std::move(binding));
         slotAutomationBindings_.swap(movedBindings);
+        decltype(deferredRecoverySlots_) movedRecoverySlots;
+        for (auto& [index, tree] : deferredRecoverySlots_)
+            movedRecoverySlots.emplace(index >= 0 && index < n ? oldToNew[(size_t) index] : index,
+                                        std::move(tree));
+        deferredRecoverySlots_.swap(movedRecoverySlots);
         const auto remapBusConfig = [&](auto& config)
         {
             std::decay_t<decltype(config)> next;
@@ -1688,6 +1709,20 @@ public:
         return false;
     }
 
+    /** True if this slot was deliberately NOT instantiated by opt-in
+        recovery restore. The complete original Slot metadata/opaque state is
+        retained for save, later user inspection and explicit retry. */
+    bool isRecoveryDeferredSlot(int slotIndex) const noexcept
+    {
+        return deferredRecoverySlots_.find(slotIndex) != deferredRecoverySlots_.end();
+    }
+
+    juce::ValueTree getRecoveryDeferredSlot(int slotIndex) const
+    {
+        auto it = deferredRecoverySlots_.find(slotIndex);
+        return it == deferredRecoverySlots_.end() ? juce::ValueTree() : it->second.createCopy();
+    }
+
     /** Result-bearing control-plane project snapshot.  The worker state
         capture is completed before the returned tree is considered valid. */
     bool captureStateForPersistence(juce::ValueTree& state,
@@ -1700,7 +1735,17 @@ public:
         for (int i = 0; i < (int)slots_.size(); ++i)
         {
             auto* plugin = slots_[i].get();
-            if (!plugin) continue;
+            if (!plugin)
+            {
+                if (auto it = deferredRecoverySlots_.find(i);
+                    it != deferredRecoverySlots_.end())
+                {
+                    auto deferred = it->second.createCopy();
+                    deferred.setProperty("index", i, nullptr);
+                    state.addChild(deferred, -1, nullptr);
+                }
+                continue;
+            }
 
             juce::ValueTree slot("Slot");
             slot.setProperty("index", i, nullptr);
@@ -1765,15 +1810,17 @@ public:
         publisher instead of being silently discarded. */
     bool restoreState(const juce::ValueTree& chain,
                       juce::AudioPluginFormatManager& formatManager,
-                      juce::String& restoreError)
+                      juce::String& restoreError,
+                      const PluginLoadRecoveryCore::Attempt* explicitRecoverySkip = nullptr)
     {
         restoreError.clear();
         bool allSlotsRestored = true;
         setChainOutputMix((float) chain.getProperty("chainOutputMixNormalized", 1.0f));
 
-        // Clear existing chain
+        // Clear existing chain, including previously deferred placeholders.
         while (!slots_.empty())
             removePlugin(0);
+        deferredRecoverySlots_.clear();
 
         for (int i = 0; i < chain.getNumChildren(); ++i)
         {
@@ -1812,6 +1859,28 @@ public:
                         " slotIndex=" + juce::String(index)
                         + " plugin=\"" + desc.name + "\""
                         + " error=\"" + modeError + "\"");
+                continue;
+            }
+
+            // Explicit opt-in only: never blacklist based on a stale
+            // marker. Preserve the entire original serialized Slot (opaque
+            // plugin state, bypass, layout and stable instance ID) while
+            // substituting a null/bypassed DSP position. Later plugins keep
+            // their original indices and continue to load normally.
+            if (executionMode == PluginExecutionMode::InProcess
+                && explicitRecoverySkip != nullptr
+                && PluginLoadRecoveryCore::mayBeSamePlugin(*explicitRecoverySkip, desc))
+            {
+                const int deferredIndex = static_cast<int>(slots_.size());
+                slots_.push_back(nullptr);
+                bypassCores_.push_back(nullptr);
+                deferredRecoverySlots_.emplace(deferredIndex, slot.createCopy());
+                PluginScanAuditLogCore::appendLine(
+                    "plugin_ui_flow.log",
+                    "PluginChainCore::restoreState safely deferred suspect plugin"
+                        " slotIndex=" + juce::String(deferredIndex)
+                        + " plugin=\"" + desc.name + "\""
+                        + " format=" + desc.pluginFormatName);
                 continue;
             }
 
@@ -1984,6 +2053,18 @@ private:
     // Message-thread canonical state (UI reads/writes this directly)
     std::vector<std::shared_ptr<PluginInstanceCore>> slots_;
     std::vector<std::unique_ptr<BypassCrossfadeCore>> bypassCores_;
+    // Control thread only. Placeholder entries retain their complete saved
+    // Slot, including vendor state bytes, without ever loading native DLLs.
+    std::unordered_map<int, juce::ValueTree> deferredRecoverySlots_;
+
+    void shiftRecoverySlotsAfterErase(int erasedIndex)
+    {
+        decltype(deferredRecoverySlots_) shifted;
+        for (auto& [index, tree] : deferredRecoverySlots_)
+            if (index != erasedIndex)
+                shifted.emplace(index > erasedIndex ? index - 1 : index, std::move(tree));
+        deferredRecoverySlots_.swap(shifted);
+    }
 
     // Published snapshot — swapped atomically between message and audio threads.
     // Audio thread loads this once at block start and processes the stable list.
