@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <algorithm>
 #include "../StateCore/ApplicationState.h"
 #include "../TransportCore/TransportController.h"
 #include "../TrackCore/Track.h"
@@ -210,6 +211,31 @@ public:
         if (trackManager_->hasMasterTrack())
             publishAncestors(trackManager_->getMasterTrack());
 
+        // Leaf Solo admits itself and ancestor buses. FolderBus Solo also
+        // admits descendants. All of this is prepared on the message thread.
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+        {
+            const auto* source = trackManager_->getTrack(i);
+            if (source == nullptr || source->isMaster()) continue;
+            const auto index = snap.soloSources.size();
+            snap.soloSources.push_back({
+                source->getNativeSoloAutomationIDRT(),
+                source->isSoloed(),
+                source->isAutomationMuted()
+            });
+            const auto allow = [&snap, index] (const TrackID& id)
+            {
+                auto& indices = snap.soloAudibleSourceIndices[id];
+                if (std::find(indices.begin(), indices.end(), index) == indices.end())
+                    indices.push_back(index);
+            };
+            allow(source->getID());
+            for (const auto& id : folderBus_.getAncestorChain(source->getID()))
+                allow(id);
+            if (folderBus_.isFolderBus(source->getID()))
+                for (const auto& id : folderBus_.getAllDescendants(source->getID()))
+                    allow(id);
+        }
         folderBusStateModel_.update(std::move(snap));
     }
 

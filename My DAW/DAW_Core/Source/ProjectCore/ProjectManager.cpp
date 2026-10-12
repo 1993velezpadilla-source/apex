@@ -628,6 +628,8 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
                     keys.getOrCreateID (Keys::trackPanKey (t->getID())));
                 t->bindNativeMuteAutomationID (
                     keys.getOrCreateID (Keys::trackMuteKey (t->getID())));
+                t->bindNativeSoloAutomationID (
+                    keys.getOrCreateID (Keys::trackSoloKey (t->getID())));
             };
             for (auto* t : subs_.tracks->getAllTracks())
                 rebindNativeControls (t);

@@ -102,6 +102,14 @@ public:
     {
         nativeMuteAutomationID_.store(id, std::memory_order_release);
     }
+    apex::automation::ParameterID getNativeSoloAutomationIDRT() const noexcept
+    {
+        return nativeSoloAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativeSoloAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativeSoloAutomationID_.store(id, std::memory_order_release);
+    }
     void setVolume(float newVolume);
     
     float getPan() const { return pan_.load(std::memory_order_relaxed); }
@@ -293,6 +301,7 @@ private:
     std::atomic<apex::automation::ParameterID> nativeVolumeAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<apex::automation::ParameterID> nativePanAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<apex::automation::ParameterID> nativeMuteAutomationID_ { apex::automation::kInvalidParameterID };
+    std::atomic<apex::automation::ParameterID> nativeSoloAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
     std::atomic<bool> automationVisible_{false};
     std::atomic<bool> automationMuted_{false};

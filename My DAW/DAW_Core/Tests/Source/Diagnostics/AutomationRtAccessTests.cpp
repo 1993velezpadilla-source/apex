@@ -14,6 +14,7 @@
 #include "../../../Source/Automation/AutomationTrackVolumePlaybackCore.h"
 #include "../../../Source/Automation/AutomationTrackPanPlaybackCore.h"
 #include "../../../Source/Automation/AutomationTrackMutePlaybackCore.h"
+#include "../../../Source/Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
 #include <array>
 #include <atomic>
@@ -3604,3 +3605,89 @@ public:
     }
 };
 static AutomationNativeMuteAudioPlaybackTests automationNativeMuteAudioPlaybackTests;
+
+/** Native Solo must gate routed tracks and preserve ancestor FolderBus audio. */
+class AutomationNativeSoloAudioPlaybackTests final : public juce::UnitTest
+{
+public:
+    AutomationNativeSoloAudioPlaybackTests()
+        : juce::UnitTest("automation.native-solo-folder-routing.v1",
+                         "APEX.Diagnostics") {}
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        constexpr ParameterID leaf = 77041, bus = 77042;
+        auto* p = registry.createParameter(leaf, "Solo leaf", {});
+        expect(p != nullptr);
+        if (p == nullptr) return;
+        registry.createParameter(bus, "Solo bus", {});
+        modes.setMode(leaf, AutomationMode::Read);
+        modes.setMode(bus, AutomationMode::Read);
+        DAW::FolderBusSnapshot snap;
+        snap.soloSources = { {leaf, false, false}, {bus, false, false} };
+        snap.soloAudibleSourceIndices["LEAF_A"] = {0, 1};
+        snap.soloAudibleSourceIndices["LEAF_B"] = {1};
+        snap.soloAudibleSourceIndices["BUS"] = {0, 1};
+        lanes.getOrCreateLane(leaf).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {2.0, 1.0f, CurveType::Smooth, 0.0f},
+            {4.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+        const auto read = [&] (double ppq, bool rolling)
+        {
+            return evaluateNativeSoloBlockRT(&snap, ppq, rolling,
+                                              registry, lanes, modes);
+        };
+        const auto audible = [&] (const juce::String& id, const NativeSoloBlockState& state)
+        {
+            return isNativeSoloAudibleRT(id, &snap, state, registry, lanes, modes);
+        };
+        beginTest("without solo, every source passes");
+        auto state = read(0.0, true);
+        expect(!state.anyActive);
+        expect(audible("LEAF_A", state));
+        expect(audible("LEAF_B", state));
+        beginTest("stepped leaf solo admits only that track and its ancestor");
+        expect(!read(1.999, true).anyActive);
+        state = read(2.0, true);
+        expect(state.anyActive);
+        expect(audible("LEAF_A", state));
+        expect(audible("BUS", state));
+        expect(!audible("LEAF_B", state));
+        expect(!audible("OUTSIDE", state));
+        beginTest("manually soloed folder admits descendants");
+        snap.soloSources[1].manualSoloed = true;
+        state = read(0.0, true);
+        expect(audible("LEAF_B", state));
+        snap.soloSources[1].manualSoloed = false;
+        beginTest("stopped and Off bypass lane");
+        expect(!read(2.0, false).anyActive);
+        modes.setMode(leaf, AutomationMode::Off);
+        expect(!read(2.0, true).anyActive);
+        beginTest("Touch takes priority; Latch holds current value");
+        modes.setMode(leaf, AutomationMode::Touch);
+        p->beginGesture();
+        p->setValueFromUser(1.0f);
+        expect(read(0.0, true).anyActive);
+        p->endGesture();
+        expect(!read(0.0, true).anyActive);
+        modes.setMode(leaf, AutomationMode::Latch);
+        modes.setLatchHeld(leaf, true);
+        expect(read(0.0, true).anyActive);
+        modes.setLatchHeld(leaf, false);
+        expect(!read(0.0, true).anyActive);
+        beginTest("no heap allocations in Solo callback");
+        modes.setMode(leaf, AutomationMode::Read);
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            int count = 0;
+            for (int i = 0; i < 200; ++i)
+                count += read(2.0, true).anyActive ? 1 : 0;
+            expectEquals(count, 200);
+        }
+    }
+};
+static AutomationNativeSoloAudioPlaybackTests automationNativeSoloAudioPlaybackTests;
