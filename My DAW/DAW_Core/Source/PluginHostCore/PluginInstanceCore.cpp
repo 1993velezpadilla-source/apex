@@ -340,6 +340,7 @@ bool PluginInstanceCore::rebuildSandboxAutomationBindings()
         binding.keyGeneration = keyGen;
         binding.ordinal = static_cast<std::uint32_t>(info.index);
         binding.representable = true;
+        binding.isDiscrete = info.isDiscrete;
 
         // Exact seed: the ACTUAL live worker value — the sandbox equivalent
         // of in-process params[i]->getValue().
@@ -516,7 +517,10 @@ void PluginInstanceCore::applySandboxedAutomationAtSample(
             samplePosition, ppqPosition, lastVal);
 
         float smoothedValue = target;
-        if (std::abs(lastVal - target) > 0.0001f)
+        // The worker reports whether its parameter is discrete. Passing a
+        // smoothed intermediate value to a boolean/choice changes the step's
+        // timing, so keep discrete targets exact across both execution modes.
+        if (! binding.isDiscrete && std::abs(lastVal - target) > 0.0001f)
         {
             const float coeff = AutomationSmootherCore::makeCoeff(sampleRate, 0.010);
             smoothedValue = AutomationSmootherCore::advance(
