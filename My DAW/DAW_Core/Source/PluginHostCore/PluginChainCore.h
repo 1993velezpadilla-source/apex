@@ -186,6 +186,30 @@ public:
         publishSnapshot();
     }
 
+    /** Optional recovery admission policy. Restrict quarantine to exact
+        path/format/UID identities: a common display name is NOT an identity.
+        The default also quarantines the one plugin with a leftover pending
+        marker from the immediately previous APEX process. No plugin is
+        automatically blacklisted forever. */
+    void setRecoveryQuarantineDescriptions(
+        std::vector<juce::PluginDescription> descriptions)
+    {
+        JUCE_ASSERT_MESSAGE_THREAD;
+        recoveryQuarantine_ = std::move(descriptions);
+    }
+
+    int getDeferredRecoverySlotCount() const noexcept
+    {
+        return static_cast<int>(deferredRecoverySlots_.size());
+    }
+
+    juce::ValueTree getDeferredRecoverySlot(int index) const
+    {
+        const auto it = deferredRecoverySlots_.find(index);
+        return it == deferredRecoverySlots_.end()
+            ? juce::ValueTree() : it->second.createCopy();
+    }
+
     void setAutomationContext(const TrackID& trackId,
                               PluginAutomationGestureCore* gestureCore,
                               LastTouchedPluginParameterCore* lastTouchedCore) noexcept
@@ -914,6 +938,9 @@ private:
             bypassCores_[slotIndex] = std::move(bypassCore);
         }
 
+        // An explicit replacement consumes the recovery placeholder; normal
+        // plugin loads never touch unrelated deferred slot state.
+        deferredRecoverySlots_.erase(slotIndex);
         // Saved state must be fully applied and automation bindings re-seeded
         // before publishing the replacement chain to the audio thread.
         // The replacement may change the bus topology — refresh the scratch
@@ -939,16 +966,30 @@ public:
     void removePlugin(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= (int)slots_.size()) return;
-        if (!slots_[slotIndex]) return;
+        const bool isDeferred = deferredRecoverySlots_.find(slotIndex)
+            != deferredRecoverySlots_.end();
+        if (!slots_[slotIndex] && !isDeferred) return;
 
-        removeSlotAutomation (slotIndex);
-
-        // Close editor now (message thread) so destructor has no UI work
-        slots_[slotIndex]->closeEditor();
-        retiredSlots_.push_back(std::move(slots_[slotIndex]));
+        if (slots_[slotIndex])
+        {
+            removeSlotAutomation (slotIndex);
+            // Close editor now (message thread) so destructor has no UI work.
+            slots_[slotIndex]->closeEditor();
+            retiredSlots_.push_back(std::move(slots_[slotIndex]));
+        }
         retireBypassCore(std::move(bypassCores_[slotIndex]));
         slots_.erase(slots_.begin() + slotIndex);
         bypassCores_.erase(bypassCores_.begin() + slotIndex);
+
+        // A quarantined slot is a genuine (though uninstantiated) project
+        // slot; deleting or moving slots must keep its saved blob aligned.
+        decltype(deferredRecoverySlots_) adjusted;
+        for (const auto& [index, tree] : deferredRecoverySlots_)
+        {
+            if (index == slotIndex) continue;
+            adjusted.emplace(index > slotIndex ? index - 1 : index, tree);
+        }
+        deferredRecoverySlots_.swap(adjusted);
 
         // Recompute the scratch capacity for the reduced slot set on this
         // message thread (capacity only ever grows — shrinking is avoided by
@@ -1055,6 +1096,12 @@ public:
         bypassCores_.erase(bypassCores_.begin() + fromIndex);
         slots_.insert(slots_.begin() + juce::jmin(toIndex, (int)slots_.size()), std::move(moving));
         bypassCores_.insert(bypassCores_.begin() + juce::jmin(toIndex, (int)bypassCores_.size()), std::move(movingBypass));
+        decltype(deferredRecoverySlots_) remappedDeferred;
+        for (const auto& [index, savedSlot] : deferredRecoverySlots_)
+            remappedDeferred.emplace(
+                index >= 0 && index < n ? oldToNew[(size_t)index] : index,
+                savedSlot);
+        deferredRecoverySlots_.swap(remappedDeferred);
 
         refreshAutomationContexts();
         publishSnapshot();
@@ -1721,7 +1768,21 @@ public:
         for (int i = 0; i < (int)slots_.size(); ++i)
         {
             auto* plugin = slots_[i].get();
-            if (!plugin) continue;
+            if (!plugin)
+            {
+                // Safe Mode must NEVER erase the user's opaque plugin state.
+                // Persist the original description, layout, instance ID,
+                // parameter data and state blob byte-for-byte as properties
+                // within a new independent ValueTree for this position.
+                const auto deferred = deferredRecoverySlots_.find(i);
+                if (deferred != deferredRecoverySlots_.end())
+                {
+                    auto slot = deferred->second.createCopy();
+                    slot.setProperty("index", i, nullptr);
+                    state.addChild(slot, -1, nullptr);
+                }
+                continue;
+            }
 
             juce::ValueTree slot("Slot");
             slot.setProperty("index", i, nullptr);
@@ -1833,6 +1894,32 @@ public:
                         " slotIndex=" + juce::String(index)
                         + " plugin=\"" + desc.name + "\""
                         + " error=\"" + modeError + "\"");
+                continue;
+            }
+
+            // A stale load marker from the previous process is enough to
+            // OFFER lossless quarantine during this reopen, but not enough
+            // to attribute an OS crash to the plugin. Explicit user policy
+            // can also supply identities via setRecoveryQuarantineDescriptions.
+            if (executionMode == PluginExecutionMode::InProcess
+                && shouldDeferPluginRestore(desc))
+            {
+                const int recoveredIndex = index >= 0
+                    ? index : static_cast<int>(slots_.size());
+                while (static_cast<int>(slots_.size()) <= recoveredIndex)
+                {
+                    slots_.push_back(nullptr);
+                    bypassCores_.push_back(nullptr);
+                }
+                // Preserve complete original plugin slot ValueTree. It can
+                // be saved/reopened without executing any third-party code.
+                deferredRecoverySlots_[recoveredIndex] = slot.createCopy();
+                PluginScanAuditLogCore::appendLine(
+                    "plugin_ui_flow.log",
+                    "PluginChainCore::restoreState deferred suspicious plugin"
+                        " slotIndex=" + juce::String(recoveredIndex)
+                        + " plugin=\"" + desc.name + "\""
+                        + " (preserved opaque state, identity and layout)");
                 continue;
             }
 
@@ -1951,6 +2038,29 @@ public:
     }
 
 private:
+    bool shouldDeferPluginRestore(const juce::PluginDescription& description) const
+    {
+        const auto matches = [&description](const juce::PluginDescription& item)
+        {
+            return item.uniqueId == description.uniqueId
+                && item.pluginFormatName.equalsIgnoreCase(description.pluginFormatName)
+                && item.fileOrIdentifier.equalsIgnoreCase(description.fileOrIdentifier);
+        };
+        if (std::any_of(recoveryQuarantine_.begin(), recoveryQuarantine_.end(), matches))
+            return true;
+
+        // Scope the automatic decision to the first launch AFTER an interrupted
+        // in-process operation. Persisted advisory history alone does not
+        // automatically block a plugin on all subsequent projects/launches.
+        auto& store = PluginLoadRecoveryCore::getInstance();
+        store.inspectPreviousLaunch();
+        if (!store.interruptedOnPreviousLaunch()) return false;
+        const auto& suspect = store.previousInterruptedOperation();
+        return suspect.uniqueId == description.uniqueId
+            && suspect.identifier.equalsIgnoreCase(description.fileOrIdentifier)
+            && suspect.format.equalsIgnoreCase(description.pluginFormatName);
+    }
+
     void retireBypassCore(std::unique_ptr<BypassCrossfadeCore> core)
     {
         if (core == nullptr)
@@ -2011,6 +2121,10 @@ private:
     // Message-thread canonical state (UI reads/writes this directly)
     std::vector<std::shared_ptr<PluginInstanceCore>> slots_;
     std::vector<std::unique_ptr<BypassCrossfadeCore>> bypassCores_;
+    // Control thread only: project state of plugins deferred by safe restore.
+    // NEVER accessible to the realtime processBlock path.
+    std::unordered_map<int, juce::ValueTree> deferredRecoverySlots_;
+    std::vector<juce::PluginDescription> recoveryQuarantine_;
 
     // Published snapshot — swapped atomically between message and audio threads.
     // Audio thread loads this once at block start and processes the stable list.
