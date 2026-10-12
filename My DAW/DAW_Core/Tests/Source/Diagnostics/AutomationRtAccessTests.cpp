@@ -16,6 +16,7 @@
 #include "../../../Source/Automation/AutomationTrackMutePlaybackCore.h"
 #include "../../../Source/Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../../../Source/AutomationCore/PluginAutomationRecorderCore.h"
+#include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4108,3 +4109,95 @@ public:
     }
 };
 static AutomationGuiSliderRecordReplayTests automationGuiSliderRecordReplayTests;
+
+
+/**
+ * V2 arrangement curve clipboard is musician-facing (not a hypothetical
+ * standalone DSP feature): the real Arrangement AutomationLaneComponent
+ * exposes Copy Entire Curve / Replace Entire Curve in its context menu.
+ * These tests pin PPQ timing, parameter safety, curve shape and undo state.
+ */
+class AutomationCurveClipboardTests final : public juce::UnitTest
+{
+public:
+    AutomationCurveClipboardTests()
+        : juce::UnitTest("automation.v2-whole-curve-clipboard.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using DAW::AutomationLaneCurveClipboardCore;
+
+        AutomationLaneCurveClipboardCore clipboard;
+        AutomationLaneCore source("V2-TRACK-A", AutomationLaneCore::trackVolumeParameterId);
+        source.addPoint(AutomationPoint{0, 0.20f, AutomationCurveType::Hold, 0.0f});
+        source.addPoint(AutomationPoint{24000, 0.55f, AutomationCurveType::Smooth, -0.5f});
+        source.addPoint(AutomationPoint{48000, 0.80f, AutomationCurveType::Linear, 0.25f});
+
+        beginTest("48 kHz 120 BPM curve copied in PPQ, pasted 44.1 kHz 100 BPM");
+        expect(clipboard.copyFrom(source, 48000.0, 120.0));
+        expectEquals((int)clipboard.pointCount(), 3);
+        expect(clipboard.hasCurveFor(AutomationLaneCore::trackVolumeParameterId));
+
+        std::vector<AutomationPoint> pasted;
+        expect(clipboard.makePastedPoints(AutomationLaneCore::trackVolumeParameterId,
+                                          44100.0, 100.0, pasted));
+        expectEquals((int)pasted.size(), 3);
+        if (pasted.size() == 3)
+        {
+            expectEquals((juce::int64)pasted[0].timeSamples, (juce::int64)0);
+            expectEquals((juce::int64)pasted[1].timeSamples, (juce::int64)26460);
+            expectEquals((juce::int64)pasted[2].timeSamples, (juce::int64)52920);
+            expect(pasted[0].curveToNext == AutomationCurveType::Hold);
+            expect(pasted[1].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(pasted[1].tensionToNext, -0.5f, 0.00001f);
+            expectWithinAbsoluteError(pasted[2].value, 0.80f, 0.00001f);
+        }
+
+        beginTest("never reinterpret volume curve as pan, pitch or unrelated VST3");
+        std::vector<AutomationPoint> sentinel{{1024, 0.75f, AutomationCurveType::Hold, 0.0f}};
+        expect(!clipboard.makePastedPoints(AutomationLaneCore::trackPanParameterId,
+                                           48000.0, 120.0, sentinel));
+        expectEquals((int)sentinel.size(), 1);
+        expectEquals((juce::int64)sentinel.front().timeSamples, (juce::int64)1024);
+        expect(!clipboard.makePastedPoints("plugin.0.foreign.cutoff",
+                                           48000.0, 120.0, sentinel));
+
+        beginTest("reject invalid tempo/sample rates without destroying clipboard");
+        expect(!clipboard.copyFrom(source, 0.0, 120.0));
+        expect(!clipboard.copyFrom(source, 48000.0,
+                                  std::numeric_limits<double>::quiet_NaN()));
+        expect(clipboard.hasCurveFor(AutomationLaneCore::trackVolumeParameterId));
+        expect(!clipboard.makePastedPoints(AutomationLaneCore::trackVolumeParameterId,
+                                           44100.0, 0.0, sentinel));
+        expectEquals((int)sentinel.size(), 1);
+
+        beginTest("complete curve state persists correct parameter key after roundtrip");
+        DAW::AutomationLaneCore target("V2-TRACK-B",
+                                       AutomationLaneCore::trackVolumeParameterId);
+        target.points = pasted;
+        target.sortAndResolveDuplicates();
+        auto state = target.getState();
+        expectEquals(state.getProperty("parameterId").toString(),
+                     juce::String(AutomationLaneCore::trackVolumeParameterId));
+        DAW::AutomationLaneCore reopened("V2-TRACK-B",
+                                         AutomationLaneCore::trackVolumeParameterId);
+        reopened.restoreState(state);
+        expectEquals(reopened.getParameterId(),
+                     juce::String(AutomationLaneCore::trackVolumeParameterId));
+        expectEquals((int)reopened.points.size(), 3);
+        if (reopened.points.size() == 3)
+        {
+            expect(reopened.points[0].curveToNext == AutomationCurveType::Hold);
+            expect(reopened.points[1].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(reopened.points[1].tensionToNext, -0.5f, 0.00001f);
+        }
+
+        beginTest("clear removes clipboard authority");
+        clipboard.clear();
+        expect(!clipboard.hasCurveFor(AutomationLaneCore::trackVolumeParameterId));
+    }
+};
+static AutomationCurveClipboardTests automationCurveClipboardTests;
