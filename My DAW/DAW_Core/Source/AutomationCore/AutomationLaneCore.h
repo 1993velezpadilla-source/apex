@@ -371,6 +371,9 @@ public:
     void restoreState(const juce::ValueTree& state)
     {
         parameterId_ = state.getProperty("parameterId", "").toString();
+        // Keep the public legacy identifier consistent with the canonical ID.
+        // Clip-region capture and older UI paths still read parameterId directly.
+        parameterId = parameterId_;
         parameterName_ = state.getProperty("parameterName", "").toString();
         defaultValue_ = (float)state.getProperty("defaultValue", 0.0f);
         visible_ = (bool)state.getProperty("visible", false);
