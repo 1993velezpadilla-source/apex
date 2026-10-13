@@ -41,6 +41,169 @@ struct AutomationMacroMappingCore
     static constexpr size_t maxBindings = 64;
     static constexpr size_t maxMacroPoints = 2048;
 
+    struct Configuration
+    {
+        juce::String name;
+        std::vector<AutomationPoint> controlPoints;
+        std::vector<Binding> bindings;
+    };
+
+    // Save macro shape and destinations in one project ValueTree, but NEVER
+    // serialize pluginIsVerifiedContinuous: that evidence is valid only for
+    // the exact currently loaded processor instance, and must be re-queried
+    // by the host after opening a project or replacing a plugin.
+    static juce::ValueTree serializeConfiguration(const Configuration& definition)
+    {
+        juce::ValueTree root("AutomationMacro");
+        if (definition.controlPoints.empty() || definition.bindings.empty()
+            || definition.controlPoints.size() > maxMacroPoints
+            || definition.bindings.size() > maxBindings
+            || !AutomationMultiParameterSnapshotCore::validPoints(
+                definition.controlPoints))
+            return root;
+
+        root.setProperty("version", 1, nullptr);
+        root.setProperty("name", definition.name, nullptr);
+        juce::ValueTree envelope("Envelope");
+        for (const auto& p : definition.controlPoints)
+        {
+            if (p.value < 0.0f || p.value > 1.0f
+                || p.tensionToNext < -1.0f || p.tensionToNext > 1.0f)
+                return juce::ValueTree("AutomationMacro");
+            juce::ValueTree point("Point");
+            point.setProperty("timeSamples", (juce::int64)p.timeSamples, nullptr);
+            point.setProperty("value", p.value, nullptr);
+            point.setProperty("curve", automationCurveTypeToString(p.curveToNext), nullptr);
+            point.setProperty("tension", p.tensionToNext, nullptr);
+            envelope.addChild(point, -1, nullptr);
+        }
+        root.addChild(envelope, -1, nullptr);
+
+        for (const auto& b : definition.bindings)
+        {
+            if (b.target.trackId.isEmpty()
+                || !AutomationMultiParameterSnapshotCore::supported(
+                    b.target.parameterId)
+                || !std::isfinite(b.minimum) || !std::isfinite(b.maximum)
+                || b.minimum >= b.maximum)
+                return juce::ValueTree("AutomationMacro");
+
+            const float lowDomain =
+                b.target.parameterId == AutomationLaneCore::trackPanParameterId
+                    ? -1.0f : 0.0f;
+            const float highDomain =
+                b.target.parameterId == AutomationLaneCore::trackVolumeParameterId
+                    ? 2.0f : 1.0f;
+            if (b.minimum < lowDomain || b.maximum > highDomain)
+                return juce::ValueTree("AutomationMacro");
+
+            for (int i = 1; i < root.getNumChildren(); ++i)
+            {
+                const auto previous = root.getChild(i);
+                if (previous.getProperty("trackId").toString() == b.target.trackId
+                    && previous.getProperty("parameterId").toString()
+                        == b.target.parameterId)
+                    return juce::ValueTree("AutomationMacro");
+            }
+
+            juce::ValueTree target("Target");
+            target.setProperty("trackId", b.target.trackId, nullptr);
+            target.setProperty("parameterId", b.target.parameterId, nullptr);
+            target.setProperty("minimum", b.minimum, nullptr);
+            target.setProperty("maximum", b.maximum, nullptr);
+            target.setProperty("inverted", b.inverted, nullptr);
+            root.addChild(target, -1, nullptr);
+        }
+        return root;
+    }
+
+    static bool deserializeConfiguration(
+        const juce::ValueTree& root, Configuration& result)
+    {
+        result = {};
+        if (!root.hasType("AutomationMacro")
+            || (int)root.getProperty("version", 0) != 1
+            || root.getNumChildren() < 2
+            || root.getNumChildren() > (int)maxBindings + 1)
+            return false;
+
+        const auto envelope = root.getChild(0);
+        if (!envelope.hasType("Envelope") || envelope.getNumChildren() <= 0
+            || envelope.getNumChildren() > (int)maxMacroPoints)
+            return false;
+
+        Configuration staged;
+        staged.name = root.getProperty("name", "").toString();
+        staged.controlPoints.reserve((size_t)envelope.getNumChildren());
+        for (int i = 0; i < envelope.getNumChildren(); ++i)
+        {
+            const auto pointTree = envelope.getChild(i);
+            if (!pointTree.hasType("Point")
+                || !pointTree.hasProperty("timeSamples")
+                || !pointTree.hasProperty("value")
+                || !pointTree.hasProperty("curve")
+                || !pointTree.hasProperty("tension"))
+                return false;
+
+            const auto curve = pointTree.getProperty("curve").toString();
+            AutomationPoint p;
+            p.timeSamples = (int64_t)(juce::int64)pointTree.getProperty("timeSamples");
+            p.value = (float)pointTree.getProperty("value");
+            p.curveToNext = automationCurveTypeFromString(curve);
+            if (automationCurveTypeToString(p.curveToNext) != curve)
+                return false;
+            p.tensionToNext = (float)pointTree.getProperty("tension");
+            staged.controlPoints.push_back(p);
+        }
+        if (!AutomationMultiParameterSnapshotCore::validPoints(
+                staged.controlPoints))
+            return false;
+        for (const auto& p : staged.controlPoints)
+            if (p.value < 0.0f || p.value > 1.0f
+                || p.tensionToNext < -1.0f || p.tensionToNext > 1.0f)
+                return false;
+
+        staged.bindings.reserve((size_t)root.getNumChildren() - 1);
+        for (int i = 1; i < root.getNumChildren(); ++i)
+        {
+            const auto node = root.getChild(i);
+            if (!node.hasType("Target")
+                || !node.hasProperty("minimum") || !node.hasProperty("maximum")
+                || !node.hasProperty("inverted"))
+                return false;
+
+            Binding b;
+            b.target.trackId = node.getProperty("trackId", {}).toString();
+            b.target.parameterId = node.getProperty("parameterId", {}).toString();
+            b.minimum = (float)node.getProperty("minimum");
+            b.maximum = (float)node.getProperty("maximum");
+            b.inverted = (bool)node.getProperty("inverted");
+            b.pluginIsVerifiedContinuous = false; // ALWAYS revalidate host metadata
+            if (b.target.trackId.isEmpty()
+                || !AutomationMultiParameterSnapshotCore::supported(
+                    b.target.parameterId)
+                || !std::isfinite(b.minimum) || !std::isfinite(b.maximum)
+                || b.minimum >= b.maximum)
+                return false;
+
+            const float lowDomain =
+                b.target.parameterId == AutomationLaneCore::trackPanParameterId
+                    ? -1.0f : 0.0f;
+            const float highDomain =
+                b.target.parameterId == AutomationLaneCore::trackVolumeParameterId
+                    ? 2.0f : 1.0f;
+            if (b.minimum < lowDomain || b.maximum > highDomain)
+                return false;
+
+            for (const auto& other : staged.bindings)
+                if (other.target == b.target)
+                    return false;
+            staged.bindings.push_back(std::move(b));
+        }
+        result = std::move(staged);
+        return true;
+    }
+
     static bool compile(const AutomationManagerCore& manager,
                         const std::vector<AutomationPoint>& macro,
                         const std::vector<Binding>& bindings,
