@@ -4941,6 +4941,81 @@ public:
 };
 static AutomationV2EmptyClipMustNotEraseTests automationV2EmptyClipMustNotEraseTests;
 
+class AutomationV2BulkEditorClipOwnershipTests final : public juce::UnitTest
+{
+public:
+    AutomationV2BulkEditorClipOwnershipTests()
+        : juce::UnitTest("automation.v2-bulk-editor-clip-ownership.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationClipRegionCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        beginTest("Clip regions own only exact track+parameter identity");
+        AutomationManagerCore manager;
+        const auto vol = juce::String(AutomationLaneCore::trackVolumeParameterId);
+        const auto pan = juce::String(AutomationLaneCore::trackPanParameterId);
+        expect(!manager.hasClipRegionsForParameter("vocals", vol));
+
+        AutomationClipRegionCore empty;
+        empty.trackId = "vocals";
+        empty.parameterId = vol;
+        empty.lengthSamples = 48000;
+        const auto emptyId = empty.regionId;
+        manager.addClipRegion(empty);
+        expect(!manager.hasClipRegionsForParameter("vocals", vol));
+
+        AutomationClipRegionCore occupied;
+        occupied.trackId = "vocals";
+        occupied.parameterId = vol;
+        occupied.startSample = 48000;
+        occupied.lengthSamples = 48000;
+        occupied.localPoints = {
+            AutomationPoint{0, 0.8f, AutomationCurveType::Hold, 0.0f},
+            AutomationPoint{48000, 1.5f, AutomationCurveType::Smooth, 0.2f}
+        };
+        const auto occupiedId = occupied.regionId;
+        manager.addClipRegion(occupied);
+        expect(manager.hasClipRegionsForParameter("vocals", vol));
+        expect(!manager.hasClipRegionsForParameter("vocals", pan));
+        expect(!manager.hasClipRegionsForParameter("different-vocals", vol));
+
+        beginTest("Even muted clip still owns range and blocks destructive whole-lane operations");
+        expect(manager.setClipRegionMuted(occupiedId, true));
+        expect(manager.hasClipRegionsForParameter("vocals", vol));
+        expect(manager.setClipRegionMuted(occupiedId, false));
+
+        beginTest("Ownership guard survives session save/load and clears on region deletion");
+        AutomationManagerCore loaded;
+        loaded.restoreState(manager.getState());
+        expect(loaded.hasClipRegionsForParameter("vocals", vol));
+        expect(!loaded.hasClipRegionsForParameter("vocals", pan));
+        expect(manager.deleteClipRegion(occupiedId));
+        expect(!manager.hasClipRegionsForParameter("vocals", vol));
+        expect(manager.deleteClipRegion(emptyId));
+        expect(!manager.hasClipRegionsForParameter("vocals", vol));
+
+        beginTest("Roundtrip preserves exact clip-owned values and curve shape");
+        const auto* region = loaded.findClipRegion(occupiedId);
+        expect(region != nullptr);
+        if (region != nullptr)
+        {
+            expectEquals((int)region->localPoints.size(), 2);
+            if (region->localPoints.size() == 2)
+            {
+                expectWithinAbsoluteError(region->localPoints[1].value, 1.5f, 0.00001f);
+                expect(region->localPoints[1].curveToNext == AutomationCurveType::Smooth);
+                expectWithinAbsoluteError(region->localPoints[1].tensionToNext, 0.2f, 0.00001f);
+            }
+        }
+    }
+};
+static AutomationV2BulkEditorClipOwnershipTests automationV2BulkEditorClipOwnershipTests;
+
 class AutomationV2GroupedCurveTests final : public juce::UnitTest
 {
 public:
