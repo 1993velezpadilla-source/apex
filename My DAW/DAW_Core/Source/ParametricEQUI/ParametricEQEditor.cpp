@@ -622,6 +622,18 @@ public:
         startTimerHz (25);
     }
 
+    // The offscreen CI screenshot test pulls an already-published response
+    // synchronously on the message thread. Production still uses the timer.
+    void ingestPublishedResponseForTesting()
+    {
+        ResponseFrame frame;
+        if (processor_.getResponseCore().consumeLatest (frame))
+        {
+            latestFrame_ = frame;
+            curveDirty_ = true;
+        }
+    }
+
     void resized() override
     {
         curveDirty_ = true;
@@ -1415,9 +1427,21 @@ private:
                 continue;
             const auto centre = nodeCentre (band).toFloat();
             const bool selected = band == owner_.getSelectedBandForTesting();
+            const auto placement = static_cast<ChannelPlacement> (
+                processor_.getParametricEQParameter (
+                    placementParameterIndex (band))->getChoiceIndex());
+            auto bandColour = Palette::accent();
+            if (placement == ChannelPlacement::Left)
+                bandColour = Palette::curve();
+            else if (placement == ChannelPlacement::Right)
+                bandColour = juce::Colour (0xffff8eb4);
+            else if (placement == ChannelPlacement::Mid)
+                bandColour = Palette::curveMid();
+            else if (placement == ChannelPlacement::Side)
+                bandColour = Palette::curveSide();
             const auto colour = bypassed->getBool()
                 ? Palette::textSecondary()
-                : selected ? Palette::selected() : Palette::accent();
+                : selected ? Palette::selected() : bandColour;
             const float radius = selected ? 12.0f : 10.0f;
             g.setColour (colour.withAlpha (selected ? 0.21f : 0.12f));
             g.fillEllipse (centre.x - radius - 6.0f,
@@ -2416,6 +2440,11 @@ juce::Rectangle<int> ParametricEQEditor::getTopBarBoundsForTesting() const
 juce::Rectangle<int> ParametricEQEditor::getGraphBoundsForTesting() const
 {
     return graph_->getBounds();
+}
+
+void ParametricEQEditor::refreshResponseForTesting()
+{
+    graph_->ingestPublishedResponseForTesting();
 }
 
 juce::Rectangle<int> ParametricEQEditor::getInspectorBoundsForTesting() const
