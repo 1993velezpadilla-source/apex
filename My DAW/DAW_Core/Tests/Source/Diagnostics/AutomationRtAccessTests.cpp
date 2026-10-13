@@ -5348,7 +5348,20 @@ public:
         expect(Snap::capture(manager, targets, right));
         manager.restoreState(initialState);
         Snap::Plan half;
-        expect(Snap::planMorph(manager, left, right, 0.5f, half));
+        const auto verifiedContinuous = [&](const Snap::Target& target)
+        {
+            return target.trackId == "V1" && target.parameterId == plug;
+        };
+        beginTest("VST3 A/B refuses unknown/discrete host targets without metadata");
+        Snap::Plan noHostEvidence;
+        expect(!Snap::planMorph(manager, left, right, 0.5f, noHostEvidence));
+        expect(!noHostEvidence.isValid());
+        expect(!Snap::planMorph(manager, left, right, 0.5f,
+                                noHostEvidence, [](const Snap::Target&) { return false; }));
+        expect(!noHostEvidence.isValid());
+
+        beginTest("Verified exact continuous VST3 instance joins native A/B morph");
+        expect(Snap::planMorph(manager, left, right, 0.5f, half, verifiedContinuous));
         expectEquals((int)half.changes.size(), 3);
 
         beginTest("Apply one transactional three-parameter morph");
@@ -5384,20 +5397,21 @@ public:
         auto mismatched = right;
         mismatched.lanes[2].target.parameterId = otherPlug;
         Snap::Plan rejected = half;
-        expect(!Snap::planMorph(manager, left, mismatched, 0.5f, rejected));
+        expect(!Snap::planMorph(manager, left, mismatched, 0.5f, rejected, verifiedContinuous));
         expect(!rejected.isValid());
         expect(!Snap::planMorph(manager, left, right,
-                               std::numeric_limits<float>::quiet_NaN(), rejected));
+                               std::numeric_limits<float>::quiet_NaN(), rejected,
+                               verifiedContinuous));
         expect(!rejected.isValid());
 
         beginTest("Out-of-domain VST3/PAN snapshot data cannot silently clamp");
         auto wrongDomain = right;
         wrongDomain.lanes[2].points[0].value = 1.5f; // VST3 normalized 0..1
-        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected));
+        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected, verifiedContinuous));
         expect(!rejected.isValid());
         wrongDomain = right;
         wrongDomain.lanes[1].points[0].value = -1.5f; // native pan -1..1
-        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected));
+        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected, verifiedContinuous));
         expect(!rejected.isValid());
 
         beginTest("Tampered after-state is rejected before any parameter mutation");
@@ -5430,13 +5444,13 @@ public:
         Snap::Snapshot protectedSnap;
         expect(!Snap::capture(manager, targets, protectedSnap));
         expect(!protectedSnap.isValid());
-        expect(!Snap::planMorph(manager, left, right, 0.5f, rejected));
+        expect(!Snap::planMorph(manager, left, right, 0.5f, rejected, verifiedContinuous));
         expect(!rejected.isValid());
 
         beginTest("Endpoint B preserves native shape and values through project serialization");
         manager.restoreState(initialState);
         Snap::Plan endpoint;
-        expect(Snap::planMorph(manager, left, right, 1.0f, endpoint));
+        expect(Snap::planMorph(manager, left, right, 1.0f, endpoint, verifiedContinuous));
         expect(Snap::apply(manager, endpoint, true));
         AutomationManagerCore reopened;
         reopened.restoreState(manager.getState());
