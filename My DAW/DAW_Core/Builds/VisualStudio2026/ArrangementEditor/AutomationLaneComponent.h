@@ -53,6 +53,13 @@ public:
         groupedCurveCallback_ = std::move(callback);
     }
 
+    using NativeMacroCallback = std::function<bool(
+        const TrackID&, const juce::String&, const std::vector<AutomationPoint>&)>;
+    void setNativeMacroCallback(NativeMacroCallback callback)
+    {
+        nativeMacroCallback_ = std::move(callback);
+    }
+
     // Session-local multi-track A/B memories. These are deliberately limited
     // to native volume/pan until the VST3 host can verify exact plugin IDs
     // and publish PPQ updates for multiple plugin parameters coherently.
@@ -685,6 +692,7 @@ private:
 
     UndoManager undoManager_;
     GroupedCurveCallback groupedCurveCallback_;
+    NativeMacroCallback nativeMacroCallback_;
     SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // ========================================================================
@@ -1348,6 +1356,37 @@ private:
                     lane->repaint();
                 }
             });
+        }
+
+        // Deliberately explicit destructive macro operation: map the shape
+        // of THIS native curve to the existing Volume + PAN lanes of every
+        // selected track. Never silently create plugin instances or lanes.
+        if (isDrawingEnabled() && nativeMacroCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            menu.addItem(
+                "Macro: Replace Selected Tracks' Volume + PAN Curves (Undoable)",
+                [safeLane]()
+                {
+                    auto* lane = safeLane.getComponent();
+                    if (lane == nullptr || !lane->nativeMacroCallback_
+                        || !lane->isDrawingEnabled()
+                        || !lane->canBulkEditCurve())
+                        return;
+
+                    const auto* source = lane->helper_.findLane(
+                        lane->trackId_, lane->parameterId_);
+                    if (source != nullptr && source->isEnabled()
+                        && !source->points.empty()
+                        && lane->nativeMacroCallback_(
+                            lane->trackId_, lane->parameterId_, source->points))
+                    {
+                        lane->invalidateCurvePath();
+                        lane->repaint();
+                    }
+                });
         }
 
         // Visible, producer-facing multi-track A/B: only explicitly selected
