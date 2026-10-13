@@ -5350,6 +5350,57 @@ public:
             expectWithinAbsoluteError(reloadedA.lanes[0].points[0].tensionToNext, -0.5f, 0.00001f);
         }
 
+        beginTest("Project sample-rate change rescales A/B and live lane together");
+        AutomationManagerCore rateChanged;
+        rateChanged.restoreState(withMemory);
+        rateChanged.scaleSamplePositions(2.0); // 48k sample => 96k
+        const auto scaledA = rateChanged.getAdvancedMemories();
+        expect(scaledA.isValid());
+        expectEquals(scaledA.getNumChildren(), 1);
+        if (scaledA.isValid() && scaledA.getNumChildren() == 1)
+        {
+            const auto savedVolume = scaledA.getChild(0).getChild(0);
+            expectEquals((juce::int64)savedVolume.getChild(1).getProperty(
+                             "timeSamples", (juce::int64)-1), (juce::int64)96000);
+            const auto* liveVolume = rateChanged.findLane("V1", vol);
+            expect(liveVolume != nullptr);
+            if (liveVolume != nullptr && liveVolume->points.size() > 1)
+                expectEquals((juce::int64)liveVolume->points[1].timeSamples,
+                             (juce::int64)96000);
+        }
+        const auto scaledProject = rateChanged.getState();
+        AutomationManagerCore reopenedAtNewRate;
+        reopenedAtNewRate.restoreState(scaledProject);
+        const auto rememberedNewRate = reopenedAtNewRate.getAdvancedMemories();
+        expect(rememberedNewRate.isValid());
+        if (rememberedNewRate.isValid() && rememberedNewRate.getNumChildren() == 1)
+            expectEquals((juce::int64)rememberedNewRate.getChild(0).getChild(0)
+                .getChild(1).getProperty("timeSamples", (juce::int64)-1),
+                (juce::int64)96000);
+
+        beginTest("Downsampling A/B knots uses deterministic last-point wins");
+        auto closeKnots = memory.createCopy();
+        closeKnots.getChild(0).getChild(0).getChild(1)
+            .setProperty("timeSamples", (juce::int64)1, nullptr);
+        juce::ValueTree collapsed;
+        expect(DAW::AutomationAdvancedMemoryValidationCore::rescaleMemories(
+            closeKnots, 0.1, collapsed));
+        if (collapsed.isValid())
+        {
+            const auto target = collapsed.getChild(0).getChild(0);
+            expectEquals(target.getNumChildren(), 1);
+            if (target.getNumChildren() == 1)
+                expectWithinAbsoluteError(
+                    (float)target.getChild(0).getProperty("value", 0.0f),
+                    1.8f, 0.00001f);
+        }
+
+        beginTest("Overflow must not write corrupt A/B sample positions");
+        juce::ValueTree overflowed;
+        expect(!DAW::AutomationAdvancedMemoryValidationCore::rescaleMemories(
+            memory, 1.0e20, overflowed));
+        expect(!overflowed.isValid());
+
         beginTest("Corrupted snapshot cannot partially restore or retain older memory");
         auto corrupted = savedA.createCopy();
         corrupted.getChild(2).getChild(0)
