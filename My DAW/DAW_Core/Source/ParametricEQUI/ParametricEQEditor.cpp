@@ -625,15 +625,24 @@ public:
     void resized() override
     {
         curveDirty_ = true;
-        sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
-        grabButton_.setBounds (108, 8, 92, ParametricEQEditor::kTouchTarget);
-        copyButton_.setBounds (208, 8, 44, ParametricEQEditor::kTouchTarget);
-        pasteButton_.setBounds (258, 8, 58, ParametricEQEditor::kTouchTarget);
-        matchButton_.setBounds (8, 58, 110, ParametricEQEditor::kTouchTarget);
-        matchSaveButton_.setBounds (122, 58, 92,
-                                    ParametricEQEditor::kTouchTarget);
-        matchLoadButton_.setBounds (218, 58, 92,
-                                    ParametricEQEditor::kTouchTarget);
+        // A single touch-safe tool ribbon replaces the previous two rows
+        // that covered ~100 px of a 142 px graph on 320px phones. Every
+        // action remains accessible; 7 * 44 + 2 * 6 == 320 exactly.
+        constexpr int padding = 6;
+        const int width = std::max (1, getWidth());
+        const int cell = std::clamp (
+            (width - 2 * padding) / 7,
+            ParametricEQEditor::kTouchTarget, 110);
+        std::array<juce::TextButton*, 7> actions {{
+            &sketchButton_, &grabButton_, &copyButton_, &pasteButton_,
+            &matchButton_, &matchSaveButton_, &matchLoadButton_
+        }};
+        int x = padding;
+        for (auto* action : actions)
+        {
+            action->setBounds (x, 8, cell, ParametricEQEditor::kTouchTarget);
+            x += cell;
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -714,7 +723,8 @@ public:
             g.setColour (Palette::textSecondary().withAlpha (0.88f));
             g.drawFittedText ("APEX  /  24-BAND PRECISION ENGINE",
                 juce::Rectangle<int> (std::max (330, getWidth() - 264),
-                                       10, std::min (250, getWidth() - 340), 24),
+                                       std::max (12, getHeight() - 54),
+                                       std::min (250, getWidth() - 340), 24),
                 juce::Justification::centredRight, 1);
         }
     }
