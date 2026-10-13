@@ -200,8 +200,33 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expect (found.size() == 3,
-                    "findAllTypesForFile must expose G10, C4 and Parametric EQ");
+            expect (found.size() == 4,
+                    "findAllTypesForFile must expose G10, C4, Parametric EQ and Tune Live");
+            if (found.size() == 4)
+                expectEquals (found[3]->fileOrIdentifier,
+                              juce::String (APEX::TuneLive::Processor::kFileOrIdentifier),
+                              "Tune Live appends after the existing native family without breaking IDs");
+        }
+
+        // The new native vocal insert must be constructible by the SAME
+        // AudioPluginFormatManager that also creates G10/C4/EQ.
+        {
+            juce::String error;
+            auto tune = manager.createPluginInstance (
+                DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                48000.0, 128, error);
+            expect (tune != nullptr, "unified native host must create Tune Live: " + error);
+            if (tune != nullptr)
+            {
+                expect (dynamic_cast<APEX::TuneLive::Processor*> (tune.get()) != nullptr,
+                        "host created the real Tune Live processor");
+                expectEquals (tune->getNumParameters(),
+                              APEX::TuneLive::Processor::kNumParams,
+                              "all 11 native parameters are hosted");
+                tune->prepareToPlay (48000.0, 128);
+                expectEquals (tune->getLatencySamples(), 1920,
+                              "production native Tune Live reports honest 40-ms plugin PDC");
+            }
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.
