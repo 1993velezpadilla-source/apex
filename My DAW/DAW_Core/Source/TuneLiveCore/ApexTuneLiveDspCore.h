@@ -29,19 +29,30 @@ struct DspSettings {
     bool preserveFormants=true;
 };
 
+// Profile is selected on the non-RT prepare thread, NEVER automated mid-buffer.
+// LowLatency18ms is a measurable research candidate only; no Antares parity
+// claim. Shipping hosted APEX Tune Live continues to use the 40ms HQ path.
+enum class ShifterProfile { HighQuality40ms, Experimental18ms };
+
 class DspCore final {
 public:
-    void prepare(double sampleRate,int maxBlockSize,int numChannels) {
+    void prepare(double sampleRate,int maxBlockSize,int numChannels,
+                 ShifterProfile profile=ShifterProfile::HighQuality40ms) {
+        profile_=profile;
         rate_=std::isfinite(sampleRate) && sampleRate>8000.0 ? sampleRate : 48000.0;
         block_=std::max(1,maxBlockSize);
         channels_=std::clamp(numChannels,1,2);
         tracker_.prepare(rate_);
         policy_.reset();
-        // Signalsmith analysis/synthesis latency is reported, not assumed.
-        stretch_.configure(channels_,
-                           std::max(256,static_cast<int>(std::lround(rate_*0.040))),
-                           std::max(64,static_cast<int>(std::lround(rate_*0.010))),
-                           false);
+        // Short-window candidate runs the exact same production pitch
+        // shifter. Both window and interval must scale together. Causal
+        // pitch tracking still requires multiple source cycles and the
+        // measured shifter PDC is not the whole device round trip.
+        const double windowSeconds=(profile_==ShifterProfile::Experimental18ms)
+                                      ?0.018:0.040;
+        const int window=std::max(256,static_cast<int>(std::lround(rate_*windowSeconds)));
+        const int interval=std::max(64,static_cast<int>(std::lround(window*0.25)));
+        stretch_.configure(channels_,window,interval,false);
         stretch_.reset();
         stretch_.setTransposeFactor(1.0f);
         stretch_.setFormantFactor(1.0f,true);
@@ -66,6 +77,7 @@ public:
         envelopeL_=envelopeR_=0.0f;
     }
     int latencySamples() const noexcept {return latency_;}
+    ShifterProfile profile() const noexcept {return profile_;}
     double sampleRate() const noexcept {return rate_;}
     float frequencyHz() const noexcept {return frequency_;}
     // Read-only DSP debug telemetry used by regression tests. Never expose
@@ -192,6 +204,7 @@ private:
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
     float envelopeL_=0,envelopeR_=0,pitchActiveSlew_=0;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1;
+    ShifterProfile profile_=ShifterProfile::HighQuality40ms;
 };
 
 }} // namespace APEX::TuneLive
