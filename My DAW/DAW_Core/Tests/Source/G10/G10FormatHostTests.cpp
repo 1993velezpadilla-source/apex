@@ -355,7 +355,7 @@ public:
                             && automation.getRegistry().find (id) != nullptr)
                             ++automationBound;
                     }
-                    expectEquals (automationBound, APEX::TuneLive::Processor::kNumParams,
+                    expectEquals (automationBound, static_cast<int> (APEX::TuneLive::Processor::kNumParams),
                                   "all 11 Tune Live knobs must be APEX automation-bound");
 
                     // The hosted signal is processed through the ACTUAL chain.
