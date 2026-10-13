@@ -83,6 +83,10 @@ public:
     int requiredShifterHistorySamples() const noexcept {
         return shifter_.requiredHistorySamples();
     }
+    // Diagnostic only. Exposing wet progression helps count the real
+    // detector-to-audible-correction delay without falsely reporting PDC.
+    double researchWetMix() const noexcept {return shifter_.wetMix();}
+    double researchAppliedRatio() const noexcept {return shifter_.smoothedRatio();}
 private:
     PitchTracker pitch_;
     VoiceControl policy_;
