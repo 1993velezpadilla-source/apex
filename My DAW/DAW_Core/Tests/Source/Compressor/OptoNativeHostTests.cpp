@@ -98,7 +98,7 @@ public:
                 juce::Image screenshot(juce::Image::ARGB,1040,380,true);
                 juce::Graphics graphics(screenshot);
                 editor->paintEntireComponent(graphics,true);
-                const auto metal=screenshot.getPixelAt(200,65);
+                const auto metal=screenshot.getPixelAt(195,148);
                 const auto lcd=screenshot.getPixelAt(512,110);
                 const auto strip=screenshot.getPixelAt(25,344);
                 expect(metal.getBrightness()>0.32f,"rack must have silver metal chassis");
