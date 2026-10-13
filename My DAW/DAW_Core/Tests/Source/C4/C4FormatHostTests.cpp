@@ -221,7 +221,7 @@ private:
                 expect (dynamic_cast<APEX::TuneLive::Processor*> (tune.get()) != nullptr,
                         "host created the real Tune Live processor");
                 expectEquals (tune->getNumParameters(),
-                              APEX::TuneLive::Processor::kNumParams,
+                              static_cast<int> (APEX::TuneLive::Processor::kNumParams),
                               "all 11 native parameters are hosted");
                 tune->prepareToPlay (48000.0, 128);
                 expectEquals (tune->getLatencySamples(), 1920,
@@ -234,7 +234,7 @@ private:
                 for (auto* parameter : tune->getParameters())
                     if (dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
                         ++tagged;
-                expectEquals (tagged, APEX::TuneLive::Processor::kNumParams,
+                expectEquals (tagged, static_cast<int> (APEX::TuneLive::Processor::kNumParams),
                               "APEX automation finds IDs on every Tune Live parameter");
 
                 // Persist a host-created instance into project-style
