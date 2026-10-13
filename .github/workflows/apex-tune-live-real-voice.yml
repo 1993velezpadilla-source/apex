@@ -187,6 +187,24 @@ jobs:
           grep -q 'profile=high' VOCADITO_REGISTER_MATRIX_LICENSE.txt
           test -s vocadito_low_PITCH_COMPARISON.txt
           test -s vocadito_high_PITCH_COMPARISON.txt
+      - name: Research-only real singer A-B downshift compensation with bit-exact HQ40 identity gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Code-generated twin lives in this ephemeral runner workspace only.
+          # Never compile it into JUCE or promote automatically to APEX.
+          python3 "My DAW/DAW_Core/Tests/TuneLive/generate_research_downshift_variant.py"
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/render_human_research_downshift.cpp" \
+            -o tune_live_research_human_ab
+          for label in human low high; do
+            ./tune_live_research_human_ab --prefix "vocadito_${label}"
+            test -s "vocadito_${label}_research_compensated.wav"
+            test -s "vocadito_${label}_RESEARCH_COMPENSATION_REPORT.txt"
+          done
+          ! grep -ql 'FAILED' vocadito_*_RESEARCH_COMPENSATION_REPORT.txt
       - name: Investigate high-register octave flags with PDC-aligned actual audio spectra
         shell: bash
         run: |
@@ -273,5 +291,11 @@ jobs:
             vocadito_high_PITCH_COMPARISON.txt
             VOCADITO_REGISTER_MATRIX_LICENSE.txt
             HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
+            vocadito_human_research_compensated.wav
+            vocadito_low_research_compensated.wav
+            vocadito_high_research_compensated.wav
+            vocadito_human_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_low_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_high_RESEARCH_COMPENSATION_REPORT.txt
           if-no-files-found: error
           retention-days: 7
