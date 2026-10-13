@@ -226,13 +226,15 @@ public:
             expect (scanner.getCache().hasCachedEntry ("APEX::C4"), "scanner seeded C4 into the cache");
             expect (scanner.getCache().hasCachedEntry ("APEX::ParametricEQ"),
                     "scanner seeded Parametric EQ into the cache");
+            expect (scanner.getCache().hasCachedEntry ("APEX::TuneLive"),
+                    "scanner seeded Tune Live for immediate browser discovery");
             int apexNativeCount = 0;
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 3,
-                          "exactly three APEX Native entries after startup");
-            expect (scanner.getCache().getCount() >= 3, "existing cache entries preserved");
+            expectEquals (apexNativeCount, 4,
+                          "exactly four APEX Native entries after startup");
+            expect (scanner.getCache().getCount() >= 4, "existing cache entries preserved");
         }
     }
 
