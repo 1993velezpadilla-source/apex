@@ -150,7 +150,7 @@ struct AutomationMacroMappingCore
             p.timeSamples = (int64_t)(juce::int64)pointTree.getProperty("timeSamples");
             p.value = (float)pointTree.getProperty("value");
             p.curveToNext = automationCurveTypeFromString(curve);
-            if (automationCurveTypeToString(p.curveToNext) != curve)
+            if (juce::String(automationCurveTypeToString(p.curveToNext)) != curve)
                 return false;
             p.tensionToNext = (float)pointTree.getProperty("tension");
             staged.controlPoints.push_back(p);
