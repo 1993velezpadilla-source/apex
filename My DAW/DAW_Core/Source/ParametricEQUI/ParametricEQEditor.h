@@ -74,6 +74,8 @@ public:
         getPlacementButtonsForTesting() const;
     juce::TextButton& getDynEnableButtonForTesting();
     juce::TextButton& getDynFilterButtonForTesting();
+    juce::TextButton& getSpectralArmButtonForTesting();
+    juce::TextButton& getSpectralBandButtonForTesting();
     juce::Slider& getDynRangeSliderForTesting();
     bool isBandDynamicActiveForTesting (int band) const;
     double getDisplayedDynamicGainDbForTesting (int band) const;
