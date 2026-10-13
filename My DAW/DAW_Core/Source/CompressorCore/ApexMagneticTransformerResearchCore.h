@@ -43,19 +43,19 @@ public:
     double process(double sample) noexcept {
         const double x=electrical_.process(sample);
         if(p_.oversampling==1)return p_.trim*shape(x);
-        inHead_=(inHead_+1)%input_.size();
+        inHead_=(inHead_+1)&(input_.size()-1);
         input_[inHead_]=x;
         for(std::size_t phase=0;phase<4;++phase) {
             double v=0;
             for(std::size_t m=0;m<phaseSize_[phase];++m)
                 v+=polyphase_[phase][m]*
-                   input_[(inHead_+input_.size()-m)%input_.size()];
-            highHead_=(highHead_+1)%high_.size();
+                   input_[(inHead_+input_.size()-m)&(input_.size()-1)];
+            highHead_=(highHead_+1)&(high_.size()-1);
             high_[highHead_]=shape(v);
         }
         double out=0;
         for(std::size_t k=0;k<fir_.size();++k)
-            out+=fir_[k]*high_[(highHead_+high_.size()-k)%high_.size()];
+            out+=fir_[k]*high_[(highHead_+high_.size()-k)&(high_.size()-1)];
         return p_.trim*out;
     }
     int latencySamples() const noexcept {return p_.oversampling==4?16:0;}
@@ -95,8 +95,12 @@ private:
     ApexTransformerResearchCore electrical_;
     ApexMagneticResearchSettings p_{};
     double fs_=48000,fluxPole_=0,linearNorm_=1,flux_=0;
-    std::array<double,65> fir_{},high_{};
-    std::array<double,18> input_{};
+    // Power-of-two circular storage avoids variable-divisor modulo per tap.
+    // FIR coefficients/tap counts are unchanged: 65 high-rate and <=17
+    // low-rate taps, so output/latency and 4x spectral response are preserved.
+    std::array<double,65> fir_{};
+    std::array<double,128> high_{};
+    std::array<double,32> input_{};
     std::array<std::array<double,17>,4> polyphase_{};
     std::array<std::size_t,4> phaseSize_{};
     std::size_t inHead_=0,highHead_=0;
