@@ -24,6 +24,7 @@
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
+#include "../../../Source/AutomationCore/AutomationLaneStateValidationCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -5610,3 +5611,68 @@ public:
     }
 };
 static AutomationV2MacroMappingTests automationV2MacroMappingTests;
+
+class AutomationV2StateValidationTests final : public juce::UnitTest
+{
+public:
+    AutomationV2StateValidationTests()
+        : juce::UnitTest("automation.v2-undo-state-strict-bounded.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationLaneStateValidationCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        const juce::String pan = AutomationLaneCore::trackPanParameterId;
+        const juce::String volume = AutomationLaneCore::trackVolumeParameterId;
+        const juce::String vst = "plugin.1.my-exact-instance.gain";
+
+        beginTest("Well-formed native PAN ValueTree roundtrips under point cap");
+        AutomationLaneCore lane("exact-track", pan);
+        lane.addPoint(AutomationPoint{0, -0.75f, AutomationCurveType::Smooth, 0.8f});
+        lane.addPoint(AutomationPoint{48000, 0.50f, AutomationCurveType::Hold, -0.3f});
+        const auto state = lane.getState();
+        expect(AutomationLaneStateValidationCore::valid(state, pan, 2));
+        expect(!AutomationLaneStateValidationCore::valid(state, pan, 1));
+        expect(!AutomationLaneStateValidationCore::valid(state, volume, 2));
+
+        beginTest("Out-of-domain levels, NaN, tension and reordered knots are rejected");
+        auto bad = state.createCopy();
+        bad.getChild(0).setProperty("value", -2.0f, nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+        bad = state.createCopy();
+        bad.getChild(0).setProperty("value",
+            std::numeric_limits<float>::quiet_NaN(), nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+        bad = state.createCopy();
+        bad.getChild(1).setProperty("tensionToNext", 1.5f, nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+        bad = state.createCopy();
+        bad.getChild(1).setProperty("timeSamples", (juce::int64)0, nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+
+        beginTest("Corrupt curve names, bypass and fabricated point layouts are rejected");
+        bad = state.createCopy();
+        bad.getChild(0).setProperty("curveToNextName", "UNKNOWN_CURVE_FAMILY", nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+        bad = state.createCopy();
+        bad.setProperty("enabled", false, nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+        bad = state.createCopy();
+        bad.getChild(0).removeProperty("timeSamples", nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(bad, pan, 2));
+
+        beginTest("VST3 instance target checks normalized range without affecting other hosts");
+        AutomationLaneCore plugin("exact-track", vst);
+        plugin.addPoint(AutomationPoint{0, 0.7f});
+        expect(AutomationLaneStateValidationCore::valid(plugin.getState(), vst, 1));
+        auto tooHigh = plugin.getState().createCopy();
+        tooHigh.getChild(0).setProperty("value", 1.5f, nullptr);
+        expect(!AutomationLaneStateValidationCore::valid(tooHigh, vst, 1));
+        expect(!AutomationLaneStateValidationCore::valid(plugin.getState(),
+            "plugin.1.different-instance.gain", 1));
+    }
+};
+static AutomationV2StateValidationTests automationV2StateValidationTests;
