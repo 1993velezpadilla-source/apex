@@ -32,6 +32,14 @@ public:
             entry.second->setGroupedCurveCallback(groupedCurveCallback_);
     }
 
+    void setSelectedSnapshotCallback(
+        AutomationLaneComponent::SelectedSnapshotCallback callback)
+    {
+        selectedSnapshotCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setSelectedSnapshotCallback(selectedSnapshotCallback_);
+    }
+
     // ========================================================================
     // LANE MANAGEMENT
     // ========================================================================
@@ -56,6 +64,7 @@ public:
 
         auto* lanePtr = laneComponent.get();
         lanePtr->setGroupedCurveCallback(groupedCurveCallback_);
+        lanePtr->setSelectedSnapshotCallback(selectedSnapshotCallback_);
         lanePtr->setSize(getWidth(), 60);  // 60 pixels high per lane
 
         addAndMakeVisible(laneComponent.get());
@@ -266,6 +275,7 @@ private:
     AutomationUIHelper& helper_;
     TrackID trackId_;
     AutomationLaneComponent::GroupedCurveCallback groupedCurveCallback_;
+    AutomationLaneComponent::SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // Map from parameter ID to lane component
     std::map<juce::String, std::unique_ptr<AutomationLaneComponent>> lanes_;
