@@ -74,6 +74,22 @@ int main() {
     const auto flexLarge=tune.update(pitch(60.40f),natural);
     assert(std::abs(flexLarge.shiftSemitones)>0.19f);
 
+    // A singer can tune A4 to 432, 440 or 442 Hz without changing the
+    // chromatic scale, without losing their selected key or corrupting F0.
+    VoiceSettings calibration{};
+    calibration.scale=0; calibration.humanize=0.0f;
+    calibration.flexTune=0.0f; calibration.correction=1.0f;
+    calibration.referenceHz=440.0f;
+    tune.reset();
+    const auto standardA=tune.update({440.0f,0.99f,true},calibration);
+    assert(standardA.targetMidi==69 && std::abs(standardA.shiftSemitones)<0.002f);
+    calibration.referenceHz=432.0f;
+    const auto flatConcertA=tune.update({440.0f,0.99f,true},calibration);
+    assert(flatConcertA.targetMidi==69 && flatConcertA.shiftSemitones < -0.30f);
+    calibration.referenceHz=442.0f;
+    const auto sharpConcertA=tune.update({440.0f,0.99f,true},calibration);
+    assert(sharpConcertA.targetMidi==69 && sharpConcertA.shiftSemitones>0.05f);
+
     // Invalid F0 and unvoiced bursts must not drive an insane transpose.
     assert(!tune.update({0.0f,0.0f,false},natural).voiced);
     assert(!tune.update({NAN,0.99f,true},natural).voiced);
