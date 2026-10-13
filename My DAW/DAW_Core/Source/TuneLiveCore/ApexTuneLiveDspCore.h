@@ -51,6 +51,7 @@ public:
         delay_.assign(static_cast<std::size_t>(channels_)*delayLength_,0.0f);
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
+        pitchActiveSlew_=0.0f;
         envelopeL_=envelopeR_=0.0f;
     }
     void reset() {
@@ -61,6 +62,7 @@ public:
         std::fill(wet_.begin(),wet_.end(),0.0f);
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
+        pitchActiveSlew_=0.0f;
         envelopeL_=envelopeR_=0.0f;
     }
     int latencySamples() const noexcept {return latency_;}
@@ -70,7 +72,7 @@ public:
     // these across threads without taking an atomic host snapshot.
     float debugTargetShiftSemitones() const noexcept {return target_;}
     float debugAppliedShiftSemitones() const noexcept {return smooth_;}
-    float debugWetAmount() const noexcept {return wetSlew_*voicedSlew_;}
+    float debugWetAmount() const noexcept {return wetSlew_*voicedSlew_*pitchActiveSlew_;}
     double detectorWindowMs() const noexcept {return tracker_.analysisWindowMs();}
 
     // planar channelData is both input and output, as for JUCE AudioBuffer pointers.
@@ -105,12 +107,23 @@ public:
                                static_cast<float>(tracker_.analysisWindowMs()/8.0)};
         const double retuneMs=1.0+149.0*static_cast<double>(user.retune);
         const float wetStep=static_cast<float>(1.0/(rate_*0.008+1.0));
+        // Absolute-pitch-neutral vocals must remain true, PDC-aligned dry.
+        // Processing an already-in-tune voice through a spectral shifter
+        // alters vowels and phase for no musical benefit. A smoothed wet gate
+        // removes this coloration at tiny shifts without clicky hard cuts.
+        const float neutralStep=static_cast<float>(1.0/(rate_*0.012+1.0));
         for(int offset=0;offset<n;) {
             const int count=std::min(block_,n-offset);
             // Smooth controls at each small chunk, not at a fixed host block rate.
             const float response=static_cast<float>(1.0-std::exp(-count/(rate_*retuneMs*0.001)));
             smooth_+=(target_-smooth_)*response;
             stretch_.setTransposeFactor(std::pow(2.0f,smooth_/12.0f));
+            // 0.01 semitone = one cent. Remain transparently dry when
+            // there is no audible work to perform. The amount/mix switches
+            // remain subject to separate smoothing on every output sample.
+            const float needsPitchWork=(std::abs(target_)>0.010f ||
+                                        std::abs(smooth_)>0.010f)
+                                        ?1.0f:0.0f;
             stretch_.setFormantFactor(1.0f,user.preserveFormants);
             stretch_.setFormantBase(frequency_>0 ? frequency_/static_cast<float>(rate_) : 0.0f);
             // Nonfinite samples can poison FFT state for multiple seconds.
@@ -148,7 +161,8 @@ public:
                 // Sibilants, breaths and unvoiced transients return to aligned dry.
                 voicedSlew_+=(voicedTarget_-voicedSlew_)*wetStep;
                 wetSlew_+=((user.bypass?0.0f:user.wet)-wetSlew_)*wetStep;
-                const float wetAmount=wetSlew_*voicedSlew_;
+                pitchActiveSlew_+=(needsPitchWork-pitchActiveSlew_)*neutralStep;
+                const float wetAmount=wetSlew_*voicedSlew_*pitchActiveSlew_;
                 for(int c=0;c<channels;++c) {
                     const std::size_t index=static_cast<std::size_t>(c)*delayLength_
                                              +static_cast<std::size_t>(delayPosition_);
@@ -176,7 +190,7 @@ private:
     std::vector<float> wet_,delay_;
     double rate_=48000.0;
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
-    float envelopeL_=0,envelopeR_=0;
+    float envelopeL_=0,envelopeR_=0,pitchActiveSlew_=0;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1;
 };
 
