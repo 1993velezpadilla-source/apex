@@ -3,6 +3,7 @@
 #include "../ParametricEQCore/ParametricEQSpectrumGrabCore.h"
 #include "../ParametricEQCore/ParametricEQMatchCore.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <functional>
@@ -16,23 +17,126 @@ namespace
 
 // APEX visual identity (mirrors the canonical APEX palette — deep violet
 // accent over layered blue-black panels, sky-blue signal curves).
+// APEX Prism: graphite/navy depth, cyan response, violet controls and amber
+// selection. No bitmap assets or fonts: pixel-perfect native JUCE on HiDPI.
 struct Palette
 {
-    static juce::Colour background() { return juce::Colour (0xff0d0d0f); }
-    static juce::Colour surface() { return juce::Colour (0xff1a1a1e); }
-    static juce::Colour surfaceHover() { return juce::Colour (0xff212126); }
-    static juce::Colour border() { return juce::Colour (0xff252529); }
-    static juce::Colour text() { return juce::Colour (0xffe4e4e8); }
-    static juce::Colour textSecondary() { return juce::Colour (0xff9a9aa3); }
-    static juce::Colour accent() { return juce::Colour (0xff7c3aed); }
-    static juce::Colour accentActive() { return juce::Colour (0xff6025cc); }
-    static juce::Colour curve() { return juce::Colour (0xff38b2f8); }
-    static juce::Colour curveMid() { return juce::Colour (0xfffbbf24); }
-    static juce::Colour curveSide() { return juce::Colour (0xff14b87a); }
-    static juce::Colour selected() { return juce::Colour (0xfffbbf24); }
-    static juce::Colour danger() { return juce::Colour (0xffe83535); }
-    static juce::Colour positive() { return juce::Colour (0xff14b87a); }
+    static juce::Colour background() { return juce::Colour (0xff090e19); }
+    static juce::Colour surface() { return juce::Colour (0xff121a2b); }
+    static juce::Colour surfaceHover() { return juce::Colour (0xff27334d); }
+    static juce::Colour border() { return juce::Colour (0xff34415d); }
+    static juce::Colour text() { return juce::Colour (0xffeff5ff); }
+    static juce::Colour textSecondary() { return juce::Colour (0xff9aabc9); }
+    static juce::Colour accent() { return juce::Colour (0xff9b71f7); }
+    static juce::Colour accentActive() { return juce::Colour (0xff7544db); }
+    static juce::Colour curve() { return juce::Colour (0xff55dff4); }
+    static juce::Colour curveMid() { return juce::Colour (0xffffc777); }
+    static juce::Colour curveSide() { return juce::Colour (0xff48e1b4); }
+    static juce::Colour selected() { return juce::Colour (0xffffd68e); }
+    static juce::Colour danger() { return juce::Colour (0xfff16c85); }
+    static juce::Colour positive() { return juce::Colour (0xff48e1b4); }
 };
+
+// Scoped native design system: buttons, control typography and slider rails.
+// Paint occurs exclusively on the JUCE message thread. The singleton is
+// immutable after construction and lives longer than any open plugin editor.
+class PrismLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    PrismLookAndFeel()
+    {
+        setColour (juce::Slider::textBoxBackgroundColourId, Palette::surface());
+        setColour (juce::Slider::textBoxTextColourId, Palette::text());
+        setColour (juce::Slider::textBoxOutlineColourId, Palette::border());
+        setColour (juce::ComboBox::backgroundColourId, Palette::surfaceHover());
+        setColour (juce::ComboBox::textColourId, Palette::text());
+        setColour (juce::ComboBox::outlineColourId, Palette::border());
+        setColour (juce::PopupMenu::backgroundColourId, Palette::surface());
+        setColour (juce::PopupMenu::textColourId, Palette::text());
+        setColour (juce::ScrollBar::thumbColourId, Palette::accent().withAlpha (0.75f));
+        setColour (juce::TextButton::textColourOffId, Palette::text());
+        setColour (juce::TextButton::textColourOnId, Palette::text());
+    }
+
+    void drawButtonBackground (juce::Graphics& g, juce::Button& button,
+                               const juce::Colour& colour, bool hovered,
+                               bool down) override
+    {
+        auto area = button.getLocalBounds().toFloat().reduced (1.0f);
+        if (area.isEmpty())
+            return;
+        const float radius = std::min (9.0f, area.getHeight() * 0.24f);
+        const auto base = button.isEnabled() ? colour : Palette::surface();
+        const auto top = base.brighter (hovered ? 0.18f : 0.07f);
+        const auto bottom = base.darker (down ? 0.22f : 0.08f);
+        g.setGradientFill (juce::ColourGradient (
+            top, area.getX(), area.getY(), bottom,
+            area.getX(), area.getBottom(), false));
+        g.fillRoundedRectangle (area, radius);
+        g.setColour ((hovered ? Palette::accent() : Palette::border())
+                         .withAlpha (button.isEnabled() ? 0.76f : 0.35f));
+        g.drawRoundedRectangle (area.reduced (0.5f), radius, 1.0f);
+        if (down)
+        {
+            g.setColour (Palette::accent().withAlpha (0.35f));
+            g.drawRoundedRectangle (area.reduced (2.0f),
+                                    std::max (2.0f, radius - 2.0f), 1.0f);
+        }
+    }
+
+    void drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                         bool, bool) override
+    {
+        const float size = std::clamp (button.getHeight() * 0.26f,
+                                       10.0f, 12.5f);
+        g.setFont (juce::Font (juce::FontOptions (size, juce::Font::bold)));
+        g.setColour (Palette::text().withAlpha (
+            button.isEnabled() ? 0.97f : 0.43f));
+        g.drawFittedText (button.getButtonText(),
+                          button.getLocalBounds().reduced (4, 2),
+                          juce::Justification::centred, 1, 0.65f);
+    }
+
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int width,
+                           int height, float sliderPos, float, float,
+                           juce::Slider::SliderStyle,
+                           juce::Slider& slider) override
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        auto label = juce::Rectangle<int> (x + 3, y + 1,
+                                           std::max (1, width - 6), 19);
+        g.setColour (Palette::textSecondary().withAlpha (
+            slider.isEnabled() ? 0.95f : 0.43f));
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawFittedText (slider.getTitle(), label,
+                          juce::Justification::centredLeft, 1);
+
+        const float left = static_cast<float> (x + 8);
+        const float right = static_cast<float> (x + std::max (9, width - 8));
+        const float barY = static_cast<float> (y + height) - 13.0f;
+        const float valueX = std::clamp (sliderPos, left, right);
+        const juce::Rectangle<float> rail (left, barY, right - left, 4.0f);
+        g.setColour (Palette::border().withAlpha (0.82f));
+        g.fillRoundedRectangle (rail, 2.0f);
+        g.setGradientFill (juce::ColourGradient (
+            Palette::accent(), left, barY,
+            Palette::curve(), right, barY, false));
+        g.fillRoundedRectangle (juce::Rectangle<float> (
+            left, barY, std::max (1.0f, valueX - left), 4.0f), 2.0f);
+        g.setColour (Palette::accent().withAlpha (0.23f));
+        g.fillEllipse (valueX - 9.0f, barY - 7.0f, 18.0f, 18.0f);
+        g.setColour (slider.isEnabled() ? Palette::text()
+                                        : Palette::textSecondary());
+        g.fillEllipse (valueX - 5.0f, barY - 3.0f, 10.0f, 10.0f);
+    }
+};
+
+PrismLookAndFeel& prismLookAndFeel()
+{
+    static PrismLookAndFeel look;
+    return look;
+}
 
 // Local APEX clipboard; valid across native EQ editor instances on the
 // JUCE message thread. This copies hosted parameter VALUES only, never
@@ -1966,6 +2070,7 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
 {
     setOpaque (true);
     setResizable (true, true);
+    setLookAndFeel (&prismLookAndFeel());
     topBar_ = std::make_unique<TopBarComponent> (*this, processor_);
     graph_ = std::make_unique<EqGraphComponent> (*this, processor_);
     inspector_ = std::make_unique<InspectorComponent> (*this, processor_);
@@ -1978,6 +2083,7 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
 
 ParametricEQEditor::~ParametricEQEditor()
 {
+    setLookAndFeel (nullptr);
     if (auditionArmed_)
     {
         processor_.endAudition (auditionToken_);
