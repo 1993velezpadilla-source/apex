@@ -4581,3 +4581,115 @@ public:
     }
 };
 static AutomationV2LaneEnabledPersistenceTests automationV2LaneEnabledPersistenceTests;
+
+
+/** Regression against destructive clip paste and parameter-domain corruption.
+ *  Exercises the real AutomationManagerCore + persisted clip regions, not a
+ *  standalone mock clipboard.
+ */
+class AutomationV2ClipClipboardSafetyTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ClipClipboardSafetyTests()
+        : juce::UnitTest("automation.v2-clip-clipboard-safety.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationClipRegionCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using DAW::AutomationLaneCore;
+
+        beginTest("Same-parameter reusable pan clip preserves negative values, curves and tension");
+        AutomationManagerCore manager;
+        AutomationClipRegionCore panSrc;
+        panSrc.trackId = "PAN-SOURCE";
+        panSrc.parameterId = AutomationLaneCore::trackPanParameterId;
+        panSrc.startSample = 0;
+        panSrc.lengthSamples = 48000;
+        panSrc.localPoints = {
+            AutomationPoint{0, -0.80f, AutomationCurveType::Hold, -0.30f},
+            AutomationPoint{24000, 0.10f, AutomationCurveType::Smooth, 0.40f},
+            AutomationPoint{48000, 0.65f, AutomationCurveType::Linear, 0.0f}
+        };
+        const auto sourceId = panSrc.regionId;
+        manager.addClipRegion(panSrc);
+        expect(manager.copyClipRegionState(sourceId));
+
+        AutomationClipRegionCore panDest;
+        panDest.trackId = "PAN-DEST";
+        panDest.parameterId = AutomationLaneCore::trackPanParameterId;
+        panDest.startSample = 96000;
+        panDest.lengthSamples = 96000;
+        panDest.localPoints = {{0, -0.1f}, {96000, -0.1f}};
+        const auto destId = panDest.regionId;
+        manager.addClipRegion(panDest);
+        expect(manager.pasteClipRegionState(destId));
+        const auto* pasted = manager.findClipRegion(destId);
+        expect(pasted != nullptr);
+        if (pasted != nullptr)
+        {
+            expectEquals((int)pasted->localPoints.size(), 3);
+            if (pasted->localPoints.size() == 3)
+            {
+                expectEquals((juce::int64)pasted->localPoints[0].timeSamples, (juce::int64)0);
+                expectEquals((juce::int64)pasted->localPoints[1].timeSamples, (juce::int64)48000);
+                expectEquals((juce::int64)pasted->localPoints[2].timeSamples, (juce::int64)96000);
+                expectWithinAbsoluteError(pasted->localPoints[0].value, -0.80f, 0.00001f);
+                expectWithinAbsoluteError(pasted->localPoints[1].value, 0.10f, 0.00001f);
+                expect(pasted->localPoints[0].curveToNext == AutomationCurveType::Hold);
+                expect(pasted->localPoints[1].curveToNext == AutomationCurveType::Smooth);
+                expectWithinAbsoluteError(pasted->localPoints[1].tensionToNext, 0.40f, 0.00001f);
+            }
+        }
+
+        const auto* playback = manager.findLane("PAN-DEST", AutomationLaneCore::trackPanParameterId);
+        expect(playback != nullptr);
+        if (playback != nullptr)
+            expectWithinAbsoluteError(playback->getValueAtSample(96000, 0.0f), -0.80f, 0.00001f);
+
+        beginTest("Wrong parameter clip paste does not erase either destination or live points");
+        AutomationClipRegionCore volDest;
+        volDest.trackId = "VOL-DEST";
+        volDest.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        volDest.startSample = 0;
+        volDest.lengthSamples = 48000;
+        volDest.localPoints = {
+            AutomationPoint{0, 1.60f, AutomationCurveType::Smooth, -0.20f},
+            AutomationPoint{48000, 1.20f, AutomationCurveType::Hold, 0.30f}
+        };
+        const auto volDestId = volDest.regionId;
+        manager.addClipRegion(volDest);
+        const auto snapshotBefore = manager.getState().toXmlString();
+        expect(!manager.pasteClipRegionState(volDestId));
+        expectEquals(manager.getState().toXmlString(), snapshotBefore);
+        const auto* unchanged = manager.findClipRegion(volDestId);
+        expect(unchanged != nullptr);
+        if (unchanged != nullptr && unchanged->localPoints.size() == 2)
+        {
+            expectWithinAbsoluteError(unchanged->localPoints[0].value, 1.60f, 0.00001f);
+            expect(unchanged->localPoints[0].curveToNext == AutomationCurveType::Smooth);
+        }
+
+        beginTest("Empty clipboard cannot wipe an existing clip on manager replay");
+        AutomationManagerCore empty;
+        empty.restoreState(manager.getState());
+        const auto beforeEmptyPaste = empty.getState().toXmlString();
+        expect(!empty.pasteClipRegionState(volDestId));
+        expectEquals(empty.getState().toXmlString(), beforeEmptyPaste);
+
+        beginTest("Actual project session save/reopen retains pasted pan range and original shape");
+        AutomationManagerCore reopened;
+        reopened.restoreState(manager.getState());
+        const auto* savedPan = reopened.findClipRegion(destId);
+        expect(savedPan != nullptr);
+        if (savedPan != nullptr && savedPan->localPoints.size() == 3)
+        {
+            expectWithinAbsoluteError(savedPan->localPoints[0].value, -0.80f, 0.00001f);
+            expect(savedPan->localPoints[1].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(savedPan->localPoints[1].tensionToNext, 0.40f, 0.00001f);
+        }
+    }
+};
+static AutomationV2ClipClipboardSafetyTests automationV2ClipClipboardSafetyTests;
