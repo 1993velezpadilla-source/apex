@@ -96,11 +96,47 @@ int main() {
     if(!wet.voiced || std::abs(cents)>18.0)
         return fail("hosted insert did not correct actual processed audio to A4");
 
+    // APEX records live solo microphones in mono. The portable DSP
+    // stereo test is not enough: the JUCE hosted bus itself must switch to
+    // mono before prepare(), then process a 1-channel AudioBuffer.
+    plugin.releaseResources();
+    juce::AudioProcessor::BusesLayout monoLayout;
+    monoLayout.inputBuses.add(juce::AudioChannelSet::mono());
+    monoLayout.outputBuses.add(juce::AudioChannelSet::mono());
+    if(!plugin.setBusesLayout(monoLayout))
+        return fail("APEX native mono mic bus layout rejected");
+    plugin.prepareToPlay(48000.0,128);
+    if(plugin.getLatencySamples()!=1920)
+        return fail("mono host PDC differs from stereo");
+    juce::AudioBuffer<float> monoAudio(1,128);
+    APEX::TuneLive::PitchTracker monoOut;
+    monoOut.prepare(48000.0);
+    for(int i=0;i<48000;i+=128) {
+        for(int n=0;n<128;++n) {
+            const double t=static_cast<double>(i+n)/48000.0;
+            monoAudio.setSample(0,n,static_cast<float>(
+                0.32*std::sin(6.283185307179586*447.69*t)));
+        }
+        plugin.processBlock(monoAudio,midi);
+        if(i>=24000)
+            for(int n=0;n<128;++n) {
+                const float x=monoAudio.getSample(0,n);
+                if(!std::isfinite(x))return fail("mono host emitted NaN");
+                monoOut.push(x);
+            }
+    }
+    const auto monoPitch=monoOut.latest();
+    const double monoCents=monoPitch.voiced
+                        ?1200.0*std::log2(monoPitch.hz/440.0):9999.0;
+    if(!monoPitch.voiced || std::abs(monoCents)>18.0)
+        return fail("mono host failed to actually pitch-correct Apollo-like mic");
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
                 "GUI controls, state, 48k/128 stereo realtime processing "
                 "and pitch correction. Input F0="<<hz
-             <<"Hz, wet cents from A4="<<cents<<"\n";
+             <<"Hz, stereo wet cents from A4="<<cents
+             <<", mono wet cents from A4="<<monoCents<<"\n";
     return 0;
 }
