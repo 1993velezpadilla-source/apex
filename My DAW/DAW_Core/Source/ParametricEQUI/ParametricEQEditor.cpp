@@ -491,9 +491,9 @@ public:
     void resized() override
     {
         auto bounds = getLocalBounds().reduced (4, 4);
-        if (getWidth() < 430)
+        if (getWidth() < 650)
         {
-            // Compact-phone contract: two rows of four controls, each row at
+            // Phone/small-tablet contract: two rows of four controls, each at
             // least 44 logical pixels tall.  The title yields its space to
             // controls instead of shrinking touch targets.
             title_.setVisible (false);
@@ -2487,7 +2487,7 @@ void ParametricEQEditor::applyLayout()
     // but entirely native APEX visuals. A bottom command dock never steals
     // horizontal space from the response display.
     auto workspace = getLocalBounds();
-    const int dockHeight = width < 430 ? 104
+    const int dockHeight = width < 650 ? 104
                           : std::min (56, std::max (44, height / 12));
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
