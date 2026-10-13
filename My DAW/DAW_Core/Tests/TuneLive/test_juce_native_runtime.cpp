@@ -2,7 +2,6 @@
 // prepare/process/state/editor. A real Windows GUI+audio smoke without
 // requiring an Apollo Solo on GitHub runners.
 #include "../../Source/TuneLiveCore/ApexTuneLiveProcessor.h"
-#include "../../Source/PluginHostCore/ApexNativePluginFormat.h"
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -14,10 +13,16 @@ static int fail(const char* reason) {
 int main() {
     juce::ScopedJuceInitialiser_GUI initialiseJuce;
     APEX::TuneLive::Processor plugin;
-    const auto desc=DAW::ApexNativePluginFormat::createTuneLiveDescription();
-    if(!DAW::ApexNativePluginFormat::isTuneLiveDescription(desc))
-        return fail("intrinsic plugin identifier not registered");
-    if(desc.fileOrIdentifier!=APEX::TuneLive::Processor::kFileOrIdentifier)
+    // The unified APEX Native registry is compiled by the separate strict
+    // JUCE syntax gate. Linking ALL G10/C4/ParametricEQ factories into a
+    // TuneLive-only console executable would require the entire DAW's .cpp
+    // dependency graph, so test the processor's own host description here.
+    juce::PluginDescription desc;
+    plugin.fillInPluginDescription(desc);
+    if(desc.pluginFormatName!="APEX Native" || desc.manufacturerName!="APEX")
+        return fail("wrong intrinsic native plug-in format");
+    if(desc.fileOrIdentifier!=APEX::TuneLive::Processor::kFileOrIdentifier
+       || desc.uniqueId!=APEX::TuneLive::Processor::kUniqueId)
         return fail("unstable native plugin identifier");
     if(plugin.getParameters().size()!=APEX::TuneLive::Processor::kNumParams)
         return fail("expected 11 hosted/automation-safe parameters");
