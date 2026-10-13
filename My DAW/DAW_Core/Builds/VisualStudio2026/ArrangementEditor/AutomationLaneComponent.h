@@ -53,6 +53,17 @@ public:
         groupedCurveCallback_ = std::move(callback);
     }
 
+    // Session-local multi-track A/B memories. These are deliberately limited
+    // to native volume/pan until the VST3 host can verify exact plugin IDs
+    // and publish PPQ updates for multiple plugin parameters coherently.
+    enum class SelectedSnapshotAction { CaptureA, CaptureB, MorphHalf };
+    using SelectedSnapshotCallback = std::function<bool(
+        const TrackID&, const juce::String&, SelectedSnapshotAction)>;
+    void setSelectedSnapshotCallback(SelectedSnapshotCallback callback)
+    {
+        selectedSnapshotCallback_ = std::move(callback);
+    }
+
     // Same exact PPQ bridge as ordinary point, pencil and curve edits.
     // Callable after multi-track Undo/Redo without constructing UI lanes.
     static void syncModelLaneToApex(const AutomationUIHelper& helper,
@@ -674,6 +685,7 @@ private:
 
     UndoManager undoManager_;
     GroupedCurveCallback groupedCurveCallback_;
+    SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // ========================================================================
     // INTERACTION STATE & HELPERS (Phase 2)
@@ -1329,6 +1341,35 @@ private:
                     }
                 }
             });
+        }
+
+        // Visible, producer-facing multi-track A/B: only explicitly selected
+        // audio clips are permitted to define participating track IDs.
+        // The owner rejects stale selections and mismatched A/B target sets.
+        if (isDrawingEnabled() && selectedSnapshotCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::PopupMenu snapshots;
+            const auto action = [this](SelectedSnapshotAction what)
+            {
+                if (selectedSnapshotCallback_)
+                    selectedSnapshotCallback_(trackId_, parameterId_, what);
+            };
+            snapshots.addItem("Capture A (selected tracks)", [action]()
+            {
+                action(SelectedSnapshotAction::CaptureA);
+            });
+            snapshots.addItem("Capture B (selected tracks)", [action]()
+            {
+                action(SelectedSnapshotAction::CaptureB);
+            });
+            snapshots.addSeparator();
+            snapshots.addItem("Morph A/B 50% (Undoable)", [action]()
+            {
+                action(SelectedSnapshotAction::MorphHalf);
+            });
+            menu.addSubMenu("Multi-Track A/B · Session Memory", snapshots);
         }
 
         menu.showMenuAsync(
