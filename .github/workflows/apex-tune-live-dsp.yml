@@ -140,6 +140,13 @@ jobs:
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp" -o tune_live_unvoiced_return
           ./tune_live_unvoiced_return
+          # Real 40ms wet vocal across large octave jumps, with policy
+          # target hysteresis, 1..521 sample callbacks and GNU sanitizers.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_rapid_note_transitions.cpp" -o tune_live_note_leaps
+          ./tune_live_note_leaps
           # Research-only A2/A3/A4 ±30-cent F0 accuracy audit,
           # independent 8192-sample Hann/Goertzel estimator vs DSP YIN.
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
@@ -227,6 +234,8 @@ jobs:
           tune_live_variable_wet.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_unvoiced_return.exe "My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp" || exit /b 1
           tune_live_unvoiced_return.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_note_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_rapid_note_transitions.cpp" || exit /b 1
+          tune_live_note_leaps.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_register_spectrum.exe "My DAW/DAW_Core/Tests/TuneLive/test_low_register_spectral_diagnostic.cpp" || exit /b 1
           tune_live_register_spectrum.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_downshift_transfer.exe "My DAW/DAW_Core/Tests/TuneLive/research_downshift_transfer.cpp" || exit /b 1
