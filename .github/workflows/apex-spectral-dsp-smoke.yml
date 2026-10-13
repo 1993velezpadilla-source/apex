@@ -1,0 +1,71 @@
+name: APEX Spectral DSP Portable Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQTypes.h'
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQSpectralDynamicsCore.h'
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQSpectralBlend.h'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/SpectralStandaloneSmoke.cpp'
+      - '.github/workflows/apex-spectral-dsp-smoke.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQTypes.h'
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQSpectralDynamicsCore.h'
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/ParametricEQSpectralBlend.h'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/SpectralStandaloneSmoke.cpp'
+      - '.github/workflows/apex-spectral-dsp-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  portable-stft:
+    name: C++17 ${{ matrix.compiler }} spectral DSP correctness
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build portable native spectral DSP test (no JUCE)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.compiler }}" -std=c++17 -O2 -Wall -Wextra -Werror \
+            -pedantic -fno-fast-math \
+            'My DAW/DAW_Core/Tests/Source/ParametricEQ/SpectralStandaloneSmoke.cpp' \
+            -o /tmp/apex-spectral-dsp-smoke
+      - name: Verify spectral FFT latency, neutrality and selected frequencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/apex-spectral-dsp-smoke
+
+  msvc-stft:
+    name: C++17 MSVC spectral DSP correctness
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and run native Windows x64 spectral smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC toolchain not found" }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "VC environment missing: $vcvars" }
+          $cpp = 'My DAW\DAW_Core\Tests\Source\ParametricEQ\SpectralStandaloneSmoke.cpp'
+          $compiler = "cl /nologo /std:c++17 /O2 /EHsc /W4 /WX /DWIN32_LEAN_AND_MEAN /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /Fe:apex-spectral-smoke.exe `"$cpp`""
+          $command = 'call "' + $vcvars + '" >nul && ' + $compiler + ' && apex-spectral-smoke.exe'
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

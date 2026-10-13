@@ -1,6 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
 
+// Windows RPC headers can define "small" as a preprocessor token ("char").
+// Theme::Fonts has a deliberately named "small" member; undefine the
+// legacy MIDL token AFTER platform headers so the declaration remains legal.
+#if defined(_WIN32) && defined(small)
+ #undef small
+#endif
+
 namespace DAW {
 
 class Theme : private juce::DeletedAtShutdown

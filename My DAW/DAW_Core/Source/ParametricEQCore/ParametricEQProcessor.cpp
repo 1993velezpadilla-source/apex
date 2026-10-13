@@ -103,7 +103,9 @@ void Processor::adoptPhaseMode() noexcept
     }
 
     // Latency must match the audible path before the crossfade progresses.
-    setLatencySamples (requested ? kLinearPhaseLatencySamples : 0);
+    setLatencySamples ((requested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
     linearPhaseMode_ = requested;
 }
 
@@ -574,6 +576,22 @@ Processor::Processor()
     add (kOutputGainScaleParameter, ParametricEQParameter::Kind::GainScale,
          "Output Gain Scale", 0.0f, 2.0f, 1.0f);
 
+    // Phase 10 append-only: opt-in +24 spectral bands + density + tilt.
+    // The EQ remains minimum-phase / zero extra latency by default.
+    add (kSpectralArmParameter, ParametricEQParameter::Kind::Toggle,
+         "Spectral Engine (Restart Audio)", 0.0f, 1.0f, 0.0f);
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (spectralBandParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Spectral", 0.0f, 1.0f, 0.0f);
+    }
+    add (kSpectralDensityParameter, ParametricEQParameter::Kind::GainScale,
+         "Spectral Density", 0.0f, 1.0f, 0.5f);
+    add (kSpectralTiltParameter, ParametricEQParameter::Kind::Toggle,
+         "Spectral Tilt +3dB/oct", 0.0f, 1.0f, 1.0f);
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -613,6 +631,11 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     linearPhaseScratch_.setSize (channels, block, false, false, true);
     kernelNextScratch_.setSize (channels, block, false, false, true);
     externalKeyValid_ = false;
+    // PDC-affecting spectral ARM is latched only during host reprepare.
+    spectralPreparedEnabled_ = parameters_[static_cast<std::size_t> (
+        kSpectralArmParameter)]->getBool();
+    spectralBlend_.prepare (rate);
+    spectralAnyBandActive_ = false;
     kernelStep_ = 1.0 / std::max (1.0, rate * 0.010);
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
                              &convolverNextL_, &convolverNextR_ })
@@ -634,7 +657,9 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     modeMix_ = linearRequested ? 1.0 : 0.0;
     if (linearRequested)
         requestLinearKernelRebuild();
-    setLatencySamples (linearRequested ? kLinearPhaseLatencySamples : 0);
+    setLatencySamples ((linearRequested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
     for (int band = 0; band < kMaxBands; ++band)
     {
         dynamicDetectors_[static_cast<std::size_t> (band)].prepare (rate);
@@ -661,7 +686,9 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     analyzer_.prepare (rate);
     analyzer_.signalDiscontinuity();
     // Keep PDC truthful.  adoptPhaseMode() owns subsequent latency changes.
-    setLatencySamples (linearRequested ? kLinearPhaseLatencySamples : 0);
+    setLatencySamples ((linearRequested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
 }
 
 void Processor::releaseResources()
@@ -682,6 +709,8 @@ void Processor::releaseResources()
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
+    spectralBlend_.reset();
+    spectralAnyBandActive_ = false;
     characterCore_.reset();
     outputAutoGainDb_ = 0.0;
     analyzer_.signalDiscontinuity();
@@ -707,6 +736,7 @@ void Processor::reset()
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     characterCore_.reset();
+    spectralBlend_.reset();
     characterCore_.setMode (readCharacterModeParameter());
     outputAutoGainDb_ = 0.0;
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
@@ -762,6 +792,9 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
             auditionBand_.reset();
             auditionBandIndex_ = -1;
         }
+        // In armed mode the bypassed signal must STILL carry the reported
+        // 1024-sample delay. Never switch to undelayed bypass audio.
+        processSpectralMode (buffer, channels, samples, false);
         analyzer_.pushPost (buffer, channels, samples);
         if (responseDirty_)
             publishResponseFrame();
@@ -800,9 +833,24 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     applyOutputStage (buffer, channels, samples, inputRmsDb);
+    processSpectralMode (buffer, channels, samples,
+                         ! bypassTarget && spectralAnyBandActive_);
     analyzer_.pushPost (buffer, channels, samples);
     if (responseDirty_)
         publishResponseFrame();
+}
+
+void Processor::processSpectralMode (juce::AudioBuffer<float>& buffer,
+                                     int channels, int samples,
+                                     bool wetTarget) noexcept
+{
+    if (! spectralPreparedEnabled_ || channels <= 0 || samples <= 0)
+        return;
+    float* pointers[SpectralDynamicsCore::kChannels] { nullptr, nullptr };
+    const int count = std::clamp (channels, 0, SpectralDynamicsCore::kChannels);
+    for (int channel = 0; channel < count; ++channel)
+        pointers[channel] = buffer.getWritePointer (channel);
+    spectralBlend_.process (pointers, count, samples, spectralBands_, wetTarget);
 }
 
 bool Processor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -853,7 +901,16 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
     {
         const juce::Identifier property (getParameterId (index));
         if (! state.hasProperty (property))
+        {
+            // Phase 10 appended controls do not exist in old saved sessions.
+            // Reset them to their own defaults even if a processor is reused.
+            // Never implicitly arm a lookahead/latency-bearing effect.
+            if (index >= kSpectralArmParameter)
+                parameters_[static_cast<std::size_t> (index)]->setValue (
+                    parameters_[static_cast<std::size_t> (index)]
+                        ->getDefaultValue());
             continue;
+        }
         const auto value = static_cast<float> (state.getProperty (property));
         if (std::isfinite (value))
             parameters_[static_cast<std::size_t> (index)]->setValue (value);
@@ -932,6 +989,17 @@ juce::String Processor::getParameterId (int index)
     if (index == kOutputPhaseInvertParameter) return "peq.output.phaseInvert";
     if (index == kOutputAutoGainParameter) return "peq.output.autoGain";
     if (index == kOutputGainScaleParameter) return "peq.output.gainScale";
+    if (index == kSpectralArmParameter) return "peq.spectral.arm";
+    if (index >= kFirstSpectralBandParameter
+        && index < kSpectralDensityParameter)
+        return "peq.band"
+             + juce::String (index - kFirstSpectralBandParameter + 1)
+                   .paddedLeft ('0', 2)
+             + ".spectral.enable";
+    if (index == kSpectralDensityParameter)
+        return "peq.spectral.density";
+    if (index == kSpectralTiltParameter)
+        return "peq.spectral.tilt";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -1419,6 +1487,11 @@ void Processor::completeTransitionIfReady() noexcept
 
 void Processor::adoptDynamicParameters() noexcept
 {
+    spectralAnyBandActive_ = false;
+    const double spectralDensity = parameters_[static_cast<std::size_t> (
+        kSpectralDensityParameter)]->getUnitsValue();
+    const bool spectralTilt = parameters_[static_cast<std::size_t> (
+        kSpectralTiltParameter)]->getBool();
     dynamicDetectorMode_ = parameters_[static_cast<std::size_t> (
         kDynamicDetectorParameter)]->getBool()
                          ? APEX::Dynamics::DetectorMode::Rms
@@ -1480,10 +1553,34 @@ void Processor::adoptDynamicParameters() noexcept
                     static_cast<std::size_t> (band)])
                 state.reset();
         }
+
+        const auto& spectrumSettings = targetSettings_[
+            static_cast<std::size_t> (band)];
         const bool compatible = next.enabled
-            && isDynamicCompatibleShape (targetSettings_[
-                static_cast<std::size_t> (band)].shape);
-        if (compatible)
+            && isDynamicCompatibleShape (spectrumSettings.shape);
+        const bool spectral = spectralPreparedEnabled_ && compatible
+            && spectrumSettings.enabled && ! spectrumSettings.bypassed
+            && std::abs (next.rangeDb) > 1.0e-8
+            && (spectrumSettings.shape == FilterShape::Bell
+                || spectrumSettings.shape == FilterShape::LowShelf
+                || spectrumSettings.shape == FilterShape::HighShelf)
+            && parameters_[static_cast<std::size_t> (
+                 spectralBandParameterIndex (band))]->getBool();
+        auto& spectralBand = spectralBands_[static_cast<std::size_t> (band)];
+        spectralBand.enabled = spectral;
+        spectralBand.shape = spectrumSettings.shape;
+        spectralBand.placement = spectrumSettings.placement;
+        spectralBand.frequencyHz = spectrumSettings.frequencyHz;
+        spectralBand.q = spectrumSettings.q;
+        spectralBand.dynamic = next;
+        spectralBand.density = spectralDensity;
+        spectralBand.tilt = spectralTilt;
+        if (spectral)
+            spectralAnyBandActive_ = true;
+
+        // A spectral band must not ALSO receive the full-band dynamic
+        // biquad envelope. Static EQ bands are still processed as usual.
+        if (compatible && ! spectral)
             mask |= 1u << band;
         else
             publishedDynamicGainDb_[static_cast<std::size_t> (band)] = 0.0;

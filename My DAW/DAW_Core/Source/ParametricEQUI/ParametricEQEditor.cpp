@@ -39,7 +39,7 @@ struct Palette
 // processor/audio objects. The first seven IDs of each band are frozen.
 struct NativeBandClipboard
 {
-    static constexpr int kSlots = 14;
+    static constexpr int kSlots = 15;
     std::array<float, kSlots> normalised {};
     bool valid = false;
 };
@@ -73,7 +73,9 @@ int clipboardParameterIndex (int band, int slot) noexcept
     if (slot < 13)
         return dynamicParameterIndex (
             band, static_cast<DynamicBandOffset> (slot - 8));
-    return dynamicFilterParameterIndex (band);
+    if (slot == 13)
+        return dynamicFilterParameterIndex (band);
+    return spectralBandParameterIndex (band);
 }
 
 void notifyParameter (Processor& processor, int index, float normalised)
@@ -84,6 +86,20 @@ void notifyParameter (Processor& processor, int index, float normalised)
     parameter->beginChangeGesture();
     parameter->setValueNotifyingHost (normalised);
     parameter->endChangeGesture();
+}
+
+// Creation paths (Sketch/Grab/Match) never inherit latent bypass, placement,
+// broadband dynamics or spectral enables from a previously disabled slot.
+// Clipboard Paste is different: it explicitly restores all copied controls.
+void resetCreatedBand (Processor& processor, int band)
+{
+    notifyParameter (processor,
+        parameterIndex (band, BandParameterOffset::Bypass), 0.0f);
+    notifyParameter (processor, placementParameterIndex (band), 0.0f);
+    notifyParameter (processor,
+        dynamicParameterIndex (band, DynamicBandOffset::Enable), 0.0f);
+    notifyParameter (processor, dynamicFilterParameterIndex (band), 0.0f);
+    notifyParameter (processor, spectralBandParameterIndex (band), 0.0f);
 }
 
 double frequencyForX (double x, double width)
@@ -866,6 +882,7 @@ private:
                 if (! slot.has_value())
                     break;
                 const int band = *slot;
+                resetCreatedBand (processor_, band);
                 const auto& suggestion =
                     plan.bands[static_cast<std::size_t> (proposal)];
                 auto setUnits = [this, band] (BandParameterOffset offset,
@@ -1035,6 +1052,7 @@ private:
             if (! slot.has_value())
                 return false;
             const int band = *slot;
+            resetCreatedBand (processor_, band);
             auto setBandUnits = [this, band] (BandParameterOffset offset,
                                              float units)
             {
@@ -1309,6 +1327,7 @@ private:
             if (! freeBand.has_value())
                 break;
             const int band = *freeBand;
+            resetCreatedBand (processor_, band);
             const auto& proposed = plan.bands[static_cast<std::size_t> (proposal)];
 
             auto publishUnits = [this, band] (BandParameterOffset offset,
@@ -1443,6 +1462,11 @@ public:
         content_.addAndMakeVisible (dynRangeSlider_);
         content_.addAndMakeVisible (dynAttackSlider_);
         content_.addAndMakeVisible (dynReleaseSlider_);
+        content_.addAndMakeVisible (spectralLabel_);
+        content_.addAndMakeVisible (spectralArmButton_);
+        content_.addAndMakeVisible (spectralBandButton_);
+        content_.addAndMakeVisible (spectralDensitySlider_);
+        content_.addAndMakeVisible (spectralTiltButton_);
         auditionButton_ = std::make_unique<HoldButton> (owner_);
         content_.addAndMakeVisible (auditionButton_.get());
 
@@ -1537,6 +1561,49 @@ public:
         configureSlider (dynAttackSlider_, "Dynamic Attack");
         configureSlider (dynReleaseSlider_, "Dynamic Release");
 
+        spectralLabel_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        spectralLabel_.setColour (juce::Label::textColourId,
+                                 Palette::textSecondary());
+        spectralLabel_.setText ("Spectral Dynamics — 1024 samples latency",
+                                juce::dontSendNotification);
+        spectralLabel_.setInterceptsMouseClicks (false, false);
+        spectralArmButton_.setTitle (
+            "Arm the FFT engine. The DAW must stop/reprepare the audio device "
+            "before the new 1024-sample plugin latency becomes active.");
+        spectralArmButton_.onClick = [this]
+        {
+            const auto index = kSpectralArmParameter;
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index,
+                parameter->getBool() ? 0.0f : 1.0f);
+            refresh();
+        };
+        spectralBandButton_.setTitle (
+            "Apply frequency-selective dynamics to this band using its "
+            "ordinary Dynamic EQ threshold/range/attack/release parameters");
+        spectralBandButton_.onClick = [this]
+        {
+            const int band = owner_.getSelectedBandForTesting();
+            if (band < 0)
+                return;
+            const auto index = spectralBandParameterIndex (band);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index,
+                parameter->getBool() ? 0.0f : 1.0f);
+            refresh();
+        };
+        configureSlider (spectralDensitySlider_, "Spectral Density");
+        spectralTiltButton_.setTitle (
+            "Apply optional +3dB/oct spectral detector tilt");
+        spectralTiltButton_.onClick = [this]
+        {
+            const auto index = kSpectralTiltParameter;
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index,
+                parameter->getBool() ? 0.0f : 1.0f);
+            refresh();
+        };
+
         startTimerHz (12);
         refresh();
     }
@@ -1559,7 +1626,7 @@ public:
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
         // 1 dynamic label + 6 dynamic rows.
-        const int contentHeight = contentMargin + 13 * row + 2 * labelHeight
+        const int contentHeight = contentMargin + 17 * row + 3 * labelHeight
                                 + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
@@ -1601,6 +1668,12 @@ public:
         dynAttackSlider_.setBounds (bounds.removeFromTop (row));
         dynReleaseSlider_.setBounds (bounds.removeFromTop (row));
 
+        spectralLabel_.setBounds (bounds.removeFromTop (labelHeight));
+        spectralArmButton_.setBounds (bounds.removeFromTop (row));
+        spectralBandButton_.setBounds (bounds.removeFromTop (row));
+        spectralDensitySlider_.setBounds (bounds.removeFromTop (row));
+        spectralTiltButton_.setBounds (bounds.removeFromTop (row));
+
         auditionButton_->setBounds (bounds.removeFromTop (auditionHeight));
     }
 
@@ -1620,6 +1693,31 @@ public:
         qSlider_.setEnabled (valid);
         slopeSlider_.setEnabled (valid);
         auditionButton_->setEnabled (valid);
+        spectralArmButton_.setEnabled (true);
+        spectralTiltButton_.setEnabled (true);
+        spectralDensitySlider_.setEnabled (true);
+        spectralBandButton_.setEnabled (valid);
+        const bool requestedSpectral = processor_.getParametricEQParameter (
+            kSpectralArmParameter)->getBool();
+        const bool armedSpectral = processor_.isSpectralModeArmedForTesting();
+        spectralArmButton_.setButtonText (
+            requestedSpectral != armedSpectral
+                ? (requestedSpectral ? "SPEC ON: RESTART AUDIO"
+                                     : "SPEC OFF: RESTART AUDIO")
+                : (armedSpectral ? "Spectral Engine ON (+1024)"
+                                 : "Spectral Engine OFF (0ms)"));
+        spectralArmButton_.setColour (juce::TextButton::buttonColourId,
+            requestedSpectral != armedSpectral
+                ? Palette::curveMid()
+                : armedSpectral ? Palette::accentActive()
+                                 : Palette::surfaceHover());
+        const bool tiltOn = processor_.getParametricEQParameter (
+            kSpectralTiltParameter)->getBool();
+        spectralTiltButton_.setButtonText (
+            tiltOn ? "Detector Tilt ON (+3dB/oct)" : "Detector Tilt OFF");
+        spectralTiltButton_.setColour (juce::TextButton::buttonColourId,
+            tiltOn ? Palette::accentActive() : Palette::surfaceHover());
+        syncSlider (spectralDensitySlider_, kSpectralDensityParameter);
         for (auto& button : placementButtons_)
             button->setEnabled (valid);
 
@@ -1658,6 +1756,18 @@ public:
                 processor_.getParametricEQParameter (parameterIndex (
                     band, BandParameterOffset::Shape))->getChoiceIndex());
             const bool dynamicCompatible = isDynamicCompatibleShape (shape);
+            const bool spectralCompatible = shape == FilterShape::Bell
+                || shape == FilterShape::LowShelf
+                || shape == FilterShape::HighShelf;
+            spectralBandButton_.setEnabled (spectralCompatible);
+            const bool perBandSpectral = processor_.getParametricEQParameter (
+                spectralBandParameterIndex (band))->getBool();
+            spectralBandButton_.setButtonText (
+                perBandSpectral ? "This Band: Spectral ON"
+                                : "This Band: Spectral OFF");
+            spectralBandButton_.setColour (juce::TextButton::buttonColourId,
+                perBandSpectral ? Palette::accentActive()
+                                : Palette::surfaceHover());
             dynEnableButton_.setEnabled (dynamicCompatible);
             dynFilterButton_.setEnabled (dynamicCompatible);
             dynThresholdSlider_.setEnabled (dynamicCompatible);
@@ -1692,6 +1802,7 @@ public:
         }
         else
         {
+            spectralBandButton_.setEnabled (false);
             dynEnableButton_.setEnabled (false);
             dynFilterButton_.setEnabled (false);
             dynThresholdSlider_.setEnabled (false);
@@ -1704,6 +1815,14 @@ public:
 
     juce::TextButton& getDynEnableButtonForTesting() { return dynEnableButton_; }
     juce::TextButton& getDynFilterButtonForTesting() { return dynFilterButton_; }
+    juce::TextButton& getSpectralArmButtonForTesting()
+    {
+        return spectralArmButton_;
+    }
+    juce::TextButton& getSpectralBandButtonForTesting()
+    {
+        return spectralBandButton_;
+    }
     juce::Slider& getDynRangeSliderForTesting() { return dynRangeSlider_; }
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
@@ -1749,6 +1868,8 @@ private:
     int parameterForSlider (const juce::Slider& slider) const
     {
         const int band = owner_.getSelectedBandForTesting();
+        if (&slider == &spectralDensitySlider_)
+            return kSpectralDensityParameter;
         if (band < 0)
             return -1;
         if (&slider == &frequencySlider_)
@@ -1830,6 +1951,12 @@ private:
     juce::Slider dynRangeSlider_;
     juce::Slider dynAttackSlider_;
     juce::Slider dynReleaseSlider_;
+
+    juce::Label spectralLabel_;
+    juce::TextButton spectralArmButton_ { "Spectral Engine OFF" };
+    juce::TextButton spectralBandButton_ { "This Band: Spectral OFF" };
+    juce::Slider spectralDensitySlider_;
+    juce::TextButton spectralTiltButton_ { "Detector Tilt ON" };
 };
 
 //==============================================================================
@@ -2006,6 +2133,16 @@ juce::Rectangle<int> ParametricEQEditor::getGrabPeakBoundsForTesting (
 juce::TextButton& ParametricEQEditor::getDynEnableButtonForTesting()
 {
     return inspector_->getDynEnableButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getSpectralArmButtonForTesting()
+{
+    return inspector_->getSpectralArmButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getSpectralBandButtonForTesting()
+{
+    return inspector_->getSpectralBandButtonForTesting();
 }
 
 juce::TextButton& ParametricEQEditor::getDynFilterButtonForTesting()

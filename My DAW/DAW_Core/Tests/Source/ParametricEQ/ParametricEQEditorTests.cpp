@@ -73,6 +73,7 @@ public:
         testSpectrumGrabAndTouchToBand();
         testNativeBandCopyPasteAcrossInstances();
         testMeasuredEqMatchAndGuidedNativeApply();
+        testSpectralInspectorAndDeferredPdc();
         testPhaseSelectorDrivesCanonicalParameter();
     }
 
@@ -453,6 +454,7 @@ private:
         setUnits (source, dynamicParameterIndex (
             0, DynamicBandOffset::Range), -4.0f);
         setUnits (source, dynamicFilterParameterIndex (0), 1.0f);
+        setUnits (source, spectralBandParameterIndex (0), 1.0f);
         source.prepareToPlay (48000.0, 256);
         destination.prepareToPlay (48000.0, 256);
         auto sourceEditor = std::make_unique<ParametricEQEditor> (source);
@@ -494,6 +496,9 @@ private:
             dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool());
         expect (destination.getParametricEQParameter (
             dynamicFilterParameterIndex (0))->getBool());
+        expect (destination.getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool(),
+            "native clipboard must include the appended per-band spectral mode");
         expectWithinAbsoluteError (static_cast<double> (
             destination.getParametricEQParameter (
                 dynamicParameterIndex (0, DynamicBandOffset::Range))
@@ -576,6 +581,14 @@ private:
 
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
+        // Reuse a disabled slot with stale spectral/dynamic values: EQ Match
+        // must create a plain fresh band, not re-enable hidden old effects.
+        setUnits (processor, spectralBandParameterIndex (0), 1.0f);
+        setUnits (processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (processor, parameterIndex (
+            0, BandParameterOffset::Bypass), 1.0f);
+        setUnits (processor, placementParameterIndex (0), 4.0f);
         processor.prepareToPlay (48000.0, 512);
         processor.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
         auto editor = std::make_unique<ParametricEQEditor> (processor);
@@ -634,6 +647,18 @@ private:
                 parameterIndex (band, BandParameterOffset::Enabled))->getBool()
                 ? 1 : 0;
         expect (inserted >= 1, "Apply inserts real APEX EQ bands");
+        expect (! processor.getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool(),
+            "newly created Match band cannot inherit stale spectral enable");
+        expect (! processor.getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
+            "newly created Match band cannot inherit hidden old dynamics");
+        expect (! processor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Bypass))->getBool(),
+            "newly created Match band must actually affect output");
+        expectEquals (processor.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 0,
+            "newly created Match band defaults to true stereo");
         expectEquals (juce::String ("EQ MATCH"), match.getButtonText(),
                       "matching resets after a completed apply");
 
@@ -652,6 +677,51 @@ private:
         expect (secondProcessor.getParametricEQParameter (
             parameterIndex (0, BandParameterOffset::Enabled))->getBool(),
             "second plugin independently fits and applies shared reference");
+    }
+
+    void testSpectralInspectorAndDeferredPdc()
+    {
+        beginTest ("native spectral inspector preserves touch dimensions "
+                   "and advertises transport restart for PDC");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        editor->setSize (320, 568);
+        editor->setSelectedBandForTesting (0);
+        auto& arm = editor->getSpectralArmButtonForTesting();
+        auto& band = editor->getSpectralBandButtonForTesting();
+
+        expect (arm.getBounds().getHeight() >= 44);
+        expect (band.getBounds().getHeight() >= 44);
+        expect (! arm.getBounds().intersects (band.getBounds()));
+        expect (arm.isEnabled());
+        expect (band.isEnabled());
+        expect (! processor->getParametricEQParameter (
+            kSpectralArmParameter)->getBool());
+
+        arm.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (processor->getParametricEQParameter (
+            kSpectralArmParameter)->getBool());
+        expect (arm.getButtonText().containsIgnoreCase ("RESTART"),
+                "user must not be misled that host PDC switches mid-recording");
+        expect (processor->isSpectralRepreparePendingForTesting());
+        expectEquals (processor->getLatencySamples(), 0);
+
+        band.triggerClick();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        expect (processor->getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool());
+        processor->prepareToPlay (48000.0, 128);
+        editor->setSelectedBandForTesting (0);
+        expectEquals (processor->getLatencySamples(), 1024);
+        expect (! processor->isSpectralRepreparePendingForTesting());
+        expect (arm.getButtonText().containsIgnoreCase ("ON"),
+                "inspector reflects actual prepared spectral path");
+
+        for (int index = 0; index < kNumParameters; ++index)
+            expect (! Processor::getParameterId (index).isEmpty(),
+                    "spectral extension must retain stable hosted identity");
     }
 
     void testPhaseSelectorDrivesCanonicalParameter()

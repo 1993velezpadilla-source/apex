@@ -7,6 +7,7 @@
 #include "ParametricEQCharacterCore.h"
 #include "ParametricEQLinearPhase.h"
 #include "ParametricEQResponseCore.h"
+#include "ParametricEQSpectralBlend.h"
 #include "../AnalysisCore/ApexSpectrumAnalyzerCore.h"
 #include "../DynamicsCore/ApexDynamicsCore.h"
 
@@ -50,7 +51,18 @@ constexpr int kOutputPanParameter = kOutputGainParameter + 1;
 constexpr int kOutputPhaseInvertParameter = kOutputPanParameter + 1;
 constexpr int kOutputAutoGainParameter = kOutputPhaseInvertParameter + 1;
 constexpr int kOutputGainScaleParameter = kOutputAutoGainParameter + 1;
-constexpr int kNumParameters = kOutputGainScaleParameter + 1;
+// Phase 10: spectral mode is latched at prepare, never with live PDC jump.
+constexpr int kSpectralArmParameter = kOutputGainScaleParameter + 1;
+constexpr int kFirstSpectralBandParameter = kSpectralArmParameter + 1;
+constexpr int kSpectralBandParameterCount = kMaxBands;
+constexpr int kSpectralDensityParameter = kFirstSpectralBandParameter
+                                        + kSpectralBandParameterCount;
+constexpr int kSpectralTiltParameter = kSpectralDensityParameter + 1;
+constexpr int kNumParameters = kSpectralTiltParameter + 1;
+constexpr int spectralBandParameterIndex (int band) noexcept
+{
+    return kFirstSpectralBandParameter + band;
+}
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -102,8 +114,8 @@ static_assert (kFirstDynamicFilterParameter == 319,
                "Phase 8 appends per-band detector filters after peq.character");
 static_assert (kOutputGainParameter == 343,
                "Phase 9 output controls must append after Phase 8");
-static_assert (kNumParameters == 348,
-               "Phase 9 parameter count must remain append-only");
+static_assert (kSpectralArmParameter == 348 && kNumParameters == 375,
+               "Phase 10 must append to frozen indices 0..347");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -173,12 +185,12 @@ public:
     static constexpr const char* kPluginName = "APEX Parametric EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
-    static constexpr const char* kVersion = "1.2.0";
+    static constexpr const char* kVersion = "1.3.0";
     static constexpr const char* kFileOrIdentifier = "APEX::ParametricEQ";
     static constexpr const char* kStateTag = "parametriceqstate";
     static constexpr const char* kVersionProperty = "version";
     static constexpr const char* kAnalyzerProperty = "peq.analyzer";
-    static constexpr int kStateVersion = 6;
+    static constexpr int kStateVersion = 7;
 
     Processor();
     ~Processor() override;
@@ -262,6 +274,16 @@ public:
     {
         return linearKernelGeneration_.load (std::memory_order_acquire);
     }
+    bool isSpectralModeArmedForTesting() const noexcept
+    {
+        return spectralPreparedEnabled_.load (std::memory_order_acquire);
+    }
+    bool isSpectralRepreparePendingForTesting() const noexcept
+    {
+        return parameters_[static_cast<std::size_t> (
+            kSpectralArmParameter)]->getBool() != spectralPreparedEnabled_.load (std::memory_order_acquire);
+    }
+
     bool isLinearPhaseModeSettledForTesting() const noexcept
     {
         return linearPhaseMode_ && modeMix_ >= 1.0;
@@ -297,6 +319,9 @@ private:
     void adoptDynamicParameters() noexcept;
     void computeDynamicGains (int numberOfChannels,
                               int numberOfSamples) noexcept;
+    void processSpectralMode (juce::AudioBuffer<float>& buffer,
+                              int channels, int samples,
+                              bool wetTarget) noexcept;
     void adoptPhaseMode() noexcept;
     void processLinearPhase (juce::AudioBuffer<float>& buffer,
                              int numberOfChannels, int numberOfSamples) noexcept;
@@ -359,6 +384,14 @@ private:
     juce::AudioBuffer<float> externalKeyScratch_;
     bool externalKeyValid_ = false;
     std::array<double, kMaxBands> publishedDynamicGainDb_ {};
+
+    // Latency mode latched only during quiescent prepareToPlay. Spectral
+    // per-band enables, density and tilt may change at block boundaries.
+    std::atomic<bool> spectralPreparedEnabled_ { false };
+    bool spectralAnyBandActive_ = false;
+    SpectralAlignedBlend spectralBlend_;
+    std::array<SpectralDynamicsCore::Band, kMaxBands> spectralBands_ {};
+
 
     // Phase 6 linear-phase runtime. Kernel design runs on a dedicated
     // low-priority worker; the audio thread only adopts published
