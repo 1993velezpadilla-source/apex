@@ -28,6 +28,7 @@ public:
     static PichySnapshotStatus capture(
         const DAW::TrackManager& tracks,
         const ChainResolver& findExistingChain,
+        const juce::KnownPluginList* installedCatalog,
         std::uint64_t sequence, PichyCapabilitySnapshot& output)
     {
         output = {};
@@ -45,6 +46,32 @@ public:
         fresh.captureId = sequence;
         fresh.tracks.reserve(static_cast<std::size_t>(
             juce::jmax(0, tracks.getNumTracks())) + 1);
+
+        // The host-scanner catalog tells Pichy what can be inserted, whereas
+        // existing track chains tell it which controls are really loaded.
+        // Never instantiate plugin processors just to read the catalog.
+        if (installedCatalog != nullptr)
+        {
+            const auto& types = installedCatalog->getTypes();
+            if (types.size() < 0 || static_cast<std::size_t>(types.size()) >
+                PichyCapabilityRegistryCore::kMaxAvailablePlugins)
+                return PichySnapshotStatus::LimitsExceeded;
+            fresh.availablePlugins.reserve(static_cast<std::size_t>(types.size()));
+            for (const auto* desc : types)
+            {
+                if (desc == nullptr)
+                    continue;
+                PichyAvailablePluginCapability available;
+                available.pluginIdentifier = desc->fileOrIdentifier.toStdString();
+                available.displayName = desc->name.toStdString();
+                available.formatName = desc->pluginFormatName.toStdString();
+                available.manufacturer = desc->manufacturerName.toStdString();
+                available.version = desc->version.toStdString();
+                available.uniqueId = desc->uniqueId;
+                available.instrument = desc->isInstrument;
+                fresh.availablePlugins.push_back(std::move(available));
+            }
+        }
 
         for (int i = 0; i < tracks.getNumTracks(); ++i)
         {
