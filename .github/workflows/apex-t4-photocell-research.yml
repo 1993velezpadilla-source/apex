@@ -1,0 +1,47 @@
+name: APEX T4 optical photocell research
+on:
+  push:
+    paths:
+      - ".github/workflows/apex-t4-photocell-research.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+  pull_request:
+    paths:
+      - ".github/workflows/apex-t4-photocell-research.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  optical-cell:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: "Original T4 circuit scaffold C++17 / ${{ matrix.os }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux C++17 sanitizers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp" \
+            -o /tmp/apex-t4-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-test
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Windows MSVC C++17
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-t4-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC compilation failed" }
+          ./apex-t4-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 gates failed" }
