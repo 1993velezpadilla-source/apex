@@ -35,6 +35,12 @@ jobs:
     name: Parametric EQ ${{ matrix.configuration }}
     runs-on: windows-latest
     timeout-minutes: 90
+    # Windows CI validates the unsigned executable; trusted code signing is
+    # a release-distribution concern. Running New-SelfSignedCertificate in the
+    # post-build event can stall hosted runners after DAW_Core.exe is linked.
+    # sign_build.ps1 already supports this explicit, CI-only bypass.
+    env:
+      APEX_SKIP_SIGNING: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -151,3 +157,14 @@ jobs:
           )
           & $env:MSBUILD @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Keep the exact unsigned binary as a QA artifact. This is NOT a
+      # signed end-user release: physical ASIO and plugin-path checks remain
+      # outside CI. Fail rather than claim GREEN if the EXE is missing.
+      - name: Publish APEX Windows QA executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-EQ-Windows-${{ matrix.configuration }}-${{ github.run_id }}
+          path: My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+          if-no-files-found: error
+          retention-days: 7

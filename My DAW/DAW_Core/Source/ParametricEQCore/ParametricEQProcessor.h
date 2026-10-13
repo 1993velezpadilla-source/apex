@@ -409,8 +409,14 @@ private:
     bool kernelRebuildPending_ = false;
     LinearPhaseConvolverChannel convolverCurrentL_;
     LinearPhaseConvolverChannel convolverCurrentR_;
+    // Off-diagonal LR and RL retain independent input histories. Populated
+    // only when Mid/Side or other mixing actually needs cross-channel audio.
+    LinearPhaseConvolverChannel convolverCurrentLR_;
+    LinearPhaseConvolverChannel convolverCurrentRL_;
     LinearPhaseConvolverChannel convolverNextL_;
     LinearPhaseConvolverChannel convolverNextR_;
+    LinearPhaseConvolverChannel convolverNextLR_;
+    LinearPhaseConvolverChannel convolverNextRL_;
     bool linearPhaseMode_ = false;
     bool linearPhaseTarget_ = false;
     std::uint32_t currentKernelIndex_ = 0;
@@ -422,6 +428,7 @@ private:
     double kernelStep_ = 1.0;
     juce::AudioBuffer<float> linearPhaseScratch_;
     juce::AudioBuffer<float> kernelNextScratch_;
+    juce::AudioBuffer<float> kernelCrossfeedScratch_; // prepared, no RT alloc
 
     // Audition state is audio-owned except for the lock-free mailbox and the
     // monotonic epoch, which control threads update before the audio thread
