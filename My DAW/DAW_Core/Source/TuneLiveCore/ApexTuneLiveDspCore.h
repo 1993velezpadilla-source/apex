@@ -3,6 +3,9 @@
 // C++17, no JUCE dependency. Allocations only during prepare(), never process().
 // Actual live host and portable wet-audio regression share this SAME implementation.
 #include "ApexTuneLiveVoiceControl.h"
+// Pinned signalsmith-linear fft.h uses std::memcpy without including <cstring>.
+// APEX owns this include-order compatibility shim; do not edit vendored code.
+#include <cstring>
 #include "signalsmith-stretch.h"
 #include <algorithm>
 #include <array>
