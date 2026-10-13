@@ -4780,6 +4780,16 @@ public:
         expectWithinAbsoluteError(clipGain.localPoints[0].value, 0.5f, 0.00001f);
         expectWithinAbsoluteError(clipGain.localPoints[1].value, 3.5f, 0.00001f);
 
+        beginTest("Other native continuous parameters preserve host [0,2] domain");
+        DAW::AutomationClipRegionCore send;
+        send.parameterId = "send.group-b.level";
+        send.lengthSamples = 1000;
+        send.localPoints = { AutomationPoint{0, 1.7f},
+                             AutomationPoint{1000, 0.2f} };
+        AutomationArticulatorToolsCore::flipVertically(send);
+        expectWithinAbsoluteError(send.localPoints[0].value, 0.3f, 0.00001f);
+        expectWithinAbsoluteError(send.localPoints[1].value, 1.8f, 0.00001f);
+
         beginTest("Time stretch fit retains signed pan and exact curve tension");
         AutomationClipRegionCore panStretched;
         panStretched.parameterId = AutomationLaneCore::trackPanParameterId;
