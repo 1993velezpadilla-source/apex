@@ -135,6 +135,15 @@ struct AutomationGroupedCurveCore
                 || !manager.findLane(entry.trackId, entry.parameterId)->isEnabled())
                 return false;
 
+            // A global Undo command may outlive later edits on one selected
+            // lane. Refuse the whole batch if ANY target has changed since
+            // the captured before/after state; never overwrite new work on a
+            // different track just because the old history entry is replayed.
+            const auto* current = manager.findLane(entry.trackId, entry.parameterId);
+            const auto expected = useAfter ? entry.before : entry.after;
+            if (current->getState().toXmlString() != expected.toXmlString())
+                return false;
+
             // A clip region added after the batch was created must also block
             // its undo/redo rather than overwrite clip-authored automation.
             for (const auto& region : manager.getClipRegions())
