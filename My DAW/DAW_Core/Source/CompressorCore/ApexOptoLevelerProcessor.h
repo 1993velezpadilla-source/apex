@@ -118,6 +118,7 @@ public:
         dsp_.prepare(sampleRate);
         dsp_.setParameters(readParameters());
         meterReductionDb_.store(0.0f,std::memory_order_relaxed);
+        outputRmsDbfs_.store(-120.0f,std::memory_order_relaxed);
         setLatencySamples(0);
     }
     void releaseResources() override {}
@@ -133,6 +134,18 @@ public:
                      buffer.getNumSamples());
         meterReductionDb_.store(static_cast<float>(dsp_.getGainReductionDb()),
                                 std::memory_order_relaxed);
+        // Meter only. No FFT/FIFO/heap work on the audio thread. The GUI uses
+        // this block RMS for output selector modes, smoothing at 30 Hz.
+        double energy=0.0;
+        for(int channel=0;channel<std::min(channels,2);++channel)
+        {
+            const double rms=buffer.getRMSLevel(channel,0,buffer.getNumSamples());
+            energy+=rms*rms;
+        }
+        energy/=std::min(channels,2);
+        const float dbfs=static_cast<float>(20.0*std::log10(
+            std::max(1.0e-9,std::sqrt(energy))));
+        outputRmsDbfs_.store(dbfs,std::memory_order_relaxed);
     }
     double getTailLengthSeconds() const override { return 0; }
     bool acceptsMidi() const override { return false; }
@@ -154,11 +167,24 @@ public:
     {
         return meterReductionDb_.load(std::memory_order_relaxed);
     }
+    float getOutputRmsDbfs() const noexcept
+    {
+        return outputRmsDbfs_.load(std::memory_order_relaxed);
+    }
+    int getMeterMode() const noexcept
+    {
+        return meterMode_.load(std::memory_order_relaxed);
+    }
+    void setMeterMode(int choice) noexcept
+    {
+        meterMode_.store(juce::jlimit(0,2,choice),std::memory_order_relaxed);
+    }
 
     void getStateInformation(juce::MemoryBlock& result) override
     {
         juce::ValueTree state(kStateName);
-        state.setProperty("version",1,nullptr);
+        state.setProperty("version",2,nullptr);
+        state.setProperty("opto.meter.mode",getMeterMode(),nullptr);
         for (int i=0;i<ParameterCount;++i)
             state.setProperty(juce::Identifier(getParamId(i)),params_[i]->getValue(),nullptr);
         juce::MemoryOutputStream stream(result,false);
@@ -169,6 +195,9 @@ public:
         if(input==nullptr || bytes<=0) return;
         const auto state=juce::ValueTree::readFromData(input,static_cast<size_t>(bytes));
         if(!state.isValid() || !state.hasType(juce::Identifier(kStateName))) return;
+        const juce::Identifier meterId("opto.meter.mode");
+        if(state.hasProperty(meterId))
+            setMeterMode(static_cast<int>(state.getProperty(meterId)));
         for(int i=0;i<ParameterCount;++i)
         {
             const auto id=juce::Identifier(getParamId(i));
@@ -212,133 +241,12 @@ private:
     std::array<OptoHostedParameter*,ParameterCount> params_ {};
     ApexOptoLevelerCore dsp_;
     std::atomic<float> meterReductionDb_{0.0f};
+    std::atomic<float> outputRmsDbfs_{-120.0f};
+    std::atomic<int> meterMode_{0};
 };
-
-class OptoEditor final : public juce::AudioProcessorEditor, private juce::Timer
-{
-public:
-    explicit OptoEditor(OptoProcessor& processor)
-      : juce::AudioProcessorEditor(&processor),processor_(processor)
-    {
-        using ST=juce::Slider;
-        configureKnob(peak_,PeakReduction,"PEAK REDUCTION",0,100,"");
-        configureKnob(gain_,Gain,"OUTPUT GAIN",0,40," dB");
-        configureKnob(mix_,Mix,"DRY / WET",0,100," %");
-        configureKnob(emphasis_,Emphasis,"KEY EMPHASIS",0,100," %");
-        configureKnob(drive_,ColorDrive,"COLOR DRIVE",0.25,4.0,"");
-        configureToggle(limit_,Limit,"LIMIT");
-        configureToggle(color_,ColorEnabled,"COLOR");
-        configureToggle(bypass_,Bypass,"BYPASS");
-        setOpaque(true);
-        setSize(780,385);
-        startTimerHz(25);
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        using C=juce::Colour;
-        const auto b=getLocalBounds().toFloat();
-        g.fillAll(C(0xff10111b));
-        g.setColour(C(0xff292a3e));
-        g.fillRoundedRectangle(b.reduced(12.0f),16.0f);
-        g.setColour(C(0xff121422));
-        g.fillRoundedRectangle(20.0f,70.0f,b.getWidth()-40.0f,200.0f,13.0f);
-        g.setColour(C(0xfffd3f99));
-        g.setFont(juce::Font(juce::FontOptions(23.0f,juce::Font::bold)));
-        g.drawText("APEX  /  OPTO 2A",30,22,405,34,juce::Justification::centredLeft);
-        g.setColour(C(0xffb0b6c8));
-        g.setFont(juce::Font(juce::FontOptions(12.0f)));
-        g.drawText("OPTICAL LEVELING  •  EXPERIMENTAL DSP",440,24,313,27,
-                   juce::Justification::centredRight);
-        const float x=55.0f,y=287.0f,w=650.0f;
-        g.setColour(C(0xff31344b));
-        g.fillRoundedRectangle(x,y,w,20.0f,9.0f);
-        const double gr=juce::jlimit(0.0,36.0,
-                                  static_cast<double>(processor_.getGainReductionMeterDb()));
-        g.setColour(C(0xff20d7df));
-        g.fillRoundedRectangle(x,y,static_cast<float>(w*gr/36.0),20.0f,9.0f);
-        g.setColour(C(0xffb7bbd2));
-        g.setFont(juce::Font(juce::FontOptions(12.0f)));
-        g.drawText("GAIN REDUCTION  " + juce::String(gr,1) + " dB",55,310,650,24,
-                   juce::Justification::centredLeft);
-        g.setColour(C(0xff788198));
-        g.drawText("UNVERIFIED T4 MODEL  •  ZERO-LATENCY PARALLEL",28,347,720,24,
-                   juce::Justification::centred);
-    }
-    void resized() override
-    {
-        const int left=42, top=99, step=142;
-        std::array<juce::Slider*,5> sliders {&peak_,&gain_,&mix_,&emphasis_,&drive_};
-        for (int i=0;i<5;++i)
-            sliders[i]->setBounds(left+i*step,top,124,148);
-        limit_.setBounds(50,252,120,28);
-        color_.setBounds(211,252,120,28);
-        bypass_.setBounds(372,252,120,28);
-    }
-
-private:
-    void configureKnob(juce::Slider& slider,int index,const juce::String& title,
-                       double low,double high,const juce::String& suffix)
-    {
-        slider.setName(title);
-        slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle(juce::Slider::TextBoxBelow,false,100,24);
-        slider.setRange(low,high,0.01);
-        slider.setTextValueSuffix(suffix);
-        slider.setColour(juce::Slider::rotarySliderFillColourId,juce::Colour(0xfffd3f99));
-        slider.setColour(juce::Slider::rotarySliderOutlineColourId,juce::Colour(0xff393d56));
-        slider.setColour(juce::Slider::textBoxTextColourId,juce::Colour(0xffedf0ff));
-        slider.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff202437));
-        slider.setTooltip(title);
-        slider.setValue(processor_.getParameterAt(index).getUnits(),juce::dontSendNotification);
-        auto& param=processor_.getParameterAt(index);
-        slider.onDragStart=[&param]{param.beginChangeGesture();};
-        slider.onDragEnd=[&param]{param.endChangeGesture();};
-        slider.onValueChange=[&slider,&param]{
-            param.setValueNotifyingHost(param.toNormalised(static_cast<float>(slider.getValue())));
-        };
-        addAndMakeVisible(slider);
-    }
-    void configureToggle(juce::ToggleButton& button,int index,const juce::String& label)
-    {
-        button.setButtonText(label);
-        button.setColour(juce::ToggleButton::tickColourId,juce::Colour(0xfffd3f99));
-        button.setToggleState(processor_.getParameterAt(index).getUnits()>=0.5,
-                              juce::dontSendNotification);
-        auto& param=processor_.getParameterAt(index);
-        button.onClick=[&button,&param]{
-            param.beginChangeGesture();
-            param.setValueNotifyingHost(button.getToggleState()?1.0f:0.0f);
-            param.endChangeGesture();
-        };
-        addAndMakeVisible(button);
-    }
-    void timerCallback() override
-    {
-        const std::array<std::pair<juce::Slider*,int>,5> sliders {{
-            {&peak_,PeakReduction},{&gain_,Gain},{&mix_,Mix},
-            {&emphasis_,Emphasis},{&drive_,ColorDrive}
-        }};
-        for(auto [slider,index]:sliders)
-            if(!slider->isMouseButtonDown())
-                slider->setValue(processor_.getParameterAt(index).getUnits(),
-                                 juce::dontSendNotification);
-        limit_.setToggleState(processor_.getParameterAt(Limit).getUnits()>=0.5,
-                               juce::dontSendNotification);
-        color_.setToggleState(processor_.getParameterAt(ColorEnabled).getUnits()>=0.5,
-                               juce::dontSendNotification);
-        bypass_.setToggleState(processor_.getParameterAt(Bypass).getUnits()>=0.5,
-                               juce::dontSendNotification);
-        repaint(juce::Rectangle<int>(50,285,680,55));
-    }
-    OptoProcessor& processor_;
-    juce::Slider peak_,gain_,mix_,emphasis_,drive_;
-    juce::ToggleButton limit_,color_,bypass_;
-};
-
-inline juce::AudioProcessorEditor* OptoProcessor::createEditor()
-{
-    return new OptoEditor(*this);
-}
 
 } // namespace APEX::Compressor
+
+// Keep custom editor in its own compilation unit for clean DSP / UI ownership.
+// Header-only editor definition requires no change to Projucer source lists.
+#include "ApexOptoLevelerEditor.h"
