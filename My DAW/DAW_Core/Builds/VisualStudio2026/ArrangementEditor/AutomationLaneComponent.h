@@ -46,6 +46,58 @@ public:
 
     ~AutomationLaneComponent() override = default;
 
+    // Host supplies an explicit selected-CLIP-track set. The lane never
+    // assumes "all tracks" or performs a cross-VST3-instance broadcast.
+    using GroupedCurveCallback = std::function<bool(
+        const TrackID&, const juce::String&, const std::vector<AutomationPoint>&)>;
+    void setGroupedCurveCallback(GroupedCurveCallback callback)
+    {
+        groupedCurveCallback_ = std::move(callback);
+    }
+
+    // Same exact PPQ bridge as ordinary point, pencil and curve edits.
+    // Callable after multi-track Undo/Redo without constructing UI lanes.
+    static void syncModelLaneToApex(const AutomationUIHelper& helper,
+                                    const TrackID& trackId,
+                                    const juce::String& parameterId,
+                                    double sampleRate, double tempoBpm)
+    {
+        if (!std::isfinite(sampleRate) || !std::isfinite(tempoBpm)
+            || sampleRate <= 0.0 || tempoBpm <= 0.0)
+            return;
+
+        juce::String key;
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        if (parameterId == AutomationLaneCore::trackVolumeParameterId)
+            key = KR::trackVolumeKey(trackId);
+        else if (parameterId == AutomationLaneCore::trackPanParameterId)
+            key = KR::trackPanKey(trackId);
+        else
+            return; // explicit native volume/pan only: no VST3 guessing
+
+        const auto* lane = helper.findLane(trackId, parameterId);
+        if (lane == nullptr)
+            return;
+
+        auto& registry = KR::getInstance();
+        const auto id = registry.getOrCreateID(key);
+        auto& apexLane = apex::automation::AutomationLaneStore::getInstance()
+                             .getOrCreateLane(id);
+        apex::automation::AutomationLane::PointVector ppqPoints;
+        ppqPoints.reserve(lane->points.size());
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        for (const auto& point : lane->points)
+        {
+            ppqPoints.push_back({
+                juce::jmax(0.0, static_cast<double>(point.timeSamples) * ppqPerSample),
+                normaliseForApex(parameterId, point.value),
+                toApexCurveType(point.curveToNext),
+                juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+            });
+        }
+        apexLane.replacePoints(std::move(ppqPoints));
+    }
+
     void paint(juce::Graphics& g) override
     {
         g.fillAll(juce::Colours::transparentBlack);
@@ -616,6 +668,7 @@ private:
     // ========================================================================
 
     UndoManager undoManager_;
+    GroupedCurveCallback groupedCurveCallback_;
 
     // ========================================================================
     // INTERACTION STATE & HELPERS (Phase 2)
@@ -1243,6 +1296,26 @@ private:
                 selectedPointIndex_ = -1;
                 invalidateCurvePath();
                 repaint();
+            });
+        }
+
+        // Deliberate grouped edit: only pre-selected, existing native lanes.
+        // The Arrangement owner decides the exact set of selected tracks.
+        if (isDrawingEnabled() && groupedCurveCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            menu.addItem("Copy This Curve to Selected Clip Tracks (Undoable)", [this]()
+            {
+                const auto* source = helper_.findLane(trackId_, parameterId_);
+                if (source != nullptr && source->isEnabled() && !source->points.empty())
+                {
+                    if (groupedCurveCallback_(trackId_, parameterId_, source->points))
+                    {
+                        invalidateCurvePath();
+                        repaint();
+                    }
+                }
             });
         }
 
