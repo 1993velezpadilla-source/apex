@@ -63,6 +63,8 @@ public:
         delayLength_=std::max(1,latency_+1);
         delay_.assign(static_cast<std::size_t>(channels_)*delayLength_,0.0f);
         delayPosition_=0;
+        // Capture-rate input envelope smoothing coefficient, set off the RT thread.
+        envelopeAlpha_=static_cast<float>(1.0/(rate_*0.010+1.0));
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
         pitchActiveSlew_=0.0f;
         envelopeL_=envelopeR_=0.0f;
@@ -160,9 +162,8 @@ public:
                 // Never average opposite-polarity stereo signals to silence.
                 const float left=source[0][i];
                 const float right=channels==2 ? source[1][i] : 0.0f;
-                const float envelopeAlpha=static_cast<float>(1.0/(rate_*0.010+1.0));
-                envelopeL_+=(std::abs(left)-envelopeL_)*envelopeAlpha;
-                envelopeR_+=(std::abs(right)-envelopeR_)*envelopeAlpha;
+                envelopeL_+=(std::abs(left)-envelopeL_)*envelopeAlpha_;
+                envelopeR_+=(std::abs(right)-envelopeR_)*envelopeAlpha_;
                 const float detectorInput=(channels==2 && envelopeR_>1.2f*envelopeL_)
                                          ? right : left;
                 if(tracker_.push(detectorInput)) {
@@ -177,20 +178,24 @@ public:
                 wetSlew_+=((user.bypass?0.0f:user.wet)-wetSlew_)*wetStep;
                 pitchActiveSlew_+=(needsPitchWork-pitchActiveSlew_)*neutralStep;
                 const float wetAmount=wetSlew_*voicedSlew_*pitchActiveSlew_;
+                // One branch-based wrap per sample instead of an integer
+                // remainder and repeated per-channel index calculation.
+                // At latency=0 the current input remains the dry authority.
+                const int nextDelayPosition=delayPosition_+1==delayLength_
+                                              ?0:delayPosition_+1;
                 for(int c=0;c<channels;++c) {
                     const std::size_t index=static_cast<std::size_t>(c)*delayLength_
                                              +static_cast<std::size_t>(delayPosition_);
                     delay_[index]=source[c][i];
-                    const int readPos=(delayPosition_+1)%delayLength_;
                     const float dry=latency_==0 ? source[c][i]
-                        : delay_[static_cast<std::size_t>(c)*delayLength_+static_cast<std::size_t>(readPos)];
+                        : delay_[static_cast<std::size_t>(c)*delayLength_+static_cast<std::size_t>(nextDelayPosition)];
                     const float wetSample=std::isfinite(processed[c][i])
                                         ? std::clamp(processed[c][i],-8.0f,8.0f)
                                         : 0.0f;
                     const float result=dry*(1.0f-wetAmount)+wetSample*wetAmount;
                     channelData[c][offset+i]=std::isfinite(result)?result:0.0f;
                 }
-                delayPosition_=(delayPosition_+1)%delayLength_;
+                delayPosition_=nextDelayPosition;
             }
             offset+=count;
         }
@@ -205,6 +210,7 @@ private:
     double rate_=48000.0;
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
     float envelopeL_=0,envelopeR_=0,pitchActiveSlew_=0;
+    float envelopeAlpha_=0.0f;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1;
     ShifterProfile profile_=ShifterProfile::HighQuality40ms;
 };
