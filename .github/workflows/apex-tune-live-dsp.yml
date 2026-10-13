@@ -39,6 +39,9 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" -o tune_live_voice_test
           ./tune_live_voice_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_early_onset.cpp" -o tune_live_early_onset
+          ./tune_live_early_onset
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" -o tune_live_preset_test
           ./tune_live_preset_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -114,6 +117,8 @@ jobs:
           tune_live_yin_test.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" || exit /b 1
           tune_live_voice_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_early_onset.exe "My DAW/DAW_Core/Tests/TuneLive/test_early_onset.cpp" || exit /b 1
+          tune_live_early_onset.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_preset_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" || exit /b 1
           tune_live_preset_test.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_wet_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" || exit /b 1
