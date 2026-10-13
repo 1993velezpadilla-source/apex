@@ -1660,7 +1660,7 @@ public:
         // Pin ONE immutable PPQ map generation for every parameter in this
         // processor callback. A concurrent multi-lane GUI publication is not
         // allowed to split the parameter loop between old and new curves.
-        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
+        const auto ppqLaneMap = laneStore.getEffectiveLaneSnapshotRT();
         auto& registry    = apex::automation::AutomationParameterRegistry::getInstance();
         const double ppqPosition = (sampleRate > 0.0 && bpm > 0.0)
             ? ((double)samplePosition / sampleRate) * (bpm / 60.0)
@@ -1812,7 +1812,7 @@ public:
         const double startPPQ = ppqAtSample(samplePosition);
         const double lastPPQ = ppqAtSample(samplePosition + maxSamples - 1);
         auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
-        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
+        const auto ppqLaneMap = laneStore.getEffectiveLaneSnapshotRT();
         auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         const auto keyGeneration = keyRegistry.getChangeGeneration();
         int best = maxSamples;
@@ -1910,7 +1910,7 @@ public:
 
         auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
-        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
+        const auto ppqLaneMap = laneStore.getEffectiveLaneSnapshotRT();
         const auto keyGeneration = keyRegistry.getChangeGeneration();
         const double ppqScale = sampleRate > 0.0 && bpm > 0.0
             ? bpm / (60.0 * sampleRate) : 0.0;
