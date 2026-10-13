@@ -146,10 +146,8 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         convolverCurrentR_.processBlock (buffer.getWritePointer (1),
                                          numberOfSamples,
                                          currentKernels.rr.data());
-    else
-        convolverCurrentR_.processBlock (buffer.getWritePointer (0),
-                                         numberOfSamples,
-                                         currentKernels.ll.data());
+    // A mono bus has only one channel. Running R on the same sample buffer
+    // would convolve it twice and turn 2047 samples PDC into 4094.
 
     if (kernelTransitionActive_ && kernelMix_ < 1.0)
     {
@@ -165,9 +163,7 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         if (channels >= 2)
             convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
                                           numberOfSamples, nextKernels.rr.data());
-        else
-            convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (0),
-                                          numberOfSamples, nextKernels.ll.data());
+        // Do not convolve mono twice during the next-kernel crossfade.
 
         for (int sample = 0; sample < numberOfSamples; ++sample)
         {
