@@ -35,6 +35,12 @@ jobs:
     name: Parametric EQ ${{ matrix.configuration }}
     runs-on: windows-latest
     timeout-minutes: 90
+    # Windows CI validates the unsigned executable; trusted code signing is
+    # a release-distribution concern. Running New-SelfSignedCertificate in the
+    # post-build event can stall hosted runners after DAW_Core.exe is linked.
+    # sign_build.ps1 already supports this explicit, CI-only bypass.
+    env:
+      APEX_SKIP_SIGNING: '1'
     strategy:
       fail-fast: false
       matrix:
