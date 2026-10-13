@@ -51,8 +51,8 @@ struct AutomationLaneStateValidationCore
                 || value != AutomationLaneCore::clampValueForParameter(
                     expectedParameterId, value))
                 return false;
-            if (automationCurveTypeToString(
-                    automationCurveTypeFromString(name)) != name)
+            if (juce::String(automationCurveTypeToString(
+                    automationCurveTypeFromString(name))) != name)
                 return false;
 
             lastSample = sample;
