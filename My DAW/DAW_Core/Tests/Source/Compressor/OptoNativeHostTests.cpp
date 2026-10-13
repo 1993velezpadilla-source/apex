@@ -97,6 +97,11 @@ public:
                        "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
                 juce::Image screenshot(juce::Image::ARGB,1040,380,true);
                 juce::Graphics graphics(screenshot);
+                // A detached JUCE editor is invisible by default, so
+                // paintEntireComponent skips the component tree entirely.
+                // Mark it visible before offscreen rendering. Otherwise the
+                // artifact becomes a transparent PNG and false GUI failure.
+                editor->setVisible(true);
                 editor->paintEntireComponent(graphics,true);
                 const auto metal=screenshot.getPixelAt(195,148);
                 const auto lcd=screenshot.getPixelAt(512,110);
