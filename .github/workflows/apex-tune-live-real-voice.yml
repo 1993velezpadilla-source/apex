@@ -205,6 +205,19 @@ jobs:
             test -s "vocadito_${label}_RESEARCH_COMPENSATION_REPORT.txt"
           done
           ! grep -ql 'FAILED' vocadito_*_RESEARCH_COMPENSATION_REPORT.txt
+      - name: Audit real singer high-frequency-rich articulation and dynamics with exact PDC alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_articulation_metrics.cpp" \
+            -o tune_live_human_articulation
+          for label in human low high; do
+            ./tune_live_human_articulation --prefix "vocadito_${label}"
+            test -s "vocadito_${label}_ARTICULATION_SPECTRAL_REPORT.txt"
+          done
       - name: Investigate high-register octave flags with PDC-aligned actual audio spectra
         shell: bash
         run: |
@@ -297,5 +310,8 @@ jobs:
             vocadito_human_RESEARCH_COMPENSATION_REPORT.txt
             vocadito_low_RESEARCH_COMPENSATION_REPORT.txt
             vocadito_high_RESEARCH_COMPENSATION_REPORT.txt
+            vocadito_human_ARTICULATION_SPECTRAL_REPORT.txt
+            vocadito_low_ARTICULATION_SPECTRAL_REPORT.txt
+            vocadito_high_ARTICULATION_SPECTRAL_REPORT.txt
           if-no-files-found: error
           retention-days: 7
