@@ -97,12 +97,26 @@ public:
                        "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
                 juce::Image screenshot(juce::Image::ARGB,1040,380,true);
                 juce::Graphics graphics(screenshot);
-                // A detached JUCE editor is invisible by default, so
-                // paintEntireComponent skips the component tree entirely.
-                // Mark it visible before offscreen rendering. Otherwise the
-                // artifact becomes a transparent PNG and false GUI failure.
-                editor->setVisible(true);
-                editor->paintEntireComponent(graphics,true);
+                // This editor is deliberately NOT attached to a desktop
+                // window during the headless Windows CI run. JUCE suppresses
+                // paintEntireComponent for components without a showing peer:
+                // even setVisible(true) yielded a fully transparent PNG.
+                // Paint the editor and each direct visible child explicitly
+                // using the exact production paint callbacks, with each
+                // child's original local bounds and clip. This yields an
+                // authentic deterministic offscreen proof without a window.
+                editor->paint(graphics);
+                for (int childIndex = 0; childIndex < editor->getNumChildComponents(); ++childIndex)
+                {
+                    auto* child = editor->getChildComponent(childIndex);
+                    if (child == nullptr || !child->isVisible()) continue;
+                    const auto area = child->getBounds();
+                    juce::Graphics::ScopedSaveState childState(graphics);
+                    graphics.reduceClipRegion(area);
+                    graphics.addTransform(juce::AffineTransform::translation(
+                        static_cast<float>(area.getX()), static_cast<float>(area.getY())));
+                    child->paint(graphics);
+                }
                 const auto metal=screenshot.getPixelAt(195,148);
                 const auto lcd=screenshot.getPixelAt(512,110);
                 const auto strip=screenshot.getPixelAt(25,344);
