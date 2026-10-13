@@ -54,17 +54,23 @@
 
 **Correcciones documentales:** El T4 usa un **panel electroluminiscente**, no lámpara incandescente/tungsteno del diseño anterior. El esquema primario y UA explican cómo *más luz disminuye resistencia CdS*. Ciertas descripciones secundarias contienen errores/inversiones; nunca usar textos de blogs como fuente de física sin comprobar S1/S2.
 
-## B. VARIANTES: IDENTIDADES QUE NO DEBEMOS FUSIONAR
+## B. VARIANTES ESTUDIADAS = REFERENCIAS, NO PRODUCTOS APEX
+
+**DECISIÓN DEL ARTISTA 2026-10-13:** Crear exactamente **UN SOLO PLUGIN NATIVO APEX Opto 2A**, no tres versiones LA-2A como UAD, ni tres modos/presets escondidos que impliquen tres emulaciones. Afinarlo por medición usando su **UAD LA-2A Gray como referencia sonora primaria para voz principal**, y consultar sus **UAD Silver y LA-2 solamente como controles de contraste** que revelen el rango de comportamiento de los circuitos; no fusionar indiscriminadamente sus curvas ni hacer tres procesadores.
+
+**Producto único:** un carácter tonal establecido; Peak Reduction / Gain / Compress-Limit / Emphasis físico cuando esté validado / Mix paralelo / medidor. NO selector Gray–Silver–LA-2. La interfaz adopta identidad APEX, nunca skins UAD. El dueño tiene UAD LA-2As, pero ninguna referencia procesada ni captura del plugin está disponible al repositorio en este momento.
+
+### Evidencia histórica de los distintos circuitos
 
 | Variante física/referencia | Rasgos corroborados | Objetivo APEX |
 |---|---|---|
 | Teletronix LA-2 / early 1960s | anterior al LA-2A, T4 historial/envejecimiento, respuesta más lenta; modelo UAD LA-2 suele ser más "mellow" | fase 3 |
-| LA-2A Gray ~1962-1965 | temprano, T4A, HA-100X habitual; R37 no en TODAS las series, revisar serial | **primero para voces**, medición de una unidad concreta |
-| LA-2A Silver ~1965-1969 | varias rev.; al final T4B y A-10 en algunas; respuesta UAD Silver más rápida que Gray | segunda variante, no un GUI skin |
+| LA-2A Gray ~1962-1965 | temprano, T4A, HA-100X habitual; R37 no en TODAS las series, revisar serial | **referencia primaria vocal (UAD Gray)**; medir contra licencia instalada por el usuario |
+| LA-2A Silver ~1965-1969 | varias rev.; al final T4B y A-10 en algunas; respuesta UAD Silver más rápida que Gray | comparativa solamente; NO segunda variante de APEX |
 | UREI 1979/1992 reissue | A-10 y T4B frecuentes | circuito/mediciones opcionales |
 | UA hardware reissue ~2000+ | versión con custom HA-100X-like, T4B | referencia electrónica accesible alternativa |
 | UAD LA-2A **Legacy** | UA confirma que **NO** modela distorsión I/O y transformador | NO usar como única referencia de 1:1 |
-| UAD LA-2A **Leveler Collection 2013+**: Silver/Gray/LA-2 | fabricante afirma modelado de camino electrónico completo, incluyendo válvulas/transformadores y T4 más detallado. Procesamiento PROPIETARIO; código interno no público | **golden plugin behavior** 3 variantes, medición de entradas/salidas con permiso/licencia |
+| UAD LA-2A **Leveler Collection 2013+**: Silver/Gray/LA-2 | fabricante afirma modelado de camino electrónico completo, incluyendo válvulas/transformadores y T4 más detallado. Procesamiento PROPIETARIO; código interno no público | referencias externas licenciadas por el usuario; **Gray es target primario**, Silver/LA-2 validan contexto, ninguno se publica como variante APEX |
 
 La "1:1 UAD" es **un OBJETIVO comparativo**, no una garantía ni algoritmo obtenido. Diferencias reales entre unidades, patentes/algoritmos propietarios, clipping y tolerancias impiden inferir que un único ajuste represente *todas* las LA-2A. No copiar código, presets, GUI, logos, datos protegidos ni empaquetar modelos de terceros sin revisar licencia.
 
@@ -95,7 +101,7 @@ La "1:1 UAD" es **un OBJETIVO comparativo**, no una garantía ni algoritmo obten
 4. **Tubos**: solver triode/pentodo parametrizado V1/V2/V3/V4; validar transferencias DC y AC, clipping suave/asimétrico y espectro armónico a diferentes niveles; evitar solo `tanh` global. Usar Wave Digital Filter / statespace con seguridad CPU.
 5. **Transformadores**: acoplamiento, inductancia no lineal, histéresis si es identificable con datos, carga nominal; alias/harmonics con oversampling interno medido 2x/4x/8x, anti-alias.
 6. **Backend dual**: low-latency live causal para 48kHz/64-128 samples, y opción HQ offline; PDC/latencia anunciada, bypass sin clic, paralelo dry/wet alineado en ambos modos. CPU cuantificado y no alocar nunca en callback.
-7. **Factory voice test**: Silver y Gray separados; NO autoajustar loudness basándose en factor de compresión. Input y Output GR +4/+10 con balística fiel, calibración -12 dBFS de **UAD Collection** como referencia del plugin, sin confundir con +4dBu de hardware.
+7. **Factory voice test**: APEX Opto 2A comparado primero con **Gray** en la misma señal vocal; Silver/LA-2 se prueban en ensayos de contraste, no se reproducen como variantes. NO autoajustar loudness basándose en factor de compresión. Input y Output GR +4/+10 con balística fiel, calibración -12 dBFS de **UAD Collection** como referencia del plugin, sin confundir con +4dBu de hardware.
 
 ## F. PROTOCOLO A/B GOLDEN WAV — SIN ADIVINAR CÓDIGO UAD
 
@@ -107,9 +113,10 @@ La "1:1 UAD" es **un OBJETIVO comparativo**, no una garantía ni algoritmo obten
 6. Gate auditivo: ABX ciego de vocal solista y de vocal en mezcla con niveles igualados (<0.1 dB como meta), varias personas y reproducibilidad. No confundir "me gusta" con "1:1".
 7. Entrega cuando: test del usuario cantando por Apollo y live monitoring sin click, sesión guardada/reabierta, copy/paste, MIDI/VST3 automation sidechain unaffected, Windows Debug+Release, macOS cuando exista.
 
-**PREGUNTA NECESARIA ANTES DE MEDIR GOLDEN:** ¿El propietario dispone de UAD LA-2A *Silver/Gray/LA-2 Collection* (no solamente un "Teletronix LA-2A Tube Compressor" o Legacy) en su Apollo/UADx? Esta auditoría NO asume licencia ni acceso remoto al plugin.
+**DISPONIBILIDAD CONFIRMADA POR EL ARTISTA:** Tiene los LA-2As de Universal Audio. La versión/formato exactos, archivos de prueba renderizados y licencia concreta aún no están identificados. No asumimos acceso remoto a la instalación. Pedir un par dry/wet renderizado de la misma voz cuando el núcleo físico esté listo para calibrar, no pedir que vuelva a decir que tiene UAD.
 
 ## VEREDICTOS
+- **Alcance del producto:** SOLO UN APEX Opto 2A, UAD Gray como referencia de calibración y otros modelos solo comparadores. CONFIRMADO.
 - **Auditoría de topología 1966 y diferencias de versión:** FUENTES ENCONTRADAS.
 - **Hardware netlist completo v1 + SPICE simulation:** PENDIENTE de transcripción/validación de esquema y parámetros.
 - **T4 física + válvulas + transformadores APEX:** NO implementado.
