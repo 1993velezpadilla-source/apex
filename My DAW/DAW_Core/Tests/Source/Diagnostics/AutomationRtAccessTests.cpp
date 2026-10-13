@@ -31,6 +31,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <limits>
 #include <thread>
 #include <vector>
 
