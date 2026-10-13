@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <cstdint>
 #include <vector>
 
 // Actual DspCore PDC identity and block bound check.
@@ -161,6 +162,47 @@ static bool poisonedInputRecovery() {
     return true;
 }
 
+// Stable deterministic unvoiced noise must remain natural (no synthetic
+// choir, random musical note, or spurious transposition of sibilants).
+// Compare against the original noise after reported PDC.
+static bool unvoicedSibilanceFidelity() {
+    constexpr int sr=48000, n=sr, block=128;
+    std::vector<float> noise(n);
+    std::uint32_t rng=0xA17EC25u;
+    for(int i=0;i<n;++i) {
+        rng^=rng<<13; rng^=rng>>17; rng^=rng<<5;
+        const float centered=static_cast<float>(rng & 0xffffu)/32768.0f-1.0f;
+        noise[static_cast<std::size_t>(i)]=0.07f*centered;
+    }
+    const auto original=noise;
+    APEX::TuneLive::DspCore effect;
+    effect.prepare(sr,block,1);
+    APEX::TuneLive::DspSettings settings;
+    settings.correction=1.0f; settings.retune=0.0f;
+    settings.flexTune=0.0f; settings.humanize=0.0f;
+    for(int i=0;i<n;i+=block) {
+        float* audio[1]={noise.data()+i};
+        effect.process(audio,1,std::min(block,n-i),settings);
+    }
+    const int latency=effect.latencySamples();
+    double squaredError=0.0,originalEnergy=0.0;
+    int count=0;
+    for(int i=sr/2;i<n;++i) {
+        if(i<latency)continue;
+        const float dry=original[static_cast<std::size_t>(i-latency)];
+        const double error=noise[static_cast<std::size_t>(i)]-dry;
+        squaredError+=error*error;
+        originalEnergy+=static_cast<double>(dry)*dry;
+        ++count;
+    }
+    const double relativeRms=std::sqrt(squaredError/std::max(1.0,originalEnergy));
+    std::cout<<"sibilance_unvoiced_relative_error="<<relativeRms
+             <<" latency="<<latency<<"\\n";
+    // Since this signal has no valid fundamental, almost all of the output
+    // must remain the original consonant, delay-aligned without coloration.
+    return count>0 && std::isfinite(relativeRms) && relativeRms<0.03;
+}
+
 int main() {
     bool pass=true;
     pass&=probe(44100.0,64,64,1);
@@ -173,6 +215,7 @@ int main() {
     pass&=rightChannelVocal();
     pass&=repeatableWetBounce();
     pass&=poisonedInputRecovery();
+    pass&=unvoicedSibilanceFidelity();
     if(!pass) {std::cerr<<"FAIL: bypass PDC/host block matrix\n";return 1;}
     std::cout<<"PASS: cross-platform PDC, mono/stereo, oversized block matrix\n";
 }
