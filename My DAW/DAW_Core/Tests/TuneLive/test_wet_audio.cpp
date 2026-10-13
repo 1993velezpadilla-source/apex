@@ -26,6 +26,10 @@ int main() {
     knobs.scale=0;
     knobs.wet=1.0f;
     knobs.humanize=0.0f;
+    // Hard-tune accuracy benchmark must disable the natural dead-zone.
+    // Flex=0.35 intentionally leaves ~6.3 cents uncorrected, so testing
+    // that natural setting as zero-error hard-tune was the wrong fixture.
+    knobs.flexTune=0.0f;
     knobs.stability=0.4f;
     knobs.preserveFormants=true;
 
