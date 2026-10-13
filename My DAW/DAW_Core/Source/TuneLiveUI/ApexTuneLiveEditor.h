@@ -191,7 +191,9 @@ public:
 
         const int available=w-48;
         const int cell=available/6;
-        for(int i=0;i<5;++i) {
+        // Lay out all six parameters, including WET. Keeping a hardcoded
+        // 5 here silently hid the sixth control after Flex Tune was added.
+        for(int i=0;i<static_cast<int>(knobs_.size());++i) {
             const int x=25+i*cell;
             knobLabels_[static_cast<std::size_t>(i)].setBounds(x,250,cell-5,24);
             knobs_[static_cast<std::size_t>(i)].setBounds(x,271,cell-7,128);
