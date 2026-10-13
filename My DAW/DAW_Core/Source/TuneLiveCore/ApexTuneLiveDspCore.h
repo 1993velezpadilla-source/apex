@@ -65,6 +65,10 @@ public:
         delayPosition_=0;
         // Capture-rate input envelope smoothing coefficient, set off the RT thread.
         envelopeAlpha_=static_cast<float>(1.0/(rate_*0.010+1.0));
+        // Constant smoothing coefficients are independent of user controls.
+        // Compute once on the prepare thread, not on every ASIO callback.
+        wetStep_=static_cast<float>(1.0/(rate_*0.008+1.0));
+        neutralStep_=static_cast<float>(1.0/(rate_*0.012+1.0));
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
         pitchActiveSlew_=0.0f;
         envelopeL_=envelopeR_=0.0f;
@@ -122,12 +126,10 @@ public:
                                std::clamp(user.stability,0.0f,1.0f)*0.35f,
                                static_cast<float>(tracker_.analysisWindowMs()/8.0)};
         const double retuneMs=1.0+149.0*static_cast<double>(user.retune);
-        const float wetStep=static_cast<float>(1.0/(rate_*0.008+1.0));
         // Absolute-pitch-neutral vocals must remain true, PDC-aligned dry.
         // Processing an already-in-tune voice through a spectral shifter
         // alters vowels and phase for no musical benefit. A smoothed wet gate
         // removes this coloration at tiny shifts without clicky hard cuts.
-        const float neutralStep=static_cast<float>(1.0/(rate_*0.012+1.0));
         for(int offset=0;offset<n;) {
             const int count=std::min(block_,n-offset);
             // Smooth controls at each small chunk, not at a fixed host block rate.
@@ -174,9 +176,9 @@ public:
                     voicedTarget_=decision.voiced?1.0f:0.0f;
                 }
                 // Sibilants, breaths and unvoiced transients return to aligned dry.
-                voicedSlew_+=(voicedTarget_-voicedSlew_)*wetStep;
-                wetSlew_+=((user.bypass?0.0f:user.wet)-wetSlew_)*wetStep;
-                pitchActiveSlew_+=(needsPitchWork-pitchActiveSlew_)*neutralStep;
+                voicedSlew_+=(voicedTarget_-voicedSlew_)*wetStep_;
+                wetSlew_+=((user.bypass?0.0f:user.wet)-wetSlew_)*wetStep_;
+                pitchActiveSlew_+=(needsPitchWork-pitchActiveSlew_)*neutralStep_;
                 const float wetAmount=wetSlew_*voicedSlew_*pitchActiveSlew_;
                 // One branch-based wrap per sample instead of an integer
                 // remainder and repeated per-channel index calculation.
@@ -210,7 +212,7 @@ private:
     double rate_=48000.0;
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
     float envelopeL_=0,envelopeR_=0,pitchActiveSlew_=0;
-    float envelopeAlpha_=0.0f;
+    float envelopeAlpha_=0.0f,wetStep_=0.0f,neutralStep_=0.0f;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1;
     ShifterProfile profile_=ShifterProfile::HighQuality40ms;
 };
