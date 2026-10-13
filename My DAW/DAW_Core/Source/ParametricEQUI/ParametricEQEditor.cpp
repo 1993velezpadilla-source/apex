@@ -2031,8 +2031,10 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto area = getLocalBounds().toFloat();
-        const bool floating = owner_.getWidth() >= 900
-            || owner_.getHeight() < static_cast<int> (owner_.getWidth() * 1.05);
+        // Floating rotary HUD exists ONLY on >=900px desktop canvases.
+        // 640x400 and 700x500 landscape touch devices use the below-graph
+        // sheet, just like narrow portrait phones. Match applyLayout().
+        const bool floating = owner_.getWidth() >= 900;
         if (floating)
         {
             // Self-contained APEX glass HUD; the controls are all real JUCE
@@ -2066,8 +2068,10 @@ public:
         // contextual panel instead of shrinking controls into unusability.
         // Floating inspector uses dense but still >=44px touch targets.
         // Portrait sheet keeps comfortable full-size 56px control rows.
-        const bool floating = owner_.getWidth() >= 900
-            || owner_.getHeight() < static_cast<int> (owner_.getWidth() * 1.05);
+        // Floating rotary HUD exists ONLY on >=900px desktop canvases.
+        // 640x400 and 700x500 landscape touch devices use the below-graph
+        // sheet, just like narrow portrait phones. Match applyLayout().
+        const bool floating = owner_.getWidth() >= 900;
         const int row = floating ? 48 : 56;
         for (auto* slider : { &frequencySlider_, &gainSlider_, &qSlider_ })
         {
