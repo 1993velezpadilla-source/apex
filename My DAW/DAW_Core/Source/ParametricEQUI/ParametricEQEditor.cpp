@@ -2092,9 +2092,11 @@ public:
             slider->setSliderStyle (floating
                 ? juce::Slider::RotaryHorizontalVerticalDrag
                 : juce::Slider::LinearHorizontal);
-            slider->setTextBoxStyle (floating
-                ? juce::Slider::TextBoxBelow : juce::Slider::TextBoxRight,
-                false, floating ? 96 : 64, 22);
+            // On phones, put the editable numeric field UNDER the slider:
+            // all three primary controls can share a full-width quick-edit
+            // strip without squeezing a 64px value box beside a 90px track.
+            slider->setTextBoxStyle (juce::Slider::TextBoxBelow,
+                false, floating ? 96 : 86, 22);
         }
         const int placementColumns = viewport_.getWidth() >= 340 ? 5 : 3;
         const int placementRows = (kChannelPlacementCount + placementColumns - 1)
@@ -2107,13 +2109,27 @@ public:
         // short by vertical exhaustion. 12 static rows + 1 label +
         // 1 dynamic label + 6 dynamic rows.
         const int contentHeight = contentMargin
-            + (floating ? 14 * row + 134 : 17 * row)
+            + (floating ? 14 * row + 134 : 13 * row + 44 + 112)
             + 3 * labelHeight + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
 
         auto bounds = content_.getLocalBounds().reduced (8, 8);
-        bandLabel_.setBounds (bounds.removeFromTop (row));
+        bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
+        if (! floating)
+        {
+            // Compact-first quick controls: selecting a node immediately
+            // exposes frequency, gain and Q without scrolling past On,
+            // Bypass and shape. Each slider retains a real hosted parameter
+            // with an editable numeric JUCE readout, even at 320px.
+            auto quick = bounds.removeFromTop (112);
+            const int column = quick.getWidth() / 3;
+            frequencySlider_.setBounds (
+                quick.removeFromLeft (column).reduced (2, 4));
+            gainSlider_.setBounds (
+                quick.removeFromLeft (column).reduced (2, 4));
+            qSlider_.setBounds (quick.reduced (2, 4));
+        }
         auto buttonRow = bounds.removeFromTop (row);
         const int third = buttonRow.getWidth() / 3;
         enableButton_.setBounds (buttonRow.removeFromLeft (third).reduced (2, 2));
@@ -2133,12 +2149,8 @@ public:
                 dials.removeFromLeft (columnWidth).reduced (2, 1));
             qSlider_.setBounds (dials.reduced (2, 1));
         }
-        else
-        {
-            frequencySlider_.setBounds (bounds.removeFromTop (row));
-            gainSlider_.setBounds (bounds.removeFromTop (row));
-            qSlider_.setBounds (bounds.removeFromTop (row));
-        }
+        // In compact mode the real FREQ/GAIN/Q sliders already occupy the
+        // pinned first-visible quick strip. Secondary controls still scroll.
         slopeSlider_.setBounds (bounds.removeFromTop (row));
 
         placementLabel_.setBounds (bounds.removeFromTop (labelHeight));
