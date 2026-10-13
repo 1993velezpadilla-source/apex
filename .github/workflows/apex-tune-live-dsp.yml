@@ -96,6 +96,9 @@ jobs:
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_fast_onset.cpp" -o tune_live_fast_tracked
           ./tune_live_fast_tracked
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_formant_telemetry.cpp" -o tune_live_formant_diag
+          ./tune_live_formant_diag
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
             -isystem "My DAW/DAW_Core/Source/ThirdParty" \
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
@@ -148,6 +151,8 @@ jobs:
           tune_live_dynamics.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_fast_tracked.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_fast_onset.cpp" || exit /b 1
           tune_live_fast_tracked.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_formant_diag.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_formant_telemetry.cpp" || exit /b 1
+          tune_live_formant_diag.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_vibrato_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_vibrato.cpp" || exit /b 1
           tune_live_vibrato_test.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_eight_insert.exe "My DAW/DAW_Core/Tests/TuneLive/test_eight_insert_telemetry.cpp" || exit /b 1
