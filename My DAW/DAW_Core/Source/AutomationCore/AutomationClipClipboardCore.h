@@ -25,14 +25,15 @@ public:
     {
         juce::String sourceParameterId;
         int64_t sourceLengthSamples = 0;
-        // Time represented as integer millionths of the source region.
+        // Historical name retained for source compatibility. Each point
+        // stores ORIGINAL local samples, not quantized millionths: sub-ms
+        // automation edits survive long multi-hour clip duplication.
         std::vector<AutomationPoint> normalisedPoints;
         juce::String name;
         juce::Colour color = juce::Colour(0xfff06bd8);
     };
 
     static constexpr size_t maxClipboardPoints = 32768;
-    static constexpr int64_t fractionScale = 1000000;
 
     void copyRegionState(const AutomationClipRegionCore& region)
     {
@@ -53,9 +54,6 @@ public:
                 || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
                 return;  // leave previous valid clipboard intact
 
-            const double t = static_cast<double>(point.timeSamples)
-                           / static_cast<double>(state.sourceLengthSamples);
-            point.timeSamples = static_cast<int64_t>(std::llround(t * fractionScale));
             point.value = AutomationLaneCore::clampValueForParameter(
                 state.sourceParameterId, point.value);
             point.tensionToNext = juce::jlimit(-1.0f, 1.0f, point.tensionToNext);
@@ -90,12 +88,12 @@ public:
 
         for (auto point : clipState_->normalisedPoints)
         {
-            if (point.timeSamples < 0 || point.timeSamples > fractionScale
+            if (point.timeSamples < 0 || point.timeSamples > clipState_->sourceLengthSamples
                 || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
                 return false;
 
             const double t = static_cast<double>(point.timeSamples)
-                           / static_cast<double>(fractionScale);
+                           / static_cast<double>(clipState_->sourceLengthSamples);
             const double pos = t * static_cast<double>(destination.lengthSamples);
             if (!std::isfinite(pos) || pos < 0.0
                 || pos > static_cast<double>(destination.lengthSamples))
