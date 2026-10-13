@@ -65,6 +65,19 @@ static PichyCapabilitySnapshot makeSession()
     bus.displayName = "Vocal Bus";
     bus.inputTrimDb = 0.0f;
     world.tracks.push_back(bus);
+
+    apex::pichy::PichyAvailablePluginCapability available;
+    available.pluginIdentifier = "apex.native.eq";
+    available.displayName = "APEX EQ";
+    available.formatName = "APEX Native";
+    available.manufacturer = "APEX";
+    available.uniqueId = 155;
+    world.availablePlugins.push_back(available);
+    available.pluginIdentifier = "vst3.external.example";
+    available.displayName = "External VST3";
+    available.formatName = "VST3";
+    available.uniqueId = 711;
+    world.availablePlugins.push_back(available);
     return world;
 }
 
@@ -75,6 +88,9 @@ int main()
     auto session = makeSession();
     assert(Core::validate(session) == Status::Ok);
     assert(session.captureId == 73);
+    assert(session.availablePlugins.size() == 2);
+    assert(session.availablePlugins[0].formatName == "APEX Native");
+    assert(session.availablePlugins[1].formatName == "VST3");
     const auto* eq = Core::findPlugin(session, "track-vocal-uuid", "native-plugin-instance-uuid");
     assert(eq && eq->slotIndex == 3);
     const auto* gain = Core::findParameter(session, "track-vocal-uuid",
@@ -94,6 +110,18 @@ int main()
                                "native-plugin-instance-uuid", "band0.gain") != nullptr);
 
     auto bad = makeSession();
+    bad.availablePlugins.push_back(bad.availablePlugins.front());
+    assert(Core::validate(bad) == Status::DuplicateIdentity);
+
+    bad = makeSession();
+    bad.availablePlugins.front().formatName = "";
+    assert(Core::validate(bad) == Status::InvalidIdentity);
+
+    bad = makeSession();
+    bad.availablePlugins.resize(Core::kMaxAvailablePlugins + 1);
+    assert(Core::validate(bad) == Status::LimitsExceeded);
+
+    bad = makeSession();
     bad.tracks.push_back(bad.tracks.front());
     assert(Core::validate(bad) == Status::DuplicateIdentity);
 
