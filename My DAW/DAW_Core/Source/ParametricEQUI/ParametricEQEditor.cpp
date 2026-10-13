@@ -2025,12 +2025,18 @@ void ParametricEQEditor::applyLayout()
     if (portraitCompact)
     {
         const bool hasSelection = selectedBand_ >= 0;
-        const int sheetHeight = hasSelection
-                              ? std::min (height - topBarHeight - 140,
-                                          std::max (240, height * 3 / 5))
-                              : std::max (56, height / 12);
-        const int graphHeight = std::max (140, height - topBarHeight - sheetHeight);
-        graph_->setBounds (bounds.removeFromTop (graphHeight));
+        // Keep the frequency graph at least one quarter of the editor's
+        // visible area even on a 320 x 568 phone with an open inspector.
+        // Previously the 140 px floor gave 320*140 < 320*568/4 and the
+        // native responsive-layout gate failed in BOTH Windows builds.
+        const int minimumGraphHeight = std::max (140, (height + 3) / 4);
+        const int available = std::max (0, height - topBarHeight);
+        const int desiredSheet = hasSelection
+                               ? std::max (240, height * 3 / 5)
+                               : std::max (56, height / 12);
+        const int sheetHeight = std::min (
+            desiredSheet, std::max (0, available - minimumGraphHeight));
+        graph_->setBounds (bounds.removeFromTop (available - sheetHeight));
         inspector_->setBounds (bounds);
     }
     else
