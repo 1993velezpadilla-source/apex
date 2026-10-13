@@ -101,3 +101,25 @@ Outputs: `opto_effective_gain_windows.csv` (input/output levels and UAD vs APEX 
 `ApexT4LevelerResearchCore.h` opts into this stage with `use6AQ5Driver=true`; the default remains `false` to preserve baseline experimental measurements. `ApexOptoCircuitPathResearchCore.h` explicitly enables it in the full standalone chain. The working APEX native insert (PR #103) remains entirely unchanged.
 
 The driver has Windows MSVC + Linux sanitizer gates for dark/light transfer, monotonic DC current, rate-consistent LED/EL envelope, recovery, buffer invariance, invalid-calibration sanitization and long-silence denormal suppression. These are **functional math tests, not sonics/1:1 proof**. No assumption should be made that a 6AQ5 is an ordinary 12AX7 preamp triode.
+
+
+## 7. Optional x4 oversampled magnetic-color experiment (2026-10-13)
+
+`ApexMagneticTransformerResearchCore.h` adds a **phenomenological** magnetic-color transfer to the *independent research pipeline*. It combines the existing provisional source/copper/load R/L transfer with bounded nonlinear transfer, a slowly varying flux-history term and optional asymmetry. It **does not** solve a physical B-H curve, model core saturation current, magnetic hysteresis, eddy current losses, real transformer laminations or measured UA/Teletronix parameters.
+
+The nonlinear transfer runs inside a 4x FIR oversampling island, with **65-tap Blackman-windowed interpolation and decimation**. Coefficients and phase tables are built once in `prepare()`; there are no heap allocations/locks or FIR design work during `process()`. x1 is also available **for scientific alias comparison only**.
+
+### Verified and unverified
+
+- `ApexMagneticTransformerResearchTests.cpp` drives a 10 kHz tone at 48 kHz native rate. A nonlinear third harmonic above Nyquist folds back to 18 kHz at x1. The x4 path must measurably reduce that folded component relative to x1. A reduction is **not** synonymous with alias-free operation, and no "1:1" spectral profile is asserted. Local GCC test (development machine, not target Windows DAW) reported folded-component amplitude around 0.076 (x1) versus 0.000033 (x4); GitHub MSVC/Linux numbers and real vocal material may differ.
+- The 4x interpolation/decimation FIR **adds 16 samples of explicit algorithmic delay per transformer** (not zero-latency). `ApexOptoCircuitPathResearchCore::prepare(sr, true)` opts into separate x4 input/output models for each audio channel, **adds 32 samples total**, and inserts a 32-sample delay into the dry/bypass branch to preserve mix alignment. The `latencySamples()` instance method reports 32 in this mode and 0 in the baseline research mode. Fixed delay does **not** include frequency-dependent R/L phase or host/plugin roundtrip latency.
+- The older working **native APEX Opto 2A PR #103 remains unchanged**. No host latency/PDC registration, production x4 toggle, or automatic preset upgrade has been attempted. The *research* chain's triode waveshapers and 6AQ5 optical sidechain have their own spectra; isolated magnetic filtering does not establish that the entire compressor is alias-free.
+- A CI smoke benchmark processes 2 seconds of x4 mono audio and prints wall-clock time, but is **not** an acceptable real-time CPU percentage, worst-case ISR deadline test or audio drop-out assurance. Test actual DAW 48k/64 and 48k/128 at multiple channel counts and with competing VST3s before release.
+
+### Acceptance gates for any native integration
+
+1. Fit input and output transformer frequency/phase and saturation independently to legally captured UA Gray renders and/or measured physical reference components. Treat the model as *original* electrical-inspired work.
+2. Repeat spectral checks for 44.1/48/96/192 kHz, 1k–20k sine sweeps, third/higher harmonics and intermodulation, with varying asymmetry and flux memory.
+3. Benchmark dual-channel 4x + T4 + tube stages as an entire host instance at 48k/64 and 48k/128; verify no allocations/locks and keep control automation stable.
+4. If adopted: explicitly register correct plugin latency/PDC, align dry/parallel/host bypass, compensate screenshots and offline bounces, and ensure parameter state migration. 32 samples in this *particular* research configuration are not an unconditional shipped latency promise.
+5. Compare level-matched real vocals through the licensed UAD Gray and APEX, including slow recovery and harmonics, before characterizing it as an authentic LA-2A sound.
