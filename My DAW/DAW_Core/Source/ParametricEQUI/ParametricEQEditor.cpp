@@ -54,6 +54,8 @@ public:
         setColour (juce::PopupMenu::backgroundColourId, Palette::surface());
         setColour (juce::PopupMenu::textColourId, Palette::text());
         setColour (juce::ScrollBar::thumbColourId, Palette::accent().withAlpha (0.75f));
+        setColour (juce::TextButton::buttonColourId, Palette::surfaceHover());
+        setColour (juce::TextButton::buttonOnColourId, Palette::accentActive());
         setColour (juce::TextButton::textColourOffId, Palette::text());
         setColour (juce::TextButton::textColourOnId, Palette::text());
     }
