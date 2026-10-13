@@ -4819,6 +4819,21 @@ public:
         expect(!AutomationGroupedCurveCore::apply(manager, badBatch, true));
         expectEquals(manager.getState().toXmlString(), beforeFailed);
 
+        beginTest("A rejected re-prepare clears a previously valid staged group");
+        auto previouslyValid = batch;
+        expect(previouslyValid.isValid());
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "not-present"}, desired, previouslyValid));
+        expect(!previouslyValid.isValid());
+
+        beginTest("Disabled target cannot be replayed as grouped automation");
+        manager.setLaneEnabled("singer-b", AutomationLaneCore::trackVolumeParameterId, false);
+        const auto bypassedBefore = manager.getState().toXmlString();
+        expect(!AutomationGroupedCurveCore::apply(manager, batch, true));
+        expectEquals(manager.getState().toXmlString(), bypassedBefore);
+        manager.setLaneEnabled("singer-b", AutomationLaneCore::trackVolumeParameterId, true);
+
         beginTest("Reject NaN and unordered curves before touching any track");
         auto malformed = desired;
         malformed[1].value = std::numeric_limits<float>::quiet_NaN();
