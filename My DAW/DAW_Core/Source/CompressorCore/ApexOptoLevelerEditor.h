@@ -141,9 +141,9 @@ public:
         meterMode_.setBounds(fit(883,65,75,75));
 
         // Accessible touch strip keeps the original face unobstructed.
-        mix_.setBounds(fit(489,297,83,71));
-        emphasis_.setBounds(fit(653,297,83,71));
-        drive_.setBounds(fit(812,297,83,71));
+        mix_.setBounds(fit(499,310,66,55));
+        emphasis_.setBounds(fit(663,310,66,55));
+        drive_.setBounds(fit(822,310,66,55));
         color_.setBounds(fit(907,300,77,68));
     }
 
@@ -217,12 +217,11 @@ private:
         label(g,"APEX",120,48,156,33,28,juce::Colour(0xffa12069),true,
               juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xffa12069));
-        g.fillRect(122,83,184,2);
-        label(g,"OPTO 2A   •   OPTICAL LEVELING AMPLIFIER",
-              120,87,250,23,10,juce::Colour(0xff3c4650),true,
+        g.fillRect(122,83,96,2);
+        label(g,"OPTO 2A",120,89,106,19,12,juce::Colour(0xff3c4650),true,
               juce::Justification::centredLeft);
-        label(g,"POWERED BY BUBBLEGUM ENGINE",120,111,240,16,
-              8,juce::Colour(0xff626c72),false,juce::Justification::centredLeft);
+        label(g,"OPTICAL LEVELER",120,109,125,14,
+              9,juce::Colour(0xff626c72),false,juce::Justification::centredLeft);
 
         dialTicks(g,302,161,64);
         dialTicks(g,744,161,64);
@@ -256,7 +255,8 @@ private:
         g.setColour(juce::Colour(0x66a18055));
         g.fillRoundedRectangle(x+9,y+8,w-18,h-35,8);
 
-        label(g,"APEX  |  VU",x+45,y+16,w-90,20,16,juce::Colour(0xff6e4833),true);
+        // Keep the engraved scale and moving needle unobscured by branding.
+        label(g,"APEX",x+79,y+112,w-158,14,11,juce::Colour(0xff7a553a),true);
         const float pivotX=x+w/2,pivotY=y+132;
         const float radius=105.0f;
         for(int i=0;i<=10;++i)
@@ -285,8 +285,7 @@ private:
         g.drawLine(pivotX,pivotY,ex,ey,1.8f);
         g.setColour(juce::Colour(0xff4e5351));
         g.fillEllipse(pivotX-6,pivotY-6,12,12);
-        label(g,meterLabel(),x+65,y+118,w-130,18,10,juce::Colour(0xff4c3e33));
-        label(g,"OPTO 2A",x+50,y+173,w-100,20,11,juce::Colour(0xff38454c),true);
+        label(g,meterLabel(),x+24,y+169,w-48,20,11,juce::Colour(0xff38454c),true);
     }
 
     void drawBubblegumStrip(juce::Graphics& g)
@@ -299,15 +298,15 @@ private:
               juce::Justification::centredLeft);
         label(g,"ADVANCED CONTROLS",34,333,239,17,11,juce::Colour(0xffc7ced9),true,
               juce::Justification::centredLeft);
-        label(g,"Vintage face  •  Modern workflow",34,350,244,14,10,
+        label(g,"Vintage face / Modern workflow",34,350,244,14,10,
               juce::Colour(0xff8997ac),false,juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff363d4d));
         g.drawVerticalLine(310,301,361);
-        label(g,"PARALLEL MIX",445,293,175,19,10,juce::Colour(0xffd3dae5),true);
-        label(g,"SIDECHAIN EMPHASIS",615,293,160,19,10,juce::Colour(0xffd3dae5),true);
-        label(g,"COLOR DRIVE",785,293,140,19,10,juce::Colour(0xffd3dae5),true);
+        label(g,"PARALLEL MIX",478,289,110,15,10,juce::Colour(0xffd3dae5),true);
+        label(g,"KEY EMPHASIS",636,289,120,15,10,juce::Colour(0xffd3dae5),true);
+        label(g,"COLOR DRIVE",797,289,117,15,10,juce::Colour(0xffd3dae5),true);
         label(g,"COLOR",906,351,101,15,10,juce::Colour(0xffd3dae5),true);
-        label(g,"ZERO LATENCY • 100% APEX NATIVE",314,334,158,30,9,
+        label(g,"ZERO LATENCY / APEX NATIVE",314,334,158,30,9,
               juce::Colour(0xffb2a4ba));
     }
 
