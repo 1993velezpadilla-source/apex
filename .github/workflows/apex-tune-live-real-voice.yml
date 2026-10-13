@@ -118,6 +118,19 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" \
             -o tune_live_offline_audition
           ./tune_live_offline_audition --input vocadito_human_source.wav --prefix vocadito_human
+      - name: Preserve singer-approved HQ40 wet audio (bit-exact PCM24 golden)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A hard audible-output preservation gate complements cents/pitch
+          # gates: a regression can damage formants while keeping pitch true.
+          # SHA pinned to the 13 Oct 2026 first singer test, independently
+          # reverified on later CPU-only builds. Deliberate sound changes
+          # require a fresh listening review before updating this hash.
+          printf '%s  %s\n' \
+            '1d076f62fd68adc80626c16bb4aa28139ca4d9baaed212860d4e92735470a72f' \
+            'vocadito_human_hq40.wav' | sha256sum --check -
+          echo 'HUMAN_HQ40_BIT_EXACT_GOLDEN_PASS'
       - name: Measure real voiced-note intonation before and after BOTH APEX engines
         shell: bash
         run: |
