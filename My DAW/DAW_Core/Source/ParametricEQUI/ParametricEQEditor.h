@@ -87,6 +87,7 @@ public:
     // behaviour to be exercised through the real component hierarchy.
     juce::Rectangle<int> getTopBarBoundsForTesting() const;
     juce::Rectangle<int> getGraphBoundsForTesting() const;
+    void refreshResponseForTesting();
     juce::Rectangle<int> getInspectorBoundsForTesting() const;
     void injectGraphMouseDownForTesting (juce::Point<float> position);
     void injectGraphMouseDragForTesting (juce::Point<float> position);
