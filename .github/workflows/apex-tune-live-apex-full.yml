@@ -10,6 +10,7 @@ on:
       - 'My DAW/DAW_Core/Source/PluginScanCore/PluginScannerCore.h'
       - 'My DAW/DAW_Core/DAW_Core.jucer'
       - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - 'My DAW/DAW_Core/Scripts/run_tune_live_native_host_tests.ps1'
       - 'My DAW/DAW_Core/Tests/Source/G10/G10FormatHostTests.cpp'
       - 'My DAW/DAW_Core/Tests/Source/C4/C4FormatHostTests.cpp'
       - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/ParametricEQFormatHostTests.cpp'
@@ -62,18 +63,10 @@ jobs:
             My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
             My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
           if-no-files-found: error
-      - name: Run real APEX smoke test discovery
+      - name: Build and run focused APEX native host tests before heavy fixtures
+        run: .\Scripts\run_tune_live_native_host_tests.ps1 -Configuration ${{ matrix.configuration }}
+      - name: Full APEX discovery smoke with external plug-in fixtures
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
-      - name: Prove real unified host native discovery and creation
-        run: |
-          $exe = ".\Tests\Builds\VisualStudio2026\x64\${{ matrix.configuration }}\ConsoleApp\APEXTests.exe"
-          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Native APEXTests.exe missing" }
-          & $exe --name=G10.Format.Host --seed=0xA9E12026
-          if ($LASTEXITCODE -ne 0) { throw "G10 real APEX chain failed Tune Live audio, automation or session reload" }
-          & $exe --name=C4.FormatHost --seed=0xA9E12026
-          if ($LASTEXITCODE -ne 0) { throw "C4 unified host registry failed (including Tune Live)" }
-          & $exe --name=ParametricEQ.FormatHost --seed=0xA9E12026
-          if ($LASTEXITCODE -ne 0) { throw "EQ unified host registry failed (including Tune Live ordering)" }
       - name: Preserve APEX test evidence
         if: always()
         uses: actions/upload-artifact@v4
