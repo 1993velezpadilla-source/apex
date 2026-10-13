@@ -106,7 +106,7 @@ public:
                 expect(strip.getBrightness()<0.30f,"APEX extra controls remain separate");
                 const auto screenshots=juce::File::getCurrentWorkingDirectory()
                     .getChildFile("evidence").getChildFile("opto2a_gui");
-                if(screenshots.createDirectory())
+                if(screenshots.createDirectory().wasOk())
                 {
                     const auto name=screenshots.getChildFile("apex_opto2a_reference_face_1040x380.png");
                     auto stream=name.createOutputStream();
