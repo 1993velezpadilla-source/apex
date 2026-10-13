@@ -114,10 +114,41 @@ int main (int argc, char** argv)
             std::cerr << "Production Tune Live editor creation failed" << std::endl;
             return 1;
         }
-        editor->setSize (900, 575); // exact default dimensions of current GUI
+        // Both Ab and Bb must be user-selectable WITHOUT changing existing
+        // 12-tone key automation IDs/state. Exercise the REAL GUI ComboBox
+        // callbacks and restore C before taking the visual snapshot.
+        juce::ComboBox* keySelection = nullptr;
+        for (int c=0;c<editor->getNumChildComponents();++c)
+            if (auto* combo=dynamic_cast<juce::ComboBox*> (editor->getChildComponent (c)))
+                if (combo->getNumItems()==17)
+                    keySelection=combo;
+        if (keySelection==nullptr)
+        {
+            std::cerr << "Expected 17 enharmonic key spellings in native GUI" << std::endl;
+            return 1;
+        }
+        auto* keyParameter=plugin.getParameters()[APEX::TuneLive::Processor::kKey];
+        keySelection->setSelectedId (13, juce::sendNotificationSync); // Ab / G#
+        if (keySelection->getText()!="Ab"
+            || std::abs (keyParameter->getValue()-8.0f/11.0f)>0.001f)
+        {
+            std::cerr << "Ab must map to existing G# key/semitone 8" << std::endl;
+            return 1;
+        }
+        keySelection->setSelectedId (16, juce::sendNotificationSync); // Bb / A#
+        if (keySelection->getText()!="Bb"
+            || std::abs (keyParameter->getValue()-10.0f/11.0f)>0.001f)
+        {
+            std::cerr << "Bb must map to existing A# key/semitone 10" << std::endl;
+            return 1;
+        }
+        keySelection->setSelectedId (1, juce::sendNotificationSync); // C
+        if (std::abs (keyParameter->getValue())>0.001f)
+            return 1;
+        editor->setSize (1200, 750); // current APEX visual concept artboard
         const auto image = editor->createComponentSnapshot (
             editor->getLocalBounds(), true, 1.0f);
-        if (! image.isValid() || image.getWidth() != 900 || image.getHeight() != 575)
+        if (! image.isValid() || image.getWidth() != 1200 || image.getHeight() != 750)
         {
             std::cerr << "Failed to render actual JUCE Tune Live component tree" << std::endl;
             return 1;
@@ -139,7 +170,7 @@ int main (int argc, char** argv)
         editor.reset();
         plugin.releaseResources();
         std::cout << "APEX_TUNE_LIVE_ACTUAL_JUCE_GUI_SCREENSHOT_PASS"
-                  << " width=900 height=575"
+                  << " width=1200 height=750 enharmonic_Ab_Bb=PASS"
                   << " source=production_Processor_createEditor"
                   << " idle=true"
                   << " filename=" << output.getFullPathName().toStdString()
