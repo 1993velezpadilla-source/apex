@@ -21,9 +21,8 @@ namespace APEX::ParametricEQ
 // neighborhood rather than applying a single envelope to an entire biquad.
 // Not FabFilter's proprietary implementation. Stereo, L/R, M/S supported.
 //
-// IMPORTANT: this standalone DSP engine is NOT YET wired into Processor's
-// audio callback or host latency compensation. Leave existing APEX EQ audio,
-// automation and session migration unchanged until the separate PDC/RT gate.
+// Embedded in Processor behind the prepareToPlay-latched spectral ARM and
+// host PDC gate. This core alone does not communicate latency to the host.
 class SpectralDynamicsCore final
 {
 public:
@@ -343,9 +342,15 @@ private:
                 auto& left = spectrum_[0][static_cast<std::size_t> (bin)];
                 if (channelCount < 2)
                 {
-                    applyComponent (bandIndex, bin, 0, left, params,
-                                    attackCoefficient, releaseCoefficient,
-                                    spectralWeight, tiltDb);
+                    // JUCE mono supports Stereo, Left and Mid as the sole
+                    // signal domain. Right is absent and Side is exactly
+                    // zero on a mono bus. Never apply right/side-only
+                    // dynamic spectral gain to the real mono channel.
+                    if (band.placement != ChannelPlacement::Right
+                        && band.placement != ChannelPlacement::Side)
+                        applyComponent (bandIndex, bin, 0, left, params,
+                                        attackCoefficient, releaseCoefficient,
+                                        spectralWeight, tiltDb);
                     continue;
                 }
                 auto& right = spectrum_[1][static_cast<std::size_t> (bin)];

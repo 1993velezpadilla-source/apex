@@ -160,6 +160,102 @@ void runAlignedBlend()
     std::cout << "PASS aligned dry/wet and arbitrary huge buffer\n";
 }
 
+
+void runPlacementRouting()
+{
+    constexpr int count = 32768;
+    constexpr double rate = 48000.0;
+    constexpr int scanOffset = 16000;
+    constexpr int scanCount = 4800;
+    std::vector<float> source (count);
+    for (int i = 0; i < count; ++i)
+        source[static_cast<std::size_t> (i)] = static_cast<float> (
+            0.25 * std::sin (2.0 * pi * 1000.0 * i / rate));
+    const auto baseline = toneMagnitude (source, scanOffset, scanCount,
+                                        1000.0, rate);
+
+    // A mono bus has one channel, which is simultaneously Left and Mid.
+    // Right- and Side-only bands cannot process a non-existent channel.
+    for (const auto placement : {
+        ChannelPlacement::Stereo, ChannelPlacement::Left,
+        ChannelPlacement::Right, ChannelPlacement::Mid, ChannelPlacement::Side
+    })
+    {
+        auto bands = makeBands();
+        bands[0].placement = placement;
+        auto dsp = std::make_unique<SpectralDynamicsCore>();
+        dsp->prepare (rate);
+        auto rendered = source;
+        float* ptr[] { rendered.data() };
+        dsp->process (ptr, 1, count, bands);
+        const auto ratio = toneMagnitude (rendered, scanOffset
+            + SpectralDynamicsCore::kLatencySamples, scanCount, 1000.0, rate)
+            / baseline;
+        const bool shouldProcess = placement == ChannelPlacement::Stereo
+            || placement == ChannelPlacement::Left
+            || placement == ChannelPlacement::Mid;
+        if (shouldProcess)
+            check (ratio < 0.70, "Mono spectral left/mid band attenuates");
+        else
+            check (ratio > 0.99 && ratio < 1.01,
+                   "Mono spectral right/side band is strict no-op");
+    }
+
+    // Stereo Left and Right must not cross-feed. Mid and Side act on their
+    // mathematical stereo component without corrupting the other domain.
+    for (const auto placement : {
+        ChannelPlacement::Left, ChannelPlacement::Right,
+        ChannelPlacement::Mid, ChannelPlacement::Side
+    })
+    {
+        for (const bool outOfPhase : { false, true })
+        {
+            auto bands = makeBands();
+            bands[0].placement = placement;
+            auto dsp = std::make_unique<SpectralDynamicsCore>();
+            dsp->prepare (rate);
+            auto left = source, right = source;
+            if (outOfPhase)
+                for (auto& value : right)
+                    value = -value;
+            float* ptr[] { left.data(), right.data() };
+            dsp->process (ptr, 2, count, bands);
+
+            const auto leftRatio = toneMagnitude (left, scanOffset
+                + SpectralDynamicsCore::kLatencySamples, scanCount,
+                1000.0, rate) / baseline;
+            const auto rightRatio = toneMagnitude (right, scanOffset
+                + SpectralDynamicsCore::kLatencySamples, scanCount,
+                1000.0, rate) / baseline;
+            if (placement == ChannelPlacement::Left)
+            {
+                check (leftRatio < 0.70, "L-only band attenuates L");
+                check (rightRatio > 0.99 && rightRatio < 1.01,
+                       "L-only band preserves R");
+            }
+            else if (placement == ChannelPlacement::Right)
+            {
+                check (rightRatio < 0.70, "R-only band attenuates R");
+                check (leftRatio > 0.99 && leftRatio < 1.01,
+                       "R-only band preserves L");
+            }
+            else if ((placement == ChannelPlacement::Mid && ! outOfPhase)
+                     || (placement == ChannelPlacement::Side && outOfPhase))
+            {
+                check (leftRatio < 0.70 && rightRatio < 0.70,
+                       "M/S spectral processing changes selected domain");
+            }
+            else
+            {
+                check (leftRatio > 0.99 && leftRatio < 1.01
+                       && rightRatio > 0.99 && rightRatio < 1.01,
+                       "M/S spectral processing preserves orthogonal domain");
+            }
+        }
+    }
+    std::cout << "PASS mono and stereo Left/Right/Mid/Side placement routing\\n";
+}
+
 void runFaults()
 {
     auto engine = std::make_unique<SpectralDynamicsCore>();
@@ -182,6 +278,7 @@ int main()
     runIdentity();
     runTonal();
     runAlignedBlend();
+    runPlacementRouting();
     runFaults();
     std::cout << "ALL APEX spectral stand-alone DSP probes PASS\n";
     return 0;
