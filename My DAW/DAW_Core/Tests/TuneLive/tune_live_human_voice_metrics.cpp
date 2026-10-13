@@ -12,6 +12,7 @@
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 struct Frame {
@@ -33,6 +34,7 @@ Frame measured(APEX::TuneLive::PitchTracker::Result r) {
     return f;
 }
 struct Outcome {
+    explicit Outcome(std::string label):title(std::move(label)) {}
     std::string title;
     std::vector<double> rawOffsets,outputOffsets,improvements;
     std::size_t voiced=0,paired=0,octaveDisagreements=0,
@@ -79,7 +81,7 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Invalid or mismatched WAV inputs");
         std::array<APEX::TuneLive::PitchTracker,3> trackers;
         for(auto& t:trackers)t.prepare(source.rate);
-        std::array<Outcome,2> results{{{"SHIPPING_HQ40"},{"CAUSAL_RESEARCH"}}};
+        std::array<Outcome,2> results{Outcome{"SHIPPING_HQ40"},Outcome{"CAUSAL_RESEARCH"}};
         int stableSourceCount=0,previousNote=-1;
         std::size_t framesMeasured=0,sourceVoiced=0;
                 // Follow independent DSP tracker updates; never provide a known F0
