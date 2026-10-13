@@ -5147,6 +5147,16 @@ public:
             manager, AutomationLaneCore::trackVolumeParameterId,
             {"singer-a", "singer-b"}, malformed, invalid));
         malformed = desired;
+        malformed[1].value = 2.5f; // native volume max 2.0, no silent clamp
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, malformed, invalid));
+        malformed = desired;
+        malformed[1].tensionToNext = 2.5f;
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, malformed, invalid));
+        malformed = desired;
         malformed[1].timeSamples = -4;
         expect(!AutomationGroupedCurveCore::prepare(
             manager, AutomationLaneCore::trackVolumeParameterId,
@@ -5311,6 +5321,26 @@ public:
         expect(!Snap::planMorph(manager, left, right,
                                std::numeric_limits<float>::quiet_NaN(), rejected));
         expect(!rejected.isValid());
+
+        beginTest("Out-of-domain VST3/PAN snapshot data cannot silently clamp");
+        auto wrongDomain = right;
+        wrongDomain.lanes[2].points[0].value = 1.5f; // VST3 normalized 0..1
+        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected));
+        expect(!rejected.isValid());
+        wrongDomain = right;
+        wrongDomain.lanes[1].points[0].value = -1.5f; // native pan -1..1
+        expect(!Snap::planMorph(manager, left, wrongDomain, 0.5f, rejected));
+        expect(!rejected.isValid());
+
+        beginTest("Tampered after-state is rejected before any parameter mutation");
+        auto brokenPlan = half;
+        brokenPlan.changes[2].after = half.changes[2].after.createCopy();
+        brokenPlan.changes[2].after.getChild(0).setProperty("value", 1.5f, nullptr);
+        const auto noMutationState = manager.getState().toXmlString();
+        const auto noMutationVersion = manager.getSnapshotVersion();
+        expect(!Snap::apply(manager, brokenPlan, true));
+        expectEquals(manager.getState().toXmlString(), noMutationState);
+        expect(manager.getSnapshotVersion() == noMutationVersion);
 
         beginTest("Conflicting user edit blocks entire morph/Undo");
         auto& changed = manager.getOrCreateLane("V2", pan);
