@@ -37,6 +37,22 @@ static std::vector<double> render(int factor,double drive,int hz) {
     return output;
 }
 int main(){
+    // Interpolation error must stay significantly below the measured
+    // harmonic-alias differences. This is DSP math, not UAD calibration.
+    {
+        ApexMagneticTanhLookup table;table.prepare();
+        double maxAbsoluteError=0;
+        for(int i=-16000;i<=16000;++i) {
+            const double input=i/1000.0;
+            const double error=std::abs(table.evaluate(input)-std::tanh(input));
+            maxAbsoluteError=std::max(maxAbsoluteError,error);
+        }
+        std::cout<<"magnetic tanh LUT max error: "<<maxAbsoluteError<<"\\n";
+        assert(maxAbsoluteError<1.0e-5);
+        near(table.evaluate(0),0,1.e-8);
+        assert(table.evaluate(-250)==-1);
+        assert(table.evaluate(250)==1);
+    }
     for(int factor:{1,4}) {
         ApexMagneticTransformerResearchCore c;
         ApexMagneticResearchSettings p;p.oversampling=factor;
