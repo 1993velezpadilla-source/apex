@@ -13,6 +13,7 @@ struct VoiceSettings {
     int scale = 0;
     float correction = 0.85f;   // [0,1]
     float humanize = 0.35f;     // [0,1]
+    float flexTune = 0.0f;       // [0,1], leave small pitch drift untouched
     float noteHysteresis = 0.15f; // semitones
     float hopMilliseconds = 5.33f;  // real pitch-detector analysis hop
 };
@@ -80,7 +81,14 @@ public:
         const float humanize = std::clamp(settings.humanize, 0.0f, 1.0f);
         const float desired = std::clamp(direct * (1.0f - humanize)
                                         + expressive * humanize, -2.0f, 2.0f);
-        return { desired * amount, midi, selected_, true };
+        // Flex Tune: soft musical dead-zone in semitones, not a hidden
+        // dynamics effect. Natural singers retain subtle deviations; large
+        // out-of-tune notes still pull toward the selected scale.
+        const float flexCents = 18.0f * std::clamp(settings.flexTune, 0.0f, 1.0f);
+        const float flexSemitones = flexCents * 0.01f;
+        const float flexible = std::copysign(
+            std::max(0.0f, std::abs(desired)-flexSemitones), desired);
+        return { flexible * amount, midi, selected_, true };
     }
 private:
     int selected_ = -1, previousRoot_ = -1, previousScale_ = -1;
