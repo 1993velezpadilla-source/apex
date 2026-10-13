@@ -15,7 +15,9 @@ public:
     {
         setOpaque(true);
         setResizable(true, true);
-        setResizeLimits(620, 480, 1300, 900);
+        // Controls/latency readout occupy rows through y=516; a 480px
+        // editor cut off the last row. Enforce a true touch-safe minimum.
+        setResizeLimits(620, 560, 1300, 900);
         setSize(900, 575);
 
         constexpr std::array<const char*,6> names{{
