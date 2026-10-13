@@ -32,6 +32,7 @@
 #include "../PluginHostCore/PluginScannerCore.h"
 #include "../PluginHostCore/PluginChainCore.h"
 #include "../PichyCore/PichyPluginDiscoveryAdapter.h"
+#include "../PichyCore/PichyActionPreflightCore.h"
 #include "../PluginHostCore/HostedPluginIsolationCore.h"
 #include "../PluginHostCore/PluginPlayheadInfoCore.h"
 #include "../PluginHostCore/ClipRegionPluginCore.h"
@@ -224,6 +225,34 @@ public:
         return apex::pichy::PichyPluginDiscoveryAdapter::capture(
             *trackManager_, resolver, &pluginScanner_.getKnownPlugins(),
             ++pichyCapabilityCaptureSequence_, output);
+    }
+
+    /**
+     * Preflight an explicit parameter request against an earlier read-only
+     * snapshot. No mutation: validates parameter UUID/ID, expected value and
+     * authorization state, then provides an inspectable plan.
+     */
+    apex::pichy::PichyActionPreflightResult previewPichyParameterChange(
+        const apex::pichy::PichyCapabilitySnapshot& observed,
+        const apex::pichy::PichyParameterChangeIntent& requested) const
+    {
+        return apex::pichy::PichyActionPreflightCore::evaluate(observed, requested);
+    }
+
+    /**
+     * SECOND safety gate: recapture live plugin state on the message thread
+     * before the FUTURE command executor could run. This returns a boolean;
+     * it NEVER writes to processors or to Undo/automation.
+     */
+    bool revalidatePichyParameterChange(
+        const apex::pichy::PichyActionPreflightResult& approved)
+    {
+        apex::pichy::PichyCapabilitySnapshot live;
+        if (capturePichyCapabilitySnapshot(live) !=
+            apex::pichy::PichySnapshotStatus::Ok)
+            return false;
+        return apex::pichy::PichyActionPreflightCore::canRevalidateForExecution(
+            approved, live);
     }
 
     /** Get or create the plugin chain for a track ID. */
