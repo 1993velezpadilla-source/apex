@@ -40,7 +40,12 @@ int main(){
         ApexOptoCircuitPathResearchCore path;path.prepare(48000);
         ApexOptoCircuitResearchParameters p;p.peakReduction=90;
         path.setParameters(p);
-        std::vector<float> left(count,0.8f),right(count,0.25f);
+        std::vector<float> left(count),right(count);
+        for(int n=0;n<count;++n) {
+            const auto phase=2.0*3.141592653589793*1000.0*n/48000.0;
+            left[n]=static_cast<float>(0.8*std::sin(phase));
+            right[n]=static_cast<float>(0.25*std::sin(phase));
+        }
         path.process(left.data(),right.data(),count);
         assert(path.getGainReductionDb()>2.0);
         assert(std::isfinite(left.back())&&std::isfinite(right.back()));
