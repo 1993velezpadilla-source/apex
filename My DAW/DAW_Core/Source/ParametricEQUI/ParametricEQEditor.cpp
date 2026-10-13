@@ -978,6 +978,15 @@ public:
                 frequencyParameter->toNormalised (frequency));
             gainParameter->setValueNotifyingHost (
                 gainParameter->toNormalised (gain));
+            // All layout computations are GUI-thread-only. Relocate the
+            // floating HUD at most 30Hz while a node moves so its old
+            // position cannot swallow the next pointer gesture.
+            const auto now = juce::Time::getMillisecondCounter();
+            if (now - lastHudRelayoutMs_ >= 33)
+            {
+                owner_.resized();
+                lastHudRelayoutMs_ = now;
+            }
         }
     }
 
@@ -997,6 +1006,7 @@ public:
                 dragBand_, BandParameterOffset::Gain));
             frequency->endChangeGesture();
             gain->endChangeGesture();
+            owner_.resized(); // final HUD anchor at the committed node
         }
         dragging_ = false;
         dragBand_ = -1;
@@ -1804,6 +1814,7 @@ private:
     bool longPressFired_ = false;
     std::optional<int> longPressTarget_;
     std::uint32_t pressTime_ = 0;
+    std::uint32_t lastHudRelayoutMs_ = 0;
 };
 
 //==============================================================================
@@ -2491,11 +2502,12 @@ void ParametricEQEditor::applyLayout()
                           : std::min (56, std::max (44, height / 12));
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
-    // Phone / portrait tablet: keep the existing scrollable touch sheet
-    // below the graph. The inspector's rows remain >=44 logical pixels.
-    const bool portrait = width < 900
-        && height >= static_cast<int> (width * 1.05);
-    if (portrait)
+    // All sub-900px devices (including landscape 600–899px): use a
+    // scrollable touch sheet BELOW the graph. A 340px floating HUD simply
+    // cannot avoid obscuring selected EQ nodes on a narrow landscape canvas.
+    // The main response remains >=45% of the whole editor.
+    const bool touchSheet = width < 900;
+    if (touchSheet)
     {
         const int available = workspace.getHeight();
         const int minGraph = std::max (140, (height * 45 + 99) / 100);
