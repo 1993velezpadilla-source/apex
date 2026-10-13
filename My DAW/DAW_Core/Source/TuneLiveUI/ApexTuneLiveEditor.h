@@ -19,7 +19,7 @@ public:
         setResizable(true, true);
         // Controls/latency readout occupy rows through y=516; a 480px
         // editor cut off the last row. Enforce a true touch-safe minimum.
-        setResizeLimits(720, 455, 1600, 1000);
+        setResizeLimits(960, 600, 1600, 1000);
         setSize(1200, 750);
 
         constexpr std::array<const char*,6> names{{
@@ -184,7 +184,7 @@ public:
         g.drawText("Tune Live",254,23,285,43,juce::Justification::centredLeft);
         g.setColour(Visual::muted());
         g.setFont(juce::Font(juce::FontOptions(9.4f).withStyle("Bold")));
-        g.drawText("N A T I V E   V O C A L   C O R R E C T I O N    •    P O W E R E D   B Y   B U B B L E G U M   E N G I N E",
+        g.drawText("N A T I V E   V O C A L   C O R R E C T I O N    -    P O W E R E D   B Y   B U B B L E G U M   E N G I N E",
                    37,71,760,16,juce::Justification::centredLeft);
         // Decorative amplitude-free arc: NOT a fabricated live spectrum.
         for(int i=0;i<4;++i) {
@@ -205,6 +205,12 @@ public:
         g.drawText("A",1125,23,50,47,juce::Justification::centred);
 
         Visual::panel(g,{16.0f,104.0f,1168.0f,210.0f});
+        // Reference concept's characteristic low cyan illumination. Applied
+        // beneath live note/controls, so contrast of the text remains safe.
+        g.setGradientFill(juce::ColourGradient(Visual::cyan().withAlpha(0.15f),
+                           550.0f,313.0f,Visual::cyan().withAlpha(0.0f),
+                           550.0f,215.0f,false));
+        g.fillRoundedRectangle(juce::Rectangle<float>(16.0f,104.0f,1168.0f,210.0f),18.0f);
         Visual::sectionTitle(g,"T R A C K E D   P I T C H",35.0f,116.0f);
         // Pitch grid and cents meter are real calibrated MIDI-cents readouts.
         constexpr float gridL=58.0f,gridR=754.0f,gridY=243.0f;
@@ -274,8 +280,8 @@ public:
 
         g.setColour(Visual::muted().withAlpha(0.5f));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("Realtime vocal tuning • Monitoring delay also depends on interface and DAW routing",
-                   30,736,1050,13,juce::Justification::centredLeft);
+        // No clipped footer underneath the lower panel; the real latency
+        // is explicitly visible as plugin PDC inside the options area.
     }
 
     void resized() override {
