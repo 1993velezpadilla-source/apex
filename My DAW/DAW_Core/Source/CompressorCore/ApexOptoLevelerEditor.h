@@ -54,7 +54,9 @@ public:
         juce::ignoreUnused(highlighted,pressed);
         const auto r=button.getLocalBounds().toFloat().reduced(2.0f);
         const auto center=r.getCentre();
-        const float metal=std::min(r.getWidth(),r.getHeight())*0.48f;
+        // Preserve a generous invisible tap target on mobile while the
+        // mechanical toggle drawn in its centre stays hardware-sized.
+        const float metal=std::min(20.0f,std::min(r.getWidth(),r.getHeight())*0.30f);
         g.setColour(juce::Colour(0xff393a40));
         g.fillEllipse(center.x-metal,center.y-metal,2.0f*metal,2.0f*metal);
         g.setColour(juce::Colour(0xffced0d2));
@@ -134,15 +136,15 @@ public:
         // Dominant analogue gain knobs: left vs right of central VU.
         gain_.setBounds(fit(243,101,119,119));
         peak_.setBounds(fit(684,101,119,119));
-        limit_.setBounds(fit(123,173,35,38));
-        power_.setBounds(fit(893,180,35,38));
+        limit_.setBounds(fit(106,158,71,69));
+        power_.setBounds(fit(876,164,71,69));
         meterMode_.setBounds(fit(883,65,75,75));
 
         // Accessible touch strip keeps the original face unobstructed.
         mix_.setBounds(fit(489,297,83,71));
         emphasis_.setBounds(fit(653,297,83,71));
         drive_.setBounds(fit(812,297,83,71));
-        color_.setBounds(fit(934,315,36,36));
+        color_.setBounds(fit(907,300,77,68));
     }
 
 private:
