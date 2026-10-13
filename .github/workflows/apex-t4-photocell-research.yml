@@ -5,11 +5,15 @@ on:
       - ".github/workflows/apex-t4-photocell-research.yml"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
   pull_request:
     paths:
       - ".github/workflows/apex-t4-photocell-research.yml"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,6 +37,11 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp" \
             -o /tmp/apex-t4-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp" \
+            -o /tmp/apex-t4-leveler-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-leveler-test
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
@@ -45,3 +54,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC compilation failed" }
           ./apex-t4-test.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC T4 gates failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-t4-leveler-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler compile failed" }
+          ./apex-t4-leveler-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler gates failed" }
