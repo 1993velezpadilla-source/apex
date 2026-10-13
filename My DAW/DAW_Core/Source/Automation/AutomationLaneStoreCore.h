@@ -348,7 +348,7 @@ namespace apex::automation
          */
         bool replacePointsBatch (std::vector<BatchReplacement> replacements)
         {
-            if (replacements.empty() || replacements.size() > 64)
+            if (replacements.empty() || replacements.size() > 128)
                 return false;
 
             LaneMap prepared;
