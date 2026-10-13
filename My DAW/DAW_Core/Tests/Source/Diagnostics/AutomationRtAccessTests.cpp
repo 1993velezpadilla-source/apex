@@ -4649,6 +4649,37 @@ public:
         if (playback != nullptr)
             expectWithinAbsoluteError(playback->getValueAtSample(96000, 0.0f), -0.80f, 0.00001f);
 
+        beginTest("Empty or malformed copy fails instead of claiming stale clipboard content");
+        AutomationClipRegionCore noPoints;
+        noPoints.trackId = "PAN-EMPTY";
+        noPoints.parameterId = AutomationLaneCore::trackPanParameterId;
+        noPoints.startSample = 0;
+        noPoints.lengthSamples = 48000;
+        const auto emptySourceId = noPoints.regionId;
+        manager.addClipRegion(noPoints);
+        expect(!manager.copyClipRegionState(emptySourceId));
+        // Previously this call returned TRUE even though the old clipboard
+        // still held the valid PAN-SOURCE curve. A user could paste the wrong
+        // pattern after believing an empty source was copied.
+        expect(manager.getClipClipboard().hasClipState());
+        const auto* previous = manager.getClipClipboard().getClipState()
+            ? &*manager.getClipClipboard().getClipState() : nullptr;
+        expect(previous != nullptr);
+        if (previous != nullptr)
+            expectWithinAbsoluteError(previous->normalisedPoints[0].value,
+                                     -0.80f, 0.00001f);
+
+        AutomationClipRegionCore badSource = panSrc;
+        badSource.startSample = -1;
+        expect(!manager.getClipClipboard().copyRegionState(badSource));
+        badSource.startSample = std::numeric_limits<int64_t>::max() - 4;
+        badSource.lengthSamples = 48000;
+        expect(!manager.getClipClipboard().copyRegionState(badSource));
+        badSource = panSrc;
+        badSource.localPoints[0].value = std::numeric_limits<float>::quiet_NaN();
+        expect(!manager.getClipClipboard().copyRegionState(badSource));
+        expect(manager.getClipClipboard().hasClipState());
+
         beginTest("Wrong parameter clip paste does not erase either destination or live points");
         AutomationClipRegionCore volDest;
         volDest.trackId = "VOL-DEST";
