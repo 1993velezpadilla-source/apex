@@ -129,8 +129,10 @@ jobs:
             $_.Condition -match 'Debug\|x64'
           })[0]
           if ($null -eq $debugGroup) { throw 'APEXTests Debug settings missing' }
-          $definitions = @(([string] $debugGroup.ClCompile.PreprocessorDefinitions)
-            -split ';' | Where-Object { $_ -and $_ -notmatch '^%\(' })
+          $rawDefs = [string] $debugGroup.ClCompile.PreprocessorDefinitions
+          $definitions = @($rawDefs -split ';' | ForEach-Object {
+            $_.Trim()
+          } | Where-Object { $_ -and $_ -notmatch '^%\(' })
           if ('NOMINMAX' -notin $definitions -and 'NOMINMAX=1' -notin $definitions) {
             throw 'APEXTests project missing NOMINMAX'
           }
