@@ -2,7 +2,7 @@
 
 **Product rule:** Exactly **one** APEX Opto 2A, tuned first against the artist's licensed UAD LA-2A **Gray** for sustained and dynamic lead vocals. Silver and LA-2 are separate *research comparators*, never separate APEX modes.
 
-**Current status:** The physical-T4 research engine and sidechain/attenuator audio path are **experimental and are not connected to the APEX native plugin in PR #103**. The functional tests prove safety and routing, **not** any 1:1 match. The APEX plugin still uses a simplified envelope DSP. Tubes, transformers and real R37 passive components remain to be implemented/calibrated.
+**Current status:** The physical-T4 research engine, stand-alone triode/transformer component equivalents and a connected experimental processing chain are **NOT connected to the APEX native plugin in PR #103**. These pass functional tests only, **not** 1:1 measurements. APEX Native Opto 2A still uses the earlier simplified envelope DSP. The 12AX7/12BH7 triodes have provisional circuit-law models and the two transformers have linear R/L equivalents, not verified component values. The 6AQ5 driver, complete R37/C12 passive network, true nonlinear magnetization, coupling capacitance, reference calibration and anti-aliasing remain missing.
 
 ## 1. Offline reference stimuli (fully original)
 
@@ -54,8 +54,8 @@ The 1966 Teletronix schematic shows that T4 CdS is in an analogue **shunt attenu
 ### Known approximation and gates still missing
 
 1. R37/C12 measured passive network and frequency-dependent control voltage (existing key EQ is a digital approximation).
-2. 12AX7, 12BH7, 6AQ5 nonlinear triode/pentode plate characteristics, bias, impedance, tube and supply transformer load lines and the amplifier's feedback network.
-3. T1/T2 equivalent magnetic/RC model with sample-rate-safe oversampling/anti-alias controls for nonlinear saturation, **not** a single output tanh.
+2. **Uncalibrated 12AX7 + 12BH7 triode equations now exist** in `ApexAnalogCircuitResearchCore.h`: static 3/2 power-law current vs cathode/grid/plate, B+ and resistive loads, 45-step bracketed solve precomputed into fixed tables at prepare time. Actual 12AX7/12BH7 datasheet fitting, tube capacitive dynamic response, nonlinearities, 6AQ5 pentode driver, feedback and power-supply effects are still MISSING.
+3. **Linear T1/T2 research equivalents now exist** with primary magnetizing and leakage inductance plus source/load/copper resistances. Current models estimate LF/HF rolloff and phase and are NOT measured transformer models. Nonlinear core loss, hysteresis, saturation, winding resonance, oversampling and antialiasing remain MISSING. A single output tanh is explicitly forbidden as a replacement for real core physics.
 4. Reference calibration of photoresistance (separately dark, illuminated, history), panel electrical transfer and independent meter CdS response.
 5. Exact host calibration, oscilloscope/spectrum waveforms, gain-reduction output meter mapping and exposure tests; validated on real user vocals with headphone monitoring and Apollo latency.
 
@@ -82,3 +82,13 @@ python Scripts/opto_reference_dynamics.py analyse `
 Outputs: `opto_effective_gain_windows.csv` (input/output levels and UAD vs APEX gain errors for each window) and `opto_recovery_comparison.json` (0.05/0.1/0.25/0.5/1/2/5/10/15-second recovery-shape differences). All PCM must be aligned to the same sample timeline BEFORE invoking the comparison; the script rejects mismatched frame counts. Audio waveforms are NOT uploaded to GitHub automatically. Test the diagnostic without any UAD installation via `python Scripts/opto_reference_dynamics.py self-test` (synthetic identity, constant-gain-offset and corrupt-length checks).
 
 **Gate:** do not fit tube/T4/transformer constants or use "1:1" terminology without measured UAD/real-unit reference render and source provenance. The research circuit remains separate from the production APEX insert while validation is incomplete.
+
+
+## 6. Electrical-stage experiment (requires golden data before adoption)
+
+* `ApexAnalogCircuitResearchCore.h`: a **12AX7-like plate voltage** stage, **12BH7-like cathode follower**, with independent static triode current-law fits. Plate/cathode voltages are solved by bounded bisection at initialisation and precomputed into fixed-size lookup tables. The gain law is normalized near silence so user-level matching does not conceal differences in nonlinear waveshape. All B+, load, grid bias, mu and current constants are provisional hypotheses, **not official LA-2A BOM measurements**.
+* `ApexTransformerResearchCore` (same header): causal frequency-limited input/output RL approximations, NOT saturation, winding capacitance, magnetic memory, transformer stage calibration or UA DSP recreation.
+* `ApexOptoCircuitPathResearchCore.h`: connects two linear transformer models with T4 optical shunt, then experimental 12AX7/12BH7 stages. Left/right electrical models are state-independent, but both channels share the stronger-side T4 sidechain. This is a **research fixture**, not the DAW's shipping audio path.
+* `Tests/Standalone/ApexAnalogCircuitResearchTests.cpp` and `ApexOptoCircuitPathResearchTests.cpp` assert mathematical monotonicity, bounded/fixed-rate behavior, mono/stereo, dry/bypass, continuous sample clock and no audio-thread allocation. GREEN means only **structural** operation.
+
+**Engineering gate before merging native audio:** fit T4, both transformers and tubes separately with licensed UAD Gray outputs + sourced component measurements; publish residual/THD/IMD/frequency-response/attack-release error plots; establish realistic 48k/64-sample CPU and anti-aliasing/oversampling budgets; then compare blind, level-matched singing performances from Apollo. Never silently swap the native processor DSP for uncalibrated research code.
