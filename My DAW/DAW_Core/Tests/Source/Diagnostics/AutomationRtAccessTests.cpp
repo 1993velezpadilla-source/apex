@@ -4865,3 +4865,99 @@ public:
     }
 };
 static AutomationV2GroupedCurveTests automationV2GroupedCurveTests;
+
+class AutomationV2ClipDomainTransformTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ClipDomainTransformTests()
+        : juce::UnitTest("automation.v2-clip-native-domain-transform.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationClipRegionCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationArticulatorToolsCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        beginTest("Pan flip/scale/normalize retain signed range and shape");
+        AutomationClipRegionCore pan;
+        pan.trackId = "pan-track";
+        pan.parameterId = AutomationLaneCore::trackPanParameterId;
+        pan.lengthSamples = 48000;
+        pan.localPoints = {
+            AutomationPoint{0, -0.8f, AutomationCurveType::Smooth, -0.4f},
+            AutomationPoint{48000, 0.6f, AutomationCurveType::Hold, 0.3f}
+        };
+        AutomationArticulatorToolsCore::flipVertically(pan);
+        expectWithinAbsoluteError(pan.localPoints[0].value, 0.8f, 0.00001f);
+        expectWithinAbsoluteError(pan.localPoints[1].value, -0.6f, 0.00001f);
+        AutomationArticulatorToolsCore::scaleLevels(pan, 0.5f);
+        expectWithinAbsoluteError(pan.localPoints[0].value, 0.4f, 0.00001f);
+        expectWithinAbsoluteError(pan.localPoints[1].value, -0.3f, 0.00001f);
+        AutomationArticulatorToolsCore::normalizeLevels(pan);
+        expectWithinAbsoluteError(pan.localPoints[0].value, 1.0f, 0.00001f);
+        expectWithinAbsoluteError(pan.localPoints[1].value, -1.0f, 0.00001f);
+        expect(pan.localPoints[0].curveToNext == AutomationCurveType::Smooth);
+        expectWithinAbsoluteError(pan.localPoints[0].tensionToNext, -0.4f, 0.00001f);
+
+        beginTest("Volume and clip gain transformations preserve levels above 1.0");
+        AutomationClipRegionCore volume;
+        volume.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        volume.lengthSamples = 1000;
+        volume.localPoints = { AutomationPoint{0, 0.25f}, AutomationPoint{1000, 1.75f} };
+        AutomationArticulatorToolsCore::flipVertically(volume);
+        expectWithinAbsoluteError(volume.localPoints[0].value, 1.75f, 0.00001f);
+        expectWithinAbsoluteError(volume.localPoints[1].value, 0.25f, 0.00001f);
+        AutomationArticulatorToolsCore::resetLevels(volume, 1.5f);
+        expectWithinAbsoluteError(volume.localPoints[0].value, 1.5f, 0.00001f);
+        expectWithinAbsoluteError(volume.localPoints[1].value, 1.5f, 0.00001f);
+
+        AutomationClipRegionCore clipGain;
+        clipGain.parameterId = AutomationLaneCore::makeClipGainParameterId("gain-id");
+        clipGain.lengthSamples = 1000;
+        clipGain.localPoints = { AutomationPoint{0, 3.5f}, AutomationPoint{1000, 0.5f} };
+        AutomationArticulatorToolsCore::flipVertically(clipGain);
+        expectWithinAbsoluteError(clipGain.localPoints[0].value, 0.5f, 0.00001f);
+        expectWithinAbsoluteError(clipGain.localPoints[1].value, 3.5f, 0.00001f);
+
+        beginTest("Other native continuous parameters preserve host [0,2] domain");
+        DAW::AutomationClipRegionCore send;
+        send.parameterId = "send.group-b.level";
+        send.lengthSamples = 1000;
+        send.localPoints = { AutomationPoint{0, 1.7f},
+                             AutomationPoint{1000, 0.2f} };
+        AutomationArticulatorToolsCore::flipVertically(send);
+        expectWithinAbsoluteError(send.localPoints[0].value, 0.3f, 0.00001f);
+        expectWithinAbsoluteError(send.localPoints[1].value, 1.8f, 0.00001f);
+
+        beginTest("Time stretch fit retains signed pan and exact curve tension");
+        AutomationClipRegionCore panStretched;
+        panStretched.parameterId = AutomationLaneCore::trackPanParameterId;
+        panStretched.lengthSamples = 96000;
+        panStretched.fitStateToLength(pan.localPoints, 48000);
+        expectEquals((int)panStretched.localPoints.size(), 2);
+        if (panStretched.localPoints.size() == 2)
+        {
+            expectEquals((juce::int64)panStretched.localPoints[1].timeSamples,
+                         (juce::int64)96000);
+            expectWithinAbsoluteError(panStretched.localPoints[1].value, -1.0f, 0.00001f);
+            expect(panStretched.localPoints[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(panStretched.localPoints[0].tensionToNext, -0.4f, 0.00001f);
+        }
+
+        beginTest("Non-finite scale does not partially corrupt a valid pattern");
+        const auto before = pan.getState().toXmlString();
+        AutomationArticulatorToolsCore::scaleLevels(
+            pan, std::numeric_limits<float>::quiet_NaN());
+        expectEquals(pan.getState().toXmlString(), before);
+
+        beginTest("Pan native range survives AutomationClipRegion save/reopen");
+        const auto restored = AutomationClipRegionCore::fromState(pan.getState());
+        expect(restored.isValid());
+        expectEquals((int)restored.localPoints.size(), 2);
+        if (restored.localPoints.size() == 2)
+            expectWithinAbsoluteError(restored.localPoints[1].value, -1.0f, 0.00001f);
+    }
+};
+static AutomationV2ClipDomainTransformTests automationV2ClipDomainTransformTests;
