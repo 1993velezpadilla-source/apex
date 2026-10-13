@@ -354,31 +354,36 @@ private:
         switch (advice.status)
         {
             case Status::NoSignal:
-                guidance = "RAW MIC: waiting for input.\nPichy checks the signal BEFORE Input Trim.";
+                guidance = "RAW INPUT: waiting for input.\nPichy checks the signal BEFORE Input Trim.";
                 break;
             case Status::InvalidInput:
-                guidance = "RAW MIC: invalid input samples/settings.\nCheck your hardware and audio device.";
+                guidance = "RAW INPUT: invalid input samples/settings.\nCheck your hardware and audio device.";
                 break;
             case Status::HardwareAttention:
-                guidance = "RAW MIC near full scale! Check INTERFACE gain.\nDigital Trim cannot repair ADC distortion.";
+                guidance = "RAW INPUT near full scale! Check INTERFACE gain.\nDigital Trim cannot repair ADC distortion.";
                 break;
             case Status::AlreadySafe:
-                guidance = "RAW MIC peak: " + juce::String(advice.rawPeakDbfs, 1)
+                guidance = "RAW INPUT peak: " + juce::String(advice.rawPeakDbfs, 1)
                          + " dBFS (before Trim).\nNo further digital reduction suggested.";
                 break;
             case Status::ReduceDigitalTrim:
-                guidance = "RAW MIC peak: " + juce::String(advice.rawPeakDbfs, 1)
+                guidance = "RAW INPUT peak: " + juce::String(advice.rawPeakDbfs, 1)
                          + " dBFS (before Trim).\nSuggested Trim: "
                          + juce::String(advice.proposedTrimDb, 1) + " dB.";
                 break;
         }
-        help_.setText(guidance, juce::dontSendNotification);
-        help_.setColour(juce::Label::textColourId,
-                        advice.status == Status::HardwareAttention
-                            ? juce::Colour(0xFFFF9A7A) : juce::Colour(0xFFBFC4D0));
-        pichyAdjust_.setEnabled(
-            advice.status == Status::ReduceDigitalTrim
-            && static_cast<bool>(onPichyAdjustRequest));
+        // The panel runs at 60 Hz; avoid gratuitous text repaints and
+        // widget state churn when the held raw peak has not changed.
+        if (help_.getText() != guidance)
+            help_.setText(guidance, juce::dontSendNotification);
+        const auto helpColour = advice.status == Status::HardwareAttention
+            ? juce::Colour(0xFFFF9A7A) : juce::Colour(0xFFBFC4D0);
+        if (help_.findColour(juce::Label::textColourId) != helpColour)
+            help_.setColour(juce::Label::textColourId, helpColour);
+        const bool canAdjust = advice.status == Status::ReduceDigitalTrim
+            && static_cast<bool>(onPichyAdjustRequest);
+        if (pichyAdjust_.isEnabled() != canAdjust)
+            pichyAdjust_.setEnabled(canAdjust);
     }
 
     static juce::String formatDb(float dB)
