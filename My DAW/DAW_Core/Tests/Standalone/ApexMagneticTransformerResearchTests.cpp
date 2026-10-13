@@ -1,6 +1,7 @@
 // Offline transformer nonlinearity/aliasing tests; NOT UAD validation.
 #include "../../Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -84,6 +85,24 @@ int main(){
                           std::numeric_limits<double>::infinity(),-1.,4.})
             for(int i=0;i<500;++i)
                 assert(std::isfinite(c.process(value)));
+    }
+    // Power-of-two history rings must reset identically after arbitrary
+    // previous audio. This also checks stale sample history cannot leak.
+    {
+        ApexMagneticTransformerResearchCore c;
+        c.prepare(48000);
+        std::array<double,257> before{},after{};
+        for(int n=0;n<257;++n)
+            before[static_cast<std::size_t>(n)]=
+                c.process(.35*std::sin(n*.071)+.13*std::cos(n*.193));
+        for(int n=0;n<601;++n)c.process(.21*std::sin(n*.039));
+        c.reset();
+        for(int n=0;n<257;++n)
+            after[static_cast<std::size_t>(n)]=
+                c.process(.35*std::sin(n*.071)+.13*std::cos(n*.193));
+        for(int n=0;n<257;++n)
+            near(before[static_cast<std::size_t>(n)],
+                 after[static_cast<std::size_t>(n)],1.e-13);
     }
     // Informational speed baseline, not a host CPU acceptance measurement.
     ApexMagneticTransformerResearchCore c;c.prepare(48000);
