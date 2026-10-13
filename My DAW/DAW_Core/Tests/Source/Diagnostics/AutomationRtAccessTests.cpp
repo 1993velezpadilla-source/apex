@@ -5883,6 +5883,29 @@ public:
             expect(oldMap->at(c) == newMap->at(c)); // untouched lane retains identity
         }
 
+        beginTest("Pinned RT lookup must not mix old and new multi-VST3 maps");
+        const auto oldAPinned = Store::findLaneInSnapshotRT(oldMap, a);
+        const auto oldBPinned = Store::findLaneInSnapshotRT(oldMap, b);
+        const auto newAPinned = Store::findLaneInSnapshotRT(newMap, a);
+        const auto newBPinned = Store::findLaneInSnapshotRT(newMap, b);
+        expect(oldAPinned != nullptr && oldBPinned != nullptr
+            && newAPinned != nullptr && newBPinned != nullptr);
+        if (oldAPinned != nullptr && oldBPinned != nullptr
+            && newAPinned != nullptr && newBPinned != nullptr)
+        {
+            expectWithinAbsoluteError(oldAPinned->getSnapshot()->front().normalizedValue,
+                                      0.2f, 0.00001f);
+            expectWithinAbsoluteError(oldBPinned->getSnapshot()->front().normalizedValue,
+                                      0.3f, 0.00001f);
+            expectWithinAbsoluteError(newAPinned->getSnapshot()->front().normalizedValue,
+                                      0.8f, 0.00001f);
+            expectWithinAbsoluteError(newBPinned->getSnapshot()->front().normalizedValue,
+                                      0.6f, 0.00001f);
+        }
+        expect(Store::findLaneInSnapshotRT(nullptr, a) == nullptr);
+        expect(Store::findLaneInSnapshotRT(newMap,
+            apex::automation::kInvalidParameterID) == nullptr);
+
         beginTest("Duplicate destination rejects without partial publication");
         const auto stableMap = store.getLaneSnapshotRT();
         std::vector<Store::BatchReplacement> duplicate;
