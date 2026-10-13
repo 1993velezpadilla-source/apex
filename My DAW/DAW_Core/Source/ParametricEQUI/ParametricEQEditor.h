@@ -77,6 +77,7 @@ public:
     juce::TextButton& getSpectralArmButtonForTesting();
     juce::TextButton& getSpectralBandButtonForTesting();
     juce::Slider& getDynRangeSliderForTesting();
+    std::array<juce::Slider*, 3> getPrimaryDialsForTesting();
     bool isBandDynamicActiveForTesting (int band) const;
     double getDisplayedDynamicGainDbForTesting (int band) const;
     void setSelectedBandForTesting (int band);
