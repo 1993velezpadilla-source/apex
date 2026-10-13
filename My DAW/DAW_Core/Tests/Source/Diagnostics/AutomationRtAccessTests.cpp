@@ -4832,6 +4832,25 @@ public:
             {"singer-a", "singer-b"}, malformed, invalid));
         expectEquals(manager.getState().toXmlString(), beforeFailed);
 
+        beginTest("Clip-owned section blocks grouped writes");
+        DAW::AutomationClipRegionCore managedRegion;
+        managedRegion.trackId = "singer-b";
+        managedRegion.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        managedRegion.startSample = 0;
+        managedRegion.lengthSamples = 48000;
+        managedRegion.localPoints = {
+            AutomationPoint{0, 0.5f, AutomationCurveType::Hold, 0.0f},
+            AutomationPoint{48000, 0.7f, AutomationCurveType::Linear, 0.0f}
+        };
+        manager.addClipRegion(managedRegion);
+        const auto beforeReject = manager.getState().toXmlString();
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, desired, invalid));
+        expect(!AutomationGroupedCurveCore::apply(manager, batch, true));
+        expectEquals(manager.getState().toXmlString(), beforeReject);
+        expect(manager.deleteClipRegion(managedRegion.regionId));
+
         beginTest("Group edit survives real manager project serialization");
         expect(AutomationGroupedCurveCore::apply(manager, batch, true));
         AutomationManagerCore reopened;
