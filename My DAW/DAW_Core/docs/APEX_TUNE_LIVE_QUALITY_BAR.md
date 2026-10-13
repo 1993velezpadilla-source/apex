@@ -99,6 +99,54 @@ real singing tests.
   dry consonant. These are assertions only until the exact branch CI
   completes, *not certified studio-quality audio*.
 
+## 2026-10-12 experimental shifter study (measured CI, not subjective quality)
+
+The pinned Signalsmith 1.3.2 native shifter was measured with a 447.691 Hz
+sine sung ~30 cents sharp of A4, a fixed -0.30 semitone request, 48 kHz,
+and the **same original YIN analyzer** on the final 0.5s output segment.
+Results are actual Linux ASan/GCC and Windows MSVC portable regression
+measurements; they are not listening-test evidence.
+
+| Shifter window | Native plugin latency | Output residual error |
+| --- | ---: | ---: |
+| 18 ms | 18 ms | +19.4 cents |
+| 24 ms | 24 ms | +20.0 cents |
+| 30 ms | 30 ms | +19.4 cents |
+| 40 ms (shipping prototype) | 40 ms | +16.7 cents |
+
+A separate *fixed-transpose* scan at 447.691 Hz illustrates that the
+requested spectral shift is **not** identical to the actual correction:
+
+| Requested shift | Residual at 18 ms | Residual at 40 ms |
+| --- | ---: | ---: |
+| -0.30 semitones | +19.4 c | +16.7 c |
+| -0.45 semitones | +9.7 c | -1.2 c |
+| -0.60 semitones | -3.2 c | -24.4 c |
+| -0.75 semitones | -19.0 c | -44.8 c |
+
+**Interpretation:** shorter shifter windows can lower its PDC, but fidelity
+with the *same* transpose settings is not equivalent, and arbitrary gains
+may massively overshoot. We must not bake in a universal 1.5x or 2x gain
+based on one sine: real sung vowels, pitch ranges, voice formants and rising
+versus falling intervals must be covered first. Real latency further
+includes input and output device + the host routing path; 18 ms here
+is **not** an APEX Apollo Solo end-to-end latency claim.
+
+The real **production DspCore** wet benchmark with 40 ms shifter, hard
+correction, zero Flex Tune and 100% amount measured +15.87 cents residual,
+passing the **existing** ±18-cent synthetic gate but **not** tight pro
+intonation; the previous +21.2 cents was the intended Flex Tune dead-zone
+incorrectly left ON in the hard-tune accuracy fixture. That fixture and
+a cross-platform CI issue (Windows command scripts swallowed assertion
+errors) have now been corrected. Actual GCC/ASan and MSVC wet/PDC
+gauntlets completed GREEN on commit `ded83bfb033beb4e17e32af2787e14d6af9e01f9`.
+Additional frequency-response study is still exploratory.
+
+Next sonic milestone is a *measured, source-clean calibrated pitch-shifter*
+or different low-latency architecture, **plus** independent confidence-
+weighted real-voice listening and tests. Correct numerical cents alone
+never certifies Antares-class sound.
+
 ## Objective / subjective evidence policy
 
 - CI green for portable detector/note-selection is only a component gate.
