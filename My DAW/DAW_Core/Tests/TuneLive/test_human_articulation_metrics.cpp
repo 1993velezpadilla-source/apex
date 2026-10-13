@@ -68,18 +68,13 @@ Metrics evaluate(const Wave& source,const Wave& candidate,
                  const std::vector<EnergyFrame>& sourceEnergy,
                  std::size_t first, std::size_t count,int pdc) {
     Metrics m;
-    // The research and approved HQ40 versions have EXACTLY the same 40ms PDC.
-    const auto wet= bands(candidate, first+static_cast<std::size_t>(pdc)/frame,
-                            count+1);
-    // But PDC is not necessarily frame-aligned: avoid a 1764/1024 rounding
-    // error by measuring wet at the actual exact sample offset below.
-    // Recompute wet with exact 1764 sample shift across output WAV. 1024
-    // nonoverlapping source windows, no resampling or estimate of timing.
+    // The research and approved HQ40 have the SAME 40ms PDC, which is
+    // not generally a multiple of the analysis frame size. Align by the
+    // exact number of samples, never by rounding to an integer frame.
     const auto samplesPerFrame=static_cast<std::size_t>(frame);
     const auto stride=static_cast<std::size_t>(source.channels);
     const double decay=std::exp(-2.0*pi*3500.0/source.rate);
     double lpf=0.0;
-    (void)wet;
     for(std::size_t j=0;j<count;++j) {
         const auto& dry=sourceEnergy[j];
         const auto firstSample=(first+j)*samplesPerFrame+
