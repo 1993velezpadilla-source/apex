@@ -484,7 +484,7 @@ void PluginInstanceCore::applySandboxedAutomationAtSample(
     auto& laneStore   = apex::automation::AutomationLaneStore::getInstance();
     // The isolated worker must see one coherent PPQ generation for every
     // parameter event staged in this host callback, just like in-process VST3.
-    const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
+    const auto ppqLaneMap = laneStore.getEffectiveLaneSnapshotRT();
     const double ppqPosition = (sampleRate > 0.0 && bpm > 0.0)
         ? ((double)samplePosition / sampleRate) * (bpm / 60.0)
         : 0.0;

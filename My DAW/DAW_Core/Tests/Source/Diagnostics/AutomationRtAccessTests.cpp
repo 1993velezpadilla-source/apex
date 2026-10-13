@@ -5926,6 +5926,53 @@ public:
         missing.push_back({876099, {{0.0, 0.4f}}});
         expect(!store.replacePointsBatch(std::move(missing)));
         expect(stableMap == store.getLaneSnapshotRT());
+
+        beginTest("Nested plugin-chain pin inherits the original PPQ generation");
+        const auto beforePin = store.getLaneSnapshotRT();
+        {
+            Store::ScopedRtPin outer(store);
+            expect(store.getEffectiveLaneSnapshotRT() == beforePin);
+            {
+                Store::ScopedRtPin inner(store);
+                expect(store.getEffectiveLaneSnapshotRT() == beforePin);
+
+                std::vector<Store::BatchReplacement> changed;
+                changed.push_back({a, {{0.0, 0.4f}}});
+                changed.push_back({b, {{0.0, 0.5f}}});
+                expect(store.replacePointsBatch(std::move(changed)));
+
+                // An in-flight chain continues with its pinned old pair;
+                // this remains true even if nested slot scopes are present.
+                expect(store.getEffectiveLaneSnapshotRT() == beforePin);
+                const auto pinnedA = Store::findLaneInSnapshotRT(
+                    store.getEffectiveLaneSnapshotRT(), a);
+                const auto pinnedB = Store::findLaneInSnapshotRT(
+                    store.getEffectiveLaneSnapshotRT(), b);
+                if (pinnedA != nullptr && pinnedB != nullptr)
+                {
+                    expectWithinAbsoluteError(
+                        pinnedA->getSnapshot()->front().normalizedValue,
+                        0.8f, 0.00001f);
+                    expectWithinAbsoluteError(
+                        pinnedB->getSnapshot()->front().normalizedValue,
+                        0.6f, 0.00001f);
+                }
+            }
+            expect(store.getEffectiveLaneSnapshotRT() == beforePin);
+        }
+        const auto afterPin = store.getEffectiveLaneSnapshotRT();
+        expect(afterPin != beforePin);
+        const auto activeA = Store::findLaneInSnapshotRT(afterPin, a);
+        const auto activeB = Store::findLaneInSnapshotRT(afterPin, b);
+        if (activeA != nullptr && activeB != nullptr)
+        {
+            expectWithinAbsoluteError(
+                activeA->getSnapshot()->front().normalizedValue,
+                0.4f, 0.00001f);
+            expectWithinAbsoluteError(
+                activeB->getSnapshot()->front().normalizedValue,
+                0.5f, 0.00001f);
+        }
     }
 };
 static AutomationV2PpqBatchPublicationTests automationV2PpqBatchPublicationTests;

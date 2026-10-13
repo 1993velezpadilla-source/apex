@@ -223,6 +223,45 @@ namespace apex::automation
         // mutable map access or allowing a real-time caller to mutate lanes.
         using RtLaneSnapshot = std::shared_ptr<const LaneMap>;
 
+        /**
+         * Pin one immutable PPQ lane-map generation across an entire plugin
+         * chain's automation preflight and all of its processor callbacks.
+         *
+         * Nested scopes inherit their outer generation; the stack owns the
+         * snapshot and a thread-local NON-owning pointer only identifies it.
+         * No locks, heap allocations, map copies or DSP-thread publications.
+         */
+        class ScopedRtPin final
+        {
+        public:
+            explicit ScopedRtPin(const AutomationLaneStore& store) noexcept
+                : snapshot_(store.getEffectiveLaneSnapshotRT()),
+                  previous_(pinnedLaneMapForThread_)
+            {
+                pinnedLaneMapForThread_ = &snapshot_;
+            }
+
+            ~ScopedRtPin() noexcept
+            {
+                pinnedLaneMapForThread_ = previous_;
+            }
+
+            ScopedRtPin(const ScopedRtPin&) = delete;
+            ScopedRtPin& operator=(const ScopedRtPin&) = delete;
+            ScopedRtPin(ScopedRtPin&&) = delete;
+            ScopedRtPin& operator=(ScopedRtPin&&) = delete;
+
+        private:
+            RtLaneSnapshot snapshot_;
+            const RtLaneSnapshot* previous_ = nullptr;
+        };
+
+        RtLaneSnapshot getEffectiveLaneSnapshotRT() const noexcept
+        {
+            return pinnedLaneMapForThread_ != nullptr
+                ? *pinnedLaneMapForThread_ : getLaneSnapshotRT();
+        }
+
         static std::shared_ptr<AutomationLane> findLaneInSnapshotRT (
             const RtLaneSnapshot& snapshot, ParameterID id) noexcept
         {
@@ -509,6 +548,7 @@ namespace apex::automation
         std::shared_ptr<const LaneMap> retiredLanesSnapshot_;   // message-thread retire slot
         std::atomic<std::uint64_t> changeGeneration_ { 0 };
         int publishBatchDepth_ = 0;   // message thread only
+        inline static thread_local const RtLaneSnapshot* pinnedLaneMapForThread_ = nullptr;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationLaneStore)
     };

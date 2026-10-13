@@ -993,6 +993,10 @@ public:
     {
         RealtimeReadScope reader(*this);
         if (!reader) return;
+        // One PPQ map for the ENTIRE chain and all VST3 slots, not one
+        // independently sampled map per hosted instance.
+        const apex::automation::AutomationLaneStore::ScopedRtPin ppqPin(
+            apex::automation::AutomationLaneStore::getInstance());
         // The engine may have captured its automation snapshot before this
         // chain's reorder completed. Adopt the current lane addresses inside
         // the admission gate so an old wet/dry lane cannot hit a new occupant.
@@ -1568,6 +1572,11 @@ public:
     {
         RealtimeReadScope reader(*this);
         if (!reader) return;
+        // Freeze PPQ generation before deciding slice boundaries. Every
+        // in-process/sandboxed VST3 slot inherits this same generation for
+        // the full chain callback, including all in-block slices.
+        const apex::automation::AutomationLaneStore::ScopedRtPin ppqPin(
+            apex::automation::AutomationLaneStore::getInstance());
         if (!validateProcessBuffer(mainBuffer, numSamples)) return;
         if (!validateOfflinePreparedForProcess(numSamples)) return;
         if (HostedPluginIsolationCore::shouldBypassHostedDsp()) return;
