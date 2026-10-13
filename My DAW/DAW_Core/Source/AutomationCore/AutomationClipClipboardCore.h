@@ -35,11 +35,18 @@ public:
 
     static constexpr size_t maxClipboardPoints = 32768;
 
-    void copyRegionState(const AutomationClipRegionCore& region)
+    // A failed copy must be reported as failed: previously the manager
+    // returned true for a malformed/empty region, while the clipboard still
+    // contained an older pattern. A subsequent Paste could surprise the user.
+    bool copyRegionState(const AutomationClipRegionCore& region)
     {
-        if (!region.isValid() || region.localPoints.empty()
+        if (!region.isValid() || region.trackId.isEmpty()
+            || region.startSample < 0
+            || region.lengthSamples > std::numeric_limits<int64_t>::max()
+                                     - region.startSample
+            || region.localPoints.empty()
             || region.localPoints.size() > maxClipboardPoints)
-            return;
+            return false;
 
         ClipState state;
         state.sourceParameterId = region.parameterId;
@@ -52,7 +59,7 @@ public:
         {
             if (point.timeSamples < 0 || point.timeSamples > region.lengthSamples
                 || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
-                return;  // leave previous valid clipboard intact
+                return false; // leave previous valid clipboard intact
 
             point.value = AutomationLaneCore::clampValueForParameter(
                 state.sourceParameterId, point.value);
@@ -61,6 +68,7 @@ public:
         }
 
         clipState_ = std::move(state);
+        return true;
     }
 
     bool hasClipState() const noexcept { return clipState_.has_value(); }
