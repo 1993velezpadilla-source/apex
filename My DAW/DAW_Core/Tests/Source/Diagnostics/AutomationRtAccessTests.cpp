@@ -5796,6 +5796,7 @@ public:
         manager.getOrCreateLane("vocal", key).addPoint(0, 0.25f);
         manager.getOrCreateLane("vocal", other).addPoint(0, 0.81f);
         manager.getOrCreateLane("vocal", discreteKey).addPoint(0, 0.0f);
+        manager.getOrCreateLane("vocal", "plugin.0.instance-A.quantized").addPoint(0, 0.5f);
         manager.publishSnapshot();
 
         juce::AudioParameterFloat cutoff(
@@ -5803,9 +5804,13 @@ public:
             juce::NormalisableRange<float>{0.0f, 1.0f}, 0.5f);
         juce::AudioParameterBool enabled(
             juce::ParameterID{"enabled", 1}, "Enabled", false);
+        juce::AudioParameterFloat quantized(
+            juce::ParameterID{"quantized", 1}, "Quantized",
+            juce::NormalisableRange<float>{0.0f, 1.0f, 0.25f}, 0.5f);
         juce::Array<juce::AudioProcessorParameter*> params;
         params.add(&cutoff);
         params.add(&enabled);
+        params.add(&quantized);
 
         DAW::LastTouchedPluginParameter touched;
         touched.trackId = "vocal";
@@ -5844,6 +5849,13 @@ public:
         expect(!Guard::verify(touched, "another-track", 0, "instance-A",
                               params, manager, checked));
         expect(!Guard::verify(touched, "vocal", 1, "instance-A",
+                              params, manager, checked));
+
+        beginTest("Quantized float cannot impersonate continuous VST3 range");
+        expect(quantized.getNumSteps()
+            != juce::AudioProcessorParameter::getDefaultNumParameterSteps());
+        touched.parameterId = "quantized";
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
                               params, manager, checked));
 
         beginTest("VST3 switch is discrete; missing and ambiguous IDs rejected");
