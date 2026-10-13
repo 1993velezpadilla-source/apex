@@ -61,6 +61,7 @@ public:
         scLowL_ = scLowR_ = 0.0;
         currentMix_ = parameters_.mix;
         currentGain_ = dbToGain(parameters_.gainDb);
+        activeMix_ = parameters_.bypass ? 0.0 : 1.0;
         gainReductionDb_ = 0.0;
         slowCoeffSamplesUntilRefresh_ = 0;
         cachedSlowCoeff_ = 1.0;
@@ -93,13 +94,14 @@ public:
             const double dryR = stereo ? sanitiseInput(right[n]) : dryL;
             currentMix_ = controlCoeff_ * currentMix_ + (1.0 - controlCoeff_) * targetMix;
             currentGain_ = controlCoeff_ * currentGain_ + (1.0 - controlCoeff_) * targetGain;
-            if (parameters_.bypass)
-            {
-                left[n] = static_cast<float>(dryL);
-                if (stereo) right[n] = static_cast<float>(dryR);
-                continue;
-            }
+            const double targetActive = parameters_.bypass ? 0.0 : 1.0;
+            activeMix_ = controlCoeff_ * activeMix_ + (1.0 - controlCoeff_) * targetActive;
+            if (std::abs(activeMix_ - targetActive) < 1.0e-10)
+                activeMix_ = targetActive;
 
+            // Keep the gain cell warm even under bypass. Applying bypass as a
+            // smoothed DRY crossfade at the output prevents discontinuities
+            // when automation toggles it under loud program material.
             // Programmable frequency sensitivity, inspired by hardware R37.
             scLowL_ = scLowpassCoeff_ * scLowL_ + (1.0 - scLowpassCoeff_) * dryL;
             scLowR_ = scLowpassCoeff_ * scLowR_ + (1.0 - scLowpassCoeff_) * dryR;
@@ -177,9 +179,10 @@ public:
             wetR *= currentGain_;
             // Linear mixing maintains time alignment (both are 0 latency).
             // 50% may be louder than pure wet; that is the intent of parallel.
-            left[n] = static_cast<float>(dryL * (1.0 - currentMix_) + wetL * currentMix_);
+            const double effectiveMix = currentMix_ * activeMix_;
+            left[n] = static_cast<float>(dryL * (1.0 - effectiveMix) + wetL * effectiveMix);
             if (stereo)
-                right[n] = static_cast<float>(dryR * (1.0 - currentMix_) + wetR * currentMix_);
+                right[n] = static_cast<float>(dryR * (1.0 - effectiveMix) + wetR * effectiveMix);
         }
     }
 
@@ -211,6 +214,7 @@ private:
     double fastReduction_ = 0.0, slowReduction_ = 0.0, compressionMemory_ = 0.0;
     double scLowL_ = 0.0, scLowR_ = 0.0, currentMix_ = 1.0, currentGain_ = 1.0;
     double gainReductionDb_ = 0.0;
+    double activeMix_ = 1.0;
     double cachedSlowCoeff_ = 1.0;
     int slowCoeffSamplesUntilRefresh_ = 0;
 };
