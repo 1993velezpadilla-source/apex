@@ -85,11 +85,51 @@ public:
         }
         base->releaseResources();
 
+        beginTest("Rack GUI constructs, scales and renders nonempty hardware face");
+        {
+            auto editor=std::unique_ptr<juce::AudioProcessorEditor>(processor->createEditor());
+            expect(editor!=nullptr,"A real JUCE rack editor must be constructed");
+            if(editor)
+            {
+                expectEquals(editor->getWidth(),1040);
+                expectEquals(editor->getHeight(),380);
+                expect(editor->getNumChildComponents()>=9,
+                       "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
+                juce::Image screenshot(juce::Image::ARGB,1040,380,true);
+                juce::Graphics graphics(screenshot);
+                editor->paintEntireComponent(graphics,true);
+                const auto metal=screenshot.getPixelAt(200,65);
+                const auto lcd=screenshot.getPixelAt(512,110);
+                const auto strip=screenshot.getPixelAt(25,344);
+                expect(metal.getBrightness()>0.32f,"rack must have silver metal chassis");
+                expect(lcd.getRed()>lcd.getBlue(),"VU meter must have amber glass");
+                expect(strip.getBrightness()<0.30f,"APEX extra controls remain separate");
+                const auto screenshots=juce::File::getCurrentWorkingDirectory()
+                    .getChildFile("evidence").getChildFile("opto2a_gui");
+                if(screenshots.createDirectory())
+                {
+                    const auto name=screenshots.getChildFile("apex_opto2a_reference_face_1040x380.png");
+                    auto stream=name.createOutputStream();
+                    if(stream!=nullptr)
+                    {
+                        juce::PNGImageFormat format;
+                        expect(format.writeImageToStream(screenshot,*stream),
+                               "Render rack screenshot artifact");
+                        stream->flush();
+                    }
+                }
+                editor->setSize(780,330);
+                expectEquals(editor->getWidth(),780);
+                expect(editor->getNumChildComponents()>=9,"responsive resize keeps real controls");
+            }
+        }
+
         beginTest("Session state roundtrip preserves normalized parameter values");
         processor->getParameterAt(APEX::Compressor::Mix).setValue(0.32f);
         processor->getParameterAt(APEX::Compressor::Gain).setValue(0.25f);
         processor->getParameterAt(APEX::Compressor::Emphasis).setValue(0.81f);
         processor->getParameterAt(APEX::Compressor::Limit).setValue(1.0f);
+        processor->setMeterMode(2);
         juce::MemoryBlock state;
         base->getStateInformation(state);
         expect(state.getSize()>0);
@@ -102,6 +142,7 @@ public:
         expectWithinAbsoluteError((double)restored.getParameterAt(APEX::Compressor::Emphasis).getValue(),
                                   0.81,1.e-5);
         expect(restored.getParameterAt(APEX::Compressor::Limit).getUnits()>0.5f);
+        expectEquals(restored.getMeterMode(),2,"VU selector persists as UI state");
 
         beginTest("Stereo key link lowers both channels equally, no dry-source printing");
         OptoProcessor comp;
