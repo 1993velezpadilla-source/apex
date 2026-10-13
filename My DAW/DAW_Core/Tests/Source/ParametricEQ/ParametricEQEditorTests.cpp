@@ -148,7 +148,7 @@ private:
                     continue;
                 expect (dial->getWidth() >= 44,
                         "primary parameter keeps a safe 44px touch target");
-                if (sizeCase.width >= 900)
+                if (sizeCase.width >= 900 && sizeCase.height >= 500)
                 {
                     expect (dial->getSliderStyle()
                             == juce::Slider::RotaryHorizontalVerticalDrag,
@@ -169,7 +169,7 @@ private:
                             "secondary inspector controls");
                 }
             }
-            if (sizeCase.width < 900)
+            if (sizeCase.width < 900 || sizeCase.height < 500)
             {
                 expectEquals (primary[0]->getY(), primary[1]->getY(),
                               "quick-edit band strip aligns FREQ and GAIN");
@@ -197,7 +197,8 @@ private:
             expectEquals (topBar.getBottom(), editorBounds.getBottom(),
                           "Pro-Q-style bottom command dock sits at window foot");
 
-            const bool touchSheet = sizeCase.width < 900;
+            const bool touchSheet = sizeCase.width < 900
+                || sizeCase.height < 500;
             if (touchSheet)
                 expect (! graph.intersects (inspector),
                         "touch phone/tablet inspector stays BELOW graph in "
@@ -903,8 +904,8 @@ private:
         expectEquals (processor.getParametricEQParameter (
             placementParameterIndex (0))->getChoiceIndex(), 0,
             "newly created Match band defaults to true stereo");
-        expectEquals (juce::String ("EQ MATCH"), match.getButtonText(),
-                      "matching resets after a completed apply");
+        expectEquals (juce::String ("MATCH"), match.getButtonText(),
+                      "matching resets to compact-width button text after apply");
 
         // The second instance uses the shared reference against its own
         // input, applying a *new* band without changing the source instance.
