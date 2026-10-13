@@ -30,9 +30,9 @@ struct DspSettings {
 };
 
 // Profile is selected on the non-RT prepare thread, NEVER automated mid-buffer.
-// LowLatency18ms is a measurable research candidate only; no Antares parity
+// Experimental 18ms and 12ms research candidates; no Antares parity
 // claim. Shipping hosted APEX Tune Live continues to use the 40ms HQ path.
-enum class ShifterProfile { HighQuality40ms, Experimental18ms };
+enum class ShifterProfile { HighQuality40ms, Experimental18ms, Experimental12ms };
 
 class DspCore final {
 public:
@@ -48,8 +48,10 @@ public:
         // shifter. Both window and interval must scale together. Causal
         // pitch tracking still requires multiple source cycles and the
         // measured shifter PDC is not the whole device round trip.
-        const double windowSeconds=(profile_==ShifterProfile::Experimental18ms)
-                                      ?0.018:0.040;
+        const double windowSeconds=(profile_==ShifterProfile::Experimental12ms)
+                                      ?0.012
+                                  : (profile_==ShifterProfile::Experimental18ms)
+                                      ?0.018 : 0.040;
         const int window=std::max(256,static_cast<int>(std::lround(rate_*windowSeconds)));
         const int interval=std::max(64,static_cast<int>(std::lround(window*0.25)));
         stretch_.configure(channels_,window,interval,false);
