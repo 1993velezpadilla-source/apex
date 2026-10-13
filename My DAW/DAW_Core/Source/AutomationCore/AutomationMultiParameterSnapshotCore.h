@@ -98,6 +98,22 @@ struct AutomationMultiParameterSnapshotCore
         return true;
     }
 
+    static bool validPointsForParameter(
+        const juce::String& parameterId,
+        const std::vector<AutomationPoint>& points) noexcept
+    {
+        if (!validPoints(points))
+            return false;
+
+        for (const auto& point : points)
+            if (point.value != AutomationLaneCore::clampValueForParameter(
+                    parameterId, point.value)
+                || point.tensionToNext < -1.0f || point.tensionToNext > 1.0f)
+                return false; // no silent level clamp during snapshot morph
+
+        return true;
+    }
+
     static bool capture(const AutomationManagerCore& manager,
                         const std::vector<Target>& targets,
                         Snapshot& result)
@@ -115,7 +131,8 @@ struct AutomationMultiParameterSnapshotCore
                 return false;
 
             const auto* lane = manager.findLane(target.trackId, target.parameterId);
-            if (lane == nullptr || !lane->isEnabled() || !validPoints(lane->points))
+            if (lane == nullptr || !lane->isEnabled() || !validPointsForParameter(
+                    target.parameterId, lane->points))
                 return false;
 
             for (const auto& captured : staged.lanes)
@@ -145,7 +162,7 @@ struct AutomationMultiParameterSnapshotCore
         for (const auto& a : left.lanes)
         {
             if (a.target.trackId.isEmpty() || !supported(a.target.parameterId)
-                || !validPoints(a.points)
+                || !validPointsForParameter(a.target.parameterId, a.points)
                 || manager.hasClipRegionsForParameter(a.target.trackId, a.target.parameterId))
                 return false;
 
@@ -158,7 +175,8 @@ struct AutomationMultiParameterSnapshotCore
                     ++matches;
                 }
             if (matches != 1 || counterpart == nullptr
-                || !validPoints(counterpart->points))
+                || !validPointsForParameter(
+                    counterpart->target.parameterId, counterpart->points))
                 return false;
 
             for (const auto& previous : staged.changes)
@@ -221,9 +239,12 @@ struct AutomationMultiParameterSnapshotCore
                 return false;
 
             AutomationLaneCore replacement = *live;
-            replacement.restoreState(after ? change.after : change.before);
-            if (replacement.getParameterId() != change.target.parameterId)
-                return false;
+            const auto desired = after ? change.after : change.before;
+            replacement.restoreState(desired);
+            if (replacement.getParameterId() != change.target.parameterId
+                || replacement.getState().toXmlString() != desired.toXmlString())
+                return false; // refuse invalid/rounded state rather than lie
+
             staged.push_back(std::move(replacement));
         }
 
