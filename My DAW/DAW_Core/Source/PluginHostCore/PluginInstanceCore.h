@@ -9,6 +9,7 @@
 #include "../AutomationCore/LastTouchedPluginParameterCore.h"
 #include "../UICore/CursorThemeCore.h"
 #include "../AutomationCore/AutomationSnapshotCore.h"
+#include "../AutomationCore/AutomationVst3BridgeAuthorityCore.h"
 #include "../AutomationCore/AutomationSmootherCore.h"
 #include "../Automation/AutomationParameterRegistryCore.h"
 #include "HostedPluginIsolationCore.h"
@@ -1565,22 +1566,25 @@ public:
         if (hasAutomation != nullptr)
             *hasAutomation = false;
         float newValue = currentValue;
-        if (automationSnap != nullptr)
+        // Resolve once; bridge permission reuses this immutable snapshot
+        // instead of adding another O(lanes) scan to every audio block.
+        const auto* coreLane = automationSnap != nullptr
+            ? automationSnap->findLaneRT(trackId, binding.coreParamId) : nullptr;
+        if (coreLane != nullptr)
         {
-            if (auto* lane = automationSnap->findLaneRT(trackId, binding.coreParamId))
-                if (lane->enabled && !lane->points.empty())
+            if (coreLane->enabled && !coreLane->points.empty())
                 {
                     if (binding.isDiscrete)
                     {
                         const auto next = std::upper_bound(
-                            lane->points.begin(), lane->points.end(), samplePosition,
+                            coreLane->points.begin(), coreLane->points.end(), samplePosition,
                             [](int64_t sample, const AutomationPoint& point) noexcept
                             { return sample < point.timeSamples; });
-                        newValue = next == lane->points.begin() ? lane->points.front().value
+                        newValue = next == coreLane->points.begin() ? coreLane->points.front().value
                                                                : (next - 1)->value;
                     }
                     else
-                        newValue = lane->getValueAtSample(samplePosition, currentValue);
+                        newValue = coreLane->getValueAtSample(samplePosition, currentValue);
                     if (hasAutomation != nullptr) *hasAutomation = true;
                 }
         }
@@ -1612,7 +1616,12 @@ public:
                 }
             }
         }
-        if (binding.bridgePid != apex::automation::kInvalidParameterID)
+        // The PPQ bridge is a MIRROR of this exact core parameter.
+        // Never replay stale PPQ points after its source was bypassed,
+        // emptied or removed (including after project reopen). No locks,
+        // allocations or direct plugin writes on the RT path.
+        if (binding.bridgePid != apex::automation::kInvalidParameterID
+            && AutomationVst3BridgeAuthorityCore::allowsPlayback(coreLane))
         {
             if (auto bridgeLane = laneStore.findLaneRT (binding.bridgePid))
             {
