@@ -2289,6 +2289,10 @@ public:
         return spectralBandButton_;
     }
     juce::Slider& getDynRangeSliderForTesting() { return dynRangeSlider_; }
+    std::array<juce::Slider*, 3> getPrimaryDialsForTesting() noexcept
+    {
+        return {{ &frequencySlider_, &gainSlider_, &qSlider_ }};
+    }
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const { return placementButtons_; }
@@ -2678,6 +2682,11 @@ juce::TextButton& ParametricEQEditor::getDynFilterButtonForTesting()
 juce::Slider& ParametricEQEditor::getDynRangeSliderForTesting()
 {
     return inspector_->getDynRangeSliderForTesting();
+}
+
+std::array<juce::Slider*, 3> ParametricEQEditor::getPrimaryDialsForTesting()
+{
+    return inspector_->getPrimaryDialsForTesting();
 }
 
 bool ParametricEQEditor::isBandDynamicActiveForTesting (int band) const
