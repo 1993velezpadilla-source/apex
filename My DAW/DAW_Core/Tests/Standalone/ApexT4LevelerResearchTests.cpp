@@ -64,7 +64,7 @@ int main()
     // Digital key emphasis applies to detector only, no EQ applied to audio.
     // Low frequency content should be less aggressive with high-pass key.
     {
-        const auto calc=[](double emphasis) {
+        const auto calc=[total](double emphasis) {
             ApexT4LevelerResearchCore d;d.prepare(48000);
             T4LevelerResearchParameters p;p.peakReduction=43;
             p.keyEmphasis=emphasis;d.setParameters(p);
