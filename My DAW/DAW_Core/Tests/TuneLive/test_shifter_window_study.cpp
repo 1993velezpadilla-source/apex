@@ -12,7 +12,7 @@ struct Probe {
     double centsError=0, inputHz=0, outputHz=0;
     bool healthy=false;
 };
-static Probe runProbe(int windowMs) {
+static Probe runProbe(int windowMs,double requestedSemitones=-0.30) {
     using Shifter=signalsmith::stretch::SignalsmithStretch<float>;
     constexpr double sr=48000.0;
     constexpr int frames=48000*3, block=128;
@@ -26,7 +26,7 @@ static Probe runProbe(int windowMs) {
     const int window=static_cast<int>(sr*windowMs*0.001);
     const int interval=window/4;
     shifter.configure(1,window,interval,false);
-    shifter.setTransposeFactor(static_cast<float>(std::pow(2.0,-0.30/12.0)));
+    shifter.setTransposeFactor(static_cast<float>(std::pow(2.0,requestedSemitones/12.0)));
     shifter.setFormantFactor(1.0f,true);
     shifter.setFormantBase(static_cast<float>(detuned/sr));
     shifter.reset();
@@ -70,6 +70,19 @@ int main() {
             return 1;
         }
     }
+    // Spectral small-interval shifts may be systematically underestimated.
+    // Capture measured response, NOT a magic multiplier in shipping DSP.
+    // Positive gains and negative notes need singer material validation.
+    for(const int ms:std::array<int,2>{{18,40}})
+        for(const double shift:std::array<double,4>{{-0.30,-0.45,-0.60,-0.75}}) {
+            const auto measured=runProbe(ms,shift);
+            std::cout<<"gain_study_window_ms="<<ms
+                     <<" request_semitones="<<shift
+                     <<" output_hz="<<measured.outputHz
+                     <<" target_cents_error="<<measured.centsError
+                     <<" voiced="<<measured.healthy<<"\\n";
+            if(!measured.healthy) return 1;
+        }
     // Deliberately no "winner" or accuracy threshold for the 18-30ms
     // exploratory windows; choose only after auditory voice/formant tests.
     std::cout<<"PASS: stable window-size exploration (not sound certification)\\n";
