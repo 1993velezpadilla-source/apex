@@ -217,6 +217,21 @@ namespace apex::automation
     public:
         AutomationLaneStore() = default;
 
+        // A DSP callback can pin exactly one published lane-map generation
+        // and use it for all plugin parameters within that callback.
+        // Keeping the opaque LaneMap behind this public alias avoids leaking
+        // mutable map access or allowing a real-time caller to mutate lanes.
+        using RtLaneSnapshot = std::shared_ptr<const LaneMap>;
+
+        static std::shared_ptr<AutomationLane> findLaneInSnapshotRT (
+            const RtLaneSnapshot& snapshot, ParameterID id) noexcept
+        {
+            if (snapshot == nullptr || id == kInvalidParameterID)
+                return nullptr;
+            const auto it = snapshot->find(id);
+            return it == snapshot->end() ? nullptr : it->second;
+        }
+
         // Returns a shared_ptr so the audio thread can safely hold the lane
         // alive even if the message thread calls removeLane() concurrently.
         std::shared_ptr<AutomationLane> findLane (ParameterID id) const noexcept
@@ -241,11 +256,7 @@ namespace apex::automation
          *  message thread removes it concurrently. */
         std::shared_ptr<AutomationLane> findLaneRT (ParameterID id) const noexcept
         {
-            auto snap = getLaneSnapshotRT();
-            if (snap == nullptr)
-                return nullptr;
-            auto it = snap->find (id);
-            return it == snap->end() ? nullptr : it->second;
+            return findLaneInSnapshotRT(getLaneSnapshotRT(), id);
         }
 
         /** Bumped on every structural publish; RT consumers re-resolve
