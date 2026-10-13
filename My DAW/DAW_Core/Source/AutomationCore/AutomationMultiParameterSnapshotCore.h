@@ -114,6 +114,104 @@ struct AutomationMultiParameterSnapshotCore
         return true;
     }
 
+    // Persist A/B memories separately from the project's currently playing
+    // envelopes. Metadata is exact (track+plugin instance+parameter). No
+    // generated VST3 processor IDs or pointers are serialized here.
+    static juce::ValueTree serializeSnapshot(const Snapshot& snapshot)
+    {
+        juce::ValueTree root("AutomationMultiSnapshot");
+        root.setProperty("version", 1, nullptr);
+        if (!snapshot.isValid() || snapshot.lanes.size() > maxParameters)
+            return root;
+
+        for (const auto& lane : snapshot.lanes)
+        {
+            if (lane.target.trackId.isEmpty()
+                || !supported(lane.target.parameterId)
+                || !validPointsForParameter(lane.target.parameterId, lane.points))
+                return juce::ValueTree("AutomationMultiSnapshot");
+
+            juce::ValueTree t("Target");
+            t.setProperty("trackId", lane.target.trackId, nullptr);
+            t.setProperty("parameterId", lane.target.parameterId, nullptr);
+            for (const auto& point : lane.points)
+            {
+                juce::ValueTree p("Point");
+                p.setProperty("timeSamples", (juce::int64)point.timeSamples, nullptr);
+                p.setProperty("value", point.value, nullptr);
+                p.setProperty("curveToNextName",
+                    automationCurveTypeToString(point.curveToNext), nullptr);
+                p.setProperty("tensionToNext", point.tensionToNext, nullptr);
+                t.addChild(p, -1, nullptr);
+            }
+            root.addChild(t, -1, nullptr);
+        }
+        return root;
+    }
+
+    // Invalid/malicious old project snapshots never partially load. All
+    // validation is completed into a detached temporary object first.
+    static bool deserializeSnapshot(const juce::ValueTree& root, Snapshot& output)
+    {
+        output.lanes.clear();
+        if (!root.hasType("AutomationMultiSnapshot")
+            || (int)root.getProperty("version", 0) != 1
+            || root.getNumChildren() <= 0
+            || root.getNumChildren() > (int)maxParameters)
+            return false;
+
+        Snapshot staged;
+        staged.lanes.reserve((size_t)root.getNumChildren());
+        for (int i = 0; i < root.getNumChildren(); ++i)
+        {
+            const auto targetTree = root.getChild(i);
+            if (!targetTree.hasType("Target")
+                || targetTree.getNumChildren() <= 0
+                || targetTree.getNumChildren() > (int)maxKnotsPerLane)
+                return false;
+
+            LaneCapture entry;
+            entry.target.trackId = targetTree.getProperty("trackId", {}).toString();
+            entry.target.parameterId = targetTree.getProperty("parameterId", {}).toString();
+            if (entry.target.trackId.isEmpty()
+                || !supported(entry.target.parameterId))
+                return false;
+
+            for (const auto& existing : staged.lanes)
+                if (existing.target == entry.target)
+                    return false;
+
+            entry.points.reserve((size_t)targetTree.getNumChildren());
+            for (int p = 0; p < targetTree.getNumChildren(); ++p)
+            {
+                const auto child = targetTree.getChild(p);
+                if (!child.hasType("Point")
+                    || !child.hasProperty("timeSamples")
+                    || !child.hasProperty("value")
+                    || !child.hasProperty("curveToNextName")
+                    || !child.hasProperty("tensionToNext"))
+                    return false;
+
+                const auto curve = child.getProperty("curveToNextName").toString();
+                if (curve.isEmpty())
+                    return false;
+
+                AutomationPoint point;
+                point.timeSamples = (int64_t)(juce::int64)child.getProperty("timeSamples");
+                point.value = (float)child.getProperty("value");
+                point.curveToNext = automationCurveTypeFromString(curve);
+                point.tensionToNext = (float)child.getProperty("tensionToNext");
+                entry.points.push_back(point);
+            }
+            if (!validPointsForParameter(entry.target.parameterId, entry.points))
+                return false;
+            staged.lanes.push_back(std::move(entry));
+        }
+
+        output = std::move(staged);
+        return true;
+    }
+
     static bool capture(const AutomationManagerCore& manager,
                         const std::vector<Target>& targets,
                         Snapshot& result)
