@@ -131,7 +131,7 @@ int main() {
         for(int i=0;i<frames;++i) {
             const double t=i/kRate;
             float v=0.0f;
-            if(t>=0.25 && t<0.75 || t>=1.05 && t<1.55) {
+            if((t>=0.25 && t<0.75) || (t>=1.05 && t<1.55)) {
                 const double hz=t<0.75?432.5:447.5;
                 phase+=2.0*kPi*hz/kRate;
                 v=synth(phase);
