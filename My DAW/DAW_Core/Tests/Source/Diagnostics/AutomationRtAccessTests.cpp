@@ -21,6 +21,7 @@
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
+#include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -4723,3 +4724,125 @@ public:
     }
 };
 static AutomationV2ClipClipboardSafetyTests automationV2ClipClipboardSafetyTests;
+
+
+class AutomationV2GroupedCurveTests final : public juce::UnitTest
+{
+public:
+    AutomationV2GroupedCurveTests()
+        : juce::UnitTest("automation.v2-grouped-curve-atomic.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationGroupedCurveCore;
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        AutomationManagerCore manager;
+        auto& a = manager.getOrCreateLane("singer-a", AutomationLaneCore::trackVolumeParameterId);
+        a.addPoint(AutomationPoint{0, 0.25f, AutomationCurveType::Hold, 0.0f});
+        a.addPoint(AutomationPoint{48000, 1.20f, AutomationCurveType::Smooth, 0.4f});
+        auto& b = manager.getOrCreateLane("singer-b", AutomationLaneCore::trackVolumeParameterId);
+        b.addPoint(AutomationPoint{0, 0.50f, AutomationCurveType::Hold, 0.0f});
+        auto& unrelated = manager.getOrCreateLane("drumbus", AutomationLaneCore::trackPanParameterId);
+        unrelated.addPoint(AutomationPoint{0, -0.75f, AutomationCurveType::Hold, 0.0f});
+        manager.publishSnapshot();
+
+        const std::vector<AutomationPoint> desired{
+            {0, 0.10f, AutomationCurveType::Hold, 0.0f},
+            {24000, 0.80f, AutomationCurveType::Smooth, -0.6f},
+            {48000, 1.40f, AutomationCurveType::Linear, 0.0f}
+        };
+
+        beginTest("Prepare exact selection without edits or phantom lanes");
+        AutomationGroupedCurveCore::Batch batch;
+        expect(AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, desired, batch));
+        expectEquals((int)batch.lanes.size(), 2);
+        expectEquals((int)manager.findLane("singer-b", AutomationLaneCore::trackVolumeParameterId)->points.size(), 1);
+        expect(manager.findLane("missing", AutomationLaneCore::trackVolumeParameterId) == nullptr);
+
+        beginTest("Apply exactly two selected lanes, one published revision");
+        const auto ver0 = manager.getSnapshotVersion();
+        expect(AutomationGroupedCurveCore::apply(manager, batch, true));
+        const auto ver1 = manager.getSnapshotVersion();
+        expectEquals((juce::int64)ver1, (juce::int64)ver0 + 1);
+        for (const auto& track : {juce::String("singer-a"), juce::String("singer-b")})
+        {
+            const auto* lane = manager.findLane(track, AutomationLaneCore::trackVolumeParameterId);
+            expect(lane != nullptr);
+            if (lane != nullptr && lane->points.size() == 3)
+            {
+                expectWithinAbsoluteError(lane->points[2].value, 1.40f, 0.00001f);
+                expect(lane->points[0].curveToNext == AutomationCurveType::Hold);
+                expect(lane->points[1].curveToNext == AutomationCurveType::Smooth);
+                expectWithinAbsoluteError(lane->points[1].tensionToNext, -0.6f, 0.00001f);
+            }
+        }
+        auto* drum = manager.findLane("drumbus", AutomationLaneCore::trackPanParameterId);
+        expect(drum != nullptr);
+        if (drum != nullptr)
+            expectWithinAbsoluteError(drum->points[0].value, -0.75f, 0.00001f);
+
+        beginTest("Undo only selected lane snapshots, without overwriting unrelated edits");
+        manager.addPoint("drum", AutomationLaneCore::trackVolumeParameterId, 0, 0.75f);
+        expect(AutomationGroupedCurveCore::apply(manager, batch, false));
+        const auto* formerA = manager.findLane("singer-a", AutomationLaneCore::trackVolumeParameterId);
+        const auto* formerB = manager.findLane("singer-b", AutomationLaneCore::trackVolumeParameterId);
+        expect(formerA != nullptr && formerB != nullptr);
+        if (formerA != nullptr && formerB != nullptr)
+        {
+            expectEquals((int)formerA->points.size(), 2);
+            expectEquals((int)formerB->points.size(), 1);
+            expectWithinAbsoluteError(formerA->points[1].value, 1.20f, 0.00001f);
+            expectWithinAbsoluteError(formerB->points[0].value, 0.50f, 0.00001f);
+        }
+        expect(manager.findLane("drum", AutomationLaneCore::trackVolumeParameterId) != nullptr);
+
+        beginTest("Rollback guarantee: disabled/missing/double targets fail with zero changes");
+        const auto beforeFailed = manager.getState().toXmlString();
+        AutomationGroupedCurveCore::Batch invalid;
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "not-present"}, desired, invalid));
+        expect(!invalid.isValid());
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-a"}, desired, invalid));
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, "plugin.1.something", {"singer-a", "singer-b"}, desired, invalid));
+        auto badBatch = batch;
+        badBatch.lanes.back().trackId = "not-present";
+        expect(!AutomationGroupedCurveCore::apply(manager, badBatch, true));
+        expectEquals(manager.getState().toXmlString(), beforeFailed);
+
+        beginTest("Reject NaN and unordered curves before touching any track");
+        auto malformed = desired;
+        malformed[1].value = std::numeric_limits<float>::quiet_NaN();
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, malformed, invalid));
+        malformed = desired;
+        malformed[1].timeSamples = -4;
+        expect(!AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, malformed, invalid));
+        expectEquals(manager.getState().toXmlString(), beforeFailed);
+
+        beginTest("Group edit survives real manager project serialization");
+        expect(AutomationGroupedCurveCore::apply(manager, batch, true));
+        AutomationManagerCore reopened;
+        reopened.restoreState(manager.getState());
+        const auto* loaded = reopened.findLane("singer-b", AutomationLaneCore::trackVolumeParameterId);
+        expect(loaded != nullptr);
+        if (loaded != nullptr && loaded->points.size() == 3)
+        {
+            expectWithinAbsoluteError(loaded->points[2].value, 1.40f, 0.00001f);
+            expect(loaded->points[1].curveToNext == AutomationCurveType::Smooth);
+        }
+    }
+};
+static AutomationV2GroupedCurveTests automationV2GroupedCurveTests;
