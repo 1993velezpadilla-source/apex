@@ -825,11 +825,11 @@ private:
         for (int i = 0; i < 4096; ++i)
         {
             difference = std::max (difference, std::abs (
-                outLeft[static_cast<std::size_t> (i)]
-                    - (i == 1024 ? 0.75f : 0.0f)));
+                static_cast<double> (outLeft[static_cast<std::size_t> (i)])
+                    - (i == 1024 ? 0.75 : 0.0)));
             difference = std::max (difference, std::abs (
-                outRight[static_cast<std::size_t> (i)]
-                    - (i == 1024 ? -0.5f : 0.0f)));
+                static_cast<double> (outRight[static_cast<std::size_t> (i)])
+                    - (i == 1024 ? -0.5 : 0.0)));
         }
         expect (difference < 1.0e-5,
                 "neutral engine must preserve source exactly on host timeline");
