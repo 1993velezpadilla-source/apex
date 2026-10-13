@@ -5192,8 +5192,24 @@ public:
             {"singer-a", "singer-b"}, desired, refreshed));
         expect(refreshed.isValid());
 
+        beginTest("Empty automation clip placeholder must not block or erase grouped edits");
+        DAW::AutomationClipRegionCore emptyPlaceholder;
+        emptyPlaceholder.trackId = "singer-b";
+        emptyPlaceholder.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        emptyPlaceholder.startSample = 0;
+        emptyPlaceholder.lengthSamples = 48000;
+        manager.addClipRegion(emptyPlaceholder);
+        expect(!manager.hasClipRegionsForParameter(
+            "singer-b", AutomationLaneCore::trackVolumeParameterId));
+
         beginTest("Group edit survives real manager project serialization");
         expect(AutomationGroupedCurveCore::apply(manager, refreshed, true));
+        const auto* editedWithPlaceholder = manager.findLane(
+            "singer-b", AutomationLaneCore::trackVolumeParameterId);
+        expect(editedWithPlaceholder != nullptr);
+        if (editedWithPlaceholder != nullptr)
+            expectEquals((int)editedWithPlaceholder->points.size(), 3);
+        expect(manager.deleteClipRegion(emptyPlaceholder.regionId));
         AutomationManagerCore reopened;
         reopened.restoreState(manager.getState());
         const auto* loaded = reopened.findLane("singer-b", AutomationLaneCore::trackVolumeParameterId);
