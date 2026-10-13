@@ -5635,6 +5635,7 @@ void ArrangementViewCore::setAutomationManager(DAW::AutomationManagerCore* autom
     if (m_automationManager)
     {
         m_automationHelper = std::make_unique<DAW::AutomationUIHelper>(*m_automationManager);
+        restoreSelectedSnapshots(); // reopen already-loaded project memories
 
         // Start update timer for curve invalidation (33ms = ~30 FPS)
         m_automationUpdateTimer = std::make_unique<AutomationUpdateTimer>(*this);
@@ -5792,6 +5793,84 @@ bool ArrangementViewCore::applyGroupedCurveFromSelectedClips(
 }
 
 
+bool ArrangementViewCore::persistSelectedSnapshots()
+{
+    if (m_automationManager == nullptr)
+        return false;
+
+    using Core = DAW::AutomationMultiParameterSnapshotCore;
+    juce::ValueTree memories("AutomationAdvancedMemories");
+    const auto save = [&](const Core::Snapshot& snapshot, const char* slot)
+    {
+        if (!snapshot.isValid())
+            return true;
+
+        auto state = Core::serializeSnapshot(snapshot);
+        if ((int)state.getProperty("version", 0) != 1
+            || state.getNumChildren() != (int)snapshot.lanes.size())
+            return false;
+        state.setProperty("slot", slot, nullptr);
+        memories.addChild(state, -1, nullptr);
+        return true;
+    };
+
+    // One malformed A/B state must not invalidate a valid state already
+    // attached to the project. Stage both before replacing the subtree.
+    if (!save(m_selectedSnapshotA, "A")
+        || !save(m_selectedSnapshotB, "B"))
+        return false;
+
+    m_automationManager->setAdvancedMemories(
+        memories.getNumChildren() == 0 ? juce::ValueTree{} : memories);
+    return true;
+}
+
+void ArrangementViewCore::restoreSelectedSnapshots()
+{
+    m_selectedSnapshotA = {};
+    m_selectedSnapshotB = {};
+    if (m_automationManager == nullptr)
+        return;
+
+    const auto memories = m_automationManager->getAdvancedMemories();
+    if (!memories.isValid())
+        return;
+
+    using Core = DAW::AutomationMultiParameterSnapshotCore;
+    bool hadA = false, hadB = false;
+    for (int i = 0; i < memories.getNumChildren(); ++i)
+    {
+        const auto state = memories.getChild(i);
+        const auto slot = state.getProperty("slot", "").toString();
+        const bool isA = slot == "A";
+        if ((!isA && slot != "B") || (isA ? hadA : hadB))
+        {
+            m_selectedSnapshotA = {};
+            m_selectedSnapshotB = {};
+            return;
+        }
+
+        Core::Snapshot loaded;
+        if (!Core::deserializeSnapshot(state, loaded))
+        {
+            m_selectedSnapshotA = {};
+            m_selectedSnapshotB = {};
+            return;
+        }
+
+        if (isA)
+        {
+            hadA = true;
+            m_selectedSnapshotA = std::move(loaded);
+        }
+        else
+        {
+            hadB = true;
+            m_selectedSnapshotB = std::move(loaded);
+        }
+    }
+}
+
 bool ArrangementViewCore::applySelectedSnapshotAction(
     const DAW::TrackID& sourceTrack, const juce::String& parameterId,
     DAW::AutomationLaneComponent::SelectedSnapshotAction action)
@@ -5804,6 +5883,10 @@ bool ArrangementViewCore::applySelectedSnapshotAction(
         || (parameterId != DAW::AutomationLaneCore::trackVolumeParameterId
             && parameterId != DAW::AutomationLaneCore::trackPanParameterId))
         return false;
+
+    // Rehydrate from the authoritative manager on each action, including
+    // projects whose state was loaded after the editor was constructed.
+    restoreSelectedSnapshots();
 
     // Treat selected arrangement CLIPS as explicit track authority; a
     // visible track alone never authorizes a snapshot/macro mass edit.
@@ -5855,7 +5938,7 @@ bool ArrangementViewCore::applySelectedSnapshotAction(
             m_selectedSnapshotA = std::move(captured);
         else
             m_selectedSnapshotB = std::move(captured);
-        return true;
+        return persistSelectedSnapshots();
     }
 
     if (action != Action::MorphHalf
