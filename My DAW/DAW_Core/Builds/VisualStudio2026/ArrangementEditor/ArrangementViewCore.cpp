@@ -5632,6 +5632,7 @@ void ArrangementViewCore::setAutomationManager(DAW::AutomationManagerCore* autom
     ++m_groupedAutomationManagerEpoch;
     m_selectedSnapshotA = {};
     m_selectedSnapshotB = {}; // never replay A/B from an old project/manager
+    m_vst3MacroTargets.clear(); // never reuse VST3 targets across sessions
     m_automationManager = automationManager;
     m_automationContainers.clear();
 
@@ -5696,6 +5697,13 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
         {
             if (auto* owner = safeOwner.getComponent())
                 return owner->applyVst3MacroFromLastTouched(source, parameter, points);
+            return false;
+        });
+    container->setVst3MacroTargetCallback(
+        [safeOwner](DAW::AutomationLaneComponent::Vst3MacroTargetAction action) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyVst3MacroTargetAction(action);
             return false;
         });
     container->setSelectedSnapshotCallback(
@@ -5859,6 +5867,42 @@ bool ArrangementViewCore::applyNativeMacroFromSelectedClips(
 }
 
 
+bool ArrangementViewCore::applyVst3MacroTargetAction(
+    DAW::AutomationLaneComponent::Vst3MacroTargetAction action)
+{
+    using Guard = DAW::AutomationMacroVst3TargetCore;
+    if (action == DAW::AutomationLaneComponent::Vst3MacroTargetAction::Clear)
+    {
+        m_vst3MacroTargets.clear();
+        return true;
+    }
+
+    if (m_automationManager == nullptr || m_engineTrackManager == nullptr)
+        return false;
+
+    const auto touch = DAW::LastTouchedPluginParameterCore::getInstance().get();
+    if (!touch.isValid() || touch.pluginInstanceId.isEmpty())
+        return false;
+    auto* track = m_engineTrackManager->getTrack(touch.trackId);
+    auto* chain = track != nullptr ? track->getPluginChain() : nullptr;
+    auto* slot = chain != nullptr ? chain->getSlot(touch.pluginSlotIndex) : nullptr;
+    if (slot == nullptr || slot->getPluginInstanceId() != touch.pluginInstanceId)
+        return false;
+    auto* processor = slot->getProcessor();
+    auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+    if (vst3 == nullptr
+        || vst3->getPluginDescription().pluginFormatName != "VST3")
+        return false;
+
+    DAW::AutomationMacroMappingCore::Binding binding;
+    if (!Guard::verify(touch, track->getID(), touch.pluginSlotIndex,
+                       slot->getPluginInstanceId(), processor->getParameters(),
+                       *m_automationManager, binding))
+        return false;
+    return m_vst3MacroTargets.add(touch);
+}
+
+
 bool ArrangementViewCore::applyVst3MacroFromLastTouched(
     const DAW::TrackID& sourceTrack, const juce::String& sourceParameter,
     const std::vector<DAW::AutomationPoint>& sourcePoints)
@@ -5880,92 +5924,122 @@ bool ArrangementViewCore::applyVst3MacroFromLastTouched(
         || m_automationManager->hasClipRegionsForParameter(sourceTrack, sourceParameter))
         return false;
 
-    // The latest actually touched parameter is the ONLY target authority.
-    // Recheck exact track, slot, unique instance ID and live parameter metadata:
-    // a different instance of the same named VST3 must never be modified.
-    const auto touched = DAW::LastTouchedPluginParameterCore::getInstance().get();
-    if (!touched.isValid() || touched.pluginInstanceId.isEmpty())
-        return false;
-    auto* hostTrack = m_engineTrackManager->getTrack(touched.trackId);
-    auto* chain = hostTrack != nullptr ? hostTrack->getPluginChain() : nullptr;
-    auto* slot = chain != nullptr ? chain->getSlot(touched.pluginSlotIndex) : nullptr;
-    if (slot == nullptr || slot->getPluginInstanceId() != touched.pluginInstanceId)
-        return false;
-    auto* processor = slot->getProcessor();
-    auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
-    if (vst3 == nullptr || vst3->getPluginDescription().pluginFormatName != "VST3")
+    // The user explicitly fills the target bank by touching a parameter and
+    // invoking Add. With an empty bank, retain the original single-target
+    // last-touched behavior. Never infer targets from display names.
+    std::vector<DAW::LastTouchedPluginParameter> targets;
+    if (m_vst3MacroTargets.empty())
+        targets.push_back(DAW::LastTouchedPluginParameterCore::getInstance().get());
+    else
+        targets = m_vst3MacroTargets.targets();
+
+    if (targets.empty() || targets.size() > M::maxBindings)
         return false;
 
-    M::Binding binding;
-    if (!Guard::verify(touched, hostTrack->getID(), touched.pluginSlotIndex,
-                       slot->getPluginInstanceId(), processor->getParameters(),
-                       *m_automationManager, binding))
-        return false;
+    // BEFORE any mutation, verify ALL live destinations: UUID, slot, track,
+    // VST3 format, automatable continuous parameter, enabled core lane.
+    // A stale member invalidates the entire edit, not a partial subset.
+    std::vector<M::Binding> bindings;
+    bindings.reserve(targets.size());
+    for (const auto& touched : targets)
+    {
+        if (!touched.isValid() || touched.pluginInstanceId.isEmpty())
+            return false;
+        auto* hostTrack = m_engineTrackManager->getTrack(touched.trackId);
+        auto* chain = hostTrack != nullptr ? hostTrack->getPluginChain() : nullptr;
+        auto* slot = chain != nullptr ? chain->getSlot(touched.pluginSlotIndex) : nullptr;
+        if (slot == nullptr || slot->getPluginInstanceId() != touched.pluginInstanceId)
+            return false;
+        auto* processor = slot->getProcessor();
+        auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+        if (vst3 == nullptr || vst3->getPluginDescription().pluginFormatName != "VST3")
+            return false;
 
-    // Convert the chosen native lane into a normalized control envelope.
-    // The VST3 binding remains [0,1] and preserves time, curve, tension.
+        M::Binding binding;
+        if (!Guard::verify(touched, hostTrack->getID(), touched.pluginSlotIndex,
+                           slot->getPluginInstanceId(), processor->getParameters(),
+                           *m_automationManager, binding))
+            return false;
+        bindings.push_back(std::move(binding));
+    }
+
     std::vector<DAW::AutomationPoint> normalized = sourcePoints;
     for (auto& point : normalized)
         point.value = sourceParameter == volume
             ? point.value * 0.5f : (point.value + 1.0f) * 0.5f;
 
     M::Plan plan;
-    if (!M::compile(*m_automationManager, normalized, {binding}, plan))
+    if (!M::compile(*m_automationManager, normalized, bindings, plan)
+        || plan.changes.size() != targets.size())
         return false;
 
     const double sr = m_engineSampleRate, bpm = m_tempoBpm;
-    if (!std::isfinite(sr) || !std::isfinite(bpm)
-        || sr <= 0.0 || bpm <= 0.0)
+    if (!std::isfinite(sr) || !std::isfinite(bpm) || sr <= 0.0 || bpm <= 0.0)
         return false;
 
     juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
     auto* expectedManager = m_automationManager;
     const auto epoch = m_groupedAutomationManagerEpoch;
-    auto replay = [safeOwner, expectedManager, epoch, touched, plan, sr, bpm](
+    auto replay = [safeOwner, expectedManager, epoch, targets, plan](
         bool useAfter)
     {
         auto* view = safeOwner.getComponent();
         if (view == nullptr || view->m_automationManager != expectedManager
             || view->m_groupedAutomationManagerEpoch != epoch
             || view->m_automationHelper == nullptr
-            || view->m_engineTrackManager == nullptr)
+            || view->m_engineTrackManager == nullptr
+            || targets.size() != plan.changes.size())
             return;
 
-        // Undo must also fail closed if the producer replaced/unloaded
-        // the VST3 since this action was registered.
-        auto* track = view->m_engineTrackManager->getTrack(touched.trackId);
-        auto* chainNow = track != nullptr ? track->getPluginChain() : nullptr;
-        auto* slotNow = chainNow != nullptr
-            ? chainNow->getSlot(touched.pluginSlotIndex) : nullptr;
-        if (slotNow == nullptr
-            || slotNow->getPluginInstanceId() != touched.pluginInstanceId)
-            return;
-        auto* liveProcessor = slotNow->getProcessor();
-        auto* liveVst3 = dynamic_cast<juce::AudioPluginInstance*>(liveProcessor);
-        if (liveVst3 == nullptr
-            || liveVst3->getPluginDescription().pluginFormatName != "VST3")
+        // The transport might have changed tempo/sample rate after editing:
+        // always mirror PPQ using the current transport configuration.
+        const double liveSr = view->m_engineSampleRate;
+        const double liveBpm = view->m_tempoBpm;
+        if (!std::isfinite(liveSr) || !std::isfinite(liveBpm)
+            || liveSr <= 0.0 || liveBpm <= 0.0)
             return;
 
-        M::Binding reverified;
-        if (!Guard::verify(touched, track->getID(), touched.pluginSlotIndex,
-                           slotNow->getPluginInstanceId(),
-                           liveProcessor->getParameters(), *expectedManager,
-                           reverified)
-            || plan.changes.size() != 1
-            || !(reverified.target == plan.changes.front().target)
-            || !M::apply(*expectedManager, plan, useAfter))
+        // Undo/Redo preflights EVERY destination again BEFORE changing even
+        // one lane. Never trust the earlier parameter pointer/approval.
+        for (size_t i = 0; i < targets.size(); ++i)
+        {
+            const auto& touched = targets[i];
+            auto* hostTrack = view->m_engineTrackManager->getTrack(touched.trackId);
+            auto* chain = hostTrack != nullptr ? hostTrack->getPluginChain() : nullptr;
+            auto* slot = chain != nullptr ? chain->getSlot(touched.pluginSlotIndex) : nullptr;
+            if (slot == nullptr || slot->getPluginInstanceId() != touched.pluginInstanceId)
+                return;
+            auto* processor = slot->getProcessor();
+            auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+            if (vst3 == nullptr
+                || vst3->getPluginDescription().pluginFormatName != "VST3")
+                return;
+
+            M::Binding checked;
+            if (!Guard::verify(touched, hostTrack->getID(),
+                               touched.pluginSlotIndex, slot->getPluginInstanceId(),
+                               processor->getParameters(), *expectedManager, checked)
+                || !(checked.target == plan.changes[i].target))
+                return;
+        }
+
+        // Single legacy DSP snapshot publication for the entire target bank.
+        // The APEX PPQ lane mirrors below still publish one-by-one and need a
+        // separate multi-lane atomic PPQ gate before declaring V2 complete.
+        if (!M::apply(*expectedManager, plan, useAfter))
             return;
 
-        // Bridge key is the exact key used by PluginInstanceCore's RT
-        // bindings. No synchronous AudioProcessor parameter set on GUI
-        // thread, no display-name routing, and no DSP callback allocation.
-        DAW::AutomationLaneComponent::syncHostVerifiedVst3LaneToApex(
-            *view->m_automationHelper, touched.trackId,
-            reverified.target.parameterId, sr, bpm);
-        if (auto it = view->m_automationContainers.find(touched.trackId);
-            it != view->m_automationContainers.end() && it->second != nullptr)
-            it->second->invalidateAllCurvePaths();
-        view->repaintAutomationLane(touched.trackId, reverified.target.parameterId);
+        for (const auto& change : plan.changes)
+        {
+            DAW::AutomationLaneComponent::syncHostVerifiedVst3LaneToApex(
+                *view->m_automationHelper, change.target.trackId,
+                change.target.parameterId, liveSr, liveBpm);
+
+            if (auto it = view->m_automationContainers.find(change.target.trackId);
+                it != view->m_automationContainers.end() && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+            view->repaintAutomationLane(change.target.trackId, change.target.parameterId);
+        }
     };
 
     struct Vst3MacroUndo final : DAW::AutomationAction
@@ -5976,7 +6050,7 @@ bool ArrangementViewCore::applyVst3MacroFromLastTouched(
         void undo() override { replay(false); }
         juce::String getDescription() const override
         {
-            return "Macro: Last-Touched Continuous VST3 Parameter";
+            return "Macro: Selected Continuous VST3 Parameters";
         }
         std::function<void(bool)> replay;
     };
