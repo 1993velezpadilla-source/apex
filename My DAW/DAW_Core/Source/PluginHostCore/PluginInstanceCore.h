@@ -9,6 +9,7 @@
 #include "../AutomationCore/LastTouchedPluginParameterCore.h"
 #include "../UICore/CursorThemeCore.h"
 #include "../AutomationCore/AutomationSnapshotCore.h"
+#include "../AutomationCore/AutomationVst3BridgeAuthorityCore.h"
 #include "../AutomationCore/AutomationSmootherCore.h"
 #include "../Automation/AutomationParameterRegistryCore.h"
 #include "HostedPluginIsolationCore.h"
@@ -1612,7 +1613,13 @@ public:
                 }
             }
         }
-        if (binding.bridgePid != apex::automation::kInvalidParameterID)
+        // The PPQ bridge is a MIRROR of this exact core parameter.
+        // Never replay stale PPQ points after its source was bypassed,
+        // emptied or removed (including after project reopen). No locks,
+        // allocations or direct plugin writes on the RT path.
+        if (binding.bridgePid != apex::automation::kInvalidParameterID
+            && AutomationVst3BridgeAuthorityCore::allowsPlayback(
+                automationSnap, trackId, binding.coreParamId))
         {
             if (auto bridgeLane = laneStore.findLaneRT (binding.bridgePid))
             {
