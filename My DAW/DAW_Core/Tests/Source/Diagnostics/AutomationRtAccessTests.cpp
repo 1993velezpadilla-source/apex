@@ -22,6 +22,7 @@
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
+#include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -5170,3 +5171,164 @@ public:
     }
 };
 static AutomationV2GroupedCurveTests automationV2GroupedCurveTests;
+
+class AutomationV2MultiParameterSnapshotTests final : public juce::UnitTest
+{
+public:
+    AutomationV2MultiParameterSnapshotTests()
+        : juce::UnitTest("automation.v2-multiparam-exact-instance-morph.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationMultiParameterSnapshotCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using Snap = AutomationMultiParameterSnapshotCore;
+
+        const juce::String vol = AutomationLaneCore::trackVolumeParameterId;
+        const juce::String pan = AutomationLaneCore::trackPanParameterId;
+        const juce::String plug = "plugin.2.inst-a001.freq";
+        const juce::String otherPlug = "plugin.2.inst-b002.freq";
+        const std::vector<Snap::Target> targets = {
+            {"V1", vol}, {"V2", pan}, {"V1", plug}};
+
+        beginTest("Require explicit target identity, including plugin instance ID");
+        expect(Snap::supported(vol));
+        expect(Snap::supported(pan));
+        expect(Snap::supported(plug));
+        expect(!Snap::supported("plugin.2.freq"));
+        expect(!Snap::supported("plugin.x.inst-a001.freq"));
+        expect(!Snap::supported("plugin.2.inst-a001."));
+        expect(!Snap::supported("instrument.volume"));
+        expect(!Snap::supported("plugin.2.inst-a001"));
+        AutomationManagerCore manager;
+        auto& a = manager.getOrCreateLane("V1", vol);
+        a.addPoint(AutomationPoint{0, 0.2f, AutomationCurveType::Smooth, -0.5f});
+        a.addPoint(AutomationPoint{48000, 1.8f, AutomationCurveType::Hold, 0.3f});
+        auto& b = manager.getOrCreateLane("V2", pan);
+        b.addPoint(AutomationPoint{0, -0.8f, AutomationCurveType::Linear, 0.0f});
+        b.addPoint(AutomationPoint{48000, 0.8f, AutomationCurveType::Smooth, 0.5f});
+        auto& c = manager.getOrCreateLane("V1", plug);
+        c.addPoint(AutomationPoint{0, 0.1f, AutomationCurveType::Smooth, 0.0f});
+        c.addPoint(AutomationPoint{48000, 0.5f, AutomationCurveType::Linear, 0.0f});
+        manager.getOrCreateLane("V1", otherPlug).addPoint(
+            AutomationPoint{0, 0.75f, AutomationCurveType::Hold, 0.0f});
+        manager.publishSnapshot();
+
+        Snap::Snapshot left;
+        expect(Snap::capture(manager, targets, left));
+        expectEquals((int)left.lanes.size(), 3);
+        const auto initialState = manager.getState();
+
+        beginTest("Capture B with changed volume, PAN and exact plugin instance");
+        auto& secondVolume = manager.getOrCreateLane("V1", vol);
+        secondVolume.points = {
+            AutomationPoint{0, 1.8f, AutomationCurveType::Hold, -0.1f},
+            AutomationPoint{48000, 0.2f, AutomationCurveType::Linear, 0.0f}
+        };
+        secondVolume.sortAndResolveDuplicates();
+        auto& secondPan = manager.getOrCreateLane("V2", pan);
+        secondPan.points = {
+            AutomationPoint{0, 0.8f, AutomationCurveType::Hold, 0.0f},
+            AutomationPoint{48000, -0.8f, AutomationCurveType::Linear, -0.3f}
+        };
+        secondPan.sortAndResolveDuplicates();
+        auto& secondPlugin = manager.getOrCreateLane("V1", plug);
+        secondPlugin.points = {
+            AutomationPoint{0, 0.9f, AutomationCurveType::Hold, -0.4f},
+            AutomationPoint{48000, 0.7f, AutomationCurveType::Smooth, 0.4f}
+        };
+        secondPlugin.sortAndResolveDuplicates();
+        manager.publishSnapshot();
+
+        Snap::Snapshot right;
+        expect(Snap::capture(manager, targets, right));
+        manager.restoreState(initialState);
+        Snap::Plan half;
+        expect(Snap::planMorph(manager, left, right, 0.5f, half));
+        expectEquals((int)half.changes.size(), 3);
+
+        beginTest("Apply one transactional three-parameter morph");
+        const auto beforeVersion = manager.getSnapshotVersion();
+        expect(Snap::apply(manager, half, true));
+        expectEquals((juce::int64)manager.getSnapshotVersion(),
+                     (juce::int64)beforeVersion + 1);
+        const auto* v = manager.findLane("V1", vol);
+        const auto* p = manager.findLane("V2", pan);
+        const auto* plugA = manager.findLane("V1", plug);
+        const auto* plugB = manager.findLane("V1", otherPlug);
+        expect(v != nullptr && p != nullptr && plugA != nullptr && plugB != nullptr);
+        if (v != nullptr && p != nullptr && plugA != nullptr && plugB != nullptr)
+        {
+            expectWithinAbsoluteError(v->getValueAtSample(0, -1.0f), 1.0f, 0.0001f);
+            expectWithinAbsoluteError(p->getValueAtSample(0, -1.0f), 0.0f, 0.0001f);
+            expectWithinAbsoluteError(plugA->getValueAtSample(0, -1.0f), 0.5f, 0.0001f);
+            expectWithinAbsoluteError(plugB->getValueAtSample(0, -1.0f), 0.75f, 0.0001f);
+        }
+
+        beginTest("Undo exact three parameters, unrelated plugin never affected");
+        expect(Snap::apply(manager, half, false));
+        const auto* orig = manager.findLane("V1", vol);
+        expect(orig != nullptr);
+        if (orig != nullptr && orig->points.size() == 2)
+        {
+            expectWithinAbsoluteError(orig->points[1].value, 1.8f, 0.0001f);
+            expect(orig->points[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(orig->points[0].tensionToNext, -0.5f, 0.0001f);
+        }
+
+        beginTest("B source must match every exact track+plugin instance");
+        auto mismatched = right;
+        mismatched.lanes[2].target.parameterId = otherPlug;
+        Snap::Plan rejected = half;
+        expect(!Snap::planMorph(manager, left, mismatched, 0.5f, rejected));
+        expect(!rejected.isValid());
+        expect(!Snap::planMorph(manager, left, right,
+                               std::numeric_limits<float>::quiet_NaN(), rejected));
+        expect(!rejected.isValid());
+
+        beginTest("Conflicting user edit blocks entire morph/Undo");
+        auto& changed = manager.getOrCreateLane("V2", pan);
+        changed.addPoint(24000, 0.25f);
+        manager.publishSnapshot();
+        const auto stateBeforeConflict = manager.getState().toXmlString();
+        expect(!Snap::apply(manager, half, true));
+        expectEquals(manager.getState().toXmlString(), stateBeforeConflict);
+
+        beginTest("Clip-owned parameter cannot join a multiparameter plan");
+        manager.restoreState(initialState);
+        DAW::AutomationClipRegionCore ownership;
+        ownership.trackId = "V2";
+        ownership.parameterId = pan;
+        ownership.startSample = 0;
+        ownership.lengthSamples = 48000;
+        ownership.localPoints = {AutomationPoint{0, 0.1f}};
+        manager.addClipRegion(ownership);
+        Snap::Snapshot protectedSnap;
+        expect(!Snap::capture(manager, targets, protectedSnap));
+        expect(!protectedSnap.isValid());
+        expect(!Snap::planMorph(manager, left, right, 0.5f, rejected));
+        expect(!rejected.isValid());
+
+        beginTest("Endpoint B preserves native shape and values through project serialization");
+        manager.restoreState(initialState);
+        Snap::Plan endpoint;
+        expect(Snap::planMorph(manager, left, right, 1.0f, endpoint));
+        expect(Snap::apply(manager, endpoint, true));
+        AutomationManagerCore reopened;
+        reopened.restoreState(manager.getState());
+        const auto* finalPan = reopened.findLane("V2", pan);
+        const auto* finalPlug = reopened.findLane("V1", plug);
+        expect(finalPan != nullptr && finalPlug != nullptr);
+        if (finalPan != nullptr && finalPlug != nullptr)
+        {
+            expectWithinAbsoluteError(finalPan->points[1].value, -0.8f, 0.0001f);
+            expect(finalPan->points[0].curveToNext == AutomationCurveType::Hold);
+            expectWithinAbsoluteError(finalPlug->points[0].value, 0.9f, 0.0001f);
+            expect(finalPlug->points[1].curveToNext == AutomationCurveType::Smooth);
+        }
+    }
+};
+static AutomationV2MultiParameterSnapshotTests automationV2MultiParameterSnapshotTests;
