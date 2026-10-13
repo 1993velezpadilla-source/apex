@@ -4,6 +4,7 @@
 #include "AutomationCurveMorphCore.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <vector>
 
 namespace DAW {
@@ -255,9 +256,16 @@ struct AutomationMultiParameterSnapshotCore
         return true;
     }
 
+    // For VST3 interpolation an external host must certify each EXACT
+    // track+slot+instance+parameter as continuous (stepCount == 0). Unknown
+    // plug-in parameters are deliberately rejected, rather than assuming
+    // they can be interpolated as floats (many are enums, toggles or steps).
+    // Native volume and PAN need no host callback.
+    using ContinuousPluginGuard = std::function<bool(const Target&)>;
     static bool planMorph(const AutomationManagerCore& manager,
                           const Snapshot& left, const Snapshot& right,
-                          float amount, Plan& result)
+                          float amount, Plan& result,
+                          const ContinuousPluginGuard& isContinuousPlugin = {})
     {
         result.changes.clear();
         if (!left.isValid() || !right.isValid()
@@ -271,6 +279,8 @@ struct AutomationMultiParameterSnapshotCore
         for (const auto& a : left.lanes)
         {
             if (a.target.trackId.isEmpty() || !supported(a.target.parameterId)
+                || (a.target.parameterId.startsWith("plugin.")
+                    && (!isContinuousPlugin || !isContinuousPlugin(a.target)))
                 || !validPointsForParameter(a.target.parameterId, a.points)
                 || manager.hasClipRegionsForParameter(a.target.trackId, a.target.parameterId))
                 return false;
