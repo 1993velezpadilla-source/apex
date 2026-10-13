@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AutomationLaneCore.h"
+#include "AutomationAdvancedMemoryValidationCore.h"
 #include "AutomationSnapshotPublisherCore.h"
 #include "AutomationClipRegionCore.h"
 #include "AutomationClipClipboardCore.h"
@@ -726,33 +727,11 @@ public:
             return;
         }
 
-        if (!memories.hasType("AutomationAdvancedMemories")
-            || memories.getNumChildren() > 2)
-            return; // malformed external project data must not be accepted
-
-        bool seenA = false, seenB = false;
-        for (int i = 0; i < memories.getNumChildren(); ++i)
-        {
-            const auto child = memories.getChild(i);
-            const auto slot = child.getProperty("slot", "").toString();
-            if (!child.hasType("AutomationMultiSnapshot")
-                || (int)child.getProperty("version", 0) != 1
-                || (slot != "A" && slot != "B")
-                || (slot == "A" ? seenA : seenB)
-                || child.getNumChildren() == 0
-                || child.getNumChildren() > 64)
-                return;
-
-            if (slot == "A") seenA = true; else seenB = true;
-
-            for (int t = 0; t < child.getNumChildren(); ++t)
-            {
-                const auto target = child.getChild(t);
-                if (!target.hasType("Target") || target.getNumChildren() == 0
-                    || target.getNumChildren() > 2048)
-                    return;
-            }
-        }
+        // Reject corrupt snapshots before storing, not only when the UI
+        // eventually tries to deserialize them. A malformed project cannot
+        // silently poison a later save or undo history.
+        if (!AutomationAdvancedMemoryValidationCore::validMemories(memories))
+            return;
 
         advancedMemories_ = memories.createCopy();
     }
