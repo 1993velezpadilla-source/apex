@@ -1,5 +1,6 @@
 #pragma once
 #include "AutomationManagerCore.h"
+#include "AutomationLaneStateValidationCore.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -130,10 +131,10 @@ struct AutomationGroupedCurveCore
             if (!isSupportedParameter(entry.parameterId)
                 || entry.trackId.isEmpty()
                 || !entry.before.isValid() || !entry.after.isValid()
-                || !entry.before.hasType("AutomationLane")
-                || !entry.after.hasType("AutomationLane")
-                || entry.before.getProperty("parameterId").toString() != entry.parameterId
-                || entry.after.getProperty("parameterId").toString() != entry.parameterId
+                || !AutomationLaneStateValidationCore::valid(
+                    entry.before, entry.parameterId, maxPoints)
+                || !AutomationLaneStateValidationCore::valid(
+                    entry.after, entry.parameterId, maxPoints)
                 || manager.findLane(entry.trackId, entry.parameterId) == nullptr
                 || !manager.findLane(entry.trackId, entry.parameterId)->isEnabled())
                 return false;
