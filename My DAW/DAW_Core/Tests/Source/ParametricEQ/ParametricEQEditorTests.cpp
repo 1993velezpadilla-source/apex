@@ -66,6 +66,7 @@ public:
     {
         testResponsiveLayoutMatrix();
         testPrismOffscreenRenderAndSnapshots();
+        testDoubleClickCreatesNativeBandAndWheelEditsQ();
         testNodeDragUpdatesParametersThroughRealHierarchy();
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
@@ -247,6 +248,47 @@ private:
                 }
             }
         }
+    }
+
+    void testDoubleClickCreatesNativeBandAndWheelEditsQ()
+    {
+        beginTest ("immersive graph double-click creates band and wheel edits Q");
+        auto holder = std::make_unique<Processor>();
+        auto& processor = *holder;
+        processor.prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (1280, 720);
+        const auto graph = editor->getGraphBoundsForTesting();
+        const auto point = juce::Point<float> (
+            static_cast<float> (graph.getWidth()) * 0.39f,
+            static_cast<float> (graph.getHeight()) * 0.43f);
+        const auto band = 0;
+        auto* enabled = processor.getParametricEQParameter (
+            parameterIndex (band, BandParameterOffset::Enabled));
+        expect (! enabled->getBool(), "new processor begins with no active band");
+        editor->injectGraphDoubleClickForTesting (point);
+        expect (enabled->getBool(), "double-click creates a real hosted band");
+        expectEquals (editor->getSelectedBandForTesting(), band);
+        expect (graph.contains (editor->getInspectorBoundsForTesting()),
+                "creation opens native floating inspector within canvas");
+        const auto frequency = processor.getParametricEQParameter (
+            parameterIndex (band, BandParameterOffset::Frequency))
+                ->getUnitsValue();
+        const auto expectedFrequency = 20.0 * std::pow (
+            1200.0, 0.39);
+        expectWithinAbsoluteError (
+            static_cast<double> (frequency), expectedFrequency,
+            expectedFrequency * 0.025, "created band's direct Hz location");
+
+        auto* q = processor.getParametricEQParameter (
+            parameterIndex (band, BandParameterOffset::Q));
+        const float oldQ = q->getValue();
+        const auto centre = editor->getNodeBoundsForTesting (band).getCentre();
+        editor->injectGraphWheelForTesting (centre.toFloat(), 0.75f);
+        expect (q->getValue() > oldQ,
+                "hovering band wheel increases canonical hosted Q");
+        expect (std::isfinite (q->getUnitsValue()),
+                "wheel editing keeps Q finite");
     }
 
     void testNodeDragUpdatesParametersThroughRealHierarchy()
