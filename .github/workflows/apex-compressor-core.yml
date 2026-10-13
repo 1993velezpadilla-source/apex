@@ -1,0 +1,58 @@
+name: APEX Native Compressor DSP Prototype
+on:
+  push:
+    paths:
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - ".github/workflows/apex-compressor-core.yml"
+  pull_request:
+    paths:
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - ".github/workflows/apex-compressor-core.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-core:
+    name: "Portable C++17 opto DSP / sanitizers"
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile with warnings and ASAN/UBSAN
+        working-directory: My DAW/DAW_Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ --version
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            Tests/Standalone/ApexOptoLevelerCoreTests.cpp -o /tmp/apex-opto-test
+      - name: Run DSP unit gates
+        working-directory: My DAW/DAW_Core
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          /tmp/apex-opto-test
+  windows-portable:
+    name: "Windows native C++17 opto core"
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run with MSVC
+        shell: pwsh
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vc = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (!$vc) { throw 'Visual Studio installation not found' }
+          $vcvars = Join-Path $vc 'VC\Auxiliary\Build\vcvars64.bat'
+          $test = 'Tests\Standalone\ApexOptoLevelerCoreTests.cpp'
+          $bat = "@echo off`r`ncall `"$vcvars`" >nul`r`ncl /nologo /std:c++17 /EHsc /W4 /WX /O2 `"$test`" /Fe:apex-opto-test.exe`r`nif errorlevel 1 exit /b 1`r`napex-opto-test.exe`r`nexit /b %errorlevel%`r`n"
+          Set-Content -Path run-opto.bat -Value $bat -Encoding ascii
+          & cmd /c run-opto.bat
+          if ($LASTEXITCODE -ne 0) { throw "MSVC native opto tests FAILED: $LASTEXITCODE" }

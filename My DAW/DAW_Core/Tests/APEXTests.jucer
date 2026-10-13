@@ -237,6 +237,14 @@
         <FILE id="DYN_CPP1" name="ApexDynamicsCoreTests.cpp" compile="1" resource="0"
               file="Source/Dynamics/ApexDynamicsCoreTests.cpp"/>
       </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000069}" name="Compressor">
+        <FILE id="OPTO_H01" name="ApexOptoLevelerCore.h" compile="0" resource="0"
+              file="../Source/CompressorCore/ApexOptoLevelerCore.h"/>
+        <FILE id="OPTO_H02" name="ApexOptoLevelerProcessor.h" compile="0" resource="0"
+              file="../Source/CompressorCore/ApexOptoLevelerProcessor.h"/>
+        <FILE id="OPTO_CPP01" name="OptoNativeHostTests.cpp" compile="1" resource="0"
+              file="Source/Compressor/OptoNativeHostTests.cpp"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000046}" name="C4">
         <FILE id="C4_H1" name="C4TestUtils.h" compile="0" resource="0"
               file="Source/C4/C4TestUtils.h"/>

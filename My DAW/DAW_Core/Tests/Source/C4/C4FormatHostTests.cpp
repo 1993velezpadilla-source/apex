@@ -200,8 +200,12 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expect (found.size() == 3,
-                    "findAllTypesForFile must expose G10, C4 and Parametric EQ");
+            expect (found.size() == 4,
+                    "findAllTypesForFile must expose G10, C4, Parametric EQ and Opto 2A");
+            bool sawOpto = false;
+            for (const auto* d : found)
+                sawOpto |= d->fileOrIdentifier == "APEX::Opto2A";
+            expect (sawOpto, "native discovery must include experimental Opto 2A");
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.
