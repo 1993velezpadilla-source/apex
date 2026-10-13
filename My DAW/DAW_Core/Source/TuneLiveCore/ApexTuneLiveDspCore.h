@@ -13,6 +13,7 @@ namespace APEX { namespace TuneLive {
 
 struct DspSettings {
     float correction=0.85f;        // 0..1
+    float referenceHz=440.0f;      // 430..450 (calibrated A4)
     float retune=0.20f;            // 0 = 1 ms, 1 = 150 ms
     int key=0;                     // C=0, C#=1... B=11
     int scale=0;                   // Chromatic=0, Major=1, NaturalMinor=2
@@ -46,6 +47,7 @@ public:
         delay_.assign(static_cast<std::size_t>(channels_)*delayLength_,0.0f);
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
+        envelopeL_=envelopeR_=0.0f;
     }
     void reset() {
         tracker_.reset();
@@ -55,6 +57,7 @@ public:
         std::fill(wet_.begin(),wet_.end(),0.0f);
         delayPosition_=0;
         target_=smooth_=frequency_=wetSlew_=voicedSlew_=voicedTarget_=0.0f;
+        envelopeL_=envelopeR_=0.0f;
     }
     int latencySamples() const noexcept {return latency_;}
     double sampleRate() const noexcept {return rate_;}
@@ -74,6 +77,7 @@ public:
         const VoiceSettings vs{std::clamp(user.key,0,11),
                                std::clamp(user.scale,0,2),
                                user.correction,
+                               user.referenceHz,
                                std::clamp(user.humanize,0.0f,1.0f),
                                std::clamp(user.flexTune,0.0f,1.0f),
                                std::clamp(user.stability,0.0f,1.0f)*0.35f,
@@ -93,7 +97,17 @@ public:
             float* processed[2]={wet_.data(),channels==2 ? wet_.data()+block_ : nullptr};
             stretch_.process(source,count,processed,count);
             for(int i=0;i<count;++i) {
-                if(tracker_.push(source[0][i])) {
+                // For stereo vocals, track the predominant microphone
+                // channel instead of always assuming a left-side signal.
+                // Never average opposite-polarity stereo signals to silence.
+                const float left=source[0][i];
+                const float right=channels==2 ? source[1][i] : 0.0f;
+                const float envelopeAlpha=static_cast<float>(1.0/(rate_*0.010+1.0));
+                envelopeL_+=(std::abs(left)-envelopeL_)*envelopeAlpha;
+                envelopeR_+=(std::abs(right)-envelopeR_)*envelopeAlpha;
+                const float detectorInput=(channels==2 && envelopeR_>1.2f*envelopeL_)
+                                         ? right : left;
+                if(tracker_.push(detectorInput)) {
                     const auto tracked=tracker_.latest();
                     const auto decision=policy_.update(tracked,vs);
                     frequency_=decision.voiced?tracked.hz:0.0f;
@@ -125,6 +139,7 @@ private:
     std::vector<float> wet_,delay_;
     double rate_=48000.0;
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
+    float envelopeL_=0,envelopeR_=0;
     int block_=0,channels_=2,latency_=0,delayPosition_=0,delayLength_=1;
 };
 
