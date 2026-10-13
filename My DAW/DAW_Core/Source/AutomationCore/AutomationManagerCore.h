@@ -610,8 +610,7 @@ public:
     {
         if (const auto* region = findClipRegion(regionId))
         {
-            AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
-            return true;
+            return AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
         }
 
         return false;
