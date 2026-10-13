@@ -786,7 +786,7 @@ private:
         setUnits (processor, spectralBandParameterIndex (0), 1.0f);
         setUnits (processor, kSpectralDensityParameter, 0.9f);
         setUnits (processor, kSpectralTiltParameter, 0.0f);
-        juce::ValueTree oldSession (juce::Identifier (Processor::kStateTag));
+        juce::ValueTree oldSession { juce::Identifier { Processor::kStateTag } };
         oldSession.setProperty (Processor::kVersionProperty, 6, nullptr);
         juce::MemoryBlock oldBytes;
         {
