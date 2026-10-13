@@ -6095,6 +6095,39 @@ public:
             expect(store.getEffectiveLaneSnapshotRT() == originalMap);
         }
 
+        beginTest("Indirect findLaneRT readers must honor outer device pin");
+        const auto indirectBefore = store.getLaneSnapshotRT();
+        const auto oldGain = store.findLaneRT(a);
+        {
+            Store::ScopedRtPin device(store);
+            expect(store.findLaneRT(a) == oldGain);
+            std::vector<Store::BatchReplacement> indirectBatch;
+            indirectBatch.push_back({a, {{0.0, 0.35f}}});
+            indirectBatch.push_back({b, {{0.0, 0.45f}}});
+            expect(store.replacePointsBatch(std::move(indirectBatch)));
+            // This is the public API still called by other native DSP paths.
+            expect(store.findLaneRT(a) == oldGain);
+            expect(store.findLaneRT(b)
+                == Store::findLaneInSnapshotRT(indirectBefore, b));
+            {
+                Store::ScopedRtPin nestedChain(store);
+                expect(store.findLaneRT(a) == oldGain);
+            }
+            // A concurrently nested DIFFERENT project must resolve its own
+            // lane; a subsequent read of the first project stays pinned.
+            {
+                Store::ScopedRtPin unrelatedSession(distinctStore);
+                expect(distinctStore.findLaneRT(a)
+                    == Store::findLaneInSnapshotRT(distinctMap, a));
+                expect(store.findLaneRT(a) == oldGain);
+            }
+        }
+        expect(store.findLaneRT(a) != oldGain);
+        if (const auto current = store.findLaneRT(a))
+            expectWithinAbsoluteError(
+                current->getSnapshot()->front().normalizedValue,
+                0.35f, 0.00001f);
+
         beginTest("Native grouped batch supports 128 targets and ONE publish");
         Store native;
         constexpr apex::automation::ParameterID first = 910000;
