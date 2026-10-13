@@ -273,6 +273,20 @@ public:
             eval.evaluateBlock (4.0, true);
             expectWithinAbsoluteError (p->getNormalizedValue(), 0.75f, 1.0e-5f);
 
+            beginTest("Native evaluator inherits device-wide pinned PPQ map");
+            {
+                AutomationLaneStore::ScopedRtPin deviceCallback(lanes);
+                std::vector<AutomationLaneStore::BatchReplacement> updated;
+                updated.push_back({7, {{0.0, 0.10f}, {4.0, 0.10f}}});
+                expect(lanes.replacePointsBatch(std::move(updated)));
+                eval.evaluateBlock(4.0, true);
+                expectWithinAbsoluteError(p->getNormalizedValue(), 0.75f, 1.0e-5f,
+                    "native fader remains on same old PPQ generation as VST3");
+            }
+            eval.evaluateBlock(4.0, true);
+            expectWithinAbsoluteError(p->getNormalizedValue(), 0.10f, 1.0e-5f,
+                "next callback sees newly published macro values");
+
             // Steady-state evaluation must be allocation-free (this is the
             // exact call the audio engine makes every rolling block).
             {
