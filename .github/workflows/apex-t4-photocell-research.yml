@@ -7,6 +7,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+      - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
   pull_request:
     paths:
       - ".github/workflows/apex-t4-photocell-research.yml"
@@ -14,6 +15,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+      - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
   workflow_dispatch:
 permissions:
   contents: read
@@ -42,6 +44,18 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp" \
             -o /tmp/apex-t4-leveler-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-leveler-test
+      - name: Golden A/B input generator and identity-check smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "My DAW/DAW_Core/Scripts/opto_reference_capture.py" generate --output /tmp/apex-opto-capture
+          python3 "My DAW/DAW_Core/Scripts/opto_reference_capture.py" compare \
+            --manifest /tmp/apex-opto-capture/apex_opto2a_reference_manifest.json \
+            --uad /tmp/apex-opto-capture/apex_opto2a_reference_input_48k_pcm24.wav \
+            --apex /tmp/apex-opto-capture/apex_opto2a_reference_input_48k_pcm24.wav \
+            --csv /tmp/apex-opto-capture/self_difference.csv
+          python3 -c 'import csv; rows=list(csv.DictReader(open("/tmp/apex-opto-capture/self_difference.csv"))); assert len(rows)>12; assert all(abs(float(row["delta_level_db"]))<1e-8 for row in rows); assert all(float(row["residual_rms_dbfs"]) <= -200 for row in rows); print("Reference tool identity smoke GREEN")'
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
@@ -58,3 +72,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler compile failed" }
           ./apex-t4-leveler-test.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler gates failed" }
+
