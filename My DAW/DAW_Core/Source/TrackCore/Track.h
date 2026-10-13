@@ -221,6 +221,7 @@ public:
     const TrackMonitoringStateModel& getMonitoringState() const noexcept { return monitoringState_; }
     InputFxChain& getInputFxChain() noexcept { return inputFxChain_; }
     InputTrimCore& getInputTrim() noexcept { return inputTrim_; }
+    const InputTrimCore& getInputTrim() const noexcept { return inputTrim_; }
     InputMeterCore& getInputMeter() noexcept { return inputMeter_; }
     LiveRecordWaveformCore& getLiveRecordWaveform() noexcept { return liveRecordWaveform_; }
 

@@ -31,6 +31,7 @@
 #include "../RecordingCore/RecordingCallbackPolicyCore.h"
 #include "../PluginHostCore/PluginScannerCore.h"
 #include "../PluginHostCore/PluginChainCore.h"
+#include "../PichyCore/PichyPluginDiscoveryAdapter.h"
 #include "../PluginHostCore/HostedPluginIsolationCore.h"
 #include "../PluginHostCore/PluginPlayheadInfoCore.h"
 #include "../PluginHostCore/ClipRegionPluginCore.h"
@@ -197,6 +198,32 @@ public:
             if (chain)
                 (*snap)[trackId] = chain;
         audioEngine_.publishPluginChainsSnapshot(std::move(snap));
+    }
+
+    /**
+     * V1 Pichy foundation: capture real track and hosted parameter capability
+     * metadata (both APEX Native and third-party), read-only.
+     *
+     * This call DOES NOT launch AI, open a plugin UI, set a parameter, or
+     * create a missing plugin chain. Call on the JUCE message thread only.
+     * Caller owns the copied result; no borrowed Track/Plugin pointers.
+     */
+    apex::pichy::PichySnapshotStatus capturePichyCapabilitySnapshot(
+        apex::pichy::PichyCapabilitySnapshot& output)
+    {
+        output = {};
+        if (!trackManager_ || isProjectStateRestoreSuspended() ||
+            pluginScanner_.isScanning())
+            return apex::pichy::PichySnapshotStatus::NotReady;
+        const apex::pichy::PichyPluginDiscoveryAdapter::ChainResolver resolver =
+            [this](const TrackID& trackId) -> const PluginChainCore*
+            {
+                const auto it = pluginChains_.find(trackId);
+                return it != pluginChains_.end() ? it->second.get() : nullptr;
+            };
+        return apex::pichy::PichyPluginDiscoveryAdapter::capture(
+            *trackManager_, resolver, &pluginScanner_.getKnownPlugins(),
+            ++pichyCapabilityCaptureSequence_, output);
     }
 
     /** Get or create the plugin chain for a track ID. */
@@ -449,6 +476,7 @@ private:
     PluginPlayheadInfoCore pluginPlayheadInfoCore_;
     ClipRegionPluginCore clipRegionPluginCore_;
     std::map<TrackID, std::shared_ptr<PluginChainCore>> pluginChains_;
+    std::uint64_t pichyCapabilityCaptureSequence_ = 0; // message-thread only
     int pluginChainPublicationBatchDepth_ = 0;
     FaderRangeCore faderRangeCore_;
     TrackPeakMeterManagerCore trackPeakMeterManager_;
