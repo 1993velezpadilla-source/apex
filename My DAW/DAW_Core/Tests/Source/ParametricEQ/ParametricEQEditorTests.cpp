@@ -101,6 +101,27 @@ private:
             const auto topBar = editor->getTopBarBoundsForTesting();
             const auto graph = editor->getGraphBoundsForTesting();
             const auto inspector = editor->getInspectorBoundsForTesting();
+            const auto primary = editor->getPrimaryDialsForTesting();
+            for (const auto* dial : primary)
+            {
+                expect (dial != nullptr, "every primary EQ dial exists");
+                if (dial == nullptr)
+                    continue;
+                expect (dial->getWidth() >= 44,
+                        "primary parameter keeps a safe 44px touch target");
+                if (sizeCase.width >= 900)
+                {
+                    expect (dial->getSliderStyle()
+                            == juce::Slider::RotaryHorizontalVerticalDrag,
+                            "floating HUD uses real interactive APEX rotary dial");
+                    expect (dial->getHeight() >= 110,
+                            "floating dial stays legible and touch safe");
+                }
+                else
+                    expect (dial->getSliderStyle()
+                            == juce::Slider::LinearHorizontal,
+                            "phone/tablet sheet retains wide touch sliders");
+            }
 
             auto inBounds = [] (const juce::Rectangle<int>& child,
                                 const juce::Rectangle<int>& parent)
