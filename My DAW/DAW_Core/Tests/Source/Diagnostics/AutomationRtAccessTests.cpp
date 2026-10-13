@@ -5798,29 +5798,29 @@ public:
         DAW::AutomationSnapshot snapshot;
 
         beginTest("No authoritative core snapshot or lane cannot drive PPQ bridge");
-        expect(!Authority::allowsPlayback(nullptr, "vocal", target));
-        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+        expect(!Authority::allowsPlayback(nullptr));
+        expect(!Authority::allowsPlayback(snapshot.findLaneRT("vocal", target)));
 
         snapshot.lanes.push_back({"vocal", target, true,
             {DAW::AutomationPoint{0, 0.25f}}});
         beginTest("Enabled non-empty exact instance may mirror its PPQ lane");
-        expect(Authority::allowsPlayback(&snapshot, "vocal", target));
-        expect(!Authority::allowsPlayback(&snapshot, "vocal",
-            "plugin.0.uuid-B.cutoff"));
-        expect(!Authority::allowsPlayback(&snapshot, "other-track", target));
+        expect(Authority::allowsPlayback(snapshot.findLaneRT("vocal", target)));
+        expect(!Authority::allowsPlayback(snapshot.findLaneRT("vocal",
+            "plugin.0.uuid-B.cutoff")));
+        expect(!Authority::allowsPlayback(snapshot.findLaneRT("other-track", target)));
 
         beginTest("Bypass cannot leave a ghost PPQ automation value playing");
         snapshot.lanes.front().enabled = false;
-        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+        expect(!Authority::allowsPlayback(snapshot.findLaneRT("vocal", target)));
 
         beginTest("Empty envelope must not reactivate cached PPQ content");
         snapshot.lanes.front().enabled = true;
         snapshot.lanes.front().points.clear();
-        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+        expect(!Authority::allowsPlayback(snapshot.findLaneRT("vocal", target)));
 
         beginTest("Re-enable only with a real source knot");
         snapshot.lanes.front().points.push_back(DAW::AutomationPoint{0, 0.8f});
-        expect(Authority::allowsPlayback(&snapshot, "vocal", target));
+        expect(Authority::allowsPlayback(snapshot.findLaneRT("vocal", target)));
     }
 };
 static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTests;
