@@ -5771,6 +5771,105 @@ public:
 };
 static AutomationV2MacroMappingTests automationV2MacroMappingTests;
 
+class AutomationV2NativeMacroSelectionTests final : public juce::UnitTest
+{
+public:
+    AutomationV2NativeMacroSelectionTests()
+        : juce::UnitTest("automation.v2-native-macro-multitrack-volume-pan.v1",
+                          "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationMacroMappingCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using M = AutomationMacroMappingCore;
+
+        const juce::String volume = AutomationLaneCore::trackVolumeParameterId;
+        const juce::String pan = AutomationLaneCore::trackPanParameterId;
+        AutomationManagerCore manager;
+        for (const auto& track : { juce::String("lead"), juce::String("double") })
+        {
+            manager.getOrCreateLane(track, volume).addPoint(0, 0.7f);
+            manager.getOrCreateLane(track, pan).addPoint(0, -0.2f);
+        }
+        manager.getOrCreateLane("unrelated", pan).addPoint(0, 0.7f);
+        manager.publishSnapshot();
+
+        const std::vector<AutomationPoint> normalized{
+            {0, 0.0f, AutomationCurveType::Smooth, -0.5f},
+            {24000, 0.5f, AutomationCurveType::Hold, 0.7f},
+            {48000, 1.0f, AutomationCurveType::Linear, 0.0f}
+        };
+        const std::vector<M::Binding> group{
+            {{"lead", volume}, 0.0f, 2.0f},
+            {{"lead", pan}, -1.0f, 1.0f},
+            {{"double", volume}, 0.0f, 2.0f},
+            {{"double", pan}, -1.0f, 1.0f}
+        };
+
+        beginTest("Explicit two-track native volume+pan macros compile to four lanes");
+        M::Plan edit;
+        expect(M::compile(manager, normalized, group, edit));
+        expectEquals((int)edit.changes.size(), 4);
+        const auto original = manager.getState().toXmlString();
+        const auto oldVersion = manager.getSnapshotVersion();
+
+        beginTest("All four selected lanes commit together exactly once");
+        expect(M::apply(manager, edit, true));
+        expectEquals((juce::int64)manager.getSnapshotVersion(),
+                     (juce::int64)oldVersion + 1);
+        for (const auto& track : { juce::String("lead"), juce::String("double") })
+        {
+            const auto* v = manager.findLane(track, volume);
+            const auto* p = manager.findLane(track, pan);
+            expect(v != nullptr && p != nullptr);
+            if (v != nullptr && p != nullptr)
+            {
+                expectEquals((int)v->points.size(), 3);
+                expectEquals((int)p->points.size(), 3);
+                expectWithinAbsoluteError(v->points[1].value, 1.0f, 0.00001f);
+                expectWithinAbsoluteError(p->points[0].value, -1.0f, 0.00001f);
+                expectWithinAbsoluteError(p->points[2].value, 1.0f, 0.00001f);
+                expect(v->points[0].curveToNext == AutomationCurveType::Smooth);
+                expectWithinAbsoluteError(p->points[1].tensionToNext,
+                                          0.7f, 0.00001f);
+            }
+        }
+        const auto* outside = manager.findLane("unrelated", pan);
+        expect(outside != nullptr);
+        if (outside != nullptr)
+            expectWithinAbsoluteError(outside->points[0].value, 0.7f, 0.00001f);
+
+        beginTest("Global Undo returns exact four lanes and no unrelated edit");
+        expect(M::apply(manager, edit, false));
+        expectEquals(manager.getState().toXmlString(), original);
+
+        beginTest("Missing one selected native lane must abort entire macro");
+        auto invalidGroup = group;
+        invalidGroup[3].target.trackId = "missing";
+        M::Plan rejected;
+        expect(!M::compile(manager, normalized, invalidGroup, rejected));
+        expect(!rejected.isValid());
+
+        beginTest("A clip-owned PAN lane blocks all targets, not just its track");
+        DAW::AutomationClipRegionCore clipOwned;
+        clipOwned.trackId = "double";
+        clipOwned.parameterId = pan;
+        clipOwned.startSample = 0;
+        clipOwned.lengthSamples = 48000;
+        clipOwned.localPoints = {AutomationPoint{0, 0.3f}};
+        manager.addClipRegion(clipOwned);
+        const auto beforeReject = manager.getState().toXmlString();
+        expect(!M::compile(manager, normalized, group, rejected));
+        expect(!rejected.isValid());
+        expectEquals(manager.getState().toXmlString(), beforeReject);
+    }
+};
+static AutomationV2NativeMacroSelectionTests automationV2NativeMacroSelectionTests;
+
 class AutomationV2StateValidationTests final : public juce::UnitTest
 {
 public:
