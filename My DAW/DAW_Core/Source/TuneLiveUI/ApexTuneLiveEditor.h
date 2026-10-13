@@ -18,12 +18,12 @@ public:
         setResizeLimits(620, 480, 1300, 900);
         setSize(900, 575);
 
-        constexpr std::array<const char*,5> names{{
-            "CORRECTION", "RE-TUNE", "HUMANIZE", "STABILITY", "WET"
+        constexpr std::array<const char*,6> names{{
+            "CORRECTION", "RE-TUNE", "HUMANIZE", "FLEX TUNE", "STABILITY", "WET"
         }};
-        constexpr std::array<int,5> parameterIds{{
+        constexpr std::array<int,6> parameterIds{{
             Processor::kAmount, Processor::kSpeed, Processor::kHumanize,
-            Processor::kNoteStability, Processor::kMix
+            Processor::kFlexTune, Processor::kNoteStability, Processor::kMix
         }};
         for (std::size_t i=0; i<knobs_.size(); ++i) {
             auto& knob=knobs_[i];
@@ -167,7 +167,7 @@ public:
         pitchCaption_.setBounds(39,154,std::max(180,w-425),27);
 
         const int available=w-48;
-        const int cell=available/5;
+        const int cell=available/6;
         for(int i=0;i<5;++i) {
             const int x=25+i*cell;
             knobLabels_[static_cast<std::size_t>(i)].setBounds(x,250,cell-5,24);
@@ -200,6 +200,7 @@ private:
         setParameter(Processor::kAmount,profile.amount);
         setParameter(Processor::kSpeed,profile.retune);
         setParameter(Processor::kHumanize,profile.humanize);
+        setParameter(Processor::kFlexTune,profile.flexTune);
         setParameter(Processor::kNoteStability,profile.stability);
         setParameter(Processor::kMix,profile.mix);
         setParameter(Processor::kPreserveFormants,profile.preserveFormants?1.0f:0.0f);
@@ -208,9 +209,9 @@ private:
     }
 
     void timerCallback() override {
-        static constexpr std::array<int,5> ids{{
+        static constexpr std::array<int,6> ids{{
             Processor::kAmount, Processor::kSpeed, Processor::kHumanize,
-            Processor::kNoteStability, Processor::kMix
+            Processor::kFlexTune, Processor::kNoteStability, Processor::kMix
         }};
         for(std::size_t i=0;i<ids.size();++i)
             if(!knobs_[i].isMouseButtonDown())
@@ -243,8 +244,8 @@ private:
     }
 
     Processor& processor_;
-    std::array<juce::Slider,5> knobs_;
-    std::array<juce::Label,5> knobLabels_;
+    std::array<juce::Slider,6> knobs_;
+    std::array<juce::Label,6> knobLabels_;
     std::array<juce::TextButton,3> styles_;
     juce::ComboBox keys_,scales_;
     juce::ToggleButton formants_,bypass_;
