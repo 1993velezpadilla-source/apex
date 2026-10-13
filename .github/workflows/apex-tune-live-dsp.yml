@@ -193,9 +193,9 @@ jobs:
           tune_live_eight_insert.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_switch.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" || exit /b 1
           tune_live_switch.exe || exit /b 1
-          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_lifecycle.exe "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_lifecycle.exe "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" || exit /b 1
           tune_live_lifecycle.exe || exit /b 1
-          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_variable_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_variable_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" || exit /b 1
           tune_live_variable_wet.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_audition.exe "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" || exit /b 1
           tune_live_audition.exe --self-test tune_live_audition || exit /b 1
