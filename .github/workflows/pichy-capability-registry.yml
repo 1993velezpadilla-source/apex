@@ -18,17 +18,34 @@ permissions:
 
 jobs:
   portable-schema:
-    runs-on: ubuntu-latest
+    name: Pichy portable capability schema / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Compile Pichy capability registry (C++17)
+      - name: Linux C++17 bounded capability tests
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
             "My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp" \
             -o "${RUNNER_TEMP}/pichy_capability_registry"
-      - name: Run native, external plugin and identity safety cases
-        shell: bash
-        run: '"${RUNNER_TEMP}/pichy_capability_registry"'
+          "${RUNNER_TEMP}/pichy_capability_registry"
+      - name: Configure MSVC x64
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Windows MSVC /W4 /WX capability tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:pichy_capability_registry.exe "My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "Pichy C++17 compile failed" }
+          ./pichy_capability_registry.exe
+          if ($LASTEXITCODE -ne 0) { throw "Pichy capability test failed" }
