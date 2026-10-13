@@ -46,3 +46,26 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/apex-spectral-dsp-smoke
+
+  msvc-stft:
+    name: C++17 MSVC spectral DSP correctness
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and run native Windows x64 spectral smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC toolchain not found" }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "VC environment missing: $vcvars" }
+          $cpp = 'My DAW\DAW_Core\Tests\Source\ParametricEQ\SpectralStandaloneSmoke.cpp'
+          $compiler = "cl /nologo /std:c++17 /O2 /EHsc /W4 /WX /DWIN32_LEAN_AND_MEAN /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /Fe:apex-spectral-smoke.exe `"$cpp`""
+          $command = 'call "' + $vcvars + '" >nul && ' + $compiler + ' && apex-spectral-smoke.exe'
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
