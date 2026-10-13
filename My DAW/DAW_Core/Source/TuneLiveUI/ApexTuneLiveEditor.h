@@ -53,9 +53,9 @@ public:
                            juce::Colour::fromRGB(250,211,142));
             knob.setColour(juce::Slider::textBoxTextColourId,juce::Colours::white);
             knob.setColour(juce::Slider::textBoxOutlineColourId,
-                           juce::Colours::transparentBlack);
+                           Visual::cyan().withAlpha(0.23f));
             knob.setColour(juce::Slider::textBoxBackgroundColourId,
-                           juce::Colour::fromRGB(36,33,44));
+                           Visual::midnight());
             knob.setValue(parameter(parameterIds[i]).getValue(), juce::dontSendNotification);
             addAndMakeVisible(knob);
 
@@ -90,11 +90,11 @@ public:
         reference_.valueFromTextFunction=[](const juce::String& str){
             return juce::jlimit(0.0,1.0,(str.getDoubleValue()-430.0)/20.0);
         };
-        reference_.setColour(juce::Slider::trackColourId,juce::Colour::fromRGB(230,161,98));
+        reference_.setColour(juce::Slider::trackColourId,Visual::cyan());
         reference_.setColour(juce::Slider::thumbColourId,juce::Colour::fromRGB(255,223,161));
         reference_.setColour(juce::Slider::textBoxTextColourId,juce::Colours::white);
-        reference_.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour::fromRGB(36,33,44));
-        reference_.setColour(juce::Slider::textBoxOutlineColourId,juce::Colours::transparentBlack);
+        reference_.setColour(juce::Slider::textBoxBackgroundColourId,Visual::midnight());
+        reference_.setColour(juce::Slider::textBoxOutlineColourId,Visual::cyan().withAlpha(0.34f));
         reference_.setValue(parameter(Processor::kA4Reference).getValue(),juce::dontSendNotification);
         reference_.onDragStart=[this](){parameter(Processor::kA4Reference).beginChangeGesture();};
         reference_.onValueChange=[this](){
@@ -197,8 +197,8 @@ public:
                 if(x==610)wave.startNewSubPath(static_cast<float>(x),y);
                 else wave.lineTo(static_cast<float>(x),y);
             }
-            g.setColour((i%2?Visual::gold():Visual::cyan()).withAlpha(0.23f));
-            g.strokePath(wave,juce::PathStrokeType(0.8f));
+            g.setColour((i%2?Visual::gold():Visual::cyan()).withAlpha(0.32f));
+            g.strokePath(wave,juce::PathStrokeType(1.15f));
         }
         g.setColour(Visual::gold());
         g.setFont(juce::Font(juce::FontOptions(39.0f).withStyle("Bold")));
