@@ -6034,6 +6034,37 @@ public:
             expect(store.getEffectiveLaneSnapshotRT() == originalMap);
         }
 
+        beginTest("Native grouped batch supports 128 targets and ONE publish");
+        Store native;
+        constexpr apex::automation::ParameterID first = 910000;
+        std::vector<Store::BatchReplacement> nativeGroup;
+        nativeGroup.reserve(128);
+        for (int i = 0; i < 128; ++i)
+        {
+            const auto id = first + (apex::automation::ParameterID)i;
+            native.getOrCreateLane(id).replacePoints({{0.0, 0.2f}});
+            nativeGroup.push_back({id, {{0.0, (float)i / 128.0f}}});
+        }
+        const auto beforeNative = native.getLaneSnapshotRT();
+        const auto genNative = native.getChangeGeneration();
+        expect(native.replacePointsBatch(std::move(nativeGroup)));
+        expectEquals((juce::int64)native.getChangeGeneration(),
+                     (juce::int64)genNative + 1);
+        const auto afterNative = native.getLaneSnapshotRT();
+        expect(beforeNative != afterNative);
+        for (int i : {0, 63, 127})
+        {
+            const auto id = first + (apex::automation::ParameterID)i;
+            const auto oldLane = Store::findLaneInSnapshotRT(beforeNative, id);
+            const auto newLane = Store::findLaneInSnapshotRT(afterNative, id);
+            if (oldLane != nullptr && newLane != nullptr)
+            {
+                expectWithinAbsoluteError(oldLane->getSnapshot()->front().normalizedValue,
+                                          0.2f, 0.00001f);
+                expectWithinAbsoluteError(newLane->getSnapshot()->front().normalizedValue,
+                                          (float)i / 128.0f, 0.00001f);
+            }
+        }
 
     }
 };
