@@ -71,6 +71,11 @@ jobs:
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" -o tune_live_18ms_probe
           ./tune_live_18ms_probe
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_wet_vibrato.cpp" -o tune_live_vibrato_test
+          ./tune_live_vibrato_test
   msvc-windows:
     runs-on: windows-2022
     steps:
@@ -99,3 +104,5 @@ jobs:
           tune_live_vowel_study.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_18ms_probe.exe "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" || exit /b 1
           tune_live_18ms_probe.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_vibrato_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_vibrato.cpp" || exit /b 1
+          tune_live_vibrato_test.exe || exit /b 1
