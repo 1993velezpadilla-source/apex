@@ -3,11 +3,20 @@ on:
   pull_request:
     paths:
       - '.github/workflows/apex-tune-live-real-voice.yml'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
   push:
     branches: [feature/apex-tune-live-native-v1]
     paths:
       - '.github/workflows/apex-tune-live-real-voice.yml'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
   workflow_dispatch:
+
+# Large licensed test-audio fetch must not queue obsolete PR heads.
+concurrency:
+  group: real-vocadito-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
 
 # Research-only, no private singer takes, no automatic production promotion.
 permissions:
