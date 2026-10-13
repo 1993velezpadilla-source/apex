@@ -5804,16 +5804,11 @@ public:
             juce::NormalisableRange<float>{0.0f, 1.0f}, 0.5f);
         juce::AudioParameterBool enabled(
             juce::ParameterID{"enabled", 1}, "Enabled", false);
-        // Some VST3s expose a finite step count without setting their
-        // isDiscrete() flag. The host must still reject interpolation.
-        struct MisreportedQuantizedParameter final : juce::AudioParameterFloat
-        {
-            using juce::AudioParameterFloat::AudioParameterFloat;
-            bool isDiscrete() const override { return false; }
-        };
-        MisreportedQuantizedParameter quantized(
-            juce::ParameterID{"quantized", 1}, "Quantized",
-            juce::NormalisableRange<float>{0.0f, 1.0f, 0.25f}, 0.5f);
+        // JUCE's AudioParameterInt has a finite step count even when
+        // isDiscrete() is false. This is the exact real-world edge case:
+        // a host must not smoothly interpolate stepped VST3 targets.
+        juce::AudioParameterInt quantized(
+            juce::ParameterID{"quantized", 1}, "Quantized", 0, 4, 2);
         juce::Array<juce::AudioProcessorParameter*> params;
         params.add(&cutoff);
         params.add(&enabled);
@@ -5858,7 +5853,7 @@ public:
         expect(!Guard::verify(touched, "vocal", 1, "instance-A",
                               params, manager, checked));
 
-        beginTest("Quantized float cannot impersonate continuous VST3 range");
+        beginTest("Finite-step integer cannot impersonate continuous VST3 range");
         expect(!quantized.isDiscrete());
         expect(static_cast<const juce::AudioProcessorParameter&>(quantized).getNumSteps()
             != juce::AudioProcessorParameter::getDefaultNumParameterSteps());
