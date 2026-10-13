@@ -21,27 +21,56 @@ public:
         for(auto& channel:history_) channel.fill(0.0f);
         position_=0;
         phase_=0.5;
+        period_=std::clamp(rate_/220.0,16.0,static_cast<double>((kCapacity-8)/2));
+        targetPeriod_=period_;
+        span_=2.0*period_;
+        ratio_=targetRatio_=1.0;
+        wetMix_=targetWet_=0.0;
+        active_=false;
     }
     // Requires an independently estimated *source* F0. The current prototype
     // assumes stable voiced pitch and has no note-change smoothing.
     void setPeriodAndRatio(double sourceHz,double outputOverInput) noexcept {
         if(!std::isfinite(sourceHz) || sourceHz<55.0 || sourceHz>1200.0 ||
-           !std::isfinite(outputOverInput)) { active_=false; return; }
-        period_=std::clamp(rate_/sourceHz,16.0,static_cast<double>((kCapacity-8)/2));
-        // Two read heads are separated by one source pitch period, so
-        // a periodic waveform has coherent phases at grain wrap boundaries.
-        span_=2.0*period_;
-        ratio_=std::clamp(outputOverInput,0.85,1.15);
+           !std::isfinite(outputOverInput)) {
+            targetWet_=0.0;
+            targetRatio_=1.0;
+            return;
+        }
+        targetPeriod_=std::clamp(rate_/sourceHz,16.0,
+                                 static_cast<double>((kCapacity-8)/2));
+        targetRatio_=std::clamp(outputOverInput,0.85,1.15);
+        // Never jump the playback delay across source pitch changes.
+        // The first valid estimate starts at its detected period; subsequent
+        // estimates are smoothed sample by sample during process().
+        if(!active_) {
+            period_=targetPeriod_;
+            ratio_=targetRatio_;
+            span_=2.0*period_;
+            phase_=0.5;
+        }
+        targetWet_=1.0;
         active_=true;
     }
     // A buffer HISTORY bound, NOT a host-reported algorithmic latency.
     int requiredHistorySamples() const noexcept {
-        return static_cast<int>(std::ceil(span_))+3;
+        // Conservative bound covering the current and pending periods.
+        return static_cast<int>(std::ceil(2.0*std::max(period_,targetPeriod_)))+3;
     }
+    double smoothedRatio() const noexcept {return ratio_;}
+    double wetMix() const noexcept {return wetMix_;}
     void process(float* const* channelData,int channels,int n) noexcept {
         if(!channelData || channels!=channels_ || n<=0 ||
            !channelData[0] || (channels_==2 && !channelData[1])) return;
+        const double periodAlpha=1.0-std::exp(-1.0/(rate_*0.010));
+        const double ratioAlpha=1.0-std::exp(-1.0/(rate_*0.004));
+        const double wetAlpha=1.0-std::exp(-1.0/(rate_*0.008));
         for(int i=0;i<n;++i) {
+            period_+=(targetPeriod_-period_)*periodAlpha;
+            ratio_+=(targetRatio_-ratio_)*ratioAlpha;
+            wetMix_+=(targetWet_-wetMix_)*wetAlpha;
+            // Two heads stay exactly one source pitch period apart.
+            span_=2.0*period_;
             for(int c=0;c<channels_;++c) {
                 const float sample=channelData[c][i];
                 history_[static_cast<std::size_t>(c)][static_cast<std::size_t>(position_)] =
@@ -53,13 +82,12 @@ public:
             const double a=std::sin(3.14159265358979323846*phase1);
             const double weight=a*a;
             for(int c=0;c<channels_;++c) {
-                double sample;
-                if(!active_ || std::abs(ratio_-1.0)<1.0e-12) {
-                    sample=read(c,1.0+period_);
-                } else {
-                    sample=weight*read(c,1.0+span_*phase1)
-                         +(1.0-weight)*read(c,1.0+span_*phase2);
-                }
+                const double dry=read(c,1.0+period_);
+                const double corrected=weight*read(c,1.0+span_*phase1)
+                                      +(1.0-weight)*read(c,1.0+span_*phase2);
+                // Smoothly enter/leave pitch work on unvoiced segments.
+                // Dry is period-delayed and NOT a certified fixed PDC path.
+                const double sample=wetMix_*corrected+(1.0-wetMix_)*dry;
                 channelData[c][i]=std::isfinite(sample)
                     ?static_cast<float>(std::clamp(sample,-8.0,8.0)):0.0f;
             }
@@ -84,7 +112,8 @@ private:
                        +mix*history[static_cast<std::size_t>(next)];
     }
     std::array<std::array<float,kCapacity>,2> history_{};
-    double rate_=48000.0,period_=218.0,span_=436.0,ratio_=1.0,phase_=0.5;
+    double rate_=48000.0,period_=218.0,targetPeriod_=218.0,span_=436.0,
+           ratio_=1.0,targetRatio_=1.0,phase_=0.5,wetMix_=0.0,targetWet_=0.0;
     int channels_=1,position_=0;
     bool active_=false;
 };
