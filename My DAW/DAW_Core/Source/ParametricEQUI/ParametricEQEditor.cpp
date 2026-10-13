@@ -708,6 +708,20 @@ public:
             &sketchButton_, &grabButton_, &copyButton_, &pasteButton_,
             &matchButton_, &matchSaveButton_, &matchLoadButton_
         }};
+        // Seven controls fit exactly at 320px, but long captions become
+        // unreadable when JUCE shrinks the font. Shorten only the idle tool
+        // captions on compact widths; active EQ Match / Save state labels
+        // are preserved so resize cannot erase the current workflow.
+        const bool compact = width <= 430;
+        if (matchButton_.getButtonText() == "EQ MATCH"
+            || matchButton_.getButtonText() == "MATCH")
+            matchButton_.setButtonText (compact ? "MATCH" : "EQ MATCH");
+        if (matchSaveButton_.getButtonText() == "REF SAVE"
+            || matchSaveButton_.getButtonText() == "SAVE")
+            matchSaveButton_.setButtonText (compact ? "SAVE" : "REF SAVE");
+        if (matchLoadButton_.getButtonText() == "REF LOAD"
+            || matchLoadButton_.getButtonText() == "LOAD")
+            matchLoadButton_.setButtonText (compact ? "LOAD" : "REF LOAD");
         int x = padding;
         for (auto* action : actions)
         {
@@ -2541,7 +2555,10 @@ void ParametricEQEditor::applyLayout()
     const int graphWidth = graph_->getWidth();
     const int graphHeight = graph_->getHeight();
     const int cardWidth = std::min (std::max (340, graphWidth / 3), 414);
-    const int cardHeight = std::min (398, std::max (230, graphHeight - 94));
+    // At short floating plugin heights, a hard 230px minimum could
+    // push the card over the graph and into the bottom dock. Let the
+    // internal viewport scroll instead of letting the overlay escape.
+    const int cardHeight = std::min (398, std::max (1, graphHeight - 94));
     const auto node = graph_->nodeBounds (selectedBand_).getCentre();
 
     // Choose a nearby HUD position which obscures as few OTHER EQ nodes as
@@ -2549,15 +2566,16 @@ void ParametricEQEditor::applyLayout()
     // the inspector whenever a low-frequency band was selected. Comparing
     // six legal card positions is cheap, GUI-only, and allocation-free.
     const int maxX = std::max (12, graphWidth - cardWidth - 12);
-    const int maxY = std::max (64, graphHeight - cardHeight - 12);
+    const int maxY = std::max (0, graphHeight - cardHeight - 12);
+    const int minY = std::min (64, maxY);
     const std::array<int, 2> xCandidates {{
         std::clamp (node.x + 42, 12, maxX),
         std::clamp (node.x - cardWidth - 42, 12, maxX)
     }};
     const std::array<int, 3> yCandidates {{
-        std::clamp (node.y + 32, 64, maxY),
-        std::clamp (node.y - cardHeight - 32, 64, maxY),
-        std::clamp (node.y - cardHeight / 2, 64, maxY)
+        std::clamp (node.y + 32, minY, maxY),
+        std::clamp (node.y - cardHeight - 32, minY, maxY),
+        std::clamp (node.y - cardHeight / 2, minY, maxY)
     }};
     juce::Rectangle<int> best;
     int bestScore = std::numeric_limits<int>::max();
