@@ -105,6 +105,7 @@ struct LinearPhaseKernels
     std::array<double, kLinearPhaseKernelLength> lr {};
     std::array<double, kLinearPhaseKernelLength> rl {};
     std::array<double, kLinearPhaseKernelLength> rr {};
+    bool hasCrossfeed = false; // Worker-built; zero-cost bypass for L/R-only EQ
 
     bool isNeutral() const noexcept
     {
@@ -145,14 +146,17 @@ public:
             const auto frequency = rate * bin / kLinearPhaseFftSize;
             const auto matrix = ResponseCore::wetTransfer (settings, mode, rate,
                                                            frequency);
-            // The linear-phase design spectrum is the ZERO-PHASE magnitude of
-            // each 2x2 entry: real, non-negative, and conjugate-symmetric by
-            // construction. The linear phase is supplied by the symmetric
-            // tap arrangement, never by embedding the minimum-phase
-            // response's phase into the sampled spectrum.
+            // Zero-phase real-valued transfer approximation. Matrix
+            // off-diagonal entries carry SIGNED L/R crossfeed: e.g. Side
+            // boost generates NEGATIVE L->R transfer. Taking abs(lr/rl)
+            // without restoring sign inverts the meaning of Mid vs Side.
+            // The sign of the target's real component preserves polarity
+            // while the FIR's own centered symmetry supplies linear phase.
             const double magnitudeLl = std::abs (matrix.ll);
-            const double magnitudeLr = std::abs (matrix.lr);
-            const double magnitudeRl = std::abs (matrix.rl);
+            const double magnitudeLr = std::copysign (
+                std::abs (matrix.lr), matrix.lr.real());
+            const double magnitudeRl = std::copysign (
+                std::abs (matrix.rl), matrix.rl.real());
             const double magnitudeRr = std::abs (matrix.rr);
             // Time-domain centering by a frequency-domain phase rotation:
             // the impulse lands exactly at the odd-kernel centre
@@ -211,6 +215,18 @@ public:
                 destinationTaps[tap] = impulse[static_cast<std::size_t> (tap)]
                                      * window[static_cast<std::size_t> (tap)];
         }
+        // Do not double the FIR cost for the overwhelmingly common
+        // Stereo/Left/Right curves: those have exactly zero off-diagonal
+        // transfer and only require two active convolvers. This flag is
+        // built off-thread alongside the kernels, never scanned on audio.
+        destination.hasCrossfeed = false;
+        for (int tap = 0; tap < kLinearPhaseKernelLength; ++tap)
+            if (std::abs (destination.lr[static_cast<std::size_t> (tap)]) > 1.0e-12
+                || std::abs (destination.rl[static_cast<std::size_t> (tap)]) > 1.0e-12)
+            {
+                destination.hasCrossfeed = true;
+                break;
+            }
     }
 };
 
