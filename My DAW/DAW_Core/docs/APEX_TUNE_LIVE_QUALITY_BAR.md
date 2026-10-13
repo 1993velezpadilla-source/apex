@@ -74,6 +74,31 @@ real singing tests.
 - These extra tests remain requirements, **not successful outcomes**, until
   CI reports a green conclusion for the exact final PR head SHA.
 
+## Targeted DSP hardening — new unverified regression gates
+
+- APEX YIN now short-circuits its cumulative-mean difference scan after
+  the first valid completed sub-threshold minimum, rather than computing all
+  lag differences for every voiced 440 Hz block. `lastLagEvaluations()`
+  exposes the per-frame search length to a deterministic portable gate.
+  This should lower callback CPU especially at high vocal fundamentals;
+  real CPU measurements are still required.
+- For upper-register fundamentals (>=165 Hz), a 256-sample preliminary
+  detector can establish the first pitch around **21–28 ms**, before the
+  normal 512-sample long-history detector becomes available. Deep vocal/bass
+  analysis continues with the full window and is *not* claimed to improve.
+  This shortens the first F0 estimate only; the shifter, device and host
+  roundtrip latency **do not disappear**, and must be measured separately.
+- Wet DSP now sanitizes nonfinite audio samples and host parameter values
+  (NaN/Inf) at its realtime boundary to avoid poisoning sustained FFT state.
+  Denormal-sized inputs are silenced, pathological >8-float samples are
+  bounded without touching typical singing amplitudes. Sanitization is
+  deterministic and allocation-free in the callback.
+- Added synthetic regression gates for poisoned upstream plugin output,
+  YIN CPU work reduction, upper-register startup with guarded bass octave,
+  and unvoiced high-frequency sibilance retaining the original time-aligned
+  dry consonant. These are assertions only until the exact branch CI
+  completes, *not certified studio-quality audio*.
+
 ## Objective / subjective evidence policy
 
 - CI green for portable detector/note-selection is only a component gate.
