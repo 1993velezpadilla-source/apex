@@ -5851,6 +5851,67 @@ static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTes
  * Consumers pinning the old map must never see mixed old/new envelopes.
  * Invalid batches must reject before mutating even the first destination.
  */
+class AutomationV2NativeMixerGlobalPinTests final : public juce::UnitTest
+{
+public:
+    AutomationV2NativeMixerGlobalPinTests()
+        : juce::UnitTest("automation.v2-native-mixer-global-ppq-pin.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        DAW::FaderRangeCore taper;
+        constexpr ParameterID volume = 782001, pan = 782002,
+                              mute = 782003, solo = 782004;
+
+        // The four native DSP consumers must observe one bank-wide
+        // generation even when a control-thread macro publishes mid-block.
+        for (const auto id : {volume, pan, mute, solo})
+            lanes.getOrCreateLane(id).replacePoints({{0.0, 0.25f}});
+
+        const auto getVolume = [&] {
+            return getNativeTrackVolumeGainRT(volume, 0.5f, 1.0, true,
+                                              false, registry, lanes, modes, taper);
+        };
+        const auto getPan = [&] {
+            return getNativeTrackPanRT(pan, 0.0f, 1.0, true,
+                                       false, registry, lanes, modes);
+        };
+        const auto getMute = [&] {
+            return getNativeTrackMuteRT(mute, false, 1.0, true,
+                                        false, registry, lanes, modes);
+        };
+        const auto getSolo = [&] {
+            return getNativeTrackSoloRT(solo, false, 1.0, true,
+                                        false, registry, lanes, modes);
+        };
+
+        beginTest("All native DSP lanes remain pinned across global macro publish");
+        {
+            AutomationLaneStore::ScopedRtPin callback(lanes);
+            std::vector<AutomationLaneStore::BatchReplacement> batch;
+            for (const auto id : {volume, pan, mute, solo})
+                batch.push_back({id, {{0.0, 0.85f}}});
+            expect(lanes.replacePointsBatch(std::move(batch)));
+            expectWithinAbsoluteError(getVolume(), taper.normToGain(0.25f), 1e-5f);
+            expectWithinAbsoluteError(getPan(), -0.5f, 1e-5f);
+            expect(!getMute());
+            expect(!getSolo());
+        }
+
+        beginTest("Next block adopts all four new envelopes together");
+        expectWithinAbsoluteError(getVolume(), taper.normToGain(0.85f), 1e-5f);
+        expectWithinAbsoluteError(getPan(), 0.7f, 1e-5f);
+        expect(getMute());
+        expect(getSolo());
+    }
+};
+static AutomationV2NativeMixerGlobalPinTests automationV2NativeMixerGlobalPinTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
