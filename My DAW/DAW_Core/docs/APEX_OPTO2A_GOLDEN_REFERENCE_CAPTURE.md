@@ -64,21 +64,21 @@ The 1966 Teletronix schematic shows that T4 CdS is in an analogue **shunt attenu
 
 ## 5. Time-resolved recovery and gain-transfer comparison
 
-The separate original diagnostic \`Scripts/opto_reference_dynamics.py\` analyzes **dry**, licensed UAD, and APEX experimental renders in fixed-size, nonoverlapping windows, using each output's RMS relative to the SAME dry input. It computes dynamic transfer curves rather than inferring T4 behavior from a single loudness number. The golden recording fixture already provides the relevant segments (including a 12-second exposure and 16-second low-level recovery probe).
+The separate original diagnostic `Scripts/opto_reference_dynamics.py` analyzes **dry**, licensed UAD, and APEX experimental renders in fixed-size, nonoverlapping windows, using each output's RMS relative to the SAME dry input. It computes dynamic transfer curves rather than inferring T4 behavior from a single loudness number. The golden recording fixture already provides the relevant segments (including a 12-second exposure and 16-second low-level recovery probe).
 
 > Do not confuse output gain with GR. The tool records the **effective total gain through each signal chain**, not the real hardware's internal photoresistance or true VU GR. The recovery shape report subtracts each model's late-period output reference independently so that differences in constant output gain do not masquerade as differences in release shape.
 
 Run once the three captured exports exist (UAD proprietary DSP is NOT executed by the script):
 
-\`\`\`powershell
-python Scripts/opto_reference_dynamics.py analyse \
-    --manifest "$env:TEMP\apex-opto-golden\apex_opto2a_reference_manifest.json" \
-    --dry "$env:TEMP\apex-opto-golden\apex_opto2a_reference_input_48k_pcm24.wav" \
-    --uad "uad_gray_reference_48k_pcm24.wav" \
-    --apex "apex_opto_response_48k_pcm24.wav" \
+```powershell
+python Scripts/opto_reference_dynamics.py analyse `
+    --manifest "$env:TEMP\apex-opto-golden\apex_opto2a_reference_manifest.json" `
+    --dry "$env:TEMP\apex-opto-golden\apex_opto2a_reference_input_48k_pcm24.wav" `
+    --uad "uad_gray_reference_48k_pcm24.wav" `
+    --apex "apex_opto_response_48k_pcm24.wav" `
     --output "opto_measured_reports"
-\`\`\`
+```
 
-Outputs: \`opto_effective_gain_windows.csv\` (input/output levels and UAD vs APEX gain errors for each window) and \`opto_recovery_comparison.json\` (0.05/0.1/0.25/0.5/1/2/5/10/15-second recovery-shape differences). All PCM must be aligned to the same sample timeline BEFORE invoking the comparison; the script rejects mismatched frame counts. Audio waveforms are NOT uploaded to GitHub automatically. Test the diagnostic without any UAD installation via \`python Scripts/opto_reference_dynamics.py self-test\` (synthetic identity, constant-gain-offset and corrupt-length checks).
+Outputs: `opto_effective_gain_windows.csv` (input/output levels and UAD vs APEX gain errors for each window) and `opto_recovery_comparison.json` (0.05/0.1/0.25/0.5/1/2/5/10/15-second recovery-shape differences). All PCM must be aligned to the same sample timeline BEFORE invoking the comparison; the script rejects mismatched frame counts. Audio waveforms are NOT uploaded to GitHub automatically. Test the diagnostic without any UAD installation via `python Scripts/opto_reference_dynamics.py self-test` (synthetic identity, constant-gain-offset and corrupt-length checks).
 
 **Gate:** do not fit tube/T4/transformer constants or use "1:1" terminology without measured UAD/real-unit reference render and source provenance. The research circuit remains separate from the production APEX insert while validation is incomplete.
