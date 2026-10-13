@@ -5,6 +5,7 @@
 // 1:1 hardware match. Do not ship this as a production emulation.
 #include <JuceHeader.h>
 #include "ApexOptoLevelerCore.h"
+#include "ApexOptoVuBallisticsCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -116,13 +117,14 @@ public:
     {
         setRateAndBufferSizeDetails(sampleRate,blockSize);
         dsp_.prepare(sampleRate);
+        vu_.prepare(sampleRate);
         dsp_.setParameters(readParameters());
         meterReductionDb_.store(0.0f,std::memory_order_relaxed);
         outputRmsDbfs_.store(-120.0f,std::memory_order_relaxed);
         setLatencySamples(0);
     }
     void releaseResources() override {}
-    void reset() override { dsp_.reset(); }
+    void reset() override { dsp_.reset(); vu_.reset(); }
 
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override
     {
@@ -134,18 +136,14 @@ public:
                      buffer.getNumSamples());
         meterReductionDb_.store(static_cast<float>(dsp_.getGainReductionDb()),
                                 std::memory_order_relaxed);
-        // Meter only. No FFT/FIFO/heap work on the audio thread. The GUI uses
-        // this block RMS for output selector modes, smoothing at 30 Hz.
-        double energy=0.0;
-        for(int channel=0;channel<std::min(channels,2);++channel)
-        {
-            const double rms=buffer.getRMSLevel(channel,0,buffer.getNumSamples());
-            energy+=rms*rms;
-        }
-        energy/=std::min(channels,2);
-        const float dbfs=static_cast<float>(20.0*std::log10(
-            std::max(1.0e-9,std::sqrt(energy))));
-        outputRmsDbfs_.store(dbfs,std::memory_order_relaxed);
+        // Hardware-style output meter dynamics are display-only. Analogue
+        // 300 ms VU ballistics are accumulated at sample rate independently of
+        // host buffer size and published once per block for the GUI.
+        vu_.process(buffer.getReadPointer(0),
+                    channels >= 2 ? buffer.getReadPointer(1) : nullptr,
+                    buffer.getNumSamples());
+        outputRmsDbfs_.store(static_cast<float>(vu_.getIndicatedRmsDbfs()),
+                             std::memory_order_relaxed);
     }
     double getTailLengthSeconds() const override { return 0; }
     bool acceptsMidi() const override { return false; }
@@ -240,6 +238,7 @@ private:
 
     std::array<OptoHostedParameter*,ParameterCount> params_ {};
     ApexOptoLevelerCore dsp_;
+    OptoVuBallisticsCore vu_;
     std::atomic<float> meterReductionDb_{0.0f};
     std::atomic<float> outputRmsDbfs_{-120.0f};
     std::atomic<int> meterMode_{0};
