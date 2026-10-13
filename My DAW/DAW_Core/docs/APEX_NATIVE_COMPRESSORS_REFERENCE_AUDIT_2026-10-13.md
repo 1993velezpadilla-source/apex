@@ -1,7 +1,7 @@
 # APEX Native Compressors — evidence-based audit and release gates
 Date: 2026-10-13. Owner: APEX. Implementation branch: `feature/apex-native-compressors-audit-opto-core-20261013`.
 
-> **Honest status:** This branch begins a clean-room DSP prototype. Neither plug-in is yet an APEX insert. No calibrated 1:1 result, GPU GUI, listening comparison, DLL, VST3, or production release is claimed.
+> **Honest status:** This branch begins a clean-room DSP prototype. The **Opto 2A** native JUCE insert and original themed experimental UI now exist on the branch and have been registered with the unified native format, but require full Windows compile/host tests before calling them usable. The **Prism** product is not yet implemented. No calibrated 1:1 result, listening comparison, public VST3 or production release is claimed.
 
 ## Decision: separate plugins, share infrastructure; validate sequentially
 
@@ -57,7 +57,7 @@ Date: 2026-10-13. Owner: APEX. Implementation branch: `feature/apex-native-compr
 - Tube transfer / bias, transformer hysteresis, tone frequency response / phase, harmonics + intermodulation, startup/turn-on and VU calibration not modeled accurately. The color function is a deliberately simple placeholder and should not be promoted as authentic circuitry.
 - The adjustable Emphasis filter is a one-pole approximation, not a measured R37 circuit.
 - Attack/release 10 ms/~60 ms/seconds are nominal anchors only. A Green functional test does not establish sample-accurate matching to real Silver hardware.
-- No high-order oversampling or anti-aliasing for saturation yet. No plugin wrapper, parameter automation threading, host sidechain bus, project state, GUI, output trim safety meter, external reference WAV fixtures, or listening audit.
+- No high-order oversampling or anti-aliasing for saturation yet. No external sidechain bus on Opto, parameter-interpolation audit, robust plugin host/session reopen test, VU calibration, reference WAV fixtures, or listening audit. A prototype native wrapper and editor exist, not a shipping-quality UI.
 
 ## Reference capture and acceptance gates (MUST complete before 1:1 language)
 
@@ -80,6 +80,6 @@ Date: 2026-10-13. Owner: APEX. Implementation branch: `feature/apex-native-compr
 
 ## Initial release verdict
 
-**Opto prototype: research/implementation started, GAUNTLET PENDING.**
+**Opto prototype: DSP+native wrapper+GUI implemented on experimental branch. Portable DSP CI GREEN on initial commit; full native Windows host gauntlet PENDING as of this document edit.**
 **1:1 LA-2A: NOT VERIFIED.**
 **Transparent Pro-C 3-like compressor: NOT IMPLEMENTED.**
