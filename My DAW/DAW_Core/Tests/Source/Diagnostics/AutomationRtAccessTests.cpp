@@ -4679,6 +4679,36 @@ public:
         expect(!empty.pasteClipRegionState(volDestId));
         expectEquals(empty.getState().toXmlString(), beforeEmptyPaste);
 
+        beginTest("Long clips retain individual sample positions and >1.0 volume values");
+        DAW::AutomationClipClipboardCore highResolutionClipboard;
+        AutomationClipRegionCore longSource;
+        longSource.trackId = "LONG-VOLUME";
+        longSource.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        longSource.lengthSamples = 100000000;
+        longSource.localPoints = {
+            AutomationPoint{12345, 1.80f, AutomationCurveType::Smooth, -0.25f},
+            AutomationPoint{98765432, 1.30f, AutomationCurveType::Hold, 0.50f}
+        };
+        highResolutionClipboard.copyRegionState(longSource);
+        expect(highResolutionClipboard.hasClipState());
+
+        AutomationClipRegionCore stretched;
+        stretched.trackId = "LONG-VOLUME-B";
+        stretched.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        stretched.lengthSamples = 200000000;
+        expect(highResolutionClipboard.pasteStateToRegion(stretched));
+        expectEquals((int)stretched.localPoints.size(), 2);
+        if (stretched.localPoints.size() == 2)
+        {
+            expectEquals((juce::int64)stretched.localPoints[0].timeSamples,
+                         (juce::int64)24690);
+            expectEquals((juce::int64)stretched.localPoints[1].timeSamples,
+                         (juce::int64)197530864);
+            expectWithinAbsoluteError(stretched.localPoints[0].value, 1.80f, 0.00001f);
+            expect(stretched.localPoints[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(stretched.localPoints[0].tensionToNext, -0.25f, 0.00001f);
+        }
+
         beginTest("Actual project session save/reopen retains pasted pan range and original shape");
         AutomationManagerCore reopened;
         reopened.restoreState(manager.getState());
