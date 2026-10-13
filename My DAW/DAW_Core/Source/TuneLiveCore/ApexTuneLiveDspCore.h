@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace APEX { namespace TuneLive {
@@ -71,9 +72,21 @@ public:
         const int channels=std::min({numChannels,channels_,2});
         if(channels!=channels_ || channels<=0 || !channelData[0]) return;
         if(channels==2 && !channelData[1]) return;
-        user.correction=std::clamp(user.correction,0.0f,1.0f);
-        user.retune=std::clamp(user.retune,0.0f,1.0f);
-        user.wet=std::clamp(user.wet,0.0f,1.0f);
+        // Host automation and untrusted upstream plugins can supply NaN/Inf.
+        // std::clamp() does NOT repair NaN, so sanitize explicitly *before*
+        // evaluating exp/pow or invoking the pitch shifter.
+        auto safeUnit=[](float value,float fallback) noexcept {
+            return std::isfinite(value) ? std::clamp(value,0.0f,1.0f) : fallback;
+        };
+        user.correction=safeUnit(user.correction,0.85f);
+        user.retune=safeUnit(user.retune,0.20f);
+        user.wet=safeUnit(user.wet,1.0f);
+        user.humanize=safeUnit(user.humanize,0.70f);
+        user.flexTune=safeUnit(user.flexTune,0.35f);
+        user.stability=safeUnit(user.stability,0.40f);
+        if(!std::isfinite(user.referenceHz))
+            user.referenceHz=440.0f;
+        user.referenceHz=std::clamp(user.referenceHz,430.0f,450.0f);
         const VoiceSettings vs{std::clamp(user.key,0,11),
                                std::clamp(user.scale,0,2),
                                user.correction,
@@ -92,6 +105,16 @@ public:
             stretch_.setTransposeFactor(std::pow(2.0f,smooth_/12.0f));
             stretch_.setFormantFactor(1.0f,user.preserveFormants);
             stretch_.setFormantBase(frequency_>0 ? frequency_/static_cast<float>(rate_) : 0.0f);
+            // Nonfinite samples can poison FFT state for multiple seconds.
+            // Repair at the insert boundary; no allocations or logging on RT.
+            for(int ch=0;ch<channels;++ch)
+                for(int i=0;i<count;++i) {
+                    float& sample=channelData[ch][offset+i];
+                    if(!std::isfinite(sample) || std::abs(sample)<1.0e-20f)
+                        sample=0.0f;
+                    else
+                        sample=std::clamp(sample,-8.0f,8.0f);
+                }
             const float* source[2]={channelData[0]+offset,
                 channels==2 ? channelData[1]+offset : nullptr};
             float* processed[2]={wet_.data(),channels==2 ? wet_.data()+block_ : nullptr};
@@ -125,7 +148,11 @@ public:
                     const int readPos=(delayPosition_+1)%delayLength_;
                     const float dry=latency_==0 ? source[c][i]
                         : delay_[static_cast<std::size_t>(c)*delayLength_+static_cast<std::size_t>(readPos)];
-                    channelData[c][offset+i]=dry*(1.0f-wetAmount)+processed[c][i]*wetAmount;
+                    const float wetSample=std::isfinite(processed[c][i])
+                                        ? std::clamp(processed[c][i],-8.0f,8.0f)
+                                        : 0.0f;
+                    const float result=dry*(1.0f-wetAmount)+wetSample*wetAmount;
+                    channelData[c][offset+i]=std::isfinite(result)?result:0.0f;
                 }
                 delayPosition_=(delayPosition_+1)%delayLength_;
             }
