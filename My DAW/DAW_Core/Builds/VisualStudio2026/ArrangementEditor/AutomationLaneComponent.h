@@ -1329,16 +1329,23 @@ private:
             && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
                 || parameterId_ == AutomationLaneCore::trackPanParameterId))
         {
-            menu.addItem("Copy This Curve to Selected Clip Tracks (Undoable)", [this]()
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            menu.addItem("Copy This Curve to Selected Clip Tracks (Undoable)", [safeLane]()
             {
-                const auto* source = helper_.findLane(trackId_, parameterId_);
-                if (source != nullptr && source->isEnabled() && !source->points.empty())
+                auto* lane = safeLane.getComponent();
+                if (lane == nullptr || !lane->groupedCurveCallback_
+                    || !lane->isDrawingEnabled())
+                    return;
+
+                const auto* source = lane->helper_.findLane(
+                    lane->trackId_, lane->parameterId_);
+                if (source != nullptr && source->isEnabled()
+                    && !source->points.empty()
+                    && lane->groupedCurveCallback_(
+                        lane->trackId_, lane->parameterId_, source->points))
                 {
-                    if (groupedCurveCallback_(trackId_, parameterId_, source->points))
-                    {
-                        invalidateCurvePath();
-                        repaint();
-                    }
+                    lane->invalidateCurvePath();
+                    lane->repaint();
                 }
             });
         }
