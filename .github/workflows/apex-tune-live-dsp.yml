@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           test "$(git -C "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" rev-parse HEAD)" = "57b93f4e9206a089a45387eaa39bdc9f310d3308"
-      - name: Build owned sources pedantic and vendor-linked DSP without third-party pedantic warnings
+      - name: Build owned sources strict; compile pinned third-party headers as system includes
         shell: bash
         run: |
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
@@ -42,18 +42,18 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" -o tune_live_preset_test
           ./tune_live_preset_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
-            -I"My DAW/DAW_Core/Source/ThirdParty" \
-            -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" -o tune_live_wet_test
           ./tune_live_wet_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
-            -I"My DAW/DAW_Core/Source/ThirdParty" \
-            -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp" -o tune_live_matrix_test
           ./tune_live_matrix_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
-            -I"My DAW/DAW_Core/Source/ThirdParty" \
-            -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp" -o tune_live_no_alloc_test
           ./tune_live_no_alloc_test
   msvc-windows:
