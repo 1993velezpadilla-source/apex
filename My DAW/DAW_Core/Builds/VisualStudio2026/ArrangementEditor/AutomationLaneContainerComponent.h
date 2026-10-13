@@ -25,6 +25,13 @@ public:
 
     ~AutomationLaneContainerComponent() override = default;
 
+    void setGroupedCurveCallback(AutomationLaneComponent::GroupedCurveCallback callback)
+    {
+        groupedCurveCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setGroupedCurveCallback(groupedCurveCallback_);
+    }
+
     // ========================================================================
     // LANE MANAGEMENT
     // ========================================================================
@@ -48,6 +55,7 @@ public:
         );
 
         auto* lanePtr = laneComponent.get();
+        lanePtr->setGroupedCurveCallback(groupedCurveCallback_);
         lanePtr->setSize(getWidth(), 60);  // 60 pixels high per lane
 
         addAndMakeVisible(laneComponent.get());
@@ -257,6 +265,7 @@ private:
 
     AutomationUIHelper& helper_;
     TrackID trackId_;
+    AutomationLaneComponent::GroupedCurveCallback groupedCurveCallback_;
 
     // Map from parameter ID to lane component
     std::map<juce::String, std::unique_ptr<AutomationLaneComponent>> lanes_;
