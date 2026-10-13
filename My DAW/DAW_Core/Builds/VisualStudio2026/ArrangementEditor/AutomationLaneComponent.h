@@ -11,6 +11,7 @@
 #include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
 #include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
+#include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 
 namespace DAW {
 
@@ -159,6 +160,67 @@ public:
                 juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
             });
         storeLane.replacePoints(std::move(converted));
+    }
+
+    /**
+     * Control-thread PPQ bridge for an already committed VST3 macro plan.
+     * Converts all host-verified core lanes first, and atomically replaces
+     * their PPQ snapshots with one lane-map publication. No audio-thread
+     * mutation/lock is introduced. Caller handles legacy manager rollback
+     * if this returns false.
+     */
+    static bool syncHostVerifiedVst3BatchToApex(
+        const AutomationUIHelper& helper,
+        const std::vector<AutomationMultiParameterSnapshotCore::LaneChange>& changes,
+        double sampleRate, double tempoBpm)
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        using Registry = apex::automation::AutomationParameterKeyRegistry;
+        if (changes.empty() || changes.size() > 64
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return false;
+
+        auto& registry = Registry::getInstance();
+        auto& store = Store::getInstance();
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        std::vector<Store::BatchReplacement> prepared;
+        prepared.reserve(changes.size());
+        for (const auto& change : changes)
+        {
+            const auto& target = change.target;
+            if (target.trackId.isEmpty()
+                || !target.parameterId.startsWith("plugin."))
+                return false;
+            const auto* lane = helper.findLane(target.trackId, target.parameterId);
+            if (lane == nullptr || !lane->isEnabled())
+                return false;
+
+            Store::BatchReplacement replacement;
+            const auto key = "plugin." + target.trackId + ".core."
+                           + target.parameterId;
+            replacement.id = registry.getOrCreateID(key);
+            replacement.points.reserve(lane->points.size());
+            for (const auto& point : lane->points)
+            {
+                if (point.timeSamples < 0 || !std::isfinite(point.value)
+                    || point.value < 0.0f || point.value > 1.0f
+                    || !std::isfinite(point.tensionToNext))
+                    return false;
+                replacement.points.push_back({
+                    (double)point.timeSamples * ppqPerSample,
+                    point.value, toApexCurveType(point.curveToNext),
+                    juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+                });
+            }
+            prepared.push_back(std::move(replacement));
+        }
+
+        // Ensure the matching lanes exist before the all-or-nothing publish.
+        // Empty new lanes carry no audio until the immutable map is swapped.
+        for (const auto& item : prepared)
+            store.getOrCreateLane(item.id);
+        return store.replacePointsBatch(std::move(prepared));
     }
 
     bool canBulkEditCurve() const noexcept

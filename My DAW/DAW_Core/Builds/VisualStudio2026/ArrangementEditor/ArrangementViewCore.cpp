@@ -6023,17 +6023,22 @@ bool ArrangementViewCore::applyVst3MacroFromLastTouched(
                 return;
         }
 
-        // Single legacy DSP snapshot publication for the entire target bank.
-        // The APEX PPQ lane mirrors below still publish one-by-one and need a
-        // separate multi-lane atomic PPQ gate before declaring V2 complete.
+        // Manager publishes once; the PPQ lane store also publishes the
+        // complete destination bank in one immutable map swap, not once per
+        // plugin. No partial PPQ mirror is observable by a pinned RT map.
         if (!M::apply(*expectedManager, plan, useAfter))
             return;
+        if (!DAW::AutomationLaneComponent::syncHostVerifiedVst3BatchToApex(
+                *view->m_automationHelper, plan.changes, liveSr, liveBpm))
+        {
+            // Restore the manager if PPQ preparation/publication failed.
+            // M::apply performs version-state preflights before reversal.
+            M::apply(*expectedManager, plan, !useAfter);
+            return;
+        }
 
         for (const auto& change : plan.changes)
         {
-            DAW::AutomationLaneComponent::syncHostVerifiedVst3LaneToApex(
-                *view->m_automationHelper, change.target.trackId,
-                change.target.parameterId, liveSr, liveBpm);
 
             if (auto it = view->m_automationContainers.find(change.target.trackId);
                 it != view->m_automationContainers.end() && it->second != nullptr)

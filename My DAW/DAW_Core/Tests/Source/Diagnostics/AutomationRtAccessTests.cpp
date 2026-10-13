@@ -31,6 +31,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -5831,6 +5832,81 @@ static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTes
  * cached authorization. Both verified host instances must pass before any
  * macro edit can publish one legacy DSP snapshot.
  */
+/**
+ * Multiple destination PPQ lanes must publish as ONE immutable lane map.
+ * Consumers pinning the old map must never see mixed old/new envelopes.
+ * Invalid batches must reject before mutating even the first destination.
+ */
+class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
+{
+public:
+    AutomationV2PpqBatchPublicationTests()
+        : juce::UnitTest("automation.v2-ppq-bank-atomic-map.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        Store store;
+        constexpr apex::automation::ParameterID a = 876001, b = 876002, c = 876003;
+        store.getOrCreateLane(a).replacePoints({{0.0, 0.2f}});
+        store.getOrCreateLane(b).replacePoints({{0.0, 0.3f}});
+        store.getOrCreateLane(c).replacePoints({{0.0, 0.7f}});
+        const auto oldMap = store.getLaneSnapshotRT();
+        const auto generationBefore = store.getChangeGeneration();
+
+        beginTest("Two VST3 lanes commit through a single RT map swap");
+        std::vector<Store::BatchReplacement> batch;
+        batch.push_back({a, {{0.0, 0.8f}, {2.0, 0.9f}}});
+        batch.push_back({b, {{0.0, 0.6f}, {2.0, 0.1f}}});
+        expect(store.replacePointsBatch(std::move(batch)));
+        expectEquals((juce::int64)store.getChangeGeneration(),
+                     (juce::int64)generationBefore + 1);
+        const auto newMap = store.getLaneSnapshotRT();
+        expect(oldMap != newMap);
+        if (oldMap != nullptr && newMap != nullptr)
+        {
+            auto oldA = oldMap->find(a), oldB = oldMap->find(b);
+            auto newA = newMap->find(a), newB = newMap->find(b);
+            if (oldA != oldMap->end() && oldB != oldMap->end()
+                && newA != newMap->end() && newB != newMap->end())
+            {
+                expectWithinAbsoluteError(oldA->second->getSnapshot()->front().normalizedValue,
+                                          0.2f, 0.00001f);
+                expectWithinAbsoluteError(oldB->second->getSnapshot()->front().normalizedValue,
+                                          0.3f, 0.00001f);
+                expectWithinAbsoluteError(newA->second->getSnapshot()->front().normalizedValue,
+                                          0.8f, 0.00001f);
+                expectWithinAbsoluteError(newB->second->getSnapshot()->front().normalizedValue,
+                                          0.6f, 0.00001f);
+            }
+            expect(oldMap->at(c) == newMap->at(c)); // untouched lane retains identity
+        }
+
+        beginTest("Duplicate destination rejects without partial publication");
+        const auto stableMap = store.getLaneSnapshotRT();
+        std::vector<Store::BatchReplacement> duplicate;
+        duplicate.push_back({a, {{0.0, 0.1f}}});
+        duplicate.push_back({a, {{0.0, 0.5f}}});
+        expect(!store.replacePointsBatch(std::move(duplicate)));
+        expect(stableMap == store.getLaneSnapshotRT());
+
+        beginTest("Nonfinite, out-of-range and missing IDs reject atomically");
+        std::vector<Store::BatchReplacement> invalid;
+        invalid.push_back({a, {{0.0, 0.1f}}});
+        invalid.push_back({b, {{0.0, std::numeric_limits<float>::quiet_NaN()}}});
+        expect(!store.replacePointsBatch(std::move(invalid)));
+        expect(stableMap == store.getLaneSnapshotRT());
+
+        std::vector<Store::BatchReplacement> missing;
+        missing.push_back({a, {{0.0, 0.1f}}});
+        missing.push_back({876099, {{0.0, 0.4f}}});
+        expect(!store.replacePointsBatch(std::move(missing)));
+        expect(stableMap == store.getLaneSnapshotRT());
+    }
+};
+static AutomationV2PpqBatchPublicationTests automationV2PpqBatchPublicationTests;
+
 class AutomationV2MultiVst3BankTests final : public juce::UnitTest
 {
 public:
