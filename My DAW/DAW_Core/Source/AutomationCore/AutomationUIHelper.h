@@ -446,6 +446,15 @@ public:
         return manager_.findLane(trackId, parameterId);
     }
 
+    /** Guard bulk curve edits against clip-owned regions. Otherwise manager's
+     *  publishSnapshot() overlays these regions and discards the bulk edit.
+     *  Point-by-point tools use different rules and are not gated here.
+     */
+    bool hasClipRegionsForParameter(const TrackID& trackId, const juce::String& parameterId) const noexcept
+    {
+        return manager_.hasClipRegionsForParameter(trackId, parameterId);
+    }
+
     // ========================================================================
     // STATE MANAGEMENT
     // ========================================================================

@@ -473,6 +473,21 @@ public:
     const std::vector<AutomationLaneCore>& getLanes() const noexcept { return lanes_; }
     const std::vector<AutomationClipRegionCore>& getClipRegions() const noexcept { return clipRegions_; }
 
+    // Whole-lane replacement tools must not silently lose their edits on
+    // publishSnapshot(), which re-materializes clip-owned points into lanes.
+    // Use this from the message thread before freehand/full-curve/transform.
+    bool hasClipRegionsForParameter(const TrackID& trackId,
+                                    const juce::String& parameterId) const noexcept
+    {
+        return std::any_of(clipRegions_.begin(), clipRegions_.end(),
+            [&](const AutomationClipRegionCore& region)
+            {
+                return region.isValid() && region.trackId == trackId
+                    && region.parameterId == parameterId
+                    && !region.localPoints.empty();
+            });
+    }
+
     AutomationClipRegionCore* findClipRegion(const juce::Uuid& regionId) noexcept
     {
         for (auto& region : clipRegions_)
@@ -610,8 +625,7 @@ public:
     {
         if (const auto* region = findClipRegion(regionId))
         {
-            AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
-            return true;
+            return AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
         }
 
         return false;
@@ -621,13 +635,20 @@ public:
     {
         if (auto* region = findClipRegion(regionId))
         {
+            // Validate and construct replacement BEFORE touching the existing
+            // lane. Empty/wrong-parameter clipboard must never delete points.
+            if (!clipClipboard_.canPasteTo(*region))
+                return false;
+
+            auto replacement = *region;
+            if (!AutomationArticulatorToolsCore::pasteState(replacement, clipClipboard_))
+                return false;
+
             clearLanePointsInRegionRange(*region);
-            const bool changed = AutomationArticulatorToolsCore::pasteState(*region, clipClipboard_);
-            if (changed)
-                syncClipRegionToLane(*region);
-            if (changed)
-                publishSnapshot();
-            return changed;
+            region->localPoints = std::move(replacement.localPoints);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
         }
 
         return false;
@@ -1127,6 +1148,12 @@ private:
 
     void clearLanePointsInRegionRange(const AutomationClipRegionCore& region)
     {
+        // Empty clips are placeholders, not destructive "erase automation"
+        // commands. Creating, moving or deleting one must preserve existing
+        // lane points that happen to occupy the same time range.
+        if (region.localPoints.empty())
+            return;
+
         if (auto* lane = findEditableLane(region.trackId, region.parameterId))
         {
             const int64_t start = region.startSample;
@@ -1142,8 +1169,8 @@ private:
 
     void syncClipRegionToLane(const AutomationClipRegionCore& region)
     {
-        if (!region.isValid())
-            return;
+        if (!region.isValid() || region.localPoints.empty())
+            return; // never erase an unrelated envelope for an empty clip
 
         auto& lane = getOrCreateLane(region.trackId, region.parameterId);
         const int64_t start = region.startSample;
