@@ -28,7 +28,10 @@ int main() {
     double phase=0.0;
     for(int i=0;i<length;++i){
         const double t=i/sampleRate;
-        // The +30 cents centre shift forces a genuinely processed WET vocal.\n        // With zero detune the transparency gate produces DRY=100%,\n        // which would invalidate the vibrato preservation experiment.\n        const double cents=30.0+25.0*std::sin(2*pi*5*t);
+        // The +30 cents centre shift forces a genuinely processed WET vocal.
+        // With zero detune the transparency gate produces DRY=100%,
+        // which would invalidate the vibrato preservation experiment.
+        const double cents=30.0+25.0*std::sin(2*pi*5*t);
         const double hz=440.0*std::pow(2.0,cents/1200.0);
         phase+=2*pi*hz/sampleRate;
         original[static_cast<std::size_t>(i)]
@@ -83,9 +86,11 @@ int main() {
              <<" samples="<<wetVib.count
              <<" unvoiced_dry="<<dryUnvoiced
              <<" unvoiced_wet="<<wetUnvoiced
-             <<" plugin_PDC="<<latency\n             <<" final_effective_wet="<<dsp.debugWetAmount()<<"\n";
+             <<" plugin_PDC="<<latency
+             <<" final_effective_wet="<<dsp.debugWetAmount()<<"\n";
     if(dryVib.count<100 || wetVib.count<100 || a<6
-       || ratio<0.50 || ratio>1.40 || wetUnvoiced>dryUnvoiced+3\n       || dsp.debugWetAmount()<0.50f){
+       || ratio<0.50 || ratio>1.40 || wetUnvoiced>dryUnvoiced+3
+       || dsp.debugWetAmount()<0.50f){
         std::cerr<<"FAIL: singer's natural 5-Hz vibrato was destroyed or exaggerated\n";
         return 1;
     }
