@@ -5256,6 +5256,40 @@ public:
         expectEquals((int)left.lanes.size(), 3);
         const auto initialState = manager.getState();
 
+        beginTest("Store snapshot A as project ValueTree with exact VST3 IDs and curve families");
+        const auto savedA = Snap::serializeSnapshot(left);
+        expect(savedA.hasType("AutomationMultiSnapshot"));
+        expectEquals(savedA.getNumChildren(), 3);
+        Snap::Snapshot reloadedA;
+        expect(Snap::deserializeSnapshot(savedA, reloadedA));
+        expectEquals((int)reloadedA.lanes.size(), 3);
+        if (reloadedA.lanes.size() == 3)
+        {
+            expectEquals(reloadedA.lanes[2].target.parameterId, plug);
+            expectWithinAbsoluteError(reloadedA.lanes[0].points[1].value, 1.8f, 0.00001f);
+            expect(reloadedA.lanes[0].points[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(reloadedA.lanes[0].points[0].tensionToNext, -0.5f, 0.00001f);
+        }
+
+        beginTest("Corrupted snapshot cannot partially restore or retain older memory");
+        auto corrupted = savedA.createCopy();
+        corrupted.getChild(2).getChild(0)
+            .setProperty("value", 1.5f, nullptr); // VST3 normalized > 1
+        expect(!Snap::deserializeSnapshot(corrupted, reloadedA));
+        expect(!reloadedA.isValid());
+        corrupted = savedA.createCopy();
+        corrupted.getChild(0).getChild(0)
+            .setProperty("curveToNextName", "INVALID_CURVE", nullptr);
+        expect(!Snap::deserializeSnapshot(corrupted, reloadedA));
+        expect(!reloadedA.isValid());
+        corrupted = savedA.createCopy();
+        corrupted.getChild(2)
+            .setProperty("parameterId", plug + ".missing", nullptr);
+        // A different fully qualified instance parameter identity still has
+        // valid syntax; consumers must validate live host instance at apply.
+        expect(Snap::deserializeSnapshot(corrupted, reloadedA));
+        expectEquals(reloadedA.lanes[2].target.parameterId, plug + ".missing");
+
         beginTest("Capture B with changed volume, PAN and exact plugin instance");
         auto& secondVolume = manager.getOrCreateLane("V1", vol);
         secondVolume.points = {
