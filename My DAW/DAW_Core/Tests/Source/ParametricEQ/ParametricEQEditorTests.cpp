@@ -968,10 +968,13 @@ private:
         {
             restoredEditor->setSize (sizeCase.width, sizeCase.height);
             const auto topBar = restoredEditor->getTopBarBoundsForTesting();
-            const auto bounds
-                = restoredEditor->getPhaseButtonForTesting().getBounds();
+            // Phase button bounds are LOCAL to its bottom-dock parent;
+            // translate into editor coordinates before containment. The
+            // pre-V2 test only worked because the bar started at (0, 0).
+            const auto bounds = restoredEditor->getPhaseButtonForTesting()
+                .getBounds().translated (topBar.getX(), topBar.getY());
             expect (topBar.contains (bounds),
-                    "phase button stays inside the top bar");
+                    "phase button stays inside its bottom command dock");
             expect (bounds.getWidth() >= 44, "phase touch target width");
             expect (bounds.getHeight() >= 32, "phase touch target height");
         }
