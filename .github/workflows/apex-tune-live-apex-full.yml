@@ -10,6 +10,7 @@ on:
       - 'My DAW/DAW_Core/Source/PluginScanCore/PluginScannerCore.h'
       - 'My DAW/DAW_Core/DAW_Core.jucer'
       - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - 'My DAW/DAW_Core/Tests/Source/G10/G10FormatHostTests.cpp'
       - 'My DAW/DAW_Core/Tests/Source/C4/C4FormatHostTests.cpp'
       - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/ParametricEQFormatHostTests.cpp'
   push:
@@ -67,6 +68,8 @@ jobs:
         run: |
           $exe = ".\Tests\Builds\VisualStudio2026\x64\${{ matrix.configuration }}\ConsoleApp\APEXTests.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Native APEXTests.exe missing" }
+          & $exe --name=G10.Format.Host --seed=0xA9E12026
+          if ($LASTEXITCODE -ne 0) { throw "G10 real APEX chain failed Tune Live audio, automation or session reload" }
           & $exe --name=C4.FormatHost --seed=0xA9E12026
           if ($LASTEXITCODE -ne 0) { throw "C4 unified host registry failed (including Tune Live)" }
           & $exe --name=ParametricEQ.FormatHost --seed=0xA9E12026
