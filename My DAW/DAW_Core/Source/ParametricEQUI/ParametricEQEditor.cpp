@@ -2111,8 +2111,14 @@ public:
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
         // 1 dynamic label + 6 dynamic rows.
+        const bool shortSheet = ! floating && owner_.getHeight() < 500;
+        // The actual viewport for short landscapes is only ~116 px tall:
+        // 112px + content padding clipped the numeric JUCE text boxes
+        // behind the bottom command dock, even though geometry tests passed.
+        // Shrink only the quick strip (never the 44px action touch targets).
+        const int quickHeight = shortSheet ? 96 : 112;
         const int contentHeight = contentMargin
-            + (floating ? 14 * row + 134 : 13 * row + 44 + 112)
+            + (floating ? 14 * row + 134 : 13 * row + 44 + quickHeight)
             + 3 * labelHeight + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
@@ -2122,7 +2128,6 @@ public:
         // precision strip OR a heading above it, not both. Give the
         // actual FREQ / GAIN / Q controls first-viewport priority; the
         // band label and secondary actions remain accessible by scrolling.
-        const bool shortSheet = ! floating && owner_.getHeight() < 500;
         if (! shortSheet)
             bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
         if (! floating)
@@ -2131,7 +2136,7 @@ public:
             // exposes frequency, gain and Q without scrolling past On,
             // Bypass and shape. Each slider retains a real hosted parameter
             // with an editable numeric JUCE readout, even at 320px.
-            auto quick = bounds.removeFromTop (112);
+            auto quick = bounds.removeFromTop (quickHeight);
             const int column = quick.getWidth() / 3;
             frequencySlider_.setBounds (
                 quick.removeFromLeft (column).reduced (2, 4));
