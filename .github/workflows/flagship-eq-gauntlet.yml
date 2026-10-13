@@ -3,6 +3,8 @@ name: APEX Flagship EQ Gauntlet
 on:
   workflow_dispatch:
   push:
+    # PR branches already run on pull_request; do not double-build them.
+    branches: [main]
     paths:
       - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
       - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
@@ -26,6 +28,13 @@ on:
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/**'
       - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/**'
       - '.github/workflows/flagship-eq-gauntlet.yml'
+
+# Drop obsolete GUI CI runs when a newer commit arrives on the same PR.
+# Native Windows app builds are expensive and previous push+PR duplication
+# generated a large backlog of stale jobs with no additional QA value.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

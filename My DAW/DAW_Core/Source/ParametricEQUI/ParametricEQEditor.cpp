@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 
 namespace APEX::ParametricEQ
@@ -97,6 +98,62 @@ public:
         g.drawFittedText (button.getButtonText(),
                           button.getLocalBounds().reduced (4, 2),
                           juce::Justification::centred, 1, 0.65f);
+    }
+
+    void drawRotarySlider (juce::Graphics& g, int x, int y,
+                           int width, int height, float proportion,
+                           float startAngle, float endAngle,
+                           juce::Slider& slider) override
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        // Distinct APEX Prism dials for the three primary EQ dimensions.
+        // Uses JUCE's canonical rotary hit-testing/parameter machinery.
+        const float cx = x + width * 0.5f;
+        const float cy = y + std::min (height * 0.49f, 49.0f);
+        const float radius = std::max (13.0f,
+            std::min (width * 0.32f, height * 0.31f));
+        const float angle = startAngle
+                          + std::clamp (proportion, 0.0f, 1.0f)
+                            * (endAngle - startAngle);
+        juce::Path track, value;
+        track.addCentredArc (cx, cy, radius, radius, 0.0f,
+                             startAngle, endAngle, true);
+        value.addCentredArc (cx, cy, radius, radius, 0.0f,
+                             startAngle, angle, true);
+        g.setColour (Palette::border());
+        g.strokePath (track, juce::PathStrokeType (4.0f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const auto active = slider.isEnabled()
+            ? Palette::accent() : Palette::textSecondary();
+        g.setColour (active.withAlpha (0.23f));
+        g.strokePath (value, juce::PathStrokeType (8.0f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (active);
+        g.strokePath (value, juce::PathStrokeType (3.2f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const auto dial = juce::Rectangle<float> (
+            cx - radius + 5.0f, cy - radius + 5.0f,
+            2.0f * (radius - 5.0f), 2.0f * (radius - 5.0f));
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().brighter (0.14f), dial.getTopLeft(),
+            Palette::background(), dial.getBottomLeft(), false));
+        g.fillEllipse (dial);
+        g.setColour (Palette::border());
+        g.drawEllipse (dial, 1.0f);
+        const auto needle = juce::Point<float> (
+            cx + (radius - 10.0f) * std::sin (angle),
+            cy - (radius - 10.0f) * std::cos (angle));
+        g.setColour (Palette::text());
+        g.drawLine (cx, cy, needle.x, needle.y, 2.1f);
+        g.setColour (Palette::textSecondary());
+        g.setFont (juce::Font (juce::FontOptions (
+            10.5f, juce::Font::bold)));
+        g.drawFittedText (slider.getTitle(),
+                          juce::Rectangle<int> (x, y + height - 19,
+                                                width, 16),
+                          juce::Justification::centred, 1);
     }
 
     void drawLinearSlider (juce::Graphics& g, int x, int y, int width,
@@ -232,18 +289,33 @@ double xForFrequency (double frequencyHz, double width)
     return (std::log10 (clamped) - logMin) / (logMax - logMin) * width;
 }
 
+// On unusually shallow landscape canvases the seven >=44px graph tools
+// occupy the top row. Without reserving a plot-safe inset, the actual band
+// handle at +8dB falls BEHIND the MATCH button (verified in native 640x400
+// Windows screenshot). Keep the inverse pointer transform exactly paired
+// with the display transform; this changes no EQ DSP or hosted parameter.
+juce::Range<double> gainPlotYRange (double height)
+{
+    const double h = std::max (1.0, height);
+    return h <= 200.0 ? juce::Range<double> (68.0, std::max (69.0, h - 20.0))
+                      : juce::Range<double> (0.0, h);
+}
+
 double gainForY (double y, double height)
 {
     constexpr double maximumDb = 18.0;
-    return maximumDb * (1.0 - 2.0 * std::clamp (y / std::max (1.0, height),
-                                                0.0, 1.0));
+    const auto plot = gainPlotYRange (height);
+    const auto ratio = std::clamp ((y - plot.getStart()) / plot.getLength(),
+                                   0.0, 1.0);
+    return maximumDb * (1.0 - 2.0 * ratio);
 }
 
 double yForGain (double gainDb, double height)
 {
     constexpr double maximumDb = 18.0;
+    const auto plot = gainPlotYRange (height);
     const auto ratio = 0.5 * (1.0 - std::clamp (gainDb / maximumDb, -1.0, 1.0));
-    return ratio * height;
+    return plot.getStart() + ratio * plot.getLength();
 }
 
 const char* shapeName (int shape)
@@ -434,9 +506,9 @@ public:
     void resized() override
     {
         auto bounds = getLocalBounds().reduced (4, 4);
-        if (getWidth() < 430)
+        if (getWidth() < 650)
         {
-            // Compact-phone contract: two rows of four controls, each row at
+            // Phone/small-tablet contract: two rows of four controls, each at
             // least 44 logical pixels tall.  The title yields its space to
             // controls instead of shrinking touch targets.
             title_.setVisible (false);
@@ -651,6 +723,20 @@ public:
             &sketchButton_, &grabButton_, &copyButton_, &pasteButton_,
             &matchButton_, &matchSaveButton_, &matchLoadButton_
         }};
+        // Seven controls fit exactly at 320px, but long captions become
+        // unreadable when JUCE shrinks the font. Shorten only the idle tool
+        // captions on compact widths; active EQ Match / Save state labels
+        // are preserved so resize cannot erase the current workflow.
+        const bool compact = width <= 430;
+        if (matchButton_.getButtonText() == "EQ MATCH"
+            || matchButton_.getButtonText() == "MATCH")
+            matchButton_.setButtonText (compact ? "MATCH" : "EQ MATCH");
+        if (matchSaveButton_.getButtonText() == "REF SAVE"
+            || matchSaveButton_.getButtonText() == "SAVE")
+            matchSaveButton_.setButtonText (compact ? "SAVE" : "REF SAVE");
+        if (matchLoadButton_.getButtonText() == "REF LOAD"
+            || matchLoadButton_.getButtonText() == "LOAD")
+            matchLoadButton_.setButtonText (compact ? "LOAD" : "REF LOAD");
         int x = padding;
         for (auto* action : actions)
         {
@@ -726,11 +812,63 @@ public:
                 juce::PathStrokeType::rounded));
         }
         drawNodes (g, bounds);
+        // APEX's own compact value readout follows the chosen frequency
+        // node without additional controls or stealing graph pointer input.
+        // The value pill must fit entirely inside the *graph*. At short
+        // landscape sizes (notably 900x300) the previous pill was clipped
+        // by the below-graph quick-edit sheet and looked like a broken
+        // floating inspector. The always-visible quick controls already
+        // display the exact values there, so omit this redundant pill.
+        if (getWidth() >= 700 && getHeight() >= 220)
+        {
+            const int selectedBand = owner_.getSelectedBandForTesting();
+            if (selectedBand >= 0 && selectedBand < kMaxBands)
+            {
+                const auto centre = nodeCentre (selectedBand);
+                const auto* frequency = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Frequency));
+                const auto* gain = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Gain));
+                const auto* q = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Q));
+                const juce::String readout = frequency->getText (
+                    frequency->getValue(), 0) + "     "
+                    + gain->getText (gain->getValue(), 0) + "     "
+                    + q->getText (q->getValue(), 0);
+                constexpr int bubbleWidth = 288;
+                constexpr int bubbleHeight = 32;
+                const int x = std::clamp (
+                    centre.x - bubbleWidth / 2, 8,
+                    std::max (8, getWidth() - bubbleWidth - 8));
+                // Keep the readout clear of the 52px toolbar and the
+                // bottom log-frequency axis. Avoid a clipped rectangle
+                // even when the host resizes the editor unusually short.
+                const int preferredY = centre.y > 100 ? centre.y - 65
+                                                       : centre.y + 36;
+                const int y = std::clamp (preferredY, 60,
+                                         getHeight() - bubbleHeight - 24);
+                auto bubble = juce::Rectangle<float> (
+                    static_cast<float> (x), static_cast<float> (y),
+                    static_cast<float> (bubbleWidth),
+                    static_cast<float> (bubbleHeight));
+                g.setColour (Palette::background().withAlpha (0.88f));
+                g.fillRoundedRectangle (bubble, 9.0f);
+                g.setColour (Palette::accent().withAlpha (0.66f));
+                g.drawRoundedRectangle (bubble, 9.0f, 1.0f);
+                g.setColour (Palette::text());
+                g.setFont (juce::Font (juce::FontOptions (
+                    12.0f, juce::Font::bold)));
+                g.drawFittedText (readout, bubble.toNearestInt().reduced (9, 3),
+                                  juce::Justification::centred, 1);
+            }
+        }
         if (grabArmed_)
             drawGrabPeaks (g);
 
-        // Never steal input events: this is purely painted status text.
-        if (getWidth() >= 560)
+        // The decorative engine caption is not a graph control. Hide it
+        // when the response is shallow: at 640x400 and 900x300 it collided
+        // with frequency labels and even active EQ nodes.
+        if (getWidth() >= 560 && getHeight() >= 260)
         {
             g.setFont (juce::Font (juce::FontOptions (
                 10.5f, juce::Font::bold)));
@@ -787,6 +925,75 @@ public:
         }
     }
 
+    // Direct, canvas-first creation: double-click any empty frequency/gain
+    // position to create a new hosted APEX band with the real target values.
+    // This complements long-press (touch) and the existing Sketch/Grab tools.
+    void mouseDoubleClick (const juce::MouseEvent& event) override
+    {
+        if (sketchArmed_ || grabArmed_)
+            return;
+        pointerDown_ = false;
+        longPressTarget_.reset();
+        const int existing = hitTest (event.position);
+        if (existing >= 0)
+        {
+            owner_.selectBand (existing);
+            return;
+        }
+        const auto slot = firstDisabledBand();
+        if (! slot.has_value())
+            return;
+        const int band = *slot;
+        resetCreatedBand (processor_, band);
+        const auto applyBand = [this, band] (BandParameterOffset offset,
+                                            float value)
+        {
+            const int index = parameterIndex (band, offset);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index, parameter->toNormalised (value));
+        };
+        applyBand (BandParameterOffset::Shape,
+                   static_cast<float> (FilterShape::Bell));
+        applyBand (BandParameterOffset::Frequency,
+                   static_cast<float> (frequencyForX (
+                       event.position.x, std::max (1, getWidth()))));
+        applyBand (BandParameterOffset::Gain,
+                   static_cast<float> (gainForY (
+                       event.position.y, std::max (1, getHeight()))));
+        applyBand (BandParameterOffset::Q, 1.0f);
+        if (event.mods.isAltDown())
+        {
+            const int index = dynamicParameterIndex (
+                band, DynamicBandOffset::Enable);
+            notifyParameter (processor_, index, 1.0f);
+        }
+        applyBand (BandParameterOffset::Enabled, 1.0f);
+        owner_.selectBand (band);
+        curveDirty_ = true;
+        repaint();
+    }
+
+    // Mouse wheel over a node adjusts its hosted Q with balanced gestures.
+    // Shift provides fine resolution. No change to graph pan/zoom behaviour
+    // outside nodes, and the same Q slider remains accessible to touch.
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override
+    {
+        const int band = hitTest (event.position);
+        if (band < 0 || std::abs (wheel.deltaY) <= 1.0e-6f)
+            return;
+        const int index = parameterIndex (band, BandParameterOffset::Q);
+        auto* parameter = processor_.getParametricEQParameter (index);
+        const float precision = event.mods.isShiftDown() ? 0.012f : 0.065f;
+        const float next = std::clamp (
+            parameter->getValue() + wheel.deltaY * precision, 0.0f, 1.0f);
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (next);
+        parameter->endChangeGesture();
+        curveDirty_ = true;
+        repaint();
+    }
+
     void mouseDrag (const juce::MouseEvent& event) override
     {
         lastDragPosition_ = event.position;
@@ -812,6 +1019,15 @@ public:
                 frequencyParameter->toNormalised (frequency));
             gainParameter->setValueNotifyingHost (
                 gainParameter->toNormalised (gain));
+            // All layout computations are GUI-thread-only. Relocate the
+            // floating HUD at most 30Hz while a node moves so its old
+            // position cannot swallow the next pointer gesture.
+            const auto now = juce::Time::getMillisecondCounter();
+            if (now - lastHudRelayoutMs_ >= 33)
+            {
+                owner_.resized();
+                lastHudRelayoutMs_ = now;
+            }
         }
     }
 
@@ -831,6 +1047,7 @@ public:
                 dragBand_, BandParameterOffset::Gain));
             frequency->endChangeGesture();
             gain->endChangeGesture();
+            owner_.resized(); // final HUD anchor at the committed node
         }
         dragging_ = false;
         dragBand_ = -1;
@@ -1007,8 +1224,11 @@ private:
         matchInput_.reset();
         matchStage_ = MatchStage::Idle;
         lastMatchSpectrumIndex_ = -1;
-        matchButton_.setButtonText ("EQ MATCH");
-        matchSaveButton_.setButtonText ("REF SAVE");
+        // Match the idle captions to the actual graph width. A phone EQ
+        // reset must not restore desktop-length labels on 44px buttons.
+        const bool compact = getWidth() <= 430;
+        matchButton_.setButtonText (compact ? "MATCH" : "EQ MATCH");
+        matchSaveButton_.setButtonText (compact ? "SAVE" : "REF SAVE");
         matchButton_.setColour (juce::TextButton::buttonColourId,
                                 Palette::surfaceHover());
     }
@@ -1638,6 +1858,7 @@ private:
     bool longPressFired_ = false;
     std::optional<int> longPressTarget_;
     std::uint32_t pressTime_ = 0;
+    std::uint32_t lastHudRelayoutMs_ = 0;
 };
 
 //==============================================================================
@@ -1854,13 +2075,32 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto area = getLocalBounds().toFloat();
+        // Floating rotary HUD exists ONLY on >=900px desktop canvases.
+        // 640x400 and 700x500 landscape touch devices use the below-graph
+        // sheet, just like narrow portrait phones. Match applyLayout().
+        const bool floating = owner_.getWidth() >= 900 && owner_.getHeight() >= 500;
+        if (floating)
+        {
+            // Self-contained APEX glass HUD; the controls are all real JUCE
+            // components and still scroll (no render-only dummy controls).
+            g.setColour (juce::Colours::black.withAlpha (0.31f));
+            g.fillRoundedRectangle (area.translated (0.0f, 2.0f)
+                                        .reduced (1.0f, 1.0f), 13.0f);
+        }
+        auto body = area.reduced (floating ? 2.0f : 0.0f);
         g.setGradientFill (juce::ColourGradient (
-            Palette::surfaceHover().darker (0.30f), area.getTopLeft(),
-            Palette::surface(), area.getBottomLeft(), false));
-        g.fillRect (area);
-        g.setColour (Palette::accent().withAlpha (0.45f));
-        g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
-                    area.getHeight());
+            juce::Colour (0xff243451), body.getTopLeft(),
+            Palette::surface(), body.getBottomLeft(), false));
+        if (floating)
+            g.fillRoundedRectangle (body, 12.0f);
+        else
+            g.fillRect (body);
+        g.setColour (Palette::accent().withAlpha (floating ? 0.84f : 0.45f));
+        if (floating)
+            g.drawRoundedRectangle (body.reduced (0.5f), 12.0f, 1.3f);
+        else
+            g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
+                        area.getHeight());
     }
 
     void resized() override
@@ -1870,7 +2110,24 @@ public:
         // The inspector content uses touch-sized fixed rows. When the editor
         // is shorter than the full control stack, the viewport scrolls the
         // contextual panel instead of shrinking controls into unusability.
-        constexpr int row = 56;
+        // Floating inspector uses dense but still >=44px touch targets.
+        // Portrait sheet keeps comfortable full-size 56px control rows.
+        // Floating rotary HUD exists ONLY on >=900px desktop canvases.
+        // 640x400 and 700x500 landscape touch devices use the below-graph
+        // sheet, just like narrow portrait phones. Match applyLayout().
+        const bool floating = owner_.getWidth() >= 900 && owner_.getHeight() >= 500;
+        const int row = floating ? 48 : 56;
+        for (auto* slider : { &frequencySlider_, &gainSlider_, &qSlider_ })
+        {
+            slider->setSliderStyle (floating
+                ? juce::Slider::RotaryHorizontalVerticalDrag
+                : juce::Slider::LinearHorizontal);
+            // On phones, put the editable numeric field UNDER the slider:
+            // all three primary controls can share a full-width quick-edit
+            // strip without squeezing a 64px value box beside a 90px track.
+            slider->setTextBoxStyle (juce::Slider::TextBoxBelow,
+                false, floating ? 96 : 86, 22);
+        }
         const int placementColumns = viewport_.getWidth() >= 340 ? 5 : 3;
         const int placementRows = (kChannelPlacementCount + placementColumns - 1)
                                 / placementColumns;
@@ -1881,13 +2138,41 @@ public:
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
         // 1 dynamic label + 6 dynamic rows.
-        const int contentHeight = contentMargin + 17 * row + 3 * labelHeight
-                                + placementRows * row + auditionHeight;
+        const bool shortSheet = ! floating && owner_.getHeight() < 500;
+        // The actual viewport for short landscapes is only ~116 px tall:
+        // 112px + content padding clipped the numeric JUCE text boxes
+        // behind the bottom command dock, even though geometry tests passed.
+        // Shrink only the quick strip (never the 44px action touch targets).
+        const int quickHeight = shortSheet ? 96 : 112;
+        const int contentHeight = contentMargin
+            + (floating ? 14 * row + 134 : 13 * row + 44 + quickHeight)
+            + 3 * labelHeight + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
 
         auto bounds = content_.getLocalBounds().reduced (8, 8);
-        bandLabel_.setBounds (bounds.removeFromTop (row));
+        // In very short landscape windows there is room for the 112px
+        // precision strip OR a heading above it, not both. Give the
+        // actual FREQ / GAIN / Q controls first-viewport priority; the
+        // band label and secondary actions remain accessible by scrolling.
+        if (! shortSheet)
+            bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
+        if (! floating)
+        {
+            // Compact-first quick controls: selecting a node immediately
+            // exposes frequency, gain and Q without scrolling past On,
+            // Bypass and shape. Each slider retains a real hosted parameter
+            // with an editable numeric JUCE readout, even at 320px.
+            auto quick = bounds.removeFromTop (quickHeight);
+            const int column = quick.getWidth() / 3;
+            frequencySlider_.setBounds (
+                quick.removeFromLeft (column).reduced (2, 4));
+            gainSlider_.setBounds (
+                quick.removeFromLeft (column).reduced (2, 4));
+            qSlider_.setBounds (quick.reduced (2, 4));
+        }
+        if (shortSheet)
+            bandLabel_.setBounds (bounds.removeFromTop (44));
         auto buttonRow = bounds.removeFromTop (row);
         const int third = buttonRow.getWidth() / 3;
         enableButton_.setBounds (buttonRow.removeFromLeft (third).reduced (2, 2));
@@ -1895,9 +2180,20 @@ public:
         closeButton_.setBounds (buttonRow.reduced (2, 2));
 
         shapeCombo_.setBounds (bounds.removeFromTop (row));
-        frequencySlider_.setBounds (bounds.removeFromTop (row));
-        gainSlider_.setBounds (bounds.removeFromTop (row));
-        qSlider_.setBounds (bounds.removeFromTop (row));
+        if (floating)
+        {
+            // Frequency/Gain/Q are the everyday EQ controls, placed together
+            // in one true JUCE rotary strip; secondary settings scroll below.
+            auto dials = bounds.removeFromTop (134);
+            const int columnWidth = dials.getWidth() / 3;
+            frequencySlider_.setBounds (
+                dials.removeFromLeft (columnWidth).reduced (2, 1));
+            gainSlider_.setBounds (
+                dials.removeFromLeft (columnWidth).reduced (2, 1));
+            qSlider_.setBounds (dials.reduced (2, 1));
+        }
+        // In compact mode the real FREQ/GAIN/Q sliders already occupy the
+        // pinned first-visible quick strip. Secondary controls still scroll.
         slopeSlider_.setBounds (bounds.removeFromTop (row));
 
         placementLabel_.setBounds (bounds.removeFromTop (labelHeight));
@@ -2079,6 +2375,10 @@ public:
         return spectralBandButton_;
     }
     juce::Slider& getDynRangeSliderForTesting() { return dynRangeSlider_; }
+    std::array<juce::Slider*, 3> getPrimaryDialsForTesting() noexcept
+    {
+        return {{ &frequencySlider_, &gainSlider_, &qSlider_ }};
+    }
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const { return placementButtons_; }
@@ -2269,41 +2569,98 @@ void ParametricEQEditor::applyLayout()
     else
         layoutMode_ = LayoutMode::CompactPhone;
 
-    auto bounds = getLocalBounds();
-    const int topBarHeight = width < 430
-                           ? std::min (104, std::max (88, height / 6))
-                           : std::min (56, std::max (44, height / 12));
-    topBar_->setBounds (bounds.removeFromTop (topBarHeight));
+    // Immersive, graph-first APEX layout. Pro-Q-style interaction philosophy
+    // but entirely native APEX visuals. A bottom command dock never steals
+    // horizontal space from the response display.
+    auto workspace = getLocalBounds();
+    const int dockHeight = width < 650 ? 104
+                          : std::min (56, std::max (44, height / 12));
+    topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
-    // Portrait-capable, compact devices use a bottom contextual sheet; the
-    // graph stays the dominant surface. Wide layouts use a side inspector.
-    const bool portraitCompact = width < 900
-        && height >= static_cast<int> (width * 1.05);
-    if (portraitCompact)
+    // Narrow devices AND short plugin windows use a scrollable touch sheet
+    // BELOW the graph. At 900x300 the floating 340px inspector physically
+    // cannot avoid covering one of two nearby EQ nodes; a touch sheet
+    // preserves editability instead of scoring an impossible HUD position.
+    // The main response remains >=45% of the whole editor.
+    const bool touchSheet = width < 900 || height < 500;
+    if (touchSheet)
     {
-        const bool hasSelection = selectedBand_ >= 0;
-        const int available = std::max (0, height - topBarHeight);
-        // A floating-style *scrollable* inspector sheet must never consume
-        // most of a portrait editor: producers need the frequency curve more
-        // than dozens of permanently visible settings. Give the graph 62%
-        // of the remaining height (>=45% of the whole panel even on phones).
-        // The user can still scroll to EVERY native control at 44+ px touch.
-        const int desiredSheet = hasSelection
+        const int available = workspace.getHeight();
+        const int minGraph = std::max (140, (height * 45 + 99) / 100);
+        const int desiredSheet = selectedBand_ >= 0
             ? std::max (120, available * 38 / 100)
             : std::max (56, height / 12);
-        const int minimumGraphHeight = std::max (140, (height * 45 + 99) / 100);
-        const int sheetHeight = std::min (
-            desiredSheet, std::max (0, available - minimumGraphHeight));
-        graph_->setBounds (bounds.removeFromTop (available - sheetHeight));
-        inspector_->setBounds (bounds);
+        const int sheet = std::min (desiredSheet,
+                                    std::max (0, available - minGraph));
+        graph_->setBounds (workspace.removeFromTop (available - sheet));
+        inspector_->setBounds (workspace);
+        inspector_->setVisible (true);
+        return;
     }
-    else
+
+    // Landscape / desktop: NO permanently docked side inspector. The graph
+    // receives the entire canvas, and a small scrolling control HUD appears
+    // beside the selected node only when required.
+    graph_->setBounds (workspace);
+    if (selectedBand_ < 0 || selectedBand_ >= kMaxBands)
     {
-        const int inspectorWidth = std::min (std::max (240, width / 3),
-                                             width >= 1400 ? 380 : 320);
-        inspector_->setBounds (bounds.removeFromRight (inspectorWidth));
-        graph_->setBounds (bounds);
+        inspector_->setVisible (false);
+        return;
     }
+
+    const int graphWidth = graph_->getWidth();
+    const int graphHeight = graph_->getHeight();
+    const int cardWidth = std::min (std::max (340, graphWidth / 3), 414);
+    // At short floating plugin heights, a hard 230px minimum could
+    // push the card over the graph and into the bottom dock. Let the
+    // internal viewport scroll instead of letting the overlay escape.
+    const int cardHeight = std::min (398, std::max (1, graphHeight - 94));
+    const auto node = graph_->nodeBounds (selectedBand_).getCentre();
+
+    // Choose a nearby HUD position which obscures as few OTHER EQ nodes as
+    // possible. A fixed right-side panel hid high-frequency nodes behind
+    // the inspector whenever a low-frequency band was selected. Comparing
+    // six legal card positions is cheap, GUI-only, and allocation-free.
+    const int maxX = std::max (12, graphWidth - cardWidth - 12);
+    const int maxY = std::max (0, graphHeight - cardHeight - 12);
+    const int minY = std::min (64, maxY);
+    const std::array<int, 2> xCandidates {{
+        std::clamp (node.x + 42, 12, maxX),
+        std::clamp (node.x - cardWidth - 42, 12, maxX)
+    }};
+    const std::array<int, 3> yCandidates {{
+        std::clamp (node.y + 32, minY, maxY),
+        std::clamp (node.y - cardHeight - 32, minY, maxY),
+        std::clamp (node.y - cardHeight / 2, minY, maxY)
+    }};
+    juce::Rectangle<int> best;
+    int bestScore = std::numeric_limits<int>::max();
+    for (const int x : xCandidates)
+        for (const int y : yCandidates)
+        {
+            const juce::Rectangle<int> candidate (x, y,
+                                                   cardWidth, cardHeight);
+            int score = std::abs (y - (node.y + 32)) / 12;
+            for (int band = 0; band < kMaxBands; ++band)
+            {
+                const auto* enabled = processor_.getParametricEQParameter (
+                    parameterIndex (band, BandParameterOffset::Enabled));
+                if (! enabled->getBool())
+                    continue;
+                if (candidate.intersects (
+                    graph_->nodeBounds (band).expanded (8)))
+                    score += band == selectedBand_ ? 10000 : 100;
+            }
+            if (score < bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+    inspector_->setBounds (best);
+    inspector_->setVisible (true);
+    inspector_->toFront (false); // overlay stays interactive, graph stays huge
 }
 
 void ParametricEQEditor::selectBand (int band)
@@ -2419,6 +2776,11 @@ juce::Slider& ParametricEQEditor::getDynRangeSliderForTesting()
     return inspector_->getDynRangeSliderForTesting();
 }
 
+std::array<juce::Slider*, 3> ParametricEQEditor::getPrimaryDialsForTesting()
+{
+    return inspector_->getPrimaryDialsForTesting();
+}
+
 bool ParametricEQEditor::isBandDynamicActiveForTesting (int band) const
 {
     return graph_->isBandDynamicActive (band);
@@ -2506,6 +2868,36 @@ void ParametricEQEditor::injectGraphMouseUpForTesting (juce::Point<float> positi
                                   juce::Time::getCurrentTime(), position,
                                   juce::Time::getCurrentTime(), 1, false);
     graph_->mouseUp (event);
+}
+
+void ParametricEQEditor::injectGraphDoubleClickForTesting (
+    juce::Point<float> position)
+{
+    auto* source = testMouseSource (this);
+    if (source == nullptr)
+        return;
+    const juce::MouseEvent event (*source, position, juce::ModifierKeys(),
+                                  1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                  graph_.get(), graph_.get(),
+                                  juce::Time::getCurrentTime(), position,
+                                  juce::Time::getCurrentTime(), 2, false);
+    graph_->mouseDoubleClick (event);
+}
+
+void ParametricEQEditor::injectGraphWheelForTesting (
+    juce::Point<float> position, float deltaY)
+{
+    auto* source = testMouseSource (this);
+    if (source == nullptr)
+        return;
+    const juce::MouseEvent event (*source, position, juce::ModifierKeys(),
+                                  1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                  graph_.get(), graph_.get(),
+                                  juce::Time::getCurrentTime(), position,
+                                  juce::Time::getCurrentTime(), 1, false);
+    juce::MouseWheelDetails details;
+    details.deltaY = deltaY;
+    graph_->mouseWheelMove (event, details);
 }
 
 void ParametricEQEditor::beginAuditionGesture()
