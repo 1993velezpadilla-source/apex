@@ -8,9 +8,9 @@
 namespace APEX { namespace TuneLive {
 
 // Stable hosted IDs: keep order and names across future versions for automation.
-class Parameter final : public juce::AudioProcessorParameterWithID {
+class TuneLiveParameter final : public juce::AudioProcessorParameterWithID {
 public:
-    Parameter(const char* id, const char* name, float initial, int steps = 0)
+    TuneLiveParameter(const char* id, const char* name, float initial, int steps = 0)
         : juce::AudioProcessorParameterWithID(juce::ParameterID(id, 1), name),
           default_(initial), steps_(steps), value_(initial) {}
     float getValue() const override { return value_.load(std::memory_order_relaxed); }
@@ -146,12 +146,12 @@ private:
         "tunelive.noteStability", "tunelive.preserveFormants",
         "tunelive.flexTune", "tunelive.a4Reference"};
     void add(int index, const char* id, const char* name, float value, int steps=0) {
-        auto p = std::make_unique<Parameter>(id, name, value, steps);
+        auto p = std::make_unique<TuneLiveParameter>(id, name, value, steps);
         params_[static_cast<std::size_t>(index)] = p.get();
         addHostedParameter(std::move(p));
     }
     float param(int index) const noexcept {return params_[static_cast<std::size_t>(index)]->getValue();}
-    std::array<Parameter*,kNumParams> params_{};
+    std::array<TuneLiveParameter*,kNumParams> params_{};
     DspCore dsp_;
     std::atomic<float> lastHz_{0.0f};
 };
