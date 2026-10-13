@@ -1555,7 +1555,7 @@ public:
     template <typename BindingT>
     static float computeCanonicalTarget(
         const BindingT& binding,
-        const apex::automation::AutomationLaneStore& laneStore,
+        const apex::automation::AutomationLaneStore::RtLaneSnapshot& ppqLaneMap,
         const AutomationSnapshot* automationSnap,
         const TrackID& trackId,
         int64_t samplePosition,
@@ -1606,7 +1606,7 @@ public:
         };
         if (binding.apexPid != apex::automation::kInvalidParameterID)
         {
-            if (auto apexLane = laneStore.findLaneRT (binding.apexPid))
+            if (auto apexLane = apex::automation::AutomationLaneStore::findLaneInSnapshotRT (ppqLaneMap, binding.apexPid))
             {
                 auto snap = apexLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
@@ -1623,7 +1623,7 @@ public:
         if (binding.bridgePid != apex::automation::kInvalidParameterID
             && AutomationVst3BridgeAuthorityCore::allowsPlayback(coreLane))
         {
-            if (auto bridgeLane = laneStore.findLaneRT (binding.bridgePid))
+            if (auto bridgeLane = apex::automation::AutomationLaneStore::findLaneInSnapshotRT (ppqLaneMap, binding.bridgePid))
             {
                 auto snap = bridgeLane->getSnapshot();
                 if (snap != nullptr && ! snap->empty())
@@ -1657,6 +1657,10 @@ public:
         auto& params = plugin_->getParameters();
         auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         auto& laneStore   = apex::automation::AutomationLaneStore::getInstance();
+        // Pin ONE immutable PPQ map generation for every parameter in this
+        // processor callback. A concurrent multi-lane GUI publication is not
+        // allowed to split the parameter loop between old and new curves.
+        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
         auto& registry    = apex::automation::AutomationParameterRegistry::getInstance();
         const double ppqPosition = (sampleRate > 0.0 && bpm > 0.0)
             ? ((double)samplePosition / sampleRate) * (bpm / 60.0)
@@ -1725,7 +1729,7 @@ public:
             // change the automation math.
             bool hasAutomation = false;
             const float newValue = computeCanonicalTarget(
-                binding, laneStore, automationSnap, trackId,
+                binding, ppqLaneMap, automationSnap, trackId,
                 samplePosition, ppqPosition, currentValue, &hasAutomation);
 
             // Without an active lane the processor owns its manual value.
