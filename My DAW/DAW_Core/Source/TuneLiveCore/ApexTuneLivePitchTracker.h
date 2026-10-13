@@ -12,7 +12,7 @@ class PitchTracker final {
 public:
     static constexpr int kWindow = 512;
     static constexpr int kHop = 64;
-    static constexpr int kMaxLag = 192;
+    static constexpr int kMaxLag = 256;
     struct Result { float hz = 0.0f; float confidence = 0.0f; bool voiced = false; };
 
     void prepare(double sampleRate) noexcept {
@@ -21,7 +21,7 @@ public:
         detectorRate_ = sampleRate_ / decimation_;
         pole_ = std::exp(-2.0 * 3.14159265358979323846 * 1800.0 / sampleRate_);
         minLag_ = std::max(2, static_cast<int>(std::floor(detectorRate_ / 1000.0)));
-        maxLag_ = std::min(kMaxLag, static_cast<int>(std::ceil(detectorRate_ / 75.0)));
+        maxLag_ = std::min(kMaxLag, static_cast<int>(std::ceil(detectorRate_ / 55.0)));
         reset();
     }
     void reset() noexcept {
@@ -90,7 +90,7 @@ private:
                 lag += std::clamp(0.5f * (a - c) / denominator, -0.5f, 0.5f);
         }
         const float hz = static_cast<float>(detectorRate_ / lag);
-        if (hz >= 75.0f && hz <= 1000.0f && std::isfinite(hz))
+        if (hz >= 55.0f && hz <= 1000.0f && std::isfinite(hz))
             last_ = {hz, 1.0f - chosen, true};
     }
     double sampleRate_ = 48000.0, detectorRate_ = 12000.0, pole_ = 0.0;
