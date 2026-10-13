@@ -1320,32 +1320,41 @@ private:
         const int height = std::max (1, getHeight());
         constexpr int basePoints = 320;
         constexpr int criticalInsertions = 32;
-        const int totalPoints = basePoints + kMaxBands * criticalInsertions;
+        constexpr int capacity = basePoints + kMaxBands * criticalInsertions;
+        std::array<double, capacity> frequencies {};
+        int count = 0;
+        for (int point = 0; point < basePoints; ++point)
+            frequencies[static_cast<std::size_t> (count++)] = frequencyForX (
+                static_cast<double> (point) / (basePoints - 1) * width, width);
+
+        // All path vertices must be in logarithmic X order. The old code
+        // appended band-centred detail AFTER the 20-20k sweep, drawing long
+        // zigzagging connections across the response graph. Inserting the
+        // detail into a fixed array and sorting keeps sharp Q peaks precise
+        // without allocations, and makes the cyan fill a valid polygon.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            const auto& settings = latestFrame_.currentBands[
+                static_cast<std::size_t> (band)];
+            if (! settings.enabled || settings.bypassed)
+                continue;
+            for (int step = 0; step < criticalInsertions; ++step)
+            {
+                const double value = settings.frequencyHz * std::pow (
+                    2.0, (step - criticalInsertions / 2) / 8.0);
+                if (std::isfinite (value)
+                    && value >= kDisplayMinimumFrequency
+                    && value <= kDisplayMaximumFrequency)
+                    frequencies[static_cast<std::size_t> (count++)] = value;
+            }
+        }
+        std::sort (frequencies.begin(), frequencies.begin() + count);
         bool haveMain = false, haveMid = false, haveSide = false;
 
-        for (int point = 0; point < totalPoints; ++point)
+        for (int point = 0; point < count; ++point)
         {
-            double frequency = 0.0;
-            if (point < basePoints)
-            {
-                frequency = frequencyForX (static_cast<double> (point)
-                                             / (basePoints - 1) * width, width);
-            }
-            else
-            {
-                const int extra = point - basePoints;
-                const int band = std::clamp (extra / criticalInsertions, 0,
-                                             kMaxBands - 1);
-                const int step = extra % criticalInsertions;
-                const auto centre = static_cast<double> (
-                    latestFrame_.currentBands[static_cast<std::size_t> (band)]
-                        .frequencyHz);
-                frequency = centre * std::pow (2.0,
-                    (step - criticalInsertions / 2) / 8.0);
-            }
-            if (! std::isfinite (frequency) || frequency <= 0.0)
-                continue;
-
+            const double frequency = frequencies[
+                static_cast<std::size_t> (point)];
             const auto matrix = ResponseCore::responseMatrix (latestFrame_,
                                                               frequency);
             const auto x = static_cast<float> (xForFrequency (frequency, width));
@@ -1640,6 +1649,9 @@ public:
     {
         addAndMakeVisible (viewport_);
         viewport_.setViewedComponent (&content_, false);
+        viewport_.setScrollBarThickness (7);
+        viewport_.setOpaque (false);
+        content_.setOpaque (false);
         content_.addAndMakeVisible (bandLabel_);
         content_.addAndMakeVisible (enableButton_);
         content_.addAndMakeVisible (bypassButton_);
@@ -1801,6 +1813,18 @@ public:
 
         startTimerHz (12);
         refresh();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().darker (0.30f), area.getTopLeft(),
+            Palette::surface(), area.getBottomLeft(), false));
+        g.fillRect (area);
+        g.setColour (Palette::accent().withAlpha (0.45f));
+        g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
+                    area.getHeight());
     }
 
     void resized() override
