@@ -2,6 +2,7 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
+#include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "ClipSplitCore.h"
 #include "ClipGlueCore.h"
 #include "ClipMuteCore.h"
@@ -5664,6 +5665,15 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
     auto container = std::make_unique<DAW::AutomationLaneContainerComponent>(
         *m_automationHelper, trackId
     );
+    juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
+    container->setGroupedCurveCallback(
+        [safeOwner](const DAW::TrackID& source, const juce::String& parameter,
+                    const std::vector<DAW::AutomationPoint>& points) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyGroupedCurveFromSelectedClips(source, parameter, points);
+            return false;
+        });
     auto* ptr = container.get();
 
     addAndMakeVisible(container.get());
@@ -5672,6 +5682,100 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
 
     resized();
     return ptr;
+}
+
+
+bool ArrangementViewCore::applyGroupedCurveFromSelectedClips(
+    const DAW::TrackID& sourceTrack, const juce::String& parameterId,
+    const std::vector<DAW::AutomationPoint>& points)
+{
+    if (m_automationManager == nullptr || m_automationHelper == nullptr
+        || m_engineTrackManager == nullptr
+        || !DAW::AutomationGroupedCurveCore::isSupportedParameter(parameterId))
+        return false;
+
+    // Explicit selected clips are the *only* selection authority. Never infer
+    // a group from visible tracks, folders or a plugin display name.
+    std::vector<DAW::TrackID> selectedTracks;
+    const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+    for (const auto& clipId : m_selection.getSelectedIds())
+    {
+        const auto* clip = m_clipState.findClip(clipId);
+        if (clip == nullptr)
+            return false; // stale selection; abort all rather than partial edit
+
+        const int engineIndex = clip->trackIndex - masterOffset;
+        if (engineIndex < 0)
+            return false;
+
+        auto* track = m_engineTrackManager->getTrack(engineIndex);
+        if (track == nullptr)
+            return false;
+
+        const auto id = track->getID();
+        if (std::find(selectedTracks.begin(), selectedTracks.end(), id)
+            == selectedTracks.end())
+            selectedTracks.push_back(id);
+    }
+
+    // Keep the origin in the explicitly selected set; minimum TWO tracks.
+    if (selectedTracks.size() < 2
+        || std::find(selectedTracks.begin(), selectedTracks.end(), sourceTrack)
+           == selectedTracks.end())
+        return false;
+
+    DAW::AutomationGroupedCurveCore::Batch edit;
+    if (!DAW::AutomationGroupedCurveCore::prepare(
+            *m_automationManager, parameterId, selectedTracks, points, edit))
+        return false;
+
+    const double sr = m_engineSampleRate;
+    const double bpm = m_tempoBpm;
+    if (!std::isfinite(sr) || !std::isfinite(bpm) || sr <= 0.0 || bpm <= 0.0)
+        return false;
+
+    // Global history may outlive a recreated arrangement editor. Capture
+    // JUCE's safe UI pointer, not an unguarded this/helper reference.
+    juce::Component::SafePointer<ArrangementViewCore> owner(this);
+    auto* expectedManager = m_automationManager;
+    auto replay = [owner, expectedManager, edit, sr, bpm](bool after)
+    {
+        auto* view = owner.getComponent();
+        if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_automationHelper == nullptr)
+            return;
+
+        if (!DAW::AutomationGroupedCurveCore::apply(*expectedManager, edit, after))
+            return;
+
+        // Each native target must update the PPQ authority on both REDO and
+        // UNDO: manager publication alone only updates its legacy DSP path.
+        for (const auto& target : edit.lanes)
+        {
+            DAW::AutomationLaneComponent::syncModelLaneToApex(
+                *view->m_automationHelper, target.trackId, target.parameterId,
+                sr, bpm);
+
+            if (auto it = view->m_automationContainers.find(target.trackId);
+                it != view->m_automationContainers.end() && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+
+            view->repaintAutomationLane(target.trackId, target.parameterId);
+        }
+    };
+
+    struct GroupedUndoAction final : DAW::AutomationAction
+    {
+        explicit GroupedUndoAction(std::function<void(bool)> fn) : replay(std::move(fn)) {}
+        void redo() override { replay(true); }
+        void undo() override { replay(false); }
+        juce::String getDescription() const override { return "Grouped Automation Curve"; }
+        std::function<void(bool)> replay;
+    };
+
+    DAW::UndoManager undo;
+    undo.doAction(std::make_unique<GroupedUndoAction>(std::move(replay)));
+    return true;
 }
 
 void ArrangementViewCore::showAutomationLane(
