@@ -64,12 +64,14 @@ void metricReport(std::ostringstream& report,const Outcome& out) {
 }
 int main(int argc,char** argv) {
     try {
-        if(argc!=3) {
-            std::cerr<<"Usage: "<<argv[0]<<" --prefix previously-rendered-prefix\n";
+        if(argc!=3 && argc!=4) {
+            std::cerr<<"Usage: "<<argv[0]<<" --prefix rendered-prefix [--exploratory]\n";
             return 2;
         }
-        if(std::string(argv[1])!="--prefix")
-            throw std::runtime_error("Expected --prefix");
+        if(std::string(argv[1])!="--prefix" ||
+           (argc==4 && std::string(argv[3])!="--exploratory"))
+            throw std::runtime_error("Expected --prefix PREFIX [--exploratory]");
+        const bool exploratory=argc==4;
         const std::string prefix=argv[2];
         const auto source=readWave(prefix+"_dry.wav");
         const auto hq=readWave(prefix+"_hq40.wav");
@@ -159,19 +161,23 @@ int main(int argc,char** argv) {
         const auto& shipping=results[0];
         const double hqCents=median(shipping.outputOffsets);
         const double improvement=median(shipping.improvements);
-        if(shipping.paired<300 || hqCents>12.0 || improvement<10.0 ||
-           shipping.octaveDisagreements>6) {
+        if(!exploratory && (shipping.paired<300 || hqCents>12.0 || improvement<10.0 ||
+           shipping.octaveDisagreements>6)) {
             std::cerr<<"REAL_HUMAN_HQ_REGRESSION_GUARD_FAILURE paired="
                      <<shipping.paired<<" median_cents="<<hqCents
                      <<" improvement_cents="<<improvement
                      <<" octave_disagreements="<<shipping.octaveDisagreements<<"\\n";
             throw std::runtime_error("HQ40 changed too much on pinned Vocadito #24 real voice");
         }
-        report<<"\\nREAL_HUMAN_HQ_REGRESSION_GUARD_PASS: exemplar #24, "
+        report<<(exploratory
+            ? "\\nEXPLORATORY_REGISTER_METRICS_PASS (descriptive only): no fixed singer-specific threshold.\\n"
+            : "\\nREAL_HUMAN_HQ_REGRESSION_GUARD_PASS: exemplar #24, "
                  "HQ40 <=12 cents median, >=10 cents paired median improvement, "
                  ">=300 stable pairs, <=6 octave disagreements. "
-                 "Not a general human-voice fidelity certificate.\\n";
-        std::ofstream output("REAL_HUMAN_PITCH_COMPARISON.txt");
+                 "Not a general human-voice fidelity certificate.\\n");
+        std::ofstream output(exploratory
+            ? prefix+"_PITCH_COMPARISON.txt"
+            : "REAL_HUMAN_PITCH_COMPARISON.txt");
         if(!output)throw std::runtime_error("Cannot write pitch comparison report");
         output<<report.str();
         if(!output)throw std::runtime_error("Failed writing pitch report");
