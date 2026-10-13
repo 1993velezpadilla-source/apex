@@ -71,15 +71,15 @@ jobs:
       # Capture the real production JUCE editor through the APEXTests
       # executable, which has JUCE and native plugin linkage in this build.
       # No illustrated mock-up: PNG is Component::createComponentSnapshot()
-      # of Processor::createEditor() at its real default 900x575.
+      # of Processor::createEditor() at its real default 1200x750.
       - name: Capture current APEX Tune Live native JUCE GUI screenshot
         if: matrix.configuration == 'Release'
         run: |
           $testExe = Join-Path (Get-Location) "Tests\\Builds\\VisualStudio2026\\x64\\Release\\ConsoleApp\\APEXTests.exe"
           if (-not (Test-Path -LiteralPath $testExe -PathType Leaf)) { throw "Missing compiled APEXTests" }
-          & $testExe '--capture-tune-live-gui=evidence/TuneLive/TuneLive_GUI_Current_900x575.png'
+          & $testExe '--capture-tune-live-gui=evidence/TuneLive/TuneLive_GUI_Approved_1200x750.png'
           if ($LASTEXITCODE -ne 0) { throw "Real JUCE GUI capture failed" }
-          $pngPath = Join-Path (Get-Location) 'evidence\\TuneLive\\TuneLive_GUI_Current_900x575.png'
+          $pngPath = Join-Path (Get-Location) 'evidence\\TuneLive\\TuneLive_GUI_Approved_1200x750.png'
           if (-not (Test-Path -LiteralPath $pngPath -PathType Leaf)) { throw "Missing actual GUI screenshot" }
           if ((Get-Item -LiteralPath $pngPath).Length -lt 5000) { throw "Suspiciously small captured GUI" }
           Write-Host "[PASS] Captured actual APEX Tune Live GUI: $pngPath"
@@ -88,7 +88,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: APEX-TuneLive-GUI-Actual-${{ github.sha }}
-          path: My DAW/DAW_Core/evidence/TuneLive/TuneLive_GUI_Current_900x575.png
+          path: My DAW/DAW_Core/evidence/TuneLive/TuneLive_GUI_Approved_1200x750.png
           if-no-files-found: error
           retention-days: 30
       - name: APEX smoke suite with real assertions and external VST3 fixtures
