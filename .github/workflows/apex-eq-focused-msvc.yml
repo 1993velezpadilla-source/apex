@@ -7,6 +7,8 @@ on:
       - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
       - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
       - 'My DAW/DAW_Core/Source/ThemeCore/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/APEXTests_ConsoleApp.vcxproj'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/DAW_Core_App.vcxproj'
       - '.github/workflows/apex-eq-focused-msvc.yml'
   pull_request:
@@ -111,5 +113,44 @@ jobs:
           }
           $arguments | Set-Content -Path '.\eq-msvc-arguments.rsp' -Encoding ascii
           $command = 'call "' + $vcvars + '" >nul && cl @"eq-msvc-arguments.rsp"'
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Compile real APEX EQ unit-test translation units against JUCE
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath).Trim()
+          if (-not $vs) { throw 'MSVC missing' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          [xml] $xml = Get-Content 'Tests\Builds\VisualStudio2026\APEXTests_ConsoleApp.vcxproj'
+          $debugGroup = @($xml.Project.ItemDefinitionGroup | Where-Object {
+            $_.Condition -match 'Debug\|x64'
+          })[0]
+          if ($null -eq $debugGroup) { throw 'APEXTests Debug settings missing' }
+          $definitions = @(([string] $debugGroup.ClCompile.PreprocessorDefinitions)
+            -split ';' | Where-Object { $_ -and $_ -notmatch '^%\(' })
+          if ('NOMINMAX' -notin $definitions -and 'NOMINMAX=1' -notin $definitions) {
+            throw 'APEXTests project missing NOMINMAX'
+          }
+          $juceModules = Join-Path $env:APEX_JUCE_ROOT 'modules'
+          $vstSdk = Join-Path $juceModules 'juce_audio_processors_headless\format_types\VST3_SDK'
+          $args = @('/nologo', '/std:c++17', '/Zs', '/EHsc', '/W3', '/utf-8',
+                    '/bigobj', '/DWIN32_LEAN_AND_MEAN')
+          foreach ($include in @('Tests\JuceLibraryCode', 'Source', $juceModules,
+            'Source\ThirdParty', 'Source\ThirdParty\signalsmith-stretch', $vstSdk)) {
+            $args += ('/I"' + $include + '"')
+          }
+          foreach ($definition in $definitions) { $args += ('/D' + $definition) }
+          foreach ($source in @(
+            'Tests\Source\ParametricEQ\ParametricEQProcessorTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQStateTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQEditorTests.cpp')) {
+            if (-not (Test-Path $source)) { throw "Missing unit test: $source" }
+            $args += ('"' + $source + '"')
+          }
+          $args | Set-Content -Path 'eq-test-msvc-arguments.rsp' -Encoding ascii
+          $command = 'call "' + $vcvars + '" >nul && cl @"eq-test-msvc-arguments.rsp"'
           & $env:ComSpec /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
