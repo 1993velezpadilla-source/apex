@@ -53,6 +53,27 @@ default stays expressive (Humanize 0.70, amount 0.85, retune ~31ms,
 Flex Tune 0.35). Headroom, mix, formants and latency still require measured
 real singing tests.
 
+## Recent head implementation notes
+
+- A4 concert-reference slider now covers **430.0 to 450.0 Hz**, with 440.0
+  default. This parameter is appended after every previous hosted ID and is
+  saved with the session and eligible for APEX automation. The live note/cents
+  readout obeys the selected concert reference as well.
+- Mono voice tracking remains authoritative. For stereo stems, the pitch
+  tracker now follows the channel with a stronger smoothed vocal envelope;
+  a right-only microphone no longer silently bypasses detection. A specific
+  right-only stereo regression checks the actual processed right-channel
+  F0 and zero unintended left-channel signal.
+- Tests added for A4=432/440/442, a low male ~65.4 Hz C2, artist preset
+  parameter bounds, real dry/wet output, mono/stereo and oversized callback
+  handling, and sample-accurate reported dry bypass delay.
+- The native JUCE editor has six host-aware rotary controls, an editable
+  concert-A4 control, scale/key selection, 3 artist styles, formant switch,
+  bypass, pitch/cents/F0 and PDC readouts. This is real source code but UI
+  build/runtime usability has not been certified in Windows Debug/Release.
+- These extra tests remain requirements, **not successful outcomes**, until
+  CI reports a green conclusion for the exact final PR head SHA.
+
 ## Objective / subjective evidence policy
 
 - CI green for portable detector/note-selection is only a component gate.
