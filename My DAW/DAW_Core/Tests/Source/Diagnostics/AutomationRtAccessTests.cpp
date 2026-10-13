@@ -5264,6 +5264,38 @@ public:
         Snap::Snapshot reloadedA;
         expect(Snap::deserializeSnapshot(savedA, reloadedA));
         expectEquals((int)reloadedA.lanes.size(), 3);
+
+        beginTest("Project Automation subtree persists exact A/B snapshots across reopen");
+        juce::ValueTree memory("AutomationAdvancedMemories");
+        auto aState = savedA.createCopy();
+        aState.setProperty("slot", "A", nullptr);
+        memory.addChild(aState, -1, nullptr);
+        manager.setAdvancedMemories(memory);
+        const auto withMemory = manager.getState();
+        expect(withMemory.getChildWithName("AutomationAdvancedMemories").isValid());
+        AutomationManagerCore openedWithMemory;
+        openedWithMemory.restoreState(withMemory);
+        auto storedMemory = openedWithMemory.getAdvancedMemories();
+        expect(storedMemory.isValid());
+        expectEquals(storedMemory.getNumChildren(), 1);
+        Snap::Snapshot loadedAFromProject;
+        expect(Snap::deserializeSnapshot(
+            storedMemory.getChild(0), loadedAFromProject));
+        expectEquals((int)loadedAFromProject.lanes.size(), 3);
+        if (loadedAFromProject.lanes.size() == 3)
+            expectEquals(loadedAFromProject.lanes[2].target.parameterId, plug);
+
+        beginTest("Project reset erases session A/B and invalid slot replay is rejected");
+        auto duplicate = memory.createCopy();
+        duplicate.addChild(aState.createCopy(), -1, nullptr);
+        openedWithMemory.setAdvancedMemories(duplicate);
+        expectEquals(openedWithMemory.getAdvancedMemories().getNumChildren(), 1);
+        openedWithMemory.clearAll();
+        expect(!openedWithMemory.getAdvancedMemories().isValid());
+        openedWithMemory.restoreState(withMemory);
+        expect(openedWithMemory.getAdvancedMemories().isValid());
+        openedWithMemory.restoreState(initialState);
+        expect(!openedWithMemory.getAdvancedMemories().isValid());
         if (reloadedA.lanes.size() == 3)
         {
             expectEquals(reloadedA.lanes[2].target.parameterId, plug);
