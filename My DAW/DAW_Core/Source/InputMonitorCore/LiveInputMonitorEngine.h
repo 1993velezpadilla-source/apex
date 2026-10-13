@@ -101,13 +101,9 @@ public:
             }
 
             const bool feedMeterOnly = !shouldMonitor && track->isArmed();
-            if (!feedMeterOnly)
-            {
-                // The graph owns ordinary playback and monitored channels.
-                // Feeding a silent block here advances VU time twice and
-                // biases the reading even though the graph later overwrites RMS.
+            const bool observeHardware = shouldMonitor || track->isArmed();
+            if (!observeHardware)
                 continue;
-            }
 
             const int firstCh = track->getInputFirstChannel() > 0
                 ? track->getInputFirstChannel()
@@ -122,6 +118,12 @@ public:
 
             const float* hwL = input.getReadPointer(firstCh);
             const float* hwR = mono ? hwL : input.getReadPointer(firstCh + 1);
+
+            // Independent PRE-trim inspection of real hardware input, even
+            // with monitoring enabled. Never infer interface clipping from
+            // the post-trim VU (which can hide overloaded ADC samples).
+            // This publishes atomic facts only: Pichy/GUI decide later.
+            track->getPichyInputGuardian().processBlock(hwL, hwR, numSamples, mono);
 
             // When monitoring is on, AudioEngine inserts this hardware signal
             // in the track buffer and TrackInputProcessorCore meters the actual
