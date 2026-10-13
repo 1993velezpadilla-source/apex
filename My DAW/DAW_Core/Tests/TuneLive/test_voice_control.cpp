@@ -94,10 +94,14 @@ int main() {
     assert(!tune.update({0.0f,0.0f,false},natural).voiced);
     assert(!tune.update({NAN,0.99f,true},natural).voiced);
     tune.reset();
-    const auto before=tune.update(pitch(60.15f),natural);
-    assert(before.targetMidi==60);
-    natural.root=1; // Db major: C is not legal, must move to Db
-    const auto after=tune.update(pitch(60.15f),natural);
-    assert(after.targetMidi==61);
+    const auto before=tune.update(pitch(62.15f),natural);
+    assert(before.targetMidi==62); // D natural is in C major.
+    natural.root=1; // Db major: D natural is not legal; Eb is the closest note.
+    const auto after=tune.update(pitch(62.15f),natural);
+    assert(after.targetMidi==63);
+    // Music theory guard: C natural IS the major seventh of Db major.
+    tune.reset();
+    const auto dbMajorLeadingTone=tune.update(pitch(60.15f),natural);
+    assert(dbMajorLeadingTone.targetMidi==60);
     std::cout << "PASS: stable notes; 5Hz vibrato preservation; key switch; unvoiced/NaN gates\n";
 }
