@@ -25,6 +25,7 @@
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
+#include "../../../Source/AutomationCore/AutomationVst3BridgeAuthorityCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneStateValidationCore.h"
 #include <array>
 #include <atomic>
@@ -5778,6 +5779,52 @@ static AutomationV2MacroMappingTests automationV2MacroMappingTests;
  * the producer GUI. The plugin processor and its format are checked by the
  * host before these metadata objects are passed to the verifier.
  */
+/**
+ * The dedicated PPQ bridge is generated from a core VST3 parameter lane.
+ * Muting/removing the core lane must not leak cached PPQ values to the DSP,
+ * including a second plugin instance that reuses the display name.
+ */
+class AutomationVst3PpqBridgeAuthorityTests final : public juce::UnitTest
+{
+public:
+    AutomationVst3PpqBridgeAuthorityTests()
+        : juce::UnitTest("automation.vst3-ppq-bridge-source-authority.v1",
+                          "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Authority = DAW::AutomationVst3BridgeAuthorityCore;
+        const juce::String target = "plugin.0.uuid-A.cutoff";
+        DAW::AutomationSnapshot snapshot;
+
+        beginTest("No authoritative core snapshot or lane cannot drive PPQ bridge");
+        expect(!Authority::allowsPlayback(nullptr, "vocal", target));
+        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+
+        snapshot.lanes.push_back({"vocal", target, true,
+            {DAW::AutomationPoint{0, 0.25f}}});
+        beginTest("Enabled non-empty exact instance may mirror its PPQ lane");
+        expect(Authority::allowsPlayback(&snapshot, "vocal", target));
+        expect(!Authority::allowsPlayback(&snapshot, "vocal",
+            "plugin.0.uuid-B.cutoff"));
+        expect(!Authority::allowsPlayback(&snapshot, "other-track", target));
+
+        beginTest("Bypass cannot leave a ghost PPQ automation value playing");
+        snapshot.lanes.front().enabled = false;
+        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+
+        beginTest("Empty envelope must not reactivate cached PPQ content");
+        snapshot.lanes.front().enabled = true;
+        snapshot.lanes.front().points.clear();
+        expect(!Authority::allowsPlayback(&snapshot, "vocal", target));
+
+        beginTest("Re-enable only with a real source knot");
+        snapshot.lanes.front().points.push_back(DAW::AutomationPoint{0, 0.8f});
+        expect(Authority::allowsPlayback(&snapshot, "vocal", target));
+    }
+};
+static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTests;
+
 class AutomationV2Vst3MacroLiveTargetTests final : public juce::UnitTest
 {
 public:
