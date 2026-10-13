@@ -60,6 +60,12 @@ public:
         nativeMacroCallback_ = std::move(callback);
     }
 
+    using Vst3MacroCallback = NativeMacroCallback;
+    void setVst3MacroCallback(Vst3MacroCallback callback)
+    {
+        vst3MacroCallback_ = std::move(callback);
+    }
+
     // Session-local multi-track A/B memories. These are deliberately limited
     // to native volume/pan until the VST3 host can verify exact plugin IDs
     // and publish PPQ updates for multiple plugin parameters coherently.
@@ -112,6 +118,40 @@ public:
             });
         }
         apexLane.replacePoints(std::move(ppqPoints));
+    }
+
+    // Only call after the arrangement host has re-verified exact VST3
+    // track + slot + instance UUID + parameter and continuous metadata.
+    // The bridge key matches PluginInstanceCore::rebuildRtAutomationBindings.
+    static void syncHostVerifiedVst3LaneToApex(
+        const AutomationUIHelper& helper, const TrackID& trackId,
+        const juce::String& coreParameterId, double sampleRate, double tempoBpm)
+    {
+        if (!coreParameterId.startsWith("plugin.")
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return;
+
+        const auto* lane = helper.findLane(trackId, coreParameterId);
+        if (lane == nullptr)
+            return;
+
+        auto& registry = apex::automation::AutomationParameterKeyRegistry::getInstance();
+        const auto key = "plugin." + trackId + ".core." + coreParameterId;
+        const auto id = registry.getOrCreateID(key);
+        auto& storeLane = apex::automation::AutomationLaneStore::getInstance()
+                              .getOrCreateLane(id);
+        apex::automation::AutomationLane::PointVector converted;
+        converted.reserve(lane->points.size());
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        for (const auto& point : lane->points)
+            converted.push_back({
+                juce::jmax(0.0, (double)point.timeSamples * ppqPerSample),
+                point.value, // hosted VST3 uses native JUCE normalized [0,1]
+                toApexCurveType(point.curveToNext),
+                juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+            });
+        storeLane.replacePoints(std::move(converted));
     }
 
     bool canBulkEditCurve() const noexcept
@@ -693,6 +733,7 @@ private:
     UndoManager undoManager_;
     GroupedCurveCallback groupedCurveCallback_;
     NativeMacroCallback nativeMacroCallback_;
+    Vst3MacroCallback vst3MacroCallback_;
     SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // ========================================================================
@@ -1381,6 +1422,31 @@ private:
                     if (source != nullptr && source->isEnabled()
                         && !source->points.empty()
                         && lane->nativeMacroCallback_(
+                            lane->trackId_, lane->parameterId_, source->points))
+                    {
+                        lane->invalidateCurvePath();
+                        lane->repaint();
+                    }
+                });
+        }
+
+        if (isDrawingEnabled() && canBulkEditCurve() && vst3MacroCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            menu.addItem("Macro: Replace Last-Touched VST3 Parameter (Undoable)",
+                [safeLane]()
+                {
+                    auto* lane = safeLane.getComponent();
+                    if (lane == nullptr || !lane->vst3MacroCallback_
+                        || !lane->isDrawingEnabled() || !lane->canBulkEditCurve())
+                        return;
+                    const auto* source = lane->helper_.findLane(
+                        lane->trackId_, lane->parameterId_);
+                    if (source != nullptr && source->isEnabled()
+                        && !source->points.empty()
+                        && lane->vst3MacroCallback_(
                             lane->trackId_, lane->parameterId_, source->points))
                     {
                         lane->invalidateCurvePath();
