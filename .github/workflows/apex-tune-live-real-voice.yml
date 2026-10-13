@@ -1,5 +1,8 @@
 name: Tune Live real human voice audition (Vocadito)
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/apex-tune-live-real-voice.yml'
   push:
     branches: [feature/apex-tune-live-native-v1]
     paths:
