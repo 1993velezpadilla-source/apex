@@ -1812,6 +1812,7 @@ public:
         const double startPPQ = ppqAtSample(samplePosition);
         const double lastPPQ = ppqAtSample(samplePosition + maxSamples - 1);
         auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
+        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
         auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         const auto keyGeneration = keyRegistry.getChangeGeneration();
         int best = maxSamples;
@@ -1850,7 +1851,7 @@ public:
             {
                 if (id == apex::automation::kInvalidParameterID)
                     return;
-                auto lane = laneStore.findLaneRT(id);
+                auto lane = apex::automation::AutomationLaneStore::findLaneInSnapshotRT(ppqLaneMap, id);
                 if (lane == nullptr)
                     return;
                 auto points = lane->getSnapshot();
@@ -1880,7 +1881,13 @@ public:
                     best = candidate;
             };
             considerPPQ(binding.apexPid);
-            considerPPQ(binding.bridgePid);
+            // A bridge is a mirror; bypassed/missing core curves must not
+            // force subdivisions from stale PPQ knots.
+            const auto* sourceLane = automationSnap != nullptr
+                ? automationSnap->findLaneRT(trackId, binding.coreParamId)
+                : nullptr;
+            if (AutomationVst3BridgeAuthorityCore::allowsPlayback(sourceLane))
+                considerPPQ(binding.bridgePid);
             if (best <= 1)
                 break;
         }
@@ -1903,6 +1910,7 @@ public:
 
         auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         auto& laneStore = apex::automation::AutomationLaneStore::getInstance();
+        const auto ppqLaneMap = laneStore.getLaneSnapshotRT();
         const auto keyGeneration = keyRegistry.getChangeGeneration();
         const double ppqScale = sampleRate > 0.0 && bpm > 0.0
             ? bpm / (60.0 * sampleRate) : 0.0;
@@ -1931,13 +1939,16 @@ public:
                     legacyLane = nullptr;
 
                 auto apexLane = binding.apexPid != apex::automation::kInvalidParameterID
-                    ? laneStore.findLaneRT(binding.apexPid) : nullptr;
+                    ? apex::automation::AutomationLaneStore::findLaneInSnapshotRT(ppqLaneMap, binding.apexPid) : nullptr;
                 auto apexPoints = apexLane != nullptr ? apexLane->getSnapshot() : nullptr;
                 if (apexPoints != nullptr && apexPoints->empty())
                     apexPoints.reset();
 
-                auto bridgeLane = binding.bridgePid != apex::automation::kInvalidParameterID
-                    ? laneStore.findLaneRT(binding.bridgePid) : nullptr;
+                auto bridgeLane =
+                    binding.bridgePid != apex::automation::kInvalidParameterID
+                    && AutomationVst3BridgeAuthorityCore::allowsPlayback(legacyLane)
+                        ? apex::automation::AutomationLaneStore::findLaneInSnapshotRT(
+                              ppqLaneMap, binding.bridgePid) : nullptr;
                 auto bridgePoints = bridgeLane != nullptr ? bridgeLane->getSnapshot() : nullptr;
                 if (bridgePoints != nullptr && bridgePoints->empty())
                     bridgePoints.reset();
