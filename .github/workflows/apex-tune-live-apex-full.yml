@@ -10,6 +10,8 @@ on:
       - 'My DAW/DAW_Core/Source/PluginScanCore/PluginScannerCore.h'
       - 'My DAW/DAW_Core/DAW_Core.jucer'
       - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - 'My DAW/DAW_Core/Tests/Source/C4/C4FormatHostTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/ParametricEQFormatHostTests.cpp'
   push:
     branches: [feature/apex-tune-live-native-v1]
   workflow_dispatch:
@@ -49,15 +51,8 @@ jobs:
         run: .\Scripts\prepare_ci.ps1
       - name: Build actual APEX desktop app with Tune Live registered
         run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
-      - name: Run real APEX smoke test discovery
-        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
-      - name: Preserve APEX test evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: APEX-TuneLive-evidence-${{ matrix.configuration }}-${{ github.sha }}
-          path: My DAW/DAW_Core/evidence/runs/
-          if-no-files-found: warn
+      # Make a usable full desktop build available even if lengthy test
+      # fixtures or subsequent format-registry regressions fail.
       - name: Publish full compiled desktop executable
         uses: actions/upload-artifact@v4
         with:
@@ -66,3 +61,20 @@ jobs:
             My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
             My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
           if-no-files-found: error
+      - name: Run real APEX smoke test discovery
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
+      - name: Prove real unified host native discovery and creation
+        run: |
+          $exe = ".\Tests\Builds\VisualStudio2026\x64\${{ matrix.configuration }}\ConsoleApp\APEXTests.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Native APEXTests.exe missing" }
+          & $exe --name=C4.FormatHost --seed=0xA9E12026
+          if ($LASTEXITCODE -ne 0) { throw "C4 unified host registry failed (including Tune Live)" }
+          & $exe --name=ParametricEQ.FormatHost --seed=0xA9E12026
+          if ($LASTEXITCODE -ne 0) { throw "EQ unified host registry failed (including Tune Live ordering)" }
+      - name: Preserve APEX test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-TuneLive-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
