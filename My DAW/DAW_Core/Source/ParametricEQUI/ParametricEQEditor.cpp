@@ -2439,19 +2439,47 @@ void ParametricEQEditor::applyLayout()
     const int cardHeight = std::min (398, std::max (230, graphHeight - 94));
     const auto node = graph_->nodeBounds (selectedBand_).getCentre();
 
-    int cardX = node.x + 42;
-    if (cardX + cardWidth + 14 > graphWidth)
-        cardX = node.x - cardWidth - 42;
-    cardX = std::clamp (cardX, 12, std::max (12, graphWidth - cardWidth - 12));
+    // Choose a nearby HUD position which obscures as few OTHER EQ nodes as
+    // possible. A fixed right-side panel hid high-frequency nodes behind
+    // the inspector whenever a low-frequency band was selected. Comparing
+    // six legal card positions is cheap, GUI-only, and allocation-free.
+    const int maxX = std::max (12, graphWidth - cardWidth - 12);
+    const int maxY = std::max (64, graphHeight - cardHeight - 12);
+    const std::array<int, 2> xCandidates {{
+        std::clamp (node.x + 42, 12, maxX),
+        std::clamp (node.x - cardWidth - 42, 12, maxX)
+    }};
+    const std::array<int, 3> yCandidates {{
+        std::clamp (node.y + 32, 64, maxY),
+        std::clamp (node.y - cardHeight - 32, 64, maxY),
+        std::clamp (node.y - cardHeight / 2, 64, maxY)
+    }};
+    juce::Rectangle<int> best;
+    int bestScore = std::numeric_limits<int>::max();
+    for (const int x : xCandidates)
+        for (const int y : yCandidates)
+        {
+            const juce::Rectangle<int> candidate (x, y,
+                                                   cardWidth, cardHeight);
+            int score = std::abs (y - (node.y + 32)) / 12;
+            for (int band = 0; band < kMaxBands; ++band)
+            {
+                const auto* enabled = processor_.getParametricEQParameter (
+                    parameterIndex (band, BandParameterOffset::Enabled));
+                if (! enabled->getBool())
+                    continue;
+                if (candidate.intersects (
+                    graph_->nodeBounds (band).expanded (8)))
+                    score += band == selectedBand_ ? 10000 : 100;
+            }
+            if (score < bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
 
-    int cardY = node.y + 32;
-    if (cardY + cardHeight + 12 > graphHeight)
-        cardY = node.y - cardHeight - 32;
-    if (cardY < 64)
-        cardY = std::clamp (node.y - cardHeight / 2, 64,
-                            std::max (64, graphHeight - cardHeight - 12));
-
-    inspector_->setBounds (cardX, cardY, cardWidth, cardHeight);
+    inspector_->setBounds (best);
     inspector_->setVisible (true);
     inspector_->toFront (false); // overlay stays interactive, graph stays huge
 }
