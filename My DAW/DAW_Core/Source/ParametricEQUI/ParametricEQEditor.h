@@ -92,6 +92,9 @@ public:
     void injectGraphMouseDownForTesting (juce::Point<float> position);
     void injectGraphMouseDragForTesting (juce::Point<float> position);
     void injectGraphMouseUpForTesting (juce::Point<float> position);
+    void injectGraphDoubleClickForTesting (juce::Point<float> position);
+    void injectGraphWheelForTesting (juce::Point<float> position,
+                                    float deltaY);
 
 private:
     void selectBand (int band);
