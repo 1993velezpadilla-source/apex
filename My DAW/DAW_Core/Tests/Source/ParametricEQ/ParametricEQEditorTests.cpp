@@ -106,12 +106,30 @@ private:
                 return child.getWidth() > 0 && child.getHeight() > 0
                     && parent.contains (child);
             };
-            expect (inBounds (topBar, editorBounds), "top bar in bounds");
+            expect (inBounds (topBar, editorBounds), "bottom dock in bounds");
             expect (inBounds (graph, editorBounds), "graph in bounds");
             expect (inBounds (inspector, editorBounds), "inspector in bounds");
-            expect (! graph.intersects (inspector), "graph/inspector overlap");
-            expect (! graph.intersects (topBar), "graph/top bar overlap");
-            expect (! inspector.intersects (topBar), "inspector/top bar overlap");
+            expect (! graph.intersects (topBar), "graph/bottom dock overlap");
+            expect (! inspector.intersects (topBar), "inspector/bottom dock overlap");
+            expectEquals (topBar.getBottom(), editorBounds.getBottom(),
+                          "Pro-Q-style bottom command dock sits at window foot");
+
+            const bool portrait = sizeCase.width < 900
+                && sizeCase.height >= static_cast<int> (sizeCase.width * 1.05);
+            if (portrait)
+                expect (! graph.intersects (inspector),
+                        "touch portrait inspector stays BELOW graph");
+            else
+            {
+                expect (graph.contains (inspector),
+                        "floating APEX band HUD stays INSIDE graph");
+                expectEquals (graph.getWidth(), sizeCase.width,
+                              "immersive desktop graph uses the entire width");
+                const auto selectedNode = editor->getNodeBoundsForTesting (0)
+                    .translated (graph.getX(), graph.getY());
+                expect (! inspector.intersects (selectedNode),
+                        "floating band HUD cannot cover selected node");
+            }
             expect (graph.getWidth() >= 0 && graph.getHeight() >= 0);
             expect (graph.getHeight() >= 140, "graph must remain usable");
             expect (graph.getWidth() * graph.getHeight() * 4
