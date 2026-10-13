@@ -610,8 +610,7 @@ public:
     {
         if (const auto* region = findClipRegion(regionId))
         {
-            AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
-            return true;
+            return AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
         }
 
         return false;
@@ -1134,6 +1133,12 @@ private:
 
     void clearLanePointsInRegionRange(const AutomationClipRegionCore& region)
     {
+        // Empty clips are placeholders, not destructive "erase automation"
+        // commands. Creating, moving or deleting one must preserve existing
+        // lane points that happen to occupy the same time range.
+        if (region.localPoints.empty())
+            return;
+
         if (auto* lane = findEditableLane(region.trackId, region.parameterId))
         {
             const int64_t start = region.startSample;
@@ -1149,8 +1154,8 @@ private:
 
     void syncClipRegionToLane(const AutomationClipRegionCore& region)
     {
-        if (!region.isValid())
-            return;
+        if (!region.isValid() || region.localPoints.empty())
+            return; // never erase an unrelated envelope for an empty clip
 
         auto& lane = getOrCreateLane(region.trackId, region.parameterId);
         const int64_t start = region.startSample;
