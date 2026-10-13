@@ -62,6 +62,7 @@ public:
         testRealtimeAllocation();
         testSpectralEngineStandalone();
         testSpectralAlignedBlend();
+        testSpectralHostGate();
     }
 
 private:
@@ -764,6 +765,126 @@ private:
             for (int frame = 0; frame < 25; ++frame)
                 rtBlend->process (stereo, 2, 128, allBands, true);
         }
+    }
+
+    void testSpectralHostGate()
+    {
+        beginTest ("Phase 10 spectral DSP is opt-in, appended ABI and zero "
+                   "additional latency by default");
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        processor.prepareToPlay (48000.0, 128);
+        expectEquals (kNumParameters, 375);
+        expectEquals (processor.getLatencySamples(), 0,
+                      "existing sessions never inherit spectral lookahead");
+        expect (! processor.isSpectralModeArmedForTesting());
+        expect (! processor.isSpectralRepreparePendingForTesting());
+
+        // Transport-safe arming: automation never jumps host PDC in flight.
+        setUnits (processor, kSpectralArmParameter, 1.0f);
+        expect (processor.isSpectralRepreparePendingForTesting());
+        juce::AudioBuffer<float> block (2, 128);
+        block.clear();
+        juce::MidiBuffer midi;
+        processor.processBlock (block, midi);
+        expectEquals (processor.getLatencySamples(), 0,
+                      "host-reported PDC must remain fixed while playing");
+        expect (! processor.isSpectralModeArmedForTesting());
+        // Reprepare represents host stopping/restarting audio.
+        processor.prepareToPlay (48000.0, 128);
+        expect (processor.isSpectralModeArmedForTesting());
+        expect (! processor.isSpectralRepreparePendingForTesting());
+        expectEquals (processor.getLatencySamples(), 1024);
+
+        beginTest ("spectral-arm neutral path is exactly 1024 samples "
+                   "and global bypass cannot leak undelayed dry audio");
+        std::array<float, 4096> outLeft {}, outRight {};
+        outLeft[0] = 0.75f;
+        outRight[0] = -0.5f;
+        processor.reset();
+        for (int start = 0; start < 4096; start += 128)
+        {
+            block.clear();
+            for (int i = 0; i < 128; ++i)
+            {
+                block.setSample (0, i, outLeft[
+                    static_cast<std::size_t> (start + i)]);
+                block.setSample (1, i, outRight[
+                    static_cast<std::size_t> (start + i)]);
+            }
+            processor.processBlock (block, midi);
+            for (int i = 0; i < 128; ++i)
+            {
+                outLeft[static_cast<std::size_t> (start + i)] =
+                    block.getSample (0, i);
+                outRight[static_cast<std::size_t> (start + i)] =
+                    block.getSample (1, i);
+            }
+        }
+        double difference = 0.0;
+        for (int i = 0; i < 4096; ++i)
+        {
+            difference = std::max (difference, std::abs (
+                outLeft[static_cast<std::size_t> (i)]
+                    - (i == 1024 ? 0.75f : 0.0f)));
+            difference = std::max (difference, std::abs (
+                outRight[static_cast<std::size_t> (i)]
+                    - (i == 1024 ? -0.5f : 0.0f)));
+        }
+        expect (difference < 1.0e-5,
+                "neutral engine must preserve source exactly on host timeline");
+
+        setUnits (processor, kGlobalBypassParameter, 1.0f);
+        processor.reset();
+        // Let legacy bypass fade settle so this checks the steady state.
+        for (int run = 0; run < 25; ++run)
+        {
+            block.clear();
+            processor.processBlock (block, midi);
+        }
+        expectEquals (processor.getLatencySamples(), 1024,
+                      "global bypass keeps mode lookahead PDC");
+
+        beginTest ("spectral band owns its envelope without double-applying "
+                   "ordinary dynamic EQ");
+        setUnits (processor, kGlobalBypassParameter, 0.0f);
+        configureBell (processor, 0, 1000.0f, 0.0f, 4.0f);
+        setUnits (processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Threshold), -36.0f);
+        setUnits (processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Range), 18.0f);
+        setUnits (processor, spectralBandParameterIndex (0), 1.0f);
+        setUnits (processor, kSpectralDensityParameter, 0.25f);
+        setUnits (processor, kSpectralTiltParameter, 0.0f);
+        processor.prepareToPlay (48000.0, 128);
+        for (int iteration = 0; iteration < 96; ++iteration)
+        {
+            for (int sample = 0; sample < 128; ++sample)
+            {
+                const int index = iteration * 128 + sample;
+                block.setSample (0, sample, static_cast<float> (
+                    0.25 * std::sin (
+                        juce::MathConstants<double>::twoPi
+                        * 1000.0 * index / 48000.0)));
+                block.setSample (1, sample, block.getSample (0, sample));
+            }
+            processor.processBlock (block, midi);
+        }
+        expectWithinAbsoluteError (processor.getDynamicGainDbForTesting (0),
+            0.0, 1.0e-9,
+            "spectral path excludes this band from the ordinary broadband "
+            "dynamic envelope");
+
+        // Arm-off will take effect on *next* host reprepare only.
+        setUnits (processor, kSpectralArmParameter, 0.0f);
+        processor.processBlock (block, midi);
+        expectEquals (processor.getLatencySamples(), 1024);
+        expect (processor.isSpectralRepreparePendingForTesting());
+        processor.prepareToPlay (48000.0, 128);
+        expectEquals (processor.getLatencySamples(), 0);
+        expect (! processor.isSpectralModeArmedForTesting());
     }
 
     void testRealtimeAllocation()
