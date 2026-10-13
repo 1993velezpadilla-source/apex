@@ -11,6 +11,8 @@ namespace APEX { namespace TuneLive {
 class PitchTracker final {
 public:
     static constexpr int kWindow = 512;
+    static constexpr int kFastWindow = 256;  // ~21ms preliminary onset detection
+    static constexpr int kFastMaxLag = 72;  // F0>=~165Hz only; never force bass octave
     static constexpr int kHop = 64;
     static constexpr int kMaxLag = 256;
     struct Result { float hz = 0.0f; float confidence = 0.0f; bool voiced = false; };
@@ -42,8 +44,15 @@ public:
         if (ready_ < kWindow) ++ready_;
         if (++hop_ < kHop) return false;
         hop_ = 0;
-        if (ready_ != kWindow) return false;
-        calculate();
+        if (ready_ < kFastWindow) return false;
+        if (ready_ < kWindow) {
+            // Produce useful upper-register F0 at ~21ms while the long
+            // 43ms window is still filling; use the full low-register tracker
+            // automatically once its history exists.
+            calculate(kFastWindow,std::min(kFastMaxLag,maxLag_),165.0f);
+            return true;
+        }
+        calculate(kWindow,maxLag_,55.0f);
         return true;
     }
     Result latest() const noexcept { return last_; }
@@ -52,19 +61,22 @@ public:
     int lastLagEvaluations() const noexcept { return lagEvaluations_; }
     double analysisWindowMs() const noexcept { return 1000.0 * kWindow / detectorRate_; }
 private:
-    void calculate() noexcept {
-        for (int i = 0; i < kWindow; ++i)
-            frame_[static_cast<std::size_t>(i)] = ring_[static_cast<std::size_t>((ringPos_ + i) % kWindow)];
+    void calculate(int window,int maxLag,float minHz) noexcept {
+        const int start = (ringPos_ + kWindow - window) % kWindow;
         double energy = 0.0;
-        for (float v : frame_) energy += static_cast<double>(v) * v;
+        for(int i=0;i<window;++i) {
+            const float v=ring_[static_cast<std::size_t>((start+i)%kWindow)];
+            frame_[static_cast<std::size_t>(i)]=v;
+            energy+=static_cast<double>(v)*v;
+        }
         last_ = {};
         lagEvaluations_ = 0;
-        if (energy < 512.0 * 0.000004) return; // about -54 dBFS RMS
-        const int w = kWindow - maxLag_;
+        if (energy < static_cast<double>(window) * 0.000004) return; // -54dBFS RMS
+        const int w = window - maxLag;
         double sum = 0.0;
         int best = -1;
         float chosen = 1.0f;
-        for (int lag = 1; lag <= maxLag_; ++lag) {
+        for (int lag = 1; lag <= maxLag; ++lag) {
             ++lagEvaluations_;
             double d = 0.0;
             for (int i = 0; i < w; ++i) {
@@ -92,7 +104,7 @@ private:
         if (best < 0) {
             // A last-point minimum without a next sample still counts.
             // Keep a conservative fallback for silence/noisy borderline data.
-            for (int lag = minLag_; lag <= maxLag_; ++lag) {
+            for (int lag = minLag_; lag <= maxLag; ++lag) {
                 if (cmndf_[static_cast<std::size_t>(lag)] < 0.17f) {
                     best=lag;
                     chosen=cmndf_[static_cast<std::size_t>(lag)];
@@ -102,7 +114,7 @@ private:
         }
         if (best < 0 || chosen > 0.17f) return;
         float lag = static_cast<float>(best);
-        if (best > minLag_ && best < maxLag_) {
+        if (best > minLag_ && best < maxLag) {
             const float a = cmndf_[static_cast<std::size_t>(best - 1)];
             const float b = cmndf_[static_cast<std::size_t>(best)];
             const float c = cmndf_[static_cast<std::size_t>(best + 1)];
@@ -111,7 +123,7 @@ private:
                 lag += std::clamp(0.5f * (a - c) / denominator, -0.5f, 0.5f);
         }
         const float hz = static_cast<float>(detectorRate_ / lag);
-        if (hz >= 55.0f && hz <= 1000.0f && std::isfinite(hz))
+        if (hz >= minHz && hz <= 1000.0f && std::isfinite(hz))
             last_ = {hz, 1.0f - chosen, true};
     }
     double sampleRate_ = 48000.0, detectorRate_ = 12000.0, pole_ = 0.0;
