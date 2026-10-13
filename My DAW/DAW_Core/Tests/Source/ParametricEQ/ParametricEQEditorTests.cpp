@@ -167,6 +167,7 @@ private:
             auto editor = std::make_unique<ParametricEQEditor> (processor);
             editor->setSize (sizeCase.width, sizeCase.height);
             editor->setSelectedBandForTesting (0);
+            editor->refreshResponseForTesting();
             juce::Image image (juce::Image::ARGB, sizeCase.width,
                                sizeCase.height, true);
             juce::Graphics graphics (image);
