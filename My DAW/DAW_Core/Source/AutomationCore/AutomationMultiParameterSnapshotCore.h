@@ -1,5 +1,6 @@
 #pragma once
 #include "AutomationManagerCore.h"
+#include "AutomationLaneStateValidationCore.h"
 #include "AutomationCurveMorphCore.h"
 #include <algorithm>
 #include <cmath>
@@ -323,10 +324,12 @@ struct AutomationMultiParameterSnapshotCore
         {
             const auto& change = plan.changes[i];
             if (change.target.trackId.isEmpty() || !supported(change.target.parameterId)
-                || !change.before.hasType("AutomationLane")
-                || !change.after.hasType("AutomationLane")
-                || change.before.getProperty("parameterId").toString() != change.target.parameterId
-                || change.after.getProperty("parameterId").toString() != change.target.parameterId
+                || !AutomationLaneStateValidationCore::valid(
+                    change.before, change.target.parameterId,
+                    AutomationCurveMorphCore::maxOutputKnots)
+                || !AutomationLaneStateValidationCore::valid(
+                    change.after, change.target.parameterId,
+                    AutomationCurveMorphCore::maxOutputKnots)
                 || manager.hasClipRegionsForParameter(
                     change.target.trackId, change.target.parameterId))
                 return false;
