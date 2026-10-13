@@ -89,6 +89,7 @@ public:
         testMagnitudeMatchesCanonicalResponse();
         testImpulsePeakAndReportedLatency();
         testMonoLinearPhasePdcMatchesAudibleImpulse();
+        testLinearPhaseMidSideCrossfeedPolarity();
         testLiveKernelTransitionPreservesOneDelay();
         testGroupDelayAndPhaseSlope();
         testModeSwitchingIsBlockInvariantAndClickBounded();
@@ -397,6 +398,82 @@ private:
         const double groupDelay = -delta / deltaOmega;
         expectWithinAbsoluteError (groupDelay, tau, 0.5,
                                    "group delay between 1.0 and 1.4 kHz");
+    }
+
+
+    void testLinearPhaseMidSideCrossfeedPolarity()
+    {
+        beginTest ("linear-phase stereo matrix sends signed Mid/Side crossfeed");
+        constexpr double rate = 48000.0;
+        constexpr double frequency = 1000.0;
+        constexpr int size = 128;
+        constexpr int total = 16384;
+        constexpr int scanStart = 8192;
+
+        // With only a LEFT input, the canonical 2x2 response must produce:
+        // MID boost -> positive correlated output in RIGHT;
+        // SIDE boost -> negative correlated output in RIGHT;
+        // L/R/Stereo -> no crossfeed (right stays mathematically silent).
+        for (const auto placement : {
+            ChannelPlacement::Stereo, ChannelPlacement::Left,
+            ChannelPlacement::Right, ChannelPlacement::Mid,
+            ChannelPlacement::Side
+        })
+        {
+            auto holder = std::make_unique<Processor>();
+            auto& processor = *holder;
+            enableBell (processor, 0, static_cast<float> (frequency),
+                        9.0f, 2.0f);
+            setUnits (processor, placementParameterIndex (0),
+                      static_cast<float> (placement));
+            processor.prepareToPlay (rate, size);
+            if (! ParametricEQTest::requestLinearPhaseAndSettle (processor))
+            {
+                expect (false, "kernel failed to settle for placement "
+                        + juce::String (static_cast<int> (placement)));
+                continue;
+            }
+            expectEquals (processor.getLatencySamples(),
+                          kLinearPhaseLatencySamples);
+            juce::AudioBuffer<float> block (2, size);
+            juce::MidiBuffer midi;
+            double dot = 0.0, referencePower = 0.0;
+            for (int offset = 0; offset < total; offset += size)
+            {
+                for (int i = 0; i < size; ++i)
+                {
+                    const int n = offset + i;
+                    block.setSample (0, i, static_cast<float> (
+                        0.2 * std::sin (2.0 * kPi * frequency * n / rate)));
+                    block.setSample (1, i, 0.0f);
+                }
+                processor.processBlock (block, midi);
+                if (offset < scanStart)
+                    continue;
+                for (int i = 0; i < size; ++i)
+                {
+                    const int n = offset + i;
+                    const double reference = 0.2 * std::sin (
+                        2.0 * kPi * frequency
+                        * (n - kLinearPhaseLatencySamples) / rate);
+                    dot += block.getSample (1, i) * reference;
+                    referencePower += reference * reference;
+                }
+            }
+            const double signedTransfer = dot / std::max (1.0e-12, referencePower);
+            const auto detail = juce::String (" placement ")
+                + juce::String (static_cast<int> (placement))
+                + " signed R<-L " + juce::String (signedTransfer, 6);
+            if (placement == ChannelPlacement::Mid)
+                expect (signedTransfer > 0.15,
+                        "MID must generate positive R<-L energy" + detail);
+            else if (placement == ChannelPlacement::Side)
+                expect (signedTransfer < -0.15,
+                        "SIDE must generate negative R<-L energy" + detail);
+            else
+                expect (std::abs (signedTransfer) < 0.005,
+                        "L/R/Stereo must not crossfeed" + detail);
+        }
     }
 
     void testModeSwitchingIsBlockInvariantAndClickBounded()
