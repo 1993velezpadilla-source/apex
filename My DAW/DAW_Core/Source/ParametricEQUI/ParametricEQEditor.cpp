@@ -2094,7 +2094,7 @@ public:
         {
             // Frequency/Gain/Q are the everyday EQ controls, placed together
             // in one true JUCE rotary strip; secondary settings scroll below.
-            const auto dials = bounds.removeFromTop (134);
+            auto dials = bounds.removeFromTop (134);
             const int columnWidth = dials.getWidth() / 3;
             frequencySlider_.setBounds (
                 dials.removeFromLeft (columnWidth).reduced (2, 1));
