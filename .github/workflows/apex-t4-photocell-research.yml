@@ -15,6 +15,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   pull_request:
@@ -32,6 +33,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   workflow_dispatch:
@@ -131,3 +133,20 @@ jobs:
           ./apex-magnetic-test.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC magnetic alias/latency tests failed" }
 
+      - name: Linux optimized 48k/64/128 standalone CPU survey (advisory)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp" \
+            -o /tmp/apex-opto-cpu-survey
+          /tmp/apex-opto-cpu-survey
+      - name: Windows optimized 48k/64/128 standalone CPU survey (advisory)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /std:c++17 /EHsc /W4 /WX /Fe:apex-opto-cpu-survey.exe "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC optimized Opto CPU survey compile failed" }
+          ./apex-opto-cpu-survey.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC optimized Opto CPU survey failed" }
