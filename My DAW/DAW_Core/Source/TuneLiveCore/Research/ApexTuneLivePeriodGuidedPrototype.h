@@ -15,6 +15,11 @@ public:
     void prepare(double sr, int channels=1) noexcept {
         rate_=(sr>=8000.0 && sr<=192000.0 && std::isfinite(sr)) ? sr : 48000.0;
         channels_=std::clamp(channels,1,2);
+        // Prepare-time coefficient computation; never call exp() from the
+        // per-sample realtime loop merely to rebuild unchanged constants.
+        periodAlpha_=1.0-std::exp(-1.0/(rate_*0.010));
+        ratioAlpha_=1.0-std::exp(-1.0/(rate_*0.004));
+        wetAlpha_=1.0-std::exp(-1.0/(rate_*0.008));
         reset();
     }
     void reset() noexcept {
@@ -62,13 +67,10 @@ public:
     void process(float* const* channelData,int channels,int n) noexcept {
         if(!channelData || channels!=channels_ || n<=0 ||
            !channelData[0] || (channels_==2 && !channelData[1])) return;
-        const double periodAlpha=1.0-std::exp(-1.0/(rate_*0.010));
-        const double ratioAlpha=1.0-std::exp(-1.0/(rate_*0.004));
-        const double wetAlpha=1.0-std::exp(-1.0/(rate_*0.008));
         for(int i=0;i<n;++i) {
-            period_+=(targetPeriod_-period_)*periodAlpha;
-            ratio_+=(targetRatio_-ratio_)*ratioAlpha;
-            wetMix_+=(targetWet_-wetMix_)*wetAlpha;
+            period_+=(targetPeriod_-period_)*periodAlpha_;
+            ratio_+=(targetRatio_-ratio_)*ratioAlpha_;
+            wetMix_+=(targetWet_-wetMix_)*wetAlpha_;
             // Two heads stay exactly one source pitch period apart.
             span_=2.0*period_;
             for(int c=0;c<channels_;++c) {
@@ -101,9 +103,10 @@ public:
     }
 private:
     double read(int c,double delay) const noexcept {
-        const double position=static_cast<double>(position_)-delay;
-        double wrapped=std::fmod(position,static_cast<double>(kCapacity));
-        if(wrapped<0.0) wrapped+=kCapacity;
+        // delay is always within [0, kCapacity), position_ is a ring index.
+        // One conditional wrap replaces the expensive per-sample std::fmod.
+        double wrapped=static_cast<double>(position_)-delay;
+        if(wrapped<0.0) wrapped+=static_cast<double>(kCapacity);
         const int index=static_cast<int>(wrapped);
         const int next=(index+1)%kCapacity;
         const double mix=wrapped-index;
@@ -114,6 +117,7 @@ private:
     std::array<std::array<float,kCapacity>,2> history_{};
     double rate_=48000.0,period_=218.0,targetPeriod_=218.0,span_=436.0,
            ratio_=1.0,targetRatio_=1.0,phase_=0.5,wetMix_=0.0,targetWet_=0.0;
+    double periodAlpha_=0.0,ratioAlpha_=0.0,wetAlpha_=0.0;
     int channels_=1,position_=0;
     bool active_=false;
 };
