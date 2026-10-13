@@ -57,7 +57,11 @@ struct AutomationMacroVst3TargetCore
 
             ++matches;
             if (matches > 1 || !parameter->isAutomatable()
-                || parameter->isDiscrete() || parameter->isBoolean())
+                || parameter->isDiscrete() || parameter->isBoolean()
+                // JUCE can report an explicitly quantised VST3 range even
+                // when isDiscrete() is false. Never interpolate such a lane.
+                || parameter->getNumSteps()
+                       != juce::AudioProcessorParameter::getDefaultNumParameterSteps())
                 return false;
         }
         if (matches != 1)
