@@ -66,7 +66,9 @@ int main() {
     broken.rectifierReleaseSec=NAN;
     Apex6AQ5DriverResearchCore safe;
     safe.prepare(NAN,broken);
-    for(double value:{NAN,INFINITY,-INFINITY,-1.0,100.0})
+    for(double value:{std::numeric_limits<double>::quiet_NaN(),
+                      std::numeric_limits<double>::infinity(),
+                      -std::numeric_limits<double>::infinity(),-1.0,100.0})
         for(int i=0;i<100;++i) {
             const double v=safe.tick(value);
             assert(std::isfinite(v)&&v>=0&&v<=1);
