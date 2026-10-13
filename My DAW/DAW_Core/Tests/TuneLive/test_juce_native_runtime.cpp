@@ -52,6 +52,31 @@ int main() {
     if(editor->getNumChildComponents()<12)
         return fail("editor has fewer controls than expected");
 
+    // Screenshot-only instrumentation: this captures the EXACT, existing
+    // JUCE production editor. Does not change the GUI or any DSP control.
+    // It is intentionally generated inside the real linked Windows JUCE
+    // harness, rather than a generated mockup or design concept.
+    editor->setVisible(true);
+    const juce::Image screenshot=editor->createComponentSnapshot(editor->getLocalBounds());
+    if(!screenshot.isValid() || screenshot.getWidth()!=900 || screenshot.getHeight()!=575)
+        return fail("actual Tune Live editor screenshot invalid dimensions");
+    const auto screenshotFile=juce::File::getCurrentWorkingDirectory()
+        .getChildFile("APEX_Tune_Live_Actual_GUI_Windows.png");
+    {
+        auto stream=screenshotFile.createOutputStream();
+        if(!stream) return fail("cannot create actual native GUI screenshot");
+        juce::PNGImageFormat png;
+        if(!png.writeImageToStream(screenshot,*stream))
+            return fail("failed writing actual native GUI PNG");
+        stream->flush();
+    }
+    if(screenshotFile.getSize()<4096)
+        return fail("captured native GUI PNG unexpectedly small");
+    std::cout<<"ACTUAL_TUNE_LIVE_GUI_SCREENSHOT "<<screenshotFile.getFullPathName()
+             <<" "<<screenshot.getWidth()<<"x"<<screenshot.getHeight()
+             <<" bytes="<<screenshotFile.getSize()<<"\\n";
+
+
     // Force precise Hard Tune in the JUCE host, not just in the portable
     // processor tester. In particular Flex Tune must be zero here.
     amount->setValueNotifyingHost(1.0f);
