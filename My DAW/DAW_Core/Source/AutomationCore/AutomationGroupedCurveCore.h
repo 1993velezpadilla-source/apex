@@ -54,6 +54,9 @@ struct AutomationGroupedCurveCore
                         const std::vector<AutomationPoint>& source,
                         Batch& result)
     {
+        // Never leak an earlier prepared edit to a caller when a later group
+        // operation fails validation (e.g. stale selected clips).
+        result.lanes.clear();
         if (!isSupportedParameter(parameterId) || selectedTrackIds.empty()
             || selectedTrackIds.size() > maxTargets || source.empty()
             || source.size() > maxPoints)
@@ -128,7 +131,8 @@ struct AutomationGroupedCurveCore
                 || !entry.after.hasType("AutomationLane")
                 || entry.before.getProperty("parameterId").toString() != entry.parameterId
                 || entry.after.getProperty("parameterId").toString() != entry.parameterId
-                || manager.findLane(entry.trackId, entry.parameterId) == nullptr)
+                || manager.findLane(entry.trackId, entry.parameterId) == nullptr
+                || !manager.findLane(entry.trackId, entry.parameterId)->isEnabled())
                 return false;
 
             // A clip region added after the batch was created must also block
