@@ -181,6 +181,11 @@ private:
                 expect (! primary[1]->getBounds().intersects (
                             primary[2]->getBounds()),
                         "GAIN and Q hit targets cannot overlap");
+                if (sizeCase.height < 500)
+                    for (const auto* dial : primary)
+                        expect (dial->getBottom() <= inspector.getHeight(),
+                            "short landscape quick-edit row must be FULLY "
+                            "visible, including its numeric text box");
             }
 
             auto inBounds = [] (const juce::Rectangle<int>& child,
