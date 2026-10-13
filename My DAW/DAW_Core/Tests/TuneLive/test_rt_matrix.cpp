@@ -87,6 +87,39 @@ static bool rightChannelVocal() {
            && dsp.frequencyHz()>440.0f;
 }
 
+// Two independent plugin instances must render exactly the same voice
+// with the same state and settings, as required for APEX bounce/freeze.
+static bool repeatableWetBounce() {
+    constexpr double sr=48000.0;
+    constexpr int n=48000, block=128;
+    std::vector<float> first(n),second(n);
+    for(int i=0;i<n;++i) {
+        const auto v=static_cast<float>(0.31*std::sin(6.283185307179586*443.5*i/sr)
+                     +0.05*std::sin(6.283185307179586*887.0*i/sr));
+        first[static_cast<std::size_t>(i)]=second[static_cast<std::size_t>(i)]=v;
+    }
+    APEX::TuneLive::DspSettings config;
+    config.correction=1.0f;config.retune=0.0f;config.humanize=0.0f;
+    config.flexTune=0.0f;
+    APEX::TuneLive::DspCore one,two;
+    one.prepare(sr,block,1);
+    two.prepare(sr,block,1);
+    double peakDifference=0.0;
+    for(int i=0;i<n;i+=block) {
+        float* monoOne[1]={first.data()+i};
+        float* monoTwo[1]={second.data()+i};
+        const int count=std::min(block,n-i);
+        one.process(monoOne,1,count,config);
+        two.process(monoTwo,1,count,config);
+    }
+    for(int i=0;i<n;++i)
+        peakDifference=std::max(peakDifference,
+            std::abs(static_cast<double>(first[static_cast<std::size_t>(i)])
+                   -static_cast<double>(second[static_cast<std::size_t>(i)])));
+    std::cout<<"repeated_wet_render_difference_peak="<<peakDifference<<"\\n";
+    return peakDifference<=1.0e-7;
+}
+
 int main() {
     bool pass=true;
     pass&=probe(44100.0,64,64,1);
@@ -97,6 +130,7 @@ int main() {
     pass&=probe(96000.0,128,128,1);
     pass&=probe(96000.0,256,256,2);
     pass&=rightChannelVocal();
+    pass&=repeatableWetBounce();
     if(!pass) {std::cerr<<"FAIL: bypass PDC/host block matrix\n";return 1;}
     std::cout<<"PASS: cross-platform PDC, mono/stereo, oversized block matrix\n";
 }
