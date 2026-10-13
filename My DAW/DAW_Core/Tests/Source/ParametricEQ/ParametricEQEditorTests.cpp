@@ -127,6 +127,20 @@ private:
                     expect (! b.intersects (tools[tool - 1]->getBounds()),
                             "adjacent graph actions cannot overlap");
             }
+            if (graph.getHeight() <= 200)
+            {
+                // Real 640x400 native screenshots previously hid the boosted
+                // EQ handle behind EQ MATCH. Test the source of the problem,
+                // not just whether the seven action buttons fit on screen.
+                for (int band = 0; band < 2; ++band)
+                {
+                    const auto node = editor->getNodeBoundsForTesting (band);
+                    for (const auto* tool : tools)
+                        expect (! node.intersects (tool->getBounds()),
+                                "short landscape EQ node is NOT concealed "
+                                "behind any top-row graph action");
+                }
+            }
             expectEquals (editor->getMatchButtonForTesting().getButtonText(),
                 sizeCase.width <= 430 ? juce::String ("MATCH")
                                       : juce::String ("EQ MATCH"),
