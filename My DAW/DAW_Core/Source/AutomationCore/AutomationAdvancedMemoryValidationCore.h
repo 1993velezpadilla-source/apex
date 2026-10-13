@@ -91,8 +91,8 @@ struct AutomationAdvancedMemoryValidationCore
                     || !std::isfinite(value) || !std::isfinite(tension)
                     || tension < -1.0f || tension > 1.0f
                     || value != AutomationLaneCore::clampValueForParameter(id, value)
-                    || automationCurveTypeToString(
-                        automationCurveTypeFromString(curve)) != curve)
+                    || juce::String(automationCurveTypeToString(
+                        automationCurveTypeFromString(curve))) != curve)
                     return false;
                 previous = sample;
             }
