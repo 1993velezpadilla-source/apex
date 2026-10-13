@@ -14,11 +14,47 @@ constexpr double pi=3.14159265358979323846;
 constexpr int block=128;
 struct Result {
     int pdc=0;
-    double cents=0.0,peak=0.0;
+    double cents=0.0,peak=0.0,correlationCents=9999.0;
+    float commandedShift=0.0f,appliedShift=0.0f,wetAmount=0.0f;
     bool voiced=false,finite=true,bypassCorrect=false;
 };
+// Independent long-window autocorrelation measures the ACTUAL wet signal,
+// so a shared YIN detector bias cannot masquerade as pitch correction.
+// Constrain the period search to a musical semitone around the known test
+// note; this is a synthetic regression oracle, not a real-time detector.
+double correlationHz(const std::vector<float>& wave,double sr,double expectedHz) {
+    const int minLag=std::max(2,static_cast<int>(std::floor(sr/(expectedHz*1.06))));
+    const int maxLag=static_cast<int>(std::ceil(sr/(expectedHz*0.94)));
+    const int begin=static_cast<int>(wave.size())-8192-maxLag;
+    if(begin<0)return 0.0;
+    const int count=8192;
+    auto score=[&](int lag) {
+        double ab=0.0,aa=0.0,bb=0.0;
+        for(int i=0;i<count;++i) {
+            const double a=wave[static_cast<std::size_t>(begin+i)];
+            const double b=wave[static_cast<std::size_t>(begin+i+lag)];
+            ab+=a*b;aa+=a*a;bb+=b*b;
+        }
+        return ab/std::sqrt(std::max(1.0e-24,aa*bb));
+    };
+    int best=minLag;
+    double peak=-2.0;
+    for(int lag=minLag;lag<=maxLag;++lag) {
+        const double value=score(lag);
+        if(value>peak){peak=value;best=lag;}
+    }
+    double lag=best;
+    if(best>minLag && best<maxLag) {
+        const double left=score(best-1),mid=score(best),right=score(best+1);
+        const double denom=left-2.0*mid+right;
+        if(std::abs(denom)>1.0e-12)
+            lag+=std::clamp(0.5*(left-right)/denom,-0.5,0.5);
+    }
+    return (peak>0.5 && lag>0.0)?sr/lag:0.0;
+}
 Result probe(double sr,double targetHz,double detune,
-             APEX::TuneLive::ShifterProfile profile) {
+             APEX::TuneLive::ShifterProfile profile,
+             float referenceHz=440.0f) {
     using namespace APEX::TuneLive;
     const int frames=static_cast<int>(sr*2.0);
     const double hz=targetHz*std::pow(2.0,detune/12.0);
@@ -40,6 +76,7 @@ Result probe(double sr,double targetHz,double detune,
     DspCore dsp;
     dsp.prepare(sr,block,1,profile);
     DspSettings cfg;
+    cfg.referenceHz=referenceHz;
     cfg.correction=1.0f;
     cfg.retune=0.0f;
     cfg.humanize=0.0f;
@@ -53,6 +90,12 @@ Result probe(double sr,double targetHz,double detune,
     tracker.prepare(sr);
     Result result;
     result.pdc=dsp.latencySamples();
+    result.commandedShift=dsp.debugTargetShiftSemitones();
+    result.appliedShift=dsp.debugAppliedShiftSemitones();
+    result.wetAmount=dsp.debugWetAmount();
+    const double independentHz=correlationHz(input,sr,targetHz);
+    if(independentHz>0.0)
+        result.correlationCents=1200.0*std::log2(independentHz/targetHz);
     for(int i=frames-static_cast<int>(sr*0.5);i<frames;++i) {
         const float v=input[static_cast<std::size_t>(i)];
         result.finite&=std::isfinite(v);
@@ -118,10 +161,38 @@ int main() {
                  <<" experimental12_pdc="<<faster.pdc
                  <<" experimental18_pdc="<<baseline.pdc
                  <<" experimental12_residual_cents="<<faster.cents
+                 <<" experimental12_autocorr_cents="<<faster.correlationCents
                  <<" experimental18_residual_cents="<<baseline.cents
+                 <<" experimental18_autocorr_cents="<<baseline.correlationCents
+                 <<" actual_target_shift_st="<<faster.commandedShift
+                 <<" applied_shift_st="<<faster.appliedShift
+                 <<" actual_wet="<<faster.wetAmount
                  <<" voiced12="<<faster.voiced
                  <<" release_accuracy_candidate="<<eligible<<"\n";
     }
+    // Research-only control-response sweep. This measures whether the
+    // short-window backend genuinely follows *more negative* requests,
+    // rather than blindly applying a guessed gain to the artist's pitch.
+    // Reference frequency is changed only in these offline probes; the
+    // hosted APEX plugin remains at its selected concert-pitch reference.
+    for(const double target:std::array<double,2>{{220.0,440.0}})
+        for(const float ref:std::array<float,5>{{430.0f,435.0f,440.0f,445.0f,450.0f}}) {
+            const auto r=probe(48000.0,target,0.30,
+                               ShifterProfile::Experimental12ms,ref);
+            if(!r.finite || !r.bypassCorrect || r.peak>2.0 || r.peak<0.005) {
+                std::cerr<<"FAIL: control response candidate violated safety/PDC\\n";
+                return 1;
+            }
+            const double desiredCents=1200.0*std::log2(ref/440.0);
+            std::cout<<"12ms_control_sweep target="<<target
+                     <<" reference_A4="<<ref
+                     <<" desired_offset_cents="<<desiredCents
+                     <<" command_st="<<r.commandedShift
+                     <<" applied_st="<<r.appliedShift
+                     <<" wet="<<r.wetAmount
+                     <<" yin_output_cents="<<r.cents
+                     <<" autocorr_output_cents="<<r.correlationCents<<"\\n";
+        }
     std::cout<<"12ms_research_safety_pass="<<safe
              <<" sound_accuracy_eligible="<<acceptable12ms<<"/"<<total
              <<" (f0 only, not vowel/formant certification)\n";
