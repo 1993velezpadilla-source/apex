@@ -4,13 +4,14 @@
 
 ## Why this architecture
 
-APEX is a DAW first. Pichy should discover native and third-party plugins from **the same live host chain**, never from manually maintained plugin-specific knowledge. C4, G10, Parametric EQ, VST3, and future intrinsic plugins become discoverable **once they exist in the host chain**. This does not claim that APEX Tune Live is already finalized/integrated.
+APEX is a DAW first. Pichy should discover native and third-party plugins from **the same live host chain**, never from manually maintained plugin-specific knowledge. C4, G10, Parametric EQ, VST3, and future intrinsic plugins are visible in the installed host scanner catalog when registered; **live parameters** become discoverable only after the plugin is actually instantiated in a track. This does not claim that APEX Tune Live is already finalized/integrated.
 
 The authoritative track/instance/parameter hierarchy comes from:
 
 - `ApplicationCore::capturePichyCapabilitySnapshot(out)`, the canonical control-plane entry point.
 - `TrackManager` and existing `pluginChains_` lookups, **without** calling the mutating `getPluginChain()`.
 - `PluginChainCore::getNumSlots() / getSlot()` and `PluginInstanceCore::getPluginInstanceId()`.
+- `juce::KnownPluginList::getTypes()` through the canonical `PluginScannerCore` to list installed/known native and third-party plugins without loading them. The scan is refused while a full plugin rescan is active.
 - `juce::AudioProcessor::getParameters()`, including `AudioProcessorParameterWithID::paramID` when present.
 - A JUCE-free, validated `apex::pichy::PichyCapabilitySnapshot`, owned by the caller.
 
@@ -29,6 +30,7 @@ Plugin parameter names, normalized current values, units and metadata come from 
 
 | Data | Present |
 |---|---|
+| Installed APEX Native / VST3 catalog, vendor, format, identifier | Yes (scanner inventory) |
 | Track ID, name, armed/monitoring state, master flag, input trim | Yes (snapshot) |
 | Plugin UUID, format, identifier, position, bypass, sandbox status | Yes |
 | Per-plugin host-exposed ID, name, unit, normalized value, steps | Yes if processor exposed |
@@ -41,7 +43,7 @@ Plugin parameter names, normalized current values, units and metadata come from 
 
 `My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp`
 
-Runs g++ C++17 on Linux and MSVC on Windows in `.github/workflows/pichy-capability-registry.yml`. Cases: APEX-native metadata, synthetic VST3 with unstable index-only parameter, slot reordering, cross-track identity collision, duplicated parameter keys, malformed IDs, NaN/out-of-range values, absent sandbox processor, memory caps, query correctness.
+Runs g++ C++17 on Linux and MSVC on Windows in `.github/workflows/pichy-capability-registry.yml`. Cases: APEX-native metadata, synthetic VST3 with unstable index-only parameter, installed catalog IDs, slot reordering, cross-track identity collision, duplicated parameter keys, malformed IDs, NaN/out-of-range values, absent sandbox processor, memory caps, query correctness.
 
 **Required before merge:** Windows Debug AND Release full APEX app build and JUCE integration smoke (open session with actual APEX native plugin and external VST3, capture snapshot while stopped and while playing, verify no new chains/GUI; reorder plugin and restore project; sandbox fallback; thread guard and race check). Existing full Windows build workflow is triggered via `TrackCore/Track.h` changes and is not the same as the portable schema test.
 
