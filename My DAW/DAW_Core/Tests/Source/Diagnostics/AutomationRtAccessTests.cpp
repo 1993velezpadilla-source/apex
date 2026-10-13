@@ -5851,6 +5851,67 @@ static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTes
  * Consumers pinning the old map must never see mixed old/new envelopes.
  * Invalid batches must reject before mutating even the first destination.
  */
+class AutomationV2NativeMixerGlobalPinTests final : public juce::UnitTest
+{
+public:
+    AutomationV2NativeMixerGlobalPinTests()
+        : juce::UnitTest("automation.v2-native-mixer-global-ppq-pin.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationParameterRegistry registry;
+        AutomationLaneStore lanes;
+        AutomationModeState modes;
+        DAW::FaderRangeCore taper;
+        constexpr ParameterID volume = 782001, pan = 782002,
+                              mute = 782003, solo = 782004;
+
+        // The four native DSP consumers must observe one bank-wide
+        // generation even when a control-thread macro publishes mid-block.
+        for (const auto id : {volume, pan, mute, solo})
+            lanes.getOrCreateLane(id).replacePoints({{0.0, 0.25f}});
+
+        const auto getVolume = [&] {
+            return getNativeTrackVolumeGainRT(volume, 0.5f, 1.0, true,
+                                              false, registry, lanes, modes, taper);
+        };
+        const auto getPan = [&] {
+            return getNativeTrackPanRT(pan, 0.0f, 1.0, true,
+                                       false, registry, lanes, modes);
+        };
+        const auto getMute = [&] {
+            return getNativeTrackMuteRT(mute, false, 1.0, true,
+                                        false, registry, lanes, modes);
+        };
+        const auto getSolo = [&] {
+            return getNativeTrackSoloRT(solo, false, 1.0, true,
+                                        false, registry, lanes, modes);
+        };
+
+        beginTest("All native DSP lanes remain pinned across global macro publish");
+        {
+            AutomationLaneStore::ScopedRtPin callback(lanes);
+            std::vector<AutomationLaneStore::BatchReplacement> batch;
+            for (const auto id : {volume, pan, mute, solo})
+                batch.push_back({id, {{0.0, 0.85f}}});
+            expect(lanes.replacePointsBatch(std::move(batch)));
+            expectWithinAbsoluteError(getVolume(), taper.normToGain(0.25f), 1e-5f);
+            expectWithinAbsoluteError(getPan(), -0.5f, 1e-5f);
+            expect(!getMute());
+            expect(!getSolo());
+        }
+
+        beginTest("Next block adopts all four new envelopes together");
+        expectWithinAbsoluteError(getVolume(), taper.normToGain(0.85f), 1e-5f);
+        expectWithinAbsoluteError(getPan(), 0.7f, 1e-5f);
+        expect(getMute());
+        expect(getSolo());
+    }
+};
+static AutomationV2NativeMixerGlobalPinTests automationV2NativeMixerGlobalPinTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
@@ -6034,6 +6095,37 @@ public:
             expect(store.getEffectiveLaneSnapshotRT() == originalMap);
         }
 
+        beginTest("Native grouped batch supports 128 targets and ONE publish");
+        Store native;
+        constexpr apex::automation::ParameterID first = 910000;
+        std::vector<Store::BatchReplacement> nativeGroup;
+        nativeGroup.reserve(128);
+        for (int i = 0; i < 128; ++i)
+        {
+            const auto id = first + (apex::automation::ParameterID)i;
+            native.getOrCreateLane(id).replacePoints({{0.0, 0.2f}});
+            nativeGroup.push_back({id, {{0.0, (float)i / 128.0f}}});
+        }
+        const auto beforeNative = native.getLaneSnapshotRT();
+        const auto genNative = native.getChangeGeneration();
+        expect(native.replacePointsBatch(std::move(nativeGroup)));
+        expectEquals((juce::int64)native.getChangeGeneration(),
+                     (juce::int64)genNative + 1);
+        const auto afterNative = native.getLaneSnapshotRT();
+        expect(beforeNative != afterNative);
+        for (int i : {0, 63, 127})
+        {
+            const auto id = first + (apex::automation::ParameterID)i;
+            const auto oldLane = Store::findLaneInSnapshotRT(beforeNative, id);
+            const auto newLane = Store::findLaneInSnapshotRT(afterNative, id);
+            if (oldLane != nullptr && newLane != nullptr)
+            {
+                expectWithinAbsoluteError(oldLane->getSnapshot()->front().normalizedValue,
+                                          0.2f, 0.00001f);
+                expectWithinAbsoluteError(newLane->getSnapshot()->front().normalizedValue,
+                                          (float)i / 128.0f, 0.00001f);
+            }
+        }
 
     }
 };

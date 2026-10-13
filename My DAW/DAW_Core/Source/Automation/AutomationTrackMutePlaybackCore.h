@@ -44,7 +44,7 @@ namespace apex::automation
             return std::isfinite(v) ? (v >= 0.5f) : fallbackMuted;
         }
 
-        const auto lane = lanes.findLaneRT(id);
+        const auto lane = AutomationLaneStore::findLaneInSnapshotRT(lanes.getEffectiveLaneSnapshotRT(), id);
         if (lane == nullptr)
             return fallbackMuted;
         const auto points = lane->getSnapshot();

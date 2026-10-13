@@ -44,7 +44,7 @@ namespace apex::automation
             const float value = live->getNormalizedValue();
             return std::isfinite(value) ? value >= 0.5f : manualSolo;
         }
-        const auto lane = lanes.findLaneRT(id);
+        const auto lane = AutomationLaneStore::findLaneInSnapshotRT(lanes.getEffectiveLaneSnapshotRT(), id);
         if (lane == nullptr)
             return manualSolo;
         const auto points = lane->getSnapshot();

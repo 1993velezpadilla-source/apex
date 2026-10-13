@@ -50,7 +50,7 @@ namespace apex::automation
                 : fallbackPan;
         }
 
-        const auto lane = lanes.findLaneRT(id);
+        const auto lane = AutomationLaneStore::findLaneInSnapshotRT(lanes.getEffectiveLaneSnapshotRT(), id);
         if (lane == nullptr)
             return fallbackPan;
         const auto points = lane->getSnapshot();

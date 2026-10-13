@@ -163,6 +163,82 @@ public:
     }
 
     /**
+     * All-or-nothing native volume/pan PPQ mirror used by selected-track
+     * macros, grouped curves and snapshot morphs. Caller must have committed
+     * a fully validated manager transaction; Undo uses exactly this route.
+     * No plugin targets may be introduced through native key guessing.
+     */
+    static bool syncNativeBatchToApex(
+        const AutomationUIHelper& helper,
+        const std::vector<AutomationMultiParameterSnapshotCore::Target>& targets,
+        double sampleRate, double tempoBpm)
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        if (targets.empty() || targets.size() > 128
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return false;
+
+        auto& registry = KR::getInstance();
+        auto& store = Store::getInstance();
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        if (!std::isfinite(ppqPerSample) || ppqPerSample <= 0.0)
+            return false;
+
+        std::vector<Store::BatchReplacement> prepared;
+        prepared.reserve(targets.size());
+        for (const auto& target : targets)
+        {
+            if (target.trackId.isEmpty())
+                return false;
+            juce::String key;
+            if (target.parameterId == AutomationLaneCore::trackVolumeParameterId)
+                key = KR::trackVolumeKey(target.trackId);
+            else if (target.parameterId == AutomationLaneCore::trackPanParameterId)
+                key = KR::trackPanKey(target.trackId);
+            else
+                return false; // never guess plugin destinations
+
+            const auto* lane = helper.findLane(target.trackId, target.parameterId);
+            if (lane == nullptr || !lane->isEnabled())
+                return false;
+
+            Store::BatchReplacement replacement;
+            replacement.id = registry.getOrCreateID(key);
+            replacement.points.reserve(lane->points.size());
+            for (const auto& point : lane->points)
+            {
+                if (point.timeSamples < 0 || !std::isfinite(point.value)
+                    || !std::isfinite(point.tensionToNext)
+                    || point.tensionToNext < -1.0f || point.tensionToNext > 1.0f
+                    || !std::isfinite((double)point.timeSamples * ppqPerSample))
+                    return false;
+                const auto normalized = normaliseForApex(target.parameterId, point.value);
+                if (!std::isfinite(normalized)
+                    || normalized < 0.0f || normalized > 1.0f)
+                    return false;
+                replacement.points.push_back({
+                    (double)point.timeSamples * ppqPerSample,
+                    normalized, toApexCurveType(point.curveToNext),
+                    point.tensionToNext
+                });
+            }
+            // A duplicated native destination rejects the entire group.
+            for (const auto& existing : prepared)
+                if (existing.id == replacement.id)
+                    return false;
+            prepared.push_back(std::move(replacement));
+        }
+
+        // Creating an absent PPQ lane is safe: it stays empty until the
+        // transaction atomically publishes all prepared envelopes together.
+        for (const auto& entry : prepared)
+            store.getOrCreateLane(entry.id);
+        return store.replacePointsBatch(std::move(prepared));
+    }
+
+    /**
      * Control-thread PPQ bridge for an already committed VST3 macro plan.
      * Converts all host-verified core lanes first, and atomically replaces
      * their PPQ snapshots with one lane-map publication. No audio-thread
