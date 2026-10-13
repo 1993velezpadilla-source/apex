@@ -12,18 +12,29 @@ namespace APEX::Compressor {
 // Fixed LUT curve for the experimental 4x magnetic stage. Constructed in
 // prepare() only; evaluate() is deterministic with no locks or allocations.
 // Precision is measured against std::tanh in portable regression tests.
+// One immutable tanh table per program, shared by every plugin instance.
+// prepare() runs off the audio thread and initializes the C++17 function
+// local static once. Audio callbacks only read a raw pointer: no mutex,
+// dynamic allocation, initialization guard, or per-instance 16 kB LUT.
 class ApexMagneticTanhLookup final {
 public:
     void prepare() noexcept {
-        for(std::size_t i=0;i<table_.size();++i) {
-            const double argument=-kRange+2*kRange*static_cast<double>(i)/
-                                  static_cast<double>(kSegments);
-            table_[i]=static_cast<float>(std::tanh(argument));
-        }
+        static const auto shared=[]() noexcept {
+            std::array<float,kSegments+1> curve{};
+            for(std::size_t i=0;i<curve.size();++i) {
+                const double argument=-kRange+2*kRange*static_cast<double>(i)/
+                                      static_cast<double>(kSegments);
+                curve[i]=static_cast<float>(std::tanh(argument));
+            }
+            return curve;
+        }();
+        table_=shared.data();
     }
     double evaluate(double argument) const noexcept {
         if(argument<=-kRange)return -1.0;
         if(argument>=kRange)return 1.0;
+        // prepare() is mandatory before process(); debug asserts belong in
+        // test harnesses, not inside the real-time sample loop.
         const double position=(argument+kRange)*static_cast<double>(kSegments)/
                               (2.0*kRange);
         const auto lo=static_cast<std::size_t>(position);
@@ -34,7 +45,7 @@ public:
 private:
     static constexpr double kRange=12.0;
     static constexpr std::size_t kSegments=4096;
-    std::array<float,kSegments+1> table_{};
+    const float* table_=nullptr;
 };
 struct ApexMagneticResearchSettings {
     ApexTransformerCircuit electrical{};
