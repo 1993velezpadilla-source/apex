@@ -2,7 +2,7 @@
 // Research-only SHORT-HISTORY YIN onset estimator. Not a replacement for
 // the full C2-capable YIN authority, not shipped, and not a PDC statement.
 // Its harmonic short-window estimate requires two agreeing frames. Frequencies
-// below ~160 Hz intentionally have no early-onset claim.
+// below 200 Hz intentionally have no early-onset claim.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,7 +21,7 @@ public:
         detectorRate_=rate_/decimation_;
         pole_=std::exp(-2.0*3.14159265358979323846*1800.0/rate_);
         minLag_=std::max(2,static_cast<int>(detectorRate_/1000.0));
-        maxLag_=std::clamp(static_cast<int>(std::ceil(detectorRate_/160.0)),
+        maxLag_=std::clamp(static_cast<int>(std::ceil(detectorRate_/200.0)),
                            minLag_+2,kMaxLag);
         reset();
     }
@@ -111,7 +111,7 @@ private:
                 period+=std::clamp(0.5*(a-c)/denom,-0.5,0.5);
         }
         const float hz=static_cast<float>(detectorRate_/period);
-        if(!std::isfinite(hz)||hz<160.0f||hz>1000.0f)return {};
+        if(!std::isfinite(hz)||hz<200.0f||hz>1000.0f)return {};
         // Guard against low male-register notes masquerading as their 2nd
         // harmonic: a real 110-Hz F0 with a strong 220-Hz harmonic can fool
         // a ~13ms short-window YIN detector into a premature A3 lock.
