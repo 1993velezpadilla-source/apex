@@ -34,6 +34,10 @@ public:
     };
 
     static constexpr size_t maxClipboardPoints = 32768;
+    // The clipboard rescales sample positions through floating-point time.
+    // Stay within the exact-integer range of IEEE-754 double so llround()
+    // cannot overflow when given malformed project lengths near INT64_MAX.
+    static constexpr int64_t maxExactSampleLength = (int64_t{1} << 53) - 1;
 
     // A failed copy must be reported as failed: previously the manager
     // returned true for a malformed/empty region, while the clipboard still
@@ -41,6 +45,7 @@ public:
     bool copyRegionState(const AutomationClipRegionCore& region)
     {
         if (!region.isValid() || region.trackId.isEmpty()
+            || region.lengthSamples > maxExactSampleLength
             || region.startSample < 0
             || region.lengthSamples > std::numeric_limits<int64_t>::max()
                                      - region.startSample
@@ -79,6 +84,8 @@ public:
     {
         return clipState_.has_value()
             && destination.isValid()
+            && destination.trackId.isNotEmpty()
+            && destination.lengthSamples <= maxExactSampleLength
             && destination.startSample >= 0
             && destination.lengthSamples <= std::numeric_limits<int64_t>::max()
                                                     - destination.startSample
