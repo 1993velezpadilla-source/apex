@@ -62,6 +62,7 @@ public:
         currentMix_ = parameters_.mix;
         currentGain_ = dbToGain(parameters_.gainDb);
         activeMix_ = parameters_.bypass ? 0.0 : 1.0;
+        hasProcessed_ = false;
         gainReductionDb_ = 0.0;
         slowCoeffSamplesUntilRefresh_ = 0;
         cachedSlowCoeff_ = 1.0;
@@ -72,6 +73,14 @@ public:
         // Call only at a safe control boundary; parent processor owns the
         // atomic parameter snapshot and automation handoff.
         parameters_ = OptoParameters::sanitise(requested);
+        // Initial state restore before the first audio block should not
+        // manufacture an audible ramp from the factory preset.
+        if (!hasProcessed_)
+        {
+            activeMix_ = parameters_.bypass ? 0.0 : 1.0;
+            currentMix_ = parameters_.mix;
+            currentGain_ = dbToGain(parameters_.gainDb);
+        }
     }
 
     OptoParameters getParameters() const noexcept { return parameters_; }
@@ -82,6 +91,7 @@ public:
     void process (float* left, float* right, int frames) noexcept
     {
         if (left == nullptr || frames <= 0) return;
+        hasProcessed_ = true;
         const bool stereo = right != nullptr && right != left;
         constexpr double epsilon = 1.0e-25;
         const double thresholdDb = -(parameters_.peakReduction * 0.40);
@@ -215,6 +225,7 @@ private:
     double scLowL_ = 0.0, scLowR_ = 0.0, currentMix_ = 1.0, currentGain_ = 1.0;
     double gainReductionDb_ = 0.0;
     double activeMix_ = 1.0;
+    bool hasProcessed_ = false;
     double cachedSlowCoeff_ = 1.0;
     int slowCoeffSamplesUntilRefresh_ = 0;
 };
