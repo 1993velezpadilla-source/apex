@@ -60,9 +60,9 @@ int main() {
                  <<" false_octave_frames="<<falseOctave
                  <<" octave_veto_frames="<<fast.octaveVetoCount()
                  <<" first_early_ms="<<1000.0*fast.firstVoicedSample()/sampleRate
-                 <<" pass="<<pass<<"\\n";
+                 <<" pass="<<pass<<"\n";
     }
     std::cout<<"OCTAVE_GUARD_TOTAL success="<<safe
-             <<" (harmonic ambiguity requires additional real-voice gating)\\n";
+             <<" (harmonic ambiguity requires additional real-voice gating)\n";
     return safe?0:1;
 }
