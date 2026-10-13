@@ -29,7 +29,7 @@ public:
         ring_.fill(0.0f);frame_.fill(0.0f);cmndf_.fill(1.0f);
         low1_=low2_=0.0;ringPosition_=filled_=substep_=hop_=0;
         stableCount_=0;priorCandidate_=0.0f;result_={};firstSample_=-1;
-        samples_=0;
+        samples_=0; octaveVetoCount_=0;
     }
     // Returns true when a new analysis was produced. The latest result can
     // be unvoiced. Call once per ORIGINAL audio input sample.
@@ -61,6 +61,7 @@ public:
     Result latest() const noexcept {return result_;}
     int64_t firstVoicedSample() const noexcept {return firstSample_;}
     double minimumWindowMs() const noexcept {return 1000.0*kWindow/detectorRate_;}
+    int octaveVetoCount() const noexcept {return octaveVetoCount_;}
 private:
     Result measure() noexcept {
         const int start=ringPosition_;
@@ -111,6 +112,37 @@ private:
         }
         const float hz=static_cast<float>(detectorRate_/period);
         if(!std::isfinite(hz)||hz<160.0f||hz>1000.0f)return {};
+        // Guard against low male-register notes masquerading as their 2nd
+        // harmonic: a real 110-Hz F0 with a strong 220-Hz harmonic can fool
+        // a ~13ms short-window YIN detector into a premature A3 lock.
+        // Compare the observed waveform error at the candidate lag and
+        // TWO candidate periods over an IDENTICAL sample support. A true
+        // 220-Hz source repeats at both; a 110-Hz source with audible odd
+        // harmonics has substantially less error at the doubled lag.
+        // Fractional interpolation avoids rejecting genuine 220-Hz sources
+        // merely because the detector's true period ends in half a sample.
+        const double twice=2.0*period;
+        const int count=kWindow-static_cast<int>(std::ceil(twice))-2;
+        if(count>=32) {
+            const int lo1=static_cast<int>(period);
+            const int lo2=static_cast<int>(twice);
+            const double mix1=period-lo1, mix2=twice-lo2;
+            double e1=0.0,e2=0.0,reference=0.0;
+            for(int i=0;i<count;++i) {
+                const double a=frame_[static_cast<std::size_t>(i)];
+                const double b=frame_[static_cast<std::size_t>(i+lo1)]*(1.0-mix1)
+                              +frame_[static_cast<std::size_t>(i+lo1+1)]*mix1;
+                const double c=frame_[static_cast<std::size_t>(i+lo2)]*(1.0-mix2)
+                              +frame_[static_cast<std::size_t>(i+lo2+1)]*mix2;
+                e1+=(a-b)*(a-b);
+                e2+=(a-c)*(a-c);
+                reference+=a*a;
+            }
+            if(reference>1e-8 && e1/reference>0.0002 && e2<e1*0.20) {
+                ++octaveVetoCount_;
+                return {};
+            }
+        }
         return {hz,1.0f-bestCmndf,true};
     }
     std::array<float,kWindow> ring_{},frame_{};
@@ -119,6 +151,7 @@ private:
            low1_=0.0,low2_=0.0;
     int decimation_=4,minLag_=12,maxLag_=72;
     int ringPosition_=0,filled_=0,substep_=0,hop_=0,stableCount_=0;
+    int octaveVetoCount_=0;
     int64_t samples_=0,firstSample_=-1;
     float priorCandidate_=0.0f;
     Result result_{};
