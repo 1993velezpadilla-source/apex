@@ -139,6 +139,16 @@ jobs:
           & $exe '--category=APEX.ParametricEQ' '--seed=0xA9E12026'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # Real PNG frames from the JUCE software renderer, not a stylized
+      # mock-up. Retained even while the whole-DAW link is in progress.
+      - name: Upload APEX Prism GUI screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Prism-GUI-${{ matrix.configuration }}-${{ github.run_id }}
+          path: apex-eq-ui-snapshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
       # Only after the isolated EQ suite has passed do we attempt the
       # full DAW compilation/link. This remains a required GREEN gate.
       - name: Build APEX ${{ matrix.configuration }}

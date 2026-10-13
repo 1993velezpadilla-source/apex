@@ -3,6 +3,7 @@
 #include "../ParametricEQCore/ParametricEQSpectrumGrabCore.h"
 #include "../ParametricEQCore/ParametricEQMatchCore.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <functional>
@@ -16,23 +17,128 @@ namespace
 
 // APEX visual identity (mirrors the canonical APEX palette — deep violet
 // accent over layered blue-black panels, sky-blue signal curves).
+// APEX Prism: graphite/navy depth, cyan response, violet controls and amber
+// selection. No bitmap assets or fonts: pixel-perfect native JUCE on HiDPI.
 struct Palette
 {
-    static juce::Colour background() { return juce::Colour (0xff0d0d0f); }
-    static juce::Colour surface() { return juce::Colour (0xff1a1a1e); }
-    static juce::Colour surfaceHover() { return juce::Colour (0xff212126); }
-    static juce::Colour border() { return juce::Colour (0xff252529); }
-    static juce::Colour text() { return juce::Colour (0xffe4e4e8); }
-    static juce::Colour textSecondary() { return juce::Colour (0xff9a9aa3); }
-    static juce::Colour accent() { return juce::Colour (0xff7c3aed); }
-    static juce::Colour accentActive() { return juce::Colour (0xff6025cc); }
-    static juce::Colour curve() { return juce::Colour (0xff38b2f8); }
-    static juce::Colour curveMid() { return juce::Colour (0xfffbbf24); }
-    static juce::Colour curveSide() { return juce::Colour (0xff14b87a); }
-    static juce::Colour selected() { return juce::Colour (0xfffbbf24); }
-    static juce::Colour danger() { return juce::Colour (0xffe83535); }
-    static juce::Colour positive() { return juce::Colour (0xff14b87a); }
+    static juce::Colour background() { return juce::Colour (0xff090e19); }
+    static juce::Colour surface() { return juce::Colour (0xff121a2b); }
+    static juce::Colour surfaceHover() { return juce::Colour (0xff27334d); }
+    static juce::Colour border() { return juce::Colour (0xff34415d); }
+    static juce::Colour text() { return juce::Colour (0xffeff5ff); }
+    static juce::Colour textSecondary() { return juce::Colour (0xff9aabc9); }
+    static juce::Colour accent() { return juce::Colour (0xff9b71f7); }
+    static juce::Colour accentActive() { return juce::Colour (0xff7544db); }
+    static juce::Colour curve() { return juce::Colour (0xff55dff4); }
+    static juce::Colour curveMid() { return juce::Colour (0xffffc777); }
+    static juce::Colour curveSide() { return juce::Colour (0xff48e1b4); }
+    static juce::Colour selected() { return juce::Colour (0xffffd68e); }
+    static juce::Colour danger() { return juce::Colour (0xfff16c85); }
+    static juce::Colour positive() { return juce::Colour (0xff48e1b4); }
 };
+
+// Scoped native design system: buttons, control typography and slider rails.
+// Paint occurs exclusively on the JUCE message thread. The singleton is
+// immutable after construction and lives longer than any open plugin editor.
+class PrismLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    PrismLookAndFeel()
+    {
+        setColour (juce::Slider::textBoxBackgroundColourId, Palette::surface());
+        setColour (juce::Slider::textBoxTextColourId, Palette::text());
+        setColour (juce::Slider::textBoxOutlineColourId, Palette::border());
+        setColour (juce::ComboBox::backgroundColourId, Palette::surfaceHover());
+        setColour (juce::ComboBox::textColourId, Palette::text());
+        setColour (juce::ComboBox::outlineColourId, Palette::border());
+        setColour (juce::PopupMenu::backgroundColourId, Palette::surface());
+        setColour (juce::PopupMenu::textColourId, Palette::text());
+        setColour (juce::ScrollBar::thumbColourId, Palette::accent().withAlpha (0.75f));
+        setColour (juce::TextButton::buttonColourId, Palette::surfaceHover());
+        setColour (juce::TextButton::buttonOnColourId, Palette::accentActive());
+        setColour (juce::TextButton::textColourOffId, Palette::text());
+        setColour (juce::TextButton::textColourOnId, Palette::text());
+    }
+
+    void drawButtonBackground (juce::Graphics& g, juce::Button& button,
+                               const juce::Colour& colour, bool hovered,
+                               bool down) override
+    {
+        auto area = button.getLocalBounds().toFloat().reduced (1.0f);
+        if (area.isEmpty())
+            return;
+        const float radius = std::min (9.0f, area.getHeight() * 0.24f);
+        const auto base = button.isEnabled() ? colour : Palette::surface();
+        const auto top = base.brighter (hovered ? 0.18f : 0.07f);
+        const auto bottom = base.darker (down ? 0.22f : 0.08f);
+        g.setGradientFill (juce::ColourGradient (
+            top, area.getX(), area.getY(), bottom,
+            area.getX(), area.getBottom(), false));
+        g.fillRoundedRectangle (area, radius);
+        g.setColour ((hovered ? Palette::accent() : Palette::border())
+                         .withAlpha (button.isEnabled() ? 0.76f : 0.35f));
+        g.drawRoundedRectangle (area.reduced (0.5f), radius, 1.0f);
+        if (down)
+        {
+            g.setColour (Palette::accent().withAlpha (0.35f));
+            g.drawRoundedRectangle (area.reduced (2.0f),
+                                    std::max (2.0f, radius - 2.0f), 1.0f);
+        }
+    }
+
+    void drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                         bool, bool) override
+    {
+        const float size = std::clamp (button.getHeight() * 0.26f,
+                                       10.0f, 12.5f);
+        g.setFont (juce::Font (juce::FontOptions (size, juce::Font::bold)));
+        g.setColour (Palette::text().withAlpha (
+            button.isEnabled() ? 0.97f : 0.43f));
+        g.drawFittedText (button.getButtonText(),
+                          button.getLocalBounds().reduced (4, 2),
+                          juce::Justification::centred, 1, 0.65f);
+    }
+
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int width,
+                           int height, float sliderPos, float, float,
+                           juce::Slider::SliderStyle,
+                           juce::Slider& slider) override
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        auto label = juce::Rectangle<int> (x + 3, y + 1,
+                                           std::max (1, width - 6), 19);
+        g.setColour (Palette::textSecondary().withAlpha (
+            slider.isEnabled() ? 0.95f : 0.43f));
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawFittedText (slider.getTitle(), label,
+                          juce::Justification::centredLeft, 1);
+
+        const float left = static_cast<float> (x + 8);
+        const float right = static_cast<float> (x + std::max (9, width - 8));
+        const float barY = static_cast<float> (y + height) - 13.0f;
+        const float valueX = std::clamp (sliderPos, left, right);
+        const juce::Rectangle<float> rail (left, barY, right - left, 4.0f);
+        g.setColour (Palette::border().withAlpha (0.82f));
+        g.fillRoundedRectangle (rail, 2.0f);
+        g.setGradientFill (juce::ColourGradient (
+            Palette::accent(), left, barY,
+            Palette::curve(), right, barY, false));
+        g.fillRoundedRectangle (juce::Rectangle<float> (
+            left, barY, std::max (1.0f, valueX - left), 4.0f), 2.0f);
+        g.setColour (Palette::accent().withAlpha (0.23f));
+        g.fillEllipse (valueX - 9.0f, barY - 7.0f, 18.0f, 18.0f);
+        g.setColour (slider.isEnabled() ? Palette::text()
+                                        : Palette::textSecondary());
+        g.fillEllipse (valueX - 5.0f, barY - 3.0f, 10.0f, 10.0f);
+    }
+};
+
+PrismLookAndFeel& prismLookAndFeel()
+{
+    static PrismLookAndFeel look;
+    return look;
+}
 
 // Local APEX clipboard; valid across native EQ editor instances on the
 // JUCE message thread. This copies hosted parameter VALUES only, never
@@ -189,7 +295,7 @@ public:
         characterButton_.setClickingTogglesState (false);
         title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, Palette::text());
-        title_.setText ("APEX Parametric EQ", juce::dontSendNotification);
+        title_.setText ("APEX / EQ", juce::dontSendNotification);
         title_.setJustificationType (juce::Justification::centredLeft);
         title_.setInterceptsMouseClicks (false, false);
 
@@ -310,6 +416,21 @@ public:
         repaint();
     }
 
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().darker (0.28f), area.getTopLeft(),
+            Palette::background(), area.getBottomLeft(), false));
+        g.fillRect (area);
+        g.setColour (Palette::accent().withAlpha (0.9f));
+        g.fillRect (0.0f, 0.0f, std::min (4.0f, area.getWidth()),
+                    area.getHeight());
+        g.setColour (Palette::border().withAlpha (0.70f));
+        g.drawLine (0.0f, area.getBottom() - 0.5f,
+                    area.getRight(), area.getBottom() - 0.5f);
+    }
+
     void resized() override
     {
         auto bounds = getLocalBounds().reduced (4, 4);
@@ -341,6 +462,9 @@ public:
         title_.setVisible (true);
         const int buttonWidth = std::max (44, bounds.getWidth() / 10);
         const int titleWidth = std::max (0, bounds.getWidth() - 8 * buttonWidth);
+        title_.setText (titleWidth >= 210 ? "APEX / PRISM EQ"
+                                          : "APEX / EQ",
+                        juce::dontSendNotification);
         title_.setBounds (bounds.removeFromLeft (titleWidth));
         designButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         bypassButton_.setBounds (bounds.removeFromLeft (buttonWidth));
@@ -500,27 +624,51 @@ public:
         startTimerHz (25);
     }
 
+    // The offscreen CI screenshot test pulls an already-published response
+    // synchronously on the message thread. Production still uses the timer.
+    void ingestPublishedResponseForTesting()
+    {
+        ResponseFrame frame;
+        if (processor_.getResponseCore().consumeLatest (frame))
+        {
+            latestFrame_ = frame;
+            curveDirty_ = true;
+        }
+    }
+
     void resized() override
     {
         curveDirty_ = true;
-        sketchButton_.setBounds (8, 8, 92, ParametricEQEditor::kTouchTarget);
-        grabButton_.setBounds (108, 8, 92, ParametricEQEditor::kTouchTarget);
-        copyButton_.setBounds (208, 8, 44, ParametricEQEditor::kTouchTarget);
-        pasteButton_.setBounds (258, 8, 58, ParametricEQEditor::kTouchTarget);
-        matchButton_.setBounds (8, 58, 110, ParametricEQEditor::kTouchTarget);
-        matchSaveButton_.setBounds (122, 58, 92,
-                                    ParametricEQEditor::kTouchTarget);
-        matchLoadButton_.setBounds (218, 58, 92,
-                                    ParametricEQEditor::kTouchTarget);
+        // A single touch-safe tool ribbon replaces the previous two rows
+        // that covered ~100 px of a 142 px graph on 320px phones. Every
+        // action remains accessible; 7 * 44 + 2 * 6 == 320 exactly.
+        constexpr int padding = 6;
+        const int width = std::max (1, getWidth());
+        const int cell = std::clamp (
+            (width - 2 * padding) / 7,
+            ParametricEQEditor::kTouchTarget, 110);
+        std::array<juce::TextButton*, 7> actions {{
+            &sketchButton_, &grabButton_, &copyButton_, &pasteButton_,
+            &matchButton_, &matchSaveButton_, &matchLoadButton_
+        }};
+        int x = padding;
+        for (auto* action : actions)
+        {
+            action->setBounds (x, 8, cell, ParametricEQEditor::kTouchTarget);
+            x += cell;
+        }
     }
 
     void paint (juce::Graphics& g) override
     {
         const auto bounds = getLocalBounds().toFloat();
-        g.setColour (Palette::background());
-        g.fillAll();
-        g.setColour (Palette::surface());
-        g.fillRect (bounds.reduced (1.0f));
+        g.setGradientFill (juce::ColourGradient (
+            juce::Colour (0xff19243b), bounds.getTopLeft(),
+            juce::Colour (0xff090f20), bounds.getBottomLeft(), false));
+        g.fillRect (bounds);
+
+        // Frequency-domain graph: quiet grid, strong zero-dB reference,
+        // precision analyser, soft coloured response area and lit nodes.
         drawGrid (g, bounds);
         if (curveDirty_)
         {
@@ -529,14 +677,33 @@ public:
         }
         if (spectrumActive_)
             drawSpectrum (g, bounds);
+
+        if (! mainCurve_.isEmpty())
+        {
+            juce::Path fill (mainCurve_);
+            fill.lineTo (bounds.getRight(), bounds.getBottom());
+            fill.lineTo (bounds.getX(), bounds.getBottom());
+            fill.closeSubPath();
+            g.setGradientFill (juce::ColourGradient (
+                Palette::curve().withAlpha (0.22f), bounds.getTopLeft(),
+                Palette::curve().withAlpha (0.01f), bounds.getBottomLeft(),
+                false));
+            g.fillPath (fill);
+        }
+        g.setColour (Palette::curve().withAlpha (0.16f));
+        g.strokePath (mainCurve_, juce::PathStrokeType (
+            8.0f, juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
         g.setColour (Palette::curve());
-        g.strokePath (mainCurve_, juce::PathStrokeType (1.8f));
+        g.strokePath (mainCurve_, juce::PathStrokeType (
+            2.4f, juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
         if (mixedPlacements_)
         {
-            g.setColour (Palette::curveMid().withAlpha (0.75f));
-            g.strokePath (midCurve_, juce::PathStrokeType (1.0f));
-            g.setColour (Palette::curveSide().withAlpha (0.75f));
-            g.strokePath (sideCurve_, juce::PathStrokeType (1.0f));
+            g.setColour (Palette::curveMid().withAlpha (0.85f));
+            g.strokePath (midCurve_, juce::PathStrokeType (1.6f));
+            g.setColour (Palette::curveSide().withAlpha (0.88f));
+            g.strokePath (sideCurve_, juce::PathStrokeType (1.6f));
         }
 
         if (sketching_ && sketchPointCount_ > 1)
@@ -553,7 +720,7 @@ public:
                 else
                     sketch.lineTo (x, y);
             }
-            g.setColour (Palette::selected().withAlpha (0.92f));
+            g.setColour (Palette::selected().withAlpha (0.95f));
             g.strokePath (sketch, juce::PathStrokeType (
                 3.0f, juce::PathStrokeType::curved,
                 juce::PathStrokeType::rounded));
@@ -561,6 +728,19 @@ public:
         drawNodes (g, bounds);
         if (grabArmed_)
             drawGrabPeaks (g);
+
+        // Never steal input events: this is purely painted status text.
+        if (getWidth() >= 560)
+        {
+            g.setFont (juce::Font (juce::FontOptions (
+                10.5f, juce::Font::bold)));
+            g.setColour (Palette::textSecondary().withAlpha (0.88f));
+            g.drawFittedText ("APEX  /  24-BAND PRECISION ENGINE",
+                juce::Rectangle<int> (std::max (330, getWidth() - 264),
+                                       std::max (12, getHeight() - 54),
+                                       std::min (250, getWidth() - 340), 24),
+                juce::Justification::centredRight, 1);
+        }
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1081,18 +1261,44 @@ private:
 
     void drawGrid (juce::Graphics& g, juce::Rectangle<float> bounds)
     {
-        g.setColour (Palette::border().withAlpha (0.5f));
+        g.setFont (juce::Font (juce::FontOptions (10.0f)));
         for (int step = -18; step <= 18; step += 6)
         {
-            const auto y = static_cast<float> (yForGain (step, bounds.getHeight()));
-            g.drawLine (bounds.getX(), y, bounds.getRight(), y);
+            const float y = static_cast<float> (
+                yForGain (step, bounds.getHeight()));
+            const bool reference = step == 0;
+            g.setColour ((reference ? Palette::curve() : Palette::border())
+                             .withAlpha (reference ? 0.35f : 0.38f));
+            g.drawHorizontalLine (static_cast<int> (y),
+                                  bounds.getX(), bounds.getRight());
+            g.setColour (Palette::textSecondary().withAlpha (
+                reference ? 0.89f : 0.58f));
+            const auto label = step > 0 ? "+" + juce::String (step)
+                                      : juce::String (step);
+            g.drawFittedText (label + " dB",
+                              juce::Rectangle<int> (6,
+                                  std::max (0, static_cast<int> (y) - 14),
+                                  48, 13),
+                              juce::Justification::centredLeft, 1);
         }
         for (const int frequency : { 20, 50, 100, 200, 500, 1000, 2000, 5000,
                                      10000, 20000 })
         {
-            const auto x = static_cast<float> (xForFrequency (frequency,
-                                                              bounds.getWidth()));
-            g.drawLine (x, bounds.getY(), x, bounds.getBottom());
+            const float x = static_cast<float> (
+                xForFrequency (frequency, bounds.getWidth()));
+            g.setColour (Palette::border().withAlpha (0.35f));
+            g.drawVerticalLine (static_cast<int> (x), bounds.getY(),
+                                bounds.getBottom());
+            g.setColour (Palette::textSecondary().withAlpha (0.64f));
+            const auto frequencyText = frequency >= 1000
+                ? juce::String (frequency / 1000) + "k"
+                : juce::String (frequency);
+            const int labelX = std::clamp (static_cast<int> (x) - 21,
+                                           0, std::max (0, getWidth() - 43));
+            g.drawFittedText (frequencyText,
+                juce::Rectangle<int> (labelX,
+                    std::max (0, getHeight() - 20), 43, 15),
+                juce::Justification::centred, 1);
         }
     }
 
@@ -1138,32 +1344,41 @@ private:
         const int height = std::max (1, getHeight());
         constexpr int basePoints = 320;
         constexpr int criticalInsertions = 32;
-        const int totalPoints = basePoints + kMaxBands * criticalInsertions;
+        constexpr int capacity = basePoints + kMaxBands * criticalInsertions;
+        std::array<double, capacity> frequencies {};
+        int count = 0;
+        for (int point = 0; point < basePoints; ++point)
+            frequencies[static_cast<std::size_t> (count++)] = frequencyForX (
+                static_cast<double> (point) / (basePoints - 1) * width, width);
+
+        // All path vertices must be in logarithmic X order. The old code
+        // appended band-centred detail AFTER the 20-20k sweep, drawing long
+        // zigzagging connections across the response graph. Inserting the
+        // detail into a fixed array and sorting keeps sharp Q peaks precise
+        // without allocations, and makes the cyan fill a valid polygon.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            const auto& settings = latestFrame_.currentBands[
+                static_cast<std::size_t> (band)];
+            if (! settings.enabled || settings.bypassed)
+                continue;
+            for (int step = 0; step < criticalInsertions; ++step)
+            {
+                const double value = settings.frequencyHz * std::pow (
+                    2.0, (step - criticalInsertions / 2) / 8.0);
+                if (std::isfinite (value)
+                    && value >= kDisplayMinimumFrequency
+                    && value <= kDisplayMaximumFrequency)
+                    frequencies[static_cast<std::size_t> (count++)] = value;
+            }
+        }
+        std::sort (frequencies.begin(), frequencies.begin() + count);
         bool haveMain = false, haveMid = false, haveSide = false;
 
-        for (int point = 0; point < totalPoints; ++point)
+        for (int point = 0; point < count; ++point)
         {
-            double frequency = 0.0;
-            if (point < basePoints)
-            {
-                frequency = frequencyForX (static_cast<double> (point)
-                                             / (basePoints - 1) * width, width);
-            }
-            else
-            {
-                const int extra = point - basePoints;
-                const int band = std::clamp (extra / criticalInsertions, 0,
-                                             kMaxBands - 1);
-                const int step = extra % criticalInsertions;
-                const auto centre = static_cast<double> (
-                    latestFrame_.currentBands[static_cast<std::size_t> (band)]
-                        .frequencyHz);
-                frequency = centre * std::pow (2.0,
-                    (step - criticalInsertions / 2) / 8.0);
-            }
-            if (! std::isfinite (frequency) || frequency <= 0.0)
-                continue;
-
+            const double frequency = frequencies[
+                static_cast<std::size_t> (point)];
             const auto matrix = ResponseCore::responseMatrix (latestFrame_,
                                                               frequency);
             const auto x = static_cast<float> (xForFrequency (frequency, width));
@@ -1213,19 +1428,44 @@ private:
             if (! enabled->getBool())
                 continue;
             const auto centre = nodeCentre (band).toFloat();
-            const float visual = 11.0f;
-            juce::Colour colour = Palette::accent();
-            if (bypassed->getBool())
-                colour = Palette::textSecondary();
-            else if (band == owner_.getSelectedBandForTesting())
-                colour = Palette::selected();
-            g.setColour (colour.withAlpha (bypassed->getBool() ? 0.6f : 1.0f));
-            juce::Path diamond;
-            diamond.addPolygon (centre, 4, visual,
-                                juce::MathConstants<float>::pi / 4.0f);
-            g.fillPath (diamond);
+            const bool selected = band == owner_.getSelectedBandForTesting();
+            const auto placement = static_cast<ChannelPlacement> (
+                processor_.getParametricEQParameter (
+                    placementParameterIndex (band))->getChoiceIndex());
+            auto bandColour = Palette::accent();
+            if (placement == ChannelPlacement::Left)
+                bandColour = Palette::curve();
+            else if (placement == ChannelPlacement::Right)
+                bandColour = juce::Colour (0xffff8eb4);
+            else if (placement == ChannelPlacement::Mid)
+                bandColour = Palette::curveMid();
+            else if (placement == ChannelPlacement::Side)
+                bandColour = Palette::curveSide();
+            const auto colour = bypassed->getBool()
+                ? Palette::textSecondary()
+                : selected ? Palette::selected() : bandColour;
+            const float radius = selected ? 12.0f : 10.0f;
+            g.setColour (colour.withAlpha (selected ? 0.21f : 0.12f));
+            g.fillEllipse (centre.x - radius - 6.0f,
+                           centre.y - radius - 6.0f,
+                           2.0f * (radius + 6.0f),
+                           2.0f * (radius + 6.0f));
             g.setColour (Palette::background());
-            g.strokePath (diamond, juce::PathStrokeType (1.5f));
+            g.fillEllipse (centre.x - radius, centre.y - radius,
+                           radius * 2.0f, radius * 2.0f);
+            g.setColour (colour.withAlpha (bypassed->getBool() ? 0.52f : 1.0f));
+            g.drawEllipse (centre.x - radius, centre.y - radius,
+                           radius * 2.0f, radius * 2.0f, selected ? 2.3f : 1.8f);
+            g.setFont (juce::Font (juce::FontOptions (
+                10.0f, juce::Font::bold)));
+            g.setColour (Palette::text());
+            g.drawFittedText (juce::String (band + 1),
+                juce::Rectangle<int> (
+                    static_cast<int> (centre.x - radius),
+                    static_cast<int> (centre.y - radius),
+                    static_cast<int> (radius * 2.0f),
+                    static_cast<int> (radius * 2.0f)),
+                juce::Justification::centred, 1);
         }
         if (latestFrame_.auditionActive && latestFrame_.auditionBand >= 0
             && latestFrame_.auditionBand < kMaxBands)
@@ -1445,6 +1685,9 @@ public:
     {
         addAndMakeVisible (viewport_);
         viewport_.setViewedComponent (&content_, false);
+        viewport_.setScrollBarThickness (7);
+        viewport_.setOpaque (false);
+        content_.setOpaque (false);
         content_.addAndMakeVisible (bandLabel_);
         content_.addAndMakeVisible (enableButton_);
         content_.addAndMakeVisible (bypassButton_);
@@ -1606,6 +1849,18 @@ public:
 
         startTimerHz (12);
         refresh();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().darker (0.30f), area.getTopLeft(),
+            Palette::surface(), area.getBottomLeft(), false));
+        g.fillRect (area);
+        g.setColour (Palette::accent().withAlpha (0.45f));
+        g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
+                    area.getHeight());
     }
 
     void resized() override
@@ -1966,6 +2221,7 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
 {
     setOpaque (true);
     setResizable (true, true);
+    setLookAndFeel (&prismLookAndFeel());
     topBar_ = std::make_unique<TopBarComponent> (*this, processor_);
     graph_ = std::make_unique<EqGraphComponent> (*this, processor_);
     inspector_ = std::make_unique<InspectorComponent> (*this, processor_);
@@ -1978,6 +2234,7 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
 
 ParametricEQEditor::~ParametricEQEditor()
 {
+    setLookAndFeel (nullptr);
     if (auditionArmed_)
     {
         processor_.endAudition (auditionToken_);
@@ -2025,15 +2282,16 @@ void ParametricEQEditor::applyLayout()
     if (portraitCompact)
     {
         const bool hasSelection = selectedBand_ >= 0;
-        // Keep the frequency graph at least one quarter of the editor's
-        // visible area even on a 320 x 568 phone with an open inspector.
-        // Previously the 140 px floor gave 320*140 < 320*568/4 and the
-        // native responsive-layout gate failed in BOTH Windows builds.
-        const int minimumGraphHeight = std::max (140, (height + 3) / 4);
         const int available = std::max (0, height - topBarHeight);
+        // A floating-style *scrollable* inspector sheet must never consume
+        // most of a portrait editor: producers need the frequency curve more
+        // than dozens of permanently visible settings. Give the graph 62%
+        // of the remaining height (>=45% of the whole panel even on phones).
+        // The user can still scroll to EVERY native control at 44+ px touch.
         const int desiredSheet = hasSelection
-                               ? std::max (240, height * 3 / 5)
-                               : std::max (56, height / 12);
+            ? std::max (120, available * 38 / 100)
+            : std::max (56, height / 12);
+        const int minimumGraphHeight = std::max (140, (height * 45 + 99) / 100);
         const int sheetHeight = std::min (
             desiredSheet, std::max (0, available - minimumGraphHeight));
         graph_->setBounds (bounds.removeFromTop (available - sheetHeight));
@@ -2185,6 +2443,11 @@ juce::Rectangle<int> ParametricEQEditor::getTopBarBoundsForTesting() const
 juce::Rectangle<int> ParametricEQEditor::getGraphBoundsForTesting() const
 {
     return graph_->getBounds();
+}
+
+void ParametricEQEditor::refreshResponseForTesting()
+{
+    graph_->ingestPublishedResponseForTesting();
 }
 
 juce::Rectangle<int> ParametricEQEditor::getInspectorBoundsForTesting() const

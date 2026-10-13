@@ -65,6 +65,7 @@ public:
     void runTest() override
     {
         testResponsiveLayoutMatrix();
+        testPrismOffscreenRenderAndSnapshots();
         testNodeDragUpdatesParametersThroughRealHierarchy();
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
@@ -116,6 +117,13 @@ private:
             expect (graph.getWidth() * graph.getHeight() * 4
                         >= editorBounds.getWidth() * editorBounds.getHeight(),
                     "graph must stay a dominant surface");
+            if (sizeCase.width < 900 && sizeCase.height
+                                              >= sizeCase.width * 1.05)
+                expect (graph.getWidth() * graph.getHeight() * 100
+                            >= editorBounds.getWidth()
+                                 * editorBounds.getHeight() * 45,
+                        "Prism portrait canvas must reserve 45% of total "
+                        "display for the actionable EQ response");
 
             const auto& placements = editor->getPlacementButtonsForTesting();
             expectEquals (placements.size(), static_cast<std::size_t> (5));
@@ -147,6 +155,79 @@ private:
                     "audition disabled without selection");
             for (const auto& button : placements)
                 expect (! button->isEnabled(), "placement disabled without selection");
+        }
+    }
+
+    void testPrismOffscreenRenderAndSnapshots()
+    {
+        beginTest ("APEX Prism native vector GUI renders at phone, tablet and desktop sizes");
+        const auto workspace = juce::SystemStats::getEnvironmentVariable (
+            "GITHUB_WORKSPACE", {});
+        for (const auto& sizeCase : kSizes)
+        {
+            auto holder = std::make_unique<Processor>();
+            auto& processor = *holder;
+            enableBell (processor, 0, 930.0f, 8.0f, 2.4f);
+            enableBell (processor, 1, 5200.0f, -5.0f, 3.0f);
+            processor.prepareToPlay (48000.0, 128);
+            processBlocks (processor);
+            auto editor = std::make_unique<ParametricEQEditor> (processor);
+            editor->setSize (sizeCase.width, sizeCase.height);
+            editor->setSelectedBandForTesting (0);
+            editor->refreshResponseForTesting();
+            // The host plugin window is opaque: use an opaque RGB backing
+            // store instead of an initially transparent ARGB screenshot.
+            // Release the Graphics renderer BEFORE querying pixels/PNG so
+            // the backend can finish any pending rasterisation.
+            juce::Image image (juce::Image::RGB, sizeCase.width,
+                               sizeCase.height, true);
+            {
+                juce::Graphics graphics (image);
+                editor->paintEntireComponent (graphics, false);
+            }
+            const auto graphBounds = editor->getGraphBoundsForTesting();
+            const auto headerPixel = image.getPixelAt (4, 4);
+            const auto graphPixel = image.getPixelAt (
+                graphBounds.getCentreX(), graphBounds.getCentreY());
+            // A genuinely painted native GUI has distinct navy header
+            // and dark blue response-canvas surfaces. Merely allocating an
+            // RGB image cannot satisfy this: all-clear-black is caught.
+            expect (headerPixel != graphPixel,
+                    "Prism offscreen screenshot must contain multiple "
+                    "rendered UI surfaces: "
+                        + juce::String (sizeCase.width) + "x"
+                        + juce::String (sizeCase.height)
+                        + " header=" + headerPixel.toDisplayString (true)
+                        + " graph=" + graphPixel.toDisplayString (true));
+            const auto graph = editor->getGraphBoundsForTesting();
+            expect (graph.getWidth() * graph.getHeight() * 4
+                        >= sizeCase.width * sizeCase.height,
+                    "frequency graph remains dominant at every layout");
+
+            // Export true software-rendered native JUCE screenshots from
+            // Windows CI. The snapshots are QA previews, not AI mockups or
+            // proof of audio quality. No files are written on user machines.
+            const bool snapshot = sizeCase.width == 320
+                                  || sizeCase.width == 1280;
+            if (snapshot && workspace.isNotEmpty())
+            {
+                auto dir = juce::File (workspace).getChildFile (
+                    "apex-eq-ui-snapshots");
+                expect (dir.createDirectory().wasOk(),
+                        "CI Prism snapshot folder must be writable");
+                const auto file = dir.getChildFile (
+                    "APEX-Prism-EQ-" + juce::String (sizeCase.width) + "x"
+                    + juce::String (sizeCase.height) + ".png");
+                auto stream = file.createOutputStream();
+                expect (stream != nullptr, "CI PNG stream must open");
+                if (stream != nullptr)
+                {
+                    juce::PNGImageFormat png;
+                    expect (png.writeImageToStream (image, *stream),
+                            "native Prism preview PNG must be valid");
+                    stream->flush();
+                }
+            }
         }
     }
 
