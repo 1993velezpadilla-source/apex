@@ -2118,7 +2118,13 @@ public:
                             std::max (1, contentHeight));
 
         auto bounds = content_.getLocalBounds().reduced (8, 8);
-        bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
+        // In very short landscape windows there is room for the 112px
+        // precision strip OR a heading above it, not both. Give the
+        // actual FREQ / GAIN / Q controls first-viewport priority; the
+        // band label and secondary actions remain accessible by scrolling.
+        const bool shortSheet = ! floating && owner_.getHeight() < 500;
+        if (! shortSheet)
+            bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
         if (! floating)
         {
             // Compact-first quick controls: selecting a node immediately
@@ -2133,6 +2139,8 @@ public:
                 quick.removeFromLeft (column).reduced (2, 4));
             qSlider_.setBounds (quick.reduced (2, 4));
         }
+        if (shortSheet)
+            bandLabel_.setBounds (bounds.removeFromTop (44));
         auto buttonRow = bounds.removeFromTop (row);
         const int third = buttonRow.getWidth() / 3;
         enableButton_.setBounds (buttonRow.removeFromLeft (third).reduced (2, 2));
