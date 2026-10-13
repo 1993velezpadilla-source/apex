@@ -58,9 +58,12 @@ public:
         p.parallelMix=sane(p.parallelMix,0.0,1.0,1.0);
         p.keyEmphasis=sane(p.keyEmphasis,0.0,1.0,0.0);
         p_=p;
+        const double normalisedReduction=p_.peakReduction/100.0;
+        cachedDrive_=normalisedReduction*normalisedReduction*21.0;
+        cachedGain_=gain(p_.gainDb);
         if(!started_)
         {
-            currentOutput_=gain(p_.gainDb);
+            currentOutput_=cachedGain_;
             currentMix_=p_.parallelMix;
             gate_=p_.bypass ? 0.0 : 1.0;
         }
@@ -70,7 +73,7 @@ public:
         if(!left||frames<=0) return;
         started_=true;
         const bool stereo=right && right!=left;
-        const double drive=std::pow(p_.peakReduction/100.0,2.0)*21.0;
+        const double drive=cachedDrive_;
         for(int n=0;n<frames;++n)
         {
             const double a=std::isfinite(left[n]) ? std::clamp((double)left[n],-16.0,16.0):0.0;
@@ -96,7 +99,7 @@ public:
                 pentodeDriver_.tick(excitation):excitation;
             cell_.tick(elDrive);
             currentOutput_=controlCoeff_*currentOutput_+
-                (1.0-controlCoeff_)*gain(p_.gainDb);
+                (1.0-controlCoeff_)*cachedGain_;
             currentMix_=controlCoeff_*currentMix_+
                 (1.0-controlCoeff_)*p_.parallelMix;
             gate_=controlCoeff_*gate_+
@@ -125,6 +128,7 @@ private:
     T4LevelerResearchParameters p_ {};
     double sampleRate_=48000,detectorCoeff_=0,keyLowpassCoeff_=0,controlCoeff_=0;
     double detector_=0,lowL_=0,lowR_=0,currentOutput_=1,currentMix_=1,gate_=1;
+    double cachedDrive_=0.0,cachedGain_=1.0;
     bool started_=false;
 };
 } // namespace APEX::Compressor
