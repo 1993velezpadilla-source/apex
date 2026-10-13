@@ -52,6 +52,48 @@ double correlationHz(const std::vector<float>& wave,double sr,double expectedHz)
     }
     return (peak>0.5 && lag>0.0)?sr/lag:0.0;
 }
+// Use the raw pinned pitch shifter as a control experiment. If this
+// under-corrects in a 12ms window despite an explicit transpose ratio,
+// changing YIN thresholds or note-selection policy cannot fix it.
+// This is offline test code only; it is NOT a new production DSP path.
+double rawShifterCents(double sr,double targetHz,double detune,
+                       APEX::TuneLive::ShifterProfile profile) {
+    using namespace APEX::TuneLive;
+    const int frames=static_cast<int>(sr*2.0);
+    const double sourceHz=targetHz*std::pow(2.0,detune/12.0);
+    std::vector<float> source(static_cast<std::size_t>(frames));
+    std::vector<float> output(static_cast<std::size_t>(frames));
+    for(int i=0;i<frames;++i) {
+        const double time=static_cast<double>(i)/sr;
+        double value=0.29*std::sin(2*pi*sourceHz*time);
+        for(int h=2;h<=13;++h) {
+            const double frequency=sourceHz*h;
+            const double envelope=0.025
+                +0.20*std::exp(-0.5*std::pow((frequency-750.0)/210.0,2))
+                +0.12*std::exp(-0.5*std::pow((frequency-1250.0)/280.0,2));
+            value+=envelope/h*std::sin(2*pi*frequency*time+0.13*h);
+        }
+        source[static_cast<std::size_t>(i)]=static_cast<float>(value);
+    }
+    const double seconds=profile==ShifterProfile::Experimental12ms?0.012
+        :profile==ShifterProfile::Experimental18ms?0.018:0.040;
+    const int window=std::max(256,static_cast<int>(std::lround(sr*seconds)));
+    const int interval=std::max(64,static_cast<int>(std::lround(window*0.25)));
+    signalsmith::stretch::SignalsmithStretch<float> shifter{0x41504558L};
+    shifter.configure(1,window,interval,false);
+    shifter.reset();
+    shifter.setTransposeFactor(static_cast<float>(std::pow(2.0,-detune/12.0)));
+    shifter.setFormantFactor(1.0f,true);
+    shifter.setFormantBase(static_cast<float>(sourceHz/sr));
+    for(int start=0;start<frames;start+=block) {
+        const int count=std::min(block,frames-start);
+        const float* in[1]={source.data()+start};
+        float* out[1]={output.data()+start};
+        shifter.process(in,count,out,count);
+    }
+    const double wetHz=correlationHz(output,sr,targetHz);
+    return wetHz>0.0?1200.0*std::log2(wetHz/targetHz):9999.0;
+}
 Result probe(double sr,double targetHz,double detune,
              APEX::TuneLive::ShifterProfile profile,
              float referenceHz=440.0f) {
@@ -77,6 +119,10 @@ Result probe(double sr,double targetHz,double detune,
     dsp.prepare(sr,block,1,profile);
     DspSettings cfg;
     cfg.referenceHz=referenceHz;
+    // Restrict the musical targets to A, not A# when the concert-pitch
+    // sweep makes an originally +30-cent note >50c above shifted A.
+    cfg.key=9;   // A
+    cfg.scale=1; // A major, nearest allowed note here is always A
     cfg.correction=1.0f;
     cfg.retune=0.0f;
     cfg.humanize=0.0f;
@@ -170,6 +216,21 @@ int main() {
                  <<" voiced12="<<faster.voiced
                  <<" release_accuracy_candidate="<<eligible<<"\n";
     }
+    // Compare independent output measurements against the same short
+    // window with a fixed, ideal command bypassing the policy and tracker.
+    // Do not assume that the short-window spectral backend obeys a
+    // transpose request merely because its parameter reads correctly.
+    for(const double target:std::array<double,2>{{220.0,440.0}})
+        for(const double detune:std::array<double,2>{{-0.30,0.30}}) {
+            const double direct12=rawShifterCents(48000.0,target,detune,
+                                      ShifterProfile::Experimental12ms);
+            const double direct40=rawShifterCents(48000.0,target,detune,
+                                      ShifterProfile::HighQuality40ms);
+            std::cout<<"raw_shifter_control target_hz="<<target
+                     <<" source_detune_cents="<<detune*100.0
+                     <<" direct12_residual_cents="<<direct12
+                     <<" direct40_residual_cents="<<direct40<<"\\n";
+        }
     // Research-only control-response sweep. This measures whether the
     // short-window backend genuinely follows *more negative* requests,
     // rather than blindly applying a guessed gain to the artist's pitch.
