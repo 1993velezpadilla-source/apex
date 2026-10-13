@@ -87,6 +87,14 @@ struct AutomationGroupedCurveCore
             if (existing == nullptr || !existing->isEnabled())
                 return false; // all-or-nothing and no phantom lane creation
 
+            // AutomationClipRegions own their section of the lane and are
+            // overlaid again when the manager publishes a snapshot. Refuse
+            // this edit until group+region ownership is handled explicitly:
+            // accepting it would display a curve that DSP silently ignores.
+            for (const auto& region : manager.getClipRegions())
+                if (region.trackId == track && region.parameterId == parameterId)
+                    return false;
+
             AutomationLaneCore replacement = *existing;
             replacement.points = clean;
             replacement.sortAndResolveDuplicates();
@@ -122,6 +130,13 @@ struct AutomationGroupedCurveCore
                 || entry.after.getProperty("parameterId").toString() != entry.parameterId
                 || manager.findLane(entry.trackId, entry.parameterId) == nullptr)
                 return false;
+
+            // A clip region added after the batch was created must also block
+            // its undo/redo rather than overwrite clip-authored automation.
+            for (const auto& region : manager.getClipRegions())
+                if (region.trackId == entry.trackId
+                    && region.parameterId == entry.parameterId)
+                    return false;
 
             for (size_t previous = 0; previous < i; ++previous)
                 if (entry.trackId == batch.lanes[previous].trackId
