@@ -2282,15 +2282,16 @@ void ParametricEQEditor::applyLayout()
     if (portraitCompact)
     {
         const bool hasSelection = selectedBand_ >= 0;
-        // Keep the frequency graph at least one quarter of the editor's
-        // visible area even on a 320 x 568 phone with an open inspector.
-        // Previously the 140 px floor gave 320*140 < 320*568/4 and the
-        // native responsive-layout gate failed in BOTH Windows builds.
-        const int minimumGraphHeight = std::max (140, (height + 3) / 4);
         const int available = std::max (0, height - topBarHeight);
+        // A floating-style *scrollable* inspector sheet must never consume
+        // most of a portrait editor: producers need the frequency curve more
+        // than dozens of permanently visible settings. Give the graph 62%
+        // of the remaining height (>=45% of the whole panel even on phones).
+        // The user can still scroll to EVERY native control at 44+ px touch.
         const int desiredSheet = hasSelection
-                               ? std::max (240, height * 3 / 5)
-                               : std::max (56, height / 12);
+            ? std::max (120, available * 38 / 100)
+            : std::max (56, height / 12);
+        const int minimumGraphHeight = std::max (140, (height * 45 + 99) / 100);
         const int sheetHeight = std::min (
             desiredSheet, std::max (0, available - minimumGraphHeight));
         graph_->setBounds (bounds.removeFromTop (available - sheetHeight));
