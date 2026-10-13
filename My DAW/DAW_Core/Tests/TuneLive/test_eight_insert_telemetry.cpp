@@ -16,11 +16,11 @@ int main() {
     constexpr int sampleRate=48000,block=128,totalSamples=sampleRate*2;
     constexpr int voiceCount=8;
     struct Instance {
-        std::unique_ptr<DspCore> effect=std::make_unique<DspCore>();
-        DspSettings settings;
+        std::unique_ptr<APEX::TuneLive::DspCore> effect=std::make_unique<APEX::TuneLive::DspCore>();
+        APEX::TuneLive::DspSettings settings;
         int channels=1;
-        std::vector<float> left=std::vector<float>(block,0.0f);
-        std::vector<float> right=std::vector<float>(block,0.0f);
+        std::vector<float> left=std::vector<float>(128,0.0f);
+        std::vector<float> right=std::vector<float>(128,0.0f);
     };
     std::array<Instance,voiceCount> inserts;
     for(int voice=0;voice<voiceCount;++voice) {
