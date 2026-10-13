@@ -48,6 +48,14 @@ public:
             entry.second->setVst3MacroCallback(vst3MacroCallback_);
     }
 
+    void setVst3MacroTargetCallback(
+        AutomationLaneComponent::Vst3MacroTargetCallback callback)
+    {
+        vst3MacroTargetCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setVst3MacroTargetCallback(vst3MacroTargetCallback_);
+    }
+
     void setSelectedSnapshotCallback(
         AutomationLaneComponent::SelectedSnapshotCallback callback)
     {
@@ -82,6 +90,7 @@ public:
         lanePtr->setGroupedCurveCallback(groupedCurveCallback_);
         lanePtr->setNativeMacroCallback(nativeMacroCallback_);
         lanePtr->setVst3MacroCallback(vst3MacroCallback_);
+        lanePtr->setVst3MacroTargetCallback(vst3MacroTargetCallback_);
         lanePtr->setSelectedSnapshotCallback(selectedSnapshotCallback_);
         lanePtr->setSize(getWidth(), 60);  // 60 pixels high per lane
 
@@ -295,6 +304,7 @@ private:
     AutomationLaneComponent::GroupedCurveCallback groupedCurveCallback_;
     AutomationLaneComponent::NativeMacroCallback nativeMacroCallback_;
     AutomationLaneComponent::Vst3MacroCallback vst3MacroCallback_;
+    AutomationLaneComponent::Vst3MacroTargetCallback vst3MacroTargetCallback_;
     AutomationLaneComponent::SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // Map from parameter ID to lane component
