@@ -1,0 +1,63 @@
+name: Pichy APEX Windows integration
+
+on:
+  push:
+    paths:
+      - '.github/workflows/pichy-apex-windows.yml'
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Source/AppCore/ApplicationCore.h'
+      - 'My DAW/DAW_Core/Source/InputMonitorCore/PichyInput*'
+      - 'My DAW/DAW_Core/Source/UICore/InputTrimFloatingPanel.h'
+  pull_request:
+    paths:
+      - '.github/workflows/pichy-apex-windows.yml'
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Source/AppCore/ApplicationCore.h'
+      - 'My DAW/DAW_Core/Source/InputMonitorCore/PichyInput*'
+      - 'My DAW/DAW_Core/Source/UICore/InputTrimFloatingPanel.h'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apex-pichy-windows-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Pichy APEX ${{ matrix.configuration }} / full desktop smoke
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Repository/evidence policy
+        run: |
+          .\Scripts\test_repository_policy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_validate_test_evidence.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Materialize locked JUCE toolchain
+        run: .\Scripts\prepare_ci.ps1
+      - name: Rebuild APEX executable with Pichy headers
+        run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
+      - name: Run APEX discovery smoke
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-pichy-windows-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
