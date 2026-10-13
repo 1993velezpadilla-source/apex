@@ -128,6 +128,16 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/tune_live_human_voice_metrics.cpp" \
             -o tune_live_human_voice_metrics
           ./tune_live_human_voice_metrics --prefix vocadito_human
+      - name: Produce real-voice 18ms and 12ms shifter research WAVs (NEVER shipping)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_window_profile_audition.cpp" \
+            -o tune_live_window_profiles
+          ./tune_live_window_profiles --input vocadito_human_source.wav --prefix vocadito_human
       - name: Test two additional independent real singers — lowest and highest annotated register
         shell: bash
         run: |
@@ -136,6 +146,7 @@ jobs:
           for register in low high; do
             ./tune_live_offline_audition --input "vocadito_${register}_source.wav" --prefix "vocadito_${register}"
             ./tune_live_human_voice_metrics --prefix "vocadito_${register}" --exploratory
+            ./tune_live_window_profiles --input "vocadito_${register}_source.wav" --prefix "vocadito_${register}"
           done
           # A low/high singer must not be silently substituted by the pinned
           # #24 take, nor vanish from artifacts after a successful CI gate.
@@ -198,6 +209,8 @@ jobs:
             vocadito_human_dry.wav
             vocadito_human_hq40.wav
             vocadito_human_causal_research.wav
+            vocadito_human_research18.wav
+            vocadito_human_research12.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
             REAL_HUMAN_RENDER_REPORT.txt
             REAL_HUMAN_PITCH_COMPARISON.txt
@@ -205,11 +218,15 @@ jobs:
             vocadito_low_dry.wav
             vocadito_low_hq40.wav
             vocadito_low_causal_research.wav
+            vocadito_low_research18.wav
+            vocadito_low_research12.wav
             vocadito_low_PITCH_COMPARISON.txt
             vocadito_high_source.wav
             vocadito_high_dry.wav
             vocadito_high_hq40.wav
             vocadito_high_causal_research.wav
+            vocadito_high_research18.wav
+            vocadito_high_research12.wav
             vocadito_high_PITCH_COMPARISON.txt
             VOCADITO_REGISTER_MATRIX_LICENSE.txt
           if-no-files-found: error
