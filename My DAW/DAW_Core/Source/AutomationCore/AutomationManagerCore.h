@@ -473,6 +473,21 @@ public:
     const std::vector<AutomationLaneCore>& getLanes() const noexcept { return lanes_; }
     const std::vector<AutomationClipRegionCore>& getClipRegions() const noexcept { return clipRegions_; }
 
+    // Whole-lane replacement tools must not silently lose their edits on
+    // publishSnapshot(), which re-materializes clip-owned points into lanes.
+    // Use this from the message thread before freehand/full-curve/transform.
+    bool hasClipRegionsForParameter(const TrackID& trackId,
+                                    const juce::String& parameterId) const noexcept
+    {
+        return std::any_of(clipRegions_.begin(), clipRegions_.end(),
+            [&](const AutomationClipRegionCore& region)
+            {
+                return region.isValid() && region.trackId == trackId
+                    && region.parameterId == parameterId
+                    && !region.localPoints.empty();
+            });
+    }
+
     AutomationClipRegionCore* findClipRegion(const juce::Uuid& regionId) noexcept
     {
         for (auto& region : clipRegions_)
