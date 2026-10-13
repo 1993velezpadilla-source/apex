@@ -126,6 +126,13 @@ jobs:
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" -o tune_live_lifecycle
           ./tune_live_lifecycle
+          # Check WET real voice correction when the host callback size
+          # changes independently of 128-sample prepared maximum buffer.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" -o tune_live_variable_wet
+          ./tune_live_variable_wet
           # Produce real WAV files with the actual shipped HQ40 engine and
           # isolated causal research backend, and exercise PCM24 read/write.
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -188,6 +195,8 @@ jobs:
           tune_live_switch.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_lifecycle.exe "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" || exit /b 1
           tune_live_lifecycle.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_variable_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" || exit /b 1
+          tune_live_variable_wet.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_audition.exe "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" || exit /b 1
           tune_live_audition.exe --self-test tune_live_audition || exit /b 1
           tune_live_audition.exe --input tune_live_audition_source.wav --prefix tune_live_reload || exit /b 1
