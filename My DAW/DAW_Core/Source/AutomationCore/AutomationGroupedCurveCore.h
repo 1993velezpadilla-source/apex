@@ -98,9 +98,8 @@ struct AutomationGroupedCurveCore
             // overlaid again when the manager publishes a snapshot. Refuse
             // this edit until group+region ownership is handled explicitly:
             // accepting it would display a curve that DSP silently ignores.
-            for (const auto& region : manager.getClipRegions())
-                if (region.trackId == track && region.parameterId == parameterId)
-                    return false;
+            if (manager.hasClipRegionsForParameter(track, parameterId))
+                return false; // only valid populated clip owners block bulk edits
 
             AutomationLaneCore replacement = *existing;
             replacement.points = clean;
@@ -150,10 +149,9 @@ struct AutomationGroupedCurveCore
 
             // A clip region added after the batch was created must also block
             // its undo/redo rather than overwrite clip-authored automation.
-            for (const auto& region : manager.getClipRegions())
-                if (region.trackId == entry.trackId
-                    && region.parameterId == entry.parameterId)
-                    return false;
+            if (manager.hasClipRegionsForParameter(entry.trackId,
+                                                    entry.parameterId))
+                return false;
 
             for (size_t previous = 0; previous < i; ++previous)
                 if (entry.trackId == batch.lanes[previous].trackId
