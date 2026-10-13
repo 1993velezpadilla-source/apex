@@ -175,16 +175,30 @@ private:
             editor->setSize (sizeCase.width, sizeCase.height);
             editor->setSelectedBandForTesting (0);
             editor->refreshResponseForTesting();
-            juce::Image image (juce::Image::ARGB, sizeCase.width,
+            // The host plugin window is opaque: use an opaque RGB backing
+            // store instead of an initially transparent ARGB screenshot.
+            // Release the Graphics renderer BEFORE querying pixels/PNG so
+            // the backend can finish any pending rasterisation.
+            juce::Image image (juce::Image::RGB, sizeCase.width,
                                sizeCase.height, true);
-            juce::Graphics graphics (image);
-            editor->paintEntireComponent (graphics, false);
-            const auto pixel = image.getPixelAt (sizeCase.width / 2,
-                                                  sizeCase.height / 2);
-            expect (pixel.getAlpha() == 255,
-                    "opaque Prism graph must actually draw pixels: "
+            {
+                juce::Graphics graphics (image);
+                editor->paintEntireComponent (graphics, false);
+            }
+            const auto graphBounds = editor->getGraphBoundsForTesting();
+            const auto headerPixel = image.getPixelAt (4, 4);
+            const auto graphPixel = image.getPixelAt (
+                graphBounds.getCentreX(), graphBounds.getCentreY());
+            // A genuinely painted native GUI has distinct navy header
+            // and dark blue response-canvas surfaces. Merely allocating an
+            // RGB image cannot satisfy this: all-clear-black is caught.
+            expect (headerPixel != graphPixel,
+                    "Prism offscreen screenshot must contain multiple "
+                    "rendered UI surfaces: "
                         + juce::String (sizeCase.width) + "x"
-                        + juce::String (sizeCase.height));
+                        + juce::String (sizeCase.height)
+                        + " header=" + headerPixel.toDisplayString (true)
+                        + " graph=" + graphPixel.toDisplayString (true));
             const auto graph = editor->getGraphBoundsForTesting();
             expect (graph.getWidth() * graph.getHeight() * 4
                         >= sizeCase.width * sizeCase.height,
