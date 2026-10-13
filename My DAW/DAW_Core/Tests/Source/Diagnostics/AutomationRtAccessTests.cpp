@@ -5860,7 +5860,7 @@ public:
 
         beginTest("Quantized float cannot impersonate continuous VST3 range");
         expect(!quantized.isDiscrete());
-        expect(quantized.getNumSteps()
+        expect(static_cast<const juce::AudioProcessorParameter&>(quantized).getNumSteps()
             != juce::AudioProcessorParameter::getDefaultNumParameterSteps());
         touched.parameterId = "quantized";
         expect(!Guard::verify(touched, "vocal", 0, "instance-A",
