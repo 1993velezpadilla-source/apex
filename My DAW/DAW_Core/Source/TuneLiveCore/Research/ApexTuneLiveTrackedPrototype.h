@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace APEX { namespace TuneLive { namespace Research {
 class TrackedPrototype final {
