@@ -9,6 +9,15 @@ on:
     branches: [feature/apex-tune-live-native-v1]
   workflow_dispatch:
 
+# Only the newest PR head is worth expensive full-DSP tests.
+# Rapid iterations previously queued many superseded runs.
+concurrency:
+  group: tune-live-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   gcc-ubuntu:
     runs-on: ubuntu-24.04
