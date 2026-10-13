@@ -304,12 +304,15 @@ namespace apex::automation
             return std::atomic_load_explicit (&publishedLanes_, std::memory_order_acquire);
         }
 
-        /** Lock-free lane lookup for the audio thread. Returns a shared_ptr,
-         *  so a lane stays alive for the duration of a block even if the
-         *  message thread removes it concurrently. */
+        /** Lock-free lane lookup for the audio thread. Honor the enclosing
+         *  device-callback PPQ pin, including indirect consumers such as
+         *  native sends, pan/mute/solo and registration bridges. Otherwise
+         *  those readers can straddle a multi-target publication while the
+         *  VST3 processor correctly reads the pinned old generation.
+         *  Without a ScopedRtPin the latest published map is used. */
         std::shared_ptr<AutomationLane> findLaneRT (ParameterID id) const noexcept
         {
-            return findLaneInSnapshotRT(getLaneSnapshotRT(), id);
+            return findLaneInSnapshotRT(getEffectiveLaneSnapshotRT(), id);
         }
 
         /** Bumped on every structural publish; RT consumers re-resolve
