@@ -488,6 +488,11 @@ namespace ArrangementEditor
             const juce::String& parameterId,
             const std::vector<DAW::AutomationPoint>& points);
 
+        bool applyNativeMacroFromSelectedClips(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& sourcePoints);
+
         // Native volume/PAN A/B memories are confined to the current editor
         // and automation manager. They do not falsely promise persistent
         // project snapshots while project-level serialization is unwired.
