@@ -138,6 +138,16 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
             requestLinearKernelRebuild();
     }
 
+    // Capture the unprocessed signal for the incoming kernel BEFORE the
+    // current FIR mutates buffer. Otherwise the next FIR receives the
+    // current FIR's already-delayed output, cascading both convolutions and
+    // generating a 4094-sample transient/echo during a live EQ edit while
+    // host PDC still reports 2047 samples.
+    if (kernelTransitionActive_ && kernelMix_ < 1.0)
+        for (int channel = 0; channel < channels; ++channel)
+            kernelNextScratch_.copyFrom (channel, 0, buffer, channel, 0,
+                                         numberOfSamples);
+
     const auto& currentKernels = linearKernels_[static_cast<std::size_t> (
         currentKernelIndex_)];
     convolverCurrentL_.processBlock (buffer.getWritePointer (0),
@@ -146,10 +156,8 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         convolverCurrentR_.processBlock (buffer.getWritePointer (1),
                                          numberOfSamples,
                                          currentKernels.rr.data());
-    else
-        convolverCurrentR_.processBlock (buffer.getWritePointer (0),
-                                         numberOfSamples,
-                                         currentKernels.ll.data());
+    // A mono bus has only one channel. Running R on the same sample buffer
+    // would convolve it twice and turn 2047 samples PDC into 4094.
 
     if (kernelTransitionActive_ && kernelMix_ < 1.0)
     {
@@ -157,17 +165,12 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         // the newly published kernel; crossfade per sample.
         const auto& nextKernels = linearKernels_[static_cast<std::size_t> (
             nextKernelIndex_)];
-        for (int channel = 0; channel < channels; ++channel)
-            kernelNextScratch_.copyFrom (channel, 0, buffer, channel, 0,
-                                         numberOfSamples);
         convolverNextL_.processBlock (kernelNextScratch_.getWritePointer (0),
                                       numberOfSamples, nextKernels.ll.data());
         if (channels >= 2)
             convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
                                           numberOfSamples, nextKernels.rr.data());
-        else
-            convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (0),
-                                          numberOfSamples, nextKernels.ll.data());
+        // Do not convolve mono twice during the next-kernel crossfade.
 
         for (int sample = 0; sample < numberOfSamples; ++sample)
         {

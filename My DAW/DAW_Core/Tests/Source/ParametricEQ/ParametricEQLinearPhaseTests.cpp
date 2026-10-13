@@ -88,6 +88,8 @@ public:
         testNeutralKernelIsPureDelay();
         testMagnitudeMatchesCanonicalResponse();
         testImpulsePeakAndReportedLatency();
+        testMonoLinearPhasePdcMatchesAudibleImpulse();
+        testLiveKernelTransitionPreservesOneDelay();
         testGroupDelayAndPhaseSlope();
         testModeSwitchingIsBlockInvariantAndClickBounded();
         testDynamicEqAndAuditionLimitations();
@@ -221,6 +223,122 @@ private:
         expectEquals (peak, kLinearPhaseLatencySamples,
                       "impulse peak lands exactly at the latency sample");
         expect (peakValue > 0.05f, "the main lobe is present");
+    }
+
+    void testMonoLinearPhasePdcMatchesAudibleImpulse()
+    {
+        beginTest ("mono linear-phase FIR must run ONCE and land at reported 2047-sample PDC");
+        auto holder = std::make_unique<Processor>();
+        auto& processor = *holder;
+        juce::AudioProcessor::BusesLayout mono;
+        mono.inputBuses.add (juce::AudioChannelSet::mono());
+        mono.outputBuses.add (juce::AudioChannelSet::mono());
+        if (! processor.setBusesLayout (mono))
+        {
+            expect (false, "mono bus must be accepted for this regression");
+            return;
+        }
+        processor.prepareToPlay (48000.0, 256);
+        if (! ParametricEQTest::requestLinearPhaseAndSettle (processor))
+        {
+            expect (false, "neutral mono linear-phase kernel failed to settle");
+            return;
+        }
+        expectEquals (processor.getLatencySamples(), kLinearPhaseLatencySamples);
+
+        // A neutral linear-phase EQ acts as a unit impulse delayed by 2047
+        // samples, not 4094. The old mono branch ran the L and R FIRs
+        // sequentially on the SAME pointer, doubling the actual delay
+        // while the host was still compensated for just 2047 samples.
+        constexpr int total = 6144;
+        constexpr int hostBlock = 256;
+        juce::AudioBuffer<float> block (1, hostBlock);
+        juce::MidiBuffer midi;
+        double worstError = 0.0;
+        int peakIndex = -1;
+        double peak = 0.0;
+        for (int start = 0; start < total; start += hostBlock)
+        {
+            block.clear();
+            if (start == 0)
+                block.setSample (0, 0, 0.8f);
+            processor.processBlock (block, midi);
+            for (int i = 0; i < hostBlock; ++i)
+            {
+                const int sample = start + i;
+                const double actual = block.getSample (0, i);
+                const double expected = sample == kLinearPhaseLatencySamples
+                    ? 0.8 : 0.0;
+                worstError = std::max (worstError, std::abs (actual - expected));
+                if (std::abs (actual) > peak)
+                {
+                    peak = std::abs (actual);
+                    peakIndex = sample;
+                }
+            }
+        }
+        expectEquals (peakIndex, kLinearPhaseLatencySamples,
+                      "audible mono impulse peak must align with host PDC");
+        expect (worstError < 1.0e-4,
+                "neutral mono LP must retain unity gain, not shift or double "
+                "the FIR latency; maximum sample error "
+                + juce::String (worstError, 9));
+    }
+
+    void testLiveKernelTransitionPreservesOneDelay()
+    {
+        beginTest ("live linear-phase kernel edit must not cascade FIR delays");
+        auto holder = std::make_unique<Processor>();
+        auto& processor = *holder;
+        processor.prepareToPlay (48000.0, 128);
+        if (! ParametricEQTest::requestLinearPhaseAndSettle (processor))
+        {
+            expect (false, "initial neutral linear-phase kernel must settle");
+            return;
+        }
+
+        const auto oldGeneration = processor.linearKernelGenerationForTesting();
+        enableBell (processor, 0, 1000.0f, 6.0f, 2.0f);
+        juce::AudioBuffer<float> block (2, 128);
+        juce::MidiBuffer midi;
+        block.clear();
+        processor.processBlock (block, midi); // publish new kernel request
+
+        // The worker is allowed to build off-thread. Crucially, do not
+        // consume audio while waiting: our next impulse must hit precisely
+        // as the audio thread adopts the fresh kernel and begins its fade.
+        const auto deadline = juce::Time::getMillisecondCounter() + 10000u;
+        while (processor.linearKernelGenerationForTesting() == oldGeneration
+               && juce::Time::getMillisecondCounter() < deadline)
+            juce::Thread::sleep (1);
+        if (processor.linearKernelGenerationForTesting() == oldGeneration)
+        {
+            expect (false, "edited FIR was not published in bounded time");
+            return;
+        }
+        expectEquals (processor.getLatencySamples(), kLinearPhaseLatencySamples);
+
+        constexpr int total = 6144;
+        constexpr int blockSize = 128;
+        std::array<float, total> observed {};
+        for (int start = 0; start < total; start += blockSize)
+        {
+            block.clear();
+            if (start == 0)
+                block.setSample (0, 0, 0.8f);
+            processor.processBlock (block, midi);
+            for (int i = 0; i < blockSize; ++i)
+                observed[static_cast<std::size_t> (start + i)]
+                    = block.getSample (0, i);
+        }
+        const auto direct = std::abs (observed[
+            static_cast<std::size_t> (kLinearPhaseLatencySamples)]);
+        const auto ghost = std::abs (observed[
+            static_cast<std::size_t> (2 * kLinearPhaseLatencySamples)]);
+        expect (direct > 0.5f,
+                "new FIR path must preserve transient at reported 2047 PDC");
+        expect (ghost < 0.10f,
+                "no cascaded 4094-sample echo during kernel transition");
     }
 
     void testGroupDelayAndPhaseSlope()
