@@ -50,7 +50,7 @@ namespace apex::automation
                     && modes.latchHeldRT(id))))
             return faderRange.normToGain(active->getNormalizedValue());
 
-        const auto lane = lanes.findLaneRT(id);
+        const auto lane = AutomationLaneStore::findLaneInSnapshotRT(lanes.getEffectiveLaneSnapshotRT(), id);
         if (lane == nullptr)
             return fallbackGain;
         const auto points = lane->getSnapshot();
