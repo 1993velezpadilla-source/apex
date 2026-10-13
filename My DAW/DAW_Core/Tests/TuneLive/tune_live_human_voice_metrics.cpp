@@ -44,15 +44,6 @@ double median(std::vector<double> data) {
     const std::size_t at=data.size()/2;
     return data.size()%2==0 ? 0.5*(data[at-1]+data[at]) : data[at];
 }
-std::string jsonEscape(const std::string& v) {
-    std::ostringstream out;
-    for(char c:v) {
-        if(c=='\\'||c=='"')out<<'\\';
-        if(c=='\n'||c=='\r')out<<" ";
-        else out<<c;
-    }
-    return out.str();
-}
 void metricReport(std::ostringstream& report,const Outcome& out) {
     const double before=median(out.rawOffsets);
     const double after=median(out.outputOffsets);
@@ -91,8 +82,7 @@ int main(int argc,char** argv) {
         std::array<Outcome,2> results{{{"SHIPPING_HQ40"},{"CAUSAL_RESEARCH"}}};
         int stableSourceCount=0,previousNote=-1;
         std::size_t framesMeasured=0,sourceVoiced=0;
-        std::size_t totalSourceDetections=0;
-        // Follow independent DSP tracker updates; never provide a known F0
+                // Follow independent DSP tracker updates; never provide a known F0
         // oracle. Evaluate only steady, same-note voiced frames to avoid
         // claiming full temporal registration between variable-delay paths.
         for(std::size_t sample=0;sample<source.frames();++sample) {
@@ -105,7 +95,6 @@ int main(int argc,char** argv) {
             const auto original=measured(trackers[0].latest());
             if(original.voiced) {
                 ++sourceVoiced;
-                ++totalSourceDetections;
                 if(original.note==previousNote)++stableSourceCount;
                 else stableSourceCount=1;
                 previousNote=original.note;
