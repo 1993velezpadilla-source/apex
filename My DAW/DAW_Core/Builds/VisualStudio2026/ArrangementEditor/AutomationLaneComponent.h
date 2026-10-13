@@ -46,8 +46,6 @@ public:
 
     ~AutomationLaneComponent() override = default;
 
-    // Host supplies an explicit selected-CLIP-track set. The lane never
-    // assumes "all tracks" or performs a cross-VST3-instance broadcast.
     using GroupedCurveCallback = std::function<bool(
         const TrackID&, const juce::String&, const std::vector<AutomationPoint>&)>;
     void setGroupedCurveCallback(GroupedCurveCallback callback)
@@ -96,6 +94,11 @@ public:
             });
         }
         apexLane.replacePoints(std::move(ppqPoints));
+    }
+
+    bool canBulkEditCurve() const noexcept
+    {
+        return !helper_.hasClipRegionsForParameter(trackId_, parameterId_);
     }
 
     void paint(juce::Graphics& g) override
@@ -176,7 +179,8 @@ public:
         tensionDragActive_ = false;
 
         const bool canEdit = isDrawingEnabled();
-        if (freehandArmed_ && !e.mods.isPopupMenu() && canEdit)
+        if (freehandArmed_ && !e.mods.isPopupMenu() && canEdit
+            && canBulkEditCurve())
         {
             freehandArmed_ = false;
             freehandDrawing_ = true;
@@ -316,7 +320,8 @@ public:
             appendFreehandPoint(e);
             freehandDrawing_ = false;
             auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
-            if (AutomationFreehandStrokeCore::commit(lane, freehandStroke_))
+            if (canBulkEditCurve()
+                && AutomationFreehandStrokeCore::commit(lane, freehandStroke_))
             {
                 undoManager_.doAction(std::make_unique<MovePointAction>(
                     helper_, trackId_, parameterId_,
@@ -1109,7 +1114,7 @@ private:
     {
         juce::PopupMenu menu;
         menu.addItem("Add Point", [this, e]() { insertPointAtClickLocation(e); });
-        if (isDrawingEnabled())
+        if (isDrawingEnabled() && canBulkEditCurve())
             menu.addItem("Freehand Pencil - Next Drag", [this]()
             {
                 freehandArmed_ = true;
@@ -1143,6 +1148,11 @@ private:
         });
 
         // Explicit full-lane edit, distinct from point/segment clipboards.
+        // A snapshot publish reapplies clip-owned regions; never offer a bulk
+        // edit that would be silently reverted or partially masked in DSP.
+        if (!canBulkEditCurve())
+            menu.addSectionHeader("Bulk edits unavailable: Automation Clip owns this lane");
+
         // Only an exact parameter match can paste: pan/volume/foreign VST3
         // ranges must never be silently reinterpreted.
         menu.addSeparator();
@@ -1156,7 +1166,7 @@ private:
             });
         }
 
-        if (isDrawingEnabled()
+        if (isDrawingEnabled() && canBulkEditCurve()
             && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
         {
             menu.addItem("Replace Entire Curve (Undoable)", [this]()
@@ -1164,7 +1174,7 @@ private:
                 // findLane() intentionally exposes a const view. Edits must
                 // use the message-thread mutable getOrCreateLane() API.
                 auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
-                if (!lane.isEnabled())
+                if (!lane.isEnabled() || !canBulkEditCurve())
                     return;
 
                 std::vector<AutomationPoint> pasted;
@@ -1190,7 +1200,8 @@ private:
 
         // Producer-friendly one-click musical modulation patterns. Generate
         // OFFLINE points once; playback consumes normal APEX lane snapshots.
-        if (isDrawingEnabled() && AutomationMusicalLfoCore::supports(parameterId_))
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationMusicalLfoCore::supports(parameterId_))
         {
             juce::PopupMenu lfoMenu;
             const auto addLfoItem = [this, &lfoMenu](const juce::String& name,
@@ -1204,7 +1215,7 @@ private:
                         return;
 
                     auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
-                    if (!lane.isEnabled())
+                    if (!lane.isEnabled() || !canBulkEditCurve())
                         return;
 
                     const auto before = lane.getState();
@@ -1229,7 +1240,8 @@ private:
             menu.addSubMenu("Generate 1-Bar LFO Curve (Undoable)", lfoMenu);
         }
 
-        if (isDrawingEnabled() && AutomationCurveTransformCore::supports(parameterId_))
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationCurveTransformCore::supports(parameterId_))
         {
             juce::PopupMenu transformations;
             const auto addTransform = [this, &transformations](
@@ -1238,7 +1250,7 @@ private:
                 transformations.addItem(label, [this, op]()
                 {
                     auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
-                    if (!lane.isEnabled() || lane.points.empty())
+                    if (!lane.isEnabled() || lane.points.empty() || !canBulkEditCurve())
                         return;
 
                     std::vector<AutomationPoint> transformed;
@@ -1267,7 +1279,7 @@ private:
 
         // Creative A/B blend against the copied whole-curve snapshot. This
         // is OFFLINE point generation, not signal-rate or VST3 parameter DSP.
-        if (isDrawingEnabled()
+        if (isDrawingEnabled() && canBulkEditCurve()
             && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
         {
             menu.addItem("Morph 50% Toward Copied Curve (Undoable)", [this]()
@@ -1278,7 +1290,7 @@ private:
                     return;
 
                 auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
-                if (!lane.isEnabled() || lane.points.empty())
+                if (!lane.isEnabled() || lane.points.empty() || !canBulkEditCurve())
                     return;
 
                 std::vector<AutomationPoint> blended;
