@@ -5962,6 +5962,17 @@ public:
         }
         const auto afterPin = store.getEffectiveLaneSnapshotRT();
         expect(afterPin != beforePin);
+        const auto activeA = Store::findLaneInSnapshotRT(afterPin, a);
+        const auto activeB = Store::findLaneInSnapshotRT(afterPin, b);
+        if (activeA != nullptr && activeB != nullptr)
+        {
+            expectWithinAbsoluteError(
+                activeA->getSnapshot()->front().normalizedValue,
+                0.4f, 0.00001f);
+            expectWithinAbsoluteError(
+                activeB->getSnapshot()->front().normalizedValue,
+                0.5f, 0.00001f);
+        }
         // One device callback surrounds track A, track B and master. Every
         // nested chain pin must keep the original generation even if the
         // UI publishes a new macro batch midway through that callback.
@@ -6010,17 +6021,6 @@ public:
         }
 
 
-        const auto activeA = Store::findLaneInSnapshotRT(afterPin, a);
-        const auto activeB = Store::findLaneInSnapshotRT(afterPin, b);
-        if (activeA != nullptr && activeB != nullptr)
-        {
-            expectWithinAbsoluteError(
-                activeA->getSnapshot()->front().normalizedValue,
-                0.4f, 0.00001f);
-            expectWithinAbsoluteError(
-                activeB->getSnapshot()->front().normalizedValue,
-                0.5f, 0.00001f);
-        }
     }
 };
 static AutomationV2PpqBatchPublicationTests automationV2PpqBatchPublicationTests;
