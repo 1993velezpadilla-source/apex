@@ -167,6 +167,16 @@ jobs:
           grep -q 'profile=high' VOCADITO_REGISTER_MATRIX_LICENSE.txt
           test -s vocadito_low_PITCH_COMPARISON.txt
           test -s vocadito_high_PITCH_COMPARISON.txt
+      - name: Investigate high-register octave flags with PDC-aligned actual audio spectra
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_octave_spectral_audit.cpp" \
+            -o human_octave_spectral_audit
+          ./human_octave_spectral_audit --prefix vocadito_high | tee HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
       - name: Validate real human voice outputs and write objective render report
         shell: bash
         run: |
@@ -242,5 +252,6 @@ jobs:
             vocadito_high_research12.wav
             vocadito_high_PITCH_COMPARISON.txt
             VOCADITO_REGISTER_MATRIX_LICENSE.txt
+            HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
           if-no-files-found: error
           retention-days: 7
