@@ -5093,6 +5093,21 @@ public:
         }
         expect(manager.findLane("drum", AutomationLaneCore::trackVolumeParameterId) != nullptr);
 
+        beginTest("Stale redo must not overwrite one selected track edited after Undo");
+        manager.addPoint("singer-b", AutomationLaneCore::trackVolumeParameterId,
+                         12000, 1.45f);
+        const auto beforeStaleRedo = manager.getState().toXmlString();
+        const auto staleVersion = manager.getSnapshotVersion();
+        expect(!AutomationGroupedCurveCore::apply(manager, batch, true));
+        expectEquals(manager.getState().toXmlString(), beforeStaleRedo);
+        expect(manager.getSnapshotVersion() == staleVersion);
+        // Revert only singer-b to the originally captured state, preserving
+        // unrelated changes to drum and other tracks.
+        manager.getOrCreateLane("singer-b",
+            AutomationLaneCore::trackVolumeParameterId)
+            .restoreState(batch.lanes.back().before);
+        manager.publishSnapshot();
+
         beginTest("Rollback guarantee: disabled/missing/double targets fail with zero changes");
         const auto beforeFailed = manager.getState().toXmlString();
         AutomationGroupedCurveCore::Batch invalid;
@@ -5157,8 +5172,16 @@ public:
         expectEquals(manager.getState().toXmlString(), beforeReject);
         expect(manager.deleteClipRegion(managedRegion.regionId));
 
+        beginTest("Clip region teardown invalidates stale group plan; reprepare explicitly");
+        expect(!AutomationGroupedCurveCore::apply(manager, batch, true));
+        AutomationGroupedCurveCore::Batch refreshed;
+        expect(AutomationGroupedCurveCore::prepare(
+            manager, AutomationLaneCore::trackVolumeParameterId,
+            {"singer-a", "singer-b"}, desired, refreshed));
+        expect(refreshed.isValid());
+
         beginTest("Group edit survives real manager project serialization");
-        expect(AutomationGroupedCurveCore::apply(manager, batch, true));
+        expect(AutomationGroupedCurveCore::apply(manager, refreshed, true));
         AutomationManagerCore reopened;
         reopened.restoreState(manager.getState());
         const auto* loaded = reopened.findLane("singer-b", AutomationLaneCore::trackVolumeParameterId);
