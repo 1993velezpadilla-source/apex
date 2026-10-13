@@ -1197,8 +1197,11 @@ private:
         matchInput_.reset();
         matchStage_ = MatchStage::Idle;
         lastMatchSpectrumIndex_ = -1;
-        matchButton_.setButtonText ("EQ MATCH");
-        matchSaveButton_.setButtonText ("REF SAVE");
+        // Match the idle captions to the actual graph width. A phone EQ
+        // reset must not restore desktop-length labels on 44px buttons.
+        const bool compact = getWidth() <= 430;
+        matchButton_.setButtonText (compact ? "MATCH" : "EQ MATCH");
+        matchSaveButton_.setButtonText (compact ? "SAVE" : "REF SAVE");
         matchButton_.setColour (juce::TextButton::buttonColourId,
                                 Palette::surfaceHover());
     }
@@ -2534,11 +2537,12 @@ void ParametricEQEditor::applyLayout()
                           : std::min (56, std::max (44, height / 12));
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
-    // All sub-900px devices (including landscape 600–899px): use a
-    // scrollable touch sheet BELOW the graph. A 340px floating HUD simply
-    // cannot avoid obscuring selected EQ nodes on a narrow landscape canvas.
+    // Narrow devices AND short plugin windows use a scrollable touch sheet
+    // BELOW the graph. At 900x300 the floating 340px inspector physically
+    // cannot avoid covering one of two nearby EQ nodes; a touch sheet
+    // preserves editability instead of scoring an impossible HUD position.
     // The main response remains >=45% of the whole editor.
-    const bool touchSheet = width < 900;
+    const bool touchSheet = width < 900 || height < 500;
     if (touchSheet)
     {
         const int available = workspace.getHeight();
