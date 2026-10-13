@@ -47,6 +47,18 @@ int main() {
     if(editor->getNumChildComponents()<12)
         return fail("editor has fewer controls than expected");
 
+    // Force precise Hard Tune in the JUCE host, not just in the portable
+    // processor tester. In particular Flex Tune must be zero here.
+    amount->setValueNotifyingHost(1.0f);
+    plugin.getParameters()[APEX::TuneLive::Processor::kSpeed]
+          ->setValueNotifyingHost(0.0f);
+    plugin.getParameters()[APEX::TuneLive::Processor::kHumanize]
+          ->setValueNotifyingHost(0.0f);
+    plugin.getParameters()[APEX::TuneLive::Processor::kFlexTune]
+          ->setValueNotifyingHost(0.0f);
+    APEX::TuneLive::PitchTracker outputPitch;
+    outputPitch.prepare(48000.0);
+
     // Pump identical stereo microphone signals through the actual JUCE
     // AudioPluginInstance processBlock; verify finite audio and detected F0.
     juce::AudioBuffer<float> audio(2,128);
@@ -65,15 +77,25 @@ int main() {
             for(int n=0;n<128;++n)
                 if(!std::isfinite(audio.getSample(c,n)))
                     return fail("non-finite native audio output");
+        if(i>=24000)
+            for(int n=0;n<128;++n)
+                outputPitch.push(audio.getSample(0,n));
     }
     const float hz=plugin.detectedFrequencyHz();
     if(hz<430.0f || hz>470.0f)
         return fail("live input was not pitch-tracked by native insert");
 
+    const auto wet=outputPitch.latest();
+    const double cents=wet.voiced
+       ? 1200.0*std::log2(wet.hz/440.0) : 9999.0;
+    if(!wet.voiced || std::abs(cents)>18.0)
+        return fail("hosted insert did not correct actual processed audio to A4");
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
                 "GUI controls, state, 48k/128 stereo realtime processing "
-                "and pitch detection. F0="<<hz<<"Hz\n";
+                "and pitch correction. Input F0="<<hz
+             <<"Hz, wet cents from A4="<<cents<<"\n";
     return 0;
 }
