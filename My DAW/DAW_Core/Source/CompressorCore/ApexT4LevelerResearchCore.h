@@ -12,6 +12,7 @@
 //
 // Zero heap allocations / locks / lookahead on audio thread. C++17.
 #include "ApexT4OpticalCellCore.h"
+#include "Apex6AQ5DriverResearchCore.h"
 #include <algorithm>
 #include <cmath>
 
@@ -25,6 +26,7 @@ struct T4LevelerResearchParameters
     double keyEmphasis=0.0; // detector only, does not EQ music
     bool limit=false;
     bool bypass=false;
+    bool use6AQ5Driver=false; // opt-in experimental EL stage
 };
 class ApexT4LevelerResearchCore final
 {
@@ -33,6 +35,7 @@ public:
     {
         sampleRate_=(std::isfinite(sr) && sr>=8000.0 && sr<=768000.0)?sr:48000.0;
         cell_.prepare(sampleRate_,calibration);
+        pentodeDriver_.prepare(sampleRate_);
         detectorCoeff_=std::exp(-1.0/(sampleRate_*0.010));
         keyLowpassCoeff_=std::exp(-2.0*3.141592653589793*320.0/sampleRate_);
         controlCoeff_=std::exp(-1.0/(sampleRate_*0.005));
@@ -41,6 +44,7 @@ public:
     void reset() noexcept
     {
         cell_.reset();
+        pentodeDriver_.reset();
         detector_=lowL_=lowR_=0.0;
         currentOutput_=gain(p_.gainDb);
         currentMix_=p_.parallelMix;
@@ -85,7 +89,12 @@ public:
             // No threshold pretending to be measured tube physics.
             const double input=std::clamp(drive*detector_,0.0,1.0);
             const double excitation=p_.limit ? input : input*0.77;
-            cell_.tick(excitation);
+            // The old uncalibrated transfer is the backwards-compatible
+            // default. Experimental full-path fixture opts into a DC
+            // plate-current/EL transformer+rectifier transfer hypothesis.
+            const double elDrive=p_.use6AQ5Driver ?
+                pentodeDriver_.tick(excitation):excitation;
+            cell_.tick(elDrive);
             currentOutput_=controlCoeff_*currentOutput_+
                 (1.0-controlCoeff_)*gain(p_.gainDb);
             currentMix_=controlCoeff_*currentMix_+
@@ -112,6 +121,7 @@ private:
         return std::exp(db*0.11512925464970229);
     }
     ApexT4OpticalCellCore cell_;
+    Apex6AQ5DriverResearchCore pentodeDriver_;
     T4LevelerResearchParameters p_ {};
     double sampleRate_=48000,detectorCoeff_=0,keyLowpassCoeff_=0,controlCoeff_=0;
     double detector_=0,lowL_=0,lowR_=0,currentOutput_=1,currentMix_=1,gate_=1;
