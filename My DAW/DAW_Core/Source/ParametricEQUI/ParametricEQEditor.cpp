@@ -726,6 +726,46 @@ public:
                 juce::PathStrokeType::rounded));
         }
         drawNodes (g, bounds);
+        // APEX's own compact value readout follows the chosen frequency
+        // node without additional controls or stealing graph pointer input.
+        if (getWidth() >= 700)
+        {
+            const int selectedBand = owner_.getSelectedBandForTesting();
+            if (selectedBand >= 0 && selectedBand < kMaxBands)
+            {
+                const auto centre = nodeCentre (selectedBand);
+                const auto* frequency = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Frequency));
+                const auto* gain = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Gain));
+                const auto* q = processor_.getParametricEQParameter (
+                    parameterIndex (selectedBand, BandParameterOffset::Q));
+                const juce::String readout = frequency->getText (
+                    frequency->getValue(), 0) + "     "
+                    + gain->getText (gain->getValue(), 0) + "     "
+                    + q->getText (q->getValue(), 0);
+                constexpr int bubbleWidth = 288;
+                constexpr int bubbleHeight = 32;
+                const int x = std::clamp (
+                    centre.x - bubbleWidth / 2, 8,
+                    std::max (8, getWidth() - bubbleWidth - 8));
+                const int y = centre.y > 100 ? centre.y - 65
+                                             : centre.y + 36;
+                auto bubble = juce::Rectangle<float> (
+                    static_cast<float> (x), static_cast<float> (y),
+                    static_cast<float> (bubbleWidth),
+                    static_cast<float> (bubbleHeight));
+                g.setColour (Palette::background().withAlpha (0.88f));
+                g.fillRoundedRectangle (bubble, 9.0f);
+                g.setColour (Palette::accent().withAlpha (0.66f));
+                g.drawRoundedRectangle (bubble, 9.0f, 1.0f);
+                g.setColour (Palette::text());
+                g.setFont (juce::Font (juce::FontOptions (
+                    12.0f, juce::Font::bold)));
+                g.drawFittedText (readout, bubble.toNearestInt().reduced (9, 3),
+                                  juce::Justification::centred, 1);
+            }
+        }
         if (grabArmed_)
             drawGrabPeaks (g);
 
@@ -1955,7 +1995,9 @@ public:
         // The inspector content uses touch-sized fixed rows. When the editor
         // is shorter than the full control stack, the viewport scrolls the
         // contextual panel instead of shrinking controls into unusability.
-        constexpr int row = 56;
+        // Floating inspector uses dense but still >=44px touch targets.
+        // Portrait sheet keeps comfortable full-size 56px control rows.
+        const int row = getWidth() >= 340 && getHeight() <= 430 ? 48 : 56;
         const int placementColumns = viewport_.getWidth() >= 340 ? 5 : 3;
         const int placementRows = (kChannelPlacementCount + placementColumns - 1)
                                 / placementColumns;
