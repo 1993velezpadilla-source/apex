@@ -41,7 +41,16 @@ struct AutomationArticulatorToolsCore
         if (parameter.startsWith("clip.") && parameter.endsWith(AutomationLaneCore::clipStretchSuffix))
             return {0.1f, 4.0f};
 
-        return {0.0f, 1.0f};
+        // Normalized third-party plugin parameters are [0,1].
+        if (parameter.startsWith("plugin.") || parameter.startsWith("instrument.")
+            || parameter == AutomationLaneCore::trackTapeStopParameterId
+            || (parameter.startsWith("clip.")
+                && parameter.endsWith(AutomationLaneCore::clipTapeStopSuffix)))
+            return {0.0f, 1.0f};
+
+        // Match AutomationLaneCore's generic host range [0,2]. Otherwise,
+        // transformations can silently squash sends and other native lanes.
+        return {0.0f, 2.0f};
     }
 
     static void flipVertically(AutomationClipRegionCore& region)
