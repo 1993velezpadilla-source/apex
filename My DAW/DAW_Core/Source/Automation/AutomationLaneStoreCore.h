@@ -231,19 +231,27 @@ namespace apex::automation
          * snapshot and a thread-local NON-owning pointer only identifies it.
          * No locks, heap allocations, map copies or DSP-thread publications.
          */
+        struct PinFrame
+        {
+            const AutomationLaneStore* store = nullptr;
+            const RtLaneSnapshot* snapshot = nullptr;
+            const PinFrame* previous = nullptr;
+        };
+
         class ScopedRtPin final
         {
         public:
             explicit ScopedRtPin(const AutomationLaneStore& store) noexcept
                 : snapshot_(store.getEffectiveLaneSnapshotRT()),
-                  previous_(pinnedLaneMapForThread_)
+                  frame_ { &store, &snapshot_, pinnedFrameForThread_ },
+                  previous_(pinnedFrameForThread_)
             {
-                pinnedLaneMapForThread_ = &snapshot_;
+                pinnedFrameForThread_ = &frame_;
             }
 
             ~ScopedRtPin() noexcept
             {
-                pinnedLaneMapForThread_ = previous_;
+                pinnedFrameForThread_ = previous_;
             }
 
             ScopedRtPin(const ScopedRtPin&) = delete;
@@ -253,13 +261,19 @@ namespace apex::automation
 
         private:
             RtLaneSnapshot snapshot_;
-            const RtLaneSnapshot* previous_ = nullptr;
+            PinFrame frame_;
+            const PinFrame* previous_ = nullptr;
         };
 
         RtLaneSnapshot getEffectiveLaneSnapshotRT() const noexcept
         {
-            return pinnedLaneMapForThread_ != nullptr
-                ? *pinnedLaneMapForThread_ : getLaneSnapshotRT();
+            // A locally constructed test/offline store must not accidentally
+            // inherit a different store's thread-local callback generation.
+            for (auto* frame = pinnedFrameForThread_; frame != nullptr;
+                 frame = frame->previous)
+                if (frame->store == this)
+                    return *frame->snapshot;
+            return getLaneSnapshotRT();
         }
 
         static std::shared_ptr<AutomationLane> findLaneInSnapshotRT (
@@ -548,7 +562,7 @@ namespace apex::automation
         std::shared_ptr<const LaneMap> retiredLanesSnapshot_;   // message-thread retire slot
         std::atomic<std::uint64_t> changeGeneration_ { 0 };
         int publishBatchDepth_ = 0;   // message thread only
-        inline static thread_local const RtLaneSnapshot* pinnedLaneMapForThread_ = nullptr;
+        inline static thread_local const PinFrame* pinnedFrameForThread_ = nullptr;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationLaneStore)
     };
