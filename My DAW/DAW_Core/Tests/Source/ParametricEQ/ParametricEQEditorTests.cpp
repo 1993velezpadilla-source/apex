@@ -157,9 +157,30 @@ private:
                             "floating dial stays legible and touch safe");
                 }
                 else
+                {
                     expect (dial->getSliderStyle()
                             == juce::Slider::LinearHorizontal,
-                            "phone/tablet sheet retains wide touch sliders");
+                            "phone/tablet sheet retains horizontal touch sliders");
+                    expect (dial->getHeight() >= 96 && dial->getWidth() >= 80,
+                            "touch quick-edit strip keeps real FREQ/GAIN/Q "
+                            "controls large enough for fingers and text");
+                    expect (dial->getY() < 70,
+                            "touch EQ essentials immediately visible before "
+                            "secondary inspector controls");
+                }
+            }
+            if (sizeCase.width < 900)
+            {
+                expectEquals (primary[0]->getY(), primary[1]->getY(),
+                              "quick-edit band strip aligns FREQ and GAIN");
+                expectEquals (primary[1]->getY(), primary[2]->getY(),
+                              "quick-edit band strip aligns GAIN and Q");
+                expect (! primary[0]->getBounds().intersects (
+                            primary[1]->getBounds()),
+                        "FREQ and GAIN hit targets cannot overlap");
+                expect (! primary[1]->getBounds().intersects (
+                            primary[2]->getBounds()),
+                        "GAIN and Q hit targets cannot overlap");
             }
 
             auto inBounds = [] (const juce::Rectangle<int>& child,
