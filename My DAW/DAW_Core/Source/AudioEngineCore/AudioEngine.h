@@ -395,6 +395,10 @@ public:
         juce::ScopedNoDenormals noDenormals;
         if (!tracks_ || !routing_ || output.getNumChannels() < 1 || numSamples <= 0)
             return false;
+        // In direct engine export paths, pin independently; when launched
+        // through ApplicationCore, inherit its outer bounce/master pin.
+        const apex::automation::AutomationLaneStore::ScopedRtPin exportPpqPin(
+            apex::automation::AutomationLaneStore::getInstance());
 
         const int safeSamples = juce::jmin(numSamples, output.getNumSamples());
         auto renderContext = apexSoundEngineCore_.makeContext(safeSamples, (SamplePosition) timelineSample, true, SoundEngine::RenderMode::Offline);
@@ -647,6 +651,10 @@ public:
     void process(const juce::AudioSourceChannelInfo& output)
     {
         juce::ScopedNoDenormals noDenormals;
+        // Standalone engine invocation and ApplicationCore callbacks use
+        // the same PPQ generation for every route, track and bus.
+        const apex::automation::AutomationLaneStore::ScopedRtPin enginePpqPin(
+            apex::automation::AutomationLaneStore::getInstance());
 
         struct PlaybackPitchWriteScope
         {

@@ -38,9 +38,14 @@ namespace apex::automation
             if (! transportRolling)
                 return;
 
-            registry.forEachRT ([this, playheadPPQ] (AutomationParameter& p)
+            // Native parameter state must resolve from the SAME PPQ map
+            // generation pinned by the complete device/offline callback.
+            // Otherwise native faders could reflect new curves while VST3
+            // instances still render the old macro bank for this block.
+            const auto ppqLaneMap = lanes.getEffectiveLaneSnapshotRT();
+            registry.forEachRT ([this, playheadPPQ, &ppqLaneMap] (AutomationParameter& p)
             {
-                evaluateOne (p, playheadPPQ);
+                evaluateOne (p, playheadPPQ, ppqLaneMap);
             });
         }
 
@@ -50,7 +55,9 @@ namespace apex::automation
         }
 
     private:
-        void evaluateOne (AutomationParameter& p, double playheadPPQ) noexcept
+        void evaluateOne (
+            AutomationParameter& p, double playheadPPQ,
+            const AutomationLaneStore::RtLaneSnapshot& ppqLaneMap) noexcept
         {
             const auto id = p.getID();
 
@@ -66,7 +73,7 @@ namespace apex::automation
                     && modeState.latchHeldRT (id)))
                 return;
 
-            auto lane = lanes.findLaneRT (id);
+            auto lane = AutomationLaneStore::findLaneInSnapshotRT (ppqLaneMap, id);
             if (lane == nullptr) return;
 
             auto snap = lane->getSnapshot();
