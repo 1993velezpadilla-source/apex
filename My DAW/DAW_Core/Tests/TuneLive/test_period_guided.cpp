@@ -92,4 +92,11 @@ int main() {
     std::cout<<"CAUSAL_RESEARCH safety="<<valid<<"/8"
              <<" synthetic_f0_eligible="<<accurate<<"/8"
              <<" (exact source F0 oracle; NOT live singer/perceptual/PDC pass)\n";
+    // For a fixed, known periodic source, this algorithm must genuinely
+    // transpose in both directions. Never reinterpret this synthetic
+    // regression pass as a sung-vocal quality or host-latency certificate.
+    if(valid!=8 || accurate!=8) {
+        std::cerr<<"FAIL: causal oracle-F0 regression; keep research isolated\n";
+        return 1;
+    }
 }
