@@ -59,6 +59,21 @@ int main() {
     assert(naturalVibrato < originalVibrato*1.20);
     assert(roboticVibrato < originalVibrato*0.10);
 
+    // Flex Tune should preserve fine intonation at note centres while
+    // leaving a large detuned note eligible for substantial correction.
+    natural.humanize=0.0f;
+    natural.flexTune=0.0f;
+    tune.reset();
+    const auto hardSmall=tune.update(pitch(60.06f), natural);
+    natural.flexTune=1.0f;
+    tune.reset();
+    const auto flexSmall=tune.update(pitch(60.06f), natural);
+    assert(std::abs(hardSmall.shiftSemitones)>0.04f);
+    assert(std::abs(flexSmall.shiftSemitones)<0.002f);
+    tune.reset();
+    const auto flexLarge=tune.update(pitch(60.40f),natural);
+    assert(std::abs(flexLarge.shiftSemitones)>0.19f);
+
     // Invalid F0 and unvoiced bursts must not drive an insane transpose.
     assert(!tune.update({0.0f,0.0f,false},natural).voiced);
     assert(!tune.update({NAN,0.99f,true},natural).voiced);
