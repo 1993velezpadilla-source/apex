@@ -1854,13 +1854,29 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto area = getLocalBounds().toFloat();
+        const bool floating = getWidth() >= 340 && getHeight() <= 430;
+        if (floating)
+        {
+            // Self-contained APEX glass HUD; the controls are all real JUCE
+            // components and still scroll (no render-only dummy controls).
+            g.setColour (juce::Colours::black.withAlpha (0.31f));
+            g.fillRoundedRectangle (area.translated (0.0f, 2.0f)
+                                        .reduced (1.0f, 1.0f), 13.0f);
+        }
+        auto body = area.reduced (floating ? 2.0f : 0.0f);
         g.setGradientFill (juce::ColourGradient (
-            Palette::surfaceHover().darker (0.30f), area.getTopLeft(),
-            Palette::surface(), area.getBottomLeft(), false));
-        g.fillRect (area);
-        g.setColour (Palette::accent().withAlpha (0.45f));
-        g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
-                    area.getHeight());
+            juce::Colour (0xff243451), body.getTopLeft(),
+            Palette::surface(), body.getBottomLeft(), false));
+        if (floating)
+            g.fillRoundedRectangle (body, 12.0f);
+        else
+            g.fillRect (body);
+        g.setColour (Palette::accent().withAlpha (floating ? 0.84f : 0.45f));
+        if (floating)
+            g.drawRoundedRectangle (body.reduced (0.5f), 12.0f, 1.3f);
+        else
+            g.fillRect (0.0f, 0.0f, std::min (2.0f, area.getWidth()),
+                        area.getHeight());
     }
 
     void resized() override
@@ -2269,41 +2285,64 @@ void ParametricEQEditor::applyLayout()
     else
         layoutMode_ = LayoutMode::CompactPhone;
 
-    auto bounds = getLocalBounds();
-    const int topBarHeight = width < 430
-                           ? std::min (104, std::max (88, height / 6))
-                           : std::min (56, std::max (44, height / 12));
-    topBar_->setBounds (bounds.removeFromTop (topBarHeight));
+    // Immersive, graph-first APEX layout. Pro-Q-style interaction philosophy
+    // but entirely native APEX visuals. A bottom command dock never steals
+    // horizontal space from the response display.
+    auto workspace = getLocalBounds();
+    const int dockHeight = width < 430 ? 104
+                          : std::min (56, std::max (44, height / 12));
+    topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
-    // Portrait-capable, compact devices use a bottom contextual sheet; the
-    // graph stays the dominant surface. Wide layouts use a side inspector.
-    const bool portraitCompact = width < 900
+    // Phone / portrait tablet: keep the existing scrollable touch sheet
+    // below the graph. The inspector's rows remain >=44 logical pixels.
+    const bool portrait = width < 900
         && height >= static_cast<int> (width * 1.05);
-    if (portraitCompact)
+    if (portrait)
     {
-        const bool hasSelection = selectedBand_ >= 0;
-        const int available = std::max (0, height - topBarHeight);
-        // A floating-style *scrollable* inspector sheet must never consume
-        // most of a portrait editor: producers need the frequency curve more
-        // than dozens of permanently visible settings. Give the graph 62%
-        // of the remaining height (>=45% of the whole panel even on phones).
-        // The user can still scroll to EVERY native control at 44+ px touch.
-        const int desiredSheet = hasSelection
+        const int available = workspace.getHeight();
+        const int minGraph = std::max (140, (height * 45 + 99) / 100);
+        const int desiredSheet = selectedBand_ >= 0
             ? std::max (120, available * 38 / 100)
             : std::max (56, height / 12);
-        const int minimumGraphHeight = std::max (140, (height * 45 + 99) / 100);
-        const int sheetHeight = std::min (
-            desiredSheet, std::max (0, available - minimumGraphHeight));
-        graph_->setBounds (bounds.removeFromTop (available - sheetHeight));
-        inspector_->setBounds (bounds);
+        const int sheet = std::min (desiredSheet,
+                                    std::max (0, available - minGraph));
+        graph_->setBounds (workspace.removeFromTop (available - sheet));
+        inspector_->setBounds (workspace);
+        inspector_->setVisible (true);
+        return;
     }
-    else
+
+    // Landscape / desktop: NO permanently docked side inspector. The graph
+    // receives the entire canvas, and a small scrolling control HUD appears
+    // beside the selected node only when required.
+    graph_->setBounds (workspace);
+    if (selectedBand_ < 0 || selectedBand_ >= kMaxBands)
     {
-        const int inspectorWidth = std::min (std::max (240, width / 3),
-                                             width >= 1400 ? 380 : 320);
-        inspector_->setBounds (bounds.removeFromRight (inspectorWidth));
-        graph_->setBounds (bounds);
+        inspector_->setVisible (false);
+        return;
     }
+
+    const int graphWidth = graph_->getWidth();
+    const int graphHeight = graph_->getHeight();
+    const int cardWidth = std::min (std::max (340, graphWidth / 3), 414);
+    const int cardHeight = std::min (398, std::max (230, graphHeight - 94));
+    const auto node = graph_->nodeBounds (selectedBand_).getCentre();
+
+    int cardX = node.x + 42;
+    if (cardX + cardWidth + 14 > graphWidth)
+        cardX = node.x - cardWidth - 42;
+    cardX = std::clamp (cardX, 12, std::max (12, graphWidth - cardWidth - 12));
+
+    int cardY = node.y + 32;
+    if (cardY + cardHeight + 12 > graphHeight)
+        cardY = node.y - cardHeight - 32;
+    if (cardY < 64)
+        cardY = std::clamp (node.y - cardHeight / 2, 64,
+                            std::max (64, graphHeight - cardHeight - 12));
+
+    inspector_->setBounds (cardX, cardY, cardWidth, cardHeight);
+    inspector_->setVisible (true);
+    inspector_->toFront (false); // overlay stays interactive, graph stays huge
 }
 
 void ParametricEQEditor::selectBand (int band)
