@@ -47,10 +47,28 @@ int main() {
     // and ensure it presents more than generic parameter controls.
     std::unique_ptr<juce::AudioProcessorEditor> editor(plugin.createEditor());
     if(!editor) return fail("native editor unavailable");
-    if(editor->getWidth()<620 || editor->getHeight()<560)
-        return fail("native editor touch-safe bounds too small");
+    if(editor->getWidth()!=1200 || editor->getHeight()!=750)
+        return fail("premium native editor is not 1200x750 reference size");
     if(editor->getNumChildComponents()<12)
         return fail("editor has fewer controls than expected");
+
+    // Test actual dropdown interactions; Ab and Bb map onto the existing
+    // automated 12-semitone parameter. Never create duplicate tuning keys.
+    juce::ComboBox* keyBox=nullptr;
+    for(int child=0;child<editor->getNumChildComponents();++child)
+        if(auto* combo=dynamic_cast<juce::ComboBox*>(editor->getChildComponent(child)))
+            if(combo->getNumItems()==17)keyBox=combo;
+    if(!keyBox)return fail("expected 17 selectable C#/Db...G#/Ab...A#/Bb spellings");
+    auto* key=plugin.getParameters()[APEX::TuneLive::Processor::kKey];
+    keyBox->setSelectedId(13,juce::sendNotificationSync);
+    if(keyBox->getText()!="Ab" || std::abs(key->getValue()-8.0f/11.0f)>0.001f)
+        return fail("Ab key does not map to G# parameter semitone 8");
+    keyBox->setSelectedId(16,juce::sendNotificationSync);
+    if(keyBox->getText()!="Bb" || std::abs(key->getValue()-10.0f/11.0f)>0.001f)
+        return fail("Bb key does not map to A# parameter semitone 10");
+    keyBox->setSelectedId(1,juce::sendNotificationSync);
+    if(std::abs(key->getValue())>0.001f)
+        return fail("GUI key reset to C failed");
 
     // Screenshot-only instrumentation: this captures the EXACT, existing
     // JUCE production editor. Does not change the GUI or any DSP control.
@@ -58,7 +76,7 @@ int main() {
     // harness, rather than a generated mockup or design concept.
     editor->setVisible(true);
     const juce::Image screenshot=editor->createComponentSnapshot(editor->getLocalBounds());
-    if(!screenshot.isValid() || screenshot.getWidth()!=900 || screenshot.getHeight()!=575)
+    if(!screenshot.isValid() || screenshot.getWidth()!=1200 || screenshot.getHeight()!=750)
         return fail("actual Tune Live editor screenshot invalid dimensions");
     const auto screenshotFile=juce::File::getCurrentWorkingDirectory()
         .getChildFile("APEX_Tune_Live_Actual_GUI_Windows.png");
