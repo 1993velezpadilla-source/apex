@@ -314,6 +314,92 @@ public:
                                       "band31 restored through chain state");
         }
 
+        // APEX TUNE LIVE — real DAW insert path, not a standalone JUCE
+        // harness: the same PluginChainCore used for G10 and VST3 must
+        // load it, process samples, and preserve its host-saved state.
+        {
+            beginTest ("Tune Live through the REAL APEX PluginChainCore");
+
+            DAW::PluginChainCore chain;
+            chain.prepare (48000.0, 128);
+            chain.setAutomationContext ("tunelivetesttrack", nullptr, nullptr);
+
+            juce::String error;
+            const auto description = DAW::ApexNativePluginFormat::createTuneLiveDescription();
+            const bool inserted = chain.loadPlugin (0, description, manager, error);
+            expect (inserted, "native Tune Live must insert into an APEX track: " + error);
+            if (inserted)
+            {
+                auto* slot = chain.getSlot (0);
+                auto* processor = slot != nullptr ? slot->getProcessor() : nullptr;
+                expect (dynamic_cast<APEX::TuneLive::Processor*> (processor) != nullptr,
+                        "track insert must be the real Tune Live instance");
+                if (processor != nullptr)
+                {
+                    expectEquals (processor->getLatencySamples(), 1920,
+                                  "PluginChain must receive exact 40ms PDC");
+
+                    int automationBound = 0;
+                    using KR = apex::automation::AutomationParameterKeyRegistry;
+                    auto& automation = apex::automation::AutomationSystem::getInstance();
+                    for (auto* parameter : processor->getParameters())
+                    {
+                        auto* tagged = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                        if (tagged == nullptr)
+                            continue;
+                        const auto key = KR::pluginParamKey (
+                            "tunelivetesttrack", 0, APEX::TuneLive::Processor::kPluginName,
+                            tagged->paramID);
+                        const auto id = KR::getInstance().findID (key);
+                        if (id != apex::automation::kInvalidParameterID
+                            && automation.getRegistry().find (id) != nullptr)
+                            ++automationBound;
+                    }
+                    expectEquals (automationBound, APEX::TuneLive::Processor::kNumParams,
+                                  "all 11 Tune Live knobs must be APEX automation-bound");
+
+                    // The hosted signal is processed through the ACTUAL chain.
+                    auto* correction = processor->getParameters()[APEX::TuneLive::Processor::kAmount];
+                    correction->setValueNotifyingHost (0.735f);
+                    juce::AudioBuffer<float> block (2, 128);
+                    for (int offset = 0; offset < 48000; offset += 128)
+                    {
+                        for (int sample = 0; sample < 128; ++sample)
+                        {
+                            const double time = (offset + sample) / 48000.0;
+                            const float input = (float) (0.3 * std::sin (
+                                juce::MathConstants<double>::twoPi * 447.69 * time));
+                            block.setSample (0, sample, input);
+                            block.setSample (1, sample, input);
+                        }
+                        chain.processBlock (block, 128);
+                    }
+                    bool allFinite = true;
+                    for (int channel = 0; channel < 2; ++channel)
+                        for (int sample = 0; sample < 128; ++sample)
+                            allFinite = allFinite && std::isfinite (block.getSample (channel, sample));
+                    expect (allFinite, "APEX chain processed live vocal without nonfinite samples");
+
+                    const auto state = chain.getState();
+                    expectEquals (state.getNumChildren(), 1, "one track effect saved");
+                    DAW::PluginChainCore restored;
+                    restored.prepare (48000.0, 128);
+                    restored.restoreState (state, manager);
+                    expectEquals (restored.getNumActiveSlots(), 1,
+                                  "native Tune Live must reopen with the session");
+                    auto* restoredSlot = restored.getSlot (0);
+                    auto* reopened = restoredSlot != nullptr ? restoredSlot->getProcessor() : nullptr;
+                    expect (dynamic_cast<APEX::TuneLive::Processor*> (reopened) != nullptr,
+                            "restored DAW session must instantiate Tune Live");
+                    if (reopened != nullptr)
+                        expectWithinAbsoluteError (
+                            reopened->getParameters()[APEX::TuneLive::Processor::kAmount]->getValue(),
+                            0.735f, 1.0e-4f,
+                            "Track FX chain retains correction amount across save/reopen");
+                }
+            }
+        }
+
         // Test seam: appendPluginInstanceForTesting.
         {
             DAW::PluginChainCore chain;
