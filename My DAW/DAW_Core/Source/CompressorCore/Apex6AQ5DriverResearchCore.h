@@ -64,6 +64,8 @@ public:
         const double target=table_[low]+fraction*(table_[high]-table_[low]);
         const double coeff=target>elEnvelope_?attackCoef_:releaseCoef_;
         elEnvelope_=coeff*elEnvelope_+(1-coeff)*target;
+        // Eliminate tiny CPU-expensive subnormal tails during long silence.
+        if (elEnvelope_<1.e-15) elEnvelope_=0.0;
         return elEnvelope_;
     }
     double elLevel() const noexcept {return elEnvelope_;}
