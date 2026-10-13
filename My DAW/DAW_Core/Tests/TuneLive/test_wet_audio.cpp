@@ -48,7 +48,11 @@ int main() {
     std::cout<<"dry_Hz="<<inputHz<<" wet_Hz="<<result.hz
              <<" cents_from_A4="<<cents
              <<" plugin_PDC_samples="<<plugin.latencySamples()
-             <<" detector_window_ms="<<plugin.detectorWindowMs()<<"\n";
+             <<" detector_window_ms="<<plugin.detectorWindowMs()
+             <<" tracked_input_Hz="<<plugin.frequencyHz()
+             <<" requested_shift_st="<<plugin.debugTargetShiftSemitones()
+             <<" shifter_shift_st="<<plugin.debugAppliedShiftSemitones()
+             <<" effective_wet="<<plugin.debugWetAmount()<<"\n";
     if(!std::isfinite(cents)||std::abs(cents)>18.0) {
         std::cerr<<"Corrected audio failed target A4 (+/-18 cents)\n";
         return 1;
