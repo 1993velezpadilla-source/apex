@@ -28,6 +28,7 @@ public:
         ring_.fill(0.0f); frame_.fill(0.0f); diff_.fill(0.0f); cmndf_.fill(0.0f);
         ringPos_ = ready_ = hop_ = substep_ = 0;
         low1_ = low2_ = 0.0; last_ = {};
+        lagEvaluations_ = 0;
     }
     // Accept samples from exactly one monophonic signal. Return true on a new estimate.
     bool push(float input) noexcept {
@@ -46,6 +47,9 @@ public:
         return true;
     }
     Result latest() const noexcept { return last_; }
+    // Diagnostic: number of difference lags examined in the latest frame.
+    // Allows a portable RT regression to verify short-circuit performance.
+    int lastLagEvaluations() const noexcept { return lagEvaluations_; }
     double analysisWindowMs() const noexcept { return 1000.0 * kWindow / detectorRate_; }
 private:
     void calculate() noexcept {
@@ -54,12 +58,14 @@ private:
         double energy = 0.0;
         for (float v : frame_) energy += static_cast<double>(v) * v;
         last_ = {};
+        lagEvaluations_ = 0;
         if (energy < 512.0 * 0.000004) return; // about -54 dBFS RMS
         const int w = kWindow - maxLag_;
         double sum = 0.0;
         int best = -1;
         float chosen = 1.0f;
         for (int lag = 1; lag <= maxLag_; ++lag) {
+            ++lagEvaluations_;
             double d = 0.0;
             for (int i = 0; i < w; ++i) {
                 double e = static_cast<double>(frame_[static_cast<std::size_t>(i)]) - frame_[static_cast<std::size_t>(i + lag)];
@@ -69,14 +75,29 @@ private:
             sum += d;
             const float normalized = sum > 1.0e-16 ? static_cast<float>((d * lag) / sum) : 1.0f;
             cmndf_[static_cast<std::size_t>(lag)] = normalized;
+            // We can terminate YIN after the first completed below-threshold
+            // trough. The preceding implementation always calculated 218-256
+            // lags even for a voiced 440Hz singer (lag ~27 @ 12k).
+            // A completed trough requires the NEXT point to turn upward,
+            // preserving the published first-dip + local-minimum rule.
+            if (lag > minLag_) {
+                const auto prior=static_cast<std::size_t>(lag-1);
+                if (cmndf_[prior] < 0.17f && normalized >= cmndf_[prior]) {
+                    best = lag-1;
+                    chosen = cmndf_[prior];
+                    break;
+                }
+            }
         }
-        // YIN first-dip rule; walk down to its local minimum.
-        for (int lag = minLag_; lag <= maxLag_; ++lag) {
-            if (cmndf_[static_cast<std::size_t>(lag)] < 0.17f) {
-                while (lag < maxLag_ && cmndf_[static_cast<std::size_t>(lag + 1)] < cmndf_[static_cast<std::size_t>(lag)]) ++lag;
-                best = lag;
-                chosen = cmndf_[static_cast<std::size_t>(lag)];
-                break;
+        if (best < 0) {
+            // A last-point minimum without a next sample still counts.
+            // Keep a conservative fallback for silence/noisy borderline data.
+            for (int lag = minLag_; lag <= maxLag_; ++lag) {
+                if (cmndf_[static_cast<std::size_t>(lag)] < 0.17f) {
+                    best=lag;
+                    chosen=cmndf_[static_cast<std::size_t>(lag)];
+                    break;
+                }
             }
         }
         if (best < 0 || chosen > 0.17f) return;
@@ -97,6 +118,7 @@ private:
     double low1_ = 0.0, low2_ = 0.0;
     int decimation_ = 4, minLag_ = 12, maxLag_ = 160;
     int ringPos_ = 0, ready_ = 0, hop_ = 0, substep_ = 0;
+    int lagEvaluations_ = 0;
     std::array<float, kWindow> ring_{}, frame_{};
     std::array<float, kMaxLag + 1> diff_{}, cmndf_{};
     Result last_{};
