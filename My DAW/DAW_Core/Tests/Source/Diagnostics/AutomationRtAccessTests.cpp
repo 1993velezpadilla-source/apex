@@ -5296,6 +5296,52 @@ public:
         expect(openedWithMemory.getAdvancedMemories().isValid());
         openedWithMemory.restoreState(initialState);
         expect(!openedWithMemory.getAdvancedMemories().isValid());
+
+        beginTest("Project loader rejects out-of-domain plugin values before accepting memories");
+        auto malformedMemory = memory.createCopy();
+        malformedMemory.getChild(0).getChild(2).getChild(0)
+            .setProperty("value", 1.5f, nullptr); // VST3 domain [0, 1]
+        openedWithMemory.setAdvancedMemories(malformedMemory);
+        expect(!openedWithMemory.getAdvancedMemories().isValid());
+
+        beginTest("Existing memories remain unchanged when an invalid project payload arrives");
+        openedWithMemory.setAdvancedMemories(memory);
+        const auto untouchedMemory = openedWithMemory.getAdvancedMemories().toXmlString();
+        openedWithMemory.setAdvancedMemories(malformedMemory);
+        expectEquals(openedWithMemory.getAdvancedMemories().toXmlString(),
+                     untouchedMemory);
+
+        beginTest("Project loader rejects corrupt curve, duplicate target and unordered times");
+        malformedMemory = memory.createCopy();
+        malformedMemory.getChild(0).getChild(0).getChild(0)
+            .setProperty("curveToNextName", "INVALID_CURVE", nullptr);
+        openedWithMemory.setAdvancedMemories(malformedMemory);
+        expectEquals(openedWithMemory.getAdvancedMemories().toXmlString(),
+                     untouchedMemory);
+
+        malformedMemory = memory.createCopy();
+        auto duplicatedTarget = malformedMemory.getChild(0).getChild(0).createCopy();
+        malformedMemory.getChild(0).addChild(duplicatedTarget, -1, nullptr);
+        openedWithMemory.setAdvancedMemories(malformedMemory);
+        expectEquals(openedWithMemory.getAdvancedMemories().toXmlString(),
+                     untouchedMemory);
+
+        malformedMemory = memory.createCopy();
+        malformedMemory.getChild(0).getChild(0).getChild(1)
+            .setProperty("timeSamples", (juce::int64)0, nullptr);
+        openedWithMemory.setAdvancedMemories(malformedMemory);
+        expectEquals(openedWithMemory.getAdvancedMemories().toXmlString(),
+                     untouchedMemory);
+
+        beginTest("Restoring a corrupted project strips unsafe A/B data");
+        auto damagedProject = withMemory.createCopy();
+        auto attached = damagedProject.getChildWithName("AutomationAdvancedMemories");
+        attached.getChild(0).getChild(0).getChild(0)
+            .setProperty("value", std::numeric_limits<float>::quiet_NaN(), nullptr);
+        AutomationManagerCore rejectedProject;
+        rejectedProject.restoreState(damagedProject);
+        expect(!rejectedProject.getAdvancedMemories().isValid());
+
         if (reloadedA.lanes.size() == 3)
         {
             expectEquals(reloadedA.lanes[2].target.parameterId, plug);
