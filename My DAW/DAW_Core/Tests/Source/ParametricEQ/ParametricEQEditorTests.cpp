@@ -117,6 +117,13 @@ private:
             expect (graph.getWidth() * graph.getHeight() * 4
                         >= editorBounds.getWidth() * editorBounds.getHeight(),
                     "graph must stay a dominant surface");
+            if (sizeCase.width < 900 && sizeCase.height
+                                              >= sizeCase.width * 1.05)
+                expect (graph.getWidth() * graph.getHeight() * 100
+                            >= editorBounds.getWidth()
+                                 * editorBounds.getHeight() * 45,
+                        "Prism portrait canvas must reserve 45% of total "
+                        "display for the actionable EQ response");
 
             const auto& placements = editor->getPlacementButtonsForTesting();
             expectEquals (placements.size(), static_cast<std::size_t> (5));
