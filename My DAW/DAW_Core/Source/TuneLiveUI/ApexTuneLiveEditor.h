@@ -30,6 +30,17 @@ public:
             knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
             knob.setTextBoxStyle(juce::Slider::TextBoxBelow,false,88,27);
             knob.setRange(0.0,1.0,0.001);
+            // User-facing engineering units; normalized parameter values
+            // remain stable for existing DAW host automation and state.
+            knob.textFromValueFunction=[i](double normalized) {
+                if(i==1)
+                    return juce::String(1.0+149.0*normalized,1)+" ms";
+                return juce::String(juce::roundToInt(normalized*100.0))+" %";
+            };
+            knob.valueFromTextFunction=[i](const juce::String& value) {
+                const double parsed=value.getDoubleValue();
+                return juce::jlimit(0.0,1.0,i==1?(parsed-1.0)/149.0:parsed/100.0);
+            };
             knob.setColour(juce::Slider::rotarySliderFillColourId,
                            juce::Colour::fromRGB(238,173,107));
             knob.setColour(juce::Slider::rotarySliderOutlineColourId,
