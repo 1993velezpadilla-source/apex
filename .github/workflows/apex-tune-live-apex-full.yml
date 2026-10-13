@@ -65,8 +65,11 @@ jobs:
           if-no-files-found: error
       - name: Build and run focused APEX native host tests before heavy fixtures
         run: .\Scripts\run_tune_live_native_host_tests.ps1 -Configuration ${{ matrix.configuration }}
-      - name: Full APEX discovery smoke with external plug-in fixtures
-        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
+      # Main.cpp selects category OR name, never their intersection.
+      # Verify the whole APEX.Smoke category with real assertion JSON;
+      # the previous combined arguments silently ignored -Name.
+      - name: APEX smoke suite with real assertions and external VST3 fixtures
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Seed 0xA9E12026
       - name: Preserve APEX test evidence
         if: always()
         uses: actions/upload-artifact@v4
