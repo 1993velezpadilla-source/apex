@@ -100,6 +100,62 @@ public:
                           juce::Justification::centred, 1, 0.65f);
     }
 
+    void drawRotarySlider (juce::Graphics& g, int x, int y,
+                           int width, int height, float proportion,
+                           float startAngle, float endAngle,
+                           juce::Slider& slider) override
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        // Distinct APEX Prism dials for the three primary EQ dimensions.
+        // Uses JUCE's canonical rotary hit-testing/parameter machinery.
+        const float cx = x + width * 0.5f;
+        const float cy = y + std::min (height * 0.49f, 49.0f);
+        const float radius = std::max (13.0f,
+            std::min (width * 0.32f, height * 0.31f));
+        const float angle = startAngle
+                          + std::clamp (proportion, 0.0f, 1.0f)
+                            * (endAngle - startAngle);
+        juce::Path track, value;
+        track.addCentredArc (cx, cy, radius, radius, 0.0f,
+                             startAngle, endAngle, true);
+        value.addCentredArc (cx, cy, radius, radius, 0.0f,
+                             startAngle, angle, true);
+        g.setColour (Palette::border());
+        g.strokePath (track, juce::PathStrokeType (4.0f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const auto active = slider.isEnabled()
+            ? Palette::accent() : Palette::textSecondary();
+        g.setColour (active.withAlpha (0.23f));
+        g.strokePath (value, juce::PathStrokeType (8.0f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setColour (active);
+        g.strokePath (value, juce::PathStrokeType (3.2f,
+            juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const auto dial = juce::Rectangle<float> (
+            cx - radius + 5.0f, cy - radius + 5.0f,
+            2.0f * (radius - 5.0f), 2.0f * (radius - 5.0f));
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().brighter (0.14f), dial.getTopLeft(),
+            Palette::background(), dial.getBottomLeft(), false));
+        g.fillEllipse (dial);
+        g.setColour (Palette::border());
+        g.drawEllipse (dial, 1.0f);
+        const auto needle = juce::Point<float> (
+            cx + (radius - 10.0f) * std::sin (angle),
+            cy - (radius - 10.0f) * std::cos (angle));
+        g.setColour (Palette::text());
+        g.drawLine (cx, cy, needle.x, needle.y, 2.1f);
+        g.setColour (Palette::textSecondary());
+        g.setFont (juce::Font (juce::FontOptions (
+            10.5f, juce::Font::bold)));
+        g.drawFittedText (slider.getTitle(),
+                          juce::Rectangle<int> (x, y + height - 19,
+                                                width, 16),
+                          juce::Justification::centred, 1);
+    }
+
     void drawLinearSlider (juce::Graphics& g, int x, int y, int width,
                            int height, float sliderPos, float, float,
                            juce::Slider::SliderStyle,
@@ -1998,7 +2054,17 @@ public:
         // contextual panel instead of shrinking controls into unusability.
         // Floating inspector uses dense but still >=44px touch targets.
         // Portrait sheet keeps comfortable full-size 56px control rows.
-        const int row = getWidth() >= 340 && getHeight() <= 430 ? 48 : 56;
+        const bool floating = getWidth() >= 340 && getHeight() <= 430;
+        const int row = floating ? 48 : 56;
+        for (auto* slider : { &frequencySlider_, &gainSlider_, &qSlider_ })
+        {
+            slider->setSliderStyle (floating
+                ? juce::Slider::RotaryHorizontalVerticalDrag
+                : juce::Slider::LinearHorizontal);
+            slider->setTextBoxStyle (floating
+                ? juce::Slider::TextBoxBelow : juce::Slider::TextBoxRight,
+                false, floating ? 96 : 64, 22);
+        }
         const int placementColumns = viewport_.getWidth() >= 340 ? 5 : 3;
         const int placementRows = (kChannelPlacementCount + placementColumns - 1)
                                 / placementColumns;
@@ -2009,8 +2075,9 @@ public:
         // includes the margin plus every fixed row so no row is ever clamped
         // short by vertical exhaustion. 12 static rows + 1 label +
         // 1 dynamic label + 6 dynamic rows.
-        const int contentHeight = contentMargin + 17 * row + 3 * labelHeight
-                                + placementRows * row + auditionHeight;
+        const int contentHeight = contentMargin
+            + (floating ? 14 * row + 134 : 17 * row)
+            + 3 * labelHeight + placementRows * row + auditionHeight;
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
 
@@ -2023,9 +2090,24 @@ public:
         closeButton_.setBounds (buttonRow.reduced (2, 2));
 
         shapeCombo_.setBounds (bounds.removeFromTop (row));
-        frequencySlider_.setBounds (bounds.removeFromTop (row));
-        gainSlider_.setBounds (bounds.removeFromTop (row));
-        qSlider_.setBounds (bounds.removeFromTop (row));
+        if (floating)
+        {
+            // Frequency/Gain/Q are the everyday EQ controls, placed together
+            // in one true JUCE rotary strip; secondary settings scroll below.
+            const auto dials = bounds.removeFromTop (134);
+            const int columnWidth = dials.getWidth() / 3;
+            frequencySlider_.setBounds (
+                dials.removeFromLeft (columnWidth).reduced (2, 1));
+            gainSlider_.setBounds (
+                dials.removeFromLeft (columnWidth).reduced (2, 1));
+            qSlider_.setBounds (dials.reduced (2, 1));
+        }
+        else
+        {
+            frequencySlider_.setBounds (bounds.removeFromTop (row));
+            gainSlider_.setBounds (bounds.removeFromTop (row));
+            qSlider_.setBounds (bounds.removeFromTop (row));
+        }
         slopeSlider_.setBounds (bounds.removeFromTop (row));
 
         placementLabel_.setBounds (bounds.removeFromTop (labelHeight));
