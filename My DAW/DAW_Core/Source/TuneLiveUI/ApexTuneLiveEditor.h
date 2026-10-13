@@ -74,6 +74,27 @@ public:
         for(int k=0;k<12;++k)
             keys_.addItem(juce::StringArray{"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}[k],k+1);
         keys_.setSelectedId(1, juce::dontSendNotification);
+        reference_.setSliderStyle(juce::Slider::LinearHorizontal);
+        reference_.setRange(0.0,1.0,0.001);
+        reference_.setTextBoxStyle(juce::Slider::TextBoxRight,false,108,24);
+        reference_.textFromValueFunction=[](double normalized){
+            return juce::String(430.0+normalized*20.0,1)+" Hz";
+        };
+        reference_.valueFromTextFunction=[](const juce::String& str){
+            return juce::jlimit(0.0,1.0,(str.getDoubleValue()-430.0)/20.0);
+        };
+        reference_.setColour(juce::Slider::trackColourId,juce::Colour::fromRGB(230,161,98));
+        reference_.setColour(juce::Slider::thumbColourId,juce::Colour::fromRGB(255,223,161));
+        reference_.setColour(juce::Slider::textBoxTextColourId,juce::Colours::white);
+        reference_.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour::fromRGB(36,33,44));
+        reference_.setColour(juce::Slider::textBoxOutlineColourId,juce::Colours::transparentBlack);
+        reference_.setValue(parameter(Processor::kA4Reference).getValue(),juce::dontSendNotification);
+        reference_.onDragStart=[this](){parameter(Processor::kA4Reference).beginChangeGesture();};
+        reference_.onValueChange=[this](){
+            parameter(Processor::kA4Reference).setValueNotifyingHost(static_cast<float>(reference_.getValue()));
+        };
+        reference_.onDragEnd=[this](){parameter(Processor::kA4Reference).endChangeGesture();};
+        addAndMakeVisible(reference_);
         keys_.onChange=[this](){
             setDiscrete(Processor::kKey, keys_.getSelectedId()-1, 11);
         };
@@ -142,6 +163,7 @@ public:
         g.drawText("TRACKED PITCH",40,84,150,18,juce::Justification::centredLeft);
         g.drawText("KEY",getWidth()-330,84,90,18,juce::Justification::centredLeft);
         g.drawText("SCALE",getWidth()-205,84,150,18,juce::Justification::centredLeft);
+        g.drawText("CONCERT A4",getWidth()-330,148,150,14,juce::Justification::centredLeft);
 
         g.setColour(juce::Colour::fromRGB(39,36,48));
         g.fillRoundedRectangle(juce::Rectangle<float>(18.0f,211.0f,r.getWidth()-36.0f,202.0f),12.0f);
@@ -163,6 +185,7 @@ public:
         const int w=getWidth();
         keys_.setBounds(w-332,110,110,39);
         scales_.setBounds(w-210,110,174,39);
+        reference_.setBounds(w-334,164,300,30);
         pitchLabel_.setBounds(38,109,std::max(180,w-425),42);
         pitchCaption_.setBounds(39,154,std::max(180,w-425),27);
 
@@ -220,13 +243,16 @@ private:
                             juce::dontSendNotification);
         scales_.setSelectedId(1+juce::jlimit(0,2,juce::roundToInt(parameter(Processor::kScale).getValue()*2)),
                               juce::dontSendNotification);
+        if(!reference_.isMouseButtonDown())
+            reference_.setValue(parameter(Processor::kA4Reference).getValue(),juce::dontSendNotification);
         formants_.setToggleState(parameter(Processor::kPreserveFormants).getValue()>=0.5f,
                                  juce::dontSendNotification);
         bypass_.setToggleState(parameter(Processor::kBypass).getValue()>=0.5f,
                                juce::dontSendNotification);
         const auto hz=processor_.detectedFrequencyHz();
         if(hz>=50.0f && std::isfinite(hz)) {
-            const float midi=69.0f+12.0f*std::log2(hz/440.0f);
+            const float reference=430.0f+20.0f*parameter(Processor::kA4Reference).getValue();
+            const float midi=69.0f+12.0f*std::log2(hz/reference);
             const int note=juce::jlimit(0,127,juce::roundToInt(midi));
             constexpr std::array<const char*,12> names{{
                 "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
@@ -248,6 +274,7 @@ private:
     std::array<juce::Label,6> knobLabels_;
     std::array<juce::TextButton,3> styles_;
     juce::ComboBox keys_,scales_;
+    juce::Slider reference_;
     juce::ToggleButton formants_,bypass_;
     juce::Label pitchLabel_,pitchCaption_,latencyLabel_;
 };
