@@ -13,6 +13,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/Apex6AQ5DriverResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   pull_request:
@@ -28,6 +30,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/Apex6AQ5DriverResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   workflow_dispatch:
@@ -73,6 +77,11 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp" \
             -o /tmp/apex-6aq5-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-6aq5-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp" \
+            -o /tmp/apex-magnetic-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-magnetic-test
       - name: Golden A/B input generator and identity-check smoke
         if: runner.os == 'Linux'
         shell: bash
@@ -117,4 +126,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC 6AQ5 compile failed" }
           ./apex-6aq5-test.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC 6AQ5 test failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-magnetic-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC magnetic test compile failed" }
+          ./apex-magnetic-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC magnetic alias/latency tests failed" }
 
