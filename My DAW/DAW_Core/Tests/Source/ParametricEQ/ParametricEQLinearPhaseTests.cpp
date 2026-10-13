@@ -88,6 +88,7 @@ public:
         testNeutralKernelIsPureDelay();
         testMagnitudeMatchesCanonicalResponse();
         testImpulsePeakAndReportedLatency();
+        testMonoLinearPhasePdcMatchesAudibleImpulse();
         testGroupDelayAndPhaseSlope();
         testModeSwitchingIsBlockInvariantAndClickBounded();
         testDynamicEqAndAuditionLimitations();
@@ -221,6 +222,66 @@ private:
         expectEquals (peak, kLinearPhaseLatencySamples,
                       "impulse peak lands exactly at the latency sample");
         expect (peakValue > 0.05f, "the main lobe is present");
+    }
+
+    void testMonoLinearPhasePdcMatchesAudibleImpulse()
+    {
+        beginTest ("mono linear-phase FIR must run ONCE and land at reported 2047-sample PDC");
+        auto holder = std::make_unique<Processor>();
+        auto& processor = *holder;
+        juce::AudioProcessor::BusesLayout mono;
+        mono.inputBuses.add (juce::AudioChannelSet::mono());
+        mono.outputBuses.add (juce::AudioChannelSet::mono());
+        if (! processor.setBusesLayout (mono))
+        {
+            expect (false, "mono bus must be accepted for this regression");
+            return;
+        }
+        processor.prepareToPlay (48000.0, 256);
+        if (! ParametricEQTest::requestLinearPhaseAndSettle (processor))
+        {
+            expect (false, "neutral mono linear-phase kernel failed to settle");
+            return;
+        }
+        expectEquals (processor.getLatencySamples(), kLinearPhaseLatencySamples);
+
+        // A neutral linear-phase EQ acts as a unit impulse delayed by 2047
+        // samples, not 4094. The old mono branch ran the L and R FIRs
+        // sequentially on the SAME pointer, doubling the actual delay
+        // while the host was still compensated for just 2047 samples.
+        constexpr int total = 6144;
+        constexpr int hostBlock = 256;
+        juce::AudioBuffer<float> block (1, hostBlock);
+        juce::MidiBuffer midi;
+        double worstError = 0.0;
+        int peakIndex = -1;
+        double peak = 0.0;
+        for (int start = 0; start < total; start += hostBlock)
+        {
+            block.clear();
+            if (start == 0)
+                block.setSample (0, 0, 0.8f);
+            processor.processBlock (block, midi);
+            for (int i = 0; i < hostBlock; ++i)
+            {
+                const int sample = start + i;
+                const double actual = block.getSample (0, i);
+                const double expected = sample == kLinearPhaseLatencySamples
+                    ? 0.8 : 0.0;
+                worstError = std::max (worstError, std::abs (actual - expected));
+                if (std::abs (actual) > peak)
+                {
+                    peak = std::abs (actual);
+                    peakIndex = sample;
+                }
+            }
+        }
+        expectEquals (peakIndex, kLinearPhaseLatencySamples,
+                      "audible mono impulse peak must align with host PDC");
+        expect (worstError < 1.0e-4,
+                "neutral mono LP must retain unity gain, not shift or double "
+                "the FIR latency; maximum sample error "
+                + juce::String (worstError, 9));
     }
 
     void testGroupDelayAndPhaseSlope()
