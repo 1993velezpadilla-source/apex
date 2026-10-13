@@ -1,6 +1,7 @@
 // Standalone portable test suite, no JUCE/runtime dependency.
 // g++ -std=c++17 -O2 -Wall -Wextra -pedantic ApexOptoLevelerCoreTests.cpp -o opto_test
 #include "../../Source/CompressorCore/ApexOptoLevelerCore.h"
+#include "../../Source/CompressorCore/ApexOptoVuBallisticsCore.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -93,10 +94,37 @@ static void testBypassAndParameterChanges()
     std::vector<float> sound(48000,0.8f);p.process(sound.data(),nullptr,(int)sound.size());
     assert(p.getGainReductionDb()>0);
 }
+static void testVuBallistics()
+{
+    OptoVuBallisticsCore one, split;
+    one.prepare(fs); split.prepare(fs);
+    std::vector<float> audio(48000,0.8f);
+    one.process(audio.data(),nullptr,(int)audio.size());
+    for(int i=0;i<(int)audio.size();i+=13)
+        split.process(audio.data()+i,nullptr,std::min(13,(int)audio.size()-i));
+    near(one.getIndicatedAmplitude(),split.getIndicatedAmplitude(),1.e-10);
+    near(one.getIndicatedAmplitude(),0.8,0.001);
+    split.reset(); near(split.getIndicatedAmplitude(),0.0);
+    split.process(audio.data(),nullptr,14400); // 300ms hardware-style step
+    const double fraction=split.getIndicatedAmplitude()/0.8;
+    assert(fraction>0.98 && fraction<0.995);
+    for(auto sr:{44100.0,48000.0,96000.0,192000.0})
+    {
+        OptoVuBallisticsCore vu;vu.prepare(sr);
+        std::vector<float> unit(static_cast<size_t>(sr*0.3),0.8f);
+        vu.process(unit.data(),nullptr,(int)unit.size());
+        near(vu.getIndicatedAmplitude()/0.8,fraction,0.002);
+        vu.reset();
+        unit.assign(64,NAN);
+        vu.process(unit.data(),nullptr,(int)unit.size());
+        assert(std::isfinite(vu.getIndicatedRmsDbfs()));
+    }
+}
 int main()
 {
     std::cerr << "dry\n"; testDryAndSilence(); std::cerr << "compress\n"; testCompressionAndStereoLink(); std::cerr << "release\n";testTwoStageRelease();
     std::cerr << "invariance\n"; testBlockInvariance();std::cerr << "sanity\n";testInputSanitisationAndParameterSafety();
     std::cerr << "bypass\n"; testBypassAndParameterChanges();
-    std::cout<<"APEX Opto Core: 6 suites PASS (algorithm scaffold only; no hardware match claim)\n";
+    std::cerr << "VU ballistics\\n"; testVuBallistics();
+    std::cout<<"APEX Opto Core: 7 suites PASS (algorithm scaffold only; no hardware match claim)\n";
 }
