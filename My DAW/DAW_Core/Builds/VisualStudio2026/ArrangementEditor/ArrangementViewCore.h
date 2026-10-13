@@ -495,6 +495,11 @@ namespace ArrangementEditor
             const DAW::TrackID& sourceTrack, const juce::String& parameterId,
             DAW::AutomationLaneComponent::SelectedSnapshotAction action);
 
+        // Project-level A/B state travels with AutomationManagerCore::getState,
+        // not merely with a particular arrangement editor's lifetime.
+        bool persistSelectedSnapshots();
+        void restoreSelectedSnapshots();
+
         DAW::AutomationManagerCore* m_automationManager = nullptr;
         uint64_t m_groupedAutomationManagerEpoch = 0; // invalidate retained Undo on manager rebind
         DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotA;
