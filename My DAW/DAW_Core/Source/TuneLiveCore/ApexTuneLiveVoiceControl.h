@@ -30,6 +30,7 @@ public:
         selected_ = -1;
         previousRoot_ = -1;
         previousScale_ = -1;
+        previousReferenceHz_ = 0.0f;
         centreMidi_ = 0.0f;
         centreValid_ = false;
     }
@@ -40,11 +41,13 @@ public:
             centreValid_ = false;
             return {};
         }
-        if (settings.root != previousRoot_ || settings.scale != previousScale_) {
+        if (settings.root != previousRoot_ || settings.scale != previousScale_
+            || settings.referenceHz != previousReferenceHz_) {
             selected_ = -1; // Changing key must invalidate the old note immediately.
             centreValid_ = false;
             previousRoot_ = settings.root;
             previousScale_ = settings.scale;
+            previousReferenceHz_ = settings.referenceHz;
         }
         const float reference = std::isfinite(settings.referenceHz)
                                 ? std::clamp(settings.referenceHz, 430.0f, 450.0f) : 440.0f;
@@ -95,6 +98,7 @@ public:
     }
 private:
     int selected_ = -1, previousRoot_ = -1, previousScale_ = -1;
+    float previousReferenceHz_ = 0.0f;
     float centreMidi_ = 0.0f;
     bool centreValid_ = false;
 };
