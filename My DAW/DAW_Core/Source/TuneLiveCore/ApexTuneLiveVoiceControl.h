@@ -12,6 +12,7 @@ struct VoiceSettings {
     int root = 0;
     int scale = 0;
     float correction = 0.85f;   // [0,1]
+    float referenceHz = 440.0f; // concert pitch, 430..450 Hz; independent from note key
     float humanize = 0.35f;     // [0,1]
     float flexTune = 0.0f;       // [0,1], leave small pitch drift untouched
     float noteHysteresis = 0.15f; // semitones
@@ -45,7 +46,9 @@ public:
             previousRoot_ = settings.root;
             previousScale_ = settings.scale;
         }
-        const float midi = 69.0f + 12.0f * std::log2(detected.hz / 440.0f);
+        const float reference = std::isfinite(settings.referenceHz)
+                                ? std::clamp(settings.referenceHz, 430.0f, 450.0f) : 440.0f;
+        const float midi = 69.0f + 12.0f * std::log2(detected.hz / reference);
         const int nearest = nearestScaleMidi(midi, settings.root, settings.scale);
         const float hysteresis = std::clamp(settings.noteHysteresis, 0.0f, 0.40f);
         // Only keep an old target if it is still in the selected scale.
