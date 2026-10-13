@@ -354,21 +354,21 @@ private:
         switch (advice.status)
         {
             case Status::NoSignal:
-                guidance = "RAW MIC: waiting for input.\\nPichy checks the signal BEFORE Input Trim.";
+                guidance = "RAW MIC: waiting for input.\nPichy checks the signal BEFORE Input Trim.";
                 break;
             case Status::InvalidInput:
-                guidance = "RAW MIC: invalid input samples/settings.\\nCheck your hardware and audio device.";
+                guidance = "RAW MIC: invalid input samples/settings.\nCheck your hardware and audio device.";
                 break;
             case Status::HardwareAttention:
-                guidance = "RAW MIC near full scale! Check INTERFACE gain.\\nDigital Trim cannot repair ADC distortion.";
+                guidance = "RAW MIC near full scale! Check INTERFACE gain.\nDigital Trim cannot repair ADC distortion.";
                 break;
             case Status::AlreadySafe:
                 guidance = "RAW MIC peak: " + juce::String(advice.rawPeakDbfs, 1)
-                         + " dBFS (before Trim).\\nNo further digital reduction suggested.";
+                         + " dBFS (before Trim).\nNo further digital reduction suggested.";
                 break;
             case Status::ReduceDigitalTrim:
                 guidance = "RAW MIC peak: " + juce::String(advice.rawPeakDbfs, 1)
-                         + " dBFS (before Trim).\\nSuggested Trim: "
+                         + " dBFS (before Trim).\nSuggested Trim: "
                          + juce::String(advice.proposedTrimDb, 1) + " dB.";
                 break;
         }
