@@ -289,18 +289,33 @@ double xForFrequency (double frequencyHz, double width)
     return (std::log10 (clamped) - logMin) / (logMax - logMin) * width;
 }
 
+// On unusually shallow landscape canvases the seven >=44px graph tools
+// occupy the top row. Without reserving a plot-safe inset, the actual band
+// handle at +8dB falls BEHIND the MATCH button (verified in native 640x400
+// Windows screenshot). Keep the inverse pointer transform exactly paired
+// with the display transform; this changes no EQ DSP or hosted parameter.
+juce::Range<double> gainPlotYRange (double height)
+{
+    const double h = std::max (1.0, height);
+    return h <= 200.0 ? juce::Range<double> (68.0, std::max (69.0, h - 20.0))
+                      : juce::Range<double> (0.0, h);
+}
+
 double gainForY (double y, double height)
 {
     constexpr double maximumDb = 18.0;
-    return maximumDb * (1.0 - 2.0 * std::clamp (y / std::max (1.0, height),
-                                                0.0, 1.0));
+    const auto plot = gainPlotYRange (height);
+    const auto ratio = std::clamp ((y - plot.getStart()) / plot.getLength(),
+                                   0.0, 1.0);
+    return maximumDb * (1.0 - 2.0 * ratio);
 }
 
 double yForGain (double gainDb, double height)
 {
     constexpr double maximumDb = 18.0;
+    const auto plot = gainPlotYRange (height);
     const auto ratio = 0.5 * (1.0 - std::clamp (gainDb / maximumDb, -1.0, 1.0));
-    return ratio * height;
+    return plot.getStart() + ratio * plot.getLength();
 }
 
 const char* shapeName (int shape)
