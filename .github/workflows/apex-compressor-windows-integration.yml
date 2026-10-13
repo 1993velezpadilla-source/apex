@@ -6,12 +6,16 @@ on:
       - "My DAW/DAW_Core/Source/CompressorCore/**"
       - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/**"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
   pull_request:
     paths:
       - ".github/workflows/apex-compressor-windows-integration.yml"
       - "My DAW/DAW_Core/Source/CompressorCore/**"
       - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/**"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,6 +52,8 @@ jobs:
         run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
       - name: Run independent hosted plugin smoke category
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Smoke -Name runner.discovery.v1 -Seed 0xA9E12026
+      - name: Exercise live APEX Native plugin host and full project state
+        run: .\\Scripts\\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Compressor -Seed 0xA9E12026
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@v4
