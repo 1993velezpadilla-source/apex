@@ -148,7 +148,8 @@ jobs:
           foreach ($source in @(
             'Tests\Source\ParametricEQ\ParametricEQProcessorTests.cpp',
             'Tests\Source\ParametricEQ\ParametricEQStateTests.cpp',
-            'Tests\Source\ParametricEQ\ParametricEQEditorTests.cpp')) {
+            'Tests\Source\ParametricEQ\ParametricEQEditorTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQLinearPhaseTests.cpp')) {
             if (-not (Test-Path $source)) { throw "Missing unit test: $source" }
             $args += ('"' + $source + '"')
           }
