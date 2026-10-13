@@ -39,7 +39,7 @@ struct Palette
 // processor/audio objects. The first seven IDs of each band are frozen.
 struct NativeBandClipboard
 {
-    static constexpr int kSlots = 14;
+    static constexpr int kSlots = 15;
     std::array<float, kSlots> normalised {};
     bool valid = false;
 };
@@ -73,7 +73,9 @@ int clipboardParameterIndex (int band, int slot) noexcept
     if (slot < 13)
         return dynamicParameterIndex (
             band, static_cast<DynamicBandOffset> (slot - 8));
-    return dynamicFilterParameterIndex (band);
+    if (slot == 13)
+        return dynamicFilterParameterIndex (band);
+    return spectralBandParameterIndex (band);
 }
 
 void notifyParameter (Processor& processor, int index, float normalised)
@@ -84,6 +86,20 @@ void notifyParameter (Processor& processor, int index, float normalised)
     parameter->beginChangeGesture();
     parameter->setValueNotifyingHost (normalised);
     parameter->endChangeGesture();
+}
+
+// Creation paths (Sketch/Grab/Match) never inherit latent bypass, placement,
+// broadband dynamics or spectral enables from a previously disabled slot.
+// Clipboard Paste is different: it explicitly restores all copied controls.
+void resetCreatedBand (Processor& processor, int band)
+{
+    notifyParameter (processor,
+        parameterIndex (band, BandParameterOffset::Bypass), 0.0f);
+    notifyParameter (processor, placementParameterIndex (band), 0.0f);
+    notifyParameter (processor,
+        dynamicParameterIndex (band, DynamicBandOffset::Enable), 0.0f);
+    notifyParameter (processor, dynamicFilterParameterIndex (band), 0.0f);
+    notifyParameter (processor, spectralBandParameterIndex (band), 0.0f);
 }
 
 double frequencyForX (double x, double width)
@@ -866,6 +882,7 @@ private:
                 if (! slot.has_value())
                     break;
                 const int band = *slot;
+                resetCreatedBand (processor_, band);
                 const auto& suggestion =
                     plan.bands[static_cast<std::size_t> (proposal)];
                 auto setUnits = [this, band] (BandParameterOffset offset,
@@ -1035,6 +1052,7 @@ private:
             if (! slot.has_value())
                 return false;
             const int band = *slot;
+            resetCreatedBand (processor_, band);
             auto setBandUnits = [this, band] (BandParameterOffset offset,
                                              float units)
             {
@@ -1309,6 +1327,7 @@ private:
             if (! freeBand.has_value())
                 break;
             const int band = *freeBand;
+            resetCreatedBand (processor_, band);
             const auto& proposed = plan.bands[static_cast<std::size_t> (proposal)];
 
             auto publishUnits = [this, band] (BandParameterOffset offset,
