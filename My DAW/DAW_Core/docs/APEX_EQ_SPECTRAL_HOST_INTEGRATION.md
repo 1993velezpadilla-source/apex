@@ -73,6 +73,20 @@ Spectral Engine ARM, per-band enable, global Density, and Detector Tilt.
 The ARM control explicitly displays pending restart when its saved
 parameter differs from the prepared state.
 
+## Native band creation and clipboard safety
+
+The GUI's shared band clipboard now copies the new per-band spectral toggle
+as its fifteenth hosted control. Sketch, Spectrum Grab and EQ Match are
+different workflows: when creating a new ordinary band in an available
+(disabled) slot they reset latent bypass, placement, ordinary Dynamic EQ
+enable, detector filter and spectral enable BEFORE activating the band.
+This avoids accidental reactivation of an old hidden dynamic or spectral
+setting left in the reused slot. Cross-instance Paste intentionally keeps
+the saved spectral selection.
+
+Tests cover the cross-instance copied spectral flag, existing-disabled-slot
+recycling, and legacy state v6 defaults for re-used processors.
+
 ## Required verification gates
 
 1. Compile with pinned JUCE on Windows Debug/Release.
