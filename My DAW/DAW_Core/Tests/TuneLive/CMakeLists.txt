@@ -11,6 +11,7 @@ juce_add_console_app(TuneLiveNativeRuntimeSmoke
     PRODUCT_NAME "APEX Tune Live Native Runtime Smoke")
 target_sources(TuneLiveNativeRuntimeSmoke PRIVATE test_juce_native_runtime.cpp)
 target_include_directories(TuneLiveNativeRuntimeSmoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../JuceLibraryCode"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/ThirdParty"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Source/ThirdParty/signalsmith-stretch")
 target_compile_definitions(TuneLiveNativeRuntimeSmoke PRIVATE
