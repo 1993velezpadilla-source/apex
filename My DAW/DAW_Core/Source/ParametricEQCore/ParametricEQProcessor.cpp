@@ -840,6 +840,19 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         publishResponseFrame();
 }
 
+void Processor::processSpectralMode (juce::AudioBuffer<float>& buffer,
+                                     int channels, int samples,
+                                     bool wetTarget) noexcept
+{
+    if (! spectralPreparedEnabled_ || channels <= 0 || samples <= 0)
+        return;
+    float* pointers[SpectralDynamicsCore::kChannels] { nullptr, nullptr };
+    const int count = std::clamp (channels, 0, SpectralDynamicsCore::kChannels);
+    for (int channel = 0; channel < count; ++channel)
+        pointers[channel] = buffer.getWritePointer (channel);
+    spectralBlend_.process (pointers, count, samples, spectralBands_, wetTarget);
+}
+
 bool Processor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto input = layouts.getMainInputChannelSet();
@@ -1465,6 +1478,11 @@ void Processor::completeTransitionIfReady() noexcept
 
 void Processor::adoptDynamicParameters() noexcept
 {
+    spectralAnyBandActive_ = false;
+    const double spectralDensity = parameters_[static_cast<std::size_t> (
+        kSpectralDensityParameter)]->getUnitsValue();
+    const bool spectralTilt = parameters_[static_cast<std::size_t> (
+        kSpectralTiltParameter)]->getBool();
     dynamicDetectorMode_ = parameters_[static_cast<std::size_t> (
         kDynamicDetectorParameter)]->getBool()
                          ? APEX::Dynamics::DetectorMode::Rms
@@ -1526,10 +1544,34 @@ void Processor::adoptDynamicParameters() noexcept
                     static_cast<std::size_t> (band)])
                 state.reset();
         }
+
+        const auto& spectrumSettings = targetSettings_[
+            static_cast<std::size_t> (band)];
         const bool compatible = next.enabled
-            && isDynamicCompatibleShape (targetSettings_[
-                static_cast<std::size_t> (band)].shape);
-        if (compatible)
+            && isDynamicCompatibleShape (spectrumSettings.shape);
+        const bool spectral = spectralPreparedEnabled_ && compatible
+            && spectrumSettings.enabled && ! spectrumSettings.bypassed
+            && std::abs (next.rangeDb) > 1.0e-8
+            && (spectrumSettings.shape == FilterShape::Bell
+                || spectrumSettings.shape == FilterShape::LowShelf
+                || spectrumSettings.shape == FilterShape::HighShelf)
+            && parameters_[static_cast<std::size_t> (
+                 spectralBandParameterIndex (band))]->getBool();
+        auto& spectralBand = spectralBands_[static_cast<std::size_t> (band)];
+        spectralBand.enabled = spectral;
+        spectralBand.shape = spectrumSettings.shape;
+        spectralBand.placement = spectrumSettings.placement;
+        spectralBand.frequencyHz = spectrumSettings.frequencyHz;
+        spectralBand.q = spectrumSettings.q;
+        spectralBand.dynamic = next;
+        spectralBand.density = spectralDensity;
+        spectralBand.tilt = spectralTilt;
+        if (spectral)
+            spectralAnyBandActive_ = true;
+
+        // A spectral band must not ALSO receive the full-band dynamic
+        // biquad envelope. Static EQ bands are still processed as usual.
+        if (compatible && ! spectral)
             mask |= 1u << band;
         else
             publishedDynamicGainDb_[static_cast<std::size_t> (band)] = 0.0;
