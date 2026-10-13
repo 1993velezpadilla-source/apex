@@ -88,6 +88,7 @@ private:
             auto processorStorage = std::make_unique<Processor>();
             auto& processor = *processorStorage;
             enableBell (processor, 0, 1000.0f, 6.0f, 2.0f);
+            enableBell (processor, 1, 5200.0f, -5.0f, 3.0f);
             processor.prepareToPlay (48000.0, 512);
 
             auto editor = std::make_unique<ParametricEQEditor> (processor);
@@ -130,6 +131,16 @@ private:
                     .translated (graph.getX(), graph.getY());
                 expect (! inspector.intersects (selectedNode),
                         "floating band HUD cannot cover selected node");
+                const auto otherNode = editor->getNodeBoundsForTesting (1)
+                    .translated (graph.getX(), graph.getY());
+                expect (! inspector.intersects (otherNode),
+                        "floating HUD must preserve access to other EQ nodes");
+                editor->setSelectedBandForTesting (1);
+                const auto movedInspector = editor->getInspectorBoundsForTesting();
+                expect (! movedInspector.intersects (
+                    editor->getNodeBoundsForTesting (0).translated (
+                        graph.getX(), graph.getY())),
+                    "switching bands repositions the HUD without hiding prior band");
             }
             expect (graph.getWidth() >= 0 && graph.getHeight() >= 0);
             expect (graph.getHeight() >= 140, "graph must remain usable");
