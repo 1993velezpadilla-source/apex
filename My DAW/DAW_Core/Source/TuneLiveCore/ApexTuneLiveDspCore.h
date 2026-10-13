@@ -63,6 +63,11 @@ public:
     int latencySamples() const noexcept {return latency_;}
     double sampleRate() const noexcept {return rate_;}
     float frequencyHz() const noexcept {return frequency_;}
+    // Read-only DSP debug telemetry used by regression tests. Never expose
+    // these across threads without taking an atomic host snapshot.
+    float debugTargetShiftSemitones() const noexcept {return target_;}
+    float debugAppliedShiftSemitones() const noexcept {return smooth_;}
+    float debugWetAmount() const noexcept {return wetSlew_*voicedSlew_;}
     double detectorWindowMs() const noexcept {return tracker_.analysisWindowMs();}
 
     // planar channelData is both input and output, as for JUCE AudioBuffer pointers.
