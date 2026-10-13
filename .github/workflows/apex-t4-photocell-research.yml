@@ -9,6 +9,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexAnalogCircuitResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   pull_request:
@@ -20,6 +22,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/ApexAnalogCircuitResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
       - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   workflow_dispatch:
@@ -55,6 +59,11 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp" \
             -o /tmp/apex-analog-circuit-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-analog-circuit-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp" \
+            -o /tmp/apex-opto-path-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-opto-path-test
       - name: Golden A/B input generator and identity-check smoke
         if: runner.os == 'Linux'
         shell: bash
@@ -91,4 +100,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC triode+transformer compile failed" }
           ./apex-analog-circuit-test.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC triode+transformer tests failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-opto-path-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC opto path compile failed" }
+          ./apex-opto-path-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC opto path tests failed" }
 
