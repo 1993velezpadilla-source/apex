@@ -210,7 +210,7 @@ struct AutomationMultiParameterSnapshotCore
                 point.timeSamples = (int64_t)(juce::int64)child.getProperty("timeSamples");
                 point.value = (float)child.getProperty("value");
                 point.curveToNext = automationCurveTypeFromString(curve);
-                if (automationCurveTypeToString(point.curveToNext) != curve)
+                if (juce::String(automationCurveTypeToString(point.curveToNext)) != curve)
                     return false; // reject corrupted or unknown curve families
                 point.tensionToNext = (float)child.getProperty("tensionToNext");
                 entry.points.push_back(point);
