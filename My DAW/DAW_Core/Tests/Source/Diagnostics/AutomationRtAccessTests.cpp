@@ -5536,6 +5536,52 @@ public:
         expect(!M::compile(manager, invalidValues, bindings, rejected));
         expect(!rejected.isValid());
 
+        beginTest("Project macro saves curve and target ranges but not trusted VST3 status");
+        M::Configuration definition;
+        definition.name = "Vocal Lift";
+        definition.controlPoints = macro;
+        definition.bindings = bindings;
+        const auto persisted = M::serializeConfiguration(definition);
+        expect(persisted.hasType("AutomationMacro"));
+        expectEquals(persisted.getNumChildren(), 4);
+        M::Configuration loadedConfig;
+        expect(M::deserializeConfiguration(persisted, loadedConfig));
+        expectEquals(loadedConfig.name, juce::String("Vocal Lift"));
+        expectEquals((int)loadedConfig.bindings.size(), 3);
+        expectEquals((int)loadedConfig.controlPoints.size(), 3);
+        if (loadedConfig.bindings.size() == 3 && loadedConfig.controlPoints.size() == 3)
+        {
+            expect(!loadedConfig.bindings[2].pluginIsVerifiedContinuous);
+            expectEquals(loadedConfig.bindings[2].target.parameterId, vst);
+            expectWithinAbsoluteError(loadedConfig.bindings[1].minimum, -1.0f, 0.00001f);
+            expect(loadedConfig.bindings[1].inverted);
+            expect(loadedConfig.controlPoints[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(loadedConfig.controlPoints[1].tensionToNext,
+                                      0.7f, 0.00001f);
+            M::Plan requireReverification;
+            expect(!M::compile(manager, loadedConfig.controlPoints,
+                               loadedConfig.bindings, requireReverification));
+            expect(!requireReverification.isValid());
+            loadedConfig.bindings[2].pluginIsVerifiedContinuous = true;
+            expect(M::compile(manager, loadedConfig.controlPoints,
+                              loadedConfig.bindings, requireReverification));
+        }
+
+        beginTest("Malformed macro project data is rejected transactionally");
+        auto damaged = persisted.createCopy();
+        damaged.getChild(0).getChild(0).setProperty(
+            "value", std::numeric_limits<float>::quiet_NaN(), nullptr);
+        expect(!M::deserializeConfiguration(damaged, loadedConfig));
+        expect(loadedConfig.bindings.empty());
+        damaged = persisted.createCopy();
+        damaged.getChild(3).setProperty("parameterId", vol, nullptr); // duplicate target
+        expect(!M::deserializeConfiguration(damaged, loadedConfig));
+        expect(loadedConfig.bindings.empty());
+        damaged = persisted.createCopy();
+        damaged.getChild(0).getChild(0).setProperty("curve", "CORRUPT", nullptr);
+        expect(!M::deserializeConfiguration(damaged, loadedConfig));
+        expect(loadedConfig.bindings.empty());
+
         beginTest("Clip ownership, bypass or absent lane fails whole macro");
         DAW::AutomationClipRegionCore owned;
         owned.trackId = "voice";
