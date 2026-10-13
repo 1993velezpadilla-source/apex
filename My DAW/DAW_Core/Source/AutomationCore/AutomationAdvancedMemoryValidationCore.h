@@ -2,6 +2,8 @@
 #include "AutomationLaneCore.h"
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <utility>
 #include <vector>
 
 namespace DAW {
@@ -95,6 +97,60 @@ struct AutomationAdvancedMemoryValidationCore
                 previous = sample;
             }
         }
+        return true;
+    }
+
+    // Project sample-rate reconciliation scales the live automation manager
+    // AND stored A/B envelopes. Never leave A/B using the old sample clock:
+    // that would morph the wrong musical section after a 44.1/48k reopen.
+    // Stage a detached copy; reject overflow/invalid source atomically.
+    static bool rescaleMemories(const juce::ValueTree& source,
+                                double factor, juce::ValueTree& result)
+    {
+        result = {};
+        if (!validMemories(source) || !std::isfinite(factor)
+            || factor <= 0.0)
+            return false;
+
+        auto staged = source.createCopy();
+        for (int m = 0; m < staged.getNumChildren(); ++m)
+        {
+            auto snapshot = staged.getChild(m);
+            for (int t = 0; t < snapshot.getNumChildren(); ++t)
+            {
+                auto target = snapshot.getChild(t);
+                const auto original = target.createCopy();
+                target.removeAllChildren(nullptr);
+                int64_t last = -1;
+
+                for (int p = 0; p < original.getNumChildren(); ++p)
+                {
+                    const auto originalPoint = original.getChild(p);
+                    const auto oldPosition =
+                        (int64_t)(juce::int64)originalPoint.getProperty("timeSamples");
+                    const long double scaled =
+                        (long double)oldPosition * (long double)factor;
+                    if (!std::isfinite(scaled)
+                        || scaled > (long double)std::numeric_limits<int64_t>::max())
+                        return false;
+
+                    const auto position = (int64_t)std::llround(scaled);
+                    auto next = originalPoint.createCopy();
+                    next.setProperty("timeSamples", (juce::int64)position, nullptr);
+                    // Resampling to a lower rate can collapse two knots onto
+                    // the same sample. Match AutomationLaneCore's stable
+                    // "last point wins" duplicate policy.
+                    if (position == last)
+                        target.removeChild(target.getNumChildren() - 1, nullptr);
+                    target.addChild(next, -1, nullptr);
+                    last = position;
+                }
+            }
+        }
+        if (!validMemories(staged))
+            return false;
+
+        result = std::move(staged);
         return true;
     }
 
