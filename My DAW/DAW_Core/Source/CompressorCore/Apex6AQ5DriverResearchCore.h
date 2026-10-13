@@ -90,7 +90,8 @@ private:
         c.elPrimaryOhms=sane(c.elPrimaryOhms,1,1.e7,2400);
         c.elTurnOnVolts=sane(c.elTurnOnVolts,0,100,0.25);
         c.elFullScaleVolts=sane(c.elFullScaleVolts,
-                                 c.elTurnOnVolts+0.01,500,5);
+                                 c.elTurnOnVolts+0.01,500,
+                                 std::max(5.0,c.elTurnOnVolts+1.0));
         c.rectifierAttackSec=sane(c.rectifierAttackSec,.00001,1,.0007);
         c.rectifierReleaseSec=sane(c.rectifierReleaseSec,.00001,1,.002);
         return c;
