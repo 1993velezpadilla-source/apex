@@ -66,6 +66,13 @@ public:
         vst3MacroCallback_ = std::move(callback);
     }
 
+    enum class Vst3MacroTargetAction { AddLastTouched, Clear };
+    using Vst3MacroTargetCallback = std::function<bool(Vst3MacroTargetAction)>;
+    void setVst3MacroTargetCallback(Vst3MacroTargetCallback callback)
+    {
+        vst3MacroTargetCallback_ = std::move(callback);
+    }
+
     // Session-local multi-track A/B memories. These are deliberately limited
     // to native volume/pan until the VST3 host can verify exact plugin IDs
     // and publish PPQ updates for multiple plugin parameters coherently.
@@ -734,6 +741,7 @@ private:
     GroupedCurveCallback groupedCurveCallback_;
     NativeMacroCallback nativeMacroCallback_;
     Vst3MacroCallback vst3MacroCallback_;
+    Vst3MacroTargetCallback vst3MacroTargetCallback_;
     SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // ========================================================================
@@ -1435,7 +1443,26 @@ private:
                 || parameterId_ == AutomationLaneCore::trackPanParameterId))
         {
             juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
-            menu.addItem("Macro: Replace Last-Touched VST3 Parameter (Undoable)",
+            if (vst3MacroTargetCallback_)
+            {
+                menu.addItem("Macro: Add Last-Touched VST3 to Target Bank",
+                    [safeLane]()
+                    {
+                        if (auto* lane = safeLane.getComponent())
+                            if (lane->vst3MacroTargetCallback_)
+                                lane->vst3MacroTargetCallback_(
+                                    Vst3MacroTargetAction::AddLastTouched);
+                    });
+                menu.addItem("Macro: Clear VST3 Target Bank",
+                    [safeLane]()
+                    {
+                        if (auto* lane = safeLane.getComponent())
+                            if (lane->vst3MacroTargetCallback_)
+                                lane->vst3MacroTargetCallback_(
+                                    Vst3MacroTargetAction::Clear);
+                    });
+            }
+            menu.addItem("Macro: Replace VST3 Target Bank / Last-Touched (Undoable)",
                 [safeLane]()
                 {
                     auto* lane = safeLane.getComponent();
