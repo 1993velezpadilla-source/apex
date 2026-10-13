@@ -5962,6 +5962,54 @@ public:
         }
         const auto afterPin = store.getEffectiveLaneSnapshotRT();
         expect(afterPin != beforePin);
+        // One device callback surrounds track A, track B and master. Every
+        // nested chain pin must keep the original generation even if the
+        // UI publishes a new macro batch midway through that callback.
+        beginTest("Global callback pin spans two tracks, bus and master");
+        const auto globalBefore = store.getLaneSnapshotRT();
+        {
+            Store::ScopedRtPin deviceCallback(store);
+            {
+                Store::ScopedRtPin vocalTrack(store);
+                expect(store.getEffectiveLaneSnapshotRT() == globalBefore);
+            }
+            std::vector<Store::BatchReplacement> subsequent;
+            subsequent.push_back({a, {{0.0, 0.9f}}});
+            subsequent.push_back({b, {{0.0, 0.1f}}});
+            expect(store.replacePointsBatch(std::move(subsequent)));
+            {
+                Store::ScopedRtPin reverbBus(store);
+                expect(store.getEffectiveLaneSnapshotRT() == globalBefore);
+            }
+            {
+                Store::ScopedRtPin masterChain(store);
+                expect(store.getEffectiveLaneSnapshotRT() == globalBefore);
+            }
+        }
+        expect(store.getEffectiveLaneSnapshotRT() != globalBefore);
+
+        beginTest("Nested pin of a DIFFERENT store must not inherit this session");
+        Store distinctStore;
+        distinctStore.getOrCreateLane(a).replacePoints({{0.0, 0.67f}});
+        const auto distinctMap = distinctStore.getLaneSnapshotRT();
+        const auto originalMap = store.getLaneSnapshotRT();
+        {
+            Store::ScopedRtPin mainSession(store);
+            {
+                Store::ScopedRtPin independentProject(distinctStore);
+                expect(distinctStore.getEffectiveLaneSnapshotRT() == distinctMap);
+                expect(store.getEffectiveLaneSnapshotRT() == originalMap);
+                auto isolated = Store::findLaneInSnapshotRT(
+                    distinctStore.getEffectiveLaneSnapshotRT(), a);
+                if (isolated != nullptr)
+                    expectWithinAbsoluteError(
+                        isolated->getSnapshot()->front().normalizedValue,
+                        0.67f, 0.00001f);
+            }
+            expect(store.getEffectiveLaneSnapshotRT() == originalMap);
+        }
+
+
         const auto activeA = Store::findLaneInSnapshotRT(afterPin, a);
         const auto activeB = Store::findLaneInSnapshotRT(afterPin, b);
         if (activeA != nullptr && activeB != nullptr)
