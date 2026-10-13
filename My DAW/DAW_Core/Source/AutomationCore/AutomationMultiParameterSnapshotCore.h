@@ -131,6 +131,14 @@ struct AutomationMultiParameterSnapshotCore
                 || !validPointsForParameter(lane.target.parameterId, lane.points))
                 return juce::ValueTree("AutomationMultiSnapshot");
 
+            for (int existing = 0; existing < root.getNumChildren(); ++existing)
+            {
+                const auto previous = root.getChild(existing);
+                if (previous.getProperty("trackId").toString() == lane.target.trackId
+                    && previous.getProperty("parameterId").toString() == lane.target.parameterId)
+                    return juce::ValueTree("AutomationMultiSnapshot");
+            }
+
             juce::ValueTree t("Target");
             t.setProperty("trackId", lane.target.trackId, nullptr);
             t.setProperty("parameterId", lane.target.parameterId, nullptr);
@@ -200,6 +208,8 @@ struct AutomationMultiParameterSnapshotCore
                 point.timeSamples = (int64_t)(juce::int64)child.getProperty("timeSamples");
                 point.value = (float)child.getProperty("value");
                 point.curveToNext = automationCurveTypeFromString(curve);
+                if (automationCurveTypeToString(point.curveToNext) != curve)
+                    return false; // reject corrupted or unknown curve families
                 point.tensionToNext = (float)child.getProperty("tensionToNext");
                 entry.points.push_back(point);
             }
