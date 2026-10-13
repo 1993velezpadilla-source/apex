@@ -901,7 +901,16 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
     {
         const juce::Identifier property (getParameterId (index));
         if (! state.hasProperty (property))
+        {
+            // Phase 10 appended controls do not exist in old saved sessions.
+            // Reset them to their own defaults even if a processor is reused.
+            // Never implicitly arm a lookahead/latency-bearing effect.
+            if (index >= kSpectralArmParameter)
+                parameters_[static_cast<std::size_t> (index)]->setValue (
+                    parameters_[static_cast<std::size_t> (index)]
+                        ->getDefaultValue());
             continue;
+        }
         const auto value = static_cast<float> (state.getProperty (property));
         if (std::isfinite (value))
             parameters_[static_cast<std::size_t> (index)]->setValue (value);
