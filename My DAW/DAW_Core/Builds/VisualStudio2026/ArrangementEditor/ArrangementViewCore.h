@@ -30,6 +30,7 @@
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
 #include "../../../Source/AutomationCore/AutomationManagerCore.h"
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
+#include "../../../Source/AutomationCore/AutomationVst3MacroTargetBankCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/RoutingCore/RoutingGraph.h"             
@@ -493,8 +494,11 @@ namespace ArrangementEditor
             const juce::String& parameterId,
             const std::vector<DAW::AutomationPoint>& sourcePoints);
 
-        // A separate explicit macro action targets ONE exact host-verified
-        // last-touched continuous VST3 parameter (not arbitrary slot names).
+        // Explicit VST3 target bank: touch parameters individually and add
+        // them to a session-scoped selection. Every target is reverified
+        // against the live host on apply AND on every Undo/Redo.
+        bool applyVst3MacroTargetAction(
+            DAW::AutomationLaneComponent::Vst3MacroTargetAction action);
         bool applyVst3MacroFromLastTouched(
             const DAW::TrackID& sourceTrack,
             const juce::String& parameterId,
@@ -516,6 +520,7 @@ namespace ArrangementEditor
         uint64_t m_groupedAutomationManagerEpoch = 0; // invalidate retained Undo on manager rebind
         DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotA;
         DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotB;
+        DAW::AutomationVst3MacroTargetBankCore m_vst3MacroTargets;
         std::unique_ptr<DAW::AutomationManagerCore> m_fallbackAutomationManager; // used when no external manager is wired
         std::unique_ptr<DAW::AutomationUIHelper> m_automationHelper;
         std::map<DAW::TrackID, std::unique_ptr<DAW::AutomationLaneContainerComponent>> m_automationContainers;

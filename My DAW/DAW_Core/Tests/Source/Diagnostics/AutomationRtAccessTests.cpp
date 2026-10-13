@@ -25,6 +25,7 @@
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
+#include "../../../Source/AutomationCore/AutomationVst3MacroTargetBankCore.h"
 #include "../../../Source/AutomationCore/AutomationVst3BridgeAuthorityCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneStateValidationCore.h"
 #include <array>
@@ -5824,6 +5825,116 @@ public:
     }
 };
 static AutomationVst3PpqBridgeAuthorityTests automationVst3PpqBridgeAuthorityTests;
+
+/**
+ * The GUI's explicit VST3 destination bank is an identity collection, not a
+ * cached authorization. Both verified host instances must pass before any
+ * macro edit can publish one legacy DSP snapshot.
+ */
+class AutomationV2MultiVst3BankTests final : public juce::UnitTest
+{
+public:
+    AutomationV2MultiVst3BankTests()
+        : juce::UnitTest("automation.v2-vst3-multi-target-bank.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Bank = DAW::AutomationVst3MacroTargetBankCore;
+        using Guard = DAW::AutomationMacroVst3TargetCore;
+        using M = DAW::AutomationMacroMappingCore;
+        Bank bank;
+
+        DAW::LastTouchedPluginParameter first;
+        first.trackId = "vocal";
+        first.pluginSlotIndex = 0;
+        first.pluginInstanceId = "uuid-A";
+        first.parameterId = "cutoff";
+        DAW::LastTouchedPluginParameter second = first;
+        second.trackId = "reverb-send";
+        second.pluginSlotIndex = 2;
+        second.pluginInstanceId = "uuid-B";
+        second.parameterId = "wet";
+
+        beginTest("Explicit bank preserves distinct track/slot/UUID/parameter targets");
+        expect(bank.empty());
+        expect(bank.add(first));
+        expect(!bank.add(first)); // duplicates must not result in double writes
+        expect(bank.add(second));
+        expectEquals((int)bank.size(), 2);
+        expect(Bank::sameIdentity(bank.targets().front(), first));
+        expect(!Bank::sameIdentity(bank.targets().front(), second));
+
+        DAW::LastTouchedPluginParameter missingUuid = second;
+        missingUuid.pluginInstanceId.clear();
+        expect(!bank.add(missingUuid));
+        expectEquals((int)bank.size(), 2);
+
+        DAW::AutomationManagerCore manager;
+        const juce::String a = "plugin.0.uuid-A.cutoff";
+        const juce::String b = "plugin.2.uuid-B.wet";
+        const juce::String untouched = "plugin.3.uuid-C.feedback";
+        manager.getOrCreateLane("vocal", a).addPoint(0, 0.2f);
+        manager.getOrCreateLane("reverb-send", b).addPoint(0, 0.3f);
+        manager.getOrCreateLane("reverb-send", untouched).addPoint(0, 0.77f);
+        manager.publishSnapshot();
+
+        juce::AudioParameterFloat pA(
+            juce::ParameterID{"cutoff", 1}, "Cutoff",
+            juce::NormalisableRange<float>{0.0f, 1.0f}, 0.5f);
+        juce::AudioParameterFloat pB(
+            juce::ParameterID{"wet", 1}, "Wet",
+            juce::NormalisableRange<float>{0.0f, 1.0f}, 0.5f);
+        juce::Array<juce::AudioProcessorParameter*> paramsA;
+        paramsA.add(&pA);
+        juce::Array<juce::AudioProcessorParameter*> paramsB;
+        paramsB.add(&pB);
+
+        M::Binding one, two;
+        beginTest("Every selected plugin must still pass current host metadata");
+        expect(Guard::verify(first, first.trackId, first.pluginSlotIndex,
+                             first.pluginInstanceId, paramsA, manager, one));
+        expect(Guard::verify(second, second.trackId, second.pluginSlotIndex,
+                             second.pluginInstanceId, paramsB, manager, two));
+        expect(!Guard::verify(second, second.trackId, second.pluginSlotIndex,
+                              "uuid-REPLACED", paramsB, manager, two));
+        expect(Guard::verify(second, second.trackId, second.pluginSlotIndex,
+                             second.pluginInstanceId, paramsB, manager, two));
+
+        beginTest("One macro edits two verified instances with one Undo/Redo plan");
+        const std::vector<DAW::AutomationPoint> macro {
+            {0, 0.0f, DAW::AutomationCurveType::Linear, 0.0f},
+            {48000, 1.0f, DAW::AutomationCurveType::Smooth, 0.5f}
+        };
+        M::Plan plan;
+        expect(M::compile(manager, macro, {one, two}, plan));
+        expectEquals((int)plan.changes.size(), 2);
+        expect(M::apply(manager, plan, true));
+        const auto* laneA = manager.findLane("vocal", a);
+        const auto* laneB = manager.findLane("reverb-send", b);
+        const auto* laneC = manager.findLane("reverb-send", untouched);
+        expect(laneA != nullptr && laneB != nullptr && laneC != nullptr);
+        if (laneA != nullptr && laneB != nullptr && laneC != nullptr)
+        {
+            expectWithinAbsoluteError(laneA->points.back().value, 1.0f, 0.00001f);
+            expectWithinAbsoluteError(laneB->points.back().value, 1.0f, 0.00001f);
+            expectWithinAbsoluteError(laneC->points.front().value, 0.77f, 0.00001f);
+        }
+        expect(M::apply(manager, plan, false));
+        laneA = manager.findLane("vocal", a);
+        laneB = manager.findLane("reverb-send", b);
+        if (laneA != nullptr && laneB != nullptr)
+        {
+            expectWithinAbsoluteError(laneA->points.front().value, 0.2f, 0.00001f);
+            expectWithinAbsoluteError(laneB->points.front().value, 0.3f, 0.00001f);
+        }
+
+        beginTest("Empty bank after session replacement");
+        bank.clear();
+        expect(bank.empty());
+    }
+};
+static AutomationV2MultiVst3BankTests automationV2MultiVst3BankTests;
 
 class AutomationV2Vst3MacroLiveTargetTests final : public juce::UnitTest
 {
