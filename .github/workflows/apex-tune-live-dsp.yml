@@ -66,6 +66,11 @@ jobs:
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_vowel_study.cpp" -o tune_live_vowel_study
           ./tune_live_vowel_study
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" -o tune_live_18ms_probe
+          ./tune_live_18ms_probe
   msvc-windows:
     runs-on: windows-2022
     steps:
@@ -92,3 +97,5 @@ jobs:
           tune_live_shifter_study.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_vowel_study.exe "My DAW/DAW_Core/Tests/TuneLive/test_vowel_study.cpp" || exit /b 1
           tune_live_vowel_study.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_18ms_probe.exe "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" || exit /b 1
+          tune_live_18ms_probe.exe || exit /b 1
