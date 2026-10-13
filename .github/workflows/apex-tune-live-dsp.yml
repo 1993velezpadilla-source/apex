@@ -112,6 +112,13 @@ jobs:
             -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_eight_insert_telemetry.cpp" -o tune_live_eight_insert
           ./tune_live_eight_insert
+          # Automation hot-switch with 1..257 sample callbacks, including
+          # retune/key/formants/bypass; must return to exact 40ms dry PDC.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" -o tune_live_switch
+          ./tune_live_switch
           # Produce real WAV files with the actual shipped HQ40 engine and
           # isolated causal research backend, and exercise PCM24 read/write.
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -170,6 +177,8 @@ jobs:
           tune_live_vibrato_test.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_eight_insert.exe "My DAW/DAW_Core/Tests/TuneLive/test_eight_insert_telemetry.cpp" || exit /b 1
           tune_live_eight_insert.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_switch.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" || exit /b 1
+          tune_live_switch.exe || exit /b 1
           cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_audition.exe "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" || exit /b 1
           tune_live_audition.exe --self-test tune_live_audition || exit /b 1
           tune_live_audition.exe --input tune_live_audition_source.wav --prefix tune_live_reload || exit /b 1
