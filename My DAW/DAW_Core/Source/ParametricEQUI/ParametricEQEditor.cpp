@@ -2051,7 +2051,7 @@ public:
         // Floating rotary HUD exists ONLY on >=900px desktop canvases.
         // 640x400 and 700x500 landscape touch devices use the below-graph
         // sheet, just like narrow portrait phones. Match applyLayout().
-        const bool floating = owner_.getWidth() >= 900;
+        const bool floating = owner_.getWidth() >= 900 && owner_.getHeight() >= 500;
         if (floating)
         {
             // Self-contained APEX glass HUD; the controls are all real JUCE
@@ -2088,7 +2088,7 @@ public:
         // Floating rotary HUD exists ONLY on >=900px desktop canvases.
         // 640x400 and 700x500 landscape touch devices use the below-graph
         // sheet, just like narrow portrait phones. Match applyLayout().
-        const bool floating = owner_.getWidth() >= 900;
+        const bool floating = owner_.getWidth() >= 900 && owner_.getHeight() >= 500;
         const int row = floating ? 48 : 56;
         for (auto* slider : { &frequencySlider_, &gainSlider_, &qSlider_ })
         {
