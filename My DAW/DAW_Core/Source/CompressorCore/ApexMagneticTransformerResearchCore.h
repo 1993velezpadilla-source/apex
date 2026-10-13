@@ -9,6 +9,33 @@
 #include <cmath>
 #include <cstddef>
 namespace APEX::Compressor {
+// Fixed LUT curve for the experimental 4x magnetic stage. Constructed in
+// prepare() only; evaluate() is deterministic with no locks or allocations.
+// Precision is measured against std::tanh in portable regression tests.
+class ApexMagneticTanhLookup final {
+public:
+    void prepare() noexcept {
+        for(std::size_t i=0;i<table_.size();++i) {
+            const double argument=-kRange+2*kRange*static_cast<double>(i)/
+                                  static_cast<double>(kSegments);
+            table_[i]=static_cast<float>(std::tanh(argument));
+        }
+    }
+    double evaluate(double argument) const noexcept {
+        if(argument<=-kRange)return -1.0;
+        if(argument>=kRange)return 1.0;
+        const double position=(argument+kRange)*static_cast<double>(kSegments)/
+                              (2.0*kRange);
+        const auto lo=static_cast<std::size_t>(position);
+        const double fraction=position-static_cast<double>(lo);
+        return static_cast<double>(table_[lo])+
+               fraction*(static_cast<double>(table_[lo+1])-table_[lo]);
+    }
+private:
+    static constexpr double kRange=12.0;
+    static constexpr std::size_t kSegments=4096;
+    std::array<float,kSegments+1> table_{};
+};
 struct ApexMagneticResearchSettings {
     ApexTransformerCircuit electrical{};
     double drive=1.3, dcBias=0.045, fluxMemoryHz=24, fluxCoupling=.18, trim=1;
@@ -30,6 +57,7 @@ public:
         const double dc=std::tanh(p.drive*p.dcBias);
         const double derivative=p.drive*(1-dc*dc);
         linearNorm_=derivative>1.e-8?1/derivative:1;
+        tanhCurve_.prepare();
         buildFilter();
         reset();
     }
@@ -72,8 +100,8 @@ private:
         if(std::abs(flux_)<1.e-15)flux_=0;
         if(p_.drive==0)return x;
         const double offset=p_.dcBias+p_.fluxCoupling*flux_;
-        return std::clamp((std::tanh(p_.drive*(x+offset))-
-                           std::tanh(p_.drive*offset))*linearNorm_,-16.,16.);
+        return std::clamp((tanhCurve_.evaluate(p_.drive*(x+offset))-
+                           tanhCurve_.evaluate(p_.drive*offset))*linearNorm_,-16.,16.);
     }
     void buildFilter() noexcept {
         constexpr double cutoff=.115;
@@ -93,6 +121,7 @@ private:
         }
     }
     ApexTransformerResearchCore electrical_;
+    ApexMagneticTanhLookup tanhCurve_{};
     ApexMagneticResearchSettings p_{};
     double fs_=48000,fluxPole_=0,linearNorm_=1,flux_=0;
     // Power-of-two circular storage avoids variable-divisor modulo per tap.
