@@ -32,6 +32,14 @@ public:
             entry.second->setGroupedCurveCallback(groupedCurveCallback_);
     }
 
+    void setNativeMacroCallback(
+        AutomationLaneComponent::NativeMacroCallback callback)
+    {
+        nativeMacroCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setNativeMacroCallback(nativeMacroCallback_);
+    }
+
     void setSelectedSnapshotCallback(
         AutomationLaneComponent::SelectedSnapshotCallback callback)
     {
@@ -64,6 +72,7 @@ public:
 
         auto* lanePtr = laneComponent.get();
         lanePtr->setGroupedCurveCallback(groupedCurveCallback_);
+        lanePtr->setNativeMacroCallback(nativeMacroCallback_);
         lanePtr->setSelectedSnapshotCallback(selectedSnapshotCallback_);
         lanePtr->setSize(getWidth(), 60);  // 60 pixels high per lane
 
@@ -275,6 +284,7 @@ private:
     AutomationUIHelper& helper_;
     TrackID trackId_;
     AutomationLaneComponent::GroupedCurveCallback groupedCurveCallback_;
+    AutomationLaneComponent::NativeMacroCallback nativeMacroCallback_;
     AutomationLaneComponent::SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // Map from parameter ID to lane component
