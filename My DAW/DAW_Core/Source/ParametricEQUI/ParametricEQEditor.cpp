@@ -814,7 +814,12 @@ public:
         drawNodes (g, bounds);
         // APEX's own compact value readout follows the chosen frequency
         // node without additional controls or stealing graph pointer input.
-        if (getWidth() >= 700)
+        // The value pill must fit entirely inside the *graph*. At short
+        // landscape sizes (notably 900x300) the previous pill was clipped
+        // by the below-graph quick-edit sheet and looked like a broken
+        // floating inspector. The always-visible quick controls already
+        // display the exact values there, so omit this redundant pill.
+        if (getWidth() >= 700 && getHeight() >= 220)
         {
             const int selectedBand = owner_.getSelectedBandForTesting();
             if (selectedBand >= 0 && selectedBand < kMaxBands)
@@ -835,8 +840,13 @@ public:
                 const int x = std::clamp (
                     centre.x - bubbleWidth / 2, 8,
                     std::max (8, getWidth() - bubbleWidth - 8));
-                const int y = centre.y > 100 ? centre.y - 65
-                                             : centre.y + 36;
+                // Keep the readout clear of the 52px toolbar and the
+                // bottom log-frequency axis. Avoid a clipped rectangle
+                // even when the host resizes the editor unusually short.
+                const int preferredY = centre.y > 100 ? centre.y - 65
+                                                       : centre.y + 36;
+                const int y = std::clamp (preferredY, 60,
+                                         getHeight() - bubbleHeight - 24);
                 auto bubble = juce::Rectangle<float> (
                     static_cast<float> (x), static_cast<float> (y),
                     static_cast<float> (bubbleWidth),
@@ -855,8 +865,10 @@ public:
         if (grabArmed_)
             drawGrabPeaks (g);
 
-        // Never steal input events: this is purely painted status text.
-        if (getWidth() >= 560)
+        // The decorative engine caption is not a graph control. Hide it
+        // when the response is shallow: at 640x400 and 900x300 it collided
+        // with frequency labels and even active EQ nodes.
+        if (getWidth() >= 560 && getHeight() >= 260)
         {
             g.setFont (juce::Font (juce::FontOptions (
                 10.5f, juce::Font::bold)));
