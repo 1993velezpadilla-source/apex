@@ -5626,6 +5626,7 @@ void ArrangementViewCore::setAutomationManager(DAW::AutomationManagerCore* autom
         m_automationUpdateTimer = nullptr;
     }
 
+    ++m_groupedAutomationManagerEpoch;
     m_automationManager = automationManager;
     m_automationContainers.clear();
 
@@ -5738,10 +5739,12 @@ bool ArrangementViewCore::applyGroupedCurveFromSelectedClips(
     // JUCE's safe UI pointer, not an unguarded this/helper reference.
     juce::Component::SafePointer<ArrangementViewCore> owner(this);
     auto* expectedManager = m_automationManager;
-    auto replay = [owner, expectedManager, edit, sr, bpm](bool after)
+    const auto expectedEpoch = m_groupedAutomationManagerEpoch;
+    auto replay = [owner, expectedManager, expectedEpoch, edit, sr, bpm](bool after)
     {
         auto* view = owner.getComponent();
         if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_groupedAutomationManagerEpoch != expectedEpoch
             || view->m_automationHelper == nullptr)
             return;
 
