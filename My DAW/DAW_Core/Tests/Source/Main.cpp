@@ -123,7 +123,7 @@ int main (int argc, char** argv)
             return 1;
         }
         const juce::File output (destination);
-        if (! output.getParentDirectory().createDirectory())
+        if (output.getParentDirectory().createDirectory().failed())
         {
             std::cerr << "Failed to create screenshot folder" << std::endl;
             return 1;
