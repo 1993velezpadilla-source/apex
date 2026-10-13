@@ -46,12 +46,13 @@ struct SizeCase
     ParametricEQEditor::LayoutMode expected;
 };
 
-constexpr std::array<SizeCase, 7> kSizes {{
+constexpr std::array<SizeCase, 8> kSizes {{
     { 320, 568, ParametricEQEditor::LayoutMode::CompactPhone },
     { 480, 800, ParametricEQEditor::LayoutMode::LargePhone },
     { 640, 400, ParametricEQEditor::LayoutMode::LargePhone },
     { 700, 500, ParametricEQEditor::LayoutMode::Tablet },
     { 768, 1024, ParametricEQEditor::LayoutMode::Tablet },
+    { 900, 300, ParametricEQEditor::LayoutMode::LargePhone },
     { 1280, 720, ParametricEQEditor::LayoutMode::Desktop },
     { 1920, 1080, ParametricEQEditor::LayoutMode::LargeDesktop }
 }};
@@ -103,6 +104,42 @@ private:
             const auto topBar = editor->getTopBarBoundsForTesting();
             const auto graph = editor->getGraphBoundsForTesting();
             const auto inspector = editor->getInspectorBoundsForTesting();
+            // Even when the host forces a narrow or unusually short editor,
+            // the seven graph tools must remain independently tappable.
+            const std::array<juce::TextButton*, 7> tools {{
+                &editor->getSketchButtonForTesting(),
+                &editor->getGrabButtonForTesting(),
+                &editor->getCopyButtonForTesting(),
+                &editor->getPasteButtonForTesting(),
+                &editor->getMatchButtonForTesting(),
+                &editor->getMatchSaveButtonForTesting(),
+                &editor->getMatchLoadButtonForTesting()
+            }};
+            for (std::size_t tool = 0; tool < tools.size(); ++tool)
+            {
+                const auto b = tools[tool]->getBounds();
+                expect (b.getWidth() >= 44 && b.getHeight() >= 44,
+                        "graph actions have >=44px touch targets");
+                expect (juce::Rectangle<int> (0, 0, graph.getWidth(),
+                                                graph.getHeight()).contains (b),
+                        "graph actions fit their own panel");
+                if (tool > 0)
+                    expect (! b.intersects (tools[tool - 1]->getBounds()),
+                            "adjacent graph actions cannot overlap");
+            }
+            expectEquals (editor->getMatchButtonForTesting().getButtonText(),
+                sizeCase.width <= 430 ? juce::String ("MATCH")
+                                      : juce::String ("EQ MATCH"),
+                "compact EQ Match caption stays readable");
+            expectEquals (editor->getMatchSaveButtonForTesting().getButtonText(),
+                sizeCase.width <= 430 ? juce::String ("SAVE")
+                                      : juce::String ("REF SAVE"),
+                "compact reference save caption stays readable");
+            expectEquals (editor->getMatchLoadButtonForTesting().getButtonText(),
+                sizeCase.width <= 430 ? juce::String ("LOAD")
+                                      : juce::String ("REF LOAD"),
+                "compact reference load caption stays readable");
+
             const auto primary = editor->getPrimaryDialsForTesting();
             for (const auto* dial : primary)
             {
@@ -259,8 +296,10 @@ private:
             // Export true software-rendered native JUCE screenshots from
             // Windows CI. The snapshots are QA previews, not AI mockups or
             // proof of audio quality. No files are written on user machines.
-            const bool snapshot = sizeCase.width == 320
-                                  || sizeCase.width == 1280;
+            // Save the ENTIRE responsive matrix to catch visual regressions
+            // not observable from JUCE geometry assertions alone, including
+            // 640x400 / 700x500 landscape and 900x300 short desktop.
+            const bool snapshot = true;
             if (snapshot && workspace.isNotEmpty())
             {
                 auto dir = juce::File (workspace).getChildFile (
