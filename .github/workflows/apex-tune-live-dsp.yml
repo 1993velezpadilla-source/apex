@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           test "$(git -C "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" rev-parse HEAD)" = "57b93f4e9206a089a45387eaa39bdc9f310d3308"
-      - name: Build with C++17 sanitizers and warnings as errors
+      - name: Build owned sources pedantic and vendor-linked DSP without third-party pedantic warnings
         shell: bash
         run: |
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
@@ -41,17 +41,17 @@ jobs:
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" -o tune_live_preset_test
           ./tune_live_preset_test
-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
             -I"My DAW/DAW_Core/Source/ThirdParty" \
             -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" -o tune_live_wet_test
           ./tune_live_wet_test
-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
             -I"My DAW/DAW_Core/Source/ThirdParty" \
             -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp" -o tune_live_matrix_test
           ./tune_live_matrix_test
-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
             -I"My DAW/DAW_Core/Source/ThirdParty" \
             -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp" -o tune_live_no_alloc_test
