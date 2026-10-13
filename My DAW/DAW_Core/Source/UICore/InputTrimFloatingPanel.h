@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 
 #include "../TrackCore/Track.h"
+#include "../InputMonitorCore/PichyInputGainAdvisorCore.h"
 #include "../AnalogVuMeterCore/AnalogVuMeterCore.h"
 #include "../AnalogVuMeterCore/AnalogVuMeterComponent.h"
 #include "../BubblegumKnobCore/BubblegumKnobCore.h"
@@ -56,7 +57,7 @@ public:
     explicit InputTrimFloatingPanel(Track& track)
         : track_(track)
     {
-        setSize(360, 526);
+        setSize(360, 608);
         setOpaque(false);
 
         // ── Header ───────────────────────────────────────────────
@@ -133,13 +134,30 @@ public:
         addAndMakeVisible(vuMaxReadout_);
         resetMeters_.setButtonText("Reset meters");
         resetMeters_.setComponentID("trim.reset-meters");
-        resetMeters_.onClick = [this] { vu_.resetPeakHold(); refreshReadouts(); };
+        resetMeters_.onClick = [this]
+        {
+            vu_.resetPeakHold();
+            if (!detached_) track_.getPichyInputGuardian().resetHold();
+            refreshReadouts();
+        };
         addAndMakeVisible(resetMeters_);
         help_.setText("Set Trim around 0 VU for nominal level.\nWatch PEAK separately for digital clipping.", juce::dontSendNotification);
         help_.setFont(juce::Font(12.0f));
         help_.setColour(juce::Label::textColourId, juce::Colour(0xFFBFC4D0));
         help_.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(help_);
+
+        // Explicit user approval; never silently alter digital trim.
+        pichyAdjust_.setButtonText("Pichy: apply safer digital trim");
+        pichyAdjust_.setComponentID("trim.pichy-adjust");
+        pichyAdjust_.setTooltip("Undoable APEX input trim change only; cannot fix hardware clipping.");
+        pichyAdjust_.onClick = [this]
+        {
+            if (!detached_ && onPichyAdjustRequest)
+                onPichyAdjustRequest();
+            refreshReadouts();
+        };
+        addAndMakeVisible(pichyAdjust_);
 
         // ── Taskbar registration ─────────────────────────────────
         BubblegumTaskbarCore::getGlobalInstance().registerHost(this);
@@ -178,6 +196,7 @@ public:
     /** External callbacks for bubbleTaskbar integration from MainComponent. */
     std::function<void()> onMinimizedExternal;
     std::function<void()> onClosedExternal;
+    std::function<void()> onPichyAdjustRequest;
 
     /** Single-owner router for panel show requests. The app-wide
      *  InputTrimPanelManager registers itself here so that EVERY entry point
@@ -299,7 +318,8 @@ public:
         // Knob centred at y=340, 110x110.
         const int knobSize = 110;
         knob_.setBounds((W - knobSize) / 2, 378, knobSize, knobSize);
-        help_.setBounds(16, 487, W - 32, 36);
+        help_.setBounds(16, 487, W - 32, 46);
+        pichyAdjust_.setBounds(20, 542, W - 40, 48);
     }
 
 private:
@@ -324,6 +344,46 @@ private:
         const float peakDb = vu_.getPeakMaxDb();
         peakMaxReadout_.setValue(peakDb <= -120.0f ? juce::String(juce::CharPointer_UTF8("\xe2\x80\x94"))
                                                    : formatDb(peakDb));
+
+        // PRE-TRIM: source is the actual routed hardware input, never a mix
+        // of clips/sends. A saturated preamp may distort at lower sample peak.
+        const auto raw = track_.getPichyInputGuardian().snapshot();
+        const auto advice = PichyInputGainAdvisorCore::evaluate(raw, currentDb);
+        using Status = PichyInputGainAdvice::Status;
+        juce::String guidance;
+        switch (advice.status)
+        {
+            case Status::NoSignal:
+                guidance = "RAW INPUT: waiting for input.\nPichy checks the signal BEFORE Input Trim.";
+                break;
+            case Status::InvalidInput:
+                guidance = "RAW INPUT: invalid input samples/settings.\nCheck your hardware and audio device.";
+                break;
+            case Status::HardwareAttention:
+                guidance = "RAW INPUT near full scale! Check INTERFACE gain.\nDigital Trim cannot repair ADC distortion.";
+                break;
+            case Status::AlreadySafe:
+                guidance = "RAW INPUT peak: " + juce::String(advice.rawPeakDbfs, 1)
+                         + " dBFS (before Trim).\nNo further digital reduction suggested.";
+                break;
+            case Status::ReduceDigitalTrim:
+                guidance = "RAW INPUT peak: " + juce::String(advice.rawPeakDbfs, 1)
+                         + " dBFS (before Trim).\nSuggested Trim: "
+                         + juce::String(advice.proposedTrimDb, 1) + " dB.";
+                break;
+        }
+        // The panel runs at 60 Hz; avoid gratuitous text repaints and
+        // widget state churn when the held raw peak has not changed.
+        if (help_.getText() != guidance)
+            help_.setText(guidance, juce::dontSendNotification);
+        const auto helpColour = advice.status == Status::HardwareAttention
+            ? juce::Colour(0xFFFF9A7A) : juce::Colour(0xFFBFC4D0);
+        if (help_.findColour(juce::Label::textColourId) != helpColour)
+            help_.setColour(juce::Label::textColourId, helpColour);
+        const bool canAdjust = advice.status == Status::ReduceDigitalTrim
+            && static_cast<bool>(onPichyAdjustRequest);
+        if (pichyAdjust_.isEnabled() != canAdjust)
+            pichyAdjust_.setEnabled(canAdjust);
     }
 
     static juce::String formatDb(float dB)
@@ -367,6 +427,7 @@ private:
     juce::ComboBox             reference_;
     juce::TextButton           resetMeters_;
     juce::Label                help_;
+    juce::TextButton           pichyAdjust_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InputTrimFloatingPanel)
 };

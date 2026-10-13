@@ -6,6 +6,7 @@
 #include "../InputMonitorCore/InputFxChain.h"
 #include "../InputMonitorCore/InputTrimCore.h"
 #include "../InputMonitorCore/InputMeterCore.h"
+#include "../InputMonitorCore/PichyInputGuardianCore.h"
 #include "../RecordingCore/LiveRecordWaveformCore.h"
 #include <atomic>
 #include <cmath>
@@ -222,6 +223,8 @@ public:
     InputFxChain& getInputFxChain() noexcept { return inputFxChain_; }
     InputTrimCore& getInputTrim() noexcept { return inputTrim_; }
     InputMeterCore& getInputMeter() noexcept { return inputMeter_; }
+    PichyInputGuardianCore& getPichyInputGuardian() noexcept { return pichyInputGuardian_; }
+    const PichyInputGuardianCore& getPichyInputGuardian() const noexcept { return pichyInputGuardian_; }
     LiveRecordWaveformCore& getLiveRecordWaveform() noexcept { return liveRecordWaveform_; }
 
     // Per-track hardware input source (pro-DAW input routing).
@@ -297,6 +300,7 @@ private:
     InputFxChain              inputFxChain_;
     InputTrimCore             inputTrim_;
     InputMeterCore            inputMeter_;
+    PichyInputGuardianCore    pichyInputGuardian_;
     LiveRecordWaveformCore    liveRecordWaveform_;
     std::atomic<int>          inputFirstChannel_{0};
     std::atomic<bool>         inputMono_{false};

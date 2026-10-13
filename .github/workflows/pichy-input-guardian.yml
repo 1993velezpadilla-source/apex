@@ -1,0 +1,34 @@
+name: Pichy input guardian portable test
+
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/InputMonitorCore/PichyInput*'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyInputGuardianStandalone.cpp'
+      - '.github/workflows/pichy-input-guardian.yml'
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/InputMonitorCore/PichyInput*'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyInputGuardianStandalone.cpp'
+      - '.github/workflows/pichy-input-guardian.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-cpp17:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile input guardian and recommendation core
+        shell: bash
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            "My DAW/DAW_Core/Tests/Portable/PichyInputGuardianStandalone.cpp" \
+            -o "${RUNNER_TEMP}/pichy_input_guardian"
+      - name: Run pre-trim guardian synthetic gauntlet
+        shell: bash
+        run: '"${RUNNER_TEMP}/pichy_input_guardian"'
