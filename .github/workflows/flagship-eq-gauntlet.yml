@@ -34,7 +34,7 @@ jobs:
   parametric-eq:
     name: Parametric EQ ${{ matrix.configuration }}
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -102,23 +102,9 @@ jobs:
           Write-Host "VS18: $vs"
           Write-Host "MSBuild: $msbuild"
 
-      - name: Build APEX ${{ matrix.configuration }}
-        working-directory: My DAW/DAW_Core
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $arguments = @(
-            'Builds\VisualStudio2026\DAW_Core.sln',
-            '/t:Build',
-            '/p:Configuration=${{ matrix.configuration }}',
-            '/p:Platform=x64',
-            '/m',
-            '/nr:false',
-            '/nologo',
-            '/v:minimal'
-          )
-          & $env:MSBUILD @arguments
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
+      # The EQ suite is an independent JUCE executable. Execute it *before*
+      # the much larger DAW_Core link so tests produce evidence even if the
+      # full Windows application reaches its build-time resource ceiling.
       - name: Build APEXTests ${{ matrix.configuration }}
         working-directory: My DAW/DAW_Core
         run: |
@@ -145,4 +131,23 @@ jobs:
             throw "APEXTests binary missing: $exe"
           }
           & $exe '--category=APEX.ParametricEQ' '--seed=0xA9E12026'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Only after the isolated EQ suite has passed do we attempt the
+      # full DAW compilation/link. This remains a required GREEN gate.
+      - name: Build APEX ${{ matrix.configuration }}
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @(
+            'Builds\VisualStudio2026\DAW_Core.sln',
+            '/t:Build',
+            '/p:Configuration=${{ matrix.configuration }}',
+            '/p:Platform=x64',
+            '/m',
+            '/nr:false',
+            '/nologo',
+            '/v:minimal'
+          )
+          & $env:MSBUILD @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
