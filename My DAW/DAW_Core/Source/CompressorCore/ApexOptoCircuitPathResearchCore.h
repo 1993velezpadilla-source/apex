@@ -1,6 +1,7 @@
 #pragma once
 // APEX OPTO 2A — uncalibrated FULL AUDIO-PATH RESEARCH HARNESS.
-// INPUT linear transformer -> T4 shunt -> 12AX7 plate-stage approximation ->
+// INPUT linear transformer -> [sidechain: 6AQ5 EL drive -> T4 shunt]
+// -> 12AX7 plate-stage approximation ->
 // 12BH7 cathode-follower approximation -> OUTPUT linear transformer.
 // Optical sidechain is pre-gain-cell, as in the referenced historic schematic.
 // This is NOT a shipped DAW insert or measured Teletronix/UAD circuit.
@@ -57,6 +58,7 @@ public:
         optical.gainDb=0;
         optical.parallelMix=1;
         optical.bypass=false;
+        optical.use6AQ5Driver=true; // experimental beam-power EL driver
         t4_.setParameters(optical);
         if(!started_) {
             currentMix_=desired.mix;
