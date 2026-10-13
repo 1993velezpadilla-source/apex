@@ -409,6 +409,7 @@ public:
     {
         lanes_.clear();
         clipRegions_.clear();
+        advancedMemories_ = {}; // new project must not inherit stale A/B
         publishSnapshot();
     }
 
@@ -713,6 +714,41 @@ public:
     AutomationClipClipboardCore& getClipClipboard() noexcept { return clipClipboard_; }
     const AutomationClipClipboardCore& getClipClipboard() const noexcept { return clipClipboard_; }
 
+    // Project-owned A/B memories (not live DSP automation). Stored as a
+    // detached, optional AutomationAdvancedMemories child in Automation V2.
+    // The editor validates each contained memory using the strict Snapshot
+    // serializer/deserializer before presentation or application.
+    void setAdvancedMemories(const juce::ValueTree& memories)
+    {
+        if (!memories.isValid())
+        {
+            advancedMemories_ = {};
+            return;
+        }
+
+        if (!memories.hasType("AutomationAdvancedMemories")
+            || memories.getNumChildren() > 2)
+            return; // malformed external project data must not be accepted
+
+        for (int i = 0; i < memories.getNumChildren(); ++i)
+        {
+            const auto child = memories.getChild(i);
+            if (!child.hasType("AutomationMultiSnapshot")
+                || (int)child.getProperty("version", 0) != 1
+                || (child.getProperty("slot", "").toString() != "A"
+                    && child.getProperty("slot", "").toString() != "B"))
+                return;
+        }
+
+        advancedMemories_ = memories.createCopy();
+    }
+
+    juce::ValueTree getAdvancedMemories() const
+    {
+        return advancedMemories_.isValid()
+            ? advancedMemories_.createCopy() : juce::ValueTree{};
+    }
+
     juce::ValueTree getState() const
     {
         return getStateFilteredByClipExistence({});
@@ -756,6 +792,8 @@ public:
             regions.addChild(region.getState(), -1, nullptr);
         }
         automation.addChild(regions, -1, nullptr);
+        if (advancedMemories_.isValid())
+            automation.addChild(advancedMemories_.createCopy(), -1, nullptr);
 
         return automation;
     }
@@ -765,6 +803,7 @@ public:
     {
         lanes_.clear();
         clipRegions_.clear();
+        advancedMemories_ = {};
 
         if (automation.isValid())
         {
@@ -772,6 +811,11 @@ public:
             for (int i = 0; i < automation.getNumChildren(); ++i)
             {
                 auto laneTree = automation.getChild(i);
+                if (laneTree.hasType("AutomationAdvancedMemories"))
+                {
+                    setAdvancedMemories(laneTree);
+                    continue;
+                }
                 if (laneTree.hasType("AutomationClipRegions"))
                 {
                     for (int r = 0; r < laneTree.getNumChildren(); ++r)
@@ -1209,6 +1253,7 @@ private:
 
     std::vector<AutomationLaneCore> lanes_;
     std::vector<AutomationClipRegionCore> clipRegions_;
+    juce::ValueTree advancedMemories_; // detached state, never read on audio callback
     AutomationClipClipboardCore clipClipboard_;
     SegmentShapeClipboard segmentClipboard_;
     float copiedPointValue_ = 0.0f;
