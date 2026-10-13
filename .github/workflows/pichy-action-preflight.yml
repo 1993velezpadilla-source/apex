@@ -1,0 +1,51 @@
+name: Pichy action safety preflight
+
+on:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyActionPreflightStandalone.cpp'
+      - '.github/workflows/pichy-action-preflight.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyActionPreflightStandalone.cpp'
+      - '.github/workflows/pichy-action-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pichy-action-contract:
+    name: Pichy command preflight / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux C++17 preflight
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            'My DAW/DAW_Core/Tests/Portable/PichyActionPreflightStandalone.cpp' \
+            -o "${RUNNER_TEMP}/pichy_action_contract"
+          "${RUNNER_TEMP}/pichy_action_contract"
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Windows C++17 preflight
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:pichy_action_contract.exe 'My DAW/DAW_Core/Tests/Portable/PichyActionPreflightStandalone.cpp'
+          if ($LASTEXITCODE -ne 0) { throw 'Preflight compile failed' }
+          ./pichy_action_contract.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Preflight test failed' }
