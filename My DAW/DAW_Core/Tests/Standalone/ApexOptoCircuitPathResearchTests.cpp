@@ -74,6 +74,52 @@ int main(){
         }
         near(one.getGainReductionDb(),other.getGainReductionDb(),1.e-9);
     }
+    // X4 magnetic mode has 16+16 host samples of FIR latency: the DRY
+    // and initial BYPASS path must align to 32 samples, not silently comb.
+    for(const bool bypass:{false,true}) {
+        ApexOptoCircuitPathResearchCore path;
+        path.prepare(48000,true);
+        assert(path.latencySamples()==32);
+        ApexOptoCircuitResearchParameters p;
+        p.peakReduction=94;p.mix=bypass?1.0:0.0;p.bypass=bypass;
+        path.setParameters(p);
+        std::vector<float> left(512),right(512);
+        for(int n=0;n<512;++n) {
+            left[n]=static_cast<float>(.4*std::sin(n*.085));
+            right[n]=static_cast<float>(.25*std::cos(n*.051));
+        }
+        const auto origL=left,origR=right;
+        path.process(left.data(),right.data(),512);
+        for(int n=0;n<512;++n) {
+            const double expectL=n>=32?origL[n-32]:0.0;
+            const double expectR=n>=32?origR[n-32]:0.0;
+            near(left[n],expectL,1.e-6);
+            near(right[n],expectR,1.e-6);
+        }
+    }
+    // Continuous sample clock: x4 magnetic/T4/valve chain is invariant to
+    // DAW block partition (32 / 64 / 128 vs contiguous 2048 frames).
+    {
+        ApexOptoCircuitPathResearchCore continuous,partitioned;
+        continuous.prepare(48000,true);partitioned.prepare(48000,true);
+        ApexOptoCircuitResearchParameters p;
+        p.peakReduction=79;p.gainDb=3;p.mix=.62;p.emphasis=.25;
+        continuous.setParameters(p);partitioned.setParameters(p);
+        std::vector<float> a(2048),b(2048),c(2048),d(2048);
+        for(int i=0;i<2048;++i) {
+            a[i]=c[i]=static_cast<float>(.34*std::sin(i*.023));
+            b[i]=d[i]=static_cast<float>(.21*std::cos(i*.035));
+        }
+        continuous.process(a.data(),b.data(),2048);
+        for(int start=0;start<2048;start+=31)
+            partitioned.process(c.data()+start,d.data()+start,
+                                std::min(31,2048-start));
+        for(int i=0;i<2048;++i) {
+            near(a[i],c[i],1.e-6);
+            near(b[i],d[i],1.e-6);
+        }
+        near(continuous.getGainReductionDb(),partitioned.getGainReductionDb(),1.e-8);
+    }
     // Mono, nonfinite source and accelerated sample rates do not crash.
     for(const auto sampleRate:{44100.0,48000.0,96000.0,192000.0}){
         ApexOptoCircuitPathResearchCore path;path.prepare(sampleRate);
