@@ -2616,6 +2616,36 @@ void ParametricEQEditor::injectGraphMouseUpForTesting (juce::Point<float> positi
     graph_->mouseUp (event);
 }
 
+void ParametricEQEditor::injectGraphDoubleClickForTesting (
+    juce::Point<float> position)
+{
+    auto* source = testMouseSource (this);
+    if (source == nullptr)
+        return;
+    const juce::MouseEvent event (*source, position, juce::ModifierKeys(),
+                                  1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                  graph_.get(), graph_.get(),
+                                  juce::Time::getCurrentTime(), position,
+                                  juce::Time::getCurrentTime(), 2, false);
+    graph_->mouseDoubleClick (event);
+}
+
+void ParametricEQEditor::injectGraphWheelForTesting (
+    juce::Point<float> position, float deltaY)
+{
+    auto* source = testMouseSource (this);
+    if (source == nullptr)
+        return;
+    const juce::MouseEvent event (*source, position, juce::ModifierKeys(),
+                                  1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                  graph_.get(), graph_.get(),
+                                  juce::Time::getCurrentTime(), position,
+                                  juce::Time::getCurrentTime(), 1, false);
+    juce::MouseWheelDetails details;
+    details.deltaY = deltaY;
+    graph_->mouseWheelMove (event, details);
+}
+
 void ParametricEQEditor::beginAuditionGesture()
 {
     const int band = selectedBand_;
