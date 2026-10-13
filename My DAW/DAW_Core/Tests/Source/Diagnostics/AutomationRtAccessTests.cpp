@@ -23,6 +23,7 @@
 #include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
+#include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -5385,3 +5386,147 @@ public:
     }
 };
 static AutomationV2MultiParameterSnapshotTests automationV2MultiParameterSnapshotTests;
+
+/** Controlled VST3 metadata is explicit here, never assumed by a parameter name.
+ *  Host-side integration must query stepCount for the exact plugin instance.
+ */
+class AutomationV2MacroMappingTests final : public juce::UnitTest
+{
+public:
+    AutomationV2MacroMappingTests()
+        : juce::UnitTest("automation.v2-macro-multiparam-transaction.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationMacroMappingCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+        using M = AutomationMacroMappingCore;
+
+        AutomationManagerCore manager;
+        const juce::String vol = AutomationLaneCore::trackVolumeParameterId;
+        const juce::String pan = AutomationLaneCore::trackPanParameterId;
+        const juce::String vst = "plugin.1.instance-6cf.cutoff";
+        const juce::String otherVst = "plugin.1.instance-999.cutoff";
+        manager.getOrCreateLane("voice", vol).addPoint(0, 0.80f);
+        manager.getOrCreateLane("voice", pan).addPoint(0, 0.0f);
+        manager.getOrCreateLane("voice", vst).addPoint(0, 0.15f);
+        manager.getOrCreateLane("voice", otherVst).addPoint(0, 0.70f);
+        manager.publishSnapshot();
+
+        std::vector<AutomationPoint> macro {
+            {0, 0.0f, AutomationCurveType::Smooth, -0.4f},
+            {12000, 0.5f, AutomationCurveType::Hold, 0.7f},
+            {48000, 1.0f, AutomationCurveType::Linear, 0.0f}
+        };
+        std::vector<M::Binding> bindings {
+            {{"voice", vol}, 0.50f, 1.50f, false, false},
+            {{"voice", pan}, -1.0f, 1.0f, true, false},
+            {{"voice", vst}, 0.20f, 0.80f, false, true}
+        };
+
+        beginTest("Compile native + individually verified continuous VST3 macro offline");
+        M::Plan plan;
+        expect(M::compile(manager, macro, bindings, plan));
+        expectEquals((int)plan.changes.size(), 3);
+        expectWithinAbsoluteError(
+            manager.findLane("voice", vol)->points[0].value, 0.80f, 0.00001f);
+
+        beginTest("All targets apply at one snapshot revision; another VST3 untouched");
+        const auto revision = manager.getSnapshotVersion();
+        expect(M::apply(manager, plan, true));
+        expectEquals((juce::int64)manager.getSnapshotVersion(),
+                     (juce::int64)revision + 1);
+        const auto* volume = manager.findLane("voice", vol);
+        const auto* panning = manager.findLane("voice", pan);
+        const auto* cutoff = manager.findLane("voice", vst);
+        const auto* untouched = manager.findLane("voice", otherVst);
+        expect(volume != nullptr && panning != nullptr
+               && cutoff != nullptr && untouched != nullptr);
+        if (volume != nullptr && panning != nullptr
+            && cutoff != nullptr && untouched != nullptr)
+        {
+            expectEquals((int)volume->points.size(), 3);
+            expectWithinAbsoluteError(volume->points[0].value, 0.5f, 0.00001f);
+            expectWithinAbsoluteError(volume->points[1].value, 1.0f, 0.00001f);
+            expectWithinAbsoluteError(volume->points[2].value, 1.5f, 0.00001f);
+            expectWithinAbsoluteError(panning->points[0].value, 1.0f, 0.00001f);
+            expectWithinAbsoluteError(panning->points[2].value, -1.0f, 0.00001f);
+            expectWithinAbsoluteError(cutoff->points[0].value, 0.2f, 0.00001f);
+            expectWithinAbsoluteError(cutoff->points[2].value, 0.8f, 0.00001f);
+            expectWithinAbsoluteError(untouched->points[0].value, 0.7f, 0.00001f);
+            expect(volume->points[0].curveToNext == AutomationCurveType::Smooth);
+            expectWithinAbsoluteError(volume->points[1].tensionToNext, 0.7f, 0.00001f);
+        }
+
+        beginTest("Undo restores all original curves and survives save/reopen");
+        expect(M::apply(manager, plan, false));
+        const auto* restoredVol = manager.findLane("voice", vol);
+        expect(restoredVol != nullptr);
+        if (restoredVol != nullptr)
+            expectWithinAbsoluteError(restoredVol->points[0].value, 0.8f, 0.00001f);
+        expect(M::apply(manager, plan, true));
+        AutomationManagerCore reopened;
+        reopened.restoreState(manager.getState());
+        const auto* savedCutoff = reopened.findLane("voice", vst);
+        expect(savedCutoff != nullptr);
+        if (savedCutoff != nullptr && savedCutoff->points.size() == 3)
+        {
+            expectWithinAbsoluteError(savedCutoff->points[2].value, 0.8f, 0.00001f);
+            expect(savedCutoff->points[0].curveToNext == AutomationCurveType::Smooth);
+        }
+        expect(M::apply(manager, plan, false));
+
+        beginTest("Never assume an unknown or stepped VST3 parameter is continuous");
+        auto unverified = bindings;
+        unverified[2].pluginIsVerifiedContinuous = false;
+        M::Plan rejected = plan;
+        expect(!M::compile(manager, macro, unverified, rejected));
+        expect(!rejected.isValid());
+        expect(!M::compile(manager, macro, {bindings[0], bindings[0]}, rejected));
+        expect(!rejected.isValid());
+
+        beginTest("Reject out-of-domain ranges and corrupt macro instead of clipping");
+        auto invalidRange = bindings;
+        invalidRange[1].minimum = -2.0f;
+        expect(!M::compile(manager, macro, invalidRange, rejected));
+        expect(!rejected.isValid());
+        auto invalidValues = macro;
+        invalidValues[1].value = 1.2f;
+        expect(!M::compile(manager, invalidValues, bindings, rejected));
+        expect(!rejected.isValid());
+        invalidValues = macro;
+        invalidValues[0].value = std::numeric_limits<float>::quiet_NaN();
+        expect(!M::compile(manager, invalidValues, bindings, rejected));
+        expect(!rejected.isValid());
+
+        beginTest("Clip ownership, bypass or absent lane fails whole macro");
+        DAW::AutomationClipRegionCore owned;
+        owned.trackId = "voice";
+        owned.parameterId = pan;
+        owned.startSample = 0;
+        owned.lengthSamples = 48000;
+        owned.localPoints = {AutomationPoint{0, 0.1f}};
+        manager.addClipRegion(owned);
+        expect(!M::compile(manager, macro, bindings, rejected));
+        expect(!rejected.isValid());
+        expect(manager.deleteClipRegion(owned.regionId));
+        manager.setLaneEnabled("voice", vst, false);
+        expect(!M::compile(manager, macro, bindings, rejected));
+        expect(!rejected.isValid());
+        manager.setLaneEnabled("voice", vst, true);
+
+        beginTest("Conflict after plan creation prevents partial replay");
+        expect(M::compile(manager, macro, bindings, plan));
+        manager.getOrCreateLane("voice", pan).addPoint(24000, 0.25f);
+        manager.publishSnapshot();
+        const auto protectedBefore = manager.getState().toXmlString();
+        const auto protectedVersion = manager.getSnapshotVersion();
+        expect(!M::apply(manager, plan, true));
+        expectEquals(manager.getState().toXmlString(), protectedBefore);
+        expect(manager.getSnapshotVersion() == protectedVersion);
+    }
+};
+static AutomationV2MacroMappingTests automationV2MacroMappingTests;
