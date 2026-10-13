@@ -24,6 +24,7 @@
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
+#include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneStateValidationCore.h"
 #include <array>
 #include <atomic>
@@ -5770,6 +5771,114 @@ public:
     }
 };
 static AutomationV2MacroMappingTests automationV2MacroMappingTests;
+
+
+/**
+ * This test exercises the exact host metadata / identity preflight used by
+ * the producer GUI. The plugin processor and its format are checked by the
+ * host before these metadata objects are passed to the verifier.
+ */
+class AutomationV2Vst3MacroLiveTargetTests final : public juce::UnitTest
+{
+public:
+    AutomationV2Vst3MacroLiveTargetTests()
+        : juce::UnitTest("automation.v2-vst3-macro-exact-live-target.v1",
+                          "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Guard = DAW::AutomationMacroVst3TargetCore;
+        using M = DAW::AutomationMacroMappingCore;
+        DAW::AutomationManagerCore manager;
+        const juce::String key = "plugin.0.instance-A.cutoff";
+        const juce::String other = "plugin.0.instance-B.cutoff";
+        const juce::String discreteKey = "plugin.0.instance-A.enabled";
+        manager.getOrCreateLane("vocal", key).addPoint(0, 0.25f);
+        manager.getOrCreateLane("vocal", other).addPoint(0, 0.81f);
+        manager.getOrCreateLane("vocal", discreteKey).addPoint(0, 0.0f);
+        manager.publishSnapshot();
+
+        juce::AudioParameterFloat cutoff(
+            juce::ParameterID{"cutoff", 1}, "Cutoff",
+            juce::NormalisableRange<float>{0.0f, 1.0f}, 0.5f);
+        juce::AudioParameterBool enabled(
+            juce::ParameterID{"enabled", 1}, "Enabled", false);
+        juce::Array<juce::AudioProcessorParameter*> params;
+        params.add(&cutoff);
+        params.add(&enabled);
+
+        DAW::LastTouchedPluginParameter touched;
+        touched.trackId = "vocal";
+        touched.pluginSlotIndex = 0;
+        touched.pluginInstanceId = "instance-A";
+        touched.parameterId = "cutoff";
+        M::Binding checked;
+
+        beginTest("The live exact track, slot, UUID and stable ID enable continuous VST3 macro");
+        expect(Guard::verify(touched, "vocal", 0, "instance-A",
+                             params, manager, checked));
+        expect(checked.pluginIsVerifiedContinuous);
+        expectEquals(checked.target.parameterId, key);
+        const std::vector<DAW::AutomationPoint> macro {
+            {0, 0.0f, DAW::AutomationCurveType::Smooth, -0.3f},
+            {24000, 1.0f, DAW::AutomationCurveType::Hold, 0.6f}
+        };
+        M::Plan plan;
+        expect(M::compile(manager, macro, {checked}, plan));
+        expect(M::apply(manager, plan, true));
+        const auto* target = manager.findLane("vocal", key);
+        const auto* foreign = manager.findLane("vocal", other);
+        expect(target != nullptr && foreign != nullptr);
+        if (target && foreign)
+        {
+            expectWithinAbsoluteError(target->points.back().value, 1.0f, 0.00001f);
+            expectWithinAbsoluteError(foreign->points.front().value, 0.81f, 0.00001f);
+            expect(target->points.front().curveToNext == DAW::AutomationCurveType::Smooth);
+        }
+        expect(M::apply(manager, plan, false));
+
+        beginTest("Same display parameter in a different instance must never pass");
+        expect(!Guard::verify(touched, "vocal", 0, "instance-B",
+                              params, manager, checked));
+        expect(!checked.pluginIsVerifiedContinuous);
+        expect(!Guard::verify(touched, "another-track", 0, "instance-A",
+                              params, manager, checked));
+        expect(!Guard::verify(touched, "vocal", 1, "instance-A",
+                              params, manager, checked));
+
+        beginTest("VST3 switch is discrete; missing and ambiguous IDs rejected");
+        touched.parameterId = "enabled";
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
+                              params, manager, checked));
+        touched.parameterId = "not-found";
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
+                              params, manager, checked));
+        touched.parameterId = "cutoff";
+        params.add(&cutoff); // corrupt host: duplicate stable identity
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
+                              params, manager, checked));
+        params.removeLast();
+
+        beginTest("Clip ownership and lane bypass reject the whole target");
+        DAW::AutomationClipRegionCore owned;
+        owned.trackId = "vocal";
+        owned.parameterId = key;
+        owned.startSample = 0;
+        owned.lengthSamples = 48000;
+        owned.localPoints = {DAW::AutomationPoint{0, 0.5f}};
+        manager.addClipRegion(owned);
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
+                              params, manager, checked));
+        expect(manager.deleteClipRegion(owned.regionId));
+        manager.setLaneEnabled("vocal", key, false);
+        expect(!Guard::verify(touched, "vocal", 0, "instance-A",
+                              params, manager, checked));
+        manager.setLaneEnabled("vocal", key, true);
+        expect(Guard::verify(touched, "vocal", 0, "instance-A",
+                             params, manager, checked));
+    }
+};
+static AutomationV2Vst3MacroLiveTargetTests automationV2Vst3MacroLiveTargetTests;
 
 class AutomationV2NativeMacroSelectionTests final : public juce::UnitTest
 {
