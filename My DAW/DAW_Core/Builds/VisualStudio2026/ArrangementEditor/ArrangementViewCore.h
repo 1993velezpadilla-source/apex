@@ -488,6 +488,7 @@ namespace ArrangementEditor
             const std::vector<DAW::AutomationPoint>& points);
 
         DAW::AutomationManagerCore* m_automationManager = nullptr;
+        uint64_t m_groupedAutomationManagerEpoch = 0; // invalidate retained Undo on manager rebind
         std::unique_ptr<DAW::AutomationManagerCore> m_fallbackAutomationManager; // used when no external manager is wired
         std::unique_ptr<DAW::AutomationUIHelper> m_automationHelper;
         std::map<DAW::TrackID, std::unique_ptr<DAW::AutomationLaneContainerComponent>> m_automationContainers;
