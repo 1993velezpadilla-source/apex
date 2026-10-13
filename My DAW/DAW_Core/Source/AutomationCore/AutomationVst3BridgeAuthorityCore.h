@@ -15,14 +15,11 @@ namespace DAW {
  */
 struct AutomationVst3BridgeAuthorityCore
 {
-    static bool allowsPlayback(const AutomationSnapshot* snapshot,
-                               const TrackID& trackId,
-                               const juce::String& coreParameterId) noexcept
+    // The host passes the exact lane it already resolved for legacy playback.
+    // Reusing this pointer prevents a second O(lanes) scan in every audio block.
+    static bool allowsPlayback(
+        const AutomationSnapshot::LaneSnapshot* lane) noexcept
     {
-        if (snapshot == nullptr)
-            return false; // no authoritative core state; fail closed
-
-        const auto* lane = snapshot->findLaneRT(trackId, coreParameterId);
         return lane != nullptr && lane->enabled && !lane->points.empty();
     }
 };
