@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 
 namespace APEX::ParametricEQ
