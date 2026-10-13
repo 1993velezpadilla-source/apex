@@ -333,7 +333,18 @@ $testArguments = @()
 if ($Category) { $testArguments += "--category=$Category" }
 if ($Name) { $testArguments += "--name=$Name" }
 if ($Seed) { $testArguments += "--seed=$Seed" }
-if ($ResultsJson) { $testArguments += "--results-json=$ResultsJson" }
+# Always obtain the ACTUAL C++ runner result groups and assertion counts.
+# The previous manifest hardcoded zero even for successful real test runs.
+# The option supplied by a caller is respected; default is a unique temp
+# path so stale files cannot masquerade as today's results.
+$generatedResultsJson = -not [bool] $ResultsJson
+$observedResultsPath = if ($ResultsJson) { $ResultsJson } else {
+    Join-Path ([System.IO.Path]::GetTempPath()) ("apex-tests-{0}.json" -f [guid]::NewGuid().ToString('N'))
+}
+if (Test-Path -LiteralPath $observedResultsPath -PathType Leaf) {
+    Remove-Item -LiteralPath $observedResultsPath -Force
+}
+$testArguments += "--results-json=$observedResultsPath"
 
 # --- Evidence collection ---
 $suiteId = if ($Category) { $Category } else { 'runner-smoke' }
@@ -418,6 +429,40 @@ finally {
 
 $durationMs = [int] $startTicks.ElapsedMilliseconds
 
+# The C++ APEXTests runner exits 2 for zero registered result groups. We
+# independently enforce that contract on its JSON evidence as well; an
+# absent, stale, or malformed report is NOT a passing test.
+$actualResultGroups = 0
+$actualAssertionsPassed = 0
+$actualAssertionsFailed = 0
+try {
+    if (-not (Test-Path -LiteralPath $observedResultsPath -PathType Leaf)) {
+        throw "APEXTests did not produce required JSON report: $observedResultsPath"
+    }
+    $observed = Get-Content -LiteralPath $observedResultsPath -Raw | ConvertFrom-Json
+    if ($null -eq $observed.resultGroups -or
+        $null -eq $observed.assertionsPassed -or
+        $null -eq $observed.assertionsFailed) {
+        throw 'APEXTests result JSON is missing required assertion fields'
+    }
+    $actualResultGroups = [int] $observed.resultGroups
+    $actualAssertionsPassed = [int] $observed.assertionsPassed
+    $actualAssertionsFailed = [int] $observed.assertionsFailed
+    if ($actualResultGroups -le 0 -or $actualAssertionsPassed -le 0 -or
+        $actualAssertionsFailed -lt 0) {
+        throw "Invalid real test evidence: groups=$actualResultGroups passes=$actualAssertionsPassed failures=$actualAssertionsFailed"
+    }
+    if ($actualAssertionsFailed -gt 0 -and $testExitCode -eq 0) {
+        Write-Warning 'C++ test runner reported failures despite exit=0; refusing GREEN'
+        $testExitCode = 1
+    }
+    Write-Host "[evidence] Actual APEXTests results: groups=$actualResultGroups passed=$actualAssertionsPassed failed=$actualAssertionsFailed"
+}
+catch {
+    Write-Warning "APEXTests evidence unavailable/invalid: $_"
+    if ($testExitCode -eq 0) { $testExitCode = 2 }
+}
+
 # Parse seed as integer
 $seedInt = [long] 0
 if ($Seed) {
@@ -465,9 +510,9 @@ $evidenceManifest = [ordered]@{
         durationMs = $durationMs
     }
     results = [ordered]@{
-        resultGroups = 0
-        assertionsPassed = 0
-        assertionsFailed = 0
+        resultGroups = $actualResultGroups
+        assertionsPassed = $actualAssertionsPassed
+        assertionsFailed = $actualAssertionsFailed
     }
     artifacts = @()
 }
@@ -498,9 +543,18 @@ try {
         }
     }
 
-    # Capture stdout/stderr from the test run to a file
+    # Store the runner's factual per-test JSON alongside the summary.
+    # Console text remains in the Actions log; do not fabricate a
+    # 'captured stdout' transcript with a one-line placeholder.
+    if (Test-Path -LiteralPath $observedResultsPath -PathType Leaf) {
+        Copy-Item -LiteralPath $observedResultsPath -Destination (Join-Path $tempRunDir 'unit-test-results.json') -Force
+    }
     $stdoutPath = Join-Path $tempRunDir 'stdout.txt'
-    [System.IO.File]::WriteAllText($stdoutPath, "[test] APEXTests $Configuration`n", $utf8NoBom)
+    [System.IO.File]::WriteAllText(
+        $stdoutPath,
+        "Console test output was streamed to the CI terminal. Consult the Actions job log; this text is NOT a transcript.`n",
+        $utf8NoBom
+    )
 
     # Rename directory to final name
     $shortCommit = $applicationCommit.Substring(0, [Math]::Min(7, $applicationCommit.Length))
@@ -522,8 +576,12 @@ catch {
     exit 1
 }
 
+if ($generatedResultsJson -and (Test-Path -LiteralPath $observedResultsPath -PathType Leaf)) {
+    Remove-Item -LiteralPath $observedResultsPath -Force
+}
+
 if ($testExitCode -ne 0) {
-    Write-Error "APEXTests exited with code $testExitCode."
+    Write-Error "APEXTests exited or failed evidence validation with code $testExitCode."
     exit $testExitCode
 }
 
