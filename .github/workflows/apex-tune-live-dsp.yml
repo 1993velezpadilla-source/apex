@@ -30,6 +30,9 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" -o tune_live_voice_test
           ./tune_live_voice_test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" -o tune_live_preset_test
+          ./tune_live_preset_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             -I"My DAW/DAW_Core/Source/ThirdParty" \
             -I"My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
             "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" -o tune_live_wet_test
@@ -46,3 +49,5 @@ jobs:
           tune_live_yin_test.exe
           cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp"
           tune_live_voice_test.exe
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_preset_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp"
+          tune_live_preset_test.exe
