@@ -265,6 +265,69 @@ namespace apex::automation
             return *inserted->second;
         }
 
+        struct BatchReplacement
+        {
+            ParameterID id = kInvalidParameterID;
+            AutomationLane::PointVector points;
+        };
+
+        /**
+         * Publish a set of PPQ envelopes through ONE immutable RT lane-map
+         * replacement. Prepare every lane off the audio thread, and reject
+         * missing/duplicated IDs or invalid knots BEFORE modifying any lane.
+         *
+         * A reader that pins getLaneSnapshotRT() observes either the entire
+         * old map or the entire new map. Independent lookups across different
+         * callback invocations can straddle a publication; consumers needing
+         * strict block-wide consistency must pin one snapshot per block.
+         * Existing AutomationLane shared_ptrs are never mutated in-place.
+         */
+        bool replacePointsBatch (std::vector<BatchReplacement> replacements)
+        {
+            if (replacements.empty() || replacements.size() > 64)
+                return false;
+
+            LaneMap prepared;
+            prepared.reserve(replacements.size());
+            for (auto& replacement : replacements)
+            {
+                if (replacement.id == kInvalidParameterID
+                    || prepared.count(replacement.id) != 0)
+                    return false;
+                for (const auto& point : replacement.points)
+                    if (!std::isfinite(point.timePPQ)
+                        || point.timePPQ < 0.0
+                        || !std::isfinite(point.normalizedValue)
+                        || point.normalizedValue < 0.0f
+                        || point.normalizedValue > 1.0f
+                        || !std::isfinite(point.curveTension))
+                        return false;
+
+                auto lane = std::make_shared<AutomationLane>(replacement.id);
+                lane->replacePoints(std::move(replacement.points));
+                prepared.emplace(replacement.id, std::move(lane));
+            }
+
+            const juce::ScopedLock sl(mapLock);
+            for (const auto& replacement : replacements)
+                if (lanes.find(replacement.id) == lanes.end())
+                    return false;
+
+            // All allocation/validation happens before touching lanes. One
+            // immutable map copy, one atomic publication, one generation bump.
+            LaneMap next = lanes;
+            for (auto& [id, lane] : prepared)
+                next[id] = std::move(lane);
+            auto nextPublished = std::make_shared<const LaneMap>(next);
+            lanes.swap(next);
+            auto old = std::atomic_exchange_explicit(
+                &publishedLanes_, std::move(nextPublished),
+                std::memory_order_acq_rel);
+            retiredLanesSnapshot_ = std::move(old);
+            changeGeneration_.fetch_add(1, std::memory_order_acq_rel);
+            return true;
+        }
+
         void removeLane (ParameterID id)
         {
             const juce::ScopedLock sl (mapLock);
