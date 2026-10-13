@@ -362,6 +362,8 @@ public:
                     auto* correction = processor->getParameters()[APEX::TuneLive::Processor::kAmount];
                     correction->setValueNotifyingHost (0.735f);
                     juce::AudioBuffer<float> block (2, 128);
+                    APEX::TuneLive::PitchTracker chainWetPitch;
+                    chainWetPitch.prepare (48000.0);
                     for (int offset = 0; offset < 48000; offset += 128)
                     {
                         for (int sample = 0; sample < 128; ++sample)
@@ -373,7 +375,16 @@ public:
                             block.setSample (1, sample, input);
                         }
                         chain.processBlock (block, 128);
+                        if (offset >= 24000)
+                            for (int n = 0; n < 128; ++n)
+                                chainWetPitch.push (block.getSample (0, n));
                     }
+                    const auto corrected = chainWetPitch.latest();
+                    const double cents = corrected.voiced
+                        ? 1200.0 * std::log2 (corrected.hz / 440.0) : 9999.0;
+                    expect (corrected.voiced && std::abs (cents) < 30.0,
+                            "REAL track chain must actually pitch-correct A4; "
+                            "cents remaining=" + juce::String (cents, 3));
                     bool allFinite = true;
                     for (int channel = 0; channel < 2; ++channel)
                         for (int sample = 0; sample < 128; ++sample)
