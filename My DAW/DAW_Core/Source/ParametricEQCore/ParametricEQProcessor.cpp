@@ -115,11 +115,12 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
 {
     const int channels = std::min (numberOfChannels,
                                    linearPhaseScratch_.getNumChannels());
-    if (channels <= 0)
+    if (channels <= 0 || numberOfSamples <= 0)
         return;
+    jassert (numberOfSamples <= kernelNextScratch_.getNumSamples());
+    jassert (numberOfSamples <= kernelCrossfeedScratch_.getNumSamples());
 
-    // Adopt any newly published kernel generation, starting a bounded
-    // crossfade between the old and new kernels.
+    // Adopt the worker-published kernel only at the next audio callback.
     const auto generation = linearKernelGeneration_.load (
         std::memory_order_acquire);
     if (generation != linearKernelAdoptedGeneration_)
@@ -128,8 +129,9 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         {
             kernelTransitionActive_ = true;
             kernelMix_ = 0.0;
-            convolverNextL_.reset();
-            convolverNextR_.reset();
+            for (auto* conv : { &convolverNextL_, &convolverNextR_,
+                                &convolverNextLR_, &convolverNextRL_ })
+                conv->reset();
             nextKernelIndex_ = linearKernelActiveIndex_.load (
                 std::memory_order_acquire);
         }
@@ -138,62 +140,109 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
             requestLinearKernelRebuild();
     }
 
-    // Capture the unprocessed signal for the incoming kernel BEFORE the
-    // current FIR mutates buffer. Otherwise the next FIR receives the
-    // current FIR's already-delayed output, cascading both convolutions and
-    // generating a 4094-sample transient/echo during a live EQ edit while
-    // host PDC still reports 2047 samples.
-    if (kernelTransitionActive_ && kernelMix_ < 1.0)
-        for (int channel = 0; channel < channels; ++channel)
-            kernelNextScratch_.copyFrom (channel, 0, buffer, channel, 0,
-                                         numberOfSamples);
+    const bool transitioning = kernelTransitionActive_ && kernelMix_ < 1.0;
+    const auto& currentKernels = linearKernels_[
+        static_cast<std::size_t> (currentKernelIndex_)];
 
-    const auto& currentKernels = linearKernels_[static_cast<std::size_t> (
-        currentKernelIndex_)];
+    // Preserve *untouched* input before any convolver mutates the block.
+    // Both the old and new FIRs must process exactly the SAME source at the
+    // SAME 2047-sample group delay, never feed one FIR into another.
+    if (transitioning)
+        for (int ch = 0; ch < channels; ++ch)
+            kernelNextScratch_.copyFrom (ch, 0, buffer, ch, 0,
+                                         numberOfSamples);
+    if (channels >= 2 && currentKernels.hasCrossfeed)
+        for (int ch = 0; ch < 2; ++ch)
+            kernelCrossfeedScratch_.copyFrom (ch, 0, buffer, ch, 0,
+                                              numberOfSamples);
+
     convolverCurrentL_.processBlock (buffer.getWritePointer (0),
                                      numberOfSamples, currentKernels.ll.data());
     if (channels >= 2)
         convolverCurrentR_.processBlock (buffer.getWritePointer (1),
                                          numberOfSamples,
                                          currentKernels.rr.data());
-    // A mono bus has only one channel. Running R on the same sample buffer
-    // would convolve it twice and turn 2047 samples PDC into 4094.
-
-    if (kernelTransitionActive_ && kernelMix_ < 1.0)
+    // One-channel bus: NEVER process the same samples through a second FIR.
+    if (channels >= 2 && currentKernels.hasCrossfeed)
     {
-        // Copy the dry input into the next-kernel scratch and convolve with
-        // the newly published kernel; crossfade per sample.
-        const auto& nextKernels = linearKernels_[static_cast<std::size_t> (
-            nextKernelIndex_)];
-        convolverNextL_.processBlock (kernelNextScratch_.getWritePointer (0),
-                                      numberOfSamples, nextKernels.ll.data());
-        if (channels >= 2)
-            convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
-                                          numberOfSamples, nextKernels.rr.data());
-        // Do not convolve mono twice during the next-kernel crossfade.
-
-        for (int sample = 0; sample < numberOfSamples; ++sample)
+        // Offdiag matrix [LL LR; RL RR]: LR reads RIGHT and adds to LEFT;
+        // RL reads LEFT and adds to RIGHT. Both own separate FIR histories.
+        convolverCurrentLR_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (1), numberOfSamples,
+            currentKernels.lr.data());
+        convolverCurrentRL_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (0), numberOfSamples,
+            currentKernels.rl.data());
+        auto* left = buffer.getWritePointer (0);
+        auto* right = buffer.getWritePointer (1);
+        const auto* toLeft = kernelCrossfeedScratch_.getReadPointer (1);
+        const auto* toRight = kernelCrossfeedScratch_.getReadPointer (0);
+        for (int i = 0; i < numberOfSamples; ++i)
         {
-            const auto mix = static_cast<float> (kernelMix_);
-            for (int channel = 0; channel < channels; ++channel)
-            {
-                auto* destination = buffer.getWritePointer (channel);
-                const auto* next = kernelNextScratch_.getReadPointer (channel);
-                destination[sample] += mix * (next[sample] - destination[sample]);
-            }
-            kernelMix_ = std::min (1.0, kernelMix_ + kernelStep_);
-        }
-        if (kernelMix_ >= 1.0)
-        {
-            std::swap (convolverCurrentL_, convolverNextL_);
-            std::swap (convolverCurrentR_, convolverNextR_);
-            currentKernelIndex_ = nextKernelIndex_;
-            kernelTransitionActive_ = false;
-            convolverNextL_.reset();
-            convolverNextR_.reset();
+            left[i] += toLeft[i];
+            right[i] += toRight[i];
         }
     }
+
+    if (! transitioning)
+        return;
+
+    const auto& nextKernels = linearKernels_[
+        static_cast<std::size_t> (nextKernelIndex_)];
+    if (channels >= 2 && nextKernels.hasCrossfeed)
+        for (int ch = 0; ch < 2; ++ch)
+            kernelCrossfeedScratch_.copyFrom (ch, 0, kernelNextScratch_,
+                                              ch, 0, numberOfSamples);
+
+    convolverNextL_.processBlock (kernelNextScratch_.getWritePointer (0),
+                                  numberOfSamples, nextKernels.ll.data());
+    if (channels >= 2)
+        convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
+                                      numberOfSamples, nextKernels.rr.data());
+    if (channels >= 2 && nextKernels.hasCrossfeed)
+    {
+        convolverNextLR_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (1), numberOfSamples,
+            nextKernels.lr.data());
+        convolverNextRL_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (0), numberOfSamples,
+            nextKernels.rl.data());
+        auto* left = kernelNextScratch_.getWritePointer (0);
+        auto* right = kernelNextScratch_.getWritePointer (1);
+        const auto* toLeft = kernelCrossfeedScratch_.getReadPointer (1);
+        const auto* toRight = kernelCrossfeedScratch_.getReadPointer (0);
+        for (int i = 0; i < numberOfSamples; ++i)
+        {
+            left[i] += toLeft[i];
+            right[i] += toRight[i];
+        }
+    }
+
+    for (int i = 0; i < numberOfSamples; ++i)
+    {
+        const float mix = static_cast<float> (kernelMix_);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            auto* destination = buffer.getWritePointer (ch);
+            const auto* next = kernelNextScratch_.getReadPointer (ch);
+            destination[i] += mix * (next[i] - destination[i]);
+        }
+        kernelMix_ = std::min (1.0, kernelMix_ + kernelStep_);
+    }
+    if (kernelMix_ >= 1.0)
+    {
+        std::swap (convolverCurrentL_, convolverNextL_);
+        std::swap (convolverCurrentR_, convolverNextR_);
+        std::swap (convolverCurrentLR_, convolverNextLR_);
+        std::swap (convolverCurrentRL_, convolverNextRL_);
+        currentKernelIndex_ = nextKernelIndex_;
+        kernelTransitionActive_ = false;
+        for (auto* conv : { &convolverNextL_, &convolverNextR_,
+                            &convolverNextLR_, &convolverNextRL_ })
+            conv->reset();
+    }
 }
+
 namespace
 {
 
@@ -633,6 +682,7 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     externalKeyScratch_.setSize (channels, block, false, false, true);
     linearPhaseScratch_.setSize (channels, block, false, false, true);
     kernelNextScratch_.setSize (channels, block, false, false, true);
+    kernelCrossfeedScratch_.setSize (channels, block, false, false, true);
     externalKeyValid_ = false;
     // PDC-affecting spectral ARM is latched only during host reprepare.
     spectralPreparedEnabled_ = parameters_[static_cast<std::size_t> (
@@ -641,7 +691,9 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     spectralAnyBandActive_ = false;
     kernelStep_ = 1.0 / std::max (1.0, rate * 0.010);
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
-                             &convolverNextL_, &convolverNextR_ })
+                             &convolverCurrentLR_, &convolverCurrentRL_,
+                             &convolverNextL_, &convolverNextR_,
+                             &convolverNextLR_, &convolverNextRL_ })
         convolver->reset();
     currentKernelIndex_ = linearKernelActiveIndex_.load (std::memory_order_acquire);
     linearKernelAdoptedGeneration_ = linearKernelGeneration_.load (
@@ -743,7 +795,9 @@ void Processor::reset()
     characterCore_.setMode (readCharacterModeParameter());
     outputAutoGainDb_ = 0.0;
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
-                             &convolverNextL_, &convolverNextR_ })
+                             &convolverCurrentLR_, &convolverCurrentRL_,
+                             &convolverNextL_, &convolverNextR_,
+                             &convolverNextLR_, &convolverNextRL_ })
         convolver->reset();
     kernelTransitionActive_ = false;
     kernelMix_ = 1.0;
