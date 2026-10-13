@@ -621,13 +621,20 @@ public:
     {
         if (auto* region = findClipRegion(regionId))
         {
+            // Validate and construct replacement BEFORE touching the existing
+            // lane. Empty/wrong-parameter clipboard must never delete points.
+            if (!clipClipboard_.canPasteTo(*region))
+                return false;
+
+            auto replacement = *region;
+            if (!AutomationArticulatorToolsCore::pasteState(replacement, clipClipboard_))
+                return false;
+
             clearLanePointsInRegionRange(*region);
-            const bool changed = AutomationArticulatorToolsCore::pasteState(*region, clipClipboard_);
-            if (changed)
-                syncClipRegionToLane(*region);
-            if (changed)
-                publishSnapshot();
-            return changed;
+            region->localPoints = std::move(replacement.localPoints);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
         }
 
         return false;
