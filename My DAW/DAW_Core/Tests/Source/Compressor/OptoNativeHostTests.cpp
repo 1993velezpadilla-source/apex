@@ -95,7 +95,12 @@ public:
                 expectEquals(editor->getHeight(),380);
                 expect(editor->getNumChildComponents()>=9,
                        "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
-                juce::Image screenshot(juce::Image::ARGB,1040,380,true);
+                // JUCE 8 defaults to GPU-backed Direct2D native images on Windows.
+                // Headless GitHub runner has no render peer; queued GPU draw
+                // commands produced a fully transparent 1040x380 PNG.
+                // Force CPU-backed image for deterministic screenshot tests.
+                juce::Image screenshot(juce::Image::ARGB,1040,380,true,
+                                        juce::SoftwareImageType{});
                 juce::Graphics graphics(screenshot);
                 // This editor is deliberately NOT attached to a desktop
                 // window during the headless Windows CI run. JUCE suppresses
