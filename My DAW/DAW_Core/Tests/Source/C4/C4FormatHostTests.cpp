@@ -226,6 +226,39 @@ private:
                 tune->prepareToPlay (48000.0, 128);
                 expectEquals (tune->getLatencySamples(), 1920,
                               "production native Tune Live reports honest 40-ms plugin PDC");
+
+                // Verify all native parameter IDs are discoverable by the
+                // existing APEX automation-binding mechanism. This tests
+                // the actual manager-created instance, not a mock processor.
+                int tagged = 0;
+                for (auto* parameter : tune->getParameters())
+                    if (dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                        ++tagged;
+                expectEquals (tagged, APEX::TuneLive::Processor::kNumParams,
+                              "APEX automation finds IDs on every Tune Live parameter");
+
+                // Persist a host-created instance into project-style
+                // binary state and reopen into an independent instance.
+                auto* amount = tune->getParameters()[APEX::TuneLive::Processor::kAmount];
+                amount->setValueNotifyingHost (0.735f);
+                juce::MemoryBlock projectState;
+                tune->getStateInformation (projectState);
+                expect (projectState.getSize() > 0, "host obtains session state");
+                juce::String reopenError;
+                auto reopen = manager.createPluginInstance (
+                    DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                    48000.0, 128, reopenError);
+                expect (reopen != nullptr,
+                        "saved Tune Live must reopen through the native format: " + reopenError);
+                if (reopen != nullptr)
+                {
+                    reopen->setStateInformation (projectState.getData(),
+                                                 static_cast<int> (projectState.getSize()));
+                    expectWithinAbsoluteError (
+                        reopen->getParameters()[APEX::TuneLive::Processor::kAmount]->getValue(),
+                        0.735f, 1.0e-4f,
+                        "correction amount survives a real host session reload");
+                }
             }
         }
 
