@@ -212,7 +212,8 @@ public:
         apex::pichy::PichyCapabilitySnapshot& output)
     {
         output = {};
-        if (!trackManager_ || isProjectStateRestoreSuspended())
+        if (!trackManager_ || isProjectStateRestoreSuspended() ||
+            pluginScanner_.isScanning())
             return apex::pichy::PichySnapshotStatus::NotReady;
         const apex::pichy::PichyPluginDiscoveryAdapter::ChainResolver resolver =
             [this](const TrackID& trackId) -> const PluginChainCore*
@@ -221,7 +222,8 @@ public:
                 return it != pluginChains_.end() ? it->second.get() : nullptr;
             };
         return apex::pichy::PichyPluginDiscoveryAdapter::capture(
-            *trackManager_, resolver, ++pichyCapabilityCaptureSequence_, output);
+            *trackManager_, resolver, &pluginScanner_.getKnownPlugins(),
+            ++pichyCapabilityCaptureSequence_, output);
     }
 
     /** Get or create the plugin chain for a track ID. */
