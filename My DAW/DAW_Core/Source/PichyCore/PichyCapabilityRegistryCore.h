@@ -49,10 +49,24 @@ struct PichyTrackCapability
     std::vector<PichyPluginCapability> plugins;
 };
 
+struct PichyAvailablePluginCapability
+{
+    std::string pluginIdentifier;
+    std::string displayName;
+    std::string formatName;
+    std::string manufacturer;
+    std::string version;
+    std::int64_t uniqueId = 0;
+    bool instrument = false;
+};
+
 struct PichyCapabilitySnapshot
 {
     std::uint64_t captureId = 0; // Diagnostic capture sequence, NOT a change version
     std::vector<PichyTrackCapability> tracks;
+    // Discoverable but not necessarily instantiated plugins. Parameters are
+    // intentionally NOT fabricated until the host actually loads a processor.
+    std::vector<PichyAvailablePluginCapability> availablePlugins;
 };
 
 enum class PichySnapshotStatus : std::uint8_t
@@ -78,6 +92,7 @@ class PichyCapabilityRegistryCore final
 {
 public:
     static constexpr std::size_t kMaxTracks = 512;
+    static constexpr std::size_t kMaxAvailablePlugins = 8192;
     static constexpr std::size_t kMaxSlotsPerTrack = 256;
     static constexpr std::size_t kMaxParamsPerPlugin = 4096;
     static constexpr std::size_t kMaxParametersPerSnapshot = 262144;
@@ -97,8 +112,24 @@ public:
 
     static PichySnapshotStatus validate(const PichyCapabilitySnapshot& snapshot)
     {
-        if (snapshot.tracks.size() > kMaxTracks)
+        if (snapshot.tracks.size() > kMaxTracks ||
+            snapshot.availablePlugins.size() > kMaxAvailablePlugins)
             return PichySnapshotStatus::LimitsExceeded;
+
+        // Installed inventory: names are presentation only. The complete
+        // format+fileOrIdentifier+UID tuple is the lookup key.
+        std::unordered_set<std::string> seenAvailable;
+        for (const auto& available : snapshot.availablePlugins)
+        {
+            if (!validIdentity(available.pluginIdentifier) ||
+                !validIdentity(available.formatName))
+                return PichySnapshotStatus::InvalidIdentity;
+            const std::string identity = available.formatName + "\x1f"
+                + available.pluginIdentifier + "\x1f"
+                + std::to_string(available.uniqueId);
+            if (!seenAvailable.insert(identity).second)
+                return PichySnapshotStatus::DuplicateIdentity;
+        }
 
         std::unordered_set<std::string> seenTracks;
         std::unordered_set<std::string> seenInstances;
