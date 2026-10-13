@@ -4,6 +4,9 @@
 #include "../TrackCore/Track.h"
 #include "../UICore/InputTrimFloatingPanel.h"
 #include "InputTrimPanelStateCore.h"
+#include "../InputMonitorCore/PichyInputGainAdvisorCore.h"
+#include "../CommandCore/PichyInputTrimCommand.h"
+#include "../CommandCore/CommandManager.h"
 
 namespace DAW {
 
@@ -82,6 +85,21 @@ public:
         }
 
         auto* panel = new InputTrimFloatingPanel(track);
+        panel->onPichyAdjustRequest = [this, id]
+        {
+            // Message-thread-only, opt-in. Re-resolve TrackID to avoid a
+            // dangling GUI/assistant reference after a track is removed.
+            auto* t = trackManager_.getTrack(id);
+            if (t == nullptr) return;
+            const auto current = t->getInputTrim().getTargetGainDb();
+            const auto advice = PichyInputGainAdvisorCore::evaluate(
+                t->getPichyInputGuardian().snapshot(), current);
+            if (advice.status != PichyInputGainAdvice::Status::ReduceDigitalTrim)
+                return;
+            CommandManager::getInstance().execute(
+                std::make_unique<PichyInputTrimCommand>(
+                    trackManager_, id, current, advice.proposedTrimDb));
+        };
         panel->onCloseRequested = [this, id](InputTrimFloatingPanel* p) { handleClosed(id, p); };
         panel->addComponentListener(this);
 
