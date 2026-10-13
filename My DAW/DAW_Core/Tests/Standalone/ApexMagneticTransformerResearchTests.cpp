@@ -37,6 +37,8 @@ static std::vector<double> render(int factor,double drive,int hz) {
     return output;
 }
 int main(){
+    static_assert(sizeof(ApexMagneticTanhLookup)<=2*sizeof(void*),
+                  "Magnetic curve must be shared, never 16kB per instance");
     // Interpolation error must stay significantly below the measured
     // harmonic-alias differences. This is DSP math, not UAD calibration.
     {
