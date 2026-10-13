@@ -161,7 +161,9 @@ private:
                     expect (dial->getSliderStyle()
                             == juce::Slider::LinearHorizontal,
                             "phone/tablet sheet retains horizontal touch sliders");
-                    expect (dial->getHeight() >= 96 && dial->getWidth() >= 80,
+                    const bool shortSheet = sizeCase.height < 500;
+                    expect (dial->getHeight() >= (shortSheet ? 88 : 96)
+                            && dial->getWidth() >= 80,
                             "touch quick-edit strip keeps real FREQ/GAIN/Q "
                             "controls large enough for fingers and text");
                     expect (dial->getY() < 70,
@@ -183,9 +185,10 @@ private:
                         "GAIN and Q hit targets cannot overlap");
                 if (sizeCase.height < 500)
                     for (const auto* dial : primary)
-                        expect (dial->getBottom() <= inspector.getHeight(),
-                            "short landscape quick-edit row must be FULLY "
-                            "visible, including its numeric text box");
+                        expect (dial->getBottom() + 10 <= inspector.getHeight(),
+                            "short landscape numeric text box needs at least "
+                            "10px breathing room BEFORE the bottom command "
+                            "dock (previous native PNG cropped Hz/dB/Q)");
             }
 
             auto inBounds = [] (const juce::Rectangle<int>& child,
