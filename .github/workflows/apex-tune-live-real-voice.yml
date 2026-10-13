@@ -118,6 +118,16 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" \
             -o tune_live_offline_audition
           ./tune_live_offline_audition --input vocadito_human_source.wav --prefix vocadito_human
+      - name: Measure real voiced-note intonation before and after BOTH APEX engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_human_voice_metrics.cpp" \
+            -o tune_live_human_voice_metrics
+          ./tune_live_human_voice_metrics --prefix vocadito_human
       - name: Validate real human voice outputs and write objective render report
         shell: bash
         run: |
@@ -175,5 +185,6 @@ jobs:
             vocadito_human_causal_research.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
             REAL_HUMAN_RENDER_REPORT.txt
+            REAL_HUMAN_PITCH_COMPARISON.txt
           if-no-files-found: error
           retention-days: 7
