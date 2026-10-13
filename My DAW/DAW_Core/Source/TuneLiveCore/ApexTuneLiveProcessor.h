@@ -44,7 +44,7 @@ public:
     static constexpr const char* kFileOrIdentifier = "APEX::TuneLive";
     static constexpr const char* kVersion = "0.1.0-beta";
     enum Index { kAmount, kSpeed, kKey, kScale, kMix, kBypass,
-                 kHumanize, kNoteStability, kPreserveFormants, kNumParams };
+                 kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kNumParams };
 
     Processor() : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -59,6 +59,7 @@ public:
         add(kHumanize, "tunelive.humanize", "Humanize", 0.70f);
         add(kNoteStability, "tunelive.noteStability", "Note Stability", 0.40f);
         add(kPreserveFormants, "tunelive.preserveFormants", "Preserve Formants", 1.0f, 2);
+        add(kFlexTune, "tunelive.flexTune", "Flex Tune", 0.35f);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override {
@@ -96,6 +97,7 @@ public:
             param(kMix),
             param(kBypass)>=0.5f,
             param(kHumanize),
+            param(kFlexTune),
             param(kNoteStability),
             param(kPreserveFormants)>=0.5f
         };
@@ -139,7 +141,8 @@ private:
     inline static constexpr std::array<const char*,kNumParams> kIds = {
         "tunelive.amount", "tunelive.speed", "tunelive.key", "tunelive.scale",
         "tunelive.mix", "tunelive.bypass", "tunelive.humanize",
-        "tunelive.noteStability", "tunelive.preserveFormants"};
+        "tunelive.noteStability", "tunelive.preserveFormants",
+        "tunelive.flexTune"};
     void add(int index, const char* id, const char* name, float value, int steps=0) {
         auto p = std::make_unique<Parameter>(id, name, value, steps);
         params_[static_cast<std::size_t>(index)] = p.get();
