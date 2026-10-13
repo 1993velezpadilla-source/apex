@@ -70,9 +70,12 @@ struct AutomationGroupedCurveCore
             if (point.timeSamples < 0 || point.timeSamples <= previous
                 || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
                 return false;
+            if (point.value != AutomationLaneCore::clampValueForParameter(
+                    parameterId, point.value)
+                || point.tensionToNext < -1.0f || point.tensionToNext > 1.0f)
+                return false; // reject incompatible value domains rather than clamp
+
             previous = point.timeSamples;
-            point.value = AutomationLaneCore::clampValueForParameter(parameterId, point.value);
-            point.tensionToNext = juce::jlimit(-1.0f, 1.0f, point.tensionToNext);
             clean.push_back(point);
         }
 
@@ -164,9 +167,11 @@ struct AutomationGroupedCurveCore
         for (const auto& entry : batch.lanes)
         {
             AutomationLaneCore copy = *manager.findLane(entry.trackId, entry.parameterId);
-            copy.restoreState(useAfter ? entry.after : entry.before);
-            if (copy.getParameterId() != entry.parameterId)
-                return false;
+            const auto desired = useAfter ? entry.after : entry.before;
+            copy.restoreState(desired);
+            if (copy.getParameterId() != entry.parameterId
+                || copy.getState().toXmlString() != desired.toXmlString())
+                return false; // invalid states must not partially reach other tracks
             replacements.push_back(std::move(copy));
         }
 
