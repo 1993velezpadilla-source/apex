@@ -4866,3 +4866,76 @@ public:
     }
 };
 static AutomationV2ClipDomainTransformTests automationV2ClipDomainTransformTests;
+
+class AutomationV2EmptyClipMustNotEraseTests final : public juce::UnitTest
+{
+public:
+    AutomationV2EmptyClipMustNotEraseTests()
+        : juce::UnitTest("automation.v2-empty-clip-no-erasure.v1", "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using DAW::AutomationManagerCore;
+        using DAW::AutomationClipRegionCore;
+        using DAW::AutomationLaneCore;
+        using DAW::AutomationPoint;
+        using DAW::AutomationCurveType;
+
+        AutomationManagerCore manager;
+        auto& lane = manager.getOrCreateLane("VOICE-ONE", AutomationLaneCore::trackVolumeParameterId);
+        lane.addPoint(AutomationPoint{0, 0.7f, AutomationCurveType::Smooth, -0.4f});
+        lane.addPoint(AutomationPoint{24000, 1.5f, AutomationCurveType::Hold, 0.2f});
+        lane.addPoint(AutomationPoint{48000, 0.4f, AutomationCurveType::Linear, 0.0f});
+        manager.publishSnapshot();
+
+        auto assertUnaffected = [this](const AutomationManagerCore& state)
+        {
+            const auto* loaded = state.findLane(
+                "VOICE-ONE", AutomationLaneCore::trackVolumeParameterId);
+            expect(loaded != nullptr);
+            if (loaded != nullptr)
+            {
+                expectEquals((int)loaded->points.size(), 3);
+                if (loaded->points.size() == 3)
+                {
+                    expectEquals((juce::int64)loaded->points[1].timeSamples, (juce::int64)24000);
+                    expectWithinAbsoluteError(loaded->points[0].value, 0.7f, 0.00001f);
+                    expectWithinAbsoluteError(loaded->points[1].value, 1.5f, 0.00001f);
+                    expectWithinAbsoluteError(loaded->points[2].value, 0.4f, 0.00001f);
+                    expect(loaded->points[0].curveToNext == AutomationCurveType::Smooth);
+                    expectWithinAbsoluteError(loaded->points[0].tensionToNext, -0.4f, 0.00001f);
+                }
+            }
+        };
+
+        beginTest("Creating an empty clip cannot erase three existing envelope points");
+        AutomationClipRegionCore empty;
+        empty.trackId = "VOICE-ONE";
+        empty.parameterId = AutomationLaneCore::trackVolumeParameterId;
+        empty.startSample = 0;
+        empty.lengthSamples = 48000;
+        const auto clipId = empty.regionId;
+        manager.addClipRegion(empty);
+        assertUnaffected(manager);
+
+        beginTest("Empty region move/resize/mute/re-publish leave lane unchanged");
+        expect(manager.moveClipRegion(clipId, 12000));
+        assertUnaffected(manager);
+        expect(manager.resizeClipRegion(clipId, 96000));
+        assertUnaffected(manager);
+        expect(manager.setClipRegionMuted(clipId, true));
+        assertUnaffected(manager);
+        manager.publishSnapshot();
+        assertUnaffected(manager);
+
+        beginTest("Project save/reopen does not reinterpret empty clip as erase mask");
+        AutomationManagerCore reopened;
+        reopened.restoreState(manager.getState());
+        assertUnaffected(reopened);
+
+        beginTest("Deleting empty placeholder does not remove non-owned points");
+        expect(manager.deleteClipRegion(clipId));
+        assertUnaffected(manager);
+    }
+};
+static AutomationV2EmptyClipMustNotEraseTests automationV2EmptyClipMustNotEraseTests;
