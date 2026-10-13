@@ -460,6 +460,16 @@ public:
             }
         }
 
+        if (advancedMemories_.isValid())
+        {
+            juce::ValueTree rescaledMemories;
+            if (AutomationAdvancedMemoryValidationCore::rescaleMemories(
+                    advancedMemories_, factor, rescaledMemories))
+                advancedMemories_ = std::move(rescaledMemories);
+            else
+                advancedMemories_ = {}; // never expose wrongly timed A/B states
+        }
+
         publishSnapshot();
     }
 
