@@ -203,6 +203,41 @@ static bool unvoicedSibilanceFidelity() {
     return count>0 && std::isfinite(relativeRms) && relativeRms<0.03;
 }
 
+// 0% correction MUST be mathematically PDC-aligned dry even when input is
+// fully voiced. Spectral shifters color vowels even at factor=1 and the artist
+// must not hear a metallic voice merely because an enabled plugin is idle.
+static bool pitchNeutralTransparency() {
+    constexpr int sr=48000, n=sr, block=128;
+    std::vector<float> voice(n);
+    for(int i=0;i<n;++i) {
+        const double t=static_cast<double>(i)/sr;
+        voice[static_cast<std::size_t>(i)]=static_cast<float>(
+            0.24*std::sin(6.283185307179586*440.0*t)
+           +0.08*std::sin(6.283185307179586*880.0*t)
+           +0.035*std::sin(6.283185307179586*1320.0*t));
+    }
+    const auto original=voice;
+    APEX::TuneLive::DspCore core;
+    core.prepare(sr,block,1);
+    APEX::TuneLive::DspSettings settings;
+    settings.correction=0.0f;
+    settings.wet=1.0f;
+    settings.bypass=false;
+    for(int i=0;i<n;i+=block) {
+        float* audio[1]={voice.data()+i};
+        core.process(audio,1,std::min(block,n-i),settings);
+    }
+    const int latency=core.latencySamples();
+    double largest=0.0;
+    for(int i=sr/2;i<n;++i) {
+        largest=std::max(largest,std::abs(static_cast<double>(voice[static_cast<std::size_t>(i)])
+           -original[static_cast<std::size_t>(i-latency)]));
+    }
+    std::cout<<"zero_correction_vowel_transparency_max_error="<<largest<<"\\n";
+    return latency<sr/2 && largest<1.0e-6
+        && core.debugWetAmount()<0.0001f;
+}
+
 int main() {
     bool pass=true;
     pass&=probe(44100.0,64,64,1);
@@ -216,6 +251,7 @@ int main() {
     pass&=repeatableWetBounce();
     pass&=poisonedInputRecovery();
     pass&=unvoicedSibilanceFidelity();
+    pass&=pitchNeutralTransparency();
     if(!pass) {std::cerr<<"FAIL: bypass PDC/host block matrix\n";return 1;}
     std::cout<<"PASS: cross-platform PDC, mono/stereo, oversized block matrix\n";
 }
