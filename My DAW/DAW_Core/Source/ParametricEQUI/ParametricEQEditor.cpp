@@ -787,6 +787,75 @@ public:
         }
     }
 
+    // Direct, canvas-first creation: double-click any empty frequency/gain
+    // position to create a new hosted APEX band with the real target values.
+    // This complements long-press (touch) and the existing Sketch/Grab tools.
+    void mouseDoubleClick (const juce::MouseEvent& event) override
+    {
+        if (sketchArmed_ || grabArmed_)
+            return;
+        pointerDown_ = false;
+        longPressTarget_.reset();
+        const int existing = hitTest (event.position);
+        if (existing >= 0)
+        {
+            owner_.selectBand (existing);
+            return;
+        }
+        const auto slot = firstDisabledBand();
+        if (! slot.has_value())
+            return;
+        const int band = *slot;
+        resetCreatedBand (processor_, band);
+        const auto applyBand = [this, band] (BandParameterOffset offset,
+                                            float value)
+        {
+            const int index = parameterIndex (band, offset);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index, parameter->toNormalised (value));
+        };
+        applyBand (BandParameterOffset::Shape,
+                   static_cast<float> (FilterShape::Bell));
+        applyBand (BandParameterOffset::Frequency,
+                   static_cast<float> (frequencyForX (
+                       event.position.x, std::max (1, getWidth()))));
+        applyBand (BandParameterOffset::Gain,
+                   static_cast<float> (gainForY (
+                       event.position.y, std::max (1, getHeight()))));
+        applyBand (BandParameterOffset::Q, 1.0f);
+        if (event.mods.isAltDown())
+        {
+            const int index = dynamicParameterIndex (
+                band, DynamicBandOffset::Enable);
+            notifyParameter (processor_, index, 1.0f);
+        }
+        applyBand (BandParameterOffset::Enabled, 1.0f);
+        owner_.selectBand (band);
+        curveDirty_ = true;
+        repaint();
+    }
+
+    // Mouse wheel over a node adjusts its hosted Q with balanced gestures.
+    // Shift provides fine resolution. No change to graph pan/zoom behaviour
+    // outside nodes, and the same Q slider remains accessible to touch.
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override
+    {
+        const int band = hitTest (event.position);
+        if (band < 0 || std::abs (wheel.deltaY) <= 1.0e-6f)
+            return;
+        const int index = parameterIndex (band, BandParameterOffset::Q);
+        auto* parameter = processor_.getParametricEQParameter (index);
+        const float precision = event.mods.isShiftDown() ? 0.012f : 0.065f;
+        const float next = std::clamp (
+            parameter->getValue() + wheel.deltaY * precision, 0.0f, 1.0f);
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (next);
+        parameter->endChangeGesture();
+        curveDirty_ = true;
+        repaint();
+    }
+
     void mouseDrag (const juce::MouseEvent& event) override
     {
         lastDragPosition_ = event.position;
