@@ -8,6 +8,7 @@ on:
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
+      - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   pull_request:
     paths:
       - ".github/workflows/apex-t4-photocell-research.yml"
@@ -16,6 +17,7 @@ on:
       - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
       - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
+      - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
   workflow_dispatch:
 permissions:
   contents: read
@@ -56,6 +58,10 @@ jobs:
             --apex /tmp/apex-opto-capture/apex_opto2a_reference_input_48k_pcm24.wav \
             --csv /tmp/apex-opto-capture/self_difference.csv
           python3 -c 'import csv; rows=list(csv.DictReader(open("/tmp/apex-opto-capture/self_difference.csv"))); assert len(rows)>12; assert all(abs(float(row["delta_level_db"]))<1e-8 for row in rows); assert all(float(row["residual_rms_dbfs"]) <= -200 for row in rows); print("Reference tool identity smoke GREEN")'
+      - name: Time-resolved release A/B diagnostic synthetic regression
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py" self-test
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
