@@ -135,7 +135,9 @@ public:
 private:
     PitchTracker tracker_;
     VoiceControl policy_;
-    signalsmith::stretch::SignalsmithStretch<float> stretch_;
+    // Stable shifter seed makes repeated APEX offline bounces reproducible.
+    // Different plugin instances remain independent DSP state machines.
+    signalsmith::stretch::SignalsmithStretch<float> stretch_{0x41504558L};
     std::vector<float> wet_,delay_;
     double rate_=48000.0;
     float target_=0, smooth_=0, frequency_=0, wetSlew_=0,voicedSlew_=0,voicedTarget_=0;
