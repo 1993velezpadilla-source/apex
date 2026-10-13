@@ -46,10 +46,14 @@ public:
         expectEquals(base->getSampleRate(),48000.0);
         expectEquals(base->getBlockSize(),128);
         expect(base->getBypassParameter()!=nullptr);
-        expect(base->isBusesLayoutSupported({juce::AudioChannelSet::mono(),
-                                              juce::AudioChannelSet::mono()}));
-        expect(base->isBusesLayoutSupported({juce::AudioChannelSet::stereo(),
-                                              juce::AudioChannelSet::stereo()}));
+        juce::AudioProcessor::BusesLayout monoLayout;
+        monoLayout.inputBuses.add(juce::AudioChannelSet::mono());
+        monoLayout.outputBuses.add(juce::AudioChannelSet::mono());
+        juce::AudioProcessor::BusesLayout stereoLayout;
+        stereoLayout.inputBuses.add(juce::AudioChannelSet::stereo());
+        stereoLayout.outputBuses.add(juce::AudioChannelSet::stereo());
+        expect(base->isBusesLayoutSupported(monoLayout));
+        expect(base->isBusesLayoutSupported(stereoLayout));
         expectEquals(base->getParameters().size(),(int)ParameterCount);
 
         beginTest("Stable parameter IDs for APEX automation and dry/wet contract");
