@@ -1351,10 +1351,13 @@ private:
                 || parameterId_ == AutomationLaneCore::trackPanParameterId))
         {
             juce::PopupMenu snapshots;
-            const auto action = [this](SelectedSnapshotAction what)
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            const auto action = [safeLane](SelectedSnapshotAction what)
             {
-                if (selectedSnapshotCallback_)
-                    selectedSnapshotCallback_(trackId_, parameterId_, what);
+                if (auto* lane = safeLane.getComponent())
+                    if (lane->selectedSnapshotCallback_)
+                        lane->selectedSnapshotCallback_(
+                            lane->trackId_, lane->parameterId_, what);
             };
             snapshots.addItem("Capture A (selected tracks)", [action]()
             {
