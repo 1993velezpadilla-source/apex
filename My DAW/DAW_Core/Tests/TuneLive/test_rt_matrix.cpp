@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 // Actual DspCore PDC identity and block bound check.
@@ -120,6 +121,46 @@ static bool repeatableWetBounce() {
     return peakDifference<=1.0e-7;
 }
 
+// A broken upstream plugin must not poison the pitch shifter permanently.
+// This test also covers NaN automation values from corrupt saved sessions.
+static bool poisonedInputRecovery() {
+    constexpr int samples=48000;
+    constexpr int quantum=128;
+    std::vector<float> voice(samples);
+    for(int i=0;i<samples;++i)
+        voice[static_cast<std::size_t>(i)]=static_cast<float>(
+            0.32*std::sin(6.283185307179586*445.0*i/48000.0));
+    voice[1024]=std::numeric_limits<float>::quiet_NaN();
+    voice[1025]=std::numeric_limits<float>::infinity();
+    voice[1026]=-std::numeric_limits<float>::infinity();
+    voice[1030]=1.0e31f;
+    APEX::TuneLive::DspCore dsp;
+    dsp.prepare(48000.0,quantum,1);
+    APEX::TuneLive::DspSettings knobs;
+    knobs.wet=std::numeric_limits<float>::quiet_NaN();
+    knobs.retune=std::numeric_limits<float>::quiet_NaN();
+    knobs.correction=std::numeric_limits<float>::infinity();
+    knobs.humanize=std::numeric_limits<float>::quiet_NaN();
+    knobs.referenceHz=std::numeric_limits<float>::quiet_NaN();
+    for(int offset=0;offset<samples;offset+=quantum) {
+        float* ptr[1]={voice.data()+offset};
+        dsp.process(ptr,1,std::min(quantum,samples-offset),knobs);
+        for(int i=0;i<std::min(quantum,samples-offset);++i) {
+            if(!std::isfinite(voice[static_cast<std::size_t>(offset+i)])) {
+                std::cerr<<"Poisoned wet sample at "<<offset+i<<"\\n";
+                return false;
+            }
+        }
+    }
+    if(!std::isfinite(dsp.frequencyHz()) || dsp.frequencyHz()<400.0f
+       || dsp.frequencyHz()>500.0f) {
+        std::cerr<<"Tracker did not recover after poisoned upstream audio\\n";
+        return false;
+    }
+    std::cout<<"PASS: corrupt input + NaN controls contained, tracker recovered\\n";
+    return true;
+}
+
 int main() {
     bool pass=true;
     pass&=probe(44100.0,64,64,1);
@@ -131,6 +172,7 @@ int main() {
     pass&=probe(96000.0,256,256,2);
     pass&=rightChannelVocal();
     pass&=repeatableWetBounce();
+    pass&=poisonedInputRecovery();
     if(!pass) {std::cerr<<"FAIL: bypass PDC/host block matrix\n";return 1;}
     std::cout<<"PASS: cross-platform PDC, mono/stereo, oversized block matrix\n";
 }
