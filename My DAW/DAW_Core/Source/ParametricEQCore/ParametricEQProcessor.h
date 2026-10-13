@@ -276,12 +276,12 @@ public:
     }
     bool isSpectralModeArmedForTesting() const noexcept
     {
-        return spectralPreparedEnabled_;
+        return spectralPreparedEnabled_.load (std::memory_order_acquire);
     }
     bool isSpectralRepreparePendingForTesting() const noexcept
     {
         return parameters_[static_cast<std::size_t> (
-            kSpectralArmParameter)]->getBool() != spectralPreparedEnabled_;
+            kSpectralArmParameter)]->getBool() != spectralPreparedEnabled_.load (std::memory_order_acquire);
     }
 
     bool isLinearPhaseModeSettledForTesting() const noexcept
@@ -387,7 +387,7 @@ private:
 
     // Latency mode latched only during quiescent prepareToPlay. Spectral
     // per-band enables, density and tilt may change at block boundaries.
-    bool spectralPreparedEnabled_ = false;
+    std::atomic<bool> spectralPreparedEnabled_ { false };
     bool spectralAnyBandActive_ = false;
     SpectralAlignedBlend spectralBlend_;
     std::array<SpectralDynamicsCore::Band, kMaxBands> spectralBands_ {};
