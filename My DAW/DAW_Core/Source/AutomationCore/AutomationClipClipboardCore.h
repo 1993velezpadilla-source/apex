@@ -1,10 +1,23 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AutomationClipRegionCore.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <optional>
+#include <vector>
 
 namespace DAW {
 
+/**
+ * A reusable automation-clip state clipboard, *not* an audio-thread API.
+ *
+ * Clipboard values stay in the target's real parameter domain.  Prior code
+ * silently clipped pan (-1..1), track volume (0..2) and clip pitch values to
+ * 0..1, corrupting valid producer automation. Paste is now transactional and
+ * intentionally limited to the exact same parameter identity.
+ */
 class AutomationClipClipboardCore
 {
 public:
@@ -12,26 +25,40 @@ public:
     {
         juce::String sourceParameterId;
         int64_t sourceLengthSamples = 0;
+        // Time represented as integer millionths of the source region.
         std::vector<AutomationPoint> normalisedPoints;
         juce::String name;
         juce::Colour color = juce::Colour(0xfff06bd8);
     };
 
+    static constexpr size_t maxClipboardPoints = 32768;
+    static constexpr int64_t fractionScale = 1000000;
+
     void copyRegionState(const AutomationClipRegionCore& region)
     {
+        if (!region.isValid() || region.localPoints.empty()
+            || region.localPoints.size() > maxClipboardPoints)
+            return;
+
         ClipState state;
         state.sourceParameterId = region.parameterId;
-        state.sourceLengthSamples = juce::jmax<int64_t>(1, region.lengthSamples);
+        state.sourceLengthSamples = region.lengthSamples;
         state.name = region.name;
         state.color = region.color;
         state.normalisedPoints.reserve(region.localPoints.size());
 
         for (auto point : region.localPoints)
         {
-            const double t = (double)juce::jlimit<int64_t>(0, state.sourceLengthSamples, point.timeSamples)
-                           / (double)state.sourceLengthSamples;
-            point.timeSamples = (int64_t)std::llround(t * 1000000.0);
-            point.value = juce::jlimit(0.0f, 1.0f, point.value);
+            if (point.timeSamples < 0 || point.timeSamples > region.lengthSamples
+                || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
+                return;  // leave previous valid clipboard intact
+
+            const double t = static_cast<double>(point.timeSamples)
+                           / static_cast<double>(state.sourceLengthSamples);
+            point.timeSamples = static_cast<int64_t>(std::llround(t * fractionScale));
+            point.value = AutomationLaneCore::clampValueForParameter(
+                state.sourceParameterId, point.value);
+            point.tensionToNext = juce::jlimit(-1.0f, 1.0f, point.tensionToNext);
             state.normalisedPoints.push_back(point);
         }
 
@@ -42,20 +69,67 @@ public:
     void clear() noexcept { clipState_.reset(); }
     const std::optional<ClipState>& getClipState() const noexcept { return clipState_; }
 
+    bool canPasteTo(const AutomationClipRegionCore& destination) const noexcept
+    {
+        return clipState_.has_value()
+            && destination.isValid()
+            && destination.startSample >= 0
+            && destination.lengthSamples <= std::numeric_limits<int64_t>::max()
+                                                    - destination.startSample
+            && destination.parameterId == clipState_->sourceParameterId
+            && !clipState_->normalisedPoints.empty();
+    }
+
     bool pasteStateToRegion(AutomationClipRegionCore& destination) const
     {
-        if (!clipState_ || destination.lengthSamples <= 0)
+        if (!canPasteTo(destination))
             return false;
 
-        destination.localPoints.clear();
-        destination.localPoints.reserve(clipState_->normalisedPoints.size());
+        std::vector<AutomationPoint> updated;
+        updated.reserve(clipState_->normalisedPoints.size());
+
         for (auto point : clipState_->normalisedPoints)
         {
-            const double t = (double)juce::jlimit<int64_t>(0, 1000000, point.timeSamples) / 1000000.0;
-            point.timeSamples = (int64_t)std::llround(t * (double)destination.lengthSamples);
-            destination.localPoints.push_back(point);
+            if (point.timeSamples < 0 || point.timeSamples > fractionScale
+                || !std::isfinite(point.value) || !std::isfinite(point.tensionToNext))
+                return false;
+
+            const double t = static_cast<double>(point.timeSamples)
+                           / static_cast<double>(fractionScale);
+            const double pos = t * static_cast<double>(destination.lengthSamples);
+            if (!std::isfinite(pos) || pos < 0.0
+                || pos > static_cast<double>(destination.lengthSamples))
+                return false;
+
+            point.timeSamples = static_cast<int64_t>(std::llround(pos));
+            point.value = AutomationLaneCore::clampValueForParameter(
+                destination.parameterId, point.value);
+            point.tensionToNext = juce::jlimit(-1.0f, 1.0f, point.tensionToNext);
+            updated.push_back(point);
         }
 
+        std::stable_sort(updated.begin(), updated.end(),
+            [](const AutomationPoint& a, const AutomationPoint& b)
+            {
+                return a.timeSamples < b.timeSamples;
+            });
+
+        // Deterministic collision resolution when a destination is shorter
+        // than the copied pattern. Keep last source point at a given sample.
+        if (updated.size() > 1)
+        {
+            size_t write = 0;
+            for (size_t read = 1; read < updated.size(); ++read)
+            {
+                if (updated[read].timeSamples == updated[write].timeSamples)
+                    updated[write] = updated[read];
+                else
+                    updated[++write] = updated[read];
+            }
+            updated.resize(write + 1);
+        }
+
+        destination.localPoints = std::move(updated);
         return true;
     }
 
