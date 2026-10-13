@@ -293,7 +293,7 @@ public:
         characterButton_.setClickingTogglesState (false);
         title_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
         title_.setColour (juce::Label::textColourId, Palette::text());
-        title_.setText ("APEX Parametric EQ", juce::dontSendNotification);
+        title_.setText ("APEX / EQ", juce::dontSendNotification);
         title_.setJustificationType (juce::Justification::centredLeft);
         title_.setInterceptsMouseClicks (false, false);
 
@@ -414,6 +414,21 @@ public:
         repaint();
     }
 
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().darker (0.28f), area.getTopLeft(),
+            Palette::background(), area.getBottomLeft(), false));
+        g.fillRect (area);
+        g.setColour (Palette::accent().withAlpha (0.9f));
+        g.fillRect (0.0f, 0.0f, std::min (4.0f, area.getWidth()),
+                    area.getHeight());
+        g.setColour (Palette::border().withAlpha (0.70f));
+        g.drawLine (0.0f, area.getBottom() - 0.5f,
+                    area.getRight(), area.getBottom() - 0.5f);
+    }
+
     void resized() override
     {
         auto bounds = getLocalBounds().reduced (4, 4);
@@ -445,6 +460,9 @@ public:
         title_.setVisible (true);
         const int buttonWidth = std::max (44, bounds.getWidth() / 10);
         const int titleWidth = std::max (0, bounds.getWidth() - 8 * buttonWidth);
+        title_.setText (titleWidth >= 210 ? "APEX / PRISM EQ"
+                                          : "APEX / EQ",
+                        juce::dontSendNotification);
         title_.setBounds (bounds.removeFromLeft (titleWidth));
         designButton_.setBounds (bounds.removeFromLeft (buttonWidth));
         bypassButton_.setBounds (bounds.removeFromLeft (buttonWidth));
@@ -621,10 +639,13 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto bounds = getLocalBounds().toFloat();
-        g.setColour (Palette::background());
-        g.fillAll();
-        g.setColour (Palette::surface());
-        g.fillRect (bounds.reduced (1.0f));
+        g.setGradientFill (juce::ColourGradient (
+            juce::Colour (0xff19243b), bounds.getTopLeft(),
+            juce::Colour (0xff090f20), bounds.getBottomLeft(), false));
+        g.fillRect (bounds);
+
+        // Frequency-domain graph: quiet grid, strong zero-dB reference,
+        // precision analyser, soft coloured response area and lit nodes.
         drawGrid (g, bounds);
         if (curveDirty_)
         {
@@ -633,14 +654,33 @@ public:
         }
         if (spectrumActive_)
             drawSpectrum (g, bounds);
+
+        if (! mainCurve_.isEmpty())
+        {
+            juce::Path fill (mainCurve_);
+            fill.lineTo (bounds.getRight(), bounds.getBottom());
+            fill.lineTo (bounds.getX(), bounds.getBottom());
+            fill.closeSubPath();
+            g.setGradientFill (juce::ColourGradient (
+                Palette::curve().withAlpha (0.22f), bounds.getTopLeft(),
+                Palette::curve().withAlpha (0.01f), bounds.getBottomLeft(),
+                false));
+            g.fillPath (fill);
+        }
+        g.setColour (Palette::curve().withAlpha (0.16f));
+        g.strokePath (mainCurve_, juce::PathStrokeType (
+            8.0f, juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
         g.setColour (Palette::curve());
-        g.strokePath (mainCurve_, juce::PathStrokeType (1.8f));
+        g.strokePath (mainCurve_, juce::PathStrokeType (
+            2.4f, juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
         if (mixedPlacements_)
         {
-            g.setColour (Palette::curveMid().withAlpha (0.75f));
-            g.strokePath (midCurve_, juce::PathStrokeType (1.0f));
-            g.setColour (Palette::curveSide().withAlpha (0.75f));
-            g.strokePath (sideCurve_, juce::PathStrokeType (1.0f));
+            g.setColour (Palette::curveMid().withAlpha (0.85f));
+            g.strokePath (midCurve_, juce::PathStrokeType (1.6f));
+            g.setColour (Palette::curveSide().withAlpha (0.88f));
+            g.strokePath (sideCurve_, juce::PathStrokeType (1.6f));
         }
 
         if (sketching_ && sketchPointCount_ > 1)
@@ -657,7 +697,7 @@ public:
                 else
                     sketch.lineTo (x, y);
             }
-            g.setColour (Palette::selected().withAlpha (0.92f));
+            g.setColour (Palette::selected().withAlpha (0.95f));
             g.strokePath (sketch, juce::PathStrokeType (
                 3.0f, juce::PathStrokeType::curved,
                 juce::PathStrokeType::rounded));
@@ -665,6 +705,18 @@ public:
         drawNodes (g, bounds);
         if (grabArmed_)
             drawGrabPeaks (g);
+
+        // Never steal input events: this is purely painted status text.
+        if (getWidth() >= 560)
+        {
+            g.setFont (juce::Font (juce::FontOptions (
+                10.5f, juce::Font::bold)));
+            g.setColour (Palette::textSecondary().withAlpha (0.88f));
+            g.drawFittedText ("APEX  /  24-BAND PRECISION ENGINE",
+                juce::Rectangle<int> (std::max (330, getWidth() - 264),
+                                       10, std::min (250, getWidth() - 340), 24),
+                juce::Justification::centredRight, 1);
+        }
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1185,18 +1237,44 @@ private:
 
     void drawGrid (juce::Graphics& g, juce::Rectangle<float> bounds)
     {
-        g.setColour (Palette::border().withAlpha (0.5f));
+        g.setFont (juce::Font (juce::FontOptions (10.0f)));
         for (int step = -18; step <= 18; step += 6)
         {
-            const auto y = static_cast<float> (yForGain (step, bounds.getHeight()));
-            g.drawLine (bounds.getX(), y, bounds.getRight(), y);
+            const float y = static_cast<float> (
+                yForGain (step, bounds.getHeight()));
+            const bool reference = step == 0;
+            g.setColour ((reference ? Palette::curve() : Palette::border())
+                             .withAlpha (reference ? 0.35f : 0.38f));
+            g.drawHorizontalLine (static_cast<int> (y),
+                                  bounds.getX(), bounds.getRight());
+            g.setColour (Palette::textSecondary().withAlpha (
+                reference ? 0.89f : 0.58f));
+            const auto label = step > 0 ? "+" + juce::String (step)
+                                      : juce::String (step);
+            g.drawFittedText (label + " dB",
+                              juce::Rectangle<int> (6,
+                                  std::max (0, static_cast<int> (y) - 14),
+                                  48, 13),
+                              juce::Justification::centredLeft, 1);
         }
         for (const int frequency : { 20, 50, 100, 200, 500, 1000, 2000, 5000,
                                      10000, 20000 })
         {
-            const auto x = static_cast<float> (xForFrequency (frequency,
-                                                              bounds.getWidth()));
-            g.drawLine (x, bounds.getY(), x, bounds.getBottom());
+            const float x = static_cast<float> (
+                xForFrequency (frequency, bounds.getWidth()));
+            g.setColour (Palette::border().withAlpha (0.35f));
+            g.drawVerticalLine (static_cast<int> (x), bounds.getY(),
+                                bounds.getBottom());
+            g.setColour (Palette::textSecondary().withAlpha (0.64f));
+            const auto frequencyText = frequency >= 1000
+                ? juce::String (frequency / 1000) + "k"
+                : juce::String (frequency);
+            const int labelX = std::clamp (static_cast<int> (x) - 21,
+                                           0, std::max (0, getWidth() - 43));
+            g.drawFittedText (frequencyText,
+                juce::Rectangle<int> (labelX,
+                    std::max (0, getHeight() - 20), 43, 15),
+                juce::Justification::centred, 1);
         }
     }
 
@@ -1317,19 +1395,32 @@ private:
             if (! enabled->getBool())
                 continue;
             const auto centre = nodeCentre (band).toFloat();
-            const float visual = 11.0f;
-            juce::Colour colour = Palette::accent();
-            if (bypassed->getBool())
-                colour = Palette::textSecondary();
-            else if (band == owner_.getSelectedBandForTesting())
-                colour = Palette::selected();
-            g.setColour (colour.withAlpha (bypassed->getBool() ? 0.6f : 1.0f));
-            juce::Path diamond;
-            diamond.addPolygon (centre, 4, visual,
-                                juce::MathConstants<float>::pi / 4.0f);
-            g.fillPath (diamond);
+            const bool selected = band == owner_.getSelectedBandForTesting();
+            const auto colour = bypassed->getBool()
+                ? Palette::textSecondary()
+                : selected ? Palette::selected() : Palette::accent();
+            const float radius = selected ? 12.0f : 10.0f;
+            g.setColour (colour.withAlpha (selected ? 0.21f : 0.12f));
+            g.fillEllipse (centre.x - radius - 6.0f,
+                           centre.y - radius - 6.0f,
+                           2.0f * (radius + 6.0f),
+                           2.0f * (radius + 6.0f));
             g.setColour (Palette::background());
-            g.strokePath (diamond, juce::PathStrokeType (1.5f));
+            g.fillEllipse (centre.x - radius, centre.y - radius,
+                           radius * 2.0f, radius * 2.0f);
+            g.setColour (colour.withAlpha (bypassed->getBool() ? 0.52f : 1.0f));
+            g.drawEllipse (centre.x - radius, centre.y - radius,
+                           radius * 2.0f, radius * 2.0f, selected ? 2.3f : 1.8f);
+            g.setFont (juce::Font (juce::FontOptions (
+                10.0f, juce::Font::bold)));
+            g.setColour (Palette::text());
+            g.drawFittedText (juce::String (band + 1),
+                juce::Rectangle<int> (
+                    static_cast<int> (centre.x - radius),
+                    static_cast<int> (centre.y - radius),
+                    static_cast<int> (radius * 2.0f),
+                    static_cast<int> (radius * 2.0f)),
+                juce::Justification::centred, 1);
         }
         if (latestFrame_.auditionActive && latestFrame_.auditionBand >= 0
             && latestFrame_.auditionBand < kMaxBands)
