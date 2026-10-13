@@ -3,6 +3,7 @@
 // Uses hosted JUCE parameter gestures, preserving APEX automation Write/Read.
 // No timers, component mutations or heap work on the audio callback.
 #include "../TuneLiveCore/ApexTuneLivePresets.h"
+#include "ApexTuneLiveVisualTheme.h"
 #include <array>
 #include <cmath>
 
@@ -14,11 +15,12 @@ public:
       : juce::AudioProcessorEditor(processor), processor_(processor)
     {
         setOpaque(true);
+        setLookAndFeel(&studioLook_);
         setResizable(true, true);
         // Controls/latency readout occupy rows through y=516; a 480px
         // editor cut off the last row. Enforce a true touch-safe minimum.
-        setResizeLimits(620, 560, 1300, 900);
-        setSize(900, 575);
+        setResizeLimits(720, 455, 1600, 1000);
+        setSize(1200, 750);
 
         constexpr std::array<const char*,6> names{{
             "CORRECTION", "RE-TUNE", "HUMANIZE", "FLEX TUNE", "STABILITY", "WET"
@@ -73,8 +75,11 @@ public:
             knob.onDragEnd=[bound](){bound->endChangeGesture();};
         }
 
-        for(int k=0;k<12;++k)
-            keys_.addItem(juce::StringArray{"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}[k],k+1);
+        // Both enharmonic spellings are shown explicitly (e.g. Ab and G#).
+        // They intentionally map to the SAME existing 12 semitone values:
+        // zero new parameter IDs, no automation or serialized-state change.
+        for(std::size_t k=0;k<keyOptions_.size();++k)
+            keys_.addItem(keyOptions_[k].name,static_cast<int>(k)+1);
         keys_.setSelectedId(1, juce::dontSendNotification);
         reference_.setSliderStyle(juce::Slider::LinearHorizontal);
         reference_.setRange(0.0,1.0,0.001);
@@ -98,7 +103,9 @@ public:
         reference_.onDragEnd=[this](){parameter(Processor::kA4Reference).endChangeGesture();};
         addAndMakeVisible(reference_);
         keys_.onChange=[this](){
-            setDiscrete(Processor::kKey, keys_.getSelectedId()-1, 11);
+            const int option=keys_.getSelectedId()-1;
+            if(option>=0 && option<static_cast<int>(keyOptions_.size()))
+                setDiscrete(Processor::kKey,keyOptions_[static_cast<std::size_t>(option)].semitone,11);
         };
         addAndMakeVisible(keys_);
 
@@ -129,7 +136,12 @@ public:
             button.setColour(juce::TextButton::buttonOnColourId,
                              juce::Colour::fromRGB(144,91,60));
             button.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
-            button.onClick=[this,i](){applyStyle(static_cast<VocalStyle>(i));};
+            button.setToggleState(i==0,juce::dontSendNotification);
+            button.onClick=[this,i](){
+                for(int j=0;j<3;++j)
+                    styles_[static_cast<std::size_t>(j)].setToggleState(j==i,juce::dontSendNotification);
+                applyStyle(static_cast<VocalStyle>(i));
+            };
             addAndMakeVisible(button);
         }
         for(auto* label : {&pitchLabel_, &pitchCaption_, &latencyLabel_}) {
@@ -137,75 +149,157 @@ public:
             label->setColour(juce::Label::textColourId, juce::Colours::white);
             addAndMakeVisible(*label);
         }
-        pitchLabel_.setFont(juce::Font(juce::FontOptions(34.0f).withStyle("Bold")));
+        pitchLabel_.setFont(juce::Font(juce::FontOptions(72.0f).withStyle("Bold")));
+        pitchLabel_.setJustificationType(juce::Justification::centred);
         pitchLabel_.setColour(juce::Label::textColourId,
                               juce::Colour::fromRGB(250,205,151));
-        pitchCaption_.setFont(juce::Font(juce::FontOptions(14.0f)));
+        pitchCaption_.setFont(juce::Font(juce::FontOptions(12.0f)));
+        pitchCaption_.setJustificationType(juce::Justification::centred);
         latencyLabel_.setFont(juce::Font(juce::FontOptions(11.0f)));
         startTimerHz(25); // GUI-only controls and pitch meter.
         timerCallback();
     }
 
-    ~Editor() override { stopTimer(); }
+    ~Editor() override { stopTimer(); setLookAndFeel(nullptr); }
 
+    // All coordinates are expressed in the approved 1200x750 artboard.
+    // Child controls are repositioned with the same transform in resized().
+    // Every element is real JUCE vector paint, not a flattened screenshot.
     void paint(juce::Graphics& g) override {
-        g.fillAll(juce::Colour::fromRGB(23,22,30));
-        auto r=getLocalBounds().toFloat();
-        g.setColour(juce::Colour::fromRGB(34,32,44));
-        g.fillRoundedRectangle(juce::Rectangle<float>(18.0f,70.0f,r.getWidth()-36.0f,131.0f),13.0f);
-        g.setColour(juce::Colour::fromRGB(242,190,126));
-        g.setFont(juce::Font(juce::FontOptions(27.0f).withStyle("Bold")));
-        g.drawText("APEX  /  TUNE LIVE",24,15,getWidth()-48,38,juce::Justification::centredLeft);
-        g.setColour(juce::Colour::fromRGB(176,165,180));
-        g.setFont(juce::Font(juce::FontOptions(12.0f)));
-        g.drawText("NATIVE VOCAL CORRECTION  -  POWERED BY BUBBLEGUM ENGINE",
-                   25,49,getWidth()-48,17,juce::Justification::centredLeft);
-        g.setColour(juce::Colour::fromRGB(174,165,180));
-        g.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
-        g.drawText("TRACKED PITCH",40,84,150,18,juce::Justification::centredLeft);
-        g.drawText("KEY",getWidth()-330,84,90,18,juce::Justification::centredLeft);
-        g.drawText("SCALE",getWidth()-205,84,150,18,juce::Justification::centredLeft);
-        g.drawText("CONCERT A4",getWidth()-330,148,150,14,juce::Justification::centredLeft);
+        juce::Graphics::ScopedSaveState saved(g);
+        g.addTransform(juce::AffineTransform::scale(getWidth()/1200.0f,getHeight()/750.0f));
+        g.setColour(Visual::midnight());
+        g.fillRect(juce::Rectangle<float>(0.0f,0.0f,1200.0f,750.0f));
 
-        g.setColour(juce::Colour::fromRGB(39,36,48));
-        g.fillRoundedRectangle(juce::Rectangle<float>(18.0f,211.0f,r.getWidth()-36.0f,202.0f),12.0f);
-        g.setColour(juce::Colour::fromRGB(167,158,172));
-        g.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
-        g.drawText("MUSICAL CONTROL",36,225,getWidth()-72,18,juce::Justification::centredLeft);
-        g.setColour(juce::Colour::fromRGB(113,105,126));
-        g.drawHorizontalLine(424,22.0f,static_cast<float>(getWidth()-22));
-        g.setColour(juce::Colour::fromRGB(167,158,172));
-        g.drawText("VOCAL STYLE",29,435,145,17,juce::Justification::centredLeft);
+        Visual::panel(g,{13.0f,11.0f,1174.0f,86.0f},14.0f);
+        // Original APEX warm metallic identity, laid out like the reference.
+        g.setGradientFill(juce::ColourGradient(juce::Colour::fromRGB(255,207,142),
+                           32.0f,26.0f,juce::Colour::fromRGB(227,139,75),178.0f,74.0f,false));
+        g.setFont(juce::Font(juce::FontOptions(35.0f).withStyle("Bold")));
+        g.drawText("A P E X",34,23,214,41,juce::Justification::centredLeft);
+        g.setColour(Visual::muted().withAlpha(0.7f));
+        g.fillRect(239.0f,30.0f,1.0f,37.0f);
+        g.setColour(Visual::ivory());
+        g.setFont(juce::Font(juce::FontOptions(35.0f)));
+        g.drawText("Tune Live",254,23,285,43,juce::Justification::centredLeft);
+        g.setColour(Visual::muted());
+        g.setFont(juce::Font(juce::FontOptions(9.4f).withStyle("Bold")));
+        g.drawText("N A T I V E   V O C A L   C O R R E C T I O N    •    P O W E R E D   B Y   B U B B L E G U M   E N G I N E",
+                   37,71,760,16,juce::Justification::centredLeft);
+        // Decorative amplitude-free arc: NOT a fabricated live spectrum.
+        for(int i=0;i<4;++i) {
+            juce::Path wave;
+            const float offset=static_cast<float>(i)*4.0f;
+            for(int x=610;x<=1095;x+=5) {
+                const float t=(x-610)/485.0f;
+                const float y=55.0f+22.0f*std::sin(t*9.0f+offset*0.10f)
+                       *std::sin(t*3.14159265f)+offset*0.40f;
+                if(x==610)wave.startNewSubPath(static_cast<float>(x),y);
+                else wave.lineTo(static_cast<float>(x),y);
+            }
+            g.setColour((i%2?Visual::gold():Visual::cyan()).withAlpha(0.23f));
+            g.strokePath(wave,juce::PathStrokeType(0.8f));
+        }
+        g.setColour(Visual::gold());
+        g.setFont(juce::Font(juce::FontOptions(39.0f).withStyle("Bold")));
+        g.drawText("A",1125,23,50,47,juce::Justification::centred);
 
-        g.setColour(juce::Colour::fromRGB(126,120,138));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("Actual monitoring delay includes the audio interface, DAW routing and this plugin.",
-                  20,getHeight()-26,getWidth()-40,17,juce::Justification::centredLeft);
+        Visual::panel(g,{16.0f,104.0f,1168.0f,210.0f});
+        Visual::sectionTitle(g,"T R A C K E D   P I T C H",35.0f,116.0f);
+        // Pitch grid and cents meter are real calibrated MIDI-cents readouts.
+        constexpr float gridL=58.0f,gridR=754.0f,gridY=243.0f;
+        for(int n=0;n<=20;++n) {
+            const float x=gridL+(gridR-gridL)*n/20.0f;
+            g.setColour(Visual::cyan().withAlpha(n%5==0?0.18f:0.08f));
+            g.drawVerticalLine(static_cast<int>(x),165.0f,258.0f);
+        }
+        for(int n=0;n<77;++n) {
+            const float x=gridL+9.0f*n;
+            const float envelope=std::exp(-std::pow((n-39.0f)/31.0f,2.0f));
+            const float wave=std::abs(std::sin(n*0.34f)*std::cos(n*0.19f));
+            const float h=7.0f+37.0f*envelope*(0.20f+wave);
+            const auto shade=n<40?Visual::cyan():Visual::gold();
+            // In standby this is intentionally decorative, not an analyzer.
+            g.setColour(shade.withAlpha(trackedHz_>=55.0f?0.50f:0.20f));
+            g.fillRoundedRectangle(x,gridY-h,4.1f,h,1.1f);
+        }
+        g.setColour(Visual::muted().withAlpha(0.6f));
+        g.drawHorizontalLine(static_cast<int>(gridY),gridL,gridR);
+        for(int n=0;n<5;++n) {
+            const int cents=(n-2)*50;
+            const float x=gridL+(gridR-gridL)*n/4.0f;
+            g.setColour(Visual::muted());
+            g.setFont(juce::Font(juce::FontOptions(10.0f)));
+            g.drawText((cents>0?"+":"")+juce::String(cents),static_cast<int>(x)-24,
+                       263,48,16,juce::Justification::centred);
+        }
+        const float indicator=juce::jlimit(-100.0f,100.0f,trackedCents_);
+        const float markerX=gridL+(indicator+100.0f)*(gridR-gridL)/200.0f;
+        if(trackedHz_>=55.0f) {
+            g.setColour(Visual::gold().withAlpha(0.15f));
+            g.fillRoundedRectangle(markerX-4.0f,184.0f,8.0f,60.0f,3.0f);
+            g.setColour(Visual::gold());
+            g.fillRoundedRectangle(markerX-1.0f,194.0f,2.0f,50.0f,1.0f);
+        } else {
+            g.setColour(Visual::cyan().withAlpha(0.36f));
+            g.fillRect((gridL+gridR)*0.5f,220.0f,1.0f,24.0f);
+        }
+        g.setColour(Visual::cyan().withAlpha(0.35f));
+        g.fillRoundedRectangle(268.0f,285.0f,278.0f,21.0f,8.0f);
+        g.setColour(Visual::midnight());
+        g.fillRoundedRectangle(269.0f,286.0f,276.0f,19.0f,8.0f);
+
+        g.setColour(Visual::cyan().withAlpha(0.25f));
+        g.fillRect(770.0f,126.0f,1.0f,166.0f);
+        g.setColour(Visual::muted());
+        g.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+        g.drawText("K E Y",800,130,130,20,juce::Justification::centredLeft);
+        g.drawText("S C A L E",974,130,150,20,juce::Justification::centredLeft);
+        g.drawText("C O N C E R T   A 4",800,212,210,18,juce::Justification::centredLeft);
+
+        Visual::panel(g,{16.0f,323.0f,1168.0f,258.0f});
+        Visual::sectionTitle(g,"M U S I C A L   C O N T R O L",35.0f,335.0f);
+        for(int k=1;k<6;++k) {
+            const float x=36.0f+static_cast<float>(k)*193.0f;
+            g.setColour(Visual::cyan().withAlpha(0.08f));
+            g.fillRect(x,375.0f,1.0f,182.0f);
+        }
+
+        Visual::panel(g,{16.0f,590.0f,1168.0f,146.0f});
+        Visual::sectionTitle(g,"V O C A L   S T Y L E",35.0f,601.0f);
+        g.setColour(Visual::cyan().withAlpha(0.35f));
+        g.fillRect(749.0f,621.0f,1.0f,98.0f);
+        g.setColour(Visual::cyan().withAlpha(0.22f));
+        g.fillRect(777.0f,686.0f,374.0f,1.0f);
+
+        g.setColour(Visual::muted().withAlpha(0.5f));
+        g.setFont(juce::Font(juce::FontOptions(10.0f)));
+        g.drawText("Realtime vocal tuning • Monitoring delay also depends on interface and DAW routing",
+                   30,736,1050,13,juce::Justification::centredLeft);
     }
 
     void resized() override {
-        const int w=getWidth();
-        keys_.setBounds(w-332,110,110,39);
-        scales_.setBounds(w-210,110,174,39);
-        reference_.setBounds(w-334,164,300,30);
-        pitchLabel_.setBounds(38,109,std::max(180,w-425),42);
-        pitchCaption_.setBounds(39,154,std::max(180,w-425),27);
-
-        const int available=w-48;
-        const int cell=available/6;
-        // Lay out all six parameters, including WET. Keeping a hardcoded
-        // 5 here silently hid the sixth control after Flex Tune was added.
-        for(int i=0;i<static_cast<int>(knobs_.size());++i) {
-            const int x=25+i*cell;
-            knobLabels_[static_cast<std::size_t>(i)].setBounds(x,250,cell-5,24);
-            knobs_[static_cast<std::size_t>(i)].setBounds(x,271,cell-7,128);
+        const float sx=getWidth()/1200.0f,sy=getHeight()/750.0f;
+        const auto box=[sx,sy](int x,int y,int w,int h){
+            return juce::Rectangle<int>(juce::roundToInt(x*sx),juce::roundToInt(y*sy),
+                                         std::max(1,juce::roundToInt(w*sx)),
+                                         std::max(1,juce::roundToInt(h*sy)));
+        };
+        pitchLabel_.setBounds(box(220,138,374,102));
+        pitchCaption_.setBounds(box(268,284,278,23));
+        keys_.setBounds(box(797,159,163,41));
+        scales_.setBounds(box(973,159,177,41));
+        reference_.setBounds(box(787,231,365,50));
+        constexpr std::array<int,6> x{{38,231,424,617,810,1003}};
+        for(std::size_t i=0;i<knobs_.size();++i) {
+            knobLabels_[i].setBounds(box(x[i],365,168,23));
+            knobs_[i].setBounds(box(x[i]+6,392,156,169));
         }
-        const int buttonsW=std::min(150, (w-240)/3);
         for(int i=0;i<3;++i)
-            styles_[static_cast<std::size_t>(i)].setBounds(28+i*(buttonsW+10),463,buttonsW,38);
-        formants_.setBounds(w-315,459,193,29);
-        bypass_.setBounds(w-117,459,90,29);
-        latencyLabel_.setBounds(w-335,492,310,24);
+            styles_[static_cast<std::size_t>(i)].setBounds(box(49+i*228,640,211,57));
+        formants_.setBounds(box(788,640,246,40));
+        bypass_.setBounds(box(1037,640,137,40));
+        latencyLabel_.setBounds(box(792,688,360,26));
     }
 
 private:
@@ -243,8 +337,19 @@ private:
         for(std::size_t i=0;i<ids.size();++i)
             if(!knobs_[i].isMouseButtonDown())
                 knobs_[i].setValue(parameter(ids[i]).getValue(),juce::dontSendNotification);
-        keys_.setSelectedId(1+juce::jlimit(0,11,juce::roundToInt(parameter(Processor::kKey).getValue()*11)),
-                            juce::dontSendNotification);
+        const int activeKey=juce::jlimit(0,11,juce::roundToInt(parameter(Processor::kKey).getValue()*11));
+        const int chosenIndex=keys_.getSelectedId()-1;
+        // Keep the artist's Ab/Bb spelling if the parameter pitch class is
+        // unchanged. Automation/state recall may choose the canonical sharp
+        // option because a 12-tone numeric key cannot persist spelling.
+        if(chosenIndex<0 || chosenIndex>=static_cast<int>(keyOptions_.size())
+           || keyOptions_[static_cast<std::size_t>(chosenIndex)].semitone!=activeKey) {
+            for(std::size_t k=0;k<keyOptions_.size();++k)
+                if(keyOptions_[k].semitone==activeKey) {
+                    keys_.setSelectedId(static_cast<int>(k)+1,juce::dontSendNotification);
+                    break;
+                }
+        }
         scales_.setSelectedId(1+juce::jlimit(0,2,juce::roundToInt(parameter(Processor::kScale).getValue()*2)),
                               juce::dontSendNotification);
         if(!reference_.isMouseButtonDown())
@@ -254,10 +359,13 @@ private:
         bypass_.setToggleState(parameter(Processor::kBypass).getValue()>=0.5f,
                                juce::dontSendNotification);
         const auto hz=processor_.detectedFrequencyHz();
+        trackedHz_=hz;
+        trackedCents_=0.0f;
         if(hz>=50.0f && std::isfinite(hz)) {
             const float reference=430.0f+20.0f*parameter(Processor::kA4Reference).getValue();
             const float midi=69.0f+12.0f*std::log2(hz/reference);
             const int note=juce::jlimit(0,127,juce::roundToInt(midi));
+            trackedCents_=(midi-static_cast<float>(note))*100.0f;
             constexpr std::array<const char*,12> names{{
                 "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
             }};
@@ -269,11 +377,21 @@ private:
             pitchLabel_.setText("--",juce::dontSendNotification);
             pitchCaption_.setText("Waiting for monophonic voice",juce::dontSendNotification);
         }
-        latencyLabel_.setText("PLUGIN PDC  "+juce::String(processor_.getLatencyForDisplay())
+        latencyLabel_.setText("PLUGIN PDC    "+juce::String(processor_.getLatencyForDisplay())
              +" samples",juce::dontSendNotification);
+        repaint(); // GUI thread only: update live pitch pointer and note styling.
     }
 
+    struct KeyOption { const char* name; int semitone; };
+    inline static constexpr std::array<KeyOption,17> keyOptions_{{{ 
+        {"C",0},{"C#",1},{"Db",1},{"D",2},{"D#",3},{"Eb",3},
+        {"E",4},{"F",5},{"F#",6},{"Gb",6},{"G",7},{"G#",8},
+        {"Ab",8},{"A",9},{"A#",10},{"Bb",10},{"B",11}
+    }}};
     Processor& processor_;
+    Visual::StudioLookAndFeel studioLook_;
+    float trackedHz_=0.0f;
+    float trackedCents_=0.0f;
     std::array<juce::Slider,6> knobs_;
     std::array<juce::Label,6> knobLabels_;
     std::array<juce::TextButton,3> styles_;
