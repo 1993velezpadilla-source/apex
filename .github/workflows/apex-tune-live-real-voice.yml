@@ -1,0 +1,176 @@
+name: Tune Live real human voice audition (Vocadito)
+on:
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+    paths:
+      - '.github/workflows/apex-tune-live-real-voice.yml'
+  workflow_dispatch:
+
+# Research-only, no private singer takes, no automatic production promotion.
+permissions:
+  contents: read
+jobs:
+  real-singing-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Download annotated public-domain-or-open-license human singing dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+            --retry-delay 8 --connect-timeout 40 --max-time 480 \
+            'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
+            -o vocadito.zip
+          echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' | md5sum --check -
+          test "$(stat -c '%s' vocadito.zip)" -gt 50000000
+      - name: Choose measurable human intonation fixture without guessing singer identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv, io, math, os, pathlib, re, statistics, wave, zipfile
+
+          with zipfile.ZipFile('vocadito.zip') as package:
+              all_names = package.namelist()
+              wavs = sorted(p for p in all_names if p.lower().endswith('.wav')
+                            and not p.startswith('__MACOSX/'))
+              if not wavs:
+                  raise RuntimeError('Dataset has no real WAV singing excerpts')
+              f0s = [p for p in all_names if 'f0' in p.lower() and p.lower().endswith('.csv')]
+              candidates = []
+              for wav in wavs:
+                  basename = pathlib.PurePosixPath(wav).stem
+                  label = next((p for p in f0s if basename in pathlib.PurePosixPath(p).stem), None)
+                  deviations = []
+                  if label:
+                      contents = package.read(label).decode('utf-8-sig', errors='replace')
+                      for fields in csv.reader(io.StringIO(contents)):
+                          # Vocadito ground-truth is a frame-level, time/F0 table.
+                          # Never treat a pitch at 25+ cents as proof of bad singing:
+                          # temperament and reference A4 may differ from A440.
+                          try:
+                              vals = [float(x.strip()) for x in fields]
+                          except (ValueError, TypeError):
+                              continue
+                          if len(vals)<2:
+                              continue
+                          f0=vals[1]
+                          if math.isfinite(f0) and 65<=f0<=1300:
+                              midi=69+12*math.log2(f0/440.0)
+                              deviations.append(abs(midi-round(midi))*100.0)
+                  median=statistics.median(deviations) if len(deviations)>60 else -1
+                  candidates.append((median,len(deviations),wav,label))
+              candidates.sort(reverse=True)
+              score,num,wav,label=candidates[0]
+              wav_bytes=package.read(wav)
+              with wave.open(io.BytesIO(wav_bytes),'rb') as source:
+                  nch=source.getnchannels()
+                  width=source.getsampwidth()
+                  rate=source.getframerate()
+                  frames=source.getnframes()
+                  comp=source.getcomptype()
+                  if nch not in (1,2) or width not in (2,3,4) or rate<8000 or rate>96000 or comp!='NONE':
+                      raise RuntimeError('Chosen human WAV format not suitable for APEX offline utility')
+                  count=min(frames,15*rate)
+                  payload=source.readframes(count)
+              with wave.open('vocadito_human_source.wav','wb') as dest:
+                  dest.setnchannels(nch)
+                  dest.setsampwidth(width)
+                  dest.setframerate(rate)
+                  dest.writeframes(payload)
+              description=f"""Source: vocadito: A dataset of solo vocals with f0, note, and lyric Annotations
+          Authors: Rachel M. Bittner, Katherine Pasalo, Juan Jose Bosch,
+                   Gabriel Meseguer-Brocal, David Rubinstein
+          Record: https://zenodo.org/records/5578807
+          License: Creative Commons Attribution 4.0 International
+          License URL: https://creativecommons.org/licenses/by/4.0/
+          Dataset excerpt ZIP entry: {wav}
+          F0 annotation ZIP entry: {label or 'none available'}
+          Selected original annotation frames: {num}
+          Median absolute pitch offset from nearest 12-TET A440 note (cents): {score:.2f}
+          IMPORTANT: This metric is NOT a guarantee that the singer is singing
+          incorrectly or off-key. Expressive intonation, vibrato, and non-A440
+          reference tunings may all contribute to the observed deviation.
+          Transforms: crop first 15 seconds, preserve WAV format, then create
+          dry / production HQ40 / independent causal research 24-bit WAVs.
+          This is an actual voluntary human recording, not a generated voice.
+          This dataset is separate from the Freesound 'Bad Singer' examples.
+          Audio files are not time/level-aligned for perceptual comparison.
+          No claim of Antares equivalence or real-time device latency.
+          """
+              pathlib.Path('VOCADITO_LICENSE_AND_EVIDENCE.txt').write_text(description)
+              print(description)
+          PY
+      - name: Compile actual APEX Tune HQ40 and isolated causal research WAV renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" \
+            -o tune_live_offline_audition
+          ./tune_live_offline_audition --input vocadito_human_source.wav --prefix vocadito_human
+      - name: Validate real human voice outputs and write objective render report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import math, pathlib, struct, wave
+          paths=['vocadito_human_dry.wav','vocadito_human_hq40.wav',
+                 'vocadito_human_causal_research.wav']
+          metrics=[]
+          duration=None
+          for name in paths:
+              with wave.open(name,'rb') as wav:
+                  if wav.getsampwidth()!=3:
+                      raise RuntimeError(name+': output not PCM24')
+                  n=wav.getnframes()
+                  rate=wav.getframerate()
+                  channels=wav.getnchannels()
+                  sample=wav.readframes(n)
+                  if duration is None:
+                      duration=n/rate
+                  if abs(duration-n/rate)>1.0e-9:
+                      raise RuntimeError('Output lengths differ')
+                  if n<rate or channels not in (1,2):
+                      raise RuntimeError('Not enough nonempty voice samples')
+                  peak=0.0
+                  power=0.0
+                  for i in range(0,len(sample),3):
+                      value=int.from_bytes(sample[i:i+3],byteorder='little',signed=True)
+                      s=value/8388608.0
+                      peak=max(peak,abs(s))
+                      power+=s*s
+                  rms=math.sqrt(power/(n*channels))
+                  if not all(math.isfinite(x) for x in (peak,rms)) or peak<1e-5:
+                      raise RuntimeError('Output is invalid or unexpectedly silent')
+                  metrics.append((name,n,rate,peak,rms))
+          report=['APEX TUNE LIVE — REAL HUMAN SINGING AUDITION / SIGNAL LEVELS',
+                  'WARNING: this is a real audio render, not a perceptual tuning quality proof.',
+                  'Audio track selection source and rights: VOCADITO_LICENSE_AND_EVIDENCE.txt',
+                  'The HQ40 path is the production DspCore; causal is research-only.',
+                  'Do NOT infer fixed PDC or mic-to-ear delay from file length.',
+                  'Time-align, then volume-match before comparing.']
+          report += [f'{name} frames={n} sr={rate} peak={peak:.6f} rms={rms:.6f}'
+                     for name,n,rate,peak,rms in metrics]
+          pathlib.Path('REAL_HUMAN_RENDER_REPORT.txt').write_text('\n'.join(report)+'\n')
+          print('\n'.join(report))
+          PY
+      - name: Publish public licensed human vocal APEX Tune A-B audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-tune-real-vocadito-human-vocal-ab
+          path: |
+            vocadito_human_source.wav
+            vocadito_human_dry.wav
+            vocadito_human_hq40.wav
+            vocadito_human_causal_research.wav
+            VOCADITO_LICENSE_AND_EVIDENCE.txt
+            REAL_HUMAN_RENDER_REPORT.txt
+          if-no-files-found: error
+          retention-days: 7
