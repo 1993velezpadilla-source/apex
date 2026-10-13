@@ -1,0 +1,54 @@
+name: Tune Live linked JUCE 8 Windows runtime
+
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Source/TuneLiveUI/**'
+      - 'My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - '.github/workflows/apex-tune-live-native-runtime.yml'
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tune-live-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  windows-linked-native:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Fetch pinned JUCE 8.0.12 for linked runtime smoke
+        shell: pwsh
+        run: |
+          git clone --quiet --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP\JUCE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tag=(git -C "$env:RUNNER_TEMP\JUCE" describe --tags --exact-match).Trim()
+          if ($tag -ne "8.0.12") { throw "Unexpected JUCE tag $tag" }
+      - name: Configure linked native test harness
+        shell: pwsh
+        run: |
+          cmake -S "My DAW/DAW_Core/Tests/TuneLive" -B "build-tune-live-runtime" -G "Visual Studio 17 2022" -A x64 -D "JUCE_SOURCE_DIR=$env:RUNNER_TEMP\JUCE" -D CMAKE_POLICY_VERSION_MINIMUM=3.5
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build actual JUCE application executable
+        shell: pwsh
+        run: |
+          cmake --build "build-tune-live-runtime" --target TuneLiveNativeRuntimeSmoke --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise hosted insert and custom UI runtime
+        shell: pwsh
+        run: |
+          $path="build-tune-live-runtime/TuneLiveNativeRuntimeSmoke_artefacts/Release/TuneLiveNativeRuntimeSmoke.exe"
+          if (-not (Test-Path $path)) { throw "Expected JUCE executable missing: $path" }
+          & $path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
