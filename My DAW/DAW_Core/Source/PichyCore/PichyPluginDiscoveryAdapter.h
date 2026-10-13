@@ -57,18 +57,16 @@ public:
                 PichyCapabilityRegistryCore::kMaxAvailablePlugins)
                 return PichySnapshotStatus::LimitsExceeded;
             fresh.availablePlugins.reserve(static_cast<std::size_t>(types.size()));
-            for (const auto* desc : types)
+            for (const auto& desc : types)
             {
-                if (desc == nullptr)
-                    continue;
                 PichyAvailablePluginCapability available;
-                available.pluginIdentifier = desc->fileOrIdentifier.toStdString();
-                available.displayName = desc->name.toStdString();
-                available.formatName = desc->pluginFormatName.toStdString();
-                available.manufacturer = desc->manufacturerName.toStdString();
-                available.version = desc->version.toStdString();
-                available.uniqueId = desc->uniqueId;
-                available.instrument = desc->isInstrument;
+                available.pluginIdentifier = desc.fileOrIdentifier.toStdString();
+                available.displayName = desc.name.toStdString();
+                available.formatName = desc.pluginFormatName.toStdString();
+                available.manufacturer = desc.manufacturerName.toStdString();
+                available.version = desc.version.toStdString();
+                available.uniqueId = desc.uniqueId;
+                available.instrument = desc.isInstrument;
                 fresh.availablePlugins.push_back(std::move(available));
             }
         }
