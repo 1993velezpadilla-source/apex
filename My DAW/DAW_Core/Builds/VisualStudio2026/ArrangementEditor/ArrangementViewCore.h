@@ -29,6 +29,7 @@
 #include "ArrangementSnapCore.h"
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
 #include "../../../Source/AutomationCore/AutomationManagerCore.h"
+#include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/RoutingCore/RoutingGraph.h"             
@@ -487,8 +488,17 @@ namespace ArrangementEditor
             const juce::String& parameterId,
             const std::vector<DAW::AutomationPoint>& points);
 
+        // Native volume/PAN A/B memories are confined to the current editor
+        // and automation manager. They do not falsely promise persistent
+        // project snapshots while project-level serialization is unwired.
+        bool applySelectedSnapshotAction(
+            const DAW::TrackID& sourceTrack, const juce::String& parameterId,
+            DAW::AutomationLaneComponent::SelectedSnapshotAction action);
+
         DAW::AutomationManagerCore* m_automationManager = nullptr;
         uint64_t m_groupedAutomationManagerEpoch = 0; // invalidate retained Undo on manager rebind
+        DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotA;
+        DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotB;
         std::unique_ptr<DAW::AutomationManagerCore> m_fallbackAutomationManager; // used when no external manager is wired
         std::unique_ptr<DAW::AutomationUIHelper> m_automationHelper;
         std::map<DAW::TrackID, std::unique_ptr<DAW::AutomationLaneContainerComponent>> m_automationContainers;
