@@ -480,6 +480,13 @@ namespace ArrangementEditor
         // -----------------------------------------------------------------------
         // Automation support
         // -----------------------------------------------------------------------
+        // Called only by the native lane context menu; the explicitly
+        // selected arrangement clips supply the target-track set.
+        bool applyGroupedCurveFromSelectedClips(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& points);
+
         DAW::AutomationManagerCore* m_automationManager = nullptr;
         std::unique_ptr<DAW::AutomationManagerCore> m_fallbackAutomationManager; // used when no external manager is wired
         std::unique_ptr<DAW::AutomationUIHelper> m_automationHelper;
