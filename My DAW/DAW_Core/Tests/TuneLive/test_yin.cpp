@@ -3,9 +3,9 @@
 #include <cmath>
 #include <iostream>
 int main() {
-    // 12 deterministic F0 cases, at standard 44.1/48/96 kHz host rates.
+    // 15 deterministic F0 cases including low male C2, at 44.1/48/96 kHz.
     for (const double sr : {44100.0, 48000.0, 96000.0}) {
-        for (const double hz : {110.0, 220.0, 440.0, 880.0}) {
+        for (const double hz : {65.41, 110.0, 220.0, 440.0, 880.0}) {
             APEX::TuneLive::PitchTracker tracker;
             tracker.prepare(sr);
             for (int i = 0; i < sr * 0.35; ++i)
