@@ -18,6 +18,17 @@ int main() {
                 return 1;
             }
         }
+        // A voiced A4/YIN can stop at the first harmonic trough instead of
+        // computing all ~220-256 lags for every analysis hop on the audio thread.
+        APEX::TuneLive::PitchTracker fast;
+        fast.prepare(sr);
+        for (int i=0;i<static_cast<int>(sr*0.25);++i)
+            fast.push(static_cast<float>(0.35*std::sin(6.283185307179586*440.0*i/sr)));
+        if (!fast.latest().voiced || fast.lastLagEvaluations() >= 95) {
+            std::cerr << "FAIL: early-trough CPU optimization ineffective at " << sr
+                      << "Hz. lags=" << fast.lastLagEvaluations() << "\\n";
+            return 1;
+        }
     }
     APEX::TuneLive::PitchTracker silence;
     silence.prepare(48000.0);
