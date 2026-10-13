@@ -780,6 +780,33 @@ private:
         expect (! processor.isSpectralModeArmedForTesting());
         expect (! processor.isSpectralRepreparePendingForTesting());
 
+        // State v6 knows nothing about Phase 10. A reused processor with
+        // leftover spectral values must NOT arm itself on legacy session load.
+        setUnits (processor, kSpectralArmParameter, 1.0f);
+        setUnits (processor, spectralBandParameterIndex (0), 1.0f);
+        setUnits (processor, kSpectralDensityParameter, 0.9f);
+        setUnits (processor, kSpectralTiltParameter, 0.0f);
+        juce::ValueTree oldSession (juce::Identifier (Processor::kStateTag));
+        oldSession.setProperty (Processor::kVersionProperty, 6, nullptr);
+        juce::MemoryBlock oldBytes;
+        {
+            juce::MemoryOutputStream stream (oldBytes, false);
+            oldSession.writeToStream (stream);
+        }
+        processor.setStateInformation (oldBytes.getData(),
+            static_cast<int> (oldBytes.getSize()));
+        expect (! processor.getParametricEQParameter (
+            kSpectralArmParameter)->getBool(),
+            "legacy session must reset spectral ARM to OFF");
+        expect (! processor.getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool(),
+            "legacy session must reset unrecognized spectral band toggles");
+        expectWithinAbsoluteError (
+            processor.getParametricEQParameter (
+                kSpectralDensityParameter)->getUnitsValue(), 0.5f, 1.0e-6f);
+        expect (processor.getParametricEQParameter (
+            kSpectralTiltParameter)->getBool());
+
         // Transport-safe arming: automation never jumps host PDC in flight.
         setUnits (processor, kSpectralArmParameter, 1.0f);
         expect (processor.isSpectralRepreparePendingForTesting());
