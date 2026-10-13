@@ -52,8 +52,10 @@ public:
         juce::AudioProcessor::BusesLayout stereoLayout;
         stereoLayout.inputBuses.add(juce::AudioChannelSet::stereo());
         stereoLayout.outputBuses.add(juce::AudioChannelSet::stereo());
-        expect(base->isBusesLayoutSupported(monoLayout));
-        expect(base->isBusesLayoutSupported(stereoLayout));
+        // JUCE AudioProcessor exposes this virtual method as protected; our
+        // OptoProcessor override is public and safe to inspect directly.
+        expect(processor->isBusesLayoutSupported(monoLayout));
+        expect(processor->isBusesLayoutSupported(stereoLayout));
         expectEquals(base->getParameters().size(),(int)ParameterCount);
 
         beginTest("Stable parameter IDs for APEX automation and dry/wet contract");
