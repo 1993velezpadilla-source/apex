@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "../../Source/PluginSandboxCore/PluginWorkerMainCore.h"
+#include "../../Source/TuneLiveCore/ApexTuneLiveProcessor.h"
 #include <fstream>
 #include <iostream>
 
@@ -47,6 +48,7 @@ int main (int argc, char** argv)
     constexpr auto seedOption     = "--seed|-s";
     constexpr auto nameOption     = "--name|-n";
     constexpr auto resultsJsonOption = "--results-json";
+    constexpr auto tuneLiveScreenshotOption = "--capture-tune-live-gui";
 
     constexpr juce::int64 defaultSeed = 0xA9E12026;
 
@@ -91,6 +93,59 @@ int main (int argc, char** argv)
     // deletes process-wide DeletedAtShutdown singletons (including Theme),
     // leaving later suites with dangling singleton references.
     juce::ScopedJuceInitialiser_GUI guiLifetime;
+
+    // Explicit capture of the REAL APEX Tune Live JUCE editor. There is no
+    // Photoshop/mock-up/hand-painted approximation here: this calls the
+    // same production Processor::createEditor() used by the desktop host.
+    // This is test-runner-only and never changes the actual DAW/plug-in.
+    if (args.containsOption (tuneLiveScreenshotOption))
+    {
+        auto destination = args.getValueForOption (tuneLiveScreenshotOption);
+        if (destination.isEmpty())
+        {
+            std::cerr << "Missing --capture-tune-live-gui=PATH.png" << std::endl;
+            return 2;
+        }
+        APEX::TuneLive::Processor plugin;
+        plugin.prepareToPlay (48000.0, 128);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (plugin.createEditor());
+        if (! editor)
+        {
+            std::cerr << "Production Tune Live editor creation failed" << std::endl;
+            return 1;
+        }
+        editor->setSize (900, 575); // exact default dimensions of current GUI
+        const auto image = editor->createComponentSnapshot (
+            editor->getLocalBounds(), true, 1.0f);
+        if (! image.isValid() || image.getWidth() != 900 || image.getHeight() != 575)
+        {
+            std::cerr << "Failed to render actual JUCE Tune Live component tree" << std::endl;
+            return 1;
+        }
+        const juce::File output (destination);
+        if (! output.getParentDirectory().createDirectory())
+        {
+            std::cerr << "Failed to create screenshot folder" << std::endl;
+            return 1;
+        }
+        auto file = output.createOutputStream();
+        juce::PNGImageFormat png;
+        if (! file || ! png.writeImageToStream (image, *file))
+        {
+            std::cerr << "Failed to encode real APEX Tune Live screenshot" << std::endl;
+            return 1;
+        }
+        file->flush();
+        editor.reset();
+        plugin.releaseResources();
+        std::cout << "APEX_TUNE_LIVE_ACTUAL_JUCE_GUI_SCREENSHOT_PASS"
+                  << " width=900 height=575"
+                  << " source=production_Processor_createEditor"
+                  << " idle=true"
+                  << " filename=" << output.getFullPathName().toStdString()
+                  << std::endl;
+        return 0;
+    }
 
     ConsoleLogger logger;
     juce::Logger::setCurrentLogger (&logger);
