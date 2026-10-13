@@ -63,18 +63,18 @@ jobs:
         with:
           submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Compile portable pitch tracker on MSVC
+      - name: Compile and enforce ALL portable DSP tests on MSVC (fail fast)
         shell: cmd
         run: |
-          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_yin_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp"
-          tune_live_yin_test.exe
-          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp"
-          tune_live_voice_test.exe
-          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_preset_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp"
-          tune_live_preset_test.exe
-          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_wet_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp"
-          tune_live_wet_test.exe
-          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_matrix_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp"
-          tune_live_matrix_test.exe
-          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_no_alloc_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp"
-          tune_live_no_alloc_test.exe
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_yin_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp" || exit /b 1
+          tune_live_yin_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" || exit /b 1
+          tune_live_voice_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_preset_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" || exit /b 1
+          tune_live_preset_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_wet_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" || exit /b 1
+          tune_live_wet_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_matrix_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp" || exit /b 1
+          tune_live_matrix_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_no_alloc_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp" || exit /b 1
+          tune_live_no_alloc_test.exe || exit /b 1
