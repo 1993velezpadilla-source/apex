@@ -1,0 +1,34 @@
+name: Pichy capability registry core
+
+on:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp'
+      - '.github/workflows/pichy-capability-registry.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/PichyCore/**'
+      - 'My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp'
+      - '.github/workflows/pichy-capability-registry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile Pichy capability registry (C++17)
+        shell: bash
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            "My DAW/DAW_Core/Tests/Portable/PichyCapabilityRegistryStandalone.cpp" \
+            -o "${RUNNER_TEMP}/pichy_capability_registry"
+      - name: Run native, external plugin and identity safety cases
+        shell: bash
+        run: '"${RUNNER_TEMP}/pichy_capability_registry"'
