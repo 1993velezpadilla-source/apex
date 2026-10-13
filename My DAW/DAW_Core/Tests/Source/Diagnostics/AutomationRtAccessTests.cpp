@@ -4680,6 +4680,21 @@ public:
         expect(!manager.getClipClipboard().copyRegionState(badSource));
         expect(manager.getClipClipboard().hasClipState());
 
+        beginTest("Orphan target and unrepresentable sample duration reject before mutation");
+        AutomationClipRegionCore orphanDestination;
+        orphanDestination.parameterId = AutomationLaneCore::trackPanParameterId;
+        orphanDestination.lengthSamples = 48000;
+        orphanDestination.localPoints = { AutomationPoint{0, 0.5f} };
+        const auto originalOrphan = orphanDestination.getState().toXmlString();
+        expect(!manager.getClipClipboard().pasteStateToRegion(orphanDestination));
+        expectEquals(orphanDestination.getState().toXmlString(), originalOrphan);
+        orphanDestination.trackId = "PAN-EXTREMELY-LONG";
+        orphanDestination.lengthSamples = DAW::AutomationClipClipboardCore::maxExactSampleLength + 1;
+        expect(!manager.getClipClipboard().pasteStateToRegion(orphanDestination));
+        orphanDestination = panSrc;
+        orphanDestination.lengthSamples = 96000;
+        expect(manager.getClipClipboard().pasteStateToRegion(orphanDestination));
+
         beginTest("Wrong parameter clip paste does not erase either destination or live points");
         AutomationClipRegionCore volDest;
         volDest.trackId = "VOL-DEST";
