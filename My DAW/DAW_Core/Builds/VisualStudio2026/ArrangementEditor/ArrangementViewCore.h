@@ -493,6 +493,13 @@ namespace ArrangementEditor
             const juce::String& parameterId,
             const std::vector<DAW::AutomationPoint>& sourcePoints);
 
+        // A separate explicit macro action targets ONE exact host-verified
+        // last-touched continuous VST3 parameter (not arbitrary slot names).
+        bool applyVst3MacroFromLastTouched(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& sourcePoints);
+
         // Native volume/PAN A/B memories are confined to the current editor
         // and automation manager. They do not falsely promise persistent
         // project snapshots while project-level serialization is unwired.
