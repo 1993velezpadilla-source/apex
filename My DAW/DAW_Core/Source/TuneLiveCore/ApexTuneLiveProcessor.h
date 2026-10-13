@@ -44,7 +44,7 @@ public:
     static constexpr const char* kFileOrIdentifier = "APEX::TuneLive";
     static constexpr const char* kVersion = "0.1.0-beta";
     enum Index { kAmount, kSpeed, kKey, kScale, kMix, kBypass,
-                 kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kNumParams };
+                 kHumanize, kNoteStability, kPreserveFormants, kFlexTune, kA4Reference, kNumParams };
 
     Processor() : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -60,6 +60,7 @@ public:
         add(kNoteStability, "tunelive.noteStability", "Note Stability", 0.40f);
         add(kPreserveFormants, "tunelive.preserveFormants", "Preserve Formants", 1.0f, 2);
         add(kFlexTune, "tunelive.flexTune", "Flex Tune", 0.35f);
+        add(kA4Reference, "tunelive.a4Reference", "A4 Reference (430-450 Hz)", 0.50f);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override {
@@ -91,6 +92,7 @@ public:
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override {
         const DspSettings settings{
             param(kAmount),
+            430.0f+20.0f*param(kA4Reference),
             param(kSpeed),
             juce::jlimit(0,11,juce::roundToInt(param(kKey)*11.0f)),
             juce::jlimit(0,2,juce::roundToInt(param(kScale)*2.0f)),
@@ -142,7 +144,7 @@ private:
         "tunelive.amount", "tunelive.speed", "tunelive.key", "tunelive.scale",
         "tunelive.mix", "tunelive.bypass", "tunelive.humanize",
         "tunelive.noteStability", "tunelive.preserveFormants",
-        "tunelive.flexTune"};
+        "tunelive.flexTune", "tunelive.a4Reference"};
     void add(int index, const char* id, const char* name, float value, int steps=0) {
         auto p = std::make_unique<Parameter>(id, name, value, steps);
         params_[static_cast<std::size_t>(index)] = p.get();
