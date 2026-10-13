@@ -10,9 +10,9 @@ namespace DAW {
 
 struct AutomationArticulatorToolsCore
 {
-    static void copyState(const AutomationClipRegionCore& region, AutomationClipClipboardCore& clipboard)
+    static bool copyState(const AutomationClipRegionCore& region, AutomationClipClipboardCore& clipboard)
     {
-        clipboard.copyRegionState(region);
+        return clipboard.copyRegionState(region);
     }
 
     static bool pasteState(AutomationClipRegionCore& destination, const AutomationClipClipboardCore& clipboard)
