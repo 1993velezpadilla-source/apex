@@ -29,7 +29,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Cache fixed public-licensed research audio (checksum keyed)
+        id: audio-cache
+        uses: actions/cache@v4
+        with:
+          path: vocadito.zip
+          key: vocadito-zenodo-5578807-dea40fd18f14d899643c4ba221b33a46-v1
       - name: Download annotated public-domain-or-open-license human singing dataset
+        if: steps.audio-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -37,6 +44,10 @@ jobs:
             --retry-delay 8 --connect-timeout 40 --max-time 480 \
             'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' \
             -o vocadito.zip
+      - name: Verify pinned public-singing archive after cache or download
+        shell: bash
+        run: |
+          set -euo pipefail
           echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' | md5sum --check -
           test "$(stat -c '%s' vocadito.zip)" -gt 50000000
       - name: Choose measurable human intonation fixture without guessing singer identity
