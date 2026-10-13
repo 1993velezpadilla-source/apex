@@ -59,7 +59,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apex-opto-windows-evidence-${{ matrix.configuration }}-${{ github.sha }}
-          path: My DAW/DAW_Core/evidence/runs/
+          path: |
+            My DAW/DAW_Core/evidence/runs/
+            My DAW/DAW_Core/evidence/opto2a_gui/*.png
           if-no-files-found: warn
       - name: Preserve unsigned test build
         if: success()
