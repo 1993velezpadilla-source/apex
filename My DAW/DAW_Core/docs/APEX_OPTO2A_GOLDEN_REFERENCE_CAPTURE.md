@@ -123,3 +123,60 @@ The nonlinear transfer runs inside a 4x FIR oversampling island, with **65-tap B
 3. Benchmark dual-channel 4x + T4 + tube stages as an entire host instance at 48k/64 and 48k/128; verify no allocations/locks and keep control automation stable.
 4. If adopted: explicitly register correct plugin latency/PDC, align dry/parallel/host bypass, compensate screenshots and offline bounces, and ensure parameter state migration. 32 samples in this *particular* research configuration are not an unconditional shipped latency promise.
 5. Compare level-matched real vocals through the licensed UAD Gray and APEX, including slow recovery and harmonics, before characterizing it as an authentic LA-2A sound.
+
+
+## 8. Host latency boundary and x4 integration hold (2026-10-13)
+
+The current working APEX native Opto (PR #103) calls `setLatencySamples(0)`
+in `ApexOptoLevelerProcessor::prepareToPlay()`; that is correct for its
+current standalone zero-FIR-delay algorithm, **not** for this separate x4
+research path. Do not silently transplant x4 DSP while keeping that report.
+
+Code-level host boundary audit (main as seen 2026-10-13):
+- `PluginInstanceCore::getLatencySamples()` obtains the JUCE processor's
+  `getLatencySamples()` or sandbox effective latency.
+- `PluginChainCore::totalLatencySamples()` sums slot reports; APEX
+  `AudioEngine` publishes chain-latency snapshots and owns PDC lines.
+- Crucially, `PluginChainCore` has a **separate per-slot wet/dry mix** and a
+  **separate chain-output wet/dry mix**, implemented with
+  `PluginSlotMixCore::apply(dryView,wetView,...)` and
+  `PluginSlotMixCore::apply(chainInputBuffer_,...)`. These snippets do not
+  independently demonstrate that their dry buffers are latency-aligned.
+  The x4 research DSP's own dry/bypass delay does **not** automatically fix
+  the outer host slot or chain parallel dry path. External mixing must be
+  validated or corrected BEFORE x4 can become a native insert.
+- The low-latency live-monitor PDC bypass mode removes some *graph*
+  compensation, but it cannot remove the intrinsic 32-sample transformer FIR
+  delay. At 48 kHz, 32 samples are approximately 0.667 ms of additional
+  algorithmic delay, on top of interface and other DSP latencies.
+
+**Release-blocking integration matrix** (all currently unverified inside a
+real APEX session):
+
+1. Prepare-time JUCE latency equals the selected FIR mode. Assert 32 in x4;
+   0 only in the baseline, after preparation and session restoration. Latency
+   changes must be published on the non-audio control thread and cause PDC
+   recomputation, never graph allocation in the callback.
+2. Render a transient through both a wet insert and an unaffected parallel
+   path, first with no slot/chain mix, then slot 50% mix, chain 50% mix, 0%
+   mix and bypass. The dry reference must be delayed *once* and match the wet
+   path latency; no unaligned dry impulse at sample 0 when wet appears near
+   sample 32. Verify 64/128 sample block boundary crossings and stereo.
+3. Check external sends and routing buses independently of local compressor
+   mix, including latency propagation, export, freeze/bounce, save/reload and
+   undo/redo after changing plugin order.
+4. On armed/live-monitored tracks, check Full/Reduced/Bypass PDC modes and
+   verify user-visible plugin algorithmic delay remains documented. Validate
+   Apollo monitoring with all recording plugins active.
+5. Real 48k/64- and 48k/128-sample Windows x64 host benchmarks (per-instance
+   callback P99/max, dropout counter, competing Auto-Tune/EQ/VST3, CPU
+   contention, dynamic automation, release configuration) are mandatory.
+6. Only AFTER all host gates pass, consider an explicit prepare-time
+   experimental x4 quality option and stable session migration. Do not
+   activate or auto-upgrade the native Opto silently.
+
+**Separate optimization note:** A bounded 4097-entry tanh curve is built
+on the non-audio thread and shared across instances; a fixed interpolation
+replaces two `std::tanh` calls per oversampled magnetic tick. Curve error
+is checked against exact math, and whole-path quality remains research only.
+CI standalone CPU percentages are advisory, not Apollo/DAW safety approval.
