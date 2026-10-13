@@ -454,6 +454,7 @@ private:
         setUnits (source, dynamicParameterIndex (
             0, DynamicBandOffset::Range), -4.0f);
         setUnits (source, dynamicFilterParameterIndex (0), 1.0f);
+        setUnits (source, spectralBandParameterIndex (0), 1.0f);
         source.prepareToPlay (48000.0, 256);
         destination.prepareToPlay (48000.0, 256);
         auto sourceEditor = std::make_unique<ParametricEQEditor> (source);
@@ -495,6 +496,9 @@ private:
             dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool());
         expect (destination.getParametricEQParameter (
             dynamicFilterParameterIndex (0))->getBool());
+        expect (destination.getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool(),
+            "native clipboard must include the appended per-band spectral mode");
         expectWithinAbsoluteError (static_cast<double> (
             destination.getParametricEQParameter (
                 dynamicParameterIndex (0, DynamicBandOffset::Range))
@@ -577,6 +581,14 @@ private:
 
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
+        // Reuse a disabled slot with stale spectral/dynamic values: EQ Match
+        // must create a plain fresh band, not re-enable hidden old effects.
+        setUnits (processor, spectralBandParameterIndex (0), 1.0f);
+        setUnits (processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (processor, parameterIndex (
+            0, BandParameterOffset::Bypass), 1.0f);
+        setUnits (processor, placementParameterIndex (0), 4.0f);
         processor.prepareToPlay (48000.0, 512);
         processor.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Pre);
         auto editor = std::make_unique<ParametricEQEditor> (processor);
@@ -635,6 +647,18 @@ private:
                 parameterIndex (band, BandParameterOffset::Enabled))->getBool()
                 ? 1 : 0;
         expect (inserted >= 1, "Apply inserts real APEX EQ bands");
+        expect (! processor.getParametricEQParameter (
+            spectralBandParameterIndex (0))->getBool(),
+            "newly created Match band cannot inherit stale spectral enable");
+        expect (! processor.getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
+            "newly created Match band cannot inherit hidden old dynamics");
+        expect (! processor.getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Bypass))->getBool(),
+            "newly created Match band must actually affect output");
+        expectEquals (processor.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 0,
+            "newly created Match band defaults to true stereo");
         expectEquals (juce::String ("EQ MATCH"), match.getButtonText(),
                       "matching resets after a completed apply");
 
