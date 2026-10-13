@@ -5828,15 +5828,24 @@ bool ArrangementViewCore::applyNativeMacroFromSelectedClips(
             || !M::apply(*expectedManager, plan, useAfter))
             return;
 
-        // The modern APEX PPQ store is still updated per native target,
-        // not atomically as a group. Full PPQ transaction is an outstanding
-        // integration gate and is NOT represented as certified here.
+        // Mirror ALL native target lanes through exactly one PPQ map swap.
+        // If bridge validation fails, restore the manager transaction and
+        // leave the preexisting PPQ envelopes unchanged (no partial group).
+        std::vector<DAW::AutomationMultiParameterSnapshotCore::Target> targets;
+        targets.reserve(plan.changes.size());
+        for (const auto& change : plan.changes)
+            targets.push_back(change.target);
+        const double liveSr = view->m_engineSampleRate;
+        const double liveBpm = view->m_tempoBpm;
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets, liveSr, liveBpm))
+        {
+            M::apply(*expectedManager, plan, !useAfter);
+            return;
+        }
+
         for (const auto& change : plan.changes)
         {
-            DAW::AutomationLaneComponent::syncModelLaneToApex(
-                *view->m_automationHelper, change.target.trackId,
-                change.target.parameterId, sr, bpm);
-
             if (auto it = view->m_automationContainers.find(
                     change.target.trackId);
                 it != view->m_automationContainers.end()
@@ -6130,14 +6139,21 @@ bool ArrangementViewCore::applyGroupedCurveFromSelectedClips(
         if (!DAW::AutomationGroupedCurveCore::apply(*expectedManager, edit, after))
             return;
 
-        // Each native target must update the PPQ authority on both REDO and
-        // UNDO: manager publication alone only updates its legacy DSP path.
+        // One immutable PPQ publication covers every grouped native lane.
+        std::vector<DAW::AutomationMultiParameterSnapshotCore::Target> targets;
+        targets.reserve(edit.lanes.size());
+        for (const auto& lane : edit.lanes)
+            targets.push_back({ lane.trackId, lane.parameterId });
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets,
+                view->m_engineSampleRate, view->m_tempoBpm))
+        {
+            DAW::AutomationGroupedCurveCore::apply(*expectedManager, edit, !after);
+            return;
+        }
+
         for (const auto& target : edit.lanes)
         {
-            DAW::AutomationLaneComponent::syncModelLaneToApex(
-                *view->m_automationHelper, target.trackId, target.parameterId,
-                sr, bpm);
-
             if (auto it = view->m_automationContainers.find(target.trackId);
                 it != view->m_automationContainers.end() && it->second != nullptr)
                 it->second->invalidateAllCurvePaths();
@@ -6358,14 +6374,21 @@ bool ArrangementViewCore::applySelectedSnapshotAction(
         if (!Core::apply(*expectedManager, plan, after))
             return; // no partial changes if any lane was edited meanwhile
 
-        // Grouped native mirror to APEX's PPQ authority. The control-thread
-        // updates currently publish per lane; this is NOT an atomic PPQ
-        // cross-parameter transaction (a later integration gate).
+        // Publish every A/B morph destination to PPQ as ONE transaction.
+        // Guard Undo/Redo against stale lanes and failed PPQ conversion.
+        std::vector<Core::Target> targets;
+        targets.reserve(plan.changes.size());
+        for (const auto& change : plan.changes)
+            targets.push_back(change.target);
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets,
+                view->m_engineSampleRate, view->m_tempoBpm))
+        {
+            Core::apply(*expectedManager, plan, !after);
+            return;
+        }
         for (const auto& change : plan.changes)
         {
-            DAW::AutomationLaneComponent::syncModelLaneToApex(
-                *view->m_automationHelper, change.target.trackId,
-                change.target.parameterId, sr, bpm);
             if (auto it = view->m_automationContainers.find(change.target.trackId);
                 it != view->m_automationContainers.end() && it->second != nullptr)
                 it->second->invalidateAllCurvePaths();
