@@ -42,10 +42,16 @@ pitch component, so natural vibrato is kept to a greater degree; it is
 The new regression mandates preservation of +/-25-cent, 5-Hz vibrato
 compared with hard tune, while still rejecting out-of-key detuning.
 
-**Natural / Tight / Hard Tune** ought to be differentiated musical workflows.
-They are NOT certified presets yet. Default is currently musically
-expressive (Humanize 0.70, amount 0.85, speed ~31ms). Artist preferences
-must win over one universal tuning setting.
+**Natural / Modern / Hard Tune** now have actual user-facing artist
+preset buttons in a dedicated responsive dark APEX plug-in editor. Presets
+modify real hosted parameters using change gestures and host notifications;
+key and scale intentionally remain under the singer's control. The natural
+profile includes gentle *Flex Tune* (small intonation dead-zone), a slow
+tracked note centre for vibrato, Humanize and note hysteresis. All modes
+are experimental sonic starting points, **not artist-certified**. The initial
+default stays expressive (Humanize 0.70, amount 0.85, retune ~31ms,
+Flex Tune 0.35). Headroom, mix, formants and latency still require measured
+real singing tests.
 
 ## Objective / subjective evidence policy
 
