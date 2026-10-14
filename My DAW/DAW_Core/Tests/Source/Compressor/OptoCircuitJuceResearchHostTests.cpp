@@ -6,6 +6,7 @@
 #include "../../../Source/AutomationCore/PluginSlotMixCore.h"
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcJuceResearchBridge.h"
+#include "../../../Source/PDCCore/ProgrammeRoutePdcJuceDispatchResearchCore.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -736,6 +737,100 @@ public:
             graph.processingOrder={"RN_aux","RN_voice","RN_bass","master"};
             expect(!Bridge::build(graph,&publishedLatencies,planned));
             expect(!planned.valid());
+        }
+
+        beginTest("Actual JUCE RoutingSnapshot indices render 32+16-sample parallel sends aligned with master");
+        for(double sr:{44100.0,48000.0}) {
+            for(int frames:{31,64,128}) {
+                using Dispatch=DAW::PdcResearch::ProgrammeRoutePdcJuceDispatchResearchCore;
+                DAW::RoutingSnapshot graph;
+                graph.version=207;
+                graph.nodes={
+                    {"vocal-node","vocal",DAW::RoutingNodeType::Track,true},
+                    {"aux-node","aux",DAW::RoutingNodeType::Bus,true},
+                    {"master","master",DAW::RoutingNodeType::Master,true}};
+                graph.processingOrder={"vocal-node","aux-node","master"};
+                const auto makeEdge=[](const char* id,const char* src,
+                                       const char* dst,DAW::ConnectionType type) {
+                    DAW::RoutingSnapshot::EdgeSnapshot e;
+                    e.id=id;e.sourceNodeId=src;e.destNodeId=dst;e.type=type;
+                    return e;
+                };
+                graph.edges={
+                    makeEdge("dry","vocal-node","master",DAW::ConnectionType::Direct),
+                    makeEdge("send","vocal-node","aux-node",DAW::ConnectionType::Send),
+                    makeEdge("wet","aux-node","master",DAW::ConnectionType::Direct),
+                    makeEdge("key","aux-node","vocal-node",DAW::ConnectionType::Sidechain)};
+                std::map<DAW::TrackID,int> latencies={
+                    {"vocal",32},{"aux",16}};
+                Dispatch dispatcher;
+                expect(dispatcher.prepare(graph,&latencies,2));
+                expectEquals(dispatcher.version(),static_cast<std::uint64_t>(207));
+                expectEquals(dispatcher.edgeDelay(0),16);
+                expectEquals(dispatcher.edgeDelay(1),0);
+                expectEquals(dispatcher.edgeDelay(2),0);
+                expectEquals(dispatcher.edgeDelay(3),-1);
+                DAW::PluginParallelDryDelayResearchCore vocalFx,auxFx;
+                expect(vocalFx.prepare(2,32));
+                expect(auxFx.prepare(2,16));
+                constexpr int total=512;
+                for(int start=0;start<total;start+=frames) {
+                    const int n=std::min(frames,total-start);
+                    juce::AudioBuffer<float> vocal(2,n),dry(2,n),wet(2,n);
+                    for(int i=0;i<n;++i) {
+                        const int at=start+i;
+                        vocal.setSample(0,i,static_cast<float>(
+                            .22*std::sin(at*.037)+.07*std::cos(at*.091)));
+                        vocal.setSample(1,i,static_cast<float>(
+                            -.3*std::cos(at*.021)));
+                    }
+                    vocalFx.process(vocal.getArrayOfWritePointers(),2,n);
+                    for(int ch=0;ch<2;++ch) {
+                        dry.copyFrom(ch,0,vocal,ch,0,n);
+                        wet.copyFrom(ch,0,vocal,ch,0,n);
+                    }
+                    expect(!dispatcher.processEdge(
+                        206,0,dry.getArrayOfWritePointers(),2,n));
+                    expect(dispatcher.processEdge(
+                        207,0,dry.getArrayOfWritePointers(),2,n));
+                    expect(dispatcher.processEdge(
+                        207,1,wet.getArrayOfWritePointers(),2,n));
+                    auxFx.process(wet.getArrayOfWritePointers(),2,n);
+                    expect(dispatcher.processEdge(
+                        207,2,wet.getArrayOfWritePointers(),2,n));
+                    for(int i=0;i<n;++i) {
+                        const int source=start+i-48;
+                        const double expL=source<0?0.0:2.*(
+                            .22*std::sin(source*.037)+.07*std::cos(source*.091));
+                        const double expR=source<0?0.0:
+                            -0.6*std::cos(source*.021);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(dry.getSample(0,i))+
+                            static_cast<double>(wet.getSample(0,i)),
+                            expL,2.e-6);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(dry.getSample(1,i))+
+                            static_cast<double>(wet.getSample(1,i)),
+                            expR,2.e-6);
+                    }
+                }
+                float left=1.f,right=-.5f;
+                float* pointers[]={&left,&right};
+                expect(!dispatcher.processEdge(207,3,pointers,2,1));
+                expectEquals(left,1.f);
+                graph.edges[1].active=false;
+                graph.version=208;
+                expect(dispatcher.prepare(graph,&latencies,2));
+                expectEquals(dispatcher.edgeDelay(0),0);
+                expectEquals(dispatcher.edgeDelay(1),-1);
+                expect(!dispatcher.processEdge(207,0,pointers,2,1),
+                       "old immutable snapshot generation must not dispatch");
+                graph.processingOrder={"aux-node","vocal-node","master"};
+                graph.version=209;
+                expect(!dispatcher.prepare(graph,&latencies,2));
+                expectEquals(dispatcher.version(),static_cast<std::uint64_t>(208));
+                expectEquals(dispatcher.edgeDelay(0),0);
+            }
         }
 
         beginTest("Changing quality during prepare updates latency without callback toggles");
