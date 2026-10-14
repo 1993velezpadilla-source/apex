@@ -293,14 +293,15 @@ namespace apex::automation
             if (paramID == kInvalidParameterID)
                 return;
 
-            auto& lane = AutomationLaneStore::getInstance().getOrCreateLane (paramID);
-            auto snap = lane.getSnapshot();
+            auto& store = AutomationLaneStore::getInstance();
+            auto lane = store.findLane (paramID);
+            auto snap = lane != nullptr ? lane->getSnapshot() : nullptr;
             AutomationLane::PointVector next = snap ? *snap : AutomationLane::PointVector{};
 
             const double ppq = samplesToPPQ (timeSamples, sampleRate, bpm);
             const float normalized = faderRange->gainToNorm (gainValue);
             next.push_back ({ ppq, normalized, CurveType::Linear, 0.0f });
-            lane.replacePoints (std::move (next));
+            (void) store.replaceOrCreateLanePoints (paramID, std::move (next));
         }
 
         void moveTrackVolumeBreakpointFromGain (const juce::String& trackID,
@@ -329,7 +330,8 @@ namespace apex::automation
             AutomationLane::PointVector next = *snap;
             next[(size_t) index].timePPQ = samplesToPPQ (timeSamples, sampleRate, bpm);
             next[(size_t) index].normalizedValue = faderRange->gainToNorm (gainValue);
-            lane->replacePoints (std::move (next));
+            (void) AutomationLaneStore::getInstance().replaceOrCreateLanePoints (
+                paramID, std::move (next));
         }
 
         void removeTrackVolumeBreakpoint (const juce::String& trackID, int index)
@@ -351,7 +353,8 @@ namespace apex::automation
 
             AutomationLane::PointVector next = *snap;
             next.erase (next.begin() + index);
-            lane->replacePoints (std::move (next));
+            (void) AutomationLaneStore::getInstance().replaceOrCreateLanePoints (
+                paramID, std::move (next));
         }
 
         void addSendLevelBreakpoint (const juce::String& trackID,
@@ -474,11 +477,12 @@ namespace apex::automation
             if (paramID == kInvalidParameterID || sampleRate <= 0.0 || bpm <= 0.0)
                 return;
 
-            auto& lane = AutomationLaneStore::getInstance().getOrCreateLane (paramID);
-            auto snap = lane.getSnapshot();
+            auto& store = AutomationLaneStore::getInstance();
+            auto lane = store.findLane (paramID);
+            auto snap = lane != nullptr ? lane->getSnapshot() : nullptr;
             AutomationLane::PointVector next = snap ? *snap : AutomationLane::PointVector{};
             next.push_back ({ samplesToPPQ (timeSamples, sampleRate, bpm), juce::jlimit (0.0f, 1.0f, normalizedValue), curveType, 0.0f });
-            lane.replacePoints (std::move (next));
+            (void) store.replaceOrCreateLanePoints (paramID, std::move (next));
         }
 
         void setNormalizedBreakpointForParam (ParameterID paramID,
@@ -493,7 +497,18 @@ namespace apex::automation
                 return;
 
             if (auto lane = AutomationLaneStore::getInstance().findLane (paramID))
-                lane->setPoint (index, { samplesToPPQ (timeSamples, sampleRate, bpm), juce::jlimit (0.0f, 1.0f, normalizedValue), curveType, 0.0f });
+            {
+                auto snap = lane->getSnapshot();
+                if (snap == nullptr || index >= (int) snap->size())
+                    return;
+                AutomationLane::PointVector next = *snap;
+                next[(size_t) index] = {
+                    samplesToPPQ (timeSamples, sampleRate, bpm),
+                    juce::jlimit (0.0f, 1.0f, normalizedValue),
+                    curveType, 0.0f };
+                (void) AutomationLaneStore::getInstance().replaceOrCreateLanePoints (
+                    paramID, std::move (next));
+            }
         }
 
         void removeBreakpointForParam (ParameterID paramID, int index)
@@ -502,7 +517,15 @@ namespace apex::automation
                 return;
 
             if (auto lane = AutomationLaneStore::getInstance().findLane (paramID))
-                lane->removePoint (index);
+            {
+                auto snap = lane->getSnapshot();
+                if (snap == nullptr || index >= (int) snap->size())
+                    return;
+                AutomationLane::PointVector next = *snap;
+                next.erase (next.begin() + index);
+                (void) AutomationLaneStore::getInstance().replaceOrCreateLanePoints (
+                    paramID, std::move (next));
+            }
         }
 
         std::vector<BoolBreakpoint> getBoolBreakpointsForParam (ParameterID paramID,
