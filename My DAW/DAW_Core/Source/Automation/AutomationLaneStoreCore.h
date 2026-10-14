@@ -90,7 +90,18 @@ namespace apex::automation
             }
 
             auto snap = std::make_shared<const PointVector> (std::move (newPoints));
-            std::atomic_store_explicit (&snapshot, snap, std::memory_order_release);
+            // A map pin protects lane objects, not the point vector owned by
+            // each lane. Rapid direct replacePoints/addPoint/setPoint edits
+            // could otherwise leave the AUDIO thread releasing the last
+            // reference to a large point vector. Retire every superseded
+            // point generation on the control thread, just like map snapshots.
+            // Reserve before publishing so allocation failure is harmless.
+            collectRetiredPointSnapshotsOnControlThread();
+            retiredPointSnapshots_.reserve (retiredPointSnapshots_.size() + 1);
+            auto old = std::atomic_exchange_explicit (
+                &snapshot, std::move (snap), std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredPointSnapshots_.push_back (std::move (old));
         }
 
         void addPoint (Breakpoint bp)
@@ -201,8 +212,23 @@ namespace apex::automation
             }
         }
 
+        // All mutations are control-thread-only. A retired point generation
+        // remains owned here until no DSP or other reader holds it; pruning
+        // never runs inside getSnapshot() or the realtime callback.
+        void collectRetiredPointSnapshotsOnControlThread() noexcept
+        {
+            const auto end = std::remove_if (retiredPointSnapshots_.begin(),
+                                             retiredPointSnapshots_.end(),
+                [] (const Snapshot& candidate) noexcept
+                {
+                    return candidate.use_count() == 1;
+                });
+            retiredPointSnapshots_.erase (end, retiredPointSnapshots_.end());
+        }
+
         const ParameterID paramID;
         std::shared_ptr<const PointVector> snapshot;
+        std::vector<Snapshot> retiredPointSnapshots_;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationLane)
     };
