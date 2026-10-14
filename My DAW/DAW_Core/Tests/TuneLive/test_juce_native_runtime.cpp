@@ -94,6 +94,55 @@ int main() {
              <<" "<<screenshot.getWidth()<<"x"<<screenshot.getHeight()
              <<" bytes="<<screenshotFile.getSize()<<"\\n";
 
+    // V5 responsive fidelity gate: both ends of the supported touch-safe
+    // artboard must keep every real JUCE control inside the editor viewport.
+    for(const auto size : {juce::Point<int>(960,600),juce::Point<int>(1600,1000)}) {
+        editor->setSize(size.x,size.y);
+        if(editor->getWidth()!=size.x || editor->getHeight()!=size.y)
+            return fail("responsive native editor rejected a supported size");
+        for(int child=0;child<editor->getNumChildComponents();++child) {
+            const auto* component=editor->getChildComponent(child);
+            if(component->isVisible() && !editor->getLocalBounds().contains(component->getBounds()))
+                return fail("resize clipped a native control");
+        }
+        if(size.x==960) {
+            const auto compact=editor->createComponentSnapshot(editor->getLocalBounds());
+            if(!compact.isValid() || compact.getWidth()!=960 || compact.getHeight()!=600)
+                return fail("touch-safe real editor compact screenshot invalid");
+            const auto compactFile=juce::File::getCurrentWorkingDirectory()
+                .getChildFile("APEX_Tune_Live_Actual_GUI_Windows_Compact.png");
+            auto stream=compactFile.createOutputStream();
+            if(!stream || !juce::PNGImageFormat().writeImageToStream(compact,*stream))
+                return fail("cannot write compact real editor PNG");
+            stream->flush();
+            if(compactFile.getSize()<4096)
+                return fail("compact actual JUCE screenshot unexpectedly small");
+        }
+    }
+    editor->setSize(1200,750);
+
+    // The preset highlights and profile selection must control real hosted
+    // parameters, while a user's custom values are never reset by a resize.
+    juce::TextButton* modern=nullptr;
+    for(int i=0;i<editor->getNumChildComponents();++i)
+        if(auto* button=dynamic_cast<juce::TextButton*>(editor->getChildComponent(i)))
+            if(button->getButtonText()=="MODERN") modern=button;
+    if(!modern || !modern->onClick)
+        return fail("MODERN native preset button/callback is missing");
+    modern->onClick(); // direct GUI action; no synthetic DSP state
+    const auto& modernProfile=APEX::TuneLive::kVocalStyles[1];
+    if(!modern->getToggleState()
+       || std::abs(amount->getValue()-modernProfile.amount)>0.001f
+       || std::abs(plugin.getParameters()[APEX::TuneLive::Processor::kSpeed]
+                  ->getValue()-modernProfile.retune)>0.001f)
+        return fail("MODERN visual preset failed to drive hosted parameters");
+    plugin.getParameters()[APEX::TuneLive::Processor::kSpeed]
+          ->setValueNotifyingHost(0.37f); // changed by host; now custom
+    editor->setSize(960,600);
+    editor->setSize(1200,750);
+    if(std::abs(plugin.getParameters()[APEX::TuneLive::Processor::kSpeed]
+                ->getValue()-0.37f)>0.001f)
+        return fail("GUI rescaling changed artist's custom automated setting");
 
     // Force precise Hard Tune in the JUCE host, not just in the portable
     // processor tester. In particular Flex Tune must be zero here.
