@@ -2,6 +2,7 @@
 
 #include "../../../Source/Automation/AutomationParameterRegistryCore.h"
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
+#include "../../../Source/Automation/AutomationArrangementBridgeCore.h"
 #include "../../../Source/Automation/AutomationModeStateCore.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/Automation/AutomationEvaluatorCore.h"
@@ -6515,6 +6516,79 @@ public:
 };
 static AutomationV2RecorderLaneCowCallbackGauntletTests
     automationV2RecorderLaneCowCallbackGauntletTests;
+
+/**
+ * A real ArrangementBridge send/bypass edit (not just the low-level store)
+ * must preserve all PPQ lane values used by an already pinned audio block.
+ * Also exercises time conversions at 44.1/48 kHz and edit/remove paths.
+ */
+class AutomationV2ArrangementBridgeCallbackIsolationTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ArrangementBridgeCallbackIsolationTests()
+        : juce::UnitTest("automation.v2-arrangement-send-callback-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Bridge = apex::automation::AutomationArrangementBridge;
+        using Store = apex::automation::AutomationLaneStore;
+        const juce::String track("V2-RT-SEND-BRIDGE-20261014");
+        const juce::String send("V2-RT-SEND-BUS");
+        auto& bridge = Bridge::getInstance();
+        auto& store = Store::getInstance();
+        const auto id = Bridge::sendBypassID(track, send);
+
+        bridge.addSendBypassBreakpoint(track, send, 0.0, false, 44100.0, 120.0);
+        const auto before = store.findLaneRT(id);
+        expect(before != nullptr);
+        if (before == nullptr) return;
+        const auto original = before->getSnapshot();
+        expect(original != nullptr && original->size() == 1);
+        if (original == nullptr || original->size() != 1) return;
+
+        beginTest("Arrangement send add/move/remove keeps the callback's curve immutable");
+        {
+            Store::ScopedRtPin audioCallback(store);
+            bridge.addSendBypassBreakpoint(track, send, 128.0, true, 44100.0, 120.0);
+            bridge.moveSendBypassBreakpoint(track, send, 1, 256.0,
+                                            true, 48000.0, 120.0);
+            bridge.removeSendBypassBreakpoint(track, send, 0);
+            const auto pinnedLane = store.findLaneRT(id);
+            expect(pinnedLane == before);
+            if (pinnedLane != nullptr)
+            {
+                const auto oldPoints = pinnedLane->getSnapshot();
+                expect(oldPoints != nullptr && oldPoints->size() == 1);
+                if (oldPoints != nullptr && oldPoints->size() == 1)
+                {
+                    expectWithinAbsoluteError(oldPoints->front().timePPQ, 0.0, 1.0e-9);
+                    expectWithinAbsoluteError(oldPoints->front().normalizedValue,
+                                              0.0f, 1.0e-5f);
+                }
+            }
+        }
+
+        beginTest("Next callback gets the final 48 kHz bridge edit");
+        const auto updated = store.findLaneRT(id);
+        expect(updated != nullptr && updated != before);
+        if (updated != nullptr)
+        {
+            const auto points = updated->getSnapshot();
+            expect(points != nullptr && points->size() == 1);
+            if (points != nullptr && points->size() == 1)
+            {
+                expectWithinAbsoluteError(points->front().timePPQ,
+                                          256.0 / 48000.0 * 2.0, 1.0e-9);
+                expectWithinAbsoluteError(points->front().normalizedValue,
+                                          1.0f, 1.0e-5f);
+            }
+        }
+        store.removeLane(id); // return global singleton to its prior shape
+    }
+};
+static AutomationV2ArrangementBridgeCallbackIsolationTests
+    automationV2ArrangementBridgeCallbackIsolationTests;
 
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
