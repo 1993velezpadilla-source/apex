@@ -39,6 +39,8 @@ public:
             auto& target=newEdges.back();
             target.id=edge.id;
             target.delaySamples=edge.delaySamples;
+            target.sourceOutputLatency=edge.sourceOutputLatency;
+            target.destinationArrivalLatency=edge.destinationArrivalLatency;
 
             if(oldBank!=nullptr && reusableIds!=nullptr &&
                oldBank->channels_==channels &&
@@ -46,7 +48,9 @@ public:
                    !=reusableIds->end()) {
                 for(const auto& old:oldBank->edges_) {
                     if(old.id==edge.id &&
-                       old.delaySamples==edge.delaySamples) {
+                       old.delaySamples==edge.delaySamples &&
+                       old.sourceOutputLatency==edge.sourceOutputLatency &&
+                       old.destinationArrivalLatency==edge.destinationArrivalLatency) {
                         target.line=old.line;
                         break;
                     }
@@ -124,6 +128,11 @@ private:
     struct EdgeDelay {
         std::string id;
         int delaySamples=0;
+        // Preserve delay history only when the absolute sample timeline on
+        // BOTH sides of the edge is unchanged. Equal compensation deltas do
+        // not imply equal source timing (e.g. 32/48 -> 48/64 samples).
+        int sourceOutputLatency=0;
+        int destinationArrivalLatency=0;
         std::shared_ptr<PluginParallelDryDelayResearchCore> line;
     };
     struct LocalInputDelay {
