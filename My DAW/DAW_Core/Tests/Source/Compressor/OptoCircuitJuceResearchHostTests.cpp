@@ -972,6 +972,58 @@ public:
         }
 #endif
 
+        beginTest("Gain-only QuickSend republish retains PDC generation, latency changes invalidate it");
+        {
+            using Owner=DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore;
+            DAW::RoutingSnapshot graph;
+            graph.version=901;
+            graph.nodes={
+                {"voice","voice",DAW::RoutingNodeType::Track,true},
+                {"bus","bus",DAW::RoutingNodeType::Bus,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.processingOrder={"voice","bus","master"};
+            DAW::RoutingSnapshot::EdgeSnapshot dry,send,wet;
+            dry.id="direct";dry.sourceNodeId="voice";
+            dry.destNodeId="master";dry.type=DAW::ConnectionType::Direct;
+            send.id="send";send.sourceNodeId="voice";
+            send.destNodeId="bus";send.type=DAW::ConnectionType::Send;
+            wet.id="wet";wet.sourceNodeId="bus";
+            wet.destNodeId="master";wet.type=DAW::ConnectionType::Direct;
+            graph.edges={dry,send,wet};
+            std::map<DAW::TrackID,int> latencies={{"voice",32},{"bus",16}};
+            Owner owner;
+            expect(owner.publishPrepared(graph,&latencies,2,48000.0));
+            expectEquals(owner.latestPublicationOnControlThread(),
+                         static_cast<std::uint64_t>(1));
+            graph.edges[1].gain=.25f;
+            // RoutingGraph republishes gain without increasing version.
+            expect(owner.publishPrepared(graph,&latencies,2,48000.0));
+            expectEquals(owner.latestPublicationOnControlThread(),
+                         static_cast<std::uint64_t>(1));
+            // A new insertion latency changes absolute source timing even
+            // when direct-route PDC compensation is still exactly 16.
+            latencies["voice"]=48;
+            expect(owner.publishPrepared(graph,&latencies,2,48000.0));
+            expectEquals(owner.latestPublicationOnControlThread(),
+                         static_cast<std::uint64_t>(2));
+            {
+                auto prepared=owner.readRealtime();
+                expectEquals(prepared->dispatch.edgeDelay(0),16);
+                float l[32]{},r[32]{};
+                float* pair[]={l,r};
+                expect(prepared->dispatch.processEdge(
+                    graph.version,0,pair,2,32));
+                for(int n=0;n<32;++n)
+                    expect(l[n]==0.0f && r[n]==0.0f);
+            }
+            expectEquals(owner.collectRetiredOnControlThread(),
+                         static_cast<std::size_t>(1));
+            graph.edges[1].retiring=true;
+            auto newest=owner.readRealtime();
+            expect(!Owner::sameProgrammeRoutingRealtime(
+                graph,newest->graph));
+        }
+
         beginTest("Control-published RoutingSnapshot and PDC bank remain coherent across concurrent generations");
         {
             using Owner=DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore;
