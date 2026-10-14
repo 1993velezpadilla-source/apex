@@ -415,6 +415,64 @@ public:
             }
         }
 
+        beginTest("Actual host stereo dry-PDC parity across four processing entrypoints");
+        // Normal audio, first-slot MIDI, explicit sidechain and automation
+        // unsliced paths all call the same PDC-enabled host mixing contract.
+        // Uneven 31-frame callbacks also exercise ring wrap independently
+        // of the configured host block length.
+        for(const double sr:{44100.0,48000.0}) {
+            for(const int frames:{31,64,128}) {
+                for(int mode=0;mode<4;++mode) {
+                    DAW::PluginChainCore chain;
+                    chain.prepare(sr,frames);
+                    expectEquals(chain.appendPluginInstanceForTesting(
+                        std::make_unique<ExactHostDelayResearchPlugin>(32)),0);
+                    chain.setSlotMix(0,.5f);
+                    chain.setChainOutputMix(.5f);
+                    constexpr int total=512;
+                    constexpr double factor=1.0+0.7071067811865475244;
+                    juce::MidiBuffer midi;
+                    for(int start=0;start<total;start+=frames) {
+                        const int count=std::min(frames,total-start);
+                        juce::AudioBuffer<float> audio(2,count);
+                        for(int n=0;n<count;++n) {
+                            const int at=start+n;
+                            audio.setSample(0,n,static_cast<float>(
+                                .24*std::sin(.029*at)+.07*std::cos(.091*at)));
+                            audio.setSample(1,n,static_cast<float>(
+                                -.19*std::cos(.037*at)));
+                        }
+                        switch(mode) {
+                            case 0: chain.processBlock(audio,count);break;
+                            case 1: chain.processBlockWithMidi(audio,midi,count);break;
+                            case 2: {
+                                juce::AudioBuffer<float> sidechain(2,count);
+                                sidechain.clear();
+                                chain.processBlockWithSidechain(audio,sidechain,count);
+                                break;
+                            }
+                            default:
+                                chain.processBlockWithAutomation(
+                                    audio,nullptr,nullptr,DAW::TrackID{},
+                                    nullptr,start,sr,120.0,count);
+                                break;
+                        }
+                        for(int n=0;n<count;++n) {
+                            const int at=start+n,src=at-32;
+                            const double l=src<0?0.0:factor*(
+                                .24*std::sin(.029*src)+.07*std::cos(.091*src));
+                            const double r=src<0?0.0:
+                                factor*(-.19*std::cos(.037*src));
+                            expectWithinAbsoluteError(
+                                static_cast<double>(audio.getSample(0,n)),l,3.e-5);
+                            expectWithinAbsoluteError(
+                                static_cast<double>(audio.getSample(1,n)),r,3.e-5);
+                        }
+                    }
+                }
+            }
+        }
+
         beginTest("Real PluginChainCore clears slot+chain dry FIFOs on reset");
         for(const double rate:{44100.0,48000.0}) {
             DAW::PluginChainCore chain;
