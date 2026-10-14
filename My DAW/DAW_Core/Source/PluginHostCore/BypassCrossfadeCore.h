@@ -54,6 +54,11 @@ public:
     void reset() noexcept
     {
         progress_ = targetBypassed_.load(std::memory_order_relaxed) ? fadeSamples_ : 0;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // The plugin's own reset clears its 32-sample FIFO; its host-side
+        // parallel dry FIFO must reset on the same transport boundary.
+        dryDelay_.reset();
+#endif
     }
 
     void setTargetBypassed(bool bypassed) noexcept
