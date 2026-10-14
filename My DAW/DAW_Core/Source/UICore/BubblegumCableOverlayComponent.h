@@ -224,7 +224,8 @@ private:
         // early at "sourceId.isEmpty()" — covers full-matrix sends from any track.
         if (conn && bgV2_ && bgV2_->routingGraph)
         {
-            const bool isSend   = (conn->type == DAW::ConnectionType::Send);
+            const bool isSend   = (conn->type == DAW::ConnectionType::Send
+                                    || conn->type == DAW::ConnectionType::PreSend);
             const bool isDirect = (conn->type == DAW::ConnectionType::Direct);
             const bool isSC     = (conn->type == DAW::ConnectionType::Sidechain);
             if ((isSend || isDirect || isSC) && bgV2_->sourceSync.getSourceTrackId().isEmpty())
