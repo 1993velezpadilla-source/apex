@@ -172,17 +172,40 @@ public:
                 probe.processBlock(wet,midi);
                 if(start>=64 && std::abs(wet.getSample(0,0))>.001f)
                     nonSilentWet=true;
+
+                // Preserve the real FIR wet output BEFORE parallel mixing.
+                // A linear-phase 65-tap FIR has GROUP DELAY of 32 native
+                // samples for two transformer stages; group delay is NOT
+                // an onset gate. FIR pre-ringing can produce real wet audio
+                // during samples 0..31, even when the dry delay is exact.
+                juce::AudioBuffer<float> unblendedWet(2,block);
+                for(int ch=0;ch<2;++ch)
+                    unblendedWet.copyFrom(ch,0,wet,ch,0,block);
+
                 DAW::PluginSlotMixCore::apply(
                     slotDry,wet,0.5f,DAW::SlotMixCurve::EqualPower,block);
                 DAW::PluginSlotMixCore::apply(
                     chainDry,wet,0.5f,DAW::SlotMixCurve::EqualPower,block);
+
+                constexpr double equalPower=0.7071067811865475244;
                 for(int i=0;i<block;++i) {
-                    const float actualL=wet.getSample(0,i);
-                    const float actualR=wet.getSample(1,i);
-                    expect(std::isfinite(actualL)&&std::isfinite(actualR));
-                    if(start+i<probe.getLatencySamples()) {
-                        expectWithinAbsoluteError(static_cast<double>(actualL),0.0,1.e-7);
-                        expectWithinAbsoluteError(static_cast<double>(actualR),0.0,1.e-7);
+                    for(int ch=0;ch<2;++ch) {
+                        const double unblended=unblendedWet.getSample(ch,i);
+                        const double delayedSlot=slotDry.getSample(ch,i);
+                        const double delayedChain=chainDry.getSample(ch,i);
+                        // Expected actual host mix law, with each external
+                        // dry branch delayed by the processor's PDC contract.
+                        const double afterSlot=equalPower*(delayedSlot+unblended);
+                        const double expected=equalPower*(delayedChain+afterSlot);
+                        const double actual=wet.getSample(ch,i);
+                        expect(std::isfinite(actual));
+                        expectWithinAbsoluteError(actual,expected,1.e-6);
+                        if(start+i<probe.getLatencySamples()) {
+                            // No premature dry leakage before the PDC point;
+                            // any early output is physical FIR pre-ringing.
+                            expectWithinAbsoluteError(
+                                actual,unblended*0.5,1.e-6);
+                        }
                     }
                 }
             }
