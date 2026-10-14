@@ -135,6 +135,17 @@ public:
                     juce::Colours::white.withAlpha(0.0f),
                     face.getCentreX(),face.getCentreY(),false));
         g.fillEllipse(face.reduced(9.0f));
+        // Machined face: concentric frost line and engraved radial index.
+        // The index follows the actual hosted parameter, not an animation.
+        g.setColour(juce::Colours::white.withAlpha(0.075f));
+        g.drawEllipse(face.reduced(13.0f),0.85f);
+        const float inner=radius*0.34f,outer=radius*0.68f;
+        g.setColour(juce::Colours::black.withAlpha(0.85f));
+        g.drawLine(cx+std::sin(angle)*inner+0.8f,cy-std::cos(angle)*inner+1.0f,
+                   cx+std::sin(angle)*outer+0.8f,cy-std::cos(angle)*outer+1.0f,4.2f);
+        g.setColour(juce::Colour::fromRGB(255,227,175));
+        g.drawLine(cx+std::sin(angle)*inner,cy-std::cos(angle)*inner,
+                   cx+std::sin(angle)*outer,cy-std::cos(angle)*outer,2.0f);
         const float tip=radius+4.5f;
         g.setColour(gold().withAlpha(0.20f));
         g.fillEllipse(cx+std::sin(angle)*tip-9.0f,
@@ -170,6 +181,20 @@ public:
             juce::Colour::fromRGB(68,47,35):juce::Colour::fromRGB(15,35,47),
             r.getTopLeft(),midnight(),r.getBottomRight(),false));
         g.fillRoundedRectangle(r,7.0f);
+        // Top glass catch-light and restrained illuminated metal sill.
+        g.setGradientFill(juce::ColourGradient(
+             juce::Colours::white.withAlpha(selected?0.17f:0.085f),
+             r.getX(),r.getY()+2.0f,
+             juce::Colours::white.withAlpha(0.0f),
+             r.getX(),r.getY()+17.0f,false));
+        g.fillRoundedRectangle(r.withHeight(17.0f),7.0f);
+        if(selected) {
+            g.setGradientFill(juce::ColourGradient(gold().withAlpha(0.82f),
+                 r.getCentreX(),r.getBottom()-3.0f,
+                 gold().withAlpha(0.0f),r.getX(),r.getBottom()-3.0f,false));
+            g.fillRoundedRectangle(r.getX()+14.0f,r.getBottom()-4.0f,
+                                   r.getWidth()-28.0f,1.5f,0.75f);
+        }
         g.setColour(accent.withAlpha(over||down?1.0f:(selected?0.95f:0.68f)));
         g.drawRoundedRectangle(r,7.0f,selected?2.0f:1.2f);
         if(selected) {
