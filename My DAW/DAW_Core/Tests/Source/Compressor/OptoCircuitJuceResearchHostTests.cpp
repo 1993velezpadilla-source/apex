@@ -123,6 +123,7 @@ public:
     void reset() override {for(auto& v:delay_)v.fill(0.f);index_=0;}
     void processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) override {
         if(b.getNumChannels()<2)return;
+        ++processCalls;
         float* l=b.getWritePointer(0);
         float* r=b.getWritePointer(1);
         for(int n=0;n<b.getNumSamples();++n) {
@@ -144,6 +145,7 @@ public:
     void changeProgramName(int,const juce::String&) override {}
     void getStateInformation(juce::MemoryBlock&) override {}
     void setStateInformation(const void*,int) override {}
+    int processCalls=0; // research test probe for actual 64-frame slicing
 private:
     std::array<std::array<float,32>,2> delay_{};
     std::size_t index_=0;
@@ -470,6 +472,76 @@ public:
                         }
                     }
                 }
+            }
+        }
+
+        beginTest("Moving slot-mix automation: 256 sample sliced callback matches four real 64 sample callbacks");
+        // This is the real AutomationSnapshot lane, not synthetic knob
+        // changes. The 256-frame host path MUST call the delay processor
+        // exactly 4 times (kAutomationSliceSamples=64); the reference host
+        // receives four genuine device callbacks of 64 frames.
+        for(const double rate:{44100.0,48000.0}) {
+            for(const int mode:{0,1,2}) { // no MIDI, MIDI, silent sidechain
+                const DAW::TrackID id("apex.opto.pdc.sliced");
+                DAW::AutomationSnapshot automation;
+                DAW::AutomationSnapshot::LaneSnapshot lane;
+                lane.trackId=id;
+                lane.parameterId=DAW::AutomationManagerCore::makePluginSlotMixId(0);
+                lane.enabled=true;
+                lane.points={{0,0.1f},{127,0.95f},{255,0.2f}};
+                automation.lanes.push_back(std::move(lane));
+
+                DAW::PluginChainCore sliced, reference;
+                sliced.prepare(rate,256);
+                reference.prepare(rate,64);
+                auto slicedPlugin=std::make_unique<ExactHostDelayResearchPlugin>();
+                auto refPlugin=std::make_unique<ExactHostDelayResearchPlugin>();
+                auto* probeSliced=slicedPlugin.get();
+                auto* probeRef=refPlugin.get();
+                expectEquals(sliced.appendPluginInstanceForTesting(
+                    std::move(slicedPlugin)),0);
+                expectEquals(reference.appendPluginInstanceForTesting(
+                    std::move(refPlugin)),0);
+                sliced.setChainOutputMix(.5f);
+                reference.setChainOutputMix(.5f);
+
+                juce::AudioBuffer<float> full(2,256),ref(2,256);
+                for(int n=0;n<256;++n) {
+                    full.setSample(0,n,static_cast<float>(
+                        .27*std::sin(.061*n)+.1*std::cos(.017*n)));
+                    full.setSample(1,n,static_cast<float>(
+                        -.21*std::cos(.042*n)));
+                }
+                for(int ch=0;ch<2;++ch)
+                    ref.copyFrom(ch,0,full,ch,0,256);
+                juce::MidiBuffer midi;
+                juce::AudioBuffer<float> sideFull(2,256),sideSmall(2,64);
+                sideFull.clear();sideSmall.clear();
+                sliced.processBlockWithAutomation(
+                    full,mode==1?&midi:nullptr,mode==2?&sideFull:nullptr,
+                    id,&automation,0,rate,120.0,256);
+                for(int start=0;start<256;start+=64) {
+                    float* channels[]={ref.getWritePointer(0)+start,
+                                       ref.getWritePointer(1)+start};
+                    juce::AudioBuffer<float> chunk(channels,2,64);
+                    reference.processBlockWithAutomation(
+                        chunk,mode==1?&midi:nullptr,
+                        mode==2?&sideSmall:nullptr,
+                        id,&automation,start,rate,120.0,64);
+                }
+                expectEquals(probeSliced->processCalls,4,
+                    "the 256 frame callback must be split into four");
+                expectEquals(probeRef->processCalls,4,
+                    "reference is four genuine 64-frame host blocks");
+                for(int ch=0;ch<2;++ch)
+                    for(int n=0;n<256;++n)
+                        expectWithinAbsoluteError(
+                            static_cast<double>(full.getSample(ch,n)),
+                            static_cast<double>(ref.getSample(ch,n)),2.e-6);
+                expectWithinAbsoluteError(
+                    static_cast<double>(sliced.getSlot(0)->getSlotMixNormalized()),
+                    static_cast<double>(reference.getSlot(0)->getSlotMixNormalized()),
+                    2.e-6);
             }
         }
 
