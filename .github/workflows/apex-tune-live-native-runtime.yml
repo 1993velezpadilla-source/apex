@@ -56,6 +56,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: APEX-TuneLive-Actual-GUI-Windows
-          path: APEX_Tune_Live_Actual_GUI_Windows.png
+          path: APEX_Tune_Live_Actual_GUI_Windows*.png
           if-no-files-found: error
           retention-days: 7
