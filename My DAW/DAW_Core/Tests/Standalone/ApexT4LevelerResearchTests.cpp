@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <utility>
 
 using namespace APEX::Compressor;
 static void near(double a,double b,double tolerance=2e-6) {
@@ -96,6 +97,55 @@ int main()
             near(a[i],c[i]);near(b[i],d[i]);
         }
         near(whole.getGainReductionDb(),parts.getGainReductionDb());
+    }
+    // Sample-rate correctness: the optical cell time constants are seconds,
+    // not a fixed 48k sample count. Compare physically equal 1.0 s exposure
+    // and 0.1/0.5/2.0 s recovery at 44.1k against 48k, rather than merely
+    // checking finite output at the alternate rate.
+    {
+        struct TimeProfile {
+            double exposureDb=0,release100msDb=0,
+                   release500msDb=0,release2000msDb=0;
+        };
+        const auto measure=[](int sampleRate) {
+            ApexT4LevelerResearchCore core;
+            core.prepare(sampleRate);
+            T4LevelerResearchParameters p;
+            p.peakReduction=83.0;
+            p.keyEmphasis=.15;
+            p.use6AQ5Driver=true;
+            core.setParameters(p);
+            std::vector<float> excited(static_cast<std::size_t>(sampleRate),.72f);
+            core.process(excited.data(),nullptr,sampleRate);
+            TimeProfile profile;
+            profile.exposureDb=core.getGainReductionDb();
+            const auto runSilence=[&](double seconds) {
+                const int frames=static_cast<int>(std::round(sampleRate*seconds));
+                std::vector<float> silent(static_cast<std::size_t>(frames),0.0f);
+                core.process(silent.data(),nullptr,frames);
+                return core.getGainReductionDb();
+            };
+            profile.release100msDb=runSilence(.1);
+            profile.release500msDb=runSilence(.4);
+            profile.release2000msDb=runSilence(1.5);
+            return profile;
+        };
+        const auto profile44=measure(44100),profile48=measure(48000);
+        assert(profile44.exposureDb>1 && profile48.exposureDb>1);
+        for(const auto pair:{
+                std::pair<double,double>{profile44.exposureDb,profile48.exposureDb},
+                {profile44.release100msDb,profile48.release100msDb},
+                {profile44.release500msDb,profile48.release500msDb},
+                {profile44.release2000msDb,profile48.release2000msDb}}) {
+            assert(std::isfinite(pair.first)&&std::isfinite(pair.second));
+            near(pair.first,pair.second,.25); // cross-rate optical tolerance
+        }
+        assert(profile44.release2000msDb<profile44.exposureDb);
+        assert(profile48.release2000msDb<profile48.exposureDb);
+        std::cout<<"44.1/48 kHz 6AQ5+T4 optical time-profile: exposure GR "
+                 <<profile44.exposureDb<<" / "<<profile48.exposureDb
+                 <<" dB, recovery(2s) "<<profile44.release2000msDb
+                 <<" / "<<profile48.release2000msDb<<" dB\\n";
     }
     // Path sanitizes invalid audio and invalid automated controls.
     {
