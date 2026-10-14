@@ -186,7 +186,9 @@ public:
         if(stereo.getNumChannels()!=2 || stereo.getNumSamples()<=0)
             return false;
         auto reader=graphPdcPreflight_.readRealtime();
-        if(!reader || reader->graph.version!=graph.version ||
+        if(!reader ||
+           !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
+               sameProgrammeRoutingRealtime(graph,reader->graph) ||
            edgePosition>=graph.edges.size())return false;
         return reader->dispatch.processEdge(
             graph.version,edgePosition,stereo.getArrayOfWritePointers(),2,
@@ -2182,10 +2184,10 @@ private:
         // exclusively performed by the control thread).
         auto stagedGraphReader=graphPdcPreflight_.readRealtime();
         const bool matches=stagedGraphReader &&
-            stagedGraphReader->graph.version==snap->version &&
             stagedGraphReader->sampleRate==sampleRate_ &&
-            stagedGraphReader->graph.nodes.size()==snap->nodes.size() &&
-            stagedGraphReader->graph.edges.size()==snap->edges.size() &&
+            stagedGraphReader->dispatch.channels()==2 &&
+            DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
+                sameProgrammeRoutingRealtime(*snap,stagedGraphReader->graph) &&
             graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)==
                 graphPdcLatencyRevision_.load(std::memory_order_acquire);
         if(matches)
