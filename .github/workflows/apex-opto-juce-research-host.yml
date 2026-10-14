@@ -6,12 +6,14 @@ on:
       - "My DAW/DAW_Core/Tests/APEXTests.jucer"
       - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
   push:
     paths:
       - ".github/workflows/apex-opto-juce-research-host.yml"
       - "My DAW/DAW_Core/Tests/APEXTests.jucer"
       - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
   workflow_dispatch:
 permissions:
   contents: read
@@ -35,7 +37,7 @@ jobs:
       - name: Verify pinned dependencies and generate JUCE test project
         run: .\Scripts\prepare_ci.ps1
       - name: Compile APEXTests and run opto host boundary gate
-        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Category APEX.OptoResearchHost -Seed 0xA20C108
+        run: .\Scripts\test_opto_juce_research_host.ps1 -Configuration Release
       - name: Preserve evidence
         if: always()
         uses: actions/upload-artifact@v4
