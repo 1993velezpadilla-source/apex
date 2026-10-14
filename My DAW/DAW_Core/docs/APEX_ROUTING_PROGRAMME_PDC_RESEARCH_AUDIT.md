@@ -106,3 +106,40 @@ This cannot be solved by direct-to-master-only PDC.
    arithmetic, not physical analogue accuracy.
 
 **No 1:1 sonic claim. Do not merge research host/PDC code into Release.**
+
+
+## AudioEngine integration — October 14 research gate
+
+The **real** `Source/AudioEngineCore/AudioEngine.h` has now gained a
+test-compiled / runtime opt-in experimental programme-PDC path:
+
+- **Build flag:** `APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT=1`
+  appears only in `Tests/APEXTests.jucer`. Ordinary APEX Desktop Release
+  remains on the original AudioEngine graph path and its MasterPdcCore.
+- **Runtime flag:** `setExperimentalGraphPdcRenderEnabledForTests(true)`.
+  Default is **false**, including in the JUCE research executable.
+- With explicit opt-in **and a matching prepared immutable generation**,
+  `processWithSnapshot` holds one RCU Reader through track, bus and
+  master routing, and prebound per-edge DSP processes audio on the
+  existing routes. Direct-to-master uses **either** experimental PDC
+  **or** existing MasterPdcCore, never both; pre-fader sends apply edge PDC
+  after the tap, and mixed-source tracks delay their own local clip/live
+  branch before summing incoming programme routes.
+- Any record-armed track triggers **whole-graph fallback** to legacy
+  monitored PDC (C6 bypass/reduced/full). A changed published chain
+  latency revision, invalid graph version, sample-rate mismatch or
+  missing prepared bank also triggers legacy fallback. The new route
+  output has no production option/UI to enable it.
+- JUCE test `AudioEngine research opt-in dispatch aligns direct + send +
+  bus exactly once` directly invokes the real engine's prepared edge
+  dispatcher with 32+16 sample source/bus inserts, verifying 44.1/48k
+  and 31/64/128-frame callbacks. This **does not yet certify** actual
+  track/aux playback through the complete AudioEngine, nor prove
+  click-free live edits: the whole-graph mode can only remain selected
+  for consistent *published* generations.
+
+**Important remaining issues:** production latency-map / graph publication
+must be transactional, bypass and feedback-cycle changes must preserve
+whole-graph consistency, sidechain histories are still indexed by
+destination in legacy AudioEngine, and setup/editing of new routes must
+not prepare DSP buffers on the audio callback. No ship/merge gate yet.
