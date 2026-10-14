@@ -26,7 +26,7 @@ $msbuild = Join-Path $vsHome[0] 'MSBuild\Current\Bin\amd64\MSBuild.exe'
 if (-not (Test-Path -LiteralPath $msbuild -PathType Leaf)) {
     throw "MSBuild.exe missing: $msbuild"
 }
-Write-Host "[opto-juce] Building focused APEXTests ($Configuration) — no VST3 fixtures."
+Write-Host "[opto-juce] Building focused APEXTests ($Configuration) - no VST3 fixtures."
 & $msbuild $solution '/t:Build' "/p:Configuration=$Configuration" '/p:Platform=x64' '/m' '/nr:false' '/nologo' '/v:minimal'
 if ($LASTEXITCODE -ne 0) {
     throw "Opto JUCE research MSBuild failed: $LASTEXITCODE"
