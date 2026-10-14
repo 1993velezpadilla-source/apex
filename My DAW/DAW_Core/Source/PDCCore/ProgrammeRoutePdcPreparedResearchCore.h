@@ -8,6 +8,7 @@
 #include "ProgrammeRoutePdcPlannerResearchCore.h"
 #include "../PluginHostCore/PluginParallelDryDelayResearchCore.h"
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,7 +17,15 @@ namespace DAW::PdcResearch {
 class ProgrammeRoutePdcPreparedResearchCore final {
 public:
     static constexpr std::size_t invalidIndex=static_cast<std::size_t>(-1);
-    bool prepare(const ProgrammeRoutePdcPlannerResearchCore& plan,int channels) {
+    // Optional oldBank/reusableIds are CONTROL-THREAD ONLY. The caller may
+    // reuse an edge's delay history only after proving its stable route ID,
+    // source, destination, type and tap point did not change. Reuse means
+    // the RT bank objects share one DSP ring but must NEVER have two
+    // simultaneously processing writers. Retired generations are held by
+    // the RCU publisher until all readers leave; no RT shared_ptr copies.
+    bool prepare(const ProgrammeRoutePdcPlannerResearchCore& plan,int channels,
+                 const ProgrammeRoutePdcPreparedResearchCore* oldBank=nullptr,
+                 const std::vector<std::string>* reusableIds=nullptr) {
         if(!plan.valid()||channels<1||channels>32)return false;
         std::vector<EdgeDelay> newEdges;
         std::vector<LocalInputDelay> newInputs;
@@ -30,7 +39,24 @@ public:
             auto& target=newEdges.back();
             target.id=edge.id;
             target.delaySamples=edge.delaySamples;
-            if(!target.line.prepare(channels,edge.delaySamples))return false;
+
+            if(oldBank!=nullptr && reusableIds!=nullptr &&
+               oldBank->channels_==channels &&
+               std::find(reusableIds->begin(),reusableIds->end(),edge.id)
+                   !=reusableIds->end()) {
+                for(const auto& old:oldBank->edges_) {
+                    if(old.id==edge.id &&
+                       old.delaySamples==edge.delaySamples) {
+                        target.line=old.line;
+                        break;
+                    }
+                }
+            }
+            if(!target.line) {
+                target.line=std::make_shared<PluginParallelDryDelayResearchCore>();
+                if(!target.line->prepare(channels,edge.delaySamples))
+                    return false;
+            }
         }
         for(const auto& node:plan.nodePlans()) {
             if(node.localInputDelay<0 ||
@@ -41,7 +67,8 @@ public:
             auto& target=newInputs.back();
             target.id=node.id;
             target.delaySamples=node.localInputDelay;
-            if(!target.line.prepare(channels,node.localInputDelay))return false;
+            target.line=std::make_shared<PluginParallelDryDelayResearchCore>();
+            if(!target.line->prepare(channels,node.localInputDelay))return false;
         }
         // Atomic with respect to the *control-thread* transaction: on
         // failed preparation, existing banks remain untouched. Caller MUST
@@ -53,8 +80,8 @@ public:
         return true;
     }
     void reset() noexcept {
-        for(auto& e:edges_)e.line.reset();
-        for(auto& n:localInputs_)n.line.reset();
+        for(auto& e:edges_)e.line->reset();
+        for(auto& n:localInputs_)n.line->reset();
     }
     std::size_t edgeCount() const noexcept {return edges_.size();}
     int channels() const noexcept {return channels_;}
@@ -79,13 +106,13 @@ public:
     bool processEdge(std::size_t index,float* const* data,
                      int channels,int samples) noexcept {
         if(index>=edges_.size()||!validBlock(data,channels,samples))return false;
-        edges_[index].line.process(data,channels,samples);
+        edges_[index].line->process(data,channels,samples);
         return true;
     }
     bool processLocalInput(std::size_t index,float* const* data,
                            int channels,int samples) noexcept {
         if(index>=localInputs_.size()||!validBlock(data,channels,samples))return false;
-        localInputs_[index].line.process(data,channels,samples);
+        localInputs_[index].line->process(data,channels,samples);
         return true;
     }
 private:
@@ -97,12 +124,12 @@ private:
     struct EdgeDelay {
         std::string id;
         int delaySamples=0;
-        PluginParallelDryDelayResearchCore line;
+        std::shared_ptr<PluginParallelDryDelayResearchCore> line;
     };
     struct LocalInputDelay {
         std::string id;
         int delaySamples=0;
-        PluginParallelDryDelayResearchCore line;
+        std::shared_ptr<PluginParallelDryDelayResearchCore> line;
     };
     std::vector<EdgeDelay> edges_;
     std::vector<LocalInputDelay> localInputs_;
