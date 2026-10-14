@@ -4,6 +4,8 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <memory>
+#include <algorithm>
+#include <vector>
 
 namespace apex::automation
 {
@@ -196,14 +198,31 @@ namespace apex::automation
         }
 
     private:
+        // Strong ownership of all pinned legacy maps avoids last-owner
+        // destruction in realtime when the UI rapidly registers/plugins
+        // unload and the old one-slot retirement owner is overwritten.
+        void collectRetiredParameterSnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if (retiredParamSnapshots_.begin(),
+                                       retiredParamSnapshots_.end(),
+                [] (const std::shared_ptr<const ParameterMap>& prior) noexcept
+                {
+                    return prior.use_count() == 1;
+                });
+            retiredParamSnapshots_.erase (end, retiredParamSnapshots_.end());
+        }
+
         // Copy-on-write publication (message thread only, registryLock held).
         // Copies only shared_ptrs — parameter objects are shared, and the
         // published map is never mutated in place.
         void publishLocked()
         {
             auto snap = std::make_shared<const ParameterMap> (parameters);
+            collectRetiredParameterSnapshotsLocked();
+            retiredParamSnapshots_.reserve (retiredParamSnapshots_.size() + 1);
             auto old = std::atomic_exchange_explicit (&published_, std::move (snap), std::memory_order_acq_rel);
-            retiredParamSnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
+            if (old != nullptr)
+                retiredParamSnapshots_.push_back (std::move (old));
         }
 
         ParameterMap parameters;
@@ -213,7 +232,7 @@ namespace apex::automation
 
         // Published immutable view for the audio thread.
         std::shared_ptr<const ParameterMap> published_;
-        std::shared_ptr<const ParameterMap> retiredParamSnapshot_;   // message-thread retire slot
+        std::vector<std::shared_ptr<const ParameterMap>> retiredParamSnapshots_;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationParameterRegistry)
     };
