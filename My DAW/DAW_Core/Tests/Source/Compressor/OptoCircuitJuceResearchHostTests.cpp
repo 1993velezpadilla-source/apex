@@ -342,8 +342,12 @@ public:
                     originalR[static_cast<std::size_t>(n)]=
                         static_cast<float>(.22*std::sin(.063*n));
                 }
-                constexpr double factor=2.0; // two equal-power half mixes of
-                // perfectly correlated 32-sample delayed wet and dry.
+                // Slot 50% equal-power gains sum to sqrt(2) when dry
+                // and wet are the SAME aligned audio. The chain 50% mix
+                // combines one dry input and that slot result, yielding
+                // (1+sqrt(2))/sqrt(2) ~= 1.7071, NOT 2.0.
+                // Requiring 2.0 was an incorrect test oracle, not DSP loss.
+                constexpr double factor=1.0+0.7071067811865475244;
                 for(int start=0;start<total;start+=frames) {
                     juce::AudioBuffer<float> audio(2,frames);
                     for(int n=0;n<frames;++n) {
