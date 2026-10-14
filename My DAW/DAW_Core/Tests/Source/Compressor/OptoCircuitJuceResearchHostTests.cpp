@@ -3,6 +3,7 @@
 // In particular, this is not the PR #103 OptoProcessor or its production DSP.
 #include <JuceHeader.h>
 #include "../../../Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
+#include "../../../Source/AutomationCore/PluginSlotMixCore.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -142,48 +143,61 @@ public:
             }
         }
 
-        beginTest("Host-style external 50% wet/dry references a delayed dry signal");
+        beginTest("Actual PluginSlotMixCore equal-power slot and chain need aligned dry");
         for(int block:{64,128}) {
             OptoCircuitJuceResearchProbe probe(true);
             APEX::Compressor::ApexOptoCircuitResearchParameters p;
             p.peakReduction=55.0;p.mix=1.0;
             probe.setResearchParameters(p);
             probe.prepareToPlay(sr,block);
-            TestHostDryDelay hostLeft,hostRight;
-            hostLeft.prepare(probe.getLatencySamples());
-            hostRight.prepare(probe.getLatencySamples());
+            TestHostDryDelay slotLeft,slotRight,chainLeft,chainRight;
+            for(auto* line:{&slotLeft,&slotRight,&chainLeft,&chainRight})
+                line->prepare(probe.getLatencySamples());
             bool nonSilentWet=false;
             for(int start=0;start<1024;start+=block) {
-                juce::AudioBuffer<float> buffer(2,block);
-                std::array<float,128> inL{},inR{};
+                juce::AudioBuffer<float> wet(2,block);
+                juce::AudioBuffer<float> slotDry(2,block);
+                juce::AudioBuffer<float> chainDry(2,block);
                 for(int i=0;i<block;++i) {
                     const int n=start+i;
-                    inL[static_cast<std::size_t>(i)]=static_cast<float>(
+                    const auto inL=static_cast<float>(
                         .4*std::sin(n*.031)+.04*std::cos(n*.119));
-                    inR[static_cast<std::size_t>(i)]=static_cast<float>(
-                        .3*std::cos(n*.023));
-                    buffer.setSample(0,i,inL[static_cast<std::size_t>(i)]);
-                    buffer.setSample(1,i,inR[static_cast<std::size_t>(i)]);
+                    const auto inR=static_cast<float>(.3*std::cos(n*.023));
+                    wet.setSample(0,i,inL); wet.setSample(1,i,inR);
+                    slotDry.setSample(0,i,slotLeft.process(inL));
+                    slotDry.setSample(1,i,slotRight.process(inR));
+                    chainDry.setSample(0,i,chainLeft.process(inL));
+                    chainDry.setSample(1,i,chainRight.process(inR));
                 }
-                probe.processBlock(buffer,midi);
+                probe.processBlock(wet,midi);
+                if(start>=64 && std::abs(wet.getSample(0,0))>.001f)
+                    nonSilentWet=true;
+                DAW::PluginSlotMixCore::apply(
+                    slotDry,wet,0.5f,DAW::SlotMixCurve::EqualPower,block);
+                DAW::PluginSlotMixCore::apply(
+                    chainDry,wet,0.5f,DAW::SlotMixCurve::EqualPower,block);
                 for(int i=0;i<block;++i) {
-                    const float wetL=buffer.getSample(0,i);
-                    const float wetR=buffer.getSample(1,i);
-                    const float delayedL=hostLeft.process(inL[static_cast<std::size_t>(i)]);
-                    const float delayedR=hostRight.process(inR[static_cast<std::size_t>(i)]);
-                    const float externalMixL=.5f*delayedL+.5f*wetL;
-                    const float externalMixR=.5f*delayedR+.5f*wetR;
-                    expect(std::isfinite(externalMixL) && std::isfinite(externalMixR));
-                    // This is the host compensation contract to enforce in
-                    // PluginChainCore BEFORE a real x4 insert is registered.
-                    if(start+i<32) {
-                        expectWithinAbsoluteError(static_cast<double>(externalMixL),0.0,1.e-7);
-                        expectWithinAbsoluteError(static_cast<double>(externalMixR),0.0,1.e-7);
+                    const float actualL=wet.getSample(0,i);
+                    const float actualR=wet.getSample(1,i);
+                    expect(std::isfinite(actualL)&&std::isfinite(actualR));
+                    if(start+i<probe.getLatencySamples()) {
+                        expectWithinAbsoluteError(static_cast<double>(actualL),0.0,1.e-7);
+                        expectWithinAbsoluteError(static_cast<double>(actualR),0.0,1.e-7);
                     }
-                    if(start+i>64 && std::abs(wetL)>.001f)nonSilentWet=true;
                 }
             }
-            expect(nonSilentWet,"test DSP must produce a non-silent wet path");
+            expect(nonSilentWet,"Research circuit must produce nonzero wet audio");
+        }
+
+        beginTest("Negative control: unaligned PluginSlotMixCore leaks early dry signal");
+        {
+            juce::AudioBuffer<float> zeroWet(2,64),uncompensatedDry(2,64);
+            zeroWet.clear();uncompensatedDry.clear();
+            uncompensatedDry.setSample(0,0,1.0f);
+            DAW::PluginSlotMixCore::apply(
+                uncompensatedDry,zeroWet,.5f,DAW::SlotMixCurve::EqualPower,64);
+            expect(std::abs(zeroWet.getSample(0,0))>0.5f,
+                   "Undelayed dry leaks before x4 wet. Main host still needs fix.");
         }
 
         beginTest("Changing quality during prepare updates latency without callback toggles");
