@@ -349,7 +349,17 @@ namespace apex::automation
          * strict block-wide consistency must pin one snapshot per block.
          * Existing AutomationLane shared_ptrs are never mutated in-place.
          */
-        bool replacePointsBatch (std::vector<BatchReplacement> replacements)
+        // Bridge-specific upsert: the target bank may not have PPQ mirrors
+        // yet. Validating and creating every missing lane in one transaction
+        // prevents a failed batch from leaving phantom empty lanes or
+        // publishing intermediate generations to an in-flight DSP callback.
+        bool replaceOrCreatePointsBatch (std::vector<BatchReplacement> replacements)
+        {
+            return replacePointsBatch(std::move(replacements), true);
+        }
+
+        bool replacePointsBatch (std::vector<BatchReplacement> replacements,
+                                 bool createMissingLanes = false)
         {
             if (replacements.empty() || replacements.size() > 128)
                 return false;
@@ -376,12 +386,15 @@ namespace apex::automation
             }
 
             const juce::ScopedLock sl(mapLock);
-            for (const auto& replacement : replacements)
-                if (lanes.find(replacement.id) == lanes.end())
-                    return false;
+            if (!createMissingLanes)
+                for (const auto& replacement : replacements)
+                    if (lanes.find(replacement.id) == lanes.end())
+                        return false;
 
-            // All allocation/validation happens before touching lanes. One
-            // immutable map copy, one atomic publication, one generation bump.
+            // Validation completes before touching the live map. New targets
+            // (when permitted) exist only inside the staged next map until
+            // its ONE atomic publication; failures leave lanes untouched.
+            // One immutable map copy, one atomic publication, one bump.
             LaneMap next = lanes;
             for (auto& [id, lane] : prepared)
                 next[id] = std::move(lane);
