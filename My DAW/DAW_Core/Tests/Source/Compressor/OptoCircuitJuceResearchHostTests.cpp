@@ -825,7 +825,7 @@ public:
                 expectEquals(dispatcher.edgeDelay(1),-1);
                 expect(!dispatcher.processEdge(207,0,pointers,2,1),
                        "old immutable snapshot generation must not dispatch");
-                graph.processingOrder={"aux-node","vocal-node","master"};
+                graph.processingOrder={"master","vocal-node","aux-node"};
                 graph.version=209;
                 expect(!dispatcher.prepare(graph,&latencies,2));
                 expectEquals(dispatcher.version(),static_cast<std::uint64_t>(208));
