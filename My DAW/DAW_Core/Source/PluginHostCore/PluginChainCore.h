@@ -1256,7 +1256,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(buffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
@@ -1347,7 +1351,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(buffer, numSamples);
 
         bool firstSlot = true;
@@ -1424,7 +1432,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(mainBuffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
@@ -2376,6 +2388,10 @@ private:
 
         for (int ch = 0; ch < channels; ++ch)
             chainInputBuffer_.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        chainDryPdc_.process(chainInputBuffer_.getArrayOfWritePointers(),
+                             channels,numSamples);
+#endif
     }
 
     bool validateProcessBuffer(const juce::AudioBuffer<float>& buffer, int numSamples) const
@@ -2521,7 +2537,11 @@ private:
     {
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap.slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(mainBuffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
