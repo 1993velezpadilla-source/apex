@@ -775,7 +775,9 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 3.0, 0.8f));
         recorder.drainForTests();
 
-        auto snap = touched->getSnapshot();
+        // Touch End publishes a NEW immutable lane; the held `touched` is
+        // intentionally the earlier generation. Re-fetch the current lane.
+        auto snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "Touch ends with a recorded lane");
         if (snap == nullptr || snap->empty())
             return;
@@ -983,7 +985,7 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 1.5, 0.35f));
         expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 1.75, 0.35f));
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "second-pass lane persisted");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 1.5),
@@ -1100,7 +1102,7 @@ public:
                 expect(enqueue(AutomationGestureQueue::EventKind::GestureEnd, 5.0, 0.25f));
             recorder.drainForTests();
 
-            snap = lane->getSnapshot();
+            snap = lanes.findLane(id)->getSnapshot();
             expect(snap != nullptr && !snap->empty(), "second take recorded");
             if (snap == nullptr || snap->empty()) return;
             expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
@@ -1394,7 +1396,7 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
                        3.25, 0.6f, ChangeSource::User));
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "new session records");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 3.25),
@@ -1486,7 +1488,7 @@ public:
         clock.publishFromAudioThread(4.0, 0.001, true);
         param->dispatchPendingNotifications(0.4f, ChangeSource::User);
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "lane retained after release");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
@@ -1578,7 +1580,7 @@ public:
         expectWithinAbsoluteError(param->getCapturedGestureEndPPQ(), 4.0,
                                   1.0e-8, "release PPQ is not notification PPQ");
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "release points committed");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.0),
