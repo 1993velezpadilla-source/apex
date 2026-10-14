@@ -120,6 +120,62 @@ int main(){
         }
         near(continuous.getGainReductionDb(),partitioned.getGainReductionDb(),1.e-8);
     }
+    // Dedicated 44.1 kHz x4 tests: 32 samples are still 32 samples,
+    // but represent ~0.726 ms (not ~0.667 ms as at 48 kHz).
+    for(const auto frames:{64,128}) {
+        for(const bool bypass:{false,true}) {
+            constexpr int sampleRate=44100;
+            ApexOptoCircuitPathResearchCore processor;
+            processor.prepare(sampleRate,true);
+            assert(processor.latencySamples()==32);
+            ApexOptoCircuitResearchParameters p;
+            p.peakReduction=95.0;
+            p.mix=bypass?1.0:0.0;
+            p.bypass=bypass;
+            processor.setParameters(p);
+            std::vector<float> l(511),r(511);
+            for(int i=0;i<511;++i) {
+                l[static_cast<std::size_t>(i)]=static_cast<float>(
+                    .41*std::sin(i*.071)+.07*std::cos(i*.047));
+                r[static_cast<std::size_t>(i)]=static_cast<float>(
+                    .20*std::cos(i*.093));
+            }
+            const auto dryL=l,dryR=r;
+            for(int offset=0;offset<511;offset+=frames)
+                processor.process(l.data()+offset,r.data()+offset,
+                                  std::min(frames,511-offset));
+            for(int i=0;i<511;++i) {
+                near(l[static_cast<std::size_t>(i)],
+                     i<32?0.0:dryL[static_cast<std::size_t>(i-32)],1.e-6);
+                near(r[static_cast<std::size_t>(i)],
+                     i<32?0.0:dryR[static_cast<std::size_t>(i-32)],1.e-6);
+            }
+        }
+        // Wet mode: block slicing must not change the electrical/optical
+        // state or waveform at the lower sample rate.
+        ApexOptoCircuitPathResearchCore contiguous,sliced;
+        contiguous.prepare(44100,true);
+        sliced.prepare(44100,true);
+        ApexOptoCircuitResearchParameters params;
+        params.peakReduction=72;params.gainDb=2;params.mix=.65;params.emphasis=.31;
+        contiguous.setParameters(params);sliced.setParameters(params);
+        std::vector<float> a(4096),b(4096),c(4096),d(4096);
+        for(int i=0;i<4096;++i) {
+            a[i]=c[i]=static_cast<float>(.31*std::sin(i*.029));
+            b[i]=d[i]=static_cast<float>(.25*std::cos(i*.038));
+        }
+        contiguous.process(a.data(),b.data(),4096);
+        for(int pos=0;pos<4096;pos+=frames)
+            sliced.process(c.data()+pos,d.data()+pos,
+                           std::min(frames,4096-pos));
+        for(int i=0;i<4096;++i) {
+            near(a[static_cast<std::size_t>(i)],c[static_cast<std::size_t>(i)],1.e-6);
+            near(b[static_cast<std::size_t>(i)],d[static_cast<std::size_t>(i)],1.e-6);
+        }
+        near(contiguous.getGainReductionDb(),sliced.getGainReductionDb(),1.e-8);
+    }
+    std::cout<<"44.1 kHz x4 stereo dry/bypass, latency and wet slicing PASS\\n";
+
     // Mono, nonfinite source and accelerated sample rates do not crash.
     for(const auto sampleRate:{44100.0,48000.0,96000.0,192000.0}){
         ApexOptoCircuitPathResearchCore path;path.prepare(sampleRate);
