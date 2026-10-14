@@ -262,7 +262,9 @@ public:
         }
         if (changed)
         {
-            graph.publishSnapshotOnly();
+            // Pre/post changes alter cable presentation as well as DSP routing.
+            // Publish the audio snapshot AND invalidate UI listeners immediately.
+            graph.notifyGraphChanged();
             DBG("SET pre-fader sends: source=" << sourceId << " preFader=" << (int)preFader);
         }
     }
@@ -318,7 +320,9 @@ public:
         }
         if (changed)
         {
-            graph.publishSnapshotOnly();
+            // Pre/post changes alter cable presentation as well as DSP routing.
+            // Publish the audio snapshot AND invalidate UI listeners immediately.
+            graph.notifyGraphChanged();
             DBG("SET send pre-fader: source=" << sourceId << " target=" << targetId
                 << " preFader=" << (int)preFader);
         }
