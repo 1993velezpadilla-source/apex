@@ -13,6 +13,7 @@
 #include "ProgrammePdcRcuPublisherResearchCore.h"
 #include "ProgrammeRoutePdcJuceDispatchResearchCore.h"
 #include <cstdint>
+#include <cmath>
 #include <map>
 #include <memory>
 
@@ -23,24 +24,32 @@ public:
         RoutingSnapshot graph;
         ProgrammeRoutePdcJuceDispatchResearchCore dispatch;
         std::uint64_t publicationGeneration=0;
+        double sampleRate=0.0;
     };
     using Reader=ProgrammePdcRcuPublisherResearchCore<PreparedGeneration>::Reader;
     // Called by ONE serialized control thread only. Graph copy, validation,
     // all DSP allocation, mapping, and publication happen off audio thread.
     bool publishPrepared(const RoutingSnapshot& graph,
                          const std::map<TrackID,int>* chainLatencies,
-                         int channels) {
+                         int channels,double sampleRate=48000.0) {
+        if(!std::isfinite(sampleRate)||sampleRate<8000.0||
+           sampleRate>384000.0)return false;
         auto next=std::make_unique<PreparedGeneration>();
+        next->sampleRate=sampleRate;
         next->graph=graph;
         // Serialized control thread reads the currently owned generation
         // without acquiring an artificial realtime Reader. Otherwise each
         // publication would prevent its own retirement collection, eventually
         // exhausting the 64-generation budget even when audio is stopped.
         // Metadata stays immutable; DSP state has a single realtime writer.
+        // A sample-rate reprepare is a different timeline. Retaining the
+        // previous ring across 44.1 <-> 48 kHz would replay stale samples,
+        // even if the route ID and integer delay both remained unchanged.
         const auto* previous=publisher_.activeStateControlOnly();
+        const auto* reusable=previous && previous->sampleRate==sampleRate
+            ? &previous->dispatch : nullptr;
         if(!next->dispatch.prepare(
-                next->graph,chainLatencies,channels,
-                previous?&previous->dispatch:nullptr))
+                next->graph,chainLatencies,channels,reusable))
             return false;
         if(publicationGeneration_==UINT64_MAX)return false;
         next->publicationGeneration=publicationGeneration_+1;
