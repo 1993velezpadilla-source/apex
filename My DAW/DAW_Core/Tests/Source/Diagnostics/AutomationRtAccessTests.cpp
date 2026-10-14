@@ -5912,6 +5912,66 @@ public:
 };
 static AutomationV2NativeMixerGlobalPinTests automationV2NativeMixerGlobalPinTests;
 
+/**
+ * Legacy sample-domain manager and modern PPQ now both retain old immutable
+ * generations on the control thread. Rapid GUI publishes must not transfer
+ * legacy snapshot destruction to the active audio callback.
+ */
+class AutomationV2LegacySnapshotRetirementTests final : public juce::UnitTest
+{
+public:
+    AutomationV2LegacySnapshotRetirementTests()
+        : juce::UnitTest("automation.v2-legacy-snapshot-control-thread-reclamation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        DAW::AutomationManagerCore manager;
+        const auto param = juce::String(DAW::AutomationLaneCore::trackVolumeParameterId);
+        const juce::String track("VOICE-LEGACY-RETIRE");
+
+        beginTest("Multiple manager publishes keep pinned old generation alive");
+        auto pinned = manager.getSnapshotPublisher().get();
+        expect(pinned != nullptr);
+        if (pinned == nullptr) return;
+        std::weak_ptr<const DAW::AutomationSnapshot> oldest(pinned);
+        const auto oldVersion = pinned->version;
+
+        manager.addPoint(track, param, 0, 0.25f);
+        manager.addPoint(track, param, 128, 0.50f);
+        manager.addPoint(track, param, 256, 0.75f);
+
+        const auto latest = manager.getSnapshotPublisher().get();
+        expect(latest != nullptr);
+        if (latest != nullptr)
+        {
+            expect(latest != pinned);
+            expect(latest->version > oldVersion);
+            expectEquals((int)latest->lanes.size(), 1);
+        }
+        expect(!oldest.expired());
+        pinned.reset(); // simulation: RT block ends after three UI publishes
+        expect(!oldest.expired(),
+               "control publisher must retain last ownership after audio releases it");
+
+        beginTest("Next control-plane publish reclaims unpinned old snapshot");
+        manager.addPoint(track, param, 384, 0.90f);
+        expect(oldest.expired(),
+               "only the control thread should release a superseded snapshot");
+
+        beginTest("Repeated audio reads of legacy snapshots do not allocate");
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            for (int i = 0; i < 512; ++i)
+            {
+                auto view = manager.getSnapshotPublisher().get();
+                juce::ignoreUnused(view);
+            }
+        }
+    }
+};
+static AutomationV2LegacySnapshotRetirementTests automationV2LegacySnapshotRetirementTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:

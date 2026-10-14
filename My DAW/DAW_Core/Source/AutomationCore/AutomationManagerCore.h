@@ -1283,7 +1283,16 @@ inline void AutomationSnapshotPublisherCore::publish(const AutomationManagerCore
         snap->lanes.push_back(std::move(laneSnap));
     }
 
-    std::atomic_store_explicit(&snapshot_, snap, std::memory_order_release);
+    // Reserve control-thread retention BEFORE the RT-visible exchange:
+    // a GUI allocation failure must not publish a snapshot without being
+    // able to keep the previous one off the audio thread.
+    collectRetiredSnapshotsOnControlThread();
+    retiredSnapshots_.reserve(retiredSnapshots_.size() + 1);
+    std::shared_ptr<const AutomationSnapshot> published = std::move(snap);
+    auto prior = std::atomic_exchange_explicit(
+        &snapshot_, std::move(published), std::memory_order_acq_rel);
+    if (prior != nullptr)
+        retiredSnapshots_.push_back(std::move(prior));
 }
 
 } // namespace DAW
