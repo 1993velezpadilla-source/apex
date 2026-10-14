@@ -51,6 +51,11 @@
 
 // Audio-thread logging must be OFF in Release builds.
 // Set to 1 only for targeted debug sessions, then revert to 0.
+// Test-only staging. This preflight NEVER modifies render audio.
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+#include "../PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
+#endif
+
 #ifndef APEX_AUDIO_DEBUG_LOGS
 #define APEX_AUDIO_DEBUG_LOGS 0
 #endif
@@ -139,6 +144,33 @@ public:
         routing_    = routing;
         audioFiles_ = audioFiles;
     }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // CONTROL THREAD ONLY. Allocate and publish an immutable graph PDC plan.
+    // This does not enable the planner on the audio route.
+    bool stageProgrammeGraphPdcPreflightOnControlThread(
+        const RoutingSnapshot& graph,const std::map<TrackID,int>* latencies,
+        int channels,double sampleRate)
+    {
+        return graphPdcPreflight_.publishPrepared(
+            graph,latencies,channels,sampleRate);
+    }
+    struct GraphPdcPreflightCounters {
+        std::uint64_t matchingBlocks=0;
+        std::uint64_t rejectedBlocks=0;
+    };
+    GraphPdcPreflightCounters getGraphPdcPreflightCounters() const noexcept
+    {
+        return {
+            graphPdcMatchedBlocks_.load(std::memory_order_relaxed),
+            graphPdcRejectedBlocks_.load(std::memory_order_relaxed)
+        };
+    }
+    std::size_t collectGraphPdcRetiredOnControlThread()
+    {
+        return graphPdcPreflight_.collectRetiredOnControlThread();
+    }
+#endif
 
     /** C3: publish the immutable plugin-chain map snapshot (MESSAGE THREAD,
      *  ApplicationCore). The audio thread reads ONLY this snapshot — never
@@ -575,6 +607,11 @@ public:
                 // audio callback, stalling the callback and producing audible
                 // cracking at large block sizes.
                 routingBuffers_.syncFromSnapshot(*prepSnap, worstCaseBlock);
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+                // Diagnostic staging during device preparation (control).
+                (void)stageProgrammeGraphPdcPreflightOnControlThread(
+                    *prepSnap,latencies.get(),2,sampleRate_);
+#endif
             }
         }
         lastRoutingSnapshotVersion_ = 0;
@@ -1129,6 +1166,11 @@ private:
     std::unordered_map<juce::String, SoundEngine::ApexPdcDelayLineCore, JuceStringHash> pdcLines_;
     MasterPdcCore masterPdc_;
     std::atomic<bool> masterPdcDirty_ { true };
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore graphPdcPreflight_;
+    std::atomic<std::uint64_t> graphPdcMatchedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcRejectedBlocks_{0};
+#endif
 
     // Published per-track plugin-chain latency map (message thread publishes,
     // audio thread acquires). Read via getChainLatenciesRT() only.
@@ -2067,6 +2109,20 @@ private:
         // Refresh the per-block plugin-chain view from the published
         // snapshot (C3) — one atomic load per block, then lock-free finds.
         pluginChainsBlockSnap_ = getPluginChainsSnapshotRT();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // RT observation ONLY: never apply the PDC bank to live audio.
+        // One RCU reader guards against torn graph/PDC generations.
+        {
+            auto staged=graphPdcPreflight_.readRealtime();
+            if(staged && staged->graph.version==snap->version &&
+               staged->sampleRate==sampleRate_ &&
+               staged->graph.nodes.size()==snap->nodes.size() &&
+               staged->graph.edges.size()==snap->edges.size())
+                graphPdcMatchedBlocks_.fetch_add(1,std::memory_order_relaxed);
+            else
+                graphPdcRejectedBlocks_.fetch_add(1,std::memory_order_relaxed);
+        }
+#endif
 
         // The adopted immutable snapshot is the only synchronization authority.
         // Reading live graphVersion here created a torn old-snapshot/new-version
