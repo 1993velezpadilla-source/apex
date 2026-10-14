@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <atomic>
 #include <memory>
+#include <algorithm>
+#include <vector>
 
 namespace apex::automation
 {
@@ -288,6 +290,20 @@ namespace apex::automation
         }
 
     private:
+        // Called only under mapLock by the control thread. A single retired
+        // slot was unsafe when several mode/latch changes happened during
+        // one device callback reading an older immutable mode map.
+        void collectRetiredModeSnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if (retiredModeSnapshots_.begin(),
+                                       retiredModeSnapshots_.end(),
+                [] (const std::shared_ptr<const StateSnapshot>& prior) noexcept
+                {
+                    return prior.use_count() == 1;
+                });
+            retiredModeSnapshots_.erase (end, retiredModeSnapshots_.end());
+        }
+
         // Copy-on-write publication (message thread only, mapLock held).
         // Copies only shared_ptrs — the underlying atomics are shared, so
         // value changes after publication are visible through any snapshot.
@@ -299,8 +315,11 @@ namespace apex::automation
             snap->modes   = modes;
             snap->latched = latched;
             std::shared_ptr<const StateSnapshot> immutableSnap = std::move (snap);
+            collectRetiredModeSnapshotsLocked();
+            retiredModeSnapshots_.reserve (retiredModeSnapshots_.size() + 1);
             auto old = std::atomic_exchange_explicit (&published_, std::move (immutableSnap), std::memory_order_acq_rel);
-            retiredModeSnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
+            if (old != nullptr)
+                retiredModeSnapshots_.push_back (std::move (old));
         }
 
         std::atomic<std::uint8_t> globalDefault {
@@ -316,7 +335,7 @@ namespace apex::automation
         mutable juce::CriticalSection mapLock;
 
         std::shared_ptr<const StateSnapshot> published_;
-        std::shared_ptr<const StateSnapshot> retiredModeSnapshot_;   // message-thread retire slot
+        std::vector<std::shared_ptr<const StateSnapshot>> retiredModeSnapshots_;
         int publishBatchDepth_ = 0;   // message thread only
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationModeState)
