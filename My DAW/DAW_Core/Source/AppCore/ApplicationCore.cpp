@@ -1178,17 +1178,26 @@ void ApplicationCore::connectionAdded(RoutingConnection* conn)
 {
     juce::ignoreUnused(conn);
     syncPluginChainSidechainBusConfig();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    refreshExperimentalGraphPdcAfterPublication();
+#endif
 }
 
 void ApplicationCore::connectionRemoved(const RouteID& connId)
 {
     juce::ignoreUnused(connId);
     syncPluginChainSidechainBusConfig();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    refreshExperimentalGraphPdcAfterPublication();
+#endif
 }
 
 void ApplicationCore::graphChanged()
 {
     syncPluginChainSidechainBusConfig();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    refreshExperimentalGraphPdcAfterPublication();
+#endif
 }
 
 void ApplicationCore::transportStateChanged()
