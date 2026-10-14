@@ -8,6 +8,9 @@
 #include "../../../Source/PDCCore/ProgrammeRoutePdcJuceResearchBridge.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcJuceDispatchResearchCore.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+#include "../../../Source/AudioEngineCore/AudioEngine.h"
+#endif
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -833,6 +836,48 @@ public:
                 expectEquals(dispatcher.edgeDelay(0),0);
             }
         }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        beginTest("Actual AudioEngine stages immutable programme PDC at control boundary without changing renderer");
+        {
+            // Compile and instantiate the ACTUAL engine under the APEXTests
+            // flag. This merely stages a bank; the normal MasterPdcCore
+            // retains sole production routing/audio authority.
+            DAW::AudioEngine engine;
+            DAW::RoutingSnapshot graph;
+            graph.version=1103;
+            graph.nodes={
+                {"voice","vocal",DAW::RoutingNodeType::Track,true},
+                {"aux","aux",DAW::RoutingNodeType::Bus,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.processingOrder={"voice","aux","master"};
+            const auto edge=[](const char* id,const char* src,
+                               const char* dst,DAW::ConnectionType kind) {
+                DAW::RoutingSnapshot::EdgeSnapshot e;
+                e.id=id;e.sourceNodeId=src;e.destNodeId=dst;e.type=kind;
+                return e;
+            };
+            graph.edges={
+                edge("dry","voice","master",DAW::ConnectionType::Direct),
+                edge("send","voice","aux",DAW::ConnectionType::Send),
+                edge("wet","aux","master",DAW::ConnectionType::Direct)};
+            std::map<DAW::TrackID,int> delays={{"vocal",32},{"aux",16}};
+            expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                graph,&delays,2,48000.0));
+            graph.version=1104;
+            graph.edges[1].active=false;
+            expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                graph,&delays,2,48000.0));
+            expectEquals(engine.collectGraphPdcRetiredOnControlThread(),
+                         static_cast<std::size_t>(1));
+            const auto before=engine.getGraphPdcPreflightCounters();
+            expectEquals(before.matchingBlocks,static_cast<std::uint64_t>(0));
+            expectEquals(before.rejectedBlocks,static_cast<std::uint64_t>(0));
+            graph.processingOrder={"master","voice","aux"};
+            expect(!engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                graph,&delays,2,48000.0));
+        }
+#endif
 
         beginTest("Control-published RoutingSnapshot and PDC bank remain coherent across concurrent generations");
         {
