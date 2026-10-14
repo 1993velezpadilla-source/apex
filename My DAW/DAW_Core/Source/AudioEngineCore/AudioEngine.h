@@ -153,6 +153,7 @@ public:
         int channels,double sampleRate)
     {
         const auto revision=graphPdcLatencyRevision_.load(std::memory_order_acquire);
+        // Control gate publishes preallocated routing bank.
         if(!graphPdcPreflight_.publishPrepared(
                graph,latencies,channels,sampleRate))
             return false;
