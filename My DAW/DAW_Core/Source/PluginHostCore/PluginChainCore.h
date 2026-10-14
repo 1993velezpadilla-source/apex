@@ -1988,6 +1988,10 @@ private:
     juce::AudioBuffer<float> drySnapshotBuffer_;
     juce::AudioBuffer<float> wetBuffer_;
     juce::AudioBuffer<float> chainInputBuffer_;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+    PluginParallelDryDelayResearchCore chainDryPdc_{};
+#endif
+
     juce::AudioBuffer<float> automationSliceMainBuffer_;
     juce::AudioBuffer<float> automationSliceSidechainBuffer_;
     juce::MidiBuffer automationMidiScratch_;
@@ -2330,6 +2334,19 @@ private:
 
         preparedScratchChannels_ = requiredChannels;
         preparedScratchSamples_  = capacity;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Experimental per-slot delay ownership follows bypass-core retirement
+        // and reordering. This control-only preparation MUST be performed
+        // outside audio callbacks before publishing changed layouts.
+        for(std::size_t i=0;i<slots_.size() && i<bypassCores_.size();++i) {
+            if(!slots_[i] || !bypassCores_[i])continue;
+            if(!bypassCores_[i]->configureResearchDryDelay(
+                    requiredChannels,slots_[i]->getLatencySamples()))
+                jassertfalse;
+        }
+        if(!chainDryPdc_.prepare(requiredChannels,totalLatencySamples()))
+            jassertfalse;
+#endif
     }
 
     /** True when the prepared scratch set covers the given channel/sample
@@ -2751,6 +2768,11 @@ private:
         juce::AudioBuffer<float> wetView(wetBuffer_.getArrayOfWritePointers(),
                                          copyChannels, numSamples);
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Advance dry delay on each callback, including 100% wet and bypass
+        // states, so automated mixing cannot expose stale dry samples.
+        bypassCore->applyResearchDryDelay(dryView,numSamples);
+#endif
         const float mix = slot.getSlotMixNormalized();
         if (!bypassCore->isFullyBypassed() && !slot.getSlotMixBypass() && mix >= 1.0e-6f)
         {
@@ -2765,6 +2787,12 @@ private:
             PluginSlotMixCore::apply(dryView, wetView, mix,
                                      SlotMixCurve::EqualPower, numSamples);
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if(slot.getSlotMixBypass() && bypassCore->researchDryLatency()>0) {
+            for(int ch=0;ch<copyChannels;++ch)
+                wetView.copyFrom(ch,0,dryView,ch,0,numSamples);
+        }
+#endif
         bypassCore->processSlotBypass(dryView, wetView, numSamples);
         for (int ch = 0; ch < copyChannels; ++ch)
             buffer.copyFrom(ch, 0, wetView, ch, 0, numSamples);
