@@ -41,3 +41,10 @@ if ($LASTEXITCODE -ne 0) {
     throw "Opto JUCE host suite failed: $LASTEXITCODE"
 }
 Write-Host '[PASS] JUCE research-only Opto host latency / dry / bypass regression.'
+Write-Host '[opto-juce] Running APEX Sidechain regressions with dry-PDC test flag enabled.'
+& $exe '--category=Sidechain' '--seed=0xA20C108'
+if ($LASTEXITCODE -ne 0) {
+    throw "Host Sidechain regression under experimental dry-PDC failed: $LASTEXITCODE"
+}
+Write-Host '[PASS] JUCE Opto host + Sidechain regression under experimental PDC.'
+
