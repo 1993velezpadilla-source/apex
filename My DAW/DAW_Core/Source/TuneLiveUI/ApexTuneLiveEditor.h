@@ -136,7 +136,9 @@ public:
             button.setColour(juce::TextButton::buttonOnColourId,
                              juce::Colour::fromRGB(144,91,60));
             button.setColour(juce::TextButton::textColourOffId,juce::Colours::white);
-            button.setToggleState(i==0,juce::dontSendNotification);
+            // No fictional active preset on open: the timer recognises the
+            // profile only when ALL hosted values match its saved recipe.
+            button.setToggleState(false,juce::dontSendNotification);
             button.onClick=[this,i](){
                 for(int j=0;j<3;++j)
                     styles_[static_cast<std::size_t>(j)].setToggleState(j==i,juce::dontSendNotification);
@@ -219,6 +221,16 @@ public:
                            550.0f,215.0f,false));
         g.fillRoundedRectangle(juce::Rectangle<float>(16.0f,104.0f,1168.0f,210.0f),18.0f);
         Visual::sectionTitle(g,"T R A C K E D   P I T C H",35.0f,116.0f);
+        // An illuminated glass well behind the actual note label, with a
+        // softer neutral standby appearance when the tracker has no F0.
+        const bool hasVoice=std::isfinite(trackedHz_) && trackedHz_>=55.0f;
+        const auto noteGlow=hasVoice?Visual::gold():Visual::cyan();
+        g.setGradientFill(juce::ColourGradient(noteGlow.withAlpha(hasVoice?0.24f:0.10f),
+             407.0f,186.0f,noteGlow.withAlpha(0.0f),407.0f,285.0f,true));
+        g.fillEllipse(220.0f,119.0f,370.0f,181.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.045f));
+        g.drawRoundedRectangle(juce::Rectangle<float>(228.0f,144.0f,361.0f,94.0f),
+                               16.0f,1.0f);
         // Layered vector aurora is a purely decorative brand motif; the
         // numbered +/- 100-cent scale and live pointer are real values.
         for(int lane=0;lane<5;++lane) {
@@ -275,11 +287,16 @@ public:
         }
         const float indicator=juce::jlimit(-100.0f,100.0f,trackedCents_);
         const float markerX=gridL+(indicator+100.0f)*(gridR-gridL)/200.0f;
-        if(trackedHz_>=55.0f) {
+        if(hasVoice) {
             g.setColour(Visual::gold().withAlpha(0.15f));
             g.fillRoundedRectangle(markerX-4.0f,184.0f,8.0f,60.0f,3.0f);
             g.setColour(Visual::gold());
             g.fillRoundedRectangle(markerX-1.0f,194.0f,2.0f,50.0f,1.0f);
+            juce::Path point;
+            point.addTriangle(markerX-7.0f,187.0f,markerX+7.0f,187.0f,
+                              markerX,196.0f);
+            g.setColour(Visual::gold());
+            g.fillPath(point);
         } else {
             g.setColour(Visual::cyan().withAlpha(0.36f));
             g.fillRect((gridL+gridR)*0.5f,220.0f,1.0f,24.0f);
@@ -288,6 +305,17 @@ public:
         g.fillRoundedRectangle(268.0f,285.0f,278.0f,21.0f,8.0f);
         g.setColour(Visual::midnight());
         g.fillRoundedRectangle(269.0f,286.0f,276.0f,19.0f,8.0f);
+        // Explicit label avoids passing decorative spectrum lines off as
+        // a live signal analyser; only the needle/note/cents are telemetry.
+        g.setColour(Visual::muted().withAlpha(0.88f));
+        g.setFont(juce::Font(juce::FontOptions(10.0f).withStyle("Bold")));
+        g.drawText("CENTS DEVIATION",58,285,176,20,
+                   juce::Justification::centredLeft);
+        g.setColour(hasVoice?Visual::gold():Visual::cyan());
+        g.fillEllipse(584.0f,290.0f,8.0f,8.0f);
+        g.setColour(Visual::muted());
+        g.drawText(hasVoice?"VOICE DETECTED":"AWAITING VOICE",602,284,156,21,
+                   juce::Justification::centredLeft);
 
         g.setColour(Visual::cyan().withAlpha(0.25f));
         g.fillRect(770.0f,126.0f,1.0f,166.0f);
@@ -299,10 +327,20 @@ public:
 
         Visual::panel(g,{16.0f,323.0f,1168.0f,258.0f});
         Visual::sectionTitle(g,"M U S I C A L   C O N T R O L",35.0f,335.0f);
-        for(int k=1;k<6;++k) {
-            const float x=36.0f+static_cast<float>(k)*193.0f;
-            g.setColour(Visual::cyan().withAlpha(0.08f));
-            g.fillRect(x,375.0f,1.0f,182.0f);
+        // Six separate recessed control wells: real rotary children remain
+        // fully interactive; the bevels are only editor background paint.
+        for(int k=0;k<6;++k) {
+            const float x=38.0f+static_cast<float>(k)*193.0f;
+            const juce::Rectangle<float> well(x,390.0f,168.0f,181.0f);
+            g.setGradientFill(juce::ColourGradient(Visual::surface().brighter(0.32f),
+                 well.getTopLeft(),Visual::midnight(),well.getBottomRight(),false));
+            g.fillRoundedRectangle(well,12.0f);
+            g.setColour(Visual::cyan().withAlpha(0.13f));
+            g.drawRoundedRectangle(well.reduced(0.75f),11.5f,1.0f);
+            g.setGradientFill(juce::ColourGradient(Visual::gold().withAlpha(0.075f),
+                 x+84.0f,420.0f,Visual::gold().withAlpha(0.0f),
+                 x+84.0f,538.0f,false));
+            g.fillEllipse(x+20.0f,398.0f,128.0f,128.0f);
         }
 
         Visual::panel(g,{16.0f,590.0f,1168.0f,146.0f});
@@ -311,11 +349,27 @@ public:
         g.fillRect(749.0f,621.0f,1.0f,98.0f);
         g.setColour(Visual::cyan().withAlpha(0.22f));
         g.fillRect(777.0f,686.0f,374.0f,1.0f);
-        // Reference look: soft cyan/amber light from selected preset.
-        g.setGradientFill(juce::ColourGradient(Visual::gold().withAlpha(0.10f),
-                           139.0f,685.0f,Visual::gold().withAlpha(0.0f),
-                           139.0f,610.0f,true));
-        g.fillRoundedRectangle(juce::Rectangle<float>(50.0f,622.0f,207.0f,80.0f),10.0f);
+        // Move the highlighted glow with the actual matching preset.
+        // After a host automation edit the profile becomes CUSTOM, and
+        // none of the three preset buttons falsely stays highlighted.
+        g.setColour(selectedStyle_>=0?Visual::gold():Visual::cyan());
+        g.setFont(juce::Font(juce::FontOptions(10.5f).withStyle("Bold")));
+        g.drawText(selectedStyle_>=0?"PROFILE ACTIVE":"CUSTOM PARAMETERS",
+                   530,600,199,22,juce::Justification::centredRight);
+        for(int i=0;i<3;++i) {
+            const float x=49.0f+static_cast<float>(i)*228.0f;
+            const bool active=(i==selectedStyle_);
+            g.setGradientFill(juce::ColourGradient(
+                (active?Visual::gold():Visual::cyan()).withAlpha(active?0.21f:0.045f),
+                x+105.0f,685.0f,Visual::midnight().withAlpha(0.0f),
+                x+105.0f,617.0f,true));
+            g.fillRoundedRectangle(juce::Rectangle<float>(x,626.0f,211.0f,76.0f),
+                                   11.0f);
+            if(active) {
+                g.setColour(Visual::gold().withAlpha(0.92f));
+                g.fillRoundedRectangle(x+33.0f,633.0f,145.0f,2.0f,1.0f);
+            }
+        }
         // No clipped footer underneath the lower panel; the real latency
         // is explicitly visible as plugin PDC inside the options area.
     }
@@ -372,6 +426,32 @@ private:
     }
 
     void timerCallback() override {
+        // A style is a collection of REAL automation-safe parameter values,
+        // not a separate hidden preset flag. Host recall or manual tweaking
+        // can therefore never display a misleading selected profile.
+        const auto close=[this](int id,float expected) {
+            return std::abs(parameter(id).getValue()-expected)<0.012f;
+        };
+        int matchingStyle=-1;
+        for(int i=0;i<3;++i) {
+            const auto& p=kVocalStyles[static_cast<std::size_t>(i)];
+            if(close(Processor::kAmount,p.amount)
+                && close(Processor::kSpeed,p.retune)
+                && close(Processor::kHumanize,p.humanize)
+                && close(Processor::kFlexTune,p.flexTune)
+                && close(Processor::kNoteStability,p.stability)
+                && close(Processor::kMix,p.mix)
+                && close(Processor::kPreserveFormants,p.preserveFormants?1.0f:0.0f)) {
+                matchingStyle=i;
+                break;
+            }
+        }
+        if(selectedStyle_!=matchingStyle) {
+            selectedStyle_=matchingStyle;
+            for(int i=0;i<3;++i)
+                styles_[static_cast<std::size_t>(i)]
+                    .setToggleState(i==selectedStyle_,juce::dontSendNotification);
+        }
         static constexpr std::array<int,6> ids{{
             Processor::kAmount, Processor::kSpeed, Processor::kHumanize,
             Processor::kFlexTune, Processor::kNoteStability, Processor::kMix
@@ -434,6 +514,7 @@ private:
     Visual::StudioLookAndFeel studioLook_;
     float trackedHz_=0.0f;
     float trackedCents_=0.0f;
+    int selectedStyle_=-1; // GUI-only; inferred from hosted values.
     std::array<juce::Slider,6> knobs_;
     std::array<juce::Label,6> knobLabels_;
     std::array<juce::TextButton,3> styles_;
