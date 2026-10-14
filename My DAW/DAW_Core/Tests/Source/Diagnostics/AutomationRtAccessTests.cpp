@@ -6192,6 +6192,32 @@ public:
         expect(!fresh.replacePointsBatch(std::move(noImplicitUpsert)));
         expectEquals((int)fresh.size(), 2);
 
+        beginTest("Rapid publications defer retiring DSP-pinned generations");
+        Store retiring;
+        retiring.getOrCreateLane(a).replacePoints({{0.0, 0.11f}});
+        auto oldestMap = retiring.getLaneSnapshotRT();
+        std::weak_ptr<std::remove_reference_t<decltype(*oldestMap)>>
+            oldestWeak(oldestMap);
+        {
+            Store::ScopedRtPin liveCallback(retiring);
+            oldestMap.reset();
+            // Publish twice while a callback is consuming the older map.
+            // Overwriting one retired slot must NOT make that callback
+            // responsible for freeing the old immutable hash map.
+            for (float nextValue : {0.21f, 0.31f})
+            {
+                std::vector<Store::BatchReplacement> next;
+                next.push_back({a, {{0.0, nextValue}}});
+                expect(retiring.replacePointsBatch(std::move(next)));
+            }
+            expect(!oldestWeak.expired());
+        }
+        // The RT scope has exited, but the last owner is deliberately
+        // retained on the control side until its next cleanup.
+        expect(!oldestWeak.expired());
+        retiring.getOrCreateLane(b);
+        expect(oldestWeak.expired());
+
         beginTest("Native grouped batch supports 128 targets and ONE publish");
         Store native;
         constexpr apex::automation::ParameterID first = 910000;
