@@ -6060,16 +6060,13 @@ public:
         expect(separateProject.replaceOrCreatePointsBatch(
             {{first, {{0.0, 0.60f}}}}));
 
-        const auto oldMap = store.getLaneSnapshotRT();
+        auto oldMap = store.getLaneSnapshotRT();
         if (oldMap == nullptr) { expect(false); return; }
         std::weak_ptr<std::remove_reference_t<decltype(*oldMap)>>
             oldestWeak(oldMap);
         const auto initialGeneration = store.getChangeGeneration();
-        // Do not retain the generation on this control/test thread.
-        // The audio callback and publisher retirement must provide ownership.
-        // oldMap is const; a separate mutable copy can be reset.
-        auto oldControlView = oldMap;
-        oldControlView.reset();
+        // No control-side strong ownership of the oldest generation.
+        oldMap.reset();
 
         std::atomic<int> phase { 0 }; // 0=start, 1=audio pinned, 2=published, 3=audio exited
         std::atomic<bool> firstPass { false };
@@ -6168,8 +6165,8 @@ public:
         std::vector<Store::BatchReplacement> cleanup;
         cleanup.push_back({first, {{0.0, 0.81f}}});
         expect(store.replacePointsBatch(std::move(cleanup)));
-        // Other map owners may still keep the map alive; this test checks
-        // live consistency above, not a forced strong-reference count.
+        expect(oldestWeak.expired(),
+               "the next control publish must collect the unpinned old map");
     }
 };
 static AutomationV2ConcurrentCallbackPinGauntletTests automationV2ConcurrentCallbackPinGauntletTests;
