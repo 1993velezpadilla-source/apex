@@ -6426,6 +6426,96 @@ public:
 static AutomationV2MetadataRtRetirementGauntletTests
     automationV2MetadataRtRetirementGauntletTests;
 
+/**
+ * A 90 Hz recorder commit used to mutate an existing AutomationLane in
+ * place. Even though PPQ map pins kept old lane OBJECTS alive, an in-flight
+ * callback could observe old points on track A and NEW points after the UI
+ * committed live automation to the same lane, breaking block consistency.
+ */
+class AutomationV2RecorderLaneCowCallbackGauntletTests final : public juce::UnitTest
+{
+public:
+    AutomationV2RecorderLaneCowCallbackGauntletTests()
+        : juce::UnitTest("automation.v2-recorder-cow-callback-isolation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        constexpr apex::automation::ParameterID voice = 940001;
+        Store store;
+        store.getOrCreateLane(voice).replacePoints({{0.0, 0.20f}});
+        const auto originalLane = store.findLaneRT(voice);
+        expect(originalLane != nullptr);
+        if (originalLane == nullptr) return;
+        const auto generation = store.getChangeGeneration();
+
+        beginTest("32 live recorder commits must not change an in-flight callback");
+        {
+            Store::ScopedRtPin deviceCallback(store);
+            for (int i = 0; i < 32; ++i)
+            {
+                // Live Touch/Write/Latch commits may modify one lane while
+                // several tracks and VST3 slots consume it inside the block.
+                expect(store.replaceOrCreateLanePoints(voice,
+                    {{0.0, 0.40f + (float)i * 0.01f}}));
+                const auto pinnedLane = store.findLaneRT(voice);
+                expect(pinnedLane == originalLane);
+                if (pinnedLane != nullptr)
+                {
+                    const auto pinnedPoints = pinnedLane->getSnapshot();
+                    expect(pinnedPoints != nullptr && pinnedPoints->size() == 1);
+                    if (pinnedPoints != nullptr && pinnedPoints->size() == 1)
+                        expectWithinAbsoluteError(
+                            pinnedPoints->front().normalizedValue, 0.20f, 1.0e-5f);
+                }
+            }
+            expectEquals((juce::int64)store.getChangeGeneration(),
+                         (juce::int64)generation + 32);
+        }
+
+        beginTest("Next device callback sees the final recorder commit");
+        const auto latestLane = store.findLaneRT(voice);
+        expect(latestLane != nullptr && latestLane != originalLane);
+        if (latestLane != nullptr)
+        {
+            const auto newPoints = latestLane->getSnapshot();
+            expect(newPoints != nullptr && newPoints->size() == 1);
+            if (newPoints != nullptr && newPoints->size() == 1)
+                expectWithinAbsoluteError(newPoints->front().normalizedValue,
+                                          0.71f, 1.0e-5f);
+        }
+
+        beginTest("Recorder COW retains stable duplicate-knot and invalid-input normalization");
+        apex::automation::AutomationLane::PointVector malformed;
+        malformed.push_back({4.0, 0.3f});
+        malformed.push_back({2.0, 0.1f});
+        malformed.push_back({2.0, 0.9f}); // stable last-wins
+        malformed.push_back({std::numeric_limits<double>::quiet_NaN(), 0.5f});
+        malformed.push_back({8.0, 1.5f}); // clamped to one
+        expect(store.replaceOrCreateLanePoints(voice, std::move(malformed)));
+        const auto normalized = store.findLaneRT(voice);
+        if (normalized != nullptr)
+        {
+            const auto points = normalized->getSnapshot();
+            expect(points != nullptr && points->size() == 3);
+            if (points != nullptr && points->size() == 3)
+            {
+                expectWithinAbsoluteError((*points)[0].timePPQ, 2.0, 1.0e-9);
+                expectWithinAbsoluteError((*points)[0].normalizedValue, 0.9f, 1.0e-5f);
+                expectWithinAbsoluteError((*points)[2].normalizedValue, 1.0f, 1.0e-5f);
+            }
+        }
+        beginTest("Invalid parameter ID cannot publish an empty recorder lane");
+        const auto after = store.getLaneSnapshotRT();
+        expect(!store.replaceOrCreateLanePoints(apex::automation::kInvalidParameterID,
+                                                 {{0.0, 0.5f}}));
+        expect(store.getLaneSnapshotRT() == after);
+    }
+};
+static AutomationV2RecorderLaneCowCallbackGauntletTests
+    automationV2RecorderLaneCowCallbackGauntletTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
