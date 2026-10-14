@@ -78,12 +78,14 @@ public:
             if(index==invalidIndex)return false;
             nextLocal[i]=index;
         }
-        // Commit only after EVERYTHING prepared. A failed replan keeps
-        // the prior bank and exact route order intact.
+        // Copy metadata BEFORE publication, so an allocation exception
+        // cannot leave the old bank combined with new index bindings.
+        std::vector<RoutingSnapshot::EdgeSnapshot> nextMetadata=snapshot.edges;
+        // All swaps are non-throwing. No partial graph generation escapes.
         bank_.swap(next);
         edges_.swap(nextEdges);
         locals_.swap(nextLocal);
-        routeMetadata_=snapshot.edges;
+        routeMetadata_.swap(nextMetadata);
         version_=snapshot.version;
         return true;
     }
