@@ -917,7 +917,7 @@ public:
                 expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
                 graph.edges[0].tapPoint=DAW::TapPoint::PostFX;
                 expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
-                graph.edges[0].tapPoint=DAW::TapPoint::PostFader;
+                graph.edges[0].tapPoint=DAW::TapPoint::PreFX;
                 graph.version=611;
                 // A format reprepare must replace histories atomically.
                 expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
