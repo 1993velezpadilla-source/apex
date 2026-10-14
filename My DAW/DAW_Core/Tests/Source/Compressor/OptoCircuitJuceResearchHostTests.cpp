@@ -980,8 +980,11 @@ public:
                 graph.version=703;
                 expect(owner.publishPrepared(graph,&delays,2,rate));
                 run(2*frames,frames,false);
+                // Publishing generation 703 reclaimed generation 701
+                // before retiring 702 because no readers were active.
+                // Exactly ONE retired generation remains, not two.
                 expectEquals(owner.collectRetiredOnControlThread(),
-                             static_cast<std::size_t>(2));
+                             static_cast<std::size_t>(1));
                 // >64 control-plane edits WITHOUT an audio reader must not
                 // consume the bounded RCU-retirement quota. Regression for
                 // accidentally retaining a control-local Reader while
