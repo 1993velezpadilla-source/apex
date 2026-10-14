@@ -57,6 +57,42 @@ public:
         ++publicationGeneration_;
         return true;
     }
+    // RT read-only, no allocations: RoutingGraph::publishSnapshotOnly() can
+    // REPUBLISH active/bypass/tap/gain changes WITHOUT bumping graph.version.
+    // Comparing version and counts alone would silently mix a new signal
+    // graph with stale PDC taps. Gain is deliberately ignored: it changes
+    // amplitude but not path timing. A mutated programme topology or tap is
+    // forbidden until its corresponding control-prepared bank is published.
+    static bool sameProgrammeRoutingRealtime(
+        const RoutingSnapshot& live,const RoutingSnapshot& prepared) noexcept {
+        if(live.version!=prepared.version ||
+           live.nodes.size()!=prepared.nodes.size() ||
+           live.edges.size()!=prepared.edges.size() ||
+           live.processingOrder.size()!=prepared.processingOrder.size())
+            return false;
+        for(std::size_t i=0;i<live.processingOrder.size();++i)
+            if(live.processingOrder[i]!=prepared.processingOrder[i])
+                return false;
+        for(std::size_t i=0;i<live.nodes.size();++i) {
+            const auto& a=live.nodes[i];
+            const auto& b=prepared.nodes[i];
+            if(a.id!=b.id || a.trackId!=b.trackId ||
+               a.type!=b.type || a.active!=b.active)
+                return false;
+        }
+        for(std::size_t i=0;i<live.edges.size();++i) {
+            const auto& a=live.edges[i];
+            const auto& b=prepared.edges[i];
+            if(a.id!=b.id || a.sourceNodeId!=b.sourceNodeId ||
+               a.destNodeId!=b.destNodeId || a.type!=b.type ||
+               a.active!=b.active || a.bypassed!=b.bypassed ||
+               a.tapPoint!=b.tapPoint ||
+               a.destinationPluginId!=b.destinationPluginId ||
+               a.destinationBusIndex!=b.destinationBusIndex)
+                return false;
+        }
+        return true;
+    }
     Reader readRealtime() noexcept{return publisher_.readRealtime();}
     std::size_t collectRetiredOnControlThread() {
         return publisher_.collectRetired();
