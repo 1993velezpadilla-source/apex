@@ -1337,6 +1337,20 @@ void ApplicationCore::prepareRenderGraph(double sampleRate, int samplesPerBlock)
     for (auto& [id, chain] : pluginChains_)
         if (chain) chain->prepare(sampleRate, samplesPerBlock);
     publishPluginChainLatencies();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // Device/renderer prepare is an explicitly stopped callback lifecycle
+    // gate, even when JUCE runs prepareToPlay() off the message thread.
+    // Republish AFTER plugin-chain prepare, otherwise the planned latency
+    // map may describe the previous device format. No RT callback executes
+    // during this preparation boundary.
+    if (auto graph=routingGraph_->getSnapshotPublisher().get())
+    {
+        auto latency=audioEngine_.getChainLatenciesRT();
+        (void)audioEngine_.stageProgrammeGraphPdcPreflightOnControlThread(
+            *graph,latency.get(),2,sampleRate);
+        (void)audioEngine_.collectGraphPdcRetiredOnControlThread();
+    }
+#endif
     masterBus_.prepare(sampleRate, samplesPerBlock);
     controlRoom_.prepare(sampleRate, samplesPerBlock);
 }
