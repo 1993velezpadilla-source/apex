@@ -411,11 +411,17 @@ namespace apex::automation
             for (auto& [id, lane] : prepared)
                 next[id] = std::move(lane);
             auto nextPublished = std::make_shared<const LaneMap>(next);
+            // Reserve retirement ownership before exchanging the published
+            // map. A currently pinned RT generation must never be destroyed
+            // when a later GUI publication overwrites a single retire slot.
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve(retiredLanesSnapshots_.size() + 1);
             lanes.swap(next);
             auto old = std::atomic_exchange_explicit(
                 &publishedLanes_, std::move(nextPublished),
                 std::memory_order_acq_rel);
-            retiredLanesSnapshot_ = std::move(old);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back(std::move(old));
             changeGeneration_.fetch_add(1, std::memory_order_acq_rel);
             return true;
         }
@@ -572,14 +578,33 @@ namespace apex::automation
         // Copy-on-write publication (message thread only, called with
         // mapLock held). Copies only shared_ptrs — lane point data is
         // shared, never duplicated. Suppressed inside batched restores.
+        // Control-thread-only reclamation. A generation with use_count > 1
+        // remains pinned by a DSP callback (or another reader), so keep our
+        // owner until after that reader releases it. This avoids executing
+        // LaneMap destructors on the audio thread after rapid GUI publishes.
+        void collectRetiredSnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if(retiredLanesSnapshots_.begin(),
+                                      retiredLanesSnapshots_.end(),
+                [] (const RtLaneSnapshot& generation) noexcept
+                {
+                    return generation.use_count() == 1;
+                });
+            retiredLanesSnapshots_.erase(end, retiredLanesSnapshots_.end());
+        }
+
         void publishLocked()
         {
             if (publishBatchDepth_ > 0)
                 return;
             auto snap = std::make_shared<const LaneMap> (lanes);
-            auto old = std::atomic_exchange_explicit (&publishedLanes_, std::move (snap), std::memory_order_acq_rel);
-            retiredLanesSnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
-            changeGeneration_.fetch_add (1, std::memory_order_acq_rel);
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve(retiredLanesSnapshots_.size() + 1);
+            auto old = std::atomic_exchange_explicit(
+                &publishedLanes_, std::move(snap), std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back(std::move(old));
+            changeGeneration_.fetch_add(1, std::memory_order_acq_rel);
         }
 
         LaneMap lanes;
@@ -587,7 +612,10 @@ namespace apex::automation
 
         // Published immutable view for the audio thread (never mutated in place).
         std::shared_ptr<const LaneMap> publishedLanes_;
-        std::shared_ptr<const LaneMap> retiredLanesSnapshot_;   // message-thread retire slot
+        // Control-thread owned: retain as MANY generations as RT callbacks
+        // still pin; prune only when no external readers remain. A single
+        // overwritten retire slot was insufficient for fast macro edits.
+        std::vector<RtLaneSnapshot> retiredLanesSnapshots_;
         std::atomic<std::uint64_t> changeGeneration_ { 0 };
         int publishBatchDepth_ = 0;   // message thread only
         inline static thread_local const PinFrame* pinnedFrameForThread_ = nullptr;
