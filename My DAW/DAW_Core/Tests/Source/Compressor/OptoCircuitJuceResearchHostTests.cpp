@@ -92,10 +92,11 @@ private:
 // tests. Distinct from the FIR compressor (which has legitimate pre-ringing).
 class ExactHostDelayResearchPlugin final : public juce::AudioPluginInstance {
 public:
-    ExactHostDelayResearchPlugin()
+    explicit ExactHostDelayResearchPlugin(int samples=32)
       : AudioPluginInstance(BusesProperties()
             .withInput("Input",juce::AudioChannelSet::stereo(),true)
-            .withOutput("Output",juce::AudioChannelSet::stereo(),true)) {}
+            .withOutput("Output",juce::AudioChannelSet::stereo(),true)),
+        latency_(samples) { jassert(samples==16 || samples==32); }
     const juce::String getName() const override {return "APEX Exact Latency Test";}
     void fillInPluginDescription(juce::PluginDescription& d) const override {
         d.name=getName();
@@ -116,7 +117,7 @@ public:
     void prepareToPlay(double sr,int block) override {
         setRateAndBufferSizeDetails(sr,block);
         reset();
-        setLatencySamples(32);
+        setLatencySamples(latency_);
     }
     void releaseResources() override {}
     void reset() override {for(auto& v:delay_)v.fill(0.f);index_=0;}
@@ -128,7 +129,7 @@ public:
             const float oldL=delay_[0][index_],oldR=delay_[1][index_];
             delay_[0][index_]=l[n];delay_[1][index_]=r[n];
             l[n]=oldL;r[n]=oldR;
-            index_=(index_+1)%32;
+            index_=(index_+1)%static_cast<std::size_t>(latency_);
         }
     }
     bool acceptsMidi() const override {return false;}
@@ -146,6 +147,7 @@ public:
 private:
     std::array<std::array<float,32>,2> delay_{};
     std::size_t index_=0;
+    int latency_=32;
 };
 } // namespace
 
@@ -369,6 +371,50 @@ public:
                 }
             }
         }
+        beginTest("Serial 32+16 plugin latencies keep chain dry aligned to 48 samples");
+        // Both slot mixes are 50% equal-power and the overall chain mix is
+        // also 50%. With identical delayed wet and dry, each slot multiplies
+        // amplitude by sqrt(2), and the chain multiplies by (1+2)/sqrt(2).
+        for(const double sr:{44100.0,48000.0}) {
+            for(const int frames:{64,128}) {
+                DAW::PluginChainCore chain;
+                chain.prepare(sr,frames);
+                expectEquals(chain.appendPluginInstanceForTesting(
+                    std::make_unique<ExactHostDelayResearchPlugin>(32)),0);
+                expectEquals(chain.appendPluginInstanceForTesting(
+                    std::make_unique<ExactHostDelayResearchPlugin>(16)),1);
+                expectEquals(chain.totalLatencySamples(),48);
+                chain.setSlotMix(0,.5f);
+                chain.setSlotMix(1,.5f);
+                chain.setChainOutputMix(.5f);
+                constexpr double expectedFactor=3.0*0.7071067811865475244;
+                constexpr int total=512;
+                for(int start=0;start<total;start+=frames) {
+                    juce::AudioBuffer<float> audio(2,frames);
+                    for(int i=0;i<frames;++i) {
+                        const int at=start+i;
+                        audio.setSample(0,i,static_cast<float>(
+                            .26*std::sin(.057*at)+.1*std::cos(.011*at)));
+                        audio.setSample(1,i,static_cast<float>(
+                            -.31*std::cos(.041*at)));
+                    }
+                    chain.processBlock(audio,frames);
+                    for(int i=0;i<frames;++i) {
+                        const int at=start+i;
+                        const int src=at-48;
+                        const double left=src<0?0.0:expectedFactor*(
+                            .26*std::sin(.057*src)+.1*std::cos(.011*src));
+                        const double right=src<0?0.0:
+                            expectedFactor*(-.31*std::cos(.041*src));
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(0,i)),left,3.e-5);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(1,i)),right,3.e-5);
+                    }
+                }
+            }
+        }
+
         beginTest("Real PluginChainCore clears slot+chain dry FIFOs on reset");
         for(const double rate:{44100.0,48000.0}) {
             DAW::PluginChainCore chain;
