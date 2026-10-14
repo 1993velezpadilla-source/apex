@@ -6128,6 +6128,70 @@ public:
                 current->getSnapshot()->front().normalizedValue,
                 0.35f, 0.00001f);
 
+        beginTest("Atomic bridge upsert creates missing PPQ lanes in one generation");
+        Store fresh;
+        const auto freshBefore = fresh.getLaneSnapshotRT();
+        const auto freshEpoch = fresh.getChangeGeneration();
+        std::vector<Store::BatchReplacement> firstBridge;
+        firstBridge.push_back({920001, {{0.0, 0.31f}}});
+        firstBridge.push_back({920002, {{0.0, 0.79f}}});
+        expect(fresh.replaceOrCreatePointsBatch(std::move(firstBridge)));
+        expectEquals((juce::int64)fresh.getChangeGeneration(),
+                     (juce::int64)freshEpoch + 1);
+        expectEquals((int)fresh.size(), 2);
+        const auto freshAfter = fresh.getLaneSnapshotRT();
+        expect(freshAfter != freshBefore);
+        expect(Store::findLaneInSnapshotRT(freshBefore, 920001) == nullptr);
+        const auto firstMirror = Store::findLaneInSnapshotRT(freshAfter, 920001);
+        const auto secondMirror = Store::findLaneInSnapshotRT(freshAfter, 920002);
+        if (firstMirror != nullptr && secondMirror != nullptr)
+        {
+            expectWithinAbsoluteError(
+                firstMirror->getSnapshot()->front().normalizedValue,
+                0.31f, 0.00001f);
+            expectWithinAbsoluteError(
+                secondMirror->getSnapshot()->front().normalizedValue,
+                0.79f, 0.00001f);
+        }
+
+        beginTest("Invalid upsert leaves no phantom PPQ target or publication");
+        const auto beforeRejected = fresh.getLaneSnapshotRT();
+        const auto beforeRejectedEpoch = fresh.getChangeGeneration();
+        std::vector<Store::BatchReplacement> rejectedBridge;
+        rejectedBridge.push_back({920003, {{0.0, 0.10f}}});
+        rejectedBridge.push_back({920004,
+            {{0.0, std::numeric_limits<float>::quiet_NaN()}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(rejectedBridge)));
+        expect(fresh.getLaneSnapshotRT() == beforeRejected);
+        expectEquals((juce::int64)fresh.getChangeGeneration(),
+                     (juce::int64)beforeRejectedEpoch);
+        expectEquals((int)fresh.size(), 2);
+        expect(Store::findLaneInSnapshotRT(fresh.getLaneSnapshotRT(), 920003)
+            == nullptr);
+
+        beginTest("Bridge upsert rejects reordered or duplicated authored PPQ knots");
+        const auto beforeUnsorted = fresh.getLaneSnapshotRT();
+        std::vector<Store::BatchReplacement> reordered;
+        reordered.push_back({920006,
+            {{2.0, 0.1f}, {1.0, 0.2f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(reordered)));
+        std::vector<Store::BatchReplacement> duplicatedKnots;
+        duplicatedKnots.push_back({920006,
+            {{2.0, 0.1f}, {2.0, 0.2f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(duplicatedKnots)));
+        std::vector<Store::BatchReplacement> badTension;
+        badTension.push_back({920006,
+            {{0.0, 0.1f, apex::automation::CurveType::Smooth, 2.0f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(badTension)));
+        expect(fresh.getLaneSnapshotRT() == beforeUnsorted);
+        expectEquals((int)fresh.size(), 2);
+
+        beginTest("Strict pre-existing-only batch still rejects unknown lanes");
+        std::vector<Store::BatchReplacement> noImplicitUpsert;
+        noImplicitUpsert.push_back({920005, {{0.0, 0.5f}}});
+        expect(!fresh.replacePointsBatch(std::move(noImplicitUpsert)));
+        expectEquals((int)fresh.size(), 2);
+
         beginTest("Native grouped batch supports 128 targets and ONE publish");
         Store native;
         constexpr apex::automation::ParameterID first = 910000;

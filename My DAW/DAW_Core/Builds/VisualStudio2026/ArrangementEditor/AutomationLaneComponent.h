@@ -231,11 +231,10 @@ public:
             prepared.push_back(std::move(replacement));
         }
 
-        // Creating an absent PPQ lane is safe: it stays empty until the
-        // transaction atomically publishes all prepared envelopes together.
-        for (const auto& entry : prepared)
-            store.getOrCreateLane(entry.id);
-        return store.replacePointsBatch(std::move(prepared));
+        // No getOrCreateLane here: that would publish each new empty lane
+        // before the group commit, and even leak phantom lanes on failure.
+        // The store creates missing mirrors inside ONE atomic map swap.
+        return store.replaceOrCreatePointsBatch(std::move(prepared));
     }
 
     /**
@@ -292,11 +291,9 @@ public:
             prepared.push_back(std::move(replacement));
         }
 
-        // Ensure the matching lanes exist before the all-or-nothing publish.
-        // Empty new lanes carry no audio until the immutable map is swapped.
-        for (const auto& item : prepared)
-            store.getOrCreateLane(item.id);
-        return store.replacePointsBatch(std::move(prepared));
+        // Create absent hosted PPQ bridges in the SAME atomic publication:
+        // no transient empty-lane generations and no failed partial upserts.
+        return store.replaceOrCreatePointsBatch(std::move(prepared));
     }
 
     bool canBulkEditCurve() const noexcept

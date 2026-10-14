@@ -349,7 +349,17 @@ namespace apex::automation
          * strict block-wide consistency must pin one snapshot per block.
          * Existing AutomationLane shared_ptrs are never mutated in-place.
          */
-        bool replacePointsBatch (std::vector<BatchReplacement> replacements)
+        // Bridge-specific upsert: the target bank may not have PPQ mirrors
+        // yet. Validating and creating every missing lane in one transaction
+        // prevents a failed batch from leaving phantom empty lanes or
+        // publishing intermediate generations to an in-flight DSP callback.
+        bool replaceOrCreatePointsBatch (std::vector<BatchReplacement> replacements)
+        {
+            return replacePointsBatch(std::move(replacements), true);
+        }
+
+        bool replacePointsBatch (std::vector<BatchReplacement> replacements,
+                                 bool createMissingLanes = false)
         {
             if (replacements.empty() || replacements.size() > 128)
                 return false;
@@ -361,14 +371,26 @@ namespace apex::automation
                 if (replacement.id == kInvalidParameterID
                     || prepared.count(replacement.id) != 0)
                     return false;
+                double previousPPQ = -1.0;
                 for (const auto& point : replacement.points)
+                {
+                    // Bridges are already sorted by source timeline. Reject
+                    // duplicated/reversed knots instead of silently sorting
+                    // or discarding authored automation during an upsert.
+                    if (createMissingLanes && point.timePPQ <= previousPPQ)
+                        return false;
+                    previousPPQ = point.timePPQ;
                     if (!std::isfinite(point.timePPQ)
                         || point.timePPQ < 0.0
                         || !std::isfinite(point.normalizedValue)
                         || point.normalizedValue < 0.0f
                         || point.normalizedValue > 1.0f
-                        || !std::isfinite(point.curveTension))
+                        || !std::isfinite(point.curveTension)
+                        || (createMissingLanes
+                            && (point.curveTension < -1.0f
+                                || point.curveTension > 1.0f)))
                         return false;
+                }
 
                 auto lane = std::make_shared<AutomationLane>(replacement.id);
                 lane->replacePoints(std::move(replacement.points));
@@ -376,12 +398,15 @@ namespace apex::automation
             }
 
             const juce::ScopedLock sl(mapLock);
-            for (const auto& replacement : replacements)
-                if (lanes.find(replacement.id) == lanes.end())
-                    return false;
+            if (!createMissingLanes)
+                for (const auto& replacement : replacements)
+                    if (lanes.find(replacement.id) == lanes.end())
+                        return false;
 
-            // All allocation/validation happens before touching lanes. One
-            // immutable map copy, one atomic publication, one generation bump.
+            // Validation completes before touching the live map. New targets
+            // (when permitted) exist only inside the staged next map until
+            // its ONE atomic publication; failures leave lanes untouched.
+            // One immutable map copy, one atomic publication, one bump.
             LaneMap next = lanes;
             for (auto& [id, lane] : prepared)
                 next[id] = std::move(lane);
