@@ -6169,6 +6169,23 @@ public:
         expect(Store::findLaneInSnapshotRT(fresh.getLaneSnapshotRT(), 920003)
             == nullptr);
 
+        beginTest("Bridge upsert rejects reordered or duplicated authored PPQ knots");
+        const auto beforeUnsorted = fresh.getLaneSnapshotRT();
+        std::vector<Store::BatchReplacement> reordered;
+        reordered.push_back({920006,
+            {{2.0, 0.1f}, {1.0, 0.2f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(reordered)));
+        std::vector<Store::BatchReplacement> duplicatedKnots;
+        duplicatedKnots.push_back({920006,
+            {{2.0, 0.1f}, {2.0, 0.2f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(duplicatedKnots)));
+        std::vector<Store::BatchReplacement> badTension;
+        badTension.push_back({920006,
+            {{0.0, 0.1f, apex::automation::CurveType::Smooth, 2.0f}}});
+        expect(!fresh.replaceOrCreatePointsBatch(std::move(badTension)));
+        expect(fresh.getLaneSnapshotRT() == beforeUnsorted);
+        expectEquals((int)fresh.size(), 2);
+
         beginTest("Strict pre-existing-only batch still rejects unknown lanes");
         std::vector<Store::BatchReplacement> noImplicitUpsert;
         noImplicitUpsert.push_back({920005, {{0.0, 0.5f}}});
