@@ -11,6 +11,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp"
       - "My DAW/DAW_Core/Source/PDCCore/ProgrammeEdgeRetimingResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeEdgeRetimingResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/PDCCore/ProgrammePdcRcuPublisherResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ProgrammePdcRcuPublisherResearchTests.cpp"
   pull_request:
     paths:
       - ".github/workflows/apex-opto-parallel-dry-research.yml"
@@ -22,6 +24,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp"
       - "My DAW/DAW_Core/Source/PDCCore/ProgrammeEdgeRetimingResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeEdgeRetimingResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/PDCCore/ProgrammePdcRcuPublisherResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ProgrammePdcRcuPublisherResearchTests.cpp"
   workflow_dispatch:
 permissions:
   contents: read
@@ -60,6 +64,11 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/ProgrammeEdgeRetimingResearchTests.cpp" \
             -o /tmp/apex-edge-retime
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-edge-retime
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ProgrammePdcRcuPublisherResearchTests.cpp" \
+            -o /tmp/apex-pdc-rcu
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-pdc-rcu
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
@@ -84,3 +93,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC atomic edge retiming compile failed" }
           ./apex-edge-retime.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC atomic edge retiming test failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:apex-pdc-rcu.exe "My DAW/DAW_Core/Tests/Standalone/ProgrammePdcRcuPublisherResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC PDC RCU lifecycle compile failed" }
+          ./apex-pdc-rcu.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC PDC RCU lifecycle test failed" }
