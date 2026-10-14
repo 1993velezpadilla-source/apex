@@ -907,6 +907,18 @@ public:
                 graph.version=611;
                 expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check),
                        "stale graph cannot dispatch a mismatched PDC bank");
+                // A same-version snapshot may still change its sends:
+                // RoutingGraph::publishSnapshotOnly() does not bump version.
+                // Never apply a bank prepared for a different active route.
+                graph.version=610;
+                graph.edges[1].active=false;
+                expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                graph.edges[1].active=true;
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                graph.edges[0].tapPoint=DAW::TapPoint::PostFX;
+                expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                graph.edges[0].tapPoint=DAW::TapPoint::PostFader;
+                graph.version=611;
                 // A format reprepare must replace histories atomically.
                 expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
                     graph,&delays,2,rate));
