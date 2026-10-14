@@ -1,0 +1,152 @@
+name: APEX T4 optical photocell research
+on:
+  push:
+    paths:
+      - ".github/workflows/apex-t4-photocell-research.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexAnalogCircuitResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/Apex6AQ5DriverResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
+      - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
+      - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
+  pull_request:
+    paths:
+      - ".github/workflows/apex-t4-photocell-research.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4OpticalCellCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexT4LevelerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexAnalogCircuitResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/Apex6AQ5DriverResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexMagneticTransformerResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
+      - "My DAW/DAW_Core/Scripts/opto_reference_capture.py"
+      - "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  optical-cell:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: "Original T4 circuit scaffold C++17 / ${{ matrix.os }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux C++17 sanitizers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp" \
+            -o /tmp/apex-t4-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp" \
+            -o /tmp/apex-t4-leveler-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-t4-leveler-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp" \
+            -o /tmp/apex-analog-circuit-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-analog-circuit-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp" \
+            -o /tmp/apex-opto-path-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-opto-path-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp" \
+            -o /tmp/apex-6aq5-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-6aq5-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp" \
+            -o /tmp/apex-magnetic-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-magnetic-test
+      - name: Golden A/B input generator and identity-check smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "My DAW/DAW_Core/Scripts/opto_reference_capture.py" generate --output /tmp/apex-opto-capture
+          python3 "My DAW/DAW_Core/Scripts/opto_reference_capture.py" compare \
+            --manifest /tmp/apex-opto-capture/apex_opto2a_reference_manifest.json \
+            --uad /tmp/apex-opto-capture/apex_opto2a_reference_input_48k_pcm24.wav \
+            --apex /tmp/apex-opto-capture/apex_opto2a_reference_input_48k_pcm24.wav \
+            --csv /tmp/apex-opto-capture/self_difference.csv
+          python3 -c 'import csv; rows=list(csv.DictReader(open("/tmp/apex-opto-capture/self_difference.csv"))); assert len(rows)>12; assert all(abs(float(row["delta_level_db"]))<1e-8 for row in rows); assert all(float(row["residual_rms_dbfs"]) <= -200 for row in rows); print("Reference tool identity smoke GREEN")'
+      - name: Time-resolved release A/B diagnostic synthetic regression
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 "My DAW/DAW_Core/Scripts/opto_reference_dynamics.py" self-test
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Windows MSVC C++17
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-t4-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexT4OpticalCellResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC compilation failed" }
+          ./apex-t4-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 gates failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-t4-leveler-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexT4LevelerResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler compile failed" }
+          ./apex-t4-leveler-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC T4 leveler gates failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-analog-circuit-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexAnalogCircuitResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC triode+transformer compile failed" }
+          ./apex-analog-circuit-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC triode+transformer tests failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-opto-path-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitPathResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC opto path compile failed" }
+          ./apex-opto-path-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC opto path tests failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-6aq5-test.exe "My DAW/DAW_Core/Tests/Standalone/Apex6AQ5DriverResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC 6AQ5 compile failed" }
+          ./apex-6aq5-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC 6AQ5 test failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:apex-magnetic-test.exe "My DAW/DAW_Core/Tests/Standalone/ApexMagneticTransformerResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC magnetic test compile failed" }
+          ./apex-magnetic-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC magnetic alias/latency tests failed" }
+
+      - name: Linux optimized 48k/64/128 standalone CPU survey (advisory)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp" \
+            -o /tmp/apex-opto-cpu-survey
+          /tmp/apex-opto-cpu-survey
+      - name: Windows optimized 48k/64/128 standalone CPU survey (advisory)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /std:c++17 /EHsc /W4 /WX /Fe:apex-opto-cpu-survey.exe "My DAW/DAW_Core/Tests/Standalone/ApexOptoCircuitRealtimeBench.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC optimized Opto CPU survey compile failed" }
+          ./apex-opto-cpu-survey.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC optimized Opto CPU survey failed" }

@@ -264,6 +264,12 @@ public:
         // this NON-REALTIME thread. The audio callback only verifies capacity
         // and never resizes these buffers.
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         // Re-seed automation smoothers from the restored parameter values
         // before the chain becomes visible to realtime processing.
@@ -299,6 +305,12 @@ public:
         // offline bus layouts, so the computed worst-case channel count is
         // authoritative before any offline processing begins.
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         publishSnapshot();
     }
@@ -326,6 +338,12 @@ public:
         // this non-realtime thread AFTER the slots re-negotiated their
         // realtime bus layouts (transition back from offline export).
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         publishSnapshot();
     }
@@ -352,6 +370,9 @@ public:
             if (slot) slot->reset();
         for (auto& core : bypassCores_)
             if (core) core->reset();
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        chainDryPdc_.reset();
+#endif
     }
 
     // ── Slot management (message thread) ─────────────────────────────────
@@ -1256,7 +1277,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(buffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
@@ -1347,7 +1372,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(buffer, numSamples);
 
         bool firstSlot = true;
@@ -1424,7 +1453,11 @@ public:
 
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap->slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(mainBuffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
@@ -1988,6 +2021,10 @@ private:
     juce::AudioBuffer<float> drySnapshotBuffer_;
     juce::AudioBuffer<float> wetBuffer_;
     juce::AudioBuffer<float> chainInputBuffer_;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+    PluginParallelDryDelayResearchCore chainDryPdc_{};
+#endif
+
     juce::AudioBuffer<float> automationSliceMainBuffer_;
     juce::AudioBuffer<float> automationSliceSidechainBuffer_;
     juce::MidiBuffer automationMidiScratch_;
@@ -2330,6 +2367,19 @@ private:
 
         preparedScratchChannels_ = requiredChannels;
         preparedScratchSamples_  = capacity;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Experimental per-slot delay ownership follows bypass-core retirement
+        // and reordering. This control-only preparation MUST be performed
+        // outside audio callbacks before publishing changed layouts.
+        for(std::size_t i=0;i<slots_.size() && i<bypassCores_.size();++i) {
+            if(!slots_[i] || !bypassCores_[i])continue;
+            if(!bypassCores_[i]->configureResearchDryDelay(
+                    requiredChannels,slots_[i]->getLatencySamples()))
+                jassertfalse;
+        }
+        if(!chainDryPdc_.prepare(requiredChannels,totalLatencySamples()))
+            jassertfalse;
+#endif
     }
 
     /** True when the prepared scratch set covers the given channel/sample
@@ -2359,6 +2409,10 @@ private:
 
         for (int ch = 0; ch < channels; ++ch)
             chainInputBuffer_.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        chainDryPdc_.process(chainInputBuffer_.getArrayOfWritePointers(),
+                             channels,numSamples);
+#endif
     }
 
     bool validateProcessBuffer(const juce::AudioBuffer<float>& buffer, int numSamples) const
@@ -2504,7 +2558,11 @@ private:
     {
         const float chainOutputMix = getChainOutputMix();
         const bool applyChainOutputMix = chainOutputMix < 0.999999f && !snap.slots.empty();
+        #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if (applyChainOutputMix || chainDryPdc_.latencySamples()>0)
+#else
         if (applyChainOutputMix)
+#endif
             captureChainInput(mainBuffer, numSamples);
 
         juce::MidiBuffer emptyMidi;
@@ -2751,6 +2809,11 @@ private:
         juce::AudioBuffer<float> wetView(wetBuffer_.getArrayOfWritePointers(),
                                          copyChannels, numSamples);
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Advance dry delay on each callback, including 100% wet and bypass
+        // states, so automated mixing cannot expose stale dry samples.
+        bypassCore->applyResearchDryDelay(dryView,numSamples);
+#endif
         const float mix = slot.getSlotMixNormalized();
         if (!bypassCore->isFullyBypassed() && !slot.getSlotMixBypass() && mix >= 1.0e-6f)
         {
@@ -2765,6 +2828,12 @@ private:
             PluginSlotMixCore::apply(dryView, wetView, mix,
                                      SlotMixCurve::EqualPower, numSamples);
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        if(slot.getSlotMixBypass() && bypassCore->researchDryLatency()>0) {
+            for(int ch=0;ch<copyChannels;++ch)
+                wetView.copyFrom(ch,0,dryView,ch,0,numSamples);
+        }
+#endif
         bypassCore->processSlotBypass(dryView, wetView, numSamples);
         for (int ch = 0; ch < copyChannels; ++ch)
             buffer.copyFrom(ch, 0, wetView, ch, 0, numSamples);

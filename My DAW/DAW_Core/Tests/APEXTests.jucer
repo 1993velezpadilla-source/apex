@@ -2,7 +2,7 @@
 
 <JUCERPROJECT id="ApexTests01" name="APEXTests" projectType="consoleapp" bundleIdentifier="com.apex.APEXTests"
               companyName="Apex" companyCopyright="Apex" useAppConfig="0" addUsingNamespaceToJuceHeader="0"
-              jucerFormatVersion="1" defines="JUCE_ENABLE_ALLOCATION_HOOKS=1 JUCE_STRICT_REFCOUNTEDPOINTER=1 APEX_ENABLE_TEST_HOOKS=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1">
+              jucerFormatVersion="1" defines="JUCE_ENABLE_ALLOCATION_HOOKS=1 JUCE_STRICT_REFCOUNTEDPOINTER=1 APEX_ENABLE_TEST_HOOKS=1 APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC=1 APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1">
   <MAINGROUP id="ApexTestsMG" name="APEXTests">
     <GROUP id="{A1A1A1A1-0000-0000-0000-000000000001}" name="Source">
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000010}" name="Smoke">
@@ -74,6 +74,10 @@
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000051}" name="Device">
         <FILE id="DV_CPP1" name="DeviceCapabilityTests.cpp" compile="1" resource="0"
               file="Source/Device/DeviceCapabilityTests.cpp"/>
+      </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-00000000C108}" name="OptoResearchHost">
+        <FILE id="ORH_CPP108" name="OptoCircuitJuceResearchHostTests.cpp" compile="1"
+              resource="0" file="Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"/>
       </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000045}" name="PluginHost">
         <FILE id="PH_CPP1" name="SidechainRoutingRegressionTests.cpp" compile="1"

@@ -1,0 +1,48 @@
+name: APEX Opto 2A JUCE Research Host
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/apex-opto-juce-research-host.yml"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
+  push:
+    paths:
+      - ".github/workflows/apex-opto-juce-research-host.yml"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: opto-juce-research-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  host-boundary:
+    name: JUCE AudioProcessor x4 latency / Windows Release
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Verify pinned dependencies and generate JUCE test project
+        run: .\Scripts\prepare_ci.ps1
+      - name: Compile APEXTests and run opto host boundary gate
+        run: .\Scripts\test_opto_juce_research_host.ps1 -Configuration Release
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opto2a-juce-research-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
