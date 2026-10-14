@@ -25,6 +25,7 @@ public:
         ProgrammeRoutePdcJuceDispatchResearchCore dispatch;
         std::uint64_t publicationGeneration=0;
         double sampleRate=0.0;
+        std::map<TrackID,int> latencyMap;
     };
     using Reader=ProgrammePdcRcuPublisherResearchCore<PreparedGeneration>::Reader;
     // Called by ONE serialized control thread only. Graph copy, validation,
@@ -34,9 +35,20 @@ public:
                          int channels,double sampleRate=48000.0) {
         if(!std::isfinite(sampleRate)||sampleRate<8000.0||
            sampleRate>384000.0)return false;
+        // Gain-only republishing does not change the programme path or DSP
+        // timings. Leave the current history intact instead of allocating a
+        // fresh bank whenever a user moves a send gain.
+        const auto* previous=publisher_.activeStateControlOnly();
+        if(previous && previous->sampleRate==sampleRate &&
+           previous->dispatch.channels()==channels &&
+           sameProgrammeRoutingRealtime(graph,previous->graph) &&
+           (chainLatencies?previous->latencyMap==*chainLatencies:
+                            previous->latencyMap.empty()))
+            return true;
         auto next=std::make_unique<PreparedGeneration>();
         next->sampleRate=sampleRate;
         next->graph=graph;
+        if(chainLatencies)next->latencyMap=*chainLatencies;
         // Serialized control thread reads the currently owned generation
         // without acquiring an artificial realtime Reader. Otherwise each
         // publication would prevent its own retirement collection, eventually
@@ -45,7 +57,6 @@ public:
         // A sample-rate reprepare is a different timeline. Retaining the
         // previous ring across 44.1 <-> 48 kHz would replay stale samples,
         // even if the route ID and integer delay both remained unchanged.
-        const auto* previous=publisher_.activeStateControlOnly();
         const auto* reusable=previous && previous->sampleRate==sampleRate
             ? &previous->dispatch : nullptr;
         if(!next->dispatch.prepare(
