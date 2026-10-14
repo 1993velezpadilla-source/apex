@@ -438,6 +438,39 @@ public:
             }
         }
 
+        beginTest("Reprepare 44.1 to 48k resets chain PDC without stale audio");
+        {
+            DAW::PluginChainCore chain;
+            chain.prepare(44100.0,64);
+            expectEquals(chain.appendPluginInstanceForTesting(
+                std::make_unique<ExactHostDelayResearchPlugin>()),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            for(int b=0;b<6;++b) {
+                juce::AudioBuffer<float> warm(2,64);
+                for(int ch=0;ch<2;++ch)
+                    for(int n=0;n<64;++n)
+                        warm.setSample(ch,n,ch==0?.45f:-.3f);
+                chain.processBlock(warm,64);
+            }
+            chain.prepare(48000.0,64);
+            expectEquals(chain.totalLatencySamples(),32);
+            juce::AudioBuffer<float> impulse(2,64);
+            impulse.clear();
+            impulse.setSample(0,0,.25f);
+            impulse.setSample(1,0,-.125f);
+            chain.processBlock(impulse,64);
+            const double factor=1.0+0.7071067811865475244;
+            for(int n=0;n<64;++n) {
+                const double left=n==32?factor*.25:0;
+                const double right=n==32?factor*(-.125):0;
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(0,n)),left,3.e-5);
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(1,n)),right,3.e-5);
+            }
+        }
+
         beginTest("Real host PDC bypass after fade stays aligned after reset");
         for(const double rate:{44100.0,48000.0}) {
             DAW::PluginChainCore chain;
