@@ -943,7 +943,7 @@ public:
                 std::map<DAW::TrackID,int> delays={
                     {"track-vocal",32},{"track-aux",16}};
                 Owner owner;
-                expect(owner.publishPrepared(graph,&delays,2));
+                expect(owner.publishPrepared(graph,&delays,2,rate));
                 auto run=[&](int first,int count,bool expectContinuous) {
                     auto scope=owner.readRealtime();
                     expect(static_cast<bool>(scope));
@@ -971,14 +971,14 @@ public:
                 // Unchanged route identity + delay MUST reuse the exact ring
                 // history instead of inserting 16 new silent samples.
                 graph.version=702;
-                expect(owner.publishPrepared(graph,&delays,2));
+                expect(owner.publishPrepared(graph,&delays,2,rate));
                 run(frames,frames,true);
                 // Changing the TAP identity on a route forces a fresh bank
                 // for this edge even though its ID and delay are the same.
                 // This intentionally gates old, semantically unrelated audio.
                 graph.edges[0].tapPoint=DAW::TapPoint::PostFX;
                 graph.version=703;
-                expect(owner.publishPrepared(graph,&delays,2));
+                expect(owner.publishPrepared(graph,&delays,2,rate));
                 run(2*frames,frames,false);
                 expectEquals(owner.collectRetiredOnControlThread(),
                              static_cast<std::size_t>(2));
@@ -988,7 +988,7 @@ public:
                 // calling publishPrepared().
                 for(std::uint64_t generation=704;generation<=800;++generation) {
                     graph.version=generation;
-                    expect(owner.publishPrepared(graph,&delays,2));
+                    expect(owner.publishPrepared(graph,&delays,2,rate));
                 }
                 expectEquals(owner.latestPublicationOnControlThread(),
                              static_cast<std::uint64_t>(100));
@@ -996,6 +996,23 @@ public:
                              static_cast<std::size_t>(1));
                 expectEquals(owner.collectRetiredOnControlThread(),
                              static_cast<std::size_t>(1));
+                // Format changes invalidate old sample history even when
+                // the same route ID, tap and integer delay remain stable.
+                graph.version=801;
+                const double changedRate=rate==44100.0?48000.0:44100.0;
+                expect(owner.publishPrepared(graph,&delays,2,changedRate));
+                run(3*frames,frames,false);
+                expect(!owner.publishPrepared(graph,&delays,2,0.0));
+                expect(!owner.publishPrepared(graph,&delays,2,-44100.0));
+                expect(!owner.publishPrepared(graph,&delays,2,500000.0));
+                expectEquals(owner.latestPublicationOnControlThread(),
+                             static_cast<std::uint64_t>(101));
+                {
+                    auto current=owner.readRealtime();
+                    expectEquals(current->sampleRate,changedRate);
+                    expectEquals(current->graph.version,
+                                 static_cast<std::uint64_t>(801));
+                }
             }
         }
 
