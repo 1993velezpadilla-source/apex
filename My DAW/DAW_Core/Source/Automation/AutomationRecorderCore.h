@@ -662,8 +662,11 @@ namespace apex::automation
         {
             if (newRawPoints.empty()) return;
 
-            auto& lane = lanes.getOrCreateLane (paramID);
-            auto prior = lane.getSnapshot();
+            // Read the current immutable point generation, but NEVER edit
+            // its shared lane in-place: an audio callback may hold a pinned
+            // map that still refers to that older lane object.
+            auto currentLane = lanes.findLane (paramID);
+            auto prior = currentLane != nullptr ? currentLane->getSnapshot() : nullptr;
             std::vector<Breakpoint> merged;
             merged.reserve ((prior ? prior->size() : 0) + newRawPoints.size()
                             + (session && session->originalCurve
@@ -759,7 +762,9 @@ namespace apex::automation
                 const auto simplified = simplify (working, kSimplifyEpsilon);
                 merged.insert (merged.end(), simplified.begin(), simplified.end());
             }
-            lane.replacePoints (std::move (merged));
+            // Atomically replace the lane OBJECT and its map on the control
+            // thread, keeping earlier callbacks' curve values unchanged.
+            (void) lanes.replaceOrCreateLanePoints (paramID, std::move (merged));
         }
 
         // ----- Ramer-Douglas-Peucker simplification ----------------------

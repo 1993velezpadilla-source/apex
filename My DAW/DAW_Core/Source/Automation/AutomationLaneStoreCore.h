@@ -358,6 +358,46 @@ namespace apex::automation
             return *inserted->second;
         }
 
+        /**
+         * Recorder/UI edit of ONE lane with full callback-generation
+         * isolation. Unlike getOrCreateLane(id).replacePoints(...), this
+         * publishes a NEW AutomationLane in a NEW immutable lane map, so a
+         * device callback already holding ScopedRtPin keeps the old point
+         * vector for the whole callback (even when it looks up the lane again).
+         *
+         * Preserve the direct lane editor's validation/normalization rules:
+         * replacePoints drops nonfinite knots, clamps values and stable-sorts
+         * duplicate PPQ positions with last-wins semantics. All allocations,
+         * map copying and retired generation reclamation are control-only.
+         */
+        bool replaceOrCreateLanePoints (ParameterID id,
+                                        AutomationLane::PointVector points)
+        {
+            if (id == kInvalidParameterID)
+                return false;
+
+            auto replacement = std::make_shared<AutomationLane> (id);
+            replacement->replacePoints (std::move (points));
+
+            const juce::ScopedLock sl (mapLock);
+            LaneMap next = lanes;
+            next[id] = std::move (replacement);
+            auto nextPublished = std::make_shared<const LaneMap> (next);
+
+            // Reserve ownership before the RT-visible map exchange: no
+            // allocation failure may leave an old DSP map unretained.
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve (retiredLanesSnapshots_.size() + 1);
+            lanes.swap (next);
+            auto old = std::atomic_exchange_explicit (
+                &publishedLanes_, std::move (nextPublished),
+                std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back (std::move (old));
+            changeGeneration_.fetch_add (1, std::memory_order_acq_rel);
+            return true;
+        }
+
         struct BatchReplacement
         {
             ParameterID id = kInvalidParameterID;
