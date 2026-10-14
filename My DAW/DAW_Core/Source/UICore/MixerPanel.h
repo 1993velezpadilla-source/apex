@@ -116,7 +116,20 @@ public:
 
         registerAdditionalNativeAutomationParameters();
 
+        // Rebuilding a strip must reflect the project's saved mode instead
+        // of falsely displaying OFF while the fader is still in Touch/Read.
+        // The volume parameter is the track-wide mode indicator authority.
+        const auto& savedModes = apex::automation::AutomationModeState::getInstance();
+        currentAutoMode_ = volumeParameter_ != nullptr
+            ? savedModes.getMode (volumeParameter_->getID())
+            : savedModes.getGlobalDefaultMode();
+
         initChildren();
+        // initChildren only wires components; its button starts labelled OFF.
+        // Synchronise its visible state immediately, without waiting for an
+        // unrelated Track property notification.
+        autoModeBtn_.label = automationModeLabel (currentAutoMode_);
+        autoModeBtn_.active = currentAutoMode_ != apex::automation::AutomationMode::Off;
     }
 
     ~MixerStrip() override
@@ -150,7 +163,13 @@ public:
                                 apex::automation::ChangeSource         source) override
     {
         if (updatingFromAutomation_) return;
-        juce::ignoreUnused (source);
+        // Mute Automation disables playback modulation, NOT the track audio.
+        // A queued 60Hz dispatcher event must not overwrite the manual
+        // track state after the user mutes its automation. The RT audio
+        // reader independently bypasses muted fader lanes in this state.
+        if (source == apex::automation::ChangeSource::Automation
+            && track_.isAutomationMuted())
+            return;
 
         const juce::ScopedValueSetter<bool> guard (updatingFromAutomation_, true);
 
@@ -458,6 +477,36 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 
     bool isFaderDragging() const noexcept { return draggingFader_; }
 
+    /** Authoritative, production mixer action, shared by the visible button
+        and keyboard/touch UI. Reads live mode state rather than stale paint
+        cache, and updates all track-native + hosted plugin parameter modes. */
+    void cycleAutomationMode()
+    {
+        const auto liveMode = volumeParameter_ != nullptr
+            ? apex::automation::AutomationModeState::getInstance().getMode(volumeParameter_->getID())
+            : currentAutoMode_;
+        setAutomationModeForTrack(nextAutoMode(liveMode));
+    }
+
+    void setAutomationModeForTrack(apex::automation::AutomationMode mode)
+    {
+        currentAutoMode_ = mode;
+        broadcastModeToAllTrackParameters(mode);
+        autoModeBtn_.label = automationModeLabel(mode);
+        autoModeBtn_.active = mode != apex::automation::AutomationMode::Off;
+        autoModeBtn_.repaint();
+    }
+
+    apex::automation::AutomationMode getDisplayedAutomationMode() const noexcept
+    {
+        return currentAutoMode_;
+    }
+
+    juce::String getAutomationModeButtonLabel() const
+    {
+        return autoModeBtn_.label;
+    }
+
     void trackPropertyChanged(Track*) override
     {
         label_.setText(track_.getName(), juce::dontSendNotification);
@@ -466,6 +515,11 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
         polarityBtn_.active = track_.isPolarityInverted();
         polarityBtn_.repaint();
         armBtn_.active  = track_.isArmed();
+        // External mode changes may have occurred via project restore or
+        // another control; never repaint an outdated cached mode label.
+        currentAutoMode_ = volumeParameter_ != nullptr
+            ? apex::automation::AutomationModeState::getInstance().getMode(volumeParameter_->getID())
+            : apex::automation::AutomationModeState::getInstance().getGlobalDefaultMode();
         autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
         autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
         panKnob_.value  = track_.getPan();
@@ -821,10 +875,9 @@ muteBtn_.setBounds(nextButtonBounds());
 
         // Automation mode button — one row below M/S/R, full strip width
         {
-            // Keep a dedicated, directly clickable polarity control on every
-            // non-master strip without squeezing M/S/R/Trim into tiny buttons.
             auto autoRow = b.removeFromTop(24).reduced(4, 1);
-            auto polarityCell = autoRow.removeFromRight(juce::jmin(30, juce::jmax(22, autoRow.getWidth() / 3)));
+            auto polarityCell = autoRow.removeFromRight(
+                juce::jmin(30, juce::jmax(22, autoRow.getWidth() / 3)));
             autoRow.removeFromRight(2);
             autoModeBtn_.setBounds(autoRow);
             polarityBtn_.setBounds(polarityCell);
@@ -1613,16 +1666,7 @@ private:
 
     static apex::automation::AutomationMode nextAutoMode (apex::automation::AutomationMode m) noexcept
     {
-        using M = apex::automation::AutomationMode;
-        switch (m)
-        {
-            case M::Off:   return M::Read;
-            case M::Read:  return M::Touch;
-            case M::Touch: return M::Latch;
-            case M::Latch: return M::Write;
-            case M::Write: return M::Off;
-            default:       return M::Off;
-        }
+        return apex::automation::nextMixerAutomationMode(m);
     }
     // ===== End Phase 1C ===================================================
 
@@ -2567,14 +2611,15 @@ private:
         muteBtn_.active = track_.isMuted();
         soloBtn_.active = track_.isSoloed();
         polarityBtn_.active = track_.isPolarityInverted();
+        polarityBtn_.repaint();
         armBtn_.active  = track_.isArmed();
 
         // Tooltip text for mixer channel strip buttons
         muteBtn_.tooltipText   = "Mute (M)\nMute this track. The track will produce no audio output during playback.";
         soloBtn_.tooltipText   = "Solo (S)\nSolo this track. All other non-soloed tracks are muted. Hold Ctrl for latch-solo.";
-        polarityBtn_.tooltipText = "Polarity Invert (\xC3\x98)\nReverse this track\'s audio polarity on all output channels. Useful for checking multi-mic cancellation. This is not time or frequency-dependent phase alignment.";
+        polarityBtn_.tooltipText = "Polarity Invert (Ø)\nReverse this track\'s audio polarity on all channels. Not time-alignment or spectral phase rotation.";
         armBtn_.tooltipText    = "Record Arm (R)\nArm this track for recording. When armed, incoming audio or MIDI will be captured on record.";
-        autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.";
+        autoModeBtn_.tooltipText = "Automation Mode\nClick to cycle: Off -> Read -> Touch -> Latch -> Write -> Trim.\nOff: no automation.\nRead: plays existing automation.\nTouch: writes only while dragging.\nLatch: overwrites until playback stops.\nWrite: writes continuously.\nTrim: offsets the existing automation while dragging.";
         inputBtn_.tooltipText  = "Input Trim\nOpen the input trim panel to adjust gain, phase, and routing before the track.";
         preFaderBtn_.tooltipText = "Send Pre/Post-Fader\nShows the pre/post-fader state of sends leaving this track.\n- = no sends, POST = all post-fader, PRE = all pre-fader, MIX = mixed.\nClick to toggle (per-target menu when multiple sends exist).";
         trackLensBtn_.tooltipText = "Track Lens\nToggle the track lens view for advanced clip inspection.";
@@ -2637,14 +2682,7 @@ private:
                                        track_.setRecordMode(TrackRecordMode::PostFader);
                                });
         };
-        autoModeBtn_.onClick = [this]
-        {
-            currentAutoMode_ = nextAutoMode (currentAutoMode_);
-            autoModeBtn_.label  = automationModeLabel (currentAutoMode_);
-            autoModeBtn_.active = (currentAutoMode_ != apex::automation::AutomationMode::Off);
-            broadcastModeToAllTrackParameters (currentAutoMode_);
-            autoModeBtn_.repaint();
-        };
+        autoModeBtn_.onClick = [this] { cycleAutomationMode(); };
 inputBtn_.onClick = [this]
         {
             inputBtn_.active = false;

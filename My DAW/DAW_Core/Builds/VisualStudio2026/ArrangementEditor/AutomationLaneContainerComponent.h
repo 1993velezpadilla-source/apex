@@ -25,6 +25,45 @@ public:
 
     ~AutomationLaneContainerComponent() override = default;
 
+    void setGroupedCurveCallback(AutomationLaneComponent::GroupedCurveCallback callback)
+    {
+        groupedCurveCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setGroupedCurveCallback(groupedCurveCallback_);
+    }
+
+    void setNativeMacroCallback(
+        AutomationLaneComponent::NativeMacroCallback callback)
+    {
+        nativeMacroCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setNativeMacroCallback(nativeMacroCallback_);
+    }
+
+    void setVst3MacroCallback(
+        AutomationLaneComponent::Vst3MacroCallback callback)
+    {
+        vst3MacroCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setVst3MacroCallback(vst3MacroCallback_);
+    }
+
+    void setVst3MacroTargetCallback(
+        AutomationLaneComponent::Vst3MacroTargetCallback callback)
+    {
+        vst3MacroTargetCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setVst3MacroTargetCallback(vst3MacroTargetCallback_);
+    }
+
+    void setSelectedSnapshotCallback(
+        AutomationLaneComponent::SelectedSnapshotCallback callback)
+    {
+        selectedSnapshotCallback_ = std::move(callback);
+        for (auto& entry : lanes_)
+            entry.second->setSelectedSnapshotCallback(selectedSnapshotCallback_);
+    }
+
     // ========================================================================
     // LANE MANAGEMENT
     // ========================================================================
@@ -48,6 +87,11 @@ public:
         );
 
         auto* lanePtr = laneComponent.get();
+        lanePtr->setGroupedCurveCallback(groupedCurveCallback_);
+        lanePtr->setNativeMacroCallback(nativeMacroCallback_);
+        lanePtr->setVst3MacroCallback(vst3MacroCallback_);
+        lanePtr->setVst3MacroTargetCallback(vst3MacroTargetCallback_);
+        lanePtr->setSelectedSnapshotCallback(selectedSnapshotCallback_);
         lanePtr->setSize(getWidth(), 60);  // 60 pixels high per lane
 
         addAndMakeVisible(laneComponent.get());
@@ -257,6 +301,11 @@ private:
 
     AutomationUIHelper& helper_;
     TrackID trackId_;
+    AutomationLaneComponent::GroupedCurveCallback groupedCurveCallback_;
+    AutomationLaneComponent::NativeMacroCallback nativeMacroCallback_;
+    AutomationLaneComponent::Vst3MacroCallback vst3MacroCallback_;
+    AutomationLaneComponent::Vst3MacroTargetCallback vst3MacroTargetCallback_;
+    AutomationLaneComponent::SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // Map from parameter ID to lane component
     std::map<juce::String, std::unique_ptr<AutomationLaneComponent>> lanes_;

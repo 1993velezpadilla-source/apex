@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "../Automation/AutomationTypes.h"
 #include "../UtilityCore/Types.h"
 #include "TrackPolarityCore.h"
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
@@ -51,12 +52,10 @@ public:
     bool isSoloed() const { return soloed_.load(std::memory_order_relaxed); }
     void setSoloed(bool shouldBeSoloed);
 
-    // Channel polarity inversion (both channels for stereo); not a time shift.
+    // Ø polarity invert is independent of native parameter automation.
     bool isPolarityInverted() const noexcept { return polarityInverted_.load(std::memory_order_relaxed); }
     void setPolarityInverted(bool inverted);
-    // Audio-thread-only production render; GUI updates only the atomic target.
-    // The per-track state carries the transition across buffers and prevents
-    // hard sign discontinuities on user Ø toggles.
+    // Called solely on the audio thread; transitions remain per-track.
     void applyPolarityTo(juce::AudioBuffer<float>& audio, int samples) noexcept
     {
         TrackPolarityCore::applyWithTransition(audio, samples,
@@ -85,6 +84,43 @@ public:
     
     // Level
     float getVolume() const { return volume_.load(std::memory_order_relaxed); }
+    // Stable, project-scoped APEX native automation key for the audio callback.
+    // Updated on the message thread after any key-registry project restore.
+    // The audio thread must NEVER construct Strings or acquire a registry lock.
+    apex::automation::ParameterID getNativeVolumeAutomationIDRT() const noexcept
+    {
+        return nativeVolumeAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativeVolumeAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativeVolumeAutomationID_.store(id, std::memory_order_release);
+    }
+    // Stable PPQ native-pan automation identity for direct audio-thread reads.
+    // Rebound after key-registry restore, without String work in processBlock.
+    apex::automation::ParameterID getNativePanAutomationIDRT() const noexcept
+    {
+        return nativePanAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativePanAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativePanAutomationID_.store(id, std::memory_order_release);
+    }
+    apex::automation::ParameterID getNativeMuteAutomationIDRT() const noexcept
+    {
+        return nativeMuteAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativeMuteAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativeMuteAutomationID_.store(id, std::memory_order_release);
+    }
+    apex::automation::ParameterID getNativeSoloAutomationIDRT() const noexcept
+    {
+        return nativeSoloAutomationID_.load(std::memory_order_acquire);
+    }
+    void bindNativeSoloAutomationID (apex::automation::ParameterID id) noexcept
+    {
+        nativeSoloAutomationID_.store(id, std::memory_order_release);
+    }
     void setVolume(float newVolume);
     
     float getPan() const { return pan_.load(std::memory_order_relaxed); }
@@ -270,11 +306,15 @@ private:
     std::atomic<bool> muted_{false};
     std::atomic<bool> soloed_{false};
     std::atomic<bool> polarityInverted_{false};
-    TrackPolarityCore::TransitionState polarityTransition_; // audio thread owns this
+    TrackPolarityCore::TransitionState polarityTransition_;
     std::atomic<bool> armed_{false};
     std::atomic<int> recordMode_ { (int) TrackRecordMode::Dry };
     std::atomic<bool> monitoring_{false};
     std::atomic<float> volume_{1.0f}; // 0.0 to ~+6 dB
+    std::atomic<apex::automation::ParameterID> nativeVolumeAutomationID_ { apex::automation::kInvalidParameterID };
+    std::atomic<apex::automation::ParameterID> nativePanAutomationID_ { apex::automation::kInvalidParameterID };
+    std::atomic<apex::automation::ParameterID> nativeMuteAutomationID_ { apex::automation::kInvalidParameterID };
+    std::atomic<apex::automation::ParameterID> nativeSoloAutomationID_ { apex::automation::kInvalidParameterID };
     std::atomic<float> pan_{0.0f};    // -1.0 to 1.0
     std::atomic<bool> automationVisible_{false};
     std::atomic<bool> automationMuted_{false};

@@ -6,6 +6,12 @@
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
 #include "../../../Source/Automation/AutomationTransportStateCore.h"
 #include "AutomationUndoRedoCore.h"
+#include "../../../Source/AutomationCore/AutomationLaneCurveClipboardCore.h"
+#include "../../../Source/AutomationCore/AutomationMusicalLfoCore.h"
+#include "../../../Source/AutomationCore/AutomationFreehandStrokeCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveTransformCore.h"
+#include "../../../Source/AutomationCore/AutomationCurveMorphCore.h"
+#include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
 
 namespace DAW {
 
@@ -41,6 +47,258 @@ public:
 
     ~AutomationLaneComponent() override = default;
 
+    using GroupedCurveCallback = std::function<bool(
+        const TrackID&, const juce::String&, const std::vector<AutomationPoint>&)>;
+    void setGroupedCurveCallback(GroupedCurveCallback callback)
+    {
+        groupedCurveCallback_ = std::move(callback);
+    }
+
+    using NativeMacroCallback = std::function<bool(
+        const TrackID&, const juce::String&, const std::vector<AutomationPoint>&)>;
+    void setNativeMacroCallback(NativeMacroCallback callback)
+    {
+        nativeMacroCallback_ = std::move(callback);
+    }
+
+    using Vst3MacroCallback = NativeMacroCallback;
+    void setVst3MacroCallback(Vst3MacroCallback callback)
+    {
+        vst3MacroCallback_ = std::move(callback);
+    }
+
+    enum class Vst3MacroTargetAction { AddLastTouched, Clear };
+    using Vst3MacroTargetCallback = std::function<bool(Vst3MacroTargetAction)>;
+    void setVst3MacroTargetCallback(Vst3MacroTargetCallback callback)
+    {
+        vst3MacroTargetCallback_ = std::move(callback);
+    }
+
+    // Session-local multi-track A/B memories. These are deliberately limited
+    // to native volume/pan until the VST3 host can verify exact plugin IDs
+    // and publish PPQ updates for multiple plugin parameters coherently.
+    enum class SelectedSnapshotAction { CaptureA, CaptureB, MorphHalf };
+    using SelectedSnapshotCallback = std::function<bool(
+        const TrackID&, const juce::String&, SelectedSnapshotAction)>;
+    void setSelectedSnapshotCallback(SelectedSnapshotCallback callback)
+    {
+        selectedSnapshotCallback_ = std::move(callback);
+    }
+
+    // Same exact PPQ bridge as ordinary point, pencil and curve edits.
+    // Callable after multi-track Undo/Redo without constructing UI lanes.
+    static void syncModelLaneToApex(const AutomationUIHelper& helper,
+                                    const TrackID& trackId,
+                                    const juce::String& parameterId,
+                                    double sampleRate, double tempoBpm)
+    {
+        if (!std::isfinite(sampleRate) || !std::isfinite(tempoBpm)
+            || sampleRate <= 0.0 || tempoBpm <= 0.0)
+            return;
+
+        juce::String key;
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        if (parameterId == AutomationLaneCore::trackVolumeParameterId)
+            key = KR::trackVolumeKey(trackId);
+        else if (parameterId == AutomationLaneCore::trackPanParameterId)
+            key = KR::trackPanKey(trackId);
+        else
+            return; // explicit native volume/pan only: no VST3 guessing
+
+        const auto* lane = helper.findLane(trackId, parameterId);
+        if (lane == nullptr)
+            return;
+
+        auto& registry = KR::getInstance();
+        const auto id = registry.getOrCreateID(key);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
+        apex::automation::AutomationLane::PointVector ppqPoints;
+        ppqPoints.reserve(lane->points.size());
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        for (const auto& point : lane->points)
+        {
+            ppqPoints.push_back({
+                juce::jmax(0.0, static_cast<double>(point.timeSamples) * ppqPerSample),
+                normaliseForApex(parameterId, point.value),
+                toApexCurveType(point.curveToNext),
+                juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+            });
+        }
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(ppqPoints));
+    }
+
+    // Only call after the arrangement host has re-verified exact VST3
+    // track + slot + instance UUID + parameter and continuous metadata.
+    // The bridge key matches PluginInstanceCore::rebuildRtAutomationBindings.
+    static void syncHostVerifiedVst3LaneToApex(
+        const AutomationUIHelper& helper, const TrackID& trackId,
+        const juce::String& coreParameterId, double sampleRate, double tempoBpm)
+    {
+        if (!coreParameterId.startsWith("plugin.")
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return;
+
+        const auto* lane = helper.findLane(trackId, coreParameterId);
+        if (lane == nullptr)
+            return;
+
+        auto& registry = apex::automation::AutomationParameterKeyRegistry::getInstance();
+        const auto key = "plugin." + trackId + ".core." + coreParameterId;
+        const auto id = registry.getOrCreateID(key);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
+        apex::automation::AutomationLane::PointVector converted;
+        converted.reserve(lane->points.size());
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        for (const auto& point : lane->points)
+            converted.push_back({
+                juce::jmax(0.0, (double)point.timeSamples * ppqPerSample),
+                point.value, // hosted VST3 uses native JUCE normalized [0,1]
+                toApexCurveType(point.curveToNext),
+                juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+            });
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(converted));
+    }
+
+    /**
+     * All-or-nothing native volume/pan PPQ mirror used by selected-track
+     * macros, grouped curves and snapshot morphs. Caller must have committed
+     * a fully validated manager transaction; Undo uses exactly this route.
+     * No plugin targets may be introduced through native key guessing.
+     */
+    static bool syncNativeBatchToApex(
+        const AutomationUIHelper& helper,
+        const std::vector<AutomationMultiParameterSnapshotCore::Target>& targets,
+        double sampleRate, double tempoBpm)
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        if (targets.empty() || targets.size() > 128
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return false;
+
+        auto& registry = KR::getInstance();
+        auto& store = Store::getInstance();
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        if (!std::isfinite(ppqPerSample) || ppqPerSample <= 0.0)
+            return false;
+
+        std::vector<Store::BatchReplacement> prepared;
+        prepared.reserve(targets.size());
+        for (const auto& target : targets)
+        {
+            if (target.trackId.isEmpty())
+                return false;
+            juce::String key;
+            if (target.parameterId == AutomationLaneCore::trackVolumeParameterId)
+                key = KR::trackVolumeKey(target.trackId);
+            else if (target.parameterId == AutomationLaneCore::trackPanParameterId)
+                key = KR::trackPanKey(target.trackId);
+            else
+                return false; // never guess plugin destinations
+
+            const auto* lane = helper.findLane(target.trackId, target.parameterId);
+            if (lane == nullptr || !lane->isEnabled())
+                return false;
+
+            Store::BatchReplacement replacement;
+            replacement.id = registry.getOrCreateID(key);
+            replacement.points.reserve(lane->points.size());
+            for (const auto& point : lane->points)
+            {
+                if (point.timeSamples < 0 || !std::isfinite(point.value)
+                    || !std::isfinite(point.tensionToNext)
+                    || point.tensionToNext < -1.0f || point.tensionToNext > 1.0f
+                    || !std::isfinite((double)point.timeSamples * ppqPerSample))
+                    return false;
+                const auto normalized = normaliseForApex(target.parameterId, point.value);
+                if (!std::isfinite(normalized)
+                    || normalized < 0.0f || normalized > 1.0f)
+                    return false;
+                replacement.points.push_back({
+                    (double)point.timeSamples * ppqPerSample,
+                    normalized, toApexCurveType(point.curveToNext),
+                    point.tensionToNext
+                });
+            }
+            // A duplicated native destination rejects the entire group.
+            for (const auto& existing : prepared)
+                if (existing.id == replacement.id)
+                    return false;
+            prepared.push_back(std::move(replacement));
+        }
+
+        // No getOrCreateLane here: that would publish each new empty lane
+        // before the group commit, and even leak phantom lanes on failure.
+        // The store creates missing mirrors inside ONE atomic map swap.
+        return store.replaceOrCreatePointsBatch(std::move(prepared));
+    }
+
+    /**
+     * Control-thread PPQ bridge for an already committed VST3 macro plan.
+     * Converts all host-verified core lanes first, and atomically replaces
+     * their PPQ snapshots with one lane-map publication. No audio-thread
+     * mutation/lock is introduced. Caller handles legacy manager rollback
+     * if this returns false.
+     */
+    static bool syncHostVerifiedVst3BatchToApex(
+        const AutomationUIHelper& helper,
+        const std::vector<AutomationMultiParameterSnapshotCore::LaneChange>& changes,
+        double sampleRate, double tempoBpm)
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        using Registry = apex::automation::AutomationParameterKeyRegistry;
+        if (changes.empty() || changes.size() > 64
+            || !std::isfinite(sampleRate) || sampleRate <= 0.0
+            || !std::isfinite(tempoBpm) || tempoBpm <= 0.0)
+            return false;
+
+        auto& registry = Registry::getInstance();
+        auto& store = Store::getInstance();
+        const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
+        std::vector<Store::BatchReplacement> prepared;
+        prepared.reserve(changes.size());
+        for (const auto& change : changes)
+        {
+            const auto& target = change.target;
+            if (target.trackId.isEmpty()
+                || !target.parameterId.startsWith("plugin."))
+                return false;
+            const auto* lane = helper.findLane(target.trackId, target.parameterId);
+            if (lane == nullptr || !lane->isEnabled())
+                return false;
+
+            Store::BatchReplacement replacement;
+            const auto key = "plugin." + target.trackId + ".core."
+                           + target.parameterId;
+            replacement.id = registry.getOrCreateID(key);
+            replacement.points.reserve(lane->points.size());
+            for (const auto& point : lane->points)
+            {
+                if (point.timeSamples < 0 || !std::isfinite(point.value)
+                    || point.value < 0.0f || point.value > 1.0f
+                    || !std::isfinite(point.tensionToNext))
+                    return false;
+                replacement.points.push_back({
+                    (double)point.timeSamples * ppqPerSample,
+                    point.value, toApexCurveType(point.curveToNext),
+                    juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
+                });
+            }
+            prepared.push_back(std::move(replacement));
+        }
+
+        // Create absent hosted PPQ bridges in the SAME atomic publication:
+        // no transient empty-lane generations and no failed partial upserts.
+        return store.replaceOrCreatePointsBatch(std::move(prepared));
+    }
+
+    bool canBulkEditCurve() const noexcept
+    {
+        return !helper_.hasClipRegionsForParameter(trackId_, parameterId_);
+    }
+
     void paint(juce::Graphics& g) override
     {
         g.fillAll(juce::Colours::transparentBlack);
@@ -65,6 +323,22 @@ public:
 
         // Draw points
         drawPoints(g);
+
+        // Transient pencil preview; live DSP is untouched until mouseUp.
+        if (freehandDrawing_ && !freehandStroke_.empty())
+        {
+            juce::Path preview;
+            bool first = true;
+            for (const auto& pt : freehandStroke_)
+            {
+                const float x = timeSamplesToX(pt.timeSamples, b);
+                const float y = valueToY(pt.value, b);
+                if (first) { preview.startNewSubPath(x, y); first = false; }
+                else preview.lineTo(x, y);
+            }
+            g.setColour(juce::Colours::yellow.withAlpha(0.85f));
+            g.strokePath(preview, juce::PathStrokeType(2.0f));
+        }
 
         // Draw tension indicators
         drawTensionIndicators(g);
@@ -103,6 +377,17 @@ public:
         tensionDragActive_ = false;
 
         const bool canEdit = isDrawingEnabled();
+        if (freehandArmed_ && !e.mods.isPopupMenu() && canEdit
+            && canBulkEditCurve())
+        {
+            freehandArmed_ = false;
+            freehandDrawing_ = true;
+            freehandStroke_.clear();
+            freehandBeforeState_ = laneRef.getState();
+            appendFreehandPoint(e);
+            setMouseCursor(juce::MouseCursor::NormalCursor);
+            return;  // pencil owns this gesture; no point/segment drag
+        }
 
         // Check for point click (highest priority)
         for (size_t i = 0; i < lane->points.size(); ++i)
@@ -189,6 +474,13 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (freehandDrawing_)
+        {
+            appendFreehandPoint(e);
+            repaint();
+            return;
+        }
+
         if (pointDragActive_)
         {
             dragSelectedPoint(e);
@@ -221,6 +513,27 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (freehandDrawing_)
+        {
+            appendFreehandPoint(e);
+            freehandDrawing_ = false;
+            auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+            if (canBulkEditCurve()
+                && AutomationFreehandStrokeCore::commit(lane, freehandStroke_))
+            {
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_,
+                    freehandBeforeState_, lane.getState()));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+            }
+            freehandBeforeState_ = {};
+            freehandStroke_.clear();
+            invalidateCurvePath();
+            repaint();
+            return;
+        }
+
         if (tensionDragActive_)
         {
             tensionDragActive_ = false;
@@ -273,6 +586,7 @@ public:
             if (undoManager_.canRedo())
             {
                 undoManager_.redo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -285,6 +599,7 @@ public:
             if (undoManager_.canRedo())
             {
                 undoManager_.redo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -297,6 +612,7 @@ public:
             if (undoManager_.canUndo())
             {
                 undoManager_.undo();
+                syncApexLaneFromCoreLane();
                 invalidateCurvePath();
                 repaint();
             }
@@ -555,6 +871,11 @@ private:
     // ========================================================================
 
     UndoManager undoManager_;
+    GroupedCurveCallback groupedCurveCallback_;
+    NativeMacroCallback nativeMacroCallback_;
+    Vst3MacroCallback vst3MacroCallback_;
+    Vst3MacroTargetCallback vst3MacroTargetCallback_;
+    SelectedSnapshotCallback selectedSnapshotCallback_;
 
     // ========================================================================
     // INTERACTION STATE & HELPERS (Phase 2)
@@ -573,6 +894,30 @@ private:
     // Complete lane state captured at drag start — the MovePointAction undo
     // payload.  One action per drag gesture, not one per mouse-motion sample.
     juce::ValueTree pointDragBeforeState_;
+
+    // A one-shot touch/mouse pencil gesture. Buffers only UI samples and
+    // commits once, so large gestures do not publish thousands of DSP lanes.
+    bool freehandArmed_ = false;
+    bool freehandDrawing_ = false;
+    std::vector<AutomationPoint> freehandStroke_;
+    juce::ValueTree freehandBeforeState_;
+
+    void appendFreehandPoint(const juce::MouseEvent& e)
+    {
+        AutomationPoint point;
+        point.timeSamples = xToTimeSamples((float)e.x);
+        point.value = yToValue((float)e.y);
+        point.curveToNext = AutomationCurveType::Linear;
+        point.tensionToNext = 0.0f;
+
+        if (!freehandStroke_.empty()
+            && freehandStroke_.back().timeSamples == point.timeSamples)
+            freehandStroke_.back() = point;
+        else if (freehandStroke_.size() < AutomationFreehandStrokeCore::maxStrokePoints)
+            freehandStroke_.push_back(point);
+        else
+            freehandStroke_.back() = point; // always retain newest endpoint
+    }
 
     bool isClickOnPoint(const juce::MouseEvent& e, const AutomationPoint& point)
     {
@@ -971,6 +1316,12 @@ private:
     {
         juce::PopupMenu menu;
         menu.addItem("Add Point", [this, e]() { insertPointAtClickLocation(e); });
+        if (isDrawingEnabled() && canBulkEditCurve())
+            menu.addItem("Freehand Pencil - Next Drag", [this]()
+            {
+                freehandArmed_ = true;
+                setMouseCursor(juce::MouseCursor::CrosshairCursor);
+            });
         menu.addItem("Add Point Keeping Level", [this, e]() {
             const auto timeSamples = xToTimeSamples((float)e.x);
             selectedPointIndex_ = helper_.insertPointPreservingLevel(trackId_, parameterId_, timeSamples);
@@ -997,6 +1348,304 @@ private:
             invalidateCurvePath();
             repaint();
         });
+
+        // Explicit full-lane edit, distinct from point/segment clipboards.
+        // A snapshot publish reapplies clip-owned regions; never offer a bulk
+        // edit that would be silently reverted or partially masked in DSP.
+        if (!canBulkEditCurve())
+            menu.addSectionHeader("Bulk edits unavailable: Automation Clip owns this lane");
+
+        // Only an exact parameter match can paste: pan/volume/foreign VST3
+        // ranges must never be silently reinterpreted.
+        menu.addSeparator();
+        if (auto* sourceLane = helper_.findLane(trackId_, parameterId_);
+            sourceLane != nullptr && !sourceLane->points.empty())
+        {
+            menu.addItem("Copy Entire Curve", [this]()
+            {
+                if (auto* lane = helper_.findLane(trackId_, parameterId_))
+                    AutomationLaneCurveClipboardCore::shared().copyFrom(*lane, sampleRate_, tempoBpm_);
+            });
+        }
+
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
+        {
+            menu.addItem("Replace Entire Curve (Undoable)", [this]()
+            {
+                // findLane() intentionally exposes a const view. Edits must
+                // use the message-thread mutable getOrCreateLane() API.
+                auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                if (!lane.isEnabled() || !canBulkEditCurve())
+                    return;
+
+                std::vector<AutomationPoint> pasted;
+                if (!AutomationLaneCurveClipboardCore::shared()
+                         .makePastedPoints(parameterId_, sampleRate_, tempoBpm_, pasted))
+                    return;
+
+                const auto before = lane.getState();
+                lane.points = std::move(pasted);
+                lane.sortAndResolveDuplicates();
+                const auto after = lane.getState();
+
+                // A single atomic history entry (rather than one per point).
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_, before, after));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+                selectedPointIndex_ = -1;
+                invalidateCurvePath();
+                repaint();
+            });
+        }
+
+        // Producer-friendly one-click musical modulation patterns. Generate
+        // OFFLINE points once; playback consumes normal APEX lane snapshots.
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationMusicalLfoCore::supports(parameterId_))
+        {
+            juce::PopupMenu lfoMenu;
+            const auto addLfoItem = [this, &lfoMenu](const juce::String& name,
+                                                    AutomationMusicalLfoCore::Shape shape)
+            {
+                lfoMenu.addItem(name, [this, shape]()
+                {
+                    std::vector<AutomationPoint> generated;
+                    if (!AutomationMusicalLfoCore::generate(parameterId_, shape,
+                            sampleRate_, tempoBpm_, generated))
+                        return;
+
+                    auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                    if (!lane.isEnabled() || !canBulkEditCurve())
+                        return;
+
+                    const auto before = lane.getState();
+                    lane.points = std::move(generated);
+                    lane.sortAndResolveDuplicates();
+                    const auto after = lane.getState();
+
+                    undoManager_.doAction(std::make_unique<MovePointAction>(
+                        helper_, trackId_, parameterId_, before, after));
+                    syncApexLaneFromCoreLane();
+                    helper_.publishSnapshot();
+                    selectedPointIndex_ = -1;
+                    invalidateCurvePath();
+                    repaint();
+                });
+            };
+
+            addLfoItem("Sine · 1 bar", AutomationMusicalLfoCore::Shape::Sine);
+            addLfoItem("Triangle · 1 bar", AutomationMusicalLfoCore::Shape::Triangle);
+            addLfoItem("Square · 1 bar", AutomationMusicalLfoCore::Shape::Square);
+            addLfoItem("Saw · 1 bar", AutomationMusicalLfoCore::Shape::Saw);
+            menu.addSubMenu("Generate 1-Bar LFO Curve (Undoable)", lfoMenu);
+        }
+
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationCurveTransformCore::supports(parameterId_))
+        {
+            juce::PopupMenu transformations;
+            const auto addTransform = [this, &transformations](
+                const juce::String& label, AutomationCurveTransformCore::Operation op)
+            {
+                transformations.addItem(label, [this, op]()
+                {
+                    auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                    if (!lane.isEnabled() || lane.points.empty() || !canBulkEditCurve())
+                        return;
+
+                    std::vector<AutomationPoint> transformed;
+                    if (!AutomationCurveTransformCore::transform(parameterId_, op, lane.points,
+                            sampleRate_, tempoBpm_, transformed))
+                        return;
+
+                    const auto before = lane.getState();
+                    lane.points = std::move(transformed);
+                    lane.sortAndResolveDuplicates();
+                    undoManager_.doAction(std::make_unique<MovePointAction>(
+                        helper_, trackId_, parameterId_, before, lane.getState()));
+                    syncApexLaneFromCoreLane();
+                    helper_.publishSnapshot();
+                    selectedPointIndex_ = -1;
+                    invalidateCurvePath();
+                    repaint();
+                });
+            };
+            addTransform("Invert Values", AutomationCurveTransformCore::Operation::InvertValues);
+            addTransform("Compress Levels 50%", AutomationCurveTransformCore::Operation::CompressHalf);
+            addTransform("Expand Levels 200%", AutomationCurveTransformCore::Operation::ExpandDouble);
+            addTransform("Shift Right 1 Beat", AutomationCurveTransformCore::Operation::ShiftRightBeat);
+            menu.addSubMenu("Transform Entire Curve (Undoable)", transformations);
+        }
+
+        // Creative A/B blend against the copied whole-curve snapshot. This
+        // is OFFLINE point generation, not signal-rate or VST3 parameter DSP.
+        if (isDrawingEnabled() && canBulkEditCurve()
+            && AutomationLaneCurveClipboardCore::shared().hasCurveFor(parameterId_))
+        {
+            menu.addItem("Morph 50% Toward Copied Curve (Undoable)", [this]()
+            {
+                std::vector<AutomationPoint> target;
+                if (!AutomationLaneCurveClipboardCore::shared()
+                         .makePastedPoints(parameterId_, sampleRate_, tempoBpm_, target))
+                    return;
+
+                auto& lane = helper_.getOrCreateLane(trackId_, parameterId_);
+                if (!lane.isEnabled() || lane.points.empty() || !canBulkEditCurve())
+                    return;
+
+                std::vector<AutomationPoint> blended;
+                if (!AutomationCurveMorphCore::blend(
+                        parameterId_, lane.points, target, 0.5f, blended))
+                    return;
+
+                const auto before = lane.getState();
+                lane.points = std::move(blended);
+                lane.sortAndResolveDuplicates();
+                undoManager_.doAction(std::make_unique<MovePointAction>(
+                    helper_, trackId_, parameterId_, before, lane.getState()));
+                syncApexLaneFromCoreLane();
+                helper_.publishSnapshot();
+                selectedPointIndex_ = -1;
+                invalidateCurvePath();
+                repaint();
+            });
+        }
+
+        // Deliberate grouped edit: only pre-selected, existing native lanes.
+        // The Arrangement owner decides the exact set of selected tracks.
+        if (isDrawingEnabled() && groupedCurveCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            menu.addItem("Copy This Curve to Selected Clip Tracks (Undoable)", [safeLane]()
+            {
+                auto* lane = safeLane.getComponent();
+                if (lane == nullptr || !lane->groupedCurveCallback_
+                    || !lane->isDrawingEnabled())
+                    return;
+
+                const auto* source = lane->helper_.findLane(
+                    lane->trackId_, lane->parameterId_);
+                if (source != nullptr && source->isEnabled()
+                    && !source->points.empty()
+                    && lane->groupedCurveCallback_(
+                        lane->trackId_, lane->parameterId_, source->points))
+                {
+                    lane->invalidateCurvePath();
+                    lane->repaint();
+                }
+            });
+        }
+
+        // Deliberately explicit destructive macro operation: map the shape
+        // of THIS native curve to the existing Volume + PAN lanes of every
+        // selected track. Never silently create plugin instances or lanes.
+        if (isDrawingEnabled() && nativeMacroCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            menu.addItem(
+                "Macro: Replace Selected Tracks' Volume + PAN Curves (Undoable)",
+                [safeLane]()
+                {
+                    auto* lane = safeLane.getComponent();
+                    if (lane == nullptr || !lane->nativeMacroCallback_
+                        || !lane->isDrawingEnabled()
+                        || !lane->canBulkEditCurve())
+                        return;
+
+                    const auto* source = lane->helper_.findLane(
+                        lane->trackId_, lane->parameterId_);
+                    if (source != nullptr && source->isEnabled()
+                        && !source->points.empty()
+                        && lane->nativeMacroCallback_(
+                            lane->trackId_, lane->parameterId_, source->points))
+                    {
+                        lane->invalidateCurvePath();
+                        lane->repaint();
+                    }
+                });
+        }
+
+        if (isDrawingEnabled() && canBulkEditCurve() && vst3MacroCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            if (vst3MacroTargetCallback_)
+            {
+                menu.addItem("Macro: Add Last-Touched VST3 to Target Bank",
+                    [safeLane]()
+                    {
+                        if (auto* lane = safeLane.getComponent())
+                            if (lane->vst3MacroTargetCallback_)
+                                lane->vst3MacroTargetCallback_(
+                                    Vst3MacroTargetAction::AddLastTouched);
+                    });
+                menu.addItem("Macro: Clear VST3 Target Bank",
+                    [safeLane]()
+                    {
+                        if (auto* lane = safeLane.getComponent())
+                            if (lane->vst3MacroTargetCallback_)
+                                lane->vst3MacroTargetCallback_(
+                                    Vst3MacroTargetAction::Clear);
+                    });
+            }
+            menu.addItem("Macro: Replace VST3 Target Bank / Last-Touched (Undoable)",
+                [safeLane]()
+                {
+                    auto* lane = safeLane.getComponent();
+                    if (lane == nullptr || !lane->vst3MacroCallback_
+                        || !lane->isDrawingEnabled() || !lane->canBulkEditCurve())
+                        return;
+                    const auto* source = lane->helper_.findLane(
+                        lane->trackId_, lane->parameterId_);
+                    if (source != nullptr && source->isEnabled()
+                        && !source->points.empty()
+                        && lane->vst3MacroCallback_(
+                            lane->trackId_, lane->parameterId_, source->points))
+                    {
+                        lane->invalidateCurvePath();
+                        lane->repaint();
+                    }
+                });
+        }
+
+        // Visible, producer-facing multi-track A/B: only explicitly selected
+        // audio clips are permitted to define participating track IDs.
+        // The owner rejects stale selections and mismatched A/B target sets.
+        if (isDrawingEnabled() && selectedSnapshotCallback_
+            && (parameterId_ == AutomationLaneCore::trackVolumeParameterId
+                || parameterId_ == AutomationLaneCore::trackPanParameterId))
+        {
+            juce::PopupMenu snapshots;
+            juce::Component::SafePointer<AutomationLaneComponent> safeLane(this);
+            const auto action = [safeLane](SelectedSnapshotAction what)
+            {
+                if (auto* lane = safeLane.getComponent())
+                    if (lane->selectedSnapshotCallback_)
+                        lane->selectedSnapshotCallback_(
+                            lane->trackId_, lane->parameterId_, what);
+            };
+            snapshots.addItem("Capture A (selected tracks)", [action]()
+            {
+                action(SelectedSnapshotAction::CaptureA);
+            });
+            snapshots.addItem("Capture B (selected tracks)", [action]()
+            {
+                action(SelectedSnapshotAction::CaptureB);
+            });
+            snapshots.addSeparator();
+            snapshots.addItem("Morph A/B 50% (Undoable)", [action]()
+            {
+                action(SelectedSnapshotAction::MorphHalf);
+            });
+            menu.addSubMenu("Multi-Track A/B · Session Memory", snapshots);
+        }
 
         menu.showMenuAsync(
             juce::PopupMenu::Options()
@@ -1069,7 +1718,7 @@ private:
 
         auto& registry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         const auto id = registry.getOrCreateID(key);
-        auto& apexLane = apex::automation::AutomationLaneStore::getInstance().getOrCreateLane(id);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
 
         apex::automation::AutomationLane::PointVector points;
         points.reserve(lane->points.size());
@@ -1093,7 +1742,9 @@ private:
             });
         }
 
-        apexLane.replacePoints(std::move(points));
+        // Publish a new lane/map generation so a pinned DSP callback cannot
+        // observe an in-place GUI edit halfway through its plugin chain.
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(points));
     }
 
     juce::String apexKeyForParameter() const

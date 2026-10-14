@@ -38,9 +38,14 @@ namespace apex::automation
             if (! transportRolling)
                 return;
 
-            registry.forEachRT ([this, playheadPPQ] (AutomationParameter& p)
+            // Native parameter state must resolve from the SAME PPQ map
+            // generation pinned by the complete device/offline callback.
+            // Otherwise native faders could reflect new curves while VST3
+            // instances still render the old macro bank for this block.
+            const auto ppqLaneMap = lanes.getEffectiveLaneSnapshotRT();
+            registry.forEachRT ([this, playheadPPQ, &ppqLaneMap] (AutomationParameter& p)
             {
-                evaluateOne (p, playheadPPQ);
+                evaluateOne (p, playheadPPQ, ppqLaneMap);
             });
         }
 
@@ -50,24 +55,49 @@ namespace apex::automation
         }
 
     private:
-        void evaluateOne (AutomationParameter& p, double playheadPPQ) noexcept
+        void evaluateOne (
+            AutomationParameter& p, double playheadPPQ,
+            const AutomationLaneStore::RtLaneSnapshot& ppqLaneMap) noexcept
         {
             const auto id = p.getID();
 
             if (! modeState.isReadingRT (id))
                 return;
 
-            // User is holding this control -- their value wins.
-            if (p.isGestureActive())
+            // User gesture wins. Latch and Write keep the last user value
+            // after release until transport Stop. Re-evaluating the old lane
+            // during this hold would fight the value on every audio block.
+            const auto mode = modeState.getModeRT (id);
+            if (p.isGestureActive()
+                || ((mode == AutomationMode::Latch || mode == AutomationMode::Write)
+                    && modeState.latchHeldRT (id)))
                 return;
 
-            auto lane = lanes.findLaneRT (id);
+            auto lane = AutomationLaneStore::findLaneInSnapshotRT (ppqLaneMap, id);
             if (lane == nullptr) return;
 
             auto snap = lane->getSnapshot();
             if (snap == nullptr || snap->empty()) return;
 
-            const float v = AutomationLane::evaluateAt (*snap, playheadPPQ);
+            // A stepped (enum/switch/boolean) control must retain its
+            // preceding value until the next breakpoint, even if a saved
+            // or imported lane incorrectly marks the segment Linear/Smooth.
+            // Interpolation here made the UI/plugin-facing atomic switch
+            // EARLIER than the direct mute/solo DSP path at the same PPQ.
+            float v;
+            if (p.getRange().isStepped)
+            {
+                const auto upper = std::upper_bound(
+                    snap->begin(), snap->end(), playheadPPQ,
+                    [] (double t, const Breakpoint& bp)
+                    {
+                        return t < bp.timePPQ;
+                    });
+                v = (upper == snap->begin()
+                         ? snap->front() : *(upper - 1)).normalizedValue;
+            }
+            else
+                v = AutomationLane::evaluateAt (*snap, playheadPPQ);
 
             // Avoid churning version counters on float-precision noise.
             const float current = p.getNormalizedValue();

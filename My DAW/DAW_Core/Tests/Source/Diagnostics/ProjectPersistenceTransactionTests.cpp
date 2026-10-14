@@ -315,6 +315,113 @@ public:
             expect(autosave.shutdown(), "completed manager job should drain");
         }
 
+        beginTest("plugin-only edits inside the throttle window still require autosave");
+        {
+            testProjectState = "plugin-throttle";
+            ScopedPersistenceDirectory files("plugin_throttle");
+            const auto projectFile = files.directory.getChildFile("project.dawproj");
+            DAW::ProjectManager project;
+            DAW::AutosaveManagerCore autosave;
+            expect(prepareManagerForIntegrationTest(project, autosave, projectFile));
+
+            autosave.markDirty("plugin.first_edit");
+            expect(autosave.isAutosaveDirty());
+            autosave.markCleanManualSave();
+            expect(!autosave.isAutosaveDirty());
+            // This second edit is inside kPluginThrottleSecs. It must still be
+            // scheduled even if no third parameter change ever arrives.
+            autosave.markDirty("plugin.second_edit");
+            expect(autosave.isAutosaveDirty());
+            expect(autosave.isUserDirty());
+            expect(autosave.shutdown());
+        }
+
+        beginTest("edits after an in-flight snapshot remain autosave-dirty");
+        {
+            testProjectState = "revision-before";
+            ScopedPersistenceDirectory files("manager_revision");
+            const auto projectFile = files.directory.getChildFile("project.dawproj");
+            DAW::ProjectManager project;
+            DAW::AutosaveManagerCore autosave;
+            expect(prepareManagerForIntegrationTest(project, autosave, projectFile));
+            const auto observation = std::make_shared<ManagerAutosaveObservation>();
+            installManagerObservation(autosave, observation);
+
+            autosave.markDirty("initial_edit");
+            DAW::detail::AutosaveWriteJobTestHooks::armPauseAtStartForTesting();
+            autosave.triggerAutosaveNow("revision_snapshot");
+            expect(DAW::detail::AutosaveWriteJobTestHooks::waitForStartPauseForTesting(5000),
+                   "first autosave worker did not reach the pause");
+            testProjectState = "revision-after";
+            autosave.markDirty("edit_while_writing");
+            DAW::detail::AutosaveWriteJobTestHooks::releasePauseForTesting();
+
+            expect(pumpMessageLoopUntil(observation->completed, 5000),
+                   "first autosave completion did not arrive");
+            expectEquals(observation->successCount, 1);
+            expect(autosave.getLatestAutosaveFile().loadFileAsString().contains("revision-before"),
+                   "the earlier snapshot should be the first published version");
+            expect(autosave.isAutosaveDirty(),
+                   "the later edit must remain pending after earlier snapshot completion");
+
+            observation->completed.reset();
+            autosave.triggerAutosaveNow("publish_later_revision");
+            expect(pumpMessageLoopUntil(observation->completed, 5000),
+                   "second autosave completion did not arrive");
+            expectEquals(observation->successCount, 2);
+            expect(autosave.getLatestAutosaveFile().loadFileAsString().contains("revision-after"));
+            expect(!autosave.isAutosaveDirty(),
+                   "dirty clears only after publishing the latest revision");
+            expect(autosave.shutdown());
+        }
+
+        beginTest("an earlier project's completion cannot acknowledge a new project");
+        {
+            testProjectState = "project-A";
+            ScopedPersistenceDirectory files("manager_project_switch");
+            const auto projectFileA = files.directory.getChildFile("A.dawproj");
+            const auto projectFileB = files.directory.getChildFile("B.dawproj");
+            DAW::ProjectManager project;
+            DAW::AutosaveManagerCore autosave;
+            expect(prepareManagerForIntegrationTest(project, autosave, projectFileA));
+            const auto observation = std::make_shared<ManagerAutosaveObservation>();
+            installManagerObservation(autosave, observation);
+
+            autosave.markDirty("edit_A");
+            DAW::detail::AutosaveWriteJobTestHooks::armPauseAtStartForTesting();
+            autosave.triggerAutosaveNow("save_A");
+            expect(DAW::detail::AutosaveWriteJobTestHooks::waitForStartPauseForTesting(5000),
+                   "project A's worker did not reach the pause");
+
+            // The test-only ProjectManager stub supports SaveAs, not the real
+            // load implementation. Switch its file identity, then invoke the
+            // same successful-load notification wired in MainComponent.
+            testProjectState = "project-B";
+            expect(project.saveToFile(projectFileB));
+            autosave.onProjectLoaded();
+            autosave.markDirty("edit_B");
+            DAW::detail::AutosaveWriteJobTestHooks::releasePauseForTesting();
+            expect(DAW::detail::AutosaveWriteJobTestHooks::waitForJobFinishedForTesting(5000),
+                   "the old worker did not finish");
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
+
+            expectEquals(observation->successCount, 0,
+                         "stale completions must not claim success for project B");
+            expect(!autosave.isAutosaveInProgress());
+            expect(autosave.isAutosaveDirty(),
+                   "project B's pending revision must not be cleared");
+            expect(autosave.getLatestAutosaveFile() == juce::File(),
+                   "project A's recovery file must not become B's latest autosave");
+
+            autosave.triggerAutosaveNow("save_B");
+            expect(pumpMessageLoopUntil(observation->completed, 5000),
+                   "project B's autosave completion did not arrive");
+            expectEquals(observation->successCount, 1);
+            expect(autosave.getLatestAutosaveFile().loadFileAsString().contains("project-B"));
+            expect(!autosave.isAutosaveDirty());
+            expect(autosave.shutdown());
+        }
+
         beginTest("real manager publication failure preserves canonical latest");
         {
             testProjectState = "manager-failure";

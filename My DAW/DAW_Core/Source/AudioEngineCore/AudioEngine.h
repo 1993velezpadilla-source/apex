@@ -1,7 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../TrackCore/Track.h"
-#include "../TrackCore/TrackPolarityCore.h"
 #include "../ClipCore/Clip.h"
 #include "../TransportCore/TransportController.h"
 #include "../RoutingCore/RoutingGraph.h"
@@ -26,6 +25,10 @@
 #include "../RenderCore/StemRouteMaskCore.h"
 #include "../AutomationCore/AutomationManagerCore.h"
 #include "../Automation/AutomationSystemCore.h"
+#include "../Automation/AutomationTrackVolumePlaybackCore.h"
+#include "../Automation/AutomationTrackPanPlaybackCore.h"
+#include "../Automation/AutomationTrackMutePlaybackCore.h"
+#include "../Automation/AutomationTrackSoloPlaybackCore.h"
 #include "../TapeStop/TapeStopProcessorCore.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 // TimePitch DSP nuclei
@@ -282,8 +285,14 @@ public:
         s.clipDspCount = clipDspMap_.size();
         s.clipPitchCount = clipPitchCoreMap_.size();
         s.clipTapeStopCount = clipTapeStopProcessorMap_.size();
-        s.clipRenderCursorCount = std::max(lastClipRenderEndOffset_.size(),
-                                           lastClipRenderPath_.size());
+        // Identity direct reads invalidate the logical cursor with a path sentinel.
+        // Count only live continuity entries; keep map nodes allocated on the audio thread.
+        for (const auto& entry : lastClipRenderEndOffset_)
+        {
+            const auto path = lastClipRenderPath_.find(entry.first);
+            if (path == lastClipRenderPath_.end() || path->second != kIdentityDirectRenderPath)
+                ++s.clipRenderCursorCount;
+        }
         s.trackVolumeRampCount = trackVolumeRampMap_.size();
         s.trackMuteFadeCount = muteFadeMap_.size();
         s.connectionRampCount = connectionGainRamps_.size();
@@ -386,6 +395,10 @@ public:
         juce::ScopedNoDenormals noDenormals;
         if (!tracks_ || !routing_ || output.getNumChannels() < 1 || numSamples <= 0)
             return false;
+        // In direct engine export paths, pin independently; when launched
+        // through ApplicationCore, inherit its outer bounce/master pin.
+        const apex::automation::AutomationLaneStore::ScopedRtPin exportPpqPin(
+            apex::automation::AutomationLaneStore::getInstance());
 
         const int safeSamples = juce::jmin(numSamples, output.getNumSamples());
         auto renderContext = apexSoundEngineCore_.makeContext(safeSamples, (SamplePosition) timelineSample, true, SoundEngine::RenderMode::Offline);
@@ -393,6 +406,14 @@ public:
             return false;
 
         output.clear(0, safeSamples);
+
+        // The live callback is gated during offline bounce, so publish its
+        // independent timeline for all native PPQ automation before DSP reads.
+        const double exportBpm = transport_ != nullptr ? transport_->getTempo() : 120.0;
+        const double exportPpqPerSample = sampleRate_ > 0.0
+            ? exportBpm / (60.0 * sampleRate_) : 0.0;
+        apex::automation::AutomationSystem::getInstance().onAudioBlockStart(
+            (double)timelineSample * exportPpqPerSample, exportPpqPerSample, true);
 
         PluginTransportSnapshot previousPlayheadSnapshot;
         if (pluginPlayheadInfo_ != nullptr)
@@ -630,6 +651,10 @@ public:
     void process(const juce::AudioSourceChannelInfo& output)
     {
         juce::ScopedNoDenormals noDenormals;
+        // Standalone engine invocation and ApplicationCore callbacks use
+        // the same PPQ generation for every route, track and bus.
+        const apex::automation::AutomationLaneStore::ScopedRtPin enginePpqPin(
+            apex::automation::AutomationLaneStore::getInstance());
 
         struct PlaybackPitchWriteScope
         {
@@ -1014,6 +1039,8 @@ private:
     std::unordered_map<ClipID, int, JuceStringHash>            lastClipRenderMode_;
     std::unordered_map<ClipID, bool, JuceStringHash>           lastClipUsingTunedAudio_;
     std::unordered_map<ClipID, double, JuceStringHash>         lastClipSourceSampleRate_;
+    static constexpr int kIdentityDirectRenderPath = std::numeric_limits<int>::min();
+
     // Tracks which RenderPath last used the per-clip dspCore so we can reset
     // it when switching between StretchThenPitch and Normal/StretchOnly.
     // Without this, the dspCore retains Stretch-only WSOLA state when the path
@@ -1210,6 +1237,71 @@ public:
     }
 
 private:
+    // Apply the native PPQ-volume envelope before the DSP gain ramp, not by
+    // waiting for the 60 Hz MixerStrip parameter listener. Reuses the atomic
+    // track->ParameterID cache (rebuilt on project load) and immutable RT
+    // snapshots. Must never call a key-registry String/locking API here.
+    float resolveNativeFaderGainRT (const Track& track, float legacyGain) const noexcept
+    {
+        auto* range = FaderRangeCore::getGlobalInstance();
+        if (range == nullptr)
+            return legacyGain;
+
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        return apex::automation::getNativeTrackVolumeGainRT(
+            track.getNativeVolumeAutomationIDRT(), legacyGain,
+            clock.captureInputPPQ(), clock.isTransportRollingRT(),
+            track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
+            system.getModeState(), *range);
+    }
+
+    // PPQ pan is evaluated in DSP even with the mixer panel closed and during
+    // offline bounces. The ParameterID is cached on Track and rebound on load.
+    float resolveNativePanRT (const Track& track, float legacyPan) const noexcept
+    {
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        return apex::automation::getNativeTrackPanRT(
+            track.getNativePanAutomationIDRT(), legacyPan,
+            clock.captureInputPPQ(), clock.isTransportRollingRT(),
+            track.isAutomationMuted(), system.getRegistry(), system.getLaneStore(),
+            system.getModeState());
+    }
+
+    // Resolve a stepped PPQ mute in DSP, including every ancestor FolderBus.
+    // The message thread precomputes the ancestor chain in the immutable
+    // FolderBusSnapshot: no folder traversal, String key or mutex on RT.
+    bool resolveNativeMutedRT (const Track& track,
+                               const FolderBusSnapshot* fbSnap) const noexcept
+    {
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& clock = system.getClock();
+        const double ppq = clock.captureInputPPQ();
+        const bool rolling = clock.isTransportRollingRT();
+        const auto readMute = [&] (apex::automation::ParameterID id,
+                                  bool manual, bool automationMuted) noexcept
+        {
+            return apex::automation::getNativeTrackMuteRT(
+                id, manual, ppq, rolling, automationMuted,
+                system.getRegistry(), system.getLaneStore(), system.getModeState());
+        };
+
+        if (readMute(track.getNativeMuteAutomationIDRT(),
+                     track.isMuted(), track.isAutomationMuted()))
+            return true;
+
+        if (fbSnap != nullptr)
+        {
+            auto path = fbSnap->muteAncestorChains.find(track.getID());
+            if (path != fbSnap->muteAncestorChains.end())
+                for (const auto& ancestor : path->second)
+                    if (readMute(ancestor.parameterID, ancestor.manualMuted,
+                                 ancestor.automationMuted))
+                        return true;
+        }
+        return false;
+    }
 
     VolumeRampCore& getOrCreateVolumeRamp(const TrackID& trackId)
     {
@@ -2064,6 +2156,28 @@ private:
                              const FolderBusSnapshot* fbSnap,
                              const AutomationSnapshot* automationSnap)
     {
+        // Evaluate each Solo source once per block; membership is immutable.
+        auto& soloSystem = apex::automation::AutomationSystem::getInstance();
+        auto& soloClock = soloSystem.getClock();
+        const auto soloState = apex::automation::evaluateNativeSoloBlockRT(
+            fbSnap, soloClock.captureInputPPQ(), soloClock.isTransportRollingRT(),
+            soloSystem.getRegistry(), soloSystem.getLaneStore(), soloSystem.getModeState());
+        // Flat routing has no folder membership: resolve native PPQ Solo once.
+        const bool effectiveAnySolo = fbSnap == nullptr && offlineStemRenderMask_ == nullptr
+            ? apex::automation::hasNativeFlatSoloRT(
+                tracks_->getNumTracks(),
+                [this] (int i) -> apex::automation::NativeFlatSoloSource
+                {
+                    const auto* t = tracks_->getTrack(i);
+                    return t != nullptr
+                        ? apex::automation::NativeFlatSoloSource {
+                            t->getNativeSoloAutomationIDRT(),
+                            t->isSoloed(), t->isAutomationMuted() }
+                        : apex::automation::NativeFlatSoloSource {};
+                }, soloState.ppq, soloState.rolling,
+                soloSystem.getRegistry(), soloSystem.getLaneStore(), soloSystem.getModeState())
+            : anySolo;
+
         // Refresh the per-block plugin-chain view from the published
         // snapshot (C3) — one atomic load per block, then lock-free finds.
         pluginChainsBlockSnap_ = getPluginChainsSnapshotRT();
@@ -2115,11 +2229,11 @@ private:
             switch (nodeMeta->type)
             {
                 case RoutingNodeType::Track:
-                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock);
+                    processTrackNode(nodeMeta, snap, numSamples, isPlaying, position, effectiveAnySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Bus:
                 case RoutingNodeType::FolderBus:
-                    processBusNode(nodeMeta, snap, numSamples, position, anySolo, fbSnap, automationSnap, logRoutesThisBlock);
+                    processBusNode(nodeMeta, snap, numSamples, position, effectiveAnySolo, fbSnap, automationSnap, logRoutesThisBlock, soloState);
                     break;
                 case RoutingNodeType::Master:
                     processMasterNode(nodeId, numSamples, output);
@@ -2150,13 +2264,14 @@ private:
                           bool isPlaying, SamplePosition position, bool anySolo,
                           const FolderBusSnapshot* fbSnap,
                           const AutomationSnapshot* automationSnap,
-                          bool logRoutesThisBlock)
+                          bool logRoutesThisBlock,
+                           const apex::automation::NativeSoloBlockState& soloState)
     {
         // Thread-local preFx buffer for parallel safety
         thread_local juce::AudioBuffer<float> localPreFx;
         processTrackNodeExt(nodeMeta, snap, numSamples, isPlaying, position,
                             anySolo, fbSnap, automationSnap, logRoutesThisBlock,
-                            trackBuffer_, localPreFx);
+                            trackBuffer_, localPreFx, soloState);
     }
 
     /** Thread-local track buffer redirect for parallel processing.
@@ -2191,7 +2306,8 @@ private:
                              const AutomationSnapshot* automationSnap,
                              bool logRoutesThisBlock,
                              juce::AudioBuffer<float>& trackBuf,
-                             juce::AudioBuffer<float>& preFxBuf)
+                             juce::AudioBuffer<float>& preFxBuf,
+                              const apex::automation::NativeSoloBlockState& soloState)
     {
         auto* track = tracks_->getTrack(nodeMeta->trackId);
         if (!track) return;
@@ -2389,6 +2505,9 @@ private:
             }
         }
 
+        // Ø runs after hosted inserts and before both send taps and fader.
+        track->applyPolarityTo(trackBuf, numSamples);
+
         // Volume and pan
         auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
         float trackVolume = track->getVolume();
@@ -2404,6 +2523,11 @@ private:
                     trackPan = lane->getValueAtSample((int64_t)position, trackPan);
         }
 
+        // APEX native Write/Touch/Latch/Trim lanes live in PPQ and are
+        // evaluated at block rate; they take precedence over the legacy
+        // sample-domain lane when present. No UI dispatch required.
+        trackVolume = resolveNativeFaderGainRT(*track, trackVolume);
+        trackPan = resolveNativePanRT(*track, trackPan);
         volumeRamp.setTargetVolume(trackVolume);
         volumeRamp.setTargetPan(trackPan);
 
@@ -2423,9 +2547,6 @@ private:
             }
         }
 #endif
-
-        // Invert before sends and routing: all tap paths hear identical polarity.
-        track->applyPolarityTo(trackBuf, numSamples);
 
         const float leftGain  = volumeRamp.getCurrentLeftGain();
         const float rightGain = volumeRamp.getCurrentRightGain();
@@ -2458,15 +2579,30 @@ private:
         bool audible;
         if (fbSnap)
         {
-            bool effMuted = fbSnap->effectivelyMutedTracks.count(track->getID()) > 0;
+            bool effMuted = resolveNativeMutedRT(*track, fbSnap);
             audible = !effMuted;
-            if (offlineStemRenderMask_ == nullptr && !fbSnap->effectiveSoloSet.empty())
-                audible = audible && fbSnap->effectiveSoloSet.count(track->getID()) > 0;
+            if (offlineStemRenderMask_ == nullptr)
+            {
+                auto& soloSys = apex::automation::AutomationSystem::getInstance();
+                audible = audible && apex::automation::isNativeSoloAudibleRT(
+                    track->getID(), fbSnap, soloState,
+                    soloSys.getRegistry(), soloSys.getLaneStore(), soloSys.getModeState());
+            }
         }
         else
         {
-            audible = !track->isMuted();
-            if (offlineStemRenderMask_ == nullptr && anySolo) audible = track->isSoloed();
+            audible = !resolveNativeMutedRT(*track, nullptr);
+            // Solo may narrow audibility but must NEVER unmute a muted track.
+            if (offlineStemRenderMask_ == nullptr && anySolo)
+            {
+                auto& soloSys = apex::automation::AutomationSystem::getInstance();
+                audible = audible && apex::automation::isNativeFlatSoloAudibleRT(
+                    { track->getNativeSoloAutomationIDRT(),
+                      track->isSoloed(), track->isAutomationMuted() },
+                    anySolo, soloState.ppq, soloState.rolling,
+                    soloSys.getRegistry(), soloSys.getLaneStore(),
+                    soloSys.getModeState());
+            }
         }
 
         auto& muteFade = getOrCreateMuteFade(track->getID());
@@ -2513,9 +2649,8 @@ private:
             if (edge.sourceNodeId != nodeMeta->id) continue;
             logExportRouteIfNeeded(logRoutesThisBlock, edge);
             if (!edge.active || edge.bypassed) continue;
-            // PreSend is already emitted once from the pre-fader tap above.
-            // Including it here again caused the same send to be added
-            // a SECOND time post-fader (and muddied Ø/null tests).
+            // PreSend was already mixed once before the fader. Never
+            // duplicate it in the post-fader fanout.
             if (edge.type == ConnectionType::PreSend
                 || edge.type == ConnectionType::Sidechain)
                 continue;
@@ -2619,7 +2754,8 @@ private:
                         int numSamples, SamplePosition position, bool anySolo,
                         const FolderBusSnapshot* fbSnap,
                         const AutomationSnapshot* automationSnap,
-                        bool logRoutesThisBlock)
+                        bool logRoutesThisBlock,
+                         const apex::automation::NativeSoloBlockState& soloState)
     {
         auto* nodeBufPtr = findNodeBuffer(nodeMeta->id);
         if (nodeBufPtr == nullptr) return;
@@ -2672,7 +2808,7 @@ private:
             }
         }
 
-        // Bus polarity is applied after inserts and before fader/routing.
+        // Independent bus Ø polarity, applied after bus insert processing.
         if (busTrack != nullptr)
             busTrack->applyPolarityTo(nodeBuf, numSamples);
 
@@ -2683,11 +2819,18 @@ private:
                 if (lane->enabled)
                     busGain = lane->getValueAtSample((int64_t)position, busGain);
 
-        bool  busMuted;
-        if (fbSnap && busTrack)
-            busMuted = fbSnap->effectivelyMutedTracks.count(busTrack->getID()) > 0;
-        else
-            busMuted = busTrack ? busTrack->isMuted() : false;
+        if (busTrack != nullptr)
+            busGain = resolveNativeFaderGainRT(*busTrack, busGain);
+
+        bool busMuted = busTrack != nullptr
+            && resolveNativeMutedRT(*busTrack, fbSnap);
+        if (busTrack != nullptr && fbSnap != nullptr && offlineStemRenderMask_ == nullptr)
+        {
+            auto& soloSys = apex::automation::AutomationSystem::getInstance();
+            busMuted = busMuted || !apex::automation::isNativeSoloAudibleRT(
+                busTrack->getID(), fbSnap, soloState,
+                soloSys.getRegistry(), soloSys.getLaneStore(), soloSys.getModeState());
+        }
 
         MuteFadeCore* busMuteFade = nullptr;
         const float* busMuteRamp = nullptr;
@@ -2714,7 +2857,7 @@ private:
         {
             auto& busRamp = getOrCreateVolumeRamp(busTrack->getID());
             busRamp.setTargetVolume(busGain);
-            busRamp.setTargetPan(busTrack->getPan());
+            busRamp.setTargetPan(resolveNativePanRT(*busTrack, busTrack->getPan()));
             busRamp.applyToStereoBuffer(bufL, bufR, numSamples);
 
             if (busMuteRamp != nullptr)
@@ -2839,8 +2982,8 @@ private:
             auto* track = tracks_->getTrack(i);
             if (!track) continue;
 
-            bool audible = !track->isMuted();
-            if (anySolo) audible = track->isSoloed();
+            bool audible = !resolveNativeMutedRT(*track, nullptr);
+            if (anySolo) audible = audible && track->isSoloed();
 
             trackBuffer_.clear();
 
@@ -2866,12 +3009,12 @@ private:
                     it->second->processBlock(trackBuffer_, numSamples);
             }
 
-            // Maintain the same polarity semantics if the routing graph is absent.
+            // Preserve the same Ø contract in graph-free fallback processing.
             track->applyPolarityTo(trackBuffer_, numSamples);
 
             auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
-            volumeRamp.setTargetVolume(track->getVolume());
-            volumeRamp.setTargetPan(track->getPan());
+            volumeRamp.setTargetVolume(resolveNativeFaderGainRT(*track, track->getVolume()));
+            volumeRamp.setTargetPan(resolveNativePanRT(*track, track->getPan()));
             volumeRamp.generateRamps(numSamples);
 
             const float leftGain  = volumeRamp.getCurrentLeftGain();
@@ -3793,7 +3936,8 @@ private:
                     // with Normal/StretchOnly full-state processing.
                     const auto lastPathIt = lastClipRenderPath_.find(clip->getID());
                     const bool samePath = (lastPathIt == lastClipRenderPath_.end())
-                                       || (lastPathIt->second != (int)RenderPath::StretchThenPitch);
+                                       || (lastPathIt->second != (int)RenderPath::StretchThenPitch
+                                           && lastPathIt->second != kIdentityDirectRenderPath);
                     const auto continuityPlan = SoundEngine::ApexFallbackTimePitchContractCore::makeContinuityPlan(
                         renderedLastBlock,
                         continuousOffset,
@@ -3878,17 +4022,9 @@ private:
                                 dst[s] += sample * fadeGain;
                             }
 
-                            const auto renderStatePlan = SoundEngine::ApexClipRenderStateBookkeepingCore::makeCompletedRenderPlan(
-                                engineClipOffset,
-                                count,
-                                processCounter_,
-                                tpMode,
-                                (int)RenderPath::Normal);
-                            lastClipRenderEndOffset_[clip->getID()] = renderStatePlan.endOffset;
-                            lastClipRenderBlock_[clip->getID()]     = renderStatePlan.processBlock;
-                            lastClipRenderMode_[clip->getID()]      = renderStatePlan.mode;
-                            // Record path so a later switch to Normal resets the dspCore.
-                            lastClipRenderPath_[clip->getID()]      = renderStatePlan.path;
+                            // This direct-read path advances no DSP cursor. Mark prior continuity
+                            // state invalid without erasing map nodes from the realtime thread.
+                            lastClipRenderPath_[clip->getID()] = kIdentityDirectRenderPath;
                             continue;
                         }
 

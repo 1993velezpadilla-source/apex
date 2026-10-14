@@ -2,6 +2,7 @@
 #include "../../Source/PluginSandboxCore/PluginWorkerMainCore.h"
 #include <fstream>
 #include <iostream>
+#include "WindowsCrashDiagnostics.h"
 
 //==============================================================================
 #define APEX_STRINGIFY_IMPL(x) #x
@@ -65,6 +66,10 @@ int main (int argc, char** argv)
      DAW::ApexProcessModeStateCore::setProcessMode (processMode);
      if (processMode == DAW::ApexProcessMode::PluginWorker)
          return DAW::PluginWorkerMainCore::run (processArguments);
+
+    #if JUCE_WINDOWS
+     ApexTestDiagnostics::install();
+    #endif
 
      if (args.containsOption (helpOption))
     {

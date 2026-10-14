@@ -4,6 +4,7 @@
 #include "AutomationParameterRegistryCore.h"
 #include <JuceHeader.h>
 #include <unordered_map>
+#include <memory>
 
 namespace apex::automation
 {
@@ -38,6 +39,10 @@ namespace apex::automation
         void pause()  { stopTimer(); }
         void resume() { startTimerHz (kPollHz); }
 
+        // Deterministic message-thread probe used by the Windows test suite.
+        // Production still dispatches on the ~60Hz timer.
+        void dispatchOnceForTests() { timerCallback(); }
+
         static AutomationUIDispatcher& getInstance()
         {
             // Timer services must be destroyed by JUCE before MessageManager.
@@ -53,24 +58,52 @@ namespace apex::automation
         {
             JUCE_ASSERT_MESSAGE_THREAD;
 
-            registry.forEach ([this] (AutomationParameter& p)
-            {
-                const auto id      = p.getID();
-                const auto current = p.getVersion();
-                auto&      last    = lastSeenVersion[id];
+            // Listener callbacks can unregister a parameter (for example,
+            // when a widget closes during a project change). Iterating the
+            // mutable registry while holding its lock lets that callback
+            // erase the CURRENT unordered_map iterator: undefined behavior.
+            // Use one lifetime-pinning immutable registry snapshot for the
+            // whole tick. Callbacks are then free to register/remove controls
+            // without invalidating the iteration or holding registryLock.
+            auto snapshot = registry.getSnapshotRT();
+            if (snapshot == nullptr)
+                return;
 
-                if (current != last)
+            for (const auto& [id, parameter] : *snapshot)
+            {
+                const auto current = parameter->getVersion();
+                auto& last = lastSeenVersion[id];
+                // A replacement parameter can reuse the same ParameterID
+                // AND reach the same version. Do not skip its first update.
+                const bool replaced = last.parameter.lock().get() != parameter.get();
+                if (replaced || current != last.version)
                 {
-                    last = current;
-                    p.dispatchPendingNotifications (
-                        p.getNormalizedValue(),
-                        p.getLastSource());
+                    last.parameter = parameter;
+                    last.version = current;
+                    parameter->dispatchPendingNotifications (
+                        parameter->getNormalizedValue(),
+                        parameter->getLastSource());
                 }
-            });
+            }
+
+            // The snapshot, not the live registry, determines which IDs were
+            // present during this tick. Reclaim stale version records on UI
+            // thread so repeated plugin/project removals do not grow the map.
+            for (auto it = lastSeenVersion.begin(); it != lastSeenVersion.end();)
+                if (snapshot->find (it->first) == snapshot->end())
+                    it = lastSeenVersion.erase (it);
+                else
+                    ++it;
         }
 
+        struct LastSeen
+        {
+            std::weak_ptr<AutomationParameter> parameter;
+            std::uint64_t version = 0;
+        };
+
         AutomationParameterRegistry& registry;
-        std::unordered_map<ParameterID, std::uint64_t> lastSeenVersion;
+        std::unordered_map<ParameterID, LastSeen> lastSeenVersion;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationUIDispatcher)
     };

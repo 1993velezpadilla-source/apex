@@ -3,6 +3,7 @@
 #include "../VocalTuneCore/IApexTuneEngineAdapter.h"
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 #include "../PluginScanCore/PluginScanAuditLogCore.h"
+#include "../Automation/AutomationLaneStoreCore.h"
 #include <unordered_map>
 
 // Diagnostic logging from the audio thread causes disk I/O that exceeds
@@ -267,6 +268,7 @@ void ApplicationCore::initialize()
                                                 &pluginAutomationGestureCore_,
                                                 [this] { return transport_ != nullptr && transport_->isPlaying(); },
                                                 [this] { return transport_ != nullptr ? (int64_t)transport_->getPosition() : 0; });
+    pluginAutomationRecorderCore_.setSampleRateProvider([this] { return currentSampleRate_; });
     pluginAutomationRecorderCore_.setLaneWrittenCallback([this](const LastTouchedPluginParameter& target, const juce::String& parameterId)
     {
         if (trackManager_ == nullptr || !target.isValid())
@@ -1009,7 +1011,54 @@ bool ApplicationCore::isGamepadEnabled() const
     return gamepadManager_ && gamepadManager_->isEnabled();
 }
 
-void ApplicationCore::checkAndShowRecoveryPromptIfNeeded(juce::Component* /*parent*/)
+void ApplicationCore::checkAndShowRecoveryPromptIfNeeded(juce::Component* parent)
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    // Do not silently blacklist a plugin. Only a leftover plugin LOAD marker
+    // is eligible; it identifies a suspect, not proven fault or a DSP crash.
+    const auto suspect = PluginLoadRecoveryCore::getStartupSuspect();
+    if (suspect.valid && !pluginRecoveryPromptShown_)
+    {
+        pluginRecoveryPromptShown_ = true;
+        juce::WeakReference<ApplicationCore> weakSelf(this);
+        auto options = juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::WarningIcon)
+            .withTitle("APEX Plugin Recovery")
+            .withMessage(
+                "The previous session stopped while initializing a plugin.\n\n"
+                "Possible plugin: " + suspect.name
+                + "\nFormat: " + suspect.format
+                + "\nStage: " + suspect.stage
+                + "\n\nAPEX cannot prove this plugin caused the crash. "
+                  "Open in Safe Mode to skip loading this component once "
+                  "while preserving its saved settings and automation. "
+                  "All other plugins will still be loaded normally.")
+            .withButton("Open in Safe Mode")
+            .withButton("Open Normally");
+        if (parent != nullptr)
+            options = options.withAssociatedComponent(parent);
+
+        juce::AlertWindow::showAsync(options, [weakSelf, suspect](int result)
+        {
+            if (auto* app = weakSelf.get())
+            {
+                if (result == 1)
+                    app->pendingSafePluginRestore_ = suspect;
+
+                // An acknowledged marker must not repeatedly prompt on
+                // subsequent launches. The startup evidence stays cached.
+                PluginLoadRecoveryCore::getMarkerFile().deleteFile();
+                app->showAutosaveRecoveryPromptIfNeeded();
+            }
+        });
+        return;
+    }
+
+    showAutosaveRecoveryPromptIfNeeded();
+}
+
+void ApplicationCore::showAutosaveRecoveryPromptIfNeeded()
 {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
@@ -1408,6 +1457,20 @@ bool ApplicationCore::beginProjectStateRestore(uint32_t timeoutMs) noexcept
     if (transport_)
         transport_->stop();
     audioEngine_.clearLiveInputBuffer();
+
+    // Native editor components retain raw references to the processor. Close
+    // them while the audio callback is suspended, BEFORE resetting clip FX.
+    try
+    {
+        if (beforeClipFxProjectReset_)
+            beforeClipFxProjectReset_();
+    }
+    catch (...)
+    {
+        if (!wasAlreadySuspended)
+            projectStateRestoreSuspensionActive_.store(false, std::memory_order_release);
+        return false;
+    }
     return true;
 }
 
@@ -1445,6 +1508,12 @@ bool ApplicationCore::getNextAudioBlock(const juce::AudioSourceChannelInfo& buff
         bufferToFill.clearActiveBufferRegion();
         return false;
     }
+
+    // One immutable PPQ map for ALL tracks, sends, buses and master inserts
+    // within this complete device callback. Nested chain/plugin snapshots
+    // inherit it. A GUI macro batch cannot split track A vs. track B DSP.
+    const apex::automation::AutomationLaneStore::ScopedRtPin callbackPpqPin(
+        apex::automation::AutomationLaneStore::getInstance());
 
     // Keep active take writers alive through both the raw-input capture and
     // the post-fader tap inside AudioEngine. The scope also writes a silent
@@ -1806,6 +1875,11 @@ bool ApplicationCore::renderOfflineBlock(juce::AudioBuffer<float>& output, int n
     if (output.getNumChannels() < 2 || numSamples <= 0)
         return false;
 
+    // Bounce/stems must obey the same cross-track PPQ generation boundary
+    // as realtime playback, including the master plugin chain.
+    const apex::automation::AutomationLaneStore::ScopedRtPin callbackPpqPin(
+        apex::automation::AutomationLaneStore::getInstance());
+
     output.clear(0, numSamples);
     if (!audioEngine_.renderOfflineBlock(output, numSamples, timelineSample))
         return false;
@@ -2069,6 +2143,12 @@ bool ApplicationCore::restorePluginChainsState(const juce::ValueTree& chains,
         error += diagnostic;
     };
 
+    // Consume the explicit recovery selection once for this project load.
+    // Snapshot the decision for all tracks before clearing it; this prevents
+    // an unrelated later project from silently inheriting Safe Mode.
+    const auto recoverySkip = pendingSafePluginRestore_;
+    pendingSafePluginRestore_ = {};
+
     for (int i = 0; i < chains.getNumChildren(); ++i)
     {
         auto trackChain = chains.getChild(i);
@@ -2087,7 +2167,8 @@ bool ApplicationCore::restorePluginChainsState(const juce::ValueTree& chains,
             juce::String chainError;
             if (! chain->restoreState(pluginChainTree,
                                       pluginScanner_.getFormatManager(),
-                                      chainError))
+                                      chainError,
+                                      recoverySkip.valid ? &recoverySkip : nullptr))
             {
                 appendRestoreDiagnostic(
                     "Track '" + trackId + "' plugin restore had rejected slot(s)"

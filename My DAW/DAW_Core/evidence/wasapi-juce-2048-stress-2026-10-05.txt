@@ -1,2 +1,0 @@
-PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=48000 block=2048 actual=2048 listed=1 rateListed=1 callbacks=281 audioProgress=1.00061 inputXruns=-1
-PASS endpoint=Speakers (Realtek(R) Audio) duplex=0 rate=44100 block=2048 actual=2048 listed=1 rateListed=1 callbacks=258 audioProgress=0.99948 inputXruns=-1

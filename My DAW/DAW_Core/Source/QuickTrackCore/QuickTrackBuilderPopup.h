@@ -482,12 +482,13 @@ class QuickTrackRoleColorPicker final : public juce::Component
 {
 public:
     QuickTrackRoleColorPicker(QuickTrackBuilderCore& builder, const QuickTrackRole& role)
-        : builder_(builder), role_(role), autoBtn_("AUTO")
+        : builder_(&builder), role_(role), autoBtn_("AUTO")
     {
         addAndMakeVisible(autoBtn_);
         autoBtn_.onClick = [this]
         {
-            builder_.clearManualRoleColor(role_);
+            if (auto* builder = builder_.get())
+                builder->clearManualRoleColor(role_);
             closeCallout();
         };
         const auto palette = TrackColorPalette::getCanonicalPalette();
@@ -511,7 +512,8 @@ public:
                 new PaintedSwatch("Swatch " + juce::String(i), colour));
             swatch->onClick = [this, colour]
             {
-                builder_.setManualRoleColor(role_, colour);
+                if (auto* builder = builder_.get())
+                    builder->setManualRoleColor(role_, colour);
                 closeCallout();
             };
             addAndMakeVisible(*swatch);
@@ -535,7 +537,8 @@ public:
         g.setColour(theme.colors.border);
         g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 6.0f, 1.0f);
         // AUTO button state ring
-        const bool isAuto = !builder_.isRoleColorManual(role_);
+        const auto* builder = builder_.get();
+        const bool isAuto = builder != nullptr && !builder->isRoleColorManual(role_);
         if (isAuto)
         {
             g.setColour(theme.colors.accent);
@@ -571,7 +574,7 @@ private:
             cb->setVisible(false);
     }
 
-    QuickTrackBuilderCore& builder_;
+    juce::WeakReference<QuickTrackBuilderCore> builder_;
     const QuickTrackRole& role_;
     QuickTrackChipButton autoBtn_;
     std::vector<std::unique_ptr<QuickTrackChipButton>> swatchBtns_;

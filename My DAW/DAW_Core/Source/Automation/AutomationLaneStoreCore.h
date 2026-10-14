@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 
 namespace apex::automation
@@ -52,6 +53,24 @@ namespace apex::automation
 
         void replacePoints (PointVector newPoints)
         {
+            // Persistence/import and hostile plugin input can bypass the
+            // recorder's own validation. Drop invalid knots BEFORE sorting:
+            // NaN in a std::sort comparator violates strict weak ordering.
+            // Only edits/replacement pay this cost; the audio reader is
+            // unchanged and receives clean immutable snapshots.
+            newPoints.erase (std::remove_if (newPoints.begin(), newPoints.end(),
+                [] (const Breakpoint& p)
+                {
+                    return !std::isfinite (p.timePPQ)
+                        || !std::isfinite (p.normalizedValue);
+                }), newPoints.end());
+            for (auto& p : newPoints)
+            {
+                p.normalizedValue = std::clamp (p.normalizedValue, 0.0f, 1.0f);
+                if (!std::isfinite (p.curveTension))
+                    p.curveTension = 0.0f;
+            }
+
             // stable_sort keeps insertion order for equal timePPQ so the
             // "last added wins" dedupe below is deterministic (std::sort is
             // unstable and left the surviving point unspecified).
@@ -71,7 +90,18 @@ namespace apex::automation
             }
 
             auto snap = std::make_shared<const PointVector> (std::move (newPoints));
-            std::atomic_store_explicit (&snapshot, snap, std::memory_order_release);
+            // A map pin protects lane objects, not the point vector owned by
+            // each lane. Rapid direct replacePoints/addPoint/setPoint edits
+            // could otherwise leave the AUDIO thread releasing the last
+            // reference to a large point vector. Retire every superseded
+            // point generation on the control thread, just like map snapshots.
+            // Reserve before publishing so allocation failure is harmless.
+            collectRetiredPointSnapshotsOnControlThread();
+            retiredPointSnapshots_.reserve (retiredPointSnapshots_.size() + 1);
+            auto old = std::atomic_exchange_explicit (
+                &snapshot, std::move (snap), std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredPointSnapshots_.push_back (std::move (old));
         }
 
         void addPoint (Breakpoint bp)
@@ -128,6 +158,7 @@ namespace apex::automation
         static float evaluateAt (const PointVector& pts, double timePPQ) noexcept
         {
             if (pts.empty()) return 0.0f;
+            if (!std::isfinite (timePPQ)) return pts.front().normalizedValue;
 
             if (timePPQ <= pts.front().timePPQ)
                 return pts.front().normalizedValue;
@@ -181,8 +212,23 @@ namespace apex::automation
             }
         }
 
+        // All mutations are control-thread-only. A retired point generation
+        // remains owned here until no DSP or other reader holds it; pruning
+        // never runs inside getSnapshot() or the realtime callback.
+        void collectRetiredPointSnapshotsOnControlThread() noexcept
+        {
+            const auto end = std::remove_if (retiredPointSnapshots_.begin(),
+                                             retiredPointSnapshots_.end(),
+                [] (const Snapshot& candidate) noexcept
+                {
+                    return candidate.use_count() == 1;
+                });
+            retiredPointSnapshots_.erase (end, retiredPointSnapshots_.end());
+        }
+
         const ParameterID paramID;
         std::shared_ptr<const PointVector> snapshot;
+        std::vector<Snapshot> retiredPointSnapshots_;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationLane)
     };
@@ -196,6 +242,74 @@ namespace apex::automation
 
     public:
         AutomationLaneStore() = default;
+
+        // A DSP callback can pin exactly one published lane-map generation
+        // and use it for all plugin parameters within that callback.
+        // Keeping the opaque LaneMap behind this public alias avoids leaking
+        // mutable map access or allowing a real-time caller to mutate lanes.
+        using RtLaneSnapshot = std::shared_ptr<const LaneMap>;
+
+        /**
+         * Pin one immutable PPQ lane-map generation across an entire plugin
+         * chain's automation preflight and all of its processor callbacks.
+         *
+         * Nested scopes inherit their outer generation; the stack owns the
+         * snapshot and a thread-local NON-owning pointer only identifies it.
+         * No locks, heap allocations, map copies or DSP-thread publications.
+         */
+        struct PinFrame
+        {
+            const AutomationLaneStore* store = nullptr;
+            const RtLaneSnapshot* snapshot = nullptr;
+            const PinFrame* previous = nullptr;
+        };
+
+        class ScopedRtPin final
+        {
+        public:
+            explicit ScopedRtPin(const AutomationLaneStore& store) noexcept
+                : snapshot_(store.getEffectiveLaneSnapshotRT()),
+                  frame_ { &store, &snapshot_, pinnedFrameForThread_ },
+                  previous_(pinnedFrameForThread_)
+            {
+                pinnedFrameForThread_ = &frame_;
+            }
+
+            ~ScopedRtPin() noexcept
+            {
+                pinnedFrameForThread_ = previous_;
+            }
+
+            ScopedRtPin(const ScopedRtPin&) = delete;
+            ScopedRtPin& operator=(const ScopedRtPin&) = delete;
+            ScopedRtPin(ScopedRtPin&&) = delete;
+            ScopedRtPin& operator=(ScopedRtPin&&) = delete;
+
+        private:
+            RtLaneSnapshot snapshot_;
+            PinFrame frame_;
+            const PinFrame* previous_ = nullptr;
+        };
+
+        RtLaneSnapshot getEffectiveLaneSnapshotRT() const noexcept
+        {
+            // A locally constructed test/offline store must not accidentally
+            // inherit a different store's thread-local callback generation.
+            for (auto* frame = pinnedFrameForThread_; frame != nullptr;
+                 frame = frame->previous)
+                if (frame->store == this)
+                    return *frame->snapshot;
+            return getLaneSnapshotRT();
+        }
+
+        static std::shared_ptr<AutomationLane> findLaneInSnapshotRT (
+            const RtLaneSnapshot& snapshot, ParameterID id) noexcept
+        {
+            if (snapshot == nullptr || id == kInvalidParameterID)
+                return nullptr;
+            const auto it = snapshot->find(id);
+            return it == snapshot->end() ? nullptr : it->second;
+        }
 
         // Returns a shared_ptr so the audio thread can safely hold the lane
         // alive even if the message thread calls removeLane() concurrently.
@@ -216,16 +330,15 @@ namespace apex::automation
             return std::atomic_load_explicit (&publishedLanes_, std::memory_order_acquire);
         }
 
-        /** Lock-free lane lookup for the audio thread. Returns a shared_ptr,
-         *  so a lane stays alive for the duration of a block even if the
-         *  message thread removes it concurrently. */
+        /** Lock-free lane lookup for the audio thread. Honor the enclosing
+         *  device-callback PPQ pin, including indirect consumers such as
+         *  native sends, pan/mute/solo and registration bridges. Otherwise
+         *  those readers can straddle a multi-target publication while the
+         *  VST3 processor correctly reads the pinned old generation.
+         *  Without a ScopedRtPin the latest published map is used. */
         std::shared_ptr<AutomationLane> findLaneRT (ParameterID id) const noexcept
         {
-            auto snap = getLaneSnapshotRT();
-            if (snap == nullptr)
-                return nullptr;
-            auto it = snap->find (id);
-            return it == snap->end() ? nullptr : it->second;
+            return findLaneInSnapshotRT(getEffectiveLaneSnapshotRT(), id);
         }
 
         /** Bumped on every structural publish; RT consumers re-resolve
@@ -243,6 +356,140 @@ namespace apex::automation
             auto [inserted, ok] = lanes.emplace (id, std::make_shared<AutomationLane> (id));
             publishLocked();
             return *inserted->second;
+        }
+
+        /**
+         * Recorder/UI edit of ONE lane with full callback-generation
+         * isolation. Unlike getOrCreateLane(id).replacePoints(...), this
+         * publishes a NEW AutomationLane in a NEW immutable lane map, so a
+         * device callback already holding ScopedRtPin keeps the old point
+         * vector for the whole callback (even when it looks up the lane again).
+         *
+         * Preserve the direct lane editor's validation/normalization rules:
+         * replacePoints drops nonfinite knots, clamps values and stable-sorts
+         * duplicate PPQ positions with last-wins semantics. All allocations,
+         * map copying and retired generation reclamation are control-only.
+         */
+        bool replaceOrCreateLanePoints (ParameterID id,
+                                        AutomationLane::PointVector points)
+        {
+            if (id == kInvalidParameterID)
+                return false;
+
+            auto replacement = std::make_shared<AutomationLane> (id);
+            replacement->replacePoints (std::move (points));
+
+            const juce::ScopedLock sl (mapLock);
+            LaneMap next = lanes;
+            next[id] = std::move (replacement);
+            auto nextPublished = std::make_shared<const LaneMap> (next);
+
+            // Reserve ownership before the RT-visible map exchange: no
+            // allocation failure may leave an old DSP map unretained.
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve (retiredLanesSnapshots_.size() + 1);
+            lanes.swap (next);
+            auto old = std::atomic_exchange_explicit (
+                &publishedLanes_, std::move (nextPublished),
+                std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back (std::move (old));
+            changeGeneration_.fetch_add (1, std::memory_order_acq_rel);
+            return true;
+        }
+
+        struct BatchReplacement
+        {
+            ParameterID id = kInvalidParameterID;
+            AutomationLane::PointVector points;
+        };
+
+        /**
+         * Publish a set of PPQ envelopes through ONE immutable RT lane-map
+         * replacement. Prepare every lane off the audio thread, and reject
+         * missing/duplicated IDs or invalid knots BEFORE modifying any lane.
+         *
+         * A reader that pins getLaneSnapshotRT() observes either the entire
+         * old map or the entire new map. Independent lookups across different
+         * callback invocations can straddle a publication; consumers needing
+         * strict block-wide consistency must pin one snapshot per block.
+         * Existing AutomationLane shared_ptrs are never mutated in-place.
+         */
+        // Bridge-specific upsert: the target bank may not have PPQ mirrors
+        // yet. Validating and creating every missing lane in one transaction
+        // prevents a failed batch from leaving phantom empty lanes or
+        // publishing intermediate generations to an in-flight DSP callback.
+        bool replaceOrCreatePointsBatch (std::vector<BatchReplacement> replacements)
+        {
+            return replacePointsBatch(std::move(replacements), true);
+        }
+
+        bool replacePointsBatch (std::vector<BatchReplacement> replacements,
+                                 bool createMissingLanes = false)
+        {
+            if (replacements.empty() || replacements.size() > 128)
+                return false;
+
+            LaneMap prepared;
+            prepared.reserve(replacements.size());
+            for (auto& replacement : replacements)
+            {
+                if (replacement.id == kInvalidParameterID
+                    || prepared.count(replacement.id) != 0)
+                    return false;
+                double previousPPQ = -1.0;
+                for (const auto& point : replacement.points)
+                {
+                    // Bridges are already sorted by source timeline. Reject
+                    // duplicated/reversed knots instead of silently sorting
+                    // or discarding authored automation during an upsert.
+                    if (createMissingLanes && point.timePPQ <= previousPPQ)
+                        return false;
+                    previousPPQ = point.timePPQ;
+                    if (!std::isfinite(point.timePPQ)
+                        || point.timePPQ < 0.0
+                        || !std::isfinite(point.normalizedValue)
+                        || point.normalizedValue < 0.0f
+                        || point.normalizedValue > 1.0f
+                        || !std::isfinite(point.curveTension)
+                        || (createMissingLanes
+                            && (point.curveTension < -1.0f
+                                || point.curveTension > 1.0f)))
+                        return false;
+                }
+
+                auto lane = std::make_shared<AutomationLane>(replacement.id);
+                lane->replacePoints(std::move(replacement.points));
+                prepared.emplace(replacement.id, std::move(lane));
+            }
+
+            const juce::ScopedLock sl(mapLock);
+            if (!createMissingLanes)
+                for (const auto& replacement : replacements)
+                    if (lanes.find(replacement.id) == lanes.end())
+                        return false;
+
+            // Validation completes before touching the live map. New targets
+            // (when permitted) exist only inside the staged next map until
+            // its ONE atomic publication; failures leave lanes untouched.
+            // One immutable map copy, one atomic publication, one bump.
+            LaneMap next = lanes;
+            for (auto& [id, lane] : prepared)
+                next[id] = std::move(lane);
+            auto nextPublished = std::make_shared<const LaneMap>(next);
+            // Reserve retirement ownership before exchanging the published
+            // map. A currently pinned RT generation must never be destroyed
+            // when a later GUI publication overwrites a single retire slot.
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve(retiredLanesSnapshots_.size() + 1);
+            lanes.swap(next);
+            auto old = std::atomic_exchange_explicit(
+                &publishedLanes_, std::move(nextPublished),
+                std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back(std::move(old));
+            changeGeneration_.fetch_add(1, std::memory_order_acq_rel);
+            return true;
         }
 
         void removeLane (ParameterID id)
@@ -327,8 +574,13 @@ namespace apex::automation
         {
             // Batch: suppress per-mutation publishes inside clear() and
             // getOrCreateLane(), then publish exactly once at the end.
-            ++publishBatchDepth_;
-            clear();
+            {
+                // ScopedValueSetter restores the previous nesting depth even if
+                // ValueTree conversion or a lane allocation throws. The last
+                // complete RT snapshot remains published on failure.
+                const juce::ScopedValueSetter<int> batchDepthGuard (
+                    publishBatchDepth_, publishBatchDepth_ + 1);
+                clear();
 
             if (state.isValid())
             {
@@ -377,7 +629,7 @@ namespace apex::automation
             }
             }
 
-            --publishBatchDepth_;
+            } // batchDepthGuard restores the previous depth before publication
             const juce::ScopedLock sl (mapLock);
             publishLocked();
         }
@@ -392,14 +644,33 @@ namespace apex::automation
         // Copy-on-write publication (message thread only, called with
         // mapLock held). Copies only shared_ptrs — lane point data is
         // shared, never duplicated. Suppressed inside batched restores.
+        // Control-thread-only reclamation. A generation with use_count > 1
+        // remains pinned by a DSP callback (or another reader), so keep our
+        // owner until after that reader releases it. This avoids executing
+        // LaneMap destructors on the audio thread after rapid GUI publishes.
+        void collectRetiredSnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if(retiredLanesSnapshots_.begin(),
+                                      retiredLanesSnapshots_.end(),
+                [] (const RtLaneSnapshot& generation) noexcept
+                {
+                    return generation.use_count() == 1;
+                });
+            retiredLanesSnapshots_.erase(end, retiredLanesSnapshots_.end());
+        }
+
         void publishLocked()
         {
             if (publishBatchDepth_ > 0)
                 return;
             auto snap = std::make_shared<const LaneMap> (lanes);
-            auto old = std::atomic_exchange_explicit (&publishedLanes_, std::move (snap), std::memory_order_acq_rel);
-            retiredLanesSnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
-            changeGeneration_.fetch_add (1, std::memory_order_acq_rel);
+            collectRetiredSnapshotsLocked();
+            retiredLanesSnapshots_.reserve(retiredLanesSnapshots_.size() + 1);
+            auto old = std::atomic_exchange_explicit(
+                &publishedLanes_, std::move(snap), std::memory_order_acq_rel);
+            if (old != nullptr)
+                retiredLanesSnapshots_.push_back(std::move(old));
+            changeGeneration_.fetch_add(1, std::memory_order_acq_rel);
         }
 
         LaneMap lanes;
@@ -407,9 +678,13 @@ namespace apex::automation
 
         // Published immutable view for the audio thread (never mutated in place).
         std::shared_ptr<const LaneMap> publishedLanes_;
-        std::shared_ptr<const LaneMap> retiredLanesSnapshot_;   // message-thread retire slot
+        // Control-thread owned: retain as MANY generations as RT callbacks
+        // still pin; prune only when no external readers remain. A single
+        // overwritten retire slot was insufficient for fast macro edits.
+        std::vector<RtLaneSnapshot> retiredLanesSnapshots_;
         std::atomic<std::uint64_t> changeGeneration_ { 0 };
         int publishBatchDepth_ = 0;   // message thread only
+        inline static thread_local const PinFrame* pinnedFrameForThread_ = nullptr;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationLaneStore)
     };

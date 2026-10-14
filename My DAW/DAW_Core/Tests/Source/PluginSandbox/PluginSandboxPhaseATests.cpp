@@ -214,8 +214,20 @@ public:
                                                             "*.exe").size(),
                          1,
                          "Self-worker mode must not create a helper executable");
-            expect(temporaryDirectory.deleteRecursively(),
-                   "Could not remove isolated distribution directory");
+            // Windows Defender/indexers may briefly hold a file handle
+            // after the isolated APEX worker has fully exited. The test has
+            // already asserted worker reaping and zero owned handles; don't
+            // turn a transient filesystem sharing violation into a false
+            // plugin-sandbox functional failure. Still fail if cleanup never
+            // succeeds, and bound total retries to ~3 seconds.
+            bool removed = temporaryDirectory.deleteRecursively();
+            for (int retry = 0; !removed && retry < 7; ++retry)
+            {
+                juce::Thread::sleep(100 * (retry + 1));
+                removed = temporaryDirectory.deleteRecursively()
+                    || !temporaryDirectory.exists();
+            }
+            expect(removed, "Could not remove isolated distribution directory");
         }
     }
 

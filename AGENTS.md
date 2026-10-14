@@ -2,15 +2,14 @@
 
 ## Official workspace
 
-The official APEX workspace is:
-
-`C:\Users\1993v\OneDrive\Desktop\Apex backup`
-
-Do not inspect, edit, build, or reference another copy of APEX unless the user explicitly authorizes it.
+The workspace is the root of the current checkout. Resolve all source, resources,
+scripts and documentation relative to that root, including on GitHub Actions.
+The original Desktop folder is retained as a local backup and hardware test
+environment. See `docs/SOURCE_MIGRATION.md` for the migration acceptance gate.
 
 ## Canonical knowledge
 
-- The canonical DAW architecture reference is `../../DAW_BRAIN.md` in the official workspace.
+- The canonical DAW architecture reference is `DAW_BRAIN.md` at this checkout's root.
 - `.opencode/agents/daw-brain.md` defines the conversational DAW Brain agent.
 - The actual repository and measured runtime determine what APEX currently implements.
 
@@ -44,7 +43,7 @@ For repository questions:
 - Do not invent results of compilations.
 - Do not invent results of runtime.
 - Do not modify files outside the workspace.
-- Do not use another copy of APEX.
+- Do not silently substitute source from another copy of APEX.
 - Do not make large refactors without authorization.
 - Do not delete functional systems to replace them with an ideal architecture.
 - Preserve functional parts of APEX during any future migration.

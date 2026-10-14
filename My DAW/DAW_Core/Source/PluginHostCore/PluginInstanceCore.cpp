@@ -340,6 +340,7 @@ bool PluginInstanceCore::rebuildSandboxAutomationBindings()
         binding.keyGeneration = keyGen;
         binding.ordinal = static_cast<std::uint32_t>(info.index);
         binding.representable = true;
+        binding.isDiscrete = info.isDiscrete;
 
         // Exact seed: the ACTUAL live worker value — the sandbox equivalent
         // of in-process params[i]->getValue().
@@ -481,6 +482,9 @@ void PluginInstanceCore::applySandboxedAutomationAtSample(
 
     auto& keyRegistry = apex::automation::AutomationParameterKeyRegistry::getInstance();
     auto& laneStore   = apex::automation::AutomationLaneStore::getInstance();
+    // The isolated worker must see one coherent PPQ generation for every
+    // parameter event staged in this host callback, just like in-process VST3.
+    const auto ppqLaneMap = laneStore.getEffectiveLaneSnapshotRT();
     const double ppqPosition = (sampleRate > 0.0 && bpm > 0.0)
         ? ((double)samplePosition / sampleRate) * (bpm / 60.0)
         : 0.0;
@@ -512,11 +516,14 @@ void PluginInstanceCore::applySandboxedAutomationAtSample(
         float& lastVal = sandboxLastAutomationValues_[ordinalIndex];
 
         const float target = computeCanonicalTarget(
-            binding, laneStore, automationSnap, trackId,
+            binding, ppqLaneMap, automationSnap, trackId,
             samplePosition, ppqPosition, lastVal);
 
         float smoothedValue = target;
-        if (std::abs(lastVal - target) > 0.0001f)
+        // The worker reports whether its parameter is discrete. Passing a
+        // smoothed intermediate value to a boolean/choice changes the step's
+        // timing, so keep discrete targets exact across both execution modes.
+        if (! binding.isDiscrete && std::abs(lastVal - target) > 0.0001f)
         {
             const float coeff = AutomationSmootherCore::makeCoeff(sampleRate, 0.010);
             smoothedValue = AutomationSmootherCore::advance(

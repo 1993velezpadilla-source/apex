@@ -105,26 +105,54 @@ void AutosaveManagerCore::markDirty(const juce::String& reason)
     // Check whether this is plugin-only dirty (throttle)
     bool isPluginChange = reason.startsWithIgnoreCase("plugin");
 
+    // Every edit advances the revision, including throttled plugin-only edits.
+    // An older in-flight autosave must never acknowledge a newer revision.
+    ++dirtyRevision_;
     userDirty_.store(true);
+    // Setting this flag is cheap; throttling repeated plugin notifications
+    // must never suppress the only unsaved parameter edit.
+    autosaveDirty_.store(true);
 
     if (isPluginChange)
     {
         auto now = juce::Time::getCurrentTime();
         if ((now - lastPluginOnlyDirtyTime_).inSeconds() < kPluginThrottleSecs)
-            return;   // throttle — don't set autosaveDirty_ yet
+            return;   // throttle bookkeeping only; dirty is already recorded
         lastPluginOnlyDirtyTime_ = now;
     }
 
-    autosaveDirty_.store(true);
 }
 
 void AutosaveManagerCore::markCleanManualSave()
 {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    // A completed manual save supersedes any older in-flight autosave.
+    ++sessionEpoch_;
     userDirty_.store(false);
     // autosaveDirty_ is intentionally NOT cleared here — the next timer tick
     // will be a no-op since the manual save already wrote the project.
     autosaveDirty_.store(false);
+}
+
+void AutosaveManagerCore::onProjectLoaded()
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    // A new/restored project is a different recovery session, even if it has
+    // the same path or the user has created another unsaved "Untitled" project.
+    ++sessionEpoch_;
+    dirtyRevision_ = 0;
+    userDirty_.store(false);
+    autosaveDirty_.store(false);
+    lastPluginOnlyDirtyTime_ = {};
+    lastAutosaveTime_ = {};
+    diagRecordingFinalizedAutosave_.store(false);
+    {
+        const juce::ScopedWriteLock sl(fileLock_);
+        latestAutosaveFile_ = {};
+    }
+    // Do not reset writing_ here: the previous job must drain before a new
+    // project is allowed to start another autosave.
 }
 
 void AutosaveManagerCore::onRecordingStarted()   { recording_.store(true);  }
@@ -247,6 +275,11 @@ void AutosaveManagerCore::performAutosaveAsync()
         return;
     }
 
+    // Capture the document and mutation revision represented by this snapshot.
+    // Both counters are message-thread-only; completion also runs on it.
+    const auto snapshotRevision = dirtyRevision_;
+    const auto snapshotEpoch = sessionEpoch_;
+
     // Determine target directory
     auto projectFile = pm_->getCurrentProjectFile();
     auto projectName = pm_->getProjectName();
@@ -269,12 +302,13 @@ void AutosaveManagerCore::performAutosaveAsync()
 
     juce::WeakReference<AutosaveManagerCore> weakThis(this);
 
-    auto completionCallback = [weakThis, authority, generation, projectFile]
+    auto completionCallback = [weakThis, authority, generation, projectFile, snapshotRevision, snapshotEpoch]
         (bool success, juce::File writtenFile, juce::String failureReason)
     {
         // Runs on background thread — schedule UI/state updates back to message thread
         juce::MessageManager::callAsync([weakThis, authority, generation, success,
-                                          writtenFile, projectFile, failureReason]()
+                                          writtenFile, projectFile, failureReason,
+                                          snapshotRevision, snapshotEpoch]()
         {
             if (authority == nullptr || !authority->isGenerationOpen(generation))
                 return;
@@ -285,9 +319,18 @@ void AutosaveManagerCore::performAutosaveAsync()
 
             self->writing_.store(false);
 
+            // A previous project or a snapshot superseded by manual Save must
+            // not alter the new session's dirty state, recovery lock or UI.
+            if (self->sessionEpoch_ != snapshotEpoch)
+            {
+                self->diagRecordingFinalizedAutosave_.store(false);
+                return;
+            }
+
             if (success)
             {
-                self->autosaveDirty_.store(false);
+                // Preserve edits made after the captured snapshot.
+                self->autosaveDirty_.store(self->dirtyRevision_ != snapshotRevision);
                 self->lastAutosaveTime_ = juce::Time::getCurrentTime();
 
                 {

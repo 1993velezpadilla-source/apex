@@ -20,6 +20,7 @@
 
 #include <JuceHeader.h>
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
+#include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 #include "../../../Source/Automation/AutomationSystemCore.h"
 #include "../../../Source/CommandCore/GeneralCommands.h"
 
@@ -81,6 +82,7 @@ struct MatrixSpec
     bool stateThrows              = false;
     float gain                    = 1.0f;
     bool parameterControlsGain    = false;
+    bool parameterIsBoolean      = false;   // true: discrete VST3 choice/switch probe
     juce::uint32 stateMarker      = 0;        // written to state / recorded from state
     juce::String modulePath;                  // non-empty => instance retains a mock module
 };
@@ -112,7 +114,10 @@ public:
         // path (configureSlotAutomation) is exercised by identity tests.
         // (AudioPluginInstance hides addParameter as private in JUCE 8; the
         // qualified AudioProcessor path is the repo's proven G10 pattern.)
-        juce::AudioProcessor::addParameter (new juce::AudioParameterFloat ("param0", "Param 0", 0.0f, 1.0f, 0.5f));
+        if (spec_.parameterIsBoolean)
+            juce::AudioProcessor::addParameter (new juce::AudioParameterBool ("param0", "Param 0", false));
+        else
+            juce::AudioProcessor::addParameter (new juce::AudioParameterFloat ("param0", "Param 0", 0.0f, 1.0f, 0.5f));
     }
 
     static juce::AudioProcessor::BusesProperties buildBuses (const MatrixSpec& s)
@@ -1206,6 +1211,13 @@ public:
     void runTest() override
     {
         testManualValuesAreAuthoritative();
+        testPassiveMirrorDoesNotCreateRecordingGesture();
+        testTouchGestureOverridesLiveDsp();
+        testPluginGestureRecordsAndAudiblyPlaysBack();
+        testInProcessPpqLaneSurvivesSessionReopen();
+        testInProcessLatchWriteHoldAndStop();
+        testDiscreteParameterSwitchesAtBlockBoundary();
+        testDiscreteApexPpqLanesHoldUntilExactKnot();
         testReorderKeepsInstanceValues();
         testReorderKeepsAutomationOwner();
         testLegacyLanesFollowThePlugin();
@@ -1247,6 +1259,558 @@ private:
         for (int i = 0; i < 5; ++i)
             expectWithinAbsoluteError(chain.getSlot(i)->getProcessor()->getParameters()[0]->getValue(),
                                       1.0f, 1.0e-6f, "manual unity remains authoritative");
+    }
+
+    void testPassiveMirrorDoesNotCreateRecordingGesture()
+    {
+        beginTest("passive host-side VST3 mirror does not fabricate Write movement");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Kind = apex::automation::AutomationGestureQueue::EventKind;
+        using Source = apex::automation::ChangeSource;
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-passive-mirror-no-fake-write-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* processor = slot->getProcessor();
+        if (processor == nullptr) { expect(false); return; }
+        auto* p = processor->getParameters()[0];
+
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto* mirrored = sys.getRegistry().find(id);
+        expect(mirrored != nullptr && mirrored->getBoundPluginParameter() == p);
+        if (mirrored == nullptr) return;
+
+        // A private processor change without a host notification can be
+        // discovered during audio processing. That is a state-sync operation,
+        // not a manual touch or a new point on a recording lane.
+        auto& queue = sys.getQueue();
+        apex::automation::AutomationGestureQueue::Event event;
+        while (queue.pop(event)) {} // isolate this test from earlier fixtures
+        p->setValue(0.75f);
+        expectWithinAbsoluteError(mirrored->getNormalizedValue(), 0.5f, 1.0e-4f,
+            "mirror starts stale before host-side synchronization");
+        chain.applyAutomationAtSample(trackId, nullptr, 0, kRate, 120.0, 64);
+        expectWithinAbsoluteError(mirrored->getNormalizedValue(), 0.75f, 1.0e-4f,
+            "processor authority updates the mirror without an automation lane");
+        bool phantomWrite = false;
+        while (queue.pop(event))
+            if (event.paramID == id && event.kind == Kind::ValueChange
+                && event.source == Source::Plugin)
+                phantomWrite = true;
+        expect(!phantomWrite,
+            "host-side synchronization must not enter the producer recording queue");
+    }
+
+    void testTouchGestureOverridesLiveDsp()
+    {
+        beginTest("native plugin editor Touch gesture wins over PPQ lane in DSP");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Source = apex::automation::ChangeSource;
+
+        const juce::String trackId = "apex-touch-gain-dsp-gesture-20261012";
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 64);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        const int slotIndex = chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec));
+        expectEquals(slotIndex, 0);
+        if (slotIndex != 0) return;
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        expect(slot != nullptr);
+        if (slot == nullptr) return;
+        auto* plugin = slot->getProcessor();
+        expect(plugin != nullptr);
+        if (plugin == nullptr) return;
+        auto* p = plugin->getParameters()[0];
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto* mirror = sys.getRegistry().find(id);
+        expect(mirror != nullptr && mirror->getBoundPluginParameter() == p);
+        if (mirror == nullptr) return;
+
+        auto& lanes = sys.getLaneStore();
+        auto& modes = sys.getModeState();
+        modes.setMode(id, Mode::Touch);
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.2f, apex::automation::CurveType::Hold, 0.0f},
+            {4.0, 0.2f, apex::automation::CurveType::Hold, 0.0f}
+        });
+
+        // Establish live Read playback and the smoother's settled value.
+        juce::AudioBuffer<float> audio(2, 64);
+        for (int block = 0; block < 128; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.2f, 1.0e-3f,
+            "PPQ lane drives real parameter before gesture");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.1f, 1.0e-3f,
+            "real plugin audio reflects 0.2 gain");
+
+        p->beginChangeGesture();
+        p->setValueNotifyingHost(0.9f);
+        expect(mirror->isGestureActive(),
+            "plugin gesture must reach APEX before next audio callback");
+        expect(mirror->getLastSource() == Source::Plugin,
+            "plugin editor value is mirrored as Plugin, not Automation");
+
+        for (int block = 128; block < 136; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.9f, 1.0e-3f,
+            "automated lane must not overwrite active plugin gesture");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.45f, 1.0e-3f,
+            "real audio follows plugin editor while Touch is active");
+
+        p->endChangeGesture();
+        expect(!mirror->isGestureActive(), "Touch released");
+        for (int block = 136; block < 264; ++block)
+        {
+            chain.applyAutomationAtSample(trackId, nullptr, block * 64, kRate, 120.0, 64);
+            fillTonePair(audio, 64, 0.5f, 0.5f);
+            chain.processBlock(audio, 64);
+        }
+        expectWithinAbsoluteError(p->getValue(), 0.2f, 1.0e-3f,
+            "Touch release returns DSP to committed PPQ lane");
+        expectWithinAbsoluteError(audio.getSample(0, 63), 0.1f, 1.0e-3f,
+            "real audio returns to playback value after release");
+
+        lanes.removeLane(id);
+        modes.setMode(id, Mode::Read);
+    }
+
+    void testDiscreteParameterSwitchesAtBlockBoundary()
+    {
+        beginTest("discrete plugin switch is not smoothed across automation blocks");
+        DAW::AutomationManagerCore manager;
+        DAW::PluginChainCore chain;
+        chain.setAutomationManager(&manager);
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        spec.parameterIsBoolean = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-discrete-step-block-boundary-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* p = slot->getProcessor()->getParameters()[0];
+        expect(p->isDiscrete(), "host sees a discrete plugin parameter");
+        const auto legacy = "plugin.0." + slot->getPluginInstanceId() + ".param0";
+        manager.addPoint(trackId, legacy, 0, 0.0f);
+        manager.addPoint(trackId, legacy, 2400, 1.0f);
+        manager.addPoint(trackId, legacy, 4800, 0.0f);
+        const auto snap = manager.getSnapshotPublisher().get();
+        juce::AudioBuffer<float> audio(2, 128);
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 0, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 0.0f, 1.0e-6f,
+            "switch starts OFF");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.0f, 1.0e-6f,
+            "OFF processes silent audio");
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 2400, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 1.0f, 1.0e-6f,
+            "switch turns ON immediately at the automation boundary");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.5f, 1.0e-6f,
+            "ON is audible in the first callback, not delayed by a 10ms ramp");
+
+        chain.applyAutomationAtSample(trackId, snap.get(), 4800, kRate, 120.0, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        chain.processBlock(audio, 128);
+        expectWithinAbsoluteError(p->getValue(), 0.0f, 1.0e-6f,
+            "switch turns OFF immediately at the next automation boundary");
+        expectWithinAbsoluteError(audio.getSample(0, 127), 0.0f, 1.0e-6f,
+            "OFF mutes in the first callback");
+    }
+
+    void testDiscreteApexPpqLanesHoldUntilExactKnot()
+    {
+        beginTest("discrete APEX PPQ lane never anticipates a switch breakpoint");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        spec.parameterIsBoolean = true;
+        expectEquals(chain.appendPluginInstanceForTesting(
+            std::make_unique<MatrixProbeProcessor>(spec)), 0);
+        const juce::String trackId = "apex-discrete-ppq-hold-probe-20261012";
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        expect(parameter->isDiscrete(), "plugin advertises discrete parameter");
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        // Deliberately use Linear curves: a discrete target must STILL hold
+        // the prior value until the exact breakpoint.
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {1.0, 1.0f, CurveType::Linear, 0.0f},
+            {2.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+
+        juce::AudioBuffer<float> audio(2, 128);
+        struct Probe { double ppq; float value; };
+        const Probe probes[] = {
+            {0.0, 0.0f}, {0.75, 0.0f}, {1.0, 1.0f},
+            {1.75, 1.0f}, {2.0, 0.0f}
+        };
+        for (const auto& probe : probes)
+        {
+            // 48kHz @ 120BPM = exactly 24k samples per PPQ.
+            const auto sample = static_cast<int64_t>(probe.ppq * 24000.0);
+            chain.applyAutomationAtSample(
+                trackId, nullptr, sample, kRate, 120.0, 128);
+            fillTonePair(audio, 128, 0.5f, 0.5f);
+            chain.processBlock(audio, 128);
+            expectWithinAbsoluteError(parameter->getValue(), probe.value,
+                1.0e-6f, "VST3 discrete value holds at PPQ " + juce::String(probe.ppq));
+            expectWithinAbsoluteError(audio.getSample(0, 127),
+                0.5f * probe.value, 1.0e-6f,
+                "real DSP switches only at PPQ " + juce::String(probe.ppq));
+        }
+        lanes.removeLane(id);
+    }
+
+    void testPluginGestureRecordsAndAudiblyPlaysBack()
+    {
+        beginTest("hosted plugin editor Touch -> 90Hz recorder -> PPQ lane -> audible DSP");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& recorder = apex::automation::AutomationRecorder::getInstance();
+        auto& clock = system.getClock();
+        auto& lanes = system.getLaneStore();
+        const juce::String trackId = "apex-inprocess-touch-to-dsp-roundtrip-20261012";
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        probe->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        chain.setAutomationContext(trackId, nullptr, nullptr);
+
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false, "hosted plugin exists"); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        const auto key = KR::pluginParamKey(
+            trackId, 0, slot->getName(), "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "production host mapped a real plugin parameter");
+            return;
+        }
+        auto* mirrored = system.getRegistry().find(id);
+        expect(mirrored != nullptr && mirrored->getBoundPluginParameter() == parameter,
+               "native VST3 callback and chain DSP resolve the same parameter identity");
+        if (mirrored == nullptr) return;
+
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.2f, Curve::Hold, 0.0f},
+            {4.0, 0.2f, Curve::Hold, 0.0f}
+        });
+        system.setMode(id, Mode::Touch);
+        system.armRecording(true);
+        clock.publishFromAudioThread(1.0, 1.0 / 24000.0, true);
+        recorder.drainForTests(); // Explicitly fence Play/arm changes BEFORE gesture.
+
+        clock.publishFromAudioThread(1.1, 1.0 / 24000.0, true);
+        parameter->beginChangeGesture();
+        clock.publishFromAudioThread(1.25, 1.0 / 24000.0, true);
+        parameter->setValueNotifyingHost(0.8f);
+        clock.publishFromAudioThread(1.5, 1.0 / 24000.0, true);
+        parameter->setValueNotifyingHost(0.3f);
+        clock.publishFromAudioThread(1.75, 1.0 / 24000.0, true);
+        parameter->endChangeGesture();
+        expect(!mirrored->isGestureActive(), "native Touch gesture released");
+        recorder.drainForTests();
+
+        const auto lane = lanes.findLane(id);
+        expect(lane != nullptr, "native editor movement committed to lane");
+        const auto snap = lane != nullptr ? lane->getSnapshot() : nullptr;
+        expect(snap != nullptr && !snap->empty(), "committed PPQ automation exists");
+        if (snap != nullptr && !snap->empty())
+        {
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 1.25),
+                0.8f, 0.005f, "first native plugin move captured at exact PPQ");
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 1.5),
+                0.3f, 0.005f, "second native plugin move captured at exact PPQ");
+            expectWithinAbsoluteError(apex::automation::AutomationLane::evaluateAt(*snap, 2.0),
+                0.2f, 0.005f, "Touch rejoined original curve after gesture release");
+        }
+
+        // Disable capture, then exercise actual real-time audio processing.
+        // No unit-test-only setter is used for the plugin's playback value:
+        // the complete production PluginChainCore resolves the recorded lane.
+        system.armRecording(false);
+        recorder.drainForTests();
+        juce::AudioBuffer<float> audio(2, 128);
+        auto renderAtPPQ = [&](double ppq)
+        {
+            const int64_t sample = static_cast<int64_t>(ppq * 24000.0);
+            system.onAudioBlockStart(ppq, 1.0 / 24000.0, true);
+            for (int block = 0; block < 96; ++block)
+            {
+                chain.applyAutomationAtSample(trackId, nullptr, sample, kRate, 120.0, 128);
+                fillTonePair(audio, 128, 0.5f, 0.5f);
+                chain.processBlock(audio, 128);
+            }
+            return audio.getSample(0, 127);
+        };
+        expectWithinAbsoluteError(renderAtPPQ(1.25), 0.4f, 0.005f,
+            "recorded plugin Touch 0.8 yields 0.4 audio sample");
+        expectWithinAbsoluteError(renderAtPPQ(2.0), 0.1f, 0.005f,
+            "released Touch returns to original 0.2 lane in audible DSP");
+
+        clock.publishFromAudioThread(0.0, 1.0 / 24000.0, false);
+        recorder.drainForTests();
+        system.armRecording(false);
+        recorder.drainForTests();
+        lanes.removeLane(id);
+        system.setMode(id, Mode::Read);
+    }
+
+    void testInProcessPpqLaneSurvivesSessionReopen()
+    {
+        beginTest("in-process VST3 automation survives XML session save/reopen and controls audio");
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& system = apex::automation::AutomationSystem::getInstance();
+        auto& lanes = system.getLaneStore();
+        const juce::String track = "apex-inprocess-save-reopen-e2e-20261012";
+
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        probe->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        chain.setAutomationContext(track, nullptr, nullptr);
+        auto* slot = chain.getSlot(0);
+        if (slot == nullptr) { expect(false, "hosted plugin exists"); return; }
+        auto* parameter = slot->getProcessor()->getParameters()[0];
+        const auto key = KR::pluginParamKey(track, 0, slot->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "stable plugin parameter identity exists");
+            return;
+        }
+        system.setMode(id, Mode::Read);
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.25f, Curve::Hold, 0.0f},
+            {2.0, 0.75f, Curve::Hold, 0.0f},
+            {4.0, 0.25f, Curve::Hold, 0.0f}
+        });
+
+        // Serialized session payload passes through real XML, not an
+        // in-memory copy of the original lane snapshot.
+        const auto saved = lanes.getState();
+        const auto xml = saved.createXml();
+        expect(xml != nullptr && saved.isValid(), "automation subtree saved");
+        if (xml == nullptr) { lanes.removeLane(id); return; }
+        const auto onDisk = juce::ValueTree::fromXml(*xml);
+        expect(onDisk.isValid(), "automation subtree reopened from XML");
+        if (!onDisk.isValid()) { lanes.removeLane(id); return; }
+
+        // Reopen is observable: drop the published lane, perturb the live
+        // processor's state, then restore only from the persisted project.
+        lanes.removeLane(id);
+        expect(lanes.findLaneRT(id) == nullptr, "old lane no longer published");
+        parameter->setValue(0.95f);
+        lanes.restoreState(onDisk);
+        const auto newId = KR::getInstance().findID(key);
+        expectEquals(newId, id, "plugin's identity survives session reopen");
+        const auto restored = lanes.findLaneRT(newId);
+        expect(restored != nullptr, "lane republished under stable plugin key");
+        if (restored != nullptr)
+        {
+            const auto snap = restored->getSnapshot();
+            expect(snap != nullptr && snap->size() == 3,
+                   "all three automation points round-trip");
+        }
+
+        juce::AudioBuffer<float> audio(2, 128);
+        const struct { double ppq; float output; } checks[] = {
+            {1.0, 0.125f}, {2.0, 0.375f}, {4.0, 0.125f}
+        };
+        for (const auto& check : checks)
+        {
+            const auto sample = static_cast<int64_t>(check.ppq * 24000.0);
+            system.onAudioBlockStart(check.ppq, 1.0 / 24000.0, true);
+            for (int block = 0; block < 96; ++block)
+            {
+                chain.applyAutomationAtSample(track, nullptr, sample, kRate, 120.0, 128);
+                fillTonePair(audio, 128, 0.5f, 0.5f);
+                chain.processBlock(audio, 128);
+            }
+            expectWithinAbsoluteError(audio.getSample(0, 127), check.output, 0.005f,
+                "reopened automation drives DSP at PPQ " + juce::String(check.ppq));
+        }
+        system.onAudioBlockStart(0.0, 1.0 / 24000.0, false);
+        lanes.removeLane(newId);
+        system.setMode(newId, Mode::Read);
+    }
+
+    void testInProcessLatchWriteHoldAndStop()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using Mode = apex::automation::AutomationMode;
+        using Curve = apex::automation::CurveType;
+        auto& sys = apex::automation::AutomationSystem::getInstance();
+        auto& recorder = apex::automation::AutomationRecorder::getInstance();
+        auto& clock = sys.getClock();
+        auto& lanes = sys.getLaneStore();
+        auto& modes = sys.getModeState();
+        constexpr double ppqPerSample = 1.0 / 24000.0;
+
+        // Both modes must keep the manually selected processor value audible
+        // AFTER the editor releases it; Stop must commit the held value and
+        // unlock normal Read playback. The entire flow uses the production
+        // in-process host + plugin callbacks + recorder + DSP.
+        for (const auto mode : {Mode::Latch, Mode::Write})
+        {
+            const bool latch = mode == Mode::Latch;
+            beginTest(latch
+                ? "in-process Latch: gesture release keeps DSP value until Stop"
+                : "in-process Write: gesture release keeps DSP value until Stop");
+            const juce::String track = latch
+                ? "apex-e2e-latch-hosted-20261012"
+                : "apex-e2e-write-hosted-20261012";
+
+            DAW::PluginChainCore chain;
+            chain.prepare(kRate, 128);
+            auto spec = *makeSpecForUid(kUidStereo);
+            spec.parameterControlsGain = true;
+            auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+            probe->quietLogging.store(true, std::memory_order_relaxed);
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+            chain.setAutomationContext(track, nullptr, nullptr);
+            auto* slot = chain.getSlot(0);
+            if (slot == nullptr) { expect(false, "plugin slot"); continue; }
+            auto* pluginParameter = slot->getProcessor()->getParameters()[0];
+            const auto key = KR::pluginParamKey(
+                track, 0, slot->getName(), "param0", kUidStereo);
+            const auto id = KR::getInstance().findID(key);
+            if (id == apex::automation::kInvalidParameterID)
+            {
+                expect(false, "stable hosted parameter identity");
+                continue;
+            }
+
+            // Establish a transport/arm epoch with an empty queue. A stopped
+            // knob movement must not sneak into the next recorded pass.
+            clock.publishFromAudioThread(0.0, ppqPerSample, false);
+            recorder.drainForTests();
+            sys.armRecording(false);
+            recorder.drainForTests();
+            lanes.getOrCreateLane(id).replacePoints({
+                {0.0, 0.2f, Curve::Hold, 0.0f},
+                {4.0, 0.2f, Curve::Hold, 0.0f}
+            });
+            sys.setMode(id, mode);
+            sys.armRecording(true);
+            clock.publishFromAudioThread(0.5, ppqPerSample, true);
+            recorder.drainForTests();
+
+            clock.publishFromAudioThread(1.0, ppqPerSample, true);
+            pluginParameter->beginChangeGesture();
+            clock.publishFromAudioThread(1.25, ppqPerSample, true);
+            pluginParameter->setValueNotifyingHost(0.85f);
+            clock.publishFromAudioThread(1.5, ppqPerSample, true);
+            pluginParameter->endChangeGesture();
+            recorder.drainForTests();
+
+            expect(modes.latchHeldRT(id),
+                "released editor retains value until transport Stop");
+            juce::AudioBuffer<float> audio(2, 128);
+            auto render = [&](double ppq)
+            {
+                const auto sample = static_cast<int64_t>(ppq * 24000.0);
+                for (int block = 0; block < 96; ++block)
+                {
+                    chain.applyAutomationAtSample(
+                        track, nullptr, sample, kRate, 120.0, 128);
+                    fillTonePair(audio, 128, 0.5f, 0.5f);
+                    chain.processBlock(audio, 128);
+                }
+                return audio.getSample(0, 127);
+            };
+            expectWithinAbsoluteError(render(2.5), 0.425f, 0.006f,
+                "released plugin editor value is DSP-authoritative, not stale Read lane");
+
+            // Stop is both the last write point and the authority handoff:
+            // after Stop the old curve may resume outside the write range.
+            clock.publishFromAudioThread(3.0, ppqPerSample, false);
+            recorder.drainForTests();
+            expect(!modes.latchHeldRT(id), "Stop clears held plugin gesture");
+            const auto newLane = lanes.findLane(id);
+            expect(newLane != nullptr, "recorder committed held automation");
+            if (newLane != nullptr)
+            {
+                const auto snap = newLane->getSnapshot();
+                if (snap != nullptr)
+                {
+                    expectWithinAbsoluteError(
+                        apex::automation::AutomationLane::evaluateAt(*snap, 2.5),
+                        0.85f, 0.006f, "sustained value persisted through Stop");
+                }
+            }
+
+            // The committed take is now ordinary Read playback.
+            sys.setMode(id, Mode::Read);
+            expectWithinAbsoluteError(render(2.5), 0.425f, 0.006f,
+                "committed Latch/Write take replays through processor DSP");
+            expectWithinAbsoluteError(render(5.0), 0.1f, 0.006f,
+                "outside overwritten region original automation still plays");
+            lanes.removeLane(id);
+            sys.setMode(id, Mode::Read);
+            sys.armRecording(false);
+            recorder.drainForTests();
+        }
     }
 
     void testReorderKeepsInstanceValues()
@@ -1412,11 +1976,109 @@ public:
         testChangingAutomationUsesShortSlices();
         beginTest("static plugin automation retains the full host block");
         testStaticAutomationKeepsFullBlock();
+        beginTest("discrete PPQ transitions split at exact samples with aligned MIDI");
+        testDiscretePpqSampleBoundaryAndMidi();
+        beginTest("32-sample callback splits at discrete knot instead of delaying");
+        testShortCallbackExactDiscreteBoundary();
     }
 
 private:
     static constexpr int largeBlock = 2048;
     static constexpr const char* trackId = "automation-large-block";
+
+    void testDiscretePpqSampleBoundaryAndMidi()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 128);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterIsBoolean = true;
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* observed = probe.get();
+        observed->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        const juce::String track = "discrete-exact-128-vst3-20261012";
+        chain.setAutomationContext(track, nullptr, nullptr);
+        const auto key = KR::pluginParamKey(track, 0, chain.getSlot(0)->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        expect(id != apex::automation::kInvalidParameterID);
+        if (id == apex::automation::kInvalidParameterID) return;
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {37.0 / 24000.0, 1.0f, CurveType::Linear, 0.0f},
+            {100.0 / 24000.0, 0.0f, CurveType::Linear, 0.0f}
+        });
+        juce::AudioBuffer<float> audio(2, 128);
+        fillTonePair(audio, 128, 0.5f, 0.5f);
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 36);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 61, (juce::uint8) 100), 37);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 62, (juce::uint8) 100), 100);
+        chain.processBlockWithAutomation(audio, &midi, nullptr, track,
+                                          nullptr, 0, kRate, 120.0, 128);
+        expectEquals(observed->processObservationCount, 3,
+                     "128 frames split into exact 37/63/28 sample segments");
+        const int samples[] = {0, 36, 37, 99, 100, 127};
+        const float expected[] = {0.0f, 0.0f, 0.5f, 0.5f, 0.0f, 0.0f};
+        for (int i = 0; i < 6; ++i)
+            expectWithinAbsoluteError(audio.getSample(0, samples[i]), expected[i],
+                1.0e-6f, "exact audio at sample " + juce::String(samples[i]));
+        if (observed->processObservationCount >= 3)
+        {
+            for (int i = 0; i < 3; ++i)
+                expectEquals(observed->observedMidiEventCounts[(size_t)i], 1,
+                             "MIDI event not dropped or duplicated across discrete split");
+            expectEquals(observed->observedFirstMidiSamplePositions[0], 36);
+            expectEquals(observed->observedFirstMidiSamplePositions[1], 0);
+            expectEquals(observed->observedFirstMidiSamplePositions[2], 0);
+        }
+        lanes.removeLane(id);
+    }
+
+    void testShortCallbackExactDiscreteBoundary()
+    {
+        using KR = apex::automation::AutomationParameterKeyRegistry;
+        using apex::automation::CurveType;
+        DAW::PluginChainCore chain;
+        chain.prepare(kRate, 32);
+        auto spec = *makeSpecForUid(kUidStereo);
+        spec.parameterIsBoolean = true;
+        spec.parameterControlsGain = true;
+        auto probe = std::make_unique<MatrixProbeProcessor>(spec);
+        auto* observed = probe.get();
+        observed->quietLogging.store(true, std::memory_order_relaxed);
+        expectEquals(chain.appendPluginInstanceForTesting(std::move(probe)), 0);
+        const juce::String track = "discrete-exact-32-vst3-20261012";
+        chain.setAutomationContext(track, nullptr, nullptr);
+        const auto key = KR::pluginParamKey(track, 0, chain.getSlot(0)->getName(),
+                                            "param0", kUidStereo);
+        const auto id = KR::getInstance().findID(key);
+        if (id == apex::automation::kInvalidParameterID)
+        {
+            expect(false, "discrete APEX parameter exists");
+            return;
+        }
+        auto& lanes = apex::automation::AutomationSystem::getInstance().getLaneStore();
+        lanes.getOrCreateLane(id).replacePoints({
+            {0.0, 0.0f, CurveType::Linear, 0.0f},
+            {21.0 / 24000.0, 1.0f, CurveType::Linear, 0.0f}
+        });
+        juce::AudioBuffer<float> audio(2, 32);
+        fillTonePair(audio, 32, 0.5f, 0.5f);
+        chain.processBlockWithAutomation(audio, nullptr, nullptr, track,
+                                          nullptr, 0, kRate, 120.0, 32);
+        expectEquals(observed->processObservationCount, 2,
+                     "small callback split into 21 and 11 samples");
+        expectWithinAbsoluteError(audio.getSample(0, 20), 0.0f, 1.0e-6f,
+                                  "sample 20 remains OFF");
+        expectWithinAbsoluteError(audio.getSample(0, 21), 0.5f, 1.0e-6f,
+                                  "sample 21 switches ON without a callback delay");
+        lanes.removeLane(id);
+    }
 
     void testChangingAutomationUsesShortSlices()
     {
@@ -1801,5 +2463,1027 @@ public:
 };
 
 static PluginModuleCoexistenceLifecycleTests pluginModuleCoexistenceLifecycleTests;
+
+class ClipRegionPluginReorderRegressionTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginReorderRegressionTests()
+        : UnitTest ("clip-region-fx.reorder-preserves-instances.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat (std::make_unique<MatrixTestPluginFormat>());
+
+        DAW::ClipRegionPluginCore clipFx;
+        clipFx.prepare (kRate, kBlock);
+        const DAW::ClipID clipId = "apex_clip_fx_reorder";
+
+        beginTest ("three instances load and publish in insertion order");
+        auto first = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidStereo)), formatManager);
+        auto middle = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinA)), formatManager);
+        auto last = clipFx.loadForClip (
+            clipId, makeDescription (*makeSpecForUid (kUidTwinB)), formatManager);
+        expect (first.success, first.message);
+        expect (middle.success, middle.message);
+        expect (last.success, last.message);
+        if (!first.success || !middle.success || !last.success)
+            return;
+
+        const auto initial = clipFx.getEntriesForClip (clipId);
+        expectEquals (static_cast<int> (initial.size()), 3);
+        if (initial.size() != 3)
+            return;
+
+        const auto firstId = initial[0].instanceId;
+        const auto middleId = initial[1].instanceId;
+        const auto lastId = initial[2].instanceId;
+        auto* firstPtr = first.instance;
+        auto* middlePtr = middle.instance;
+        auto* lastPtr = last.instance;
+        clipFx.setBypassed (clipId, middleId, true);
+
+        beginTest ("moving first to last preserves plugin identities and bypass");
+        expect (clipFx.moveEntry (clipId, 0, 2));
+        auto moved = clipFx.getEntriesForClip (clipId);
+        expectEquals (moved[0].instanceId, middleId);
+        expectEquals (moved[1].instanceId, lastId);
+        expectEquals (moved[2].instanceId, firstId);
+        expect (moved[0].bypassed);
+        expect (clipFx.findEntryById (clipId, firstId)->instance.get() == firstPtr);
+        expect (clipFx.findEntryById (clipId, middleId)->instance.get() == middlePtr);
+        expect (clipFx.findEntryById (clipId, lastId)->instance.get() == lastPtr);
+        expect (clipFx.hasPluginsForClip (clipId));
+
+        beginTest ("invalid and no-op moves leave published order unchanged");
+        expect (!clipFx.moveEntry (clipId, -1, 0));
+        expect (!clipFx.moveEntry (clipId, 0, 3));
+        expect (!clipFx.moveEntry (clipId, 1, 1));
+        expect (!clipFx.moveEntry ("missing_clip", 0, 1));
+        auto unchanged = clipFx.getEntriesForClip (clipId);
+        for (size_t i = 0; i < moved.size(); ++i)
+            expectEquals (unchanged[i].instanceId, moved[i].instanceId);
+
+        beginTest ("moving last back to first restores the complete original order");
+        expect (clipFx.moveEntry (clipId, 2, 0));
+        const auto restored = clipFx.getEntriesForClip (clipId);
+        expectEquals (restored[0].instanceId, firstId);
+        expectEquals (restored[1].instanceId, middleId);
+        expectEquals (restored[2].instanceId, lastId);
+        expect (restored[1].bypassed);
+        clipFx.releaseResources();
+    }
+};
+
+static ClipRegionPluginReorderRegressionTests clipRegionPluginReorderRegressionTests;
+
+class ClipRegionPluginProjectPersistenceTests final : public juce::UnitTest
+{
+public:
+    ClipRegionPluginProjectPersistenceTests()
+        : UnitTest("clip-region-fx.project-roundtrip-and-missing-plugin.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        const DAW::ClipID clipId = "roundtrip_clip_A";
+        const auto exists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+
+        DAW::ClipRegionPluginCore original;
+        original.prepare(kRate, kBlock);
+        const auto first = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinA)), formatManager);
+        const auto second = original.loadForClip(
+            clipId, makeDescription(*makeSpecForUid(kUidTwinB)), formatManager);
+        beginTest("save a two-processor clip chain with stable identity and bypass");
+        expect(first.success, first.message);
+        expect(second.success, second.message);
+        if (!first.success || !second.success) return;
+        // Distinct non-zero opaque payloads ensure the tests verify actual
+        // preset bytes, not merely a restored processor with a default state.
+        constexpr juce::uint32 kFirstState = 0x4a5b6c7d;
+        constexpr juce::uint32 kSecondState = 0x1a2b3c4d;
+        auto* firstProbe = dynamic_cast<MatrixProbeProcessor*>(first.instance);
+        auto* secondProbe = dynamic_cast<MatrixProbeProcessor*>(second.instance);
+        expect(firstProbe != nullptr && secondProbe != nullptr);
+        if (!firstProbe || !secondProbe) return;
+        firstProbe->spec_.stateMarker = kFirstState;
+        secondProbe->spec_.stateMarker = kSecondState;
+        auto ordered = original.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(ordered.size()), 2);
+        if (ordered.size() != 2) return;
+        const auto firstId = ordered[0].instanceId;
+        const auto secondId = ordered[1].instanceId;
+        original.setBypassed(clipId, secondId, true);
+        juce::ValueTree projectFx;
+        juce::String error;
+        expect(original.captureProjectState(projectFx, error), error);
+        expect(projectFx.isValid());
+        if (!projectFx.isValid()) return;
+        expectEquals(projectFx.getNumChildren(), 1);
+        expectEquals(projectFx.getChild(0).getNumChildren(), 2);
+
+        auto xml = projectFx.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        auto fromDisk = juce::ValueTree::fromXml(*xml);
+        beginTest("XML round trip restores both live processors and their order");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(kRate, kBlock);
+        expect(reopened.restoreProjectState(fromDisk, formatManager, exists, error), error);
+        expect(error.isEmpty(), "no missing-plugin warnings expected: " + error);
+        const auto live = reopened.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(live.size()), 2);
+        if (live.size() == 2)
+        {
+            expectEquals(live[0].instanceId, firstId);
+            expectEquals(live[1].instanceId, secondId);
+            expect(!live[0].bypassed);
+            expect(live[1].bypassed);
+            auto* liveFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, firstId)->instance.get());
+            auto* liveSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reopened.findEntryById(clipId, secondId)->instance.get());
+            expect(liveFirst != nullptr && liveSecond != nullptr);
+            if (liveFirst && liveSecond)
+            {
+                expectEquals(static_cast<int>(liveFirst->lastStateMarker),
+                             static_cast<int>(kFirstState),
+                             "first opaque VST preset must survive XML/processor restore");
+                expectEquals(static_cast<int>(liveSecond->lastStateMarker),
+                             static_cast<int>(kSecondState),
+                             "second opaque VST preset must survive XML/processor restore");
+            }
+        }
+
+        beginTest("unavailable plugin is not deleted during subsequent save");
+        juce::AudioPluginFormatManager noPlugins;
+        DAW::ClipRegionPluginCore missingHost;
+        missingHost.prepare(kRate, kBlock);
+        expect(missingHost.restoreProjectState(fromDisk, noPlugins, exists, error),
+               "missing plugin should produce a preservable placeholder: " + error);
+        expect(error.isNotEmpty(), "missing plugins must be reported to project loader");
+        const auto missing = missingHost.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(missing.size()), 2);
+        if (missing.size() == 2)
+        {
+            expectEquals(missing[0].instanceId, firstId);
+            expectEquals(missing[1].instanceId, secondId);
+            expect(missing[1].bypassed);
+            auto* missingFirst = missingHost.findEntryById(clipId, firstId);
+            auto* missingSecond = missingHost.findEntryById(clipId, secondId);
+            expect(missingFirst != nullptr && missingSecond != nullptr);
+            if (missingFirst && missingSecond)
+            {
+                expect(missingFirst->instance == nullptr);
+                expect(missingSecond->instance == nullptr);
+                expectEquals(static_cast<int>(missingFirst->unresolvedState.getSize()), 4);
+                expectEquals(static_cast<int>(missingSecond->unresolvedState.getSize()), 4);
+                if (missingFirst->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingFirst->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kFirstState));
+                }
+                if (missingSecond->unresolvedState.getSize() == 4)
+                {
+                    juce::uint32 actual = 0;
+                    std::memcpy(&actual, missingSecond->unresolvedState.getData(), sizeof(actual));
+                    expectEquals(static_cast<int>(actual), static_cast<int>(kSecondState));
+                }
+            }
+        }
+        juce::ValueTree retained;
+        expect(missingHost.captureProjectState(retained, error), error);
+        expectEquals(retained.toXmlString(), fromDisk.toXmlString(),
+                     "resaving unresolved slots must preserve opaque state, IDs, and ordering");
+
+        beginTest("reinstalling a missing plugin recreates the preserved processors");
+        DAW::ClipRegionPluginCore reinstalled;
+        reinstalled.prepare(kRate, kBlock);
+        expect(reinstalled.restoreProjectState(retained, formatManager, exists, error), error);
+        expect(error.isEmpty(), error);
+        auto recovered = reinstalled.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(recovered.size()), 2);
+        if (recovered.size() == 2)
+        {
+            expectEquals(recovered[0].instanceId, firstId);
+            expectEquals(recovered[1].instanceId, secondId);
+            expect(recovered[1].bypassed);
+            auto* recoveredFirst = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, firstId)->instance.get());
+            auto* recoveredSecond = dynamic_cast<MatrixProbeProcessor*>(
+                reinstalled.findEntryById(clipId, secondId)->instance.get());
+            expect(recoveredFirst != nullptr && recoveredSecond != nullptr);
+            if (recoveredFirst && recoveredSecond)
+            {
+                expectEquals(static_cast<int>(recoveredFirst->lastStateMarker),
+                             static_cast<int>(kFirstState));
+                expectEquals(static_cast<int>(recoveredSecond->lastStateMarker),
+                             static_cast<int>(kSecondState));
+            }
+        }
+
+        beginTest("corrupt state is rejected before disturbing the live chain");
+        auto corrupt = retained.createCopy();
+        corrupt.getChild(0).getChild(1).setProperty("instanceId", firstId, nullptr);
+        expect(!reinstalled.restoreProjectState(corrupt, formatManager, exists, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+        expect(reinstalled.findEntryById(clipId, firstId)->instance != nullptr);
+
+        beginTest("unknown clip reference is rejected instead of dropping an effect");
+        expect(!reinstalled.restoreProjectState(retained, formatManager,
+                    [](const DAW::ClipID&) { return false; }, error));
+        expectEquals(static_cast<int>(reinstalled.getEntriesForClip(clipId).size()), 2);
+
+        beginTest("deleting one clip releases only its FX and preserves other clips");
+        const DAW::ClipID otherClipId = "roundtrip_clip_B";
+        auto another = reinstalled.loadForClip(
+            otherClipId, makeDescription(*makeSpecForUid(kUidStereo)), formatManager);
+        expect(another.success, another.message);
+        reinstalled.removeAllEntriesForClip(clipId);
+        expect(reinstalled.getEntriesForClip(clipId).empty());
+        expect(!reinstalled.hasPluginsForClip(clipId));
+        expect(reinstalled.hasPluginsForClip(otherClipId));
+        if (another.success)
+            expect(reinstalled.findEntryById(otherClipId,
+                reinstalled.getEntriesForClip(otherClipId)[0].instanceId)->instance != nullptr);
+        juce::ValueTree surviving;
+        expect(reinstalled.captureProjectState(surviving, error), error);
+        expectEquals(surviving.getNumChildren(), 1,
+                     "deleted clip FX must not remain in the saved project");
+        if (surviving.getNumChildren() == 1)
+            expectEquals(surviving.getChild(0).getProperty("clipId").toString(), otherClipId);
+
+        original.releaseResources();
+        reopened.releaseResources();
+        missingHost.releaseResources();
+        reinstalled.releaseResources();
+    }
+};
+
+static ClipRegionPluginProjectPersistenceTests clipRegionPluginProjectPersistenceTests;
+
+
+/**
+ * Independent real-world integration canary. CI downloads two open-source
+ * VST3 binaries and sets the environment variables before this test runs.
+ * Unlike MatrixTestPluginFormat, these processors are NOT synthetic mocks.
+ */
+class ExternalOpenSourceVST3ClipFxTests final : public juce::UnitTest
+{
+public:
+    ExternalOpenSourceVST3ClipFxTests()
+        : UnitTest("external-vst3.wet-effects-project-roundtrip.v1", "ExternalVST3") {}
+
+    void runTest() override
+    {
+        const bool required = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_REQUIRED", "") == "1";
+        const auto reverbPath = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_WETREVERB", "");
+        const auto delayPath = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_WETDELAY", "");
+
+        beginTest("two independent GitHub release VST3 bundles are present");
+        if (reverbPath.isEmpty() || delayPath.isEmpty())
+        {
+            if (required)
+                expect(false, "External VST3 required, but CI download paths are absent");
+            else
+                logMessage("SKIP external VST3: run pinned-download workflow to execute");
+            return;
+        }
+
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager manager;
+        // This JUCE 8 build deliberately deletes addDefaultFormats().
+        // Register the exact VST3 format explicitly for this external canary.
+        manager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+        juce::VST3PluginFormat vst3;
+        juce::PluginDescription descriptions[2];
+        const juce::String paths[] = { reverbPath, delayPath };
+        const juce::String expectedNames[] = { "WetReverb", "WetDelay" };
+        for (int i = 0; i < 2; ++i)
+        {
+            const juce::File bundle(paths[i]);
+            expect(bundle.isDirectory(), expectedNames[i] + " VST3 bundle must exist");
+            if (!bundle.isDirectory()) return;
+
+            juce::OwnedArray<juce::PluginDescription> found;
+            try { vst3.findAllTypesForFile(found, bundle.getFullPathName()); }
+            catch (const std::exception& e)
+            {
+                expect(false, expectedNames[i] + " VST3 enumeration threw: " + juce::String(e.what()));
+                return;
+            }
+            catch (...) { expect(false, expectedNames[i] + " VST3 enumeration threw"); return; }
+            expect(found.size() > 0, expectedNames[i] + " must expose a real VST3 component");
+            if (found.isEmpty()) return;
+            descriptions[i] = *found.getFirst();
+            expectEquals(descriptions[i].pluginFormatName, juce::String("VST3"));
+            logMessage("External VST3 found: " + descriptions[i].name
+                       + " vendor=" + descriptions[i].manufacturerName);
+        }
+
+        const DAW::ClipID clipId = "external_mit_effects";
+        DAW::ClipRegionPluginCore chain;
+        chain.prepare(48000.0, 128);
+        beginTest("load third-party VST3 through production ClipRegionPluginCore");
+        const auto reverb = chain.loadForClip(clipId, descriptions[0], manager);
+        expect(reverb.success && reverb.instance != nullptr,
+               "real reverb instantiation: " + reverb.message);
+        if (!reverb.success || !reverb.instance) return;
+        const auto delay = chain.loadForClip(clipId, descriptions[1], manager);
+        expect(delay.success && delay.instance != nullptr,
+               "real delay instantiation: " + delay.message);
+        if (!delay.success || !delay.instance) return;
+
+        const auto before = chain.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(before.size()), 2);
+        if (before.size() != 2) return;
+        const auto reverbId = before[0].instanceId;
+        const auto delayId = before[1].instanceId;
+
+        beginTest("both third-party VST3 parameter changes are applied before state capture");
+        juce::AudioProcessor* processors[] = { reverb.instance, delay.instance };
+        const juce::String pluginNames[] = { "WetReverb", "WetDelay" };
+        int parameterIndices[] = { -1, -1 };
+        float savedParameterValues[] = { 0.0f, 0.0f };
+        for (int plugin = 0; plugin < 2; ++plugin)
+        {
+            const auto& params = processors[plugin]->getParameters();
+            for (int i = 0; i < params.size(); ++i)
+            {
+                // Both of these test plugins expose *discrete* parameters:
+                // WetReverb mode has five positions and WetDelay time has
+                // six. Select a real automatable control regardless of step
+                // count, but choose a canonical grid-aligned target below.
+                if (params[i] != nullptr && params[i]->isAutomatable()
+                    && !params[i]->isMetaParameter())
+                {
+                    parameterIndices[plugin] = i;
+                    break;
+                }
+            }
+            expect(parameterIndices[plugin] >= 0,
+                   pluginNames[plugin] + " must expose an automatable, non-meta parameter");
+            if (parameterIndices[plugin] < 0)
+                return;
+
+            auto* parameter = params[parameterIndices[plugin]];
+            const float oldValue = parameter->getValue();
+            const float requested = oldValue > 0.5f ? 0.17f : 0.83f;
+            const int steps = parameter->getNumSteps();
+            // Normalized VST3 enum values are canonical i/(steps-1).
+            // Passing e.g. 0.83 to a five-mode reverb can read back 0.83
+            // immediately but serialize mode index 3, which restores as
+            // 0.75. Align the actual requested value with the discrete grid.
+            // Continuous and unknown-step parameters keep their raw target.
+            const float targetValue = steps > 1 && steps <= 1000
+                ? std::round (requested * float(steps - 1)) / float(steps - 1)
+                : requested;
+            parameter->setValueNotifyingHost(targetValue);
+            savedParameterValues[plugin] = parameter->getValue();
+            logMessage(pluginNames[plugin] + " roundtrip parameter #" 
+                + juce::String(parameterIndices[plugin]) + " name=\""
+                + parameter->getName(128) + "\" steps="
+                + juce::String(steps) + " initial="
+                + juce::String(oldValue, 6) + " target="
+                + juce::String(targetValue, 6) + " accepted="
+                + juce::String(savedParameterValues[plugin], 6));
+            expect(std::isfinite(savedParameterValues[plugin])
+                       && std::abs(savedParameterValues[plugin] - oldValue) > 0.02f,
+                   pluginNames[plugin] + " must actually accept a distinct parameter value");
+        }
+
+        beginTest("128-sample stereo DSP with both real plugins yields finite audio");
+        juce::AudioBuffer<float> buffer(2, 128);
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                buffer.setSample(ch, sample, sample == 0 ? 0.3f : 0.0f);
+        chain.processClipBlock(clipId, buffer, 128);
+        bool finite = true;
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                finite = finite && std::isfinite(buffer.getSample(ch, sample));
+        expect(finite, "third-party VST3 DSP produced NaN/Inf");
+        chain.setBypassed(clipId, delayId, true);
+
+        beginTest("save binary state, identity, order and bypass into project XML");
+        juce::ValueTree state;
+        juce::String error;
+        expect(chain.captureProjectState(state, error), error);
+        expect(state.isValid());
+        if (!state.isValid()) return;
+        expectEquals(state.getNumChildren(), 1);
+        expectEquals(state.getChild(0).getNumChildren(), 2);
+        const auto firstState = state.getChild(0).getChild(0).getChildWithName("State");
+        const auto secondState = state.getChild(0).getChild(1).getChildWithName("State");
+        expect(firstState.getProperty("data").toString().isNotEmpty(),
+               "real reverb must supply opaque VST3 state");
+        expect(secondState.getProperty("data").toString().isNotEmpty(),
+               "real delay must supply opaque VST3 state");
+        auto xml = state.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        auto saved = juce::ValueTree::fromXml(*xml);
+
+        beginTest("unavailable third-party VST3s retain exact opaque state bytes");
+        juce::AudioPluginFormatManager missing;
+        DAW::ClipRegionPluginCore offline;
+        offline.prepare(48000.0, 128);
+        const auto clipExists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+        expect(offline.restoreProjectState(saved, missing, clipExists, error), error);
+        auto offlineEntries = offline.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(offlineEntries.size()), 2);
+        if (offlineEntries.size() != 2)
+            return;
+        expect(offline.findEntryById(clipId, reverbId)->instance == nullptr);
+        expect(offline.findEntryById(clipId, delayId)->instance == nullptr);
+        juce::ValueTree preserved;
+        expect(offline.captureProjectState(preserved, error), error);
+        expectEquals(preserved.toXmlString(), saved.toXmlString(),
+                     "lossless missing-VST3 project resave");
+
+        beginTest("reinstall real VST3s and restore processor identity and bypass");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(48000.0, 128);
+        expect(reopened.restoreProjectState(preserved, manager, clipExists, error), error);
+        expect(error.isEmpty(), "real VST3 recovery must not create missing slots: " + error);
+        auto after = reopened.getEntriesForClip(clipId);
+        expectEquals(static_cast<int>(after.size()), 2);
+        if (after.size() == 2)
+        {
+            expectEquals(after[0].instanceId, reverbId);
+            expectEquals(after[1].instanceId, delayId);
+            expect(after[1].bypassed);
+            expect(reopened.findEntryById(clipId, reverbId)->instance != nullptr);
+            expect(reopened.findEntryById(clipId, delayId)->instance != nullptr);
+        }
+
+        beginTest("real VST3 parameter values survive missing-plugin save and reinstall");
+        const juce::String instanceIds[] = { reverbId, delayId };
+        for (int plugin = 0; plugin < 2; ++plugin)
+        {
+            const auto* entry = reopened.findEntryById(clipId, instanceIds[plugin]);
+            expect(entry != nullptr && entry->instance != nullptr,
+                   pluginNames[plugin] + " must have a restored processor");
+            if (entry == nullptr || entry->instance == nullptr)
+                continue;
+
+            const auto& restoredParameters = entry->instance->getParameters();
+            expect(restoredParameters.size() > parameterIndices[plugin],
+                   pluginNames[plugin] + " parameter ordering must remain stable");
+            if (restoredParameters.size() <= parameterIndices[plugin])
+                continue;
+
+            expectWithinAbsoluteError(restoredParameters[parameterIndices[plugin]]->getValue(),
+                                      savedParameterValues[plugin], 0.015f,
+                                      pluginNames[plugin] + " parameter must match the saved value");
+        }
+
+        chain.releaseResources();
+        offline.releaseResources();
+        reopened.releaseResources();
+    }
+};
+
+static ExternalOpenSourceVST3ClipFxTests externalOpenSourceVST3ClipFxTests;
+
+/**
+ * Cross-category, REAL VST3 canary: EQ, dynamics and modulation in addition
+ * to the existing independent reverb/delay test. The APEX host handles these
+ * purely as AudioProcessors with automatable parameters; never by category,
+ * branded plugin name, or hard-coded knob index. The CI manifest is only for
+ * locating hash-pinned external test binaries.
+ */
+class ExternalOpenSourceVST3DiverseTypesTests final : public juce::UnitTest
+{
+public:
+    ExternalOpenSourceVST3DiverseTypesTests()
+        : juce::UnitTest("external-vst3.diverse-types-automation-roundtrip.v1",
+                         "ExternalVST3") {}
+
+    void runTest() override
+    {
+        const bool required = juce::SystemStats::getEnvironmentVariable(
+            "APEX_EXTERNAL_VST3_REQUIRED", "") == "1";
+        const juce::String categories[] = { "EQ", "Compressor", "Chorus" };
+        const juce::String envNames[] = {
+            "APEX_EXTERNAL_VST3_WETEQ",
+            "APEX_EXTERNAL_VST3_WETCOMPRESSOR",
+            "APEX_EXTERNAL_VST3_WETCHORUS"
+        };
+        juce::String paths[3];
+        for (int i = 0; i < 3; ++i)
+            paths[i] = juce::SystemStats::getEnvironmentVariable(envNames[i], "");
+
+        beginTest("three distinct effect categories available as real VST3 bundles");
+        for (int i = 0; i < 3; ++i)
+        {
+            if (paths[i].isEmpty())
+            {
+                if (required)
+                    expect(false, categories[i] + " VST3 missing from pinned CI manifest");
+                else
+                    logMessage("SKIP diverse VST3: run external-vst3-smoke workflow");
+                return;
+            }
+        }
+
+        juce::ScopedJuceInitialiser_GUI gui;
+        juce::AudioPluginFormatManager manager;
+        manager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+        juce::VST3PluginFormat vst3;
+        juce::PluginDescription descriptions[3];
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const juce::File bundle(paths[i]);
+            expect(bundle.isDirectory(), categories[i] + " bundle missing");
+            if (!bundle.isDirectory()) return;
+            juce::OwnedArray<juce::PluginDescription> found;
+            try { vst3.findAllTypesForFile(found, bundle.getFullPathName()); }
+            catch (const std::exception& e)
+            {
+                expect(false, categories[i] + " enumeration exception: " + juce::String(e.what()));
+                return;
+            }
+            catch (...) { expect(false, categories[i] + " enumeration exception"); return; }
+            expect(!found.isEmpty(), categories[i] + " exposes a VST3 component");
+            if (found.isEmpty()) return;
+            descriptions[i] = *found.getFirst();
+            expectEquals(descriptions[i].pluginFormatName, juce::String("VST3"));
+            logMessage("External " + categories[i] + " component="
+                       + descriptions[i].name + " vendor="
+                       + descriptions[i].manufacturerName);
+        }
+
+        // Treat all three categories identically inside the production host.
+        // A failure in a new plugin type must not be masked by the old
+        // reverb/delay fixture passing on its own.
+        const DAW::ClipID clipId = "third_party_multi_category";
+        DAW::ClipRegionPluginCore chain;
+        chain.prepare(48000.0, 128);
+        juce::AudioProcessor* processors[3] = {nullptr, nullptr, nullptr};
+        juce::String instanceIds[3];
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto loaded = chain.loadForClip(clipId, descriptions[i], manager);
+            expect(loaded.success && loaded.instance != nullptr,
+                   categories[i] + " native load failed: " + loaded.message);
+            if (!loaded.success || loaded.instance == nullptr) return;
+            processors[i] = loaded.instance;
+        }
+        const auto loadedEntries = chain.getEntriesForClip(clipId);
+        expectEquals((int)loadedEntries.size(), 3);
+        if (loadedEntries.size() != 3) return;
+        for (int i = 0; i < 3; ++i)
+        {
+            instanceIds[i] = loadedEntries[(size_t)i].instanceId;
+            for (int j = 0; j < i; ++j)
+                expect(instanceIds[i] != instanceIds[j],
+                       "VST3 instances of different categories must have unique IDs");
+        }
+
+        beginTest("arbitrary automatable controls, no hard-coded parameter names");
+        int indices[3] = {-1, -1, -1};
+        float recorded[3] = {};
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto& params = processors[i]->getParameters();
+            int automatableCount = 0;
+            for (int j = 0; j < params.size(); ++j)
+                if (params[j] != nullptr && params[j]->isAutomatable()
+                    && !params[j]->isMetaParameter())
+                {
+                    ++automatableCount;
+                    if (indices[i] < 0) indices[i] = j;
+                }
+            expect(automatableCount >= 2,
+                   categories[i] + " should expose multiple independent automation targets");
+            if (indices[i] < 0) return;
+            auto* p = params[indices[i]];
+            const float previous = p->getValue();
+            const float requested = previous > 0.5f ? 0.15f : 0.85f;
+            const int steps = p->getNumSteps();
+            const float target = steps > 1 && steps <= 1000
+                ? std::round(requested * (float)(steps - 1)) / (float)(steps - 1)
+                : requested;
+            p->setValueNotifyingHost(target);
+            recorded[i] = p->getValue();
+            expect(std::isfinite(recorded[i])
+                   && std::abs(recorded[i] - previous) > 0.02f,
+                   categories[i] + " did not accept host-provided automation value");
+            logMessage(categories[i] + " parameter #" + juce::String(indices[i])
+                       + " name=" + p->getName(128) + " steps="
+                       + juce::String(steps) + " accepted=" + juce::String(recorded[i], 6));
+        }
+
+        beginTest("128-sample real processor chain accepts automation changes");
+        juce::AudioBuffer<float> audio(2, 128);
+        for (int block = 0; block < 3; ++block)
+        {
+            audio.clear();
+            audio.setSample(0, 0, 0.25f);
+            audio.setSample(1, 0, -0.25f);
+            chain.processClipBlock(clipId, audio, 128);
+            bool finite = true;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int s = 0; s < 128; ++s)
+                    finite = finite && std::isfinite(audio.getSample(ch, s));
+            expect(finite, "EQ/compressor/chorus DSP produced non-finite audio");
+        }
+
+        beginTest("cross-category opaque VST3 state round-trips via production project host");
+        juce::ValueTree state;
+        juce::String error;
+        expect(chain.captureProjectState(state, error), error);
+        expect(state.isValid());
+        if (!state.isValid()) return;
+        expectEquals(state.getNumChildren(), 1);
+        if (state.getNumChildren() != 1) return;
+        expectEquals(state.getChild(0).getNumChildren(), 3);
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto serialized = state.getChild(0).getChild(i);
+            expect(serialized.getChildWithName("State").getProperty("data")
+                   .toString().isNotEmpty(),
+                   categories[i] + " opaque state must be serializable");
+        }
+        const auto xml = state.createXml();
+        expect(xml != nullptr);
+        if (!xml) return;
+        const auto saved = juce::ValueTree::fromXml(*xml);
+        const auto exists = [clipId](const DAW::ClipID& id) { return id == clipId; };
+
+        juce::AudioPluginFormatManager unavailable;
+        DAW::ClipRegionPluginCore missing;
+        missing.prepare(48000.0, 128);
+        expect(missing.restoreProjectState(saved, unavailable, exists, error), error);
+        juce::ValueTree preserved;
+        expect(missing.captureProjectState(preserved, error), error);
+        expectEquals(preserved.toXmlString(), saved.toXmlString(),
+                     "missing EQ/compressor/chorus binaries must preserve project bytes");
+        DAW::ClipRegionPluginCore reopened;
+        reopened.prepare(48000.0, 128);
+        expect(reopened.restoreProjectState(preserved, manager, exists, error), error);
+        const auto entries = reopened.getEntriesForClip(clipId);
+        expectEquals((int)entries.size(), 3);
+        if (entries.size() == 3)
+            for (int i = 0; i < 3; ++i)
+            {
+                expectEquals(entries[(size_t)i].instanceId, instanceIds[i]);
+                const auto* entry = reopened.findEntryById(clipId, instanceIds[i]);
+                expect(entry != nullptr && entry->instance != nullptr,
+                       categories[i] + " failed to reopen");
+                if (entry != nullptr && entry->instance != nullptr)
+                {
+                    const auto& restoredParams = entry->instance->getParameters();
+                    expect(restoredParams.size() > indices[i],
+                           categories[i] + " changed parameter order");
+                    if (restoredParams.size() > indices[i])
+                        expectWithinAbsoluteError(
+                            restoredParams[indices[i]]->getValue(), recorded[i], 0.02f,
+                            categories[i] + " automation target did not survive reopening");
+                }
+            }
+        // Beyond parameter state/preset round-tripping, verify the plugin's
+        // own editor gesture actually reaches the APEX recorder and evaluator.
+        // IDs, control names, ranges and categories are NOT hard-coded in the
+        // automation production path; indices were discovered above.
+        beginTest("VST3 native editor gestures -> Touch lane -> PPQ evaluator (3 categories)");
+        {
+            using namespace apex::automation;
+            AutomationParameterRegistry registry;
+            AutomationLaneStore lanes;
+            AutomationModeState modes;
+            AutomationClock clock;
+            AutomationTransportState arm;
+            auto queue = std::make_unique<AutomationGestureQueue>();
+            AutomationGestureBridge bridge(registry, *queue, clock);
+            AutomationRecorder recorder(registry, lanes, modes, *queue, clock, arm);
+            AutomationEvaluator evaluator(registry, lanes, modes);
+            AutomationParameter* mirrors[3] = {nullptr, nullptr, nullptr};
+            const ParameterID ids[3] = {92011u, 92012u, 92013u};
+            float expectedRecorded[3] = {};
+            const double movePPQs[3] = {1.5, 2.0, 2.5};
+            arm.setRecordArmed(true);
+
+            for (int i = 0; i < 3; ++i)
+            {
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                ParameterRange range;
+                range.defaultValue = pluginParam->getValue();
+                const int steps = pluginParam->getNumSteps();
+                range.isStepped = steps > 1 && steps <= 1000;
+                range.numSteps = range.isStepped ? steps : 0;
+                mirrors[i] = registry.createParameter(
+                    ids[i], categories[i] + " hosted control", range,
+                    ParameterScope::Plugin, static_cast<PluginInstanceID>(i + 1));
+                expect(mirrors[i] != nullptr);
+                if (mirrors[i] == nullptr) return;
+                mirrors[i]->bindToPluginParameter(pluginParam);
+                bridge.attachToParameter(*mirrors[i]); // match production AutomationSystem
+                bridge.attachToPlugin(*processors[i], {{indices[i], ids[i]}});
+                modes.setMode(ids[i], AutomationMode::Touch);
+                lanes.getOrCreateLane(ids[i]).replacePoints({
+                    {0.0, 0.1f, CurveType::Linear, 0.0f},
+                    {4.0, 0.5f, CurveType::Linear, 0.0f},
+                    {8.0, 0.9f, CurveType::Linear, 0.0f}
+                });
+            }
+
+            clock.publishFromAudioThread(1.0, 0.001, true);
+            recorder.drainForTests();
+            for (int i = 0; i < 3; ++i)
+            {
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                const float previous = pluginParam->getValue();
+                const float requested = previous > 0.5f ? 0.1f : 0.9f;
+                const int steps = pluginParam->getNumSteps();
+                const float target = steps > 1 && steps <= 1000
+                    ? std::round(requested * float(steps - 1)) / float(steps - 1)
+                    : requested;
+
+                clock.publishFromAudioThread(movePPQs[i] - 0.1, 0.001, true);
+                pluginParam->beginChangeGesture();
+                expect(mirrors[i]->isGestureActive(),
+                       categories[i] + " plugin begin must suppress Touch read");
+                clock.publishFromAudioThread(movePPQs[i], 0.001, true);
+                pluginParam->setValueNotifyingHost(target);
+                expectedRecorded[i] = pluginParam->getValue();
+                expectWithinAbsoluteError(mirrors[i]->getNormalizedValue(),
+                    expectedRecorded[i], 0.02f,
+                    categories[i] + " plugin move must update APEX atomic");
+                evaluator.evaluateBlock(movePPQs[i], true);
+                expectWithinAbsoluteError(mirrors[i]->getNormalizedValue(),
+                    expectedRecorded[i], 0.02f,
+                    categories[i] + " Touch playback must not fight plugin editor");
+                clock.publishFromAudioThread(movePPQs[i] + 0.1, 0.001, true);
+                pluginParam->endChangeGesture();
+                expect(!mirrors[i]->isGestureActive(),
+                       categories[i] + " plugin end must release Touch");
+
+                recorder.drainForTests();
+                const auto lane = lanes.findLane(ids[i]);
+                expect(lane != nullptr, categories[i] + " must create a Touch lane");
+                if (lane == nullptr) continue;
+                const auto snap = lane->getSnapshot();
+                expect(snap != nullptr && !snap->empty(),
+                       categories[i] + " must record plugin PPQ movement");
+                if (snap == nullptr || snap->empty()) continue;
+                expectWithinAbsoluteError(
+                    AutomationLane::evaluateAt(*snap, movePPQs[i]),
+                    expectedRecorded[i], 0.03f,
+                    categories[i] + " Touch sample must survive lane recording");
+                // The audio evaluator reads the actual committed PPQ lane,
+                // not a copied plugin knob value or hard-coded effect name.
+                mirrors[i]->writeValue(0.0f, ChangeSource::Programmatic);
+                evaluator.evaluateBlock(movePPQs[i], true);
+                expectWithinAbsoluteError(
+                    mirrors[i]->getNormalizedValue(), expectedRecorded[i], 0.03f,
+                    categories[i] + " committed lane must drive APEX playback atomic");
+            }
+
+            beginTest("APEX-originated controls do not echo as duplicate plugin gestures");
+            {
+                constexpr int i = 0;
+                auto* pluginParam = processors[i]->getParameters()[indices[i]];
+                const float prior = pluginParam->getValue();
+                const float requested = prior > 0.5f ? 0.1f : 0.9f;
+                const int steps = pluginParam->getNumSteps();
+                const float canonical = steps > 1 && steps <= 1000
+                    ? std::round(requested * float(steps - 1)) / float(steps - 1)
+                    : requested;
+                mirrors[i]->setValueFromUser(canonical);
+                int userEvents = 0, echoedEvents = 0;
+                AutomationGestureQueue::Event event;
+                while (queue->pop(event))
+                    if (event.paramID == ids[i]
+                        && event.kind == AutomationGestureQueue::EventKind::ValueChange)
+                    {
+                        if (event.source == ChangeSource::User) ++userEvents;
+                        if (event.source == ChangeSource::Plugin) ++echoedEvents;
+                    }
+                expectEquals(userEvents, 1, "direct APEX User capture must happen once");
+                expectEquals(echoedEvents, 0, "plugin callback must not double-record APEX gesture");
+            }
+
+            for (int i = 0; i < 3; ++i)
+                bridge.detachFromPlugin(*processors[i]);
+            // This gate proves editor capture and PPQ evaluator atomics, not
+            // sample-accurate VST3 IParameterChanges or hardware audio E2E.
+        }
+
+        chain.releaseResources();
+        missing.releaseResources();
+        reopened.releaseResources();
+    }
+};
+static ExternalOpenSourceVST3DiverseTypesTests externalOpenSourceVST3DiverseTypesTests;
+
+
+/** Crash-recovery attribution is deliberately conservative: an interrupted
+ * plugin LOAD can be flagged as suspicious, not proven guilty. The marker
+ * must never delete saved plugins or blacklist unrelated UIDs. */
+class PluginLoadCrashRecoveryMarkerTests final : public juce::UnitTest
+{
+public:
+    PluginLoadCrashRecoveryMarkerTests()
+        : juce::UnitTest("plugin.recovery.inprocess-load-marker.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        using DAW::PluginLoadRecoveryCore;
+        auto file = juce::File::getSpecialLocation(
+            juce::File::tempDirectory)
+            .getNonexistentChildFile("apex_load_recovery_gate_", ".xml", true);
+
+        beginTest("interrupted plugin initialization leaves identifiable disk evidence");
+        PluginLoadRecoveryCore::Attempt pending;
+        pending.valid = true;
+        pending.name = "Independent VST3 Test";
+        pending.format = "VST3";
+        pending.identifier = "C:/Example/Untrusted.vst3";
+        pending.uniqueId = 0x12345;
+        pending.stage = "plugin_chain_append";
+        pending.trackId = "track-A";
+        pending.slotIndex = 2;
+        pending.startedUnixMs = 123456789;
+        expect(PluginLoadRecoveryCore::writePendingAttempt(file, pending));
+        const auto persisted = PluginLoadRecoveryCore::readPendingAttempt(file);
+        expect(persisted.valid);
+        expectEquals(persisted.name, pending.name);
+        expectEquals(persisted.format, pending.format);
+        expectEquals(persisted.identifier, pending.identifier);
+        expectEquals(persisted.stage, pending.stage);
+        expectEquals(persisted.trackId, pending.trackId);
+        expectEquals(persisted.slotIndex, pending.slotIndex);
+        expectEquals(persisted.uniqueId, pending.uniqueId);
+        expectEquals(persisted.startedUnixMs, pending.startedUnixMs);
+
+        beginTest("recovery evidence matches path, format and component UID, not brand");
+        juce::PluginDescription expected;
+        expected.name = pending.name;
+        expected.pluginFormatName = pending.format;
+        expected.fileOrIdentifier = pending.identifier;
+        expected.uniqueId = pending.uniqueId;
+        expect(PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected));
+        expect(PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-A", 2));
+        expect(!PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-A", 3),
+               "same plugin component in another slot must still load");
+        expect(!PluginLoadRecoveryCore::mayBeSameSlot(persisted, expected, "track-B", 2),
+               "same plugin component on another track must still load");
+        expected.uniqueId += 1;
+        expect(!PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected),
+               "another plugin component in the same shell must not be accused");
+        expected.uniqueId = pending.uniqueId;
+        expected.fileOrIdentifier = "C:/Example/Different.vst3";
+        expect(!PluginLoadRecoveryCore::mayBeSamePlugin(persisted, expected));
+
+        beginTest("malformed, missing and invalid markers never assert a suspect");
+        file.replaceWithText("<partial");
+        expect(!PluginLoadRecoveryCore::readPendingAttempt(file).valid);
+        file.deleteFile();
+        expect(!PluginLoadRecoveryCore::readPendingAttempt(file).valid);
+        pending.format.clear();
+        expect(!PluginLoadRecoveryCore::writePendingAttempt(file, pending));
+        expect(!file.existsAsFile());
+    }
+};
+static PluginLoadCrashRecoveryMarkerTests pluginLoadCrashRecoveryMarkerTests;
+
+
+/** Safe project restore must retain the exact saved plugin settings and all
+ * later slot indices WITHOUT constructing the suspect plugin DLL. */
+class PluginRecoveryDeferredRestoreTests final : public juce::UnitTest
+{
+public:
+    PluginRecoveryDeferredRestoreTests()
+        : juce::UnitTest("plugin.recovery.deferred-restore-preserves-state.v1", "PluginHost") {}
+
+    void runTest() override
+    {
+        beginTest("suspect in-process plugin is deferred, other saved slots still restore");
+        juce::AudioPluginFormatManager formats;
+        formats.addFormat(std::make_unique<MatrixTestPluginFormat>());
+        DAW::PluginChainCore original;
+        original.prepare(kRate, 128);
+
+        const int ids[] = {kUidStereo, kUidFamilyBase, kUidFamilyPro};
+        juce::String error;
+        for (int i = 0; i < 3; ++i)
+            expectEquals(original.appendPlugin(
+                makeDescription(*makeSpecForUid(ids[i])),
+                formats, error, true), i, "original plugin inserted: " + error);
+        if (original.getNumSlots() != 3) return;
+        original.getSlot(1)->setSlotMixNormalized(0.43f);
+        original.getSlot(1)->setBypassed(true);
+        const auto project = original.getState();
+        expectEquals(project.getNumChildren(), 3);
+        if (project.getNumChildren() != 3) return;
+
+        auto suspectDesc = makeDescription(*makeSpecForUid(ids[1]));
+        DAW::PluginLoadRecoveryCore::Attempt suspect;
+        suspect.valid = true;
+        suspect.name = suspectDesc.name;
+        suspect.format = suspectDesc.pluginFormatName;
+        suspect.identifier = suspectDesc.fileOrIdentifier;
+        suspect.uniqueId = suspectDesc.uniqueId;
+        suspect.stage = "plugin_chain_append";
+
+        DAW::PluginChainCore recovered;
+        recovered.prepare(kRate, 128);
+        expect(recovered.restoreState(project, formats, error, &suspect),
+               "explicit safe restore should not fail the rest of the project: " + error);
+        expectEquals(recovered.getNumSlots(), 3,
+                     "safe restore must retain original slot numbering");
+        expect(recovered.hasPlugin(0), "first unrelated plugin remains active");
+        expect(!recovered.hasPlugin(1), "suspect's native instance must not load");
+        expect(recovered.isRecoveryDeferredSlot(1), "suspect is a recoverable placeholder");
+        expect(recovered.hasPlugin(2), "later plugin loads at its ORIGINAL slot");
+        expect(!recovered.isRecoveryDeferredSlot(2), "innocent neighbor is not deferred");
+
+        const auto preserved = recovered.getRecoveryDeferredSlot(1);
+        expect(preserved.isValid() && preserved.isEquivalentTo(project.getChild(1)),
+               "entire opaque state/layout/identity is preserved unmodified");
+
+        beginTest("safe project save round-trips skipped plugin without erasing its preset");
+        const auto safeSaved = recovered.getState();
+        expectEquals(safeSaved.getNumChildren(), 3,
+                     "saved project must still include all three plugin slots");
+        if (safeSaved.getNumChildren() == 3)
+        {
+            expect(safeSaved.getChild(1).isEquivalentTo(project.getChild(1)),
+                   "deferred slot must retain original plugin preset and identity");
+            expectEquals((int)safeSaved.getChild(2).getProperty("index", -1), 2,
+                         "later plugin original index persists");
+        }
+
+        beginTest("remove/reorder deferred slots keeps project recovery map synchronized");
+        expect(recovered.moveSlot(1, 2), "safe-mode placeholder may be reordered");
+        expect(recovered.isRecoveryDeferredSlot(2), "deferred slot follows reorder");
+        expect(!recovered.isRecoveryDeferredSlot(1), "previous slot now has active plugin");
+        recovered.removePlugin(0);
+        expect(recovered.isRecoveryDeferredSlot(1), "deferred index follows removal");
+        recovered.removePlugin(1);
+        expectEquals(recovered.getNumSlots(), 1,
+                     "removing a placeholder must not hang or delete healthy plugins");
+        expect(!recovered.isRecoveryDeferredSlot(0), "no stale deferred entries");
+        expect(recovered.hasPlugin(0), "remaining plugin still operational");
+
+        beginTest("explicit normal restore retries everything from saved project");
+        expect(recovered.restoreState(project, formats, error),
+               "normal restore must be independent of stale marker: " + error);
+        expectEquals(recovered.getNumSlots(), 3);
+        expect(recovered.hasPlugin(0) && recovered.hasPlugin(1) && recovered.hasPlugin(2),
+               "all original plugin instances restored normally on user retry");
+        expect(!recovered.isRecoveryDeferredSlot(1), "successful retry clears recovery state");
+
+        beginTest("one suspect instance never suppresses an identical VST3 on another track/slot");
+        DAW::PluginChainCore duplicateSource;
+        duplicateSource.prepare(kRate, 128);
+        duplicateSource.setAutomationContext("recovery-dup-A", nullptr, nullptr);
+        auto desc = makeDescription(*makeSpecForUid(kUidFamilyBase));
+        expectEquals(duplicateSource.appendPlugin(desc, formats, error, true), 0);
+        expectEquals(duplicateSource.appendPlugin(desc, formats, error, true), 1);
+        const auto duplicateProject = duplicateSource.getState();
+        suspect.name = desc.name;
+        suspect.format = desc.pluginFormatName;
+        suspect.identifier = desc.fileOrIdentifier;
+        suspect.uniqueId = desc.uniqueId;
+        suspect.trackId = "recovery-dup-A";
+        suspect.slotIndex = 1;
+
+        DAW::PluginChainCore sameTrack;
+        sameTrack.prepare(kRate, 128);
+        sameTrack.setAutomationContext("recovery-dup-A", nullptr, nullptr);
+        expect(sameTrack.restoreState(duplicateProject, formats, error, &suspect));
+        expect(sameTrack.hasPlugin(0), "other instance of same VST3 must be active");
+        expect(!sameTrack.hasPlugin(1), "only exact suspect track/slot is deferred");
+        expect(sameTrack.isRecoveryDeferredSlot(1));
+
+        DAW::PluginChainCore otherTrack;
+        otherTrack.prepare(kRate, 128);
+        otherTrack.setAutomationContext("recovery-dup-B", nullptr, nullptr);
+        expect(otherTrack.restoreState(duplicateProject, formats, error, &suspect));
+        expect(otherTrack.hasPlugin(0) && otherTrack.hasPlugin(1),
+               "same VST3 on unrelated track is never blacklisted");
+
+        sameTrack.releaseResources();
+        otherTrack.releaseResources();
+        duplicateSource.releaseResources();
+        recovered.releaseResources();
+        original.releaseResources();
+    }
+};
+static PluginRecoveryDeferredRestoreTests pluginRecoveryDeferredRestoreTests;
 
 } // namespace

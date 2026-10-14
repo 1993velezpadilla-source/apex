@@ -295,6 +295,52 @@ public:
             expect(h.popup.getHeaderBar().getBounds() == headerBoundsBefore,
                    "header stays fixed during scroll");
         }
+
+        beginTest("DetachedColorPickerDoesNotAccessDestroyedBuilder");
+        {
+            TrackManager tracks;
+            RoutingGraph graph;
+            MasterRouteStateCore masterRoute { graph };
+            BubblegumSendStateCore sends;
+            QuickTrackColorSystem colors { 4242 };
+            auto builder = std::make_unique<QuickTrackBuilderCore>(
+                tracks, graph, masterRoute, sends, colors);
+            const auto* role = QuickTrackRoleCatalog::findById("doubles");
+            expect(role != nullptr);
+            if (role == nullptr)
+                return;
+            auto picker = std::make_unique<QuickTrackRoleColorPicker>(*builder, *role);
+            const auto key = QuickTrackBuilderCore::colorKeyForRole(*role);
+
+            // Exercise the actual queued button action with a live owner.
+            auto* swatch = picker->getSwatchButton(0);
+            expect(swatch != nullptr);
+            if (swatch == nullptr)
+                return;
+            swatch->triggerClick();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+            expect(colors.isManual(key), "live picker still applies a swatch");
+            const auto selected = colors.getColorForRole(key);
+
+            // A native/asynchronous callout can outlive its builder. Keeping
+            // the colour store alive detects unintended late mutations as
+            // well as exercising a paint after the builder has been freed.
+            builder.reset();
+            juce::Image image(juce::Image::ARGB, picker->getWidth(), picker->getHeight(), true);
+            juce::Graphics graphics(image);
+            picker->paint(graphics);
+            picker->getAutoButton().triggerClick();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+            expect(colors.isManual(key), "late AUTO cannot mutate the former owner's colours");
+            expect(colors.getColorForRole(key) == selected);
+            auto* lateSwatch = picker->getSwatchButton(1);
+            expect(lateSwatch != nullptr);
+            if (lateSwatch != nullptr)
+                lateSwatch->triggerClick();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+            expect(colors.getColorForRole(key) == selected,
+                   "late swatch cannot mutate the former owner's colours");
+        }
     }
 
 private:

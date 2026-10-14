@@ -1,6 +1,6 @@
 # APEX Agent Rules
 
-- DAW_BRAIN.md is the canonical DAW architecture reference.
+- `../../DAW_BRAIN.md` at the checkout root is the canonical DAW architecture reference.
 - The actual repository determines what APEX currently implements.
 - Runtime tests determine whether the implementation works.
 - Inspect the repository before making implementation claims.

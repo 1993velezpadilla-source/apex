@@ -122,7 +122,7 @@ struct AutomationClipRegionCore
             const auto clippedSourceTime = juce::jlimit<int64_t>(0, sourceLength, point.timeSamples);
             const double normalised = (double)clippedSourceTime / (double)sourceLength;
             point.timeSamples = (int64_t)std::llround(normalised * (double)lengthSamples);
-            point.value = juce::jlimit(0.0f, 1.0f, point.value);
+            point.value = AutomationLaneCore::clampValueForParameter(parameterId, point.value);
             localPoints.push_back(point);
         }
     }

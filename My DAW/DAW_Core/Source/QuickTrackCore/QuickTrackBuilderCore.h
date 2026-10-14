@@ -383,6 +383,10 @@ private:
     MasterRouteStateCore& masterRoute_;
     BubblegumSendStateCore& sends_;
     QuickTrackColorSystem& colors_;
+
+    // Detached colour callouts may finish after their control-plane owner.
+    // Access and destruction stay on the JUCE message thread.
+    JUCE_DECLARE_WEAK_REFERENCEABLE(QuickTrackBuilderCore)
 };
 
 } // namespace DAW

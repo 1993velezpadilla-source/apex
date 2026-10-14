@@ -7,6 +7,7 @@
 #include "../Bubblegum/BubblegumCableSnapshotBuilder.h"
 #include "../BubblegumCable/BubblegumCableOsDragFadeCore.h"
 #include "../Bubblegum/BubblegumCableRenderCore.h"
+#include "ApexPresentationClock.h"
 
 namespace DAW {
 
@@ -25,17 +26,18 @@ class MixerStrip;
  */
 class BubblegumCableOverlayComponent : public juce::Component,
                                        public RoutingGraph::Listener,
-                                       private juce::Timer
+                                       public ApexPresentationClock::TickReceiver
 {
 public:
     static constexpr int kCableZoneH = 120;
-    static constexpr int kLegacyTimerHz = 60;
 
     BubblegumCableOverlayComponent()
     {
         setOpaque(false);
         setInterceptsMouseClicks(true, false);  // receive mouseMove for tooltips; hitTest=false blocks no clicks
-        startTimerHz(kLegacyTimerHz);   // 60 Hz — smooth cable animation
+        auto& presentationClock = ApexPresentationClock::instance();
+        presentationClock.addReceiver(this);
+        presentationUpdateActive_ = presentationClock.requestContinuousUpdate(this) != 0;
     }
 
     ~BubblegumCableOverlayComponent() override;
@@ -91,12 +93,15 @@ public:
         repaint();
     }
 
-    void timerCallback() override;
+    void onPresentationTick(double deltaSeconds) override;
 
     void resized() override
     {
         // No detached droplet state in the new pipeline — nothing to purge.
     }
+
+    void visibilityChanged() override { handlePresentationVisibilityChange(); }
+    void parentHierarchyChanged() override { handlePresentationVisibilityChange(); }
 
     void bind(BubblegumV2System* bgV2, MixerPanel* mixer, juce::Viewport* viewport = nullptr);
 
@@ -125,10 +130,14 @@ public:
     void setSidechainCableThickness(float thickness) { sidechainCableThickness_ = thickness; repaint(); }
 
 private:
+    void handlePresentationVisibilityChange();
+    void requestPresentationUpdates();
+
     BubblegumV2System* bgV2_       = nullptr;
     MixerPanel*        mixerPanel_ = nullptr;
     juce::Viewport*    viewport_   = nullptr;
     bool               wasRendering_ = false;
+    bool               presentationUpdateActive_ = false;
 
     // Last known viewport scroll and Mixer screen position.
     mutable int lastViewportScrollX_ = -1;
@@ -137,7 +146,6 @@ private:
     mutable int lastMixerScreenY_    = std::numeric_limits<int>::min();
 
     double visualTime_      = 0.0;
-    double lastTimerSec_    = 0.0;
     double freezeUntilSec_  = 0.0;
     double snapMotionUntilSec_ = 0.0;
     BubblegumCableOsDragFadeCore osDragFade_;
@@ -147,10 +155,10 @@ private:
     bubblegum::BubblegumRoutingAdapterSourceSyncExample routingAdapter_;
     bubblegum::BubblegumCableSnapshotBuilder snapshotBuilder_;
     bubblegum::BubblegumCableRenderCore renderCore_;
-    float timerDt_ = 1.0f / 60.0f;
+    float presentationDt_ = 1.0f / 60.0f;
     juce::Colour cableAccentColour_ = BubblegumAppearanceSettings::getDefaultCableAccent();
 
-    int timerTickCount_ = 0;
+    int presentationTickCount_ = 0;
 
     // ── Repaint gate debug counters ────────────────────────────────────────
     mutable int gatedTickCount_  = 0;   // ticks where repaint() was skipped
@@ -290,7 +298,7 @@ private:
         double setupMs[kWindow]  = {};
         double renderMs[kWindow] = {};
         double totalMs[kWindow]  = {};
-        double timerMs[kWindow]  = {};
+        double presentationTickMs[kWindow] = {};
         int    snapCount[kWindow]= {};
         int    cacheHits[kWindow] = {};
         int    cacheMisses[kWindow] = {};
@@ -311,7 +319,7 @@ private:
             if (filled < kWindow) ++filled;
         }
 
-        void recordTimer(double ms) { timerMs[head] = ms; }
+        void recordPresentationTick(double ms) { presentationTickMs[head] = ms; }
 
         double avg(const double* arr) const
         {
@@ -328,7 +336,7 @@ private:
             double aSetup  = avg(setupMs);
             double aRender = avg(renderMs);
             double aTotal  = avg(totalMs);
-            double aTimer  = avg(timerMs);
+            double aTick  = avg(presentationTickMs);
             int    aSnaps  = (filled > 0) ? snapCount[(head - 1 + kWindow) % kWindow] : 0;
             int totalHits = 0;
             int totalMisses = 0;
@@ -348,7 +356,7 @@ private:
                 << "  Setup/maps: " << juce::String(aSetup,  2) << " ms\n"
                 << "  paintAll:   " << juce::String(aRender, 2) << " ms\n"
                 << "Cable cache: " << totalHits << " H / " << totalMisses << " M\n"
-                << "Timer cb:     " << juce::String(aTimer,  2) << " ms\n"
+                << "Presentation: " << juce::String(aTick,  2) << " ms\n"
                 << "Snapshots:    " << aSnaps << "\n"
                 << "Budget @60Hz: 16ms";
 

@@ -29,6 +29,8 @@
 #include "ArrangementSnapCore.h"
 #include "../../../Source/Automation/AutomationLaneStoreCore.h"
 #include "../../../Source/AutomationCore/AutomationManagerCore.h"
+#include "../../../Source/AutomationCore/AutomationMultiParameterSnapshotCore.h"
+#include "../../../Source/AutomationCore/AutomationVst3MacroTargetBankCore.h"
 #include "../../../Source/DiagnosticsCore/TimelinePaintMetrics.h"
 #include "../../../Source/Automation/AutomationParameterKeyCore.h"
 #include "../../../Source/RoutingCore/RoutingGraph.h"             
@@ -480,7 +482,45 @@ namespace ArrangementEditor
         // -----------------------------------------------------------------------
         // Automation support
         // -----------------------------------------------------------------------
+        // Called only by the native lane context menu; the explicitly
+        // selected arrangement clips supply the target-track set.
+        bool applyGroupedCurveFromSelectedClips(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& points);
+
+        bool applyNativeMacroFromSelectedClips(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& sourcePoints);
+
+        // Explicit VST3 target bank: touch parameters individually and add
+        // them to a session-scoped selection. Every target is reverified
+        // against the live host on apply AND on every Undo/Redo.
+        bool applyVst3MacroTargetAction(
+            DAW::AutomationLaneComponent::Vst3MacroTargetAction action);
+        bool applyVst3MacroFromLastTouched(
+            const DAW::TrackID& sourceTrack,
+            const juce::String& parameterId,
+            const std::vector<DAW::AutomationPoint>& sourcePoints);
+
+        // Native volume/PAN A/B memories are confined to the current editor
+        // and automation manager. They do not falsely promise persistent
+        // project snapshots while project-level serialization is unwired.
+        bool applySelectedSnapshotAction(
+            const DAW::TrackID& sourceTrack, const juce::String& parameterId,
+            DAW::AutomationLaneComponent::SelectedSnapshotAction action);
+
+        // Project-level A/B state travels with AutomationManagerCore::getState,
+        // not merely with a particular arrangement editor's lifetime.
+        bool persistSelectedSnapshots();
+        void restoreSelectedSnapshots();
+
         DAW::AutomationManagerCore* m_automationManager = nullptr;
+        uint64_t m_groupedAutomationManagerEpoch = 0; // invalidate retained Undo on manager rebind
+        DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotA;
+        DAW::AutomationMultiParameterSnapshotCore::Snapshot m_selectedSnapshotB;
+        DAW::AutomationVst3MacroTargetBankCore m_vst3MacroTargets;
         std::unique_ptr<DAW::AutomationManagerCore> m_fallbackAutomationManager; // used when no external manager is wired
         std::unique_ptr<DAW::AutomationUIHelper> m_automationHelper;
         std::map<DAW::TrackID, std::unique_ptr<DAW::AutomationLaneContainerComponent>> m_automationContainers;

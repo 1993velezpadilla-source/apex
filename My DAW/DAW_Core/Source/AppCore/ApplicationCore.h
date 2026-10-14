@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <algorithm>
 #include "../StateCore/ApplicationState.h"
 #include "../TransportCore/TransportController.h"
 #include "../TrackCore/Track.h"
@@ -119,6 +120,21 @@ public:
     const PluginPlayheadInfoCore& getPluginPlayheadInfoCore() const noexcept { return pluginPlayheadInfoCore_; }
     ClipRegionPluginCore& getClipRegionPluginCore() noexcept { return clipRegionPluginCore_; }
     const ClipRegionPluginCore& getClipRegionPluginCore() const noexcept { return clipRegionPluginCore_; }
+    /** Close native clip-FX editor windows before any destructive project reset. */
+    void setBeforeClipFxProjectReset(std::function<void()> callback)
+    {
+        beforeClipFxProjectReset_ = std::move(callback);
+    }
+    /** Message-thread callback: release plugin editor windows before clip FX is deleted. */
+    void setBeforeClipFxClipRemoved(std::function<void(const ClipID&)> callback)
+    {
+        beforeClipFxClipRemoved_ = std::move(callback);
+    }
+    void notifyBeforeClipFxClipRemoved(const ClipID& clipId)
+    {
+        if (beforeClipFxClipRemoved_)
+            beforeClipFxClipRemoved_(clipId);
+    }
     BubblegumV2System& getBubblegumV2()      { return bubblegumV2_; }
     const BubblegumV2System& getBubblegumV2() const { return bubblegumV2_; }
     FolderBusCore& getFolderBus()              { return folderBus_; }
@@ -158,8 +174,11 @@ public:
     bool isRecoveredProject() const noexcept { return isRecoveredProject_; }
     void clearRecoveredFlag()                { isRecoveredProject_ = false; }
 
-    /** Called by MainComponent after it is visible — checks and shows recovery prompt. */
+    /** Called after MainComponent becomes visible: offer an opt-in safe
+        plugin restore if the previous APEX process ended while loading a
+        native plugin, THEN show the existing autosave recovery dialog. */
     void checkAndShowRecoveryPromptIfNeeded(juce::Component* parent);
+    void showAutosaveRecoveryPromptIfNeeded();
 
     /** Rebuild and publish the FolderBus mute/solo snapshot. Call after any mute/solo/topology change. */
     void rebuildFolderBusSnapshot()
@@ -167,6 +186,59 @@ public:
         DAW::FolderBusSnapshot snap;
         snap.effectivelyMutedTracks = folderBusMute_.buildEffectiveMuteSet(*trackManager_, folderBus_);
         snap.effectiveSoloSet       = folderBusSolo_.buildEffectiveSoloSet(*trackManager_, folderBus_);
+
+        // Publish lineage once on the message thread. The audio callback
+        // consumes only immutable IDs and booleans, never walks folder maps.
+        const auto publishAncestors = [this, &snap] (const Track* track)
+        {
+            if (track == nullptr) return;
+            std::vector<DAW::FolderBusSnapshot::MuteAncestorState> ancestors;
+            for (const auto& ancestorId : folderBus_.getAncestorChain(track->getID()))
+            {
+                const auto* parent = trackManager_->getTrack(ancestorId);
+                if (parent == nullptr && trackManager_->hasMasterTrack())
+                {
+                    const auto* master = trackManager_->getMasterTrack();
+                    if (master != nullptr && master->getID() == ancestorId)
+                        parent = master;
+                }
+                if (parent != nullptr)
+                    ancestors.push_back({ parent->getNativeMuteAutomationIDRT(),
+                                          parent->isMuted(), parent->isAutomationMuted() });
+            }
+            if (!ancestors.empty())
+                snap.muteAncestorChains.emplace(track->getID(), std::move(ancestors));
+        };
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+            publishAncestors(trackManager_->getTrack(i));
+        if (trackManager_->hasMasterTrack())
+            publishAncestors(trackManager_->getMasterTrack());
+
+        // Leaf Solo admits itself and ancestor buses. FolderBus Solo also
+        // admits descendants. All of this is prepared on the message thread.
+        for (int i = 0; i < trackManager_->getNumTracks(); ++i)
+        {
+            const auto* source = trackManager_->getTrack(i);
+            if (source == nullptr || source->isMaster()) continue;
+            const auto index = snap.soloSources.size();
+            snap.soloSources.push_back({
+                source->getNativeSoloAutomationIDRT(),
+                source->isSoloed(),
+                source->isAutomationMuted()
+            });
+            const auto allow = [&snap, index] (const TrackID& id)
+            {
+                auto& indices = snap.soloAudibleSourceIndices[id];
+                if (std::find(indices.begin(), indices.end(), index) == indices.end())
+                    indices.push_back(index);
+            };
+            allow(source->getID());
+            for (const auto& id : folderBus_.getAncestorChain(source->getID()))
+                allow(id);
+            if (folderBus_.isFolderBus(source->getID()))
+                for (const auto& id : folderBus_.getAllDescendants(source->getID()))
+                    allow(id);
+        }
         folderBusStateModel_.update(std::move(snap));
     }
 
@@ -448,6 +520,8 @@ private:
     PluginScannerCore pluginScanner_;
     PluginPlayheadInfoCore pluginPlayheadInfoCore_;
     ClipRegionPluginCore clipRegionPluginCore_;
+    std::function<void()> beforeClipFxProjectReset_;
+    std::function<void(const ClipID&)> beforeClipFxClipRemoved_;
     std::map<TrackID, std::shared_ptr<PluginChainCore>> pluginChains_;
     int pluginChainPublicationBatchDepth_ = 0;
     FaderRangeCore faderRangeCore_;
@@ -626,6 +700,10 @@ public:
     std::unique_ptr<apex::vocaltune::ApexTuneIntegrationCore> vocalTuneIntegration_;
 
     bool isRecoveredProject_ = false;
+    // Never infer guilt from a stale load marker. The user must explicitly
+    // choose Safe Mode, scoped to the next project plugin-chain restore.
+    PluginLoadRecoveryCore::Attempt pendingSafePluginRestore_;
+    bool pluginRecoveryPromptShown_ = false;
     bool wasRecordingLastTick_ = false;   ///< tracks previous recording state for stop-detection
     bool shutdownComplete_ = false;
 

@@ -4,6 +4,9 @@
 #include <JuceHeader.h>
 #include <unordered_map>
 #include <atomic>
+#include <algorithm>
+#include <vector>
+#include <memory>
 
 namespace apex::automation
 {
@@ -217,6 +220,33 @@ namespace apex::automation
             return state;
         }
 
+        /** Start a fresh song without leaking keys from the previous project.
+         *  The persistent Master track is NOT destroyed by deleteAllTracks(),
+         *  so keep only its four native mixer bindings alive. Keep nextID
+         *  monotonic: an editor/RT snapshot may temporarily retain old IDs,
+         *  and recycling them could address an unrelated live parameter.
+         *  Call only after the project restore callback barrier is acquired.
+         */
+        void resetForNewProject()
+        {
+            const juce::ScopedLock sl (mapsLock);
+            KeyToIDMap retained;
+            for (const auto& key : {
+                    trackVolumeKey ("master"), trackPanKey ("master"),
+                    trackMuteKey ("master"), trackSoloKey ("master") })
+            {
+                auto it = keyToID.find (key);
+                if (it != keyToID.end())
+                    retained.emplace (it->first, it->second);
+            }
+            keyToID.swap (retained);
+            idToKey.clear();
+            for (const auto& [key, id] : keyToID)
+                idToKey.emplace (id, key);
+            // Do not rewind nextID — live objects may still own historical IDs.
+            publishLocked();
+        }
+
         void restoreState (const juce::ValueTree& state)
         {
             if (! state.isValid()) return;
@@ -248,14 +278,30 @@ namespace apex::automation
         }
 
     private:
+        // Reclaim superseded key maps only on the control thread after the
+        // audio callback relinquishes any pinned/temporary RT map reads.
+        void collectRetiredKeySnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if (retiredKeySnapshots_.begin(),
+                                       retiredKeySnapshots_.end(),
+                [] (const std::shared_ptr<const KeyToIDMap>& prior) noexcept
+                {
+                    return prior.use_count() == 1;
+                });
+            retiredKeySnapshots_.erase (end, retiredKeySnapshots_.end());
+        }
+
         // Copy-on-write publication (message thread only, called with
         // mapsLock held). The map is append-mostly, so the published copy
         // shares all juce::String refcounts — no string data is duplicated.
         void publishLocked()
         {
             auto snap = std::make_shared<const KeyToIDMap> (keyToID);
+            collectRetiredKeySnapshotsLocked();
+            retiredKeySnapshots_.reserve (retiredKeySnapshots_.size() + 1);
             auto old = std::atomic_exchange_explicit (&publishedKeyToID_, std::move (snap), std::memory_order_acq_rel);
-            retiredKeySnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
+            if (old != nullptr)
+                retiredKeySnapshots_.push_back (std::move (old));
             changeGeneration_.fetch_add (1, std::memory_order_acq_rel);
         }
 
@@ -282,7 +328,7 @@ namespace apex::automation
 
         // Published immutable view for the audio thread (never mutated in place).
         std::shared_ptr<const KeyToIDMap> publishedKeyToID_;
-        std::shared_ptr<const KeyToIDMap> retiredKeySnapshot_;   // message-thread retire slot
+        std::vector<std::shared_ptr<const KeyToIDMap>> retiredKeySnapshots_;
         std::atomic<std::uint64_t> changeGeneration_ { 0 };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationParameterKeyRegistry)

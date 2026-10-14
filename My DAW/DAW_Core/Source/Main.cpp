@@ -21,12 +21,16 @@
 #include "PluginSandboxCore/PluginWorkerMainCore.h"
 #include "Benchmark/TimelineBenchmarkController.h"
 #include "ThemeCore/ApexPrimitives.h"
+#include "Automation/AutomationLaneStoreCore.h"
+#include "Automation/AutomationModeStateCore.h"
+#include "Automation/AutomationParameterKeyCore.h"
 #include "UICore/CursorThemeCore.h"
 
 #include <cmath>
 #include <cstring>
 #include <vector>
 #include <utility>
+#include <array>
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -1027,6 +1031,383 @@ public:
             {
                 if (suppressor)
                     suppressor->setScanActive(active);
+            });
+        }
+
+        // ── Production GUI launch smoke for Windows CI ────────────────────
+        // Unlike the unit-test executable, this launches the actual DAW with
+        // the real MainComponent, plugin host, audio-device initialization,
+        // window peer and JUCE message loop. The delayed check cannot run
+        // unless initialise() returns and the message loop starts pumping.
+        // No synthetic project load, audio playback or plugin interaction is
+        // claimed by this narrow startup readiness probe.
+        if (processArguments.contains ("--apex-ci-launch-smoke"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                const bool ready = mainWindow != nullptr
+                    && mainWindow->getPeer() != nullptr
+                    && mainWindow->getMainComponent() != nullptr
+                    && mainWindow->getWidth() > 0
+                    && mainWindow->getHeight() > 0
+                    && mainWindow->getMainComponent()->getWidth() > 0
+                    && mainWindow->getMainComponent()->getHeight() > 0;
+
+                juce::Logger::writeToLog (ready
+                    ? "[APEX CI STARTUP] PASS: real DAW window, component and JUCE loop ready"
+                    : "[APEX CI STARTUP] FAIL: real DAW window/component not ready");
+
+                setApplicationReturnValue (ready ? 0 : 1);
+                quit();
+            });
+        }
+
+
+        // ── Production MixerStrip automation UI action/persistence smoke ──
+        // This executes the real UICore/MixerPanel.h MixerStrip lifecycle
+        // inside the actual DAW executable, rather than testing only the
+        // pure enum cycle policy. It runs on JUCE's message thread AFTER
+        // the production MainComponent/window have initialized.
+        if (processArguments.contains ("--apex-ci-mixer-automation-ui"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                juce::String error;
+                try
+                {
+                    auto* component = mainWindow != nullptr
+                        ? mainWindow->getMainComponent() : nullptr;
+                    if (component == nullptr || mainWindow->getPeer() == nullptr)
+                    {
+                        error = "APEX production GUI was not initialized";
+                    }
+                    else
+                    {
+                        using Mode = apex::automation::AutomationMode;
+                        using Keys = apex::automation::AutomationParameterKeyRegistry;
+                        auto& keys = Keys::getInstance();
+                        auto& modes = apex::automation::AutomationModeState::getInstance();
+
+                        // A disposable track avoids touching any real
+                        // project/session or stealing another strip's native
+                        // parameter registration.
+                        DAW::Track track ("apex-ci-automation-mixer-ui",
+                                          "APEX Automation CI Strip");
+                        DAW::FaderRangeCore range;
+                        const auto trackID = track.getID();
+                        const auto volume = keys.getOrCreateID(Keys::trackVolumeKey(trackID));
+                        const auto pan = keys.getOrCreateID(Keys::trackPanKey(trackID));
+                        const auto mute = keys.getOrCreateID(Keys::trackMuteKey(trackID));
+                        const auto solo = keys.getOrCreateID(Keys::trackSoloKey(trackID));
+                        const auto sendLevel = keys.getOrCreateID(
+                            Keys::trackSendLevelKey(trackID, "ci-route"));
+                        const auto sendBypass = keys.getOrCreateID(
+                            Keys::trackSendBypassKey(trackID, "ci-route"));
+                        const auto plugin = keys.getOrCreateID(
+                            Keys::pluginParamKey(trackID, 0, "Synthetic VST3",
+                                                 "Cutoff", 86226));
+                        const auto foreign = keys.getOrCreateID(
+                            Keys::trackVolumeKey("apex-ci-foreign-track"));
+
+                        modes.setMode(volume, Mode::Off);
+                        modes.setMode(foreign, Mode::Trim);
+
+                        const std::array<Mode, 6> expected = {
+                            Mode::Read, Mode::Touch, Mode::Latch,
+                            Mode::Write, Mode::Trim, Mode::Off
+                        };
+                        const std::array<juce::String, 6> expectedLabels = {
+                            "READ", "TCH", "LTCH", "WRT", "TRIM", "OFF"
+                        };
+                        {
+                            DAW::MixerStrip strip (track, range);
+                            strip.setSize (105, 280);
+                            for (size_t i = 0; i < expected.size(); ++i)
+                            {
+                                // The visible button calls this SAME
+                                // production action in MixerPanel.h.
+                                strip.cycleAutomationMode();
+                                if (strip.getDisplayedAutomationMode() != expected[i]
+                                    || strip.getAutomationModeButtonLabel() != expectedLabels[i]
+                                    || modes.getMode(volume) != expected[i]
+                                    || modes.getMode(pan) != expected[i]
+                                    || modes.getMode(mute) != expected[i]
+                                    || modes.getMode(solo) != expected[i]
+                                    || modes.getMode(sendLevel) != expected[i]
+                                    || modes.getMode(sendBypass) != expected[i]
+                                    || modes.getMode(plugin) != expected[i])
+                                {
+                                    error = "mixer UI mode/broadcast mismatch at step "
+                                          + juce::String ((int) i);
+                                    break;
+                                }
+                                if (modes.getMode(foreign) != Mode::Trim)
+                                {
+                                    error = "mixer UI mode leaked to another track";
+                                    break;
+                                }
+                            }
+
+                            // A track property repaint must read the live
+                            // state, never revert to a stale cached button.
+                            if (error.isEmpty())
+                            {
+                                modes.setMode(volume, Mode::Latch);
+                                strip.trackPropertyChanged(&track);
+                                if (strip.getDisplayedAutomationMode() != Mode::Latch
+                                    || strip.getAutomationModeButtonLabel() != "LTCH")
+                                    error = "mixer strip displayed stale restored Latch mode";
+                            }
+                        }
+
+                        // Recreate the whole UI strip and verify its
+                        // persisted mode authority survived widget lifetime.
+                        if (error.isEmpty())
+                        {
+                            DAW::MixerStrip reopened (track, range);
+                            reopened.setSize (105, 280);
+                            if (reopened.getDisplayedAutomationMode() != Mode::Latch
+                                || reopened.getAutomationModeButtonLabel() != "LTCH"
+                                || modes.getMode(volume) != Mode::Latch)
+                                error = "reopened mixer strip lost Latch state";
+                        }
+                    }
+                }
+                catch (const std::exception& ex)
+                {
+                    error = "mixer automation UI exception: " + juce::String(ex.what());
+                }
+                catch (...)
+                {
+                    error = "unknown mixer automation UI exception";
+                }
+
+                const bool success = error.isEmpty();
+                juce::Logger::writeToLog(success
+                    ? "[APEX CI MIXER AUTOMATION UI] PASS: all modes, native/send/VST3 broadcast, isolation, repaint and strip rebind"
+                    : "[APEX CI MIXER AUTOMATION UI] FAIL: " + error);
+                setApplicationReturnValue(success ? 0 : 1);
+                quit();
+            });
+        }
+
+        // ── Real-project persistence smoke (production executable only) ──
+        // Run the actual project manager behind the real DAW UI, not the
+        // lightweight test-double ProjectManager used by APEXTests. This
+        // opt-in CI mode saves a fresh session, resets it, reloads the XML,
+        // and confirms that the live MainComponent survives the restore.
+        // Only a unique disposable OS temp file is used; never user projects.
+        if (processArguments.contains ("--apex-ci-project-roundtrip"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                const auto temporary = juce::File::getSpecialLocation (
+                    juce::File::tempDirectory).getNonexistentChildFile (
+                        "apex-ci-project-roundtrip", ".dawproj", false);
+                juce::String error;
+                bool success = false;
+
+                try
+                {
+                    auto* component = mainWindow != nullptr
+                        ? mainWindow->getMainComponent() : nullptr;
+                    if (component == nullptr || mainWindow->getPeer() == nullptr)
+                        error = "production window/MainComponent unavailable";
+                    else
+                    {
+                        auto& projects = component->getAppCore().getProjectManager();
+
+                        // Put real, non-empty APEX automation into the
+                        // production .dawproj. The earlier startup probe only
+                        // tested an empty project and could miss an automation
+                        // serialization/restore regression.
+                        constexpr auto automationKey =
+                            "ci.apex.production.roundtrip.automation";
+                        auto& keyRegistry =
+                            apex::automation::AutomationParameterKeyRegistry::getInstance();
+                        auto& laneStore =
+                            apex::automation::AutomationLaneStore::getInstance();
+                        auto& modeState =
+                            apex::automation::AutomationModeState::getInstance();
+
+                        if (! projects.newProject())
+                            error = "newProject failed: " + projects.getLastLoadError();
+                        else
+                        {
+                            const auto id = keyRegistry.getOrCreateID (automationKey);
+                            laneStore.getOrCreateLane (id).replacePoints ({
+                                { 0.25, 0.15f, apex::automation::CurveType::Linear, 0.0f },
+                                { 1.50, 0.77f, apex::automation::CurveType::Smooth, 0.35f },
+                                { 2.50, 0.30f, apex::automation::CurveType::Hold, 0.0f }
+                            });
+                            modeState.setMode (id, apex::automation::AutomationMode::Touch);
+
+                            // Also exercise a REAL mixer-track identity, not
+                            // only an independent CI-only parameter key.
+                            // This guards native fader envelopes across the
+                            // actual TrackManager project serialization.
+                            auto* faderTrack = component->getAppCore()
+                                .getTrackManager().createTrack ("APEX CI Automation Fader");
+                            const juce::String faderTrackID = faderTrack != nullptr
+                                ? faderTrack->getID() : juce::String();
+                            const auto faderKey =
+                                apex::automation::AutomationParameterKeyRegistry::trackVolumeKey (faderTrackID);
+                            const auto faderID = faderTrack != nullptr
+                                ? keyRegistry.getOrCreateID (faderKey)
+                                : apex::automation::kInvalidParameterID;
+                            if (faderTrack != nullptr)
+                            {
+                                laneStore.getOrCreateLane (faderID).replacePoints ({
+                                    { 0.50, 0.20f, apex::automation::CurveType::Linear, 0.0f },
+                                    { 2.00, 0.80f, apex::automation::CurveType::Smooth, -0.25f }
+                                });
+                                modeState.setMode (faderID, apex::automation::AutomationMode::Latch);
+                            }
+
+                            // Deleting a track is undoable. The UI listener
+                            // and strip teardown must not destroy its keyed
+                            // automation before DeleteTrackCommand can revive
+                            // the original TrackID. Exercise that event path
+                            // in the REAL MainComponent prior to saving.
+                            const auto faderTrackState = faderTrack != nullptr
+                                ? faderTrack->getState() : juce::ValueTree();
+                            auto& trackManager = component->getAppCore().getTrackManager();
+
+                            if (faderTrack == nullptr)
+                                error = "real TrackManager::createTrack failed";
+                            else if (! trackManager.deleteTrack (faderTrackID))
+                                error = "real track deletion failed in undo persistence gate";
+                            else if (laneStore.findLane (faderID) == nullptr
+                                     || modeState.getMode (faderID)
+                                         != apex::automation::AutomationMode::Latch)
+                                error = "undoable track deletion destroyed its automation or Latch mode";
+                            else if (auto* restoredTrack =
+                                         trackManager.recreateTrackFromState (faderTrackState);
+                                     restoredTrack == nullptr
+                                         || restoredTrack->getID() != faderTrackID)
+                                error = "undo recreated a different track identity";
+                            else if (! projects.saveToFile (temporary))
+                                error = "saveToFile failed: " + projects.getLastSaveError();
+                            else if (! temporary.existsAsFile()
+                                     || temporary.getSize() <= 0)
+                                error = "saved .dawproj file was empty or missing";
+                            else
+                            {
+                                auto xml = juce::XmlDocument::parse (temporary);
+                                if (xml == nullptr || ! xml->hasTagName ("DAWProject"))
+                                    error = "saved .dawproj XML has no valid DAWProject root";
+                                else
+                                {
+                                    auto saved = juce::ValueTree::fromXml (*xml);
+                                    auto automationState = saved.getChildWithName ("APEXAutomation");
+                                    if (! automationState.isValid()
+                                        || ! automationState.getChildWithName ("KeyRegistry").isValid()
+                                        || ! automationState.getChildWithName ("ModeState").isValid()
+                                        || ! automationState.getChildWithName ("Lane").isValid())
+                                        error = "saved XML dropped automation lane, key or mode";
+                                    else if (! projects.newProject())
+                                        error = "second newProject failed: "
+                                            + projects.getLastLoadError();
+                                    else if (laneStore.findLane (id) != nullptr
+                                             || laneStore.findLane (faderID) != nullptr)
+                                        error = "newProject retained old song or mixer-fader automation";
+                                    else if (! projects.loadFromFile (temporary))
+                                        error = "loadFromFile failed: "
+                                            + projects.getLastLoadError();
+                                    else if (projects.getProjectFile() != temporary
+                                             || projects.getProjectName()
+                                                 != temporary.getFileNameWithoutExtension())
+                                        error = "reloaded project identity did not match saved file";
+                                    else if (mainWindow == nullptr
+                                             || mainWindow->getMainComponent() == nullptr
+                                             || mainWindow->getMainComponent()->getWidth() <= 0
+                                             || mainWindow->getMainComponent()->getHeight() <= 0)
+                                        error = "MainComponent invalid after project restore";
+                                    else
+                                    {
+                                        // Use the restored KEY rather than assuming
+                                        // numeric ParameterIDs stay the same.
+                                        const auto restoredID = keyRegistry.findID (automationKey);
+                                        const auto restoredLane =
+                                            restoredID != apex::automation::kInvalidParameterID
+                                                ? laneStore.findLane (restoredID) : nullptr;
+                                        const auto points = restoredLane != nullptr
+                                            ? restoredLane->getSnapshot() : nullptr;
+                                        if (points == nullptr || points->size() != 3)
+                                            error = "automation points missing after real project reload";
+                                        else if (std::abs ((*points)[0].timePPQ - 0.25) > 1.0e-9
+                                            || std::abs ((*points)[0].normalizedValue - 0.15f) > 1.0e-6f
+                                            || (*points)[0].curveType != apex::automation::CurveType::Linear
+                                            || std::abs ((*points)[0].curveTension) > 1.0e-6f
+                                            || std::abs ((*points)[1].timePPQ - 1.50) > 1.0e-9
+                                            || std::abs ((*points)[1].normalizedValue - 0.77f) > 1.0e-6f
+                                            || (*points)[1].curveType != apex::automation::CurveType::Smooth
+                                            || std::abs ((*points)[1].curveTension - 0.35f) > 1.0e-6f
+                                            || std::abs ((*points)[2].timePPQ - 2.50) > 1.0e-9
+                                            || std::abs ((*points)[2].normalizedValue - 0.30f) > 1.0e-6f
+                                            || (*points)[2].curveType != apex::automation::CurveType::Hold
+                                            || std::abs ((*points)[2].curveTension) > 1.0e-6f)
+                                            error = "automation PPQ, value, curve or tension changed during reload";
+                                        else if (modeState.getMode (restoredID)
+                                                 != apex::automation::AutomationMode::Touch)
+                                            error = "Touch automation mode not restored from project";
+                                        else if (component->getAppCore().getTrackManager()
+                                                     .getTrack (faderTrackID) == nullptr)
+                                            error = "real mixer track missing after project reload";
+                                        else
+                                        {
+                                            const auto restoredFaderID = keyRegistry.findID (faderKey);
+                                            const auto faderLane = restoredFaderID
+                                                != apex::automation::kInvalidParameterID
+                                                    ? laneStore.findLane (restoredFaderID) : nullptr;
+                                            const auto faderPoints = faderLane != nullptr
+                                                ? faderLane->getSnapshot() : nullptr;
+                                            if (faderPoints == nullptr || faderPoints->size() != 2)
+                                                error = "real mixer fader points lost during session restore";
+                                            else if (std::abs ((*faderPoints)[0].timePPQ - 0.50) > 1.0e-9
+                                                || std::abs ((*faderPoints)[0].normalizedValue - 0.20f) > 1.0e-6f
+                                                || (*faderPoints)[0].curveType != apex::automation::CurveType::Linear
+                                                || std::abs ((*faderPoints)[1].timePPQ - 2.00) > 1.0e-9
+                                                || std::abs ((*faderPoints)[1].normalizedValue - 0.80f) > 1.0e-6f
+                                                || (*faderPoints)[1].curveType != apex::automation::CurveType::Smooth
+                                                || std::abs ((*faderPoints)[1].curveTension + 0.25f) > 1.0e-6f)
+                                                error = "mixer fader breakpoint/curve changed during reload";
+                                            else if (modeState.getMode (restoredFaderID)
+                                                     != apex::automation::AutomationMode::Latch)
+                                                error = "real mixer fader Latch mode not restored";
+                                            else
+                                                success = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (const std::exception& ex)
+                {
+                    error = "unhandled project roundtrip exception: "
+                        + juce::String (ex.what());
+                }
+                catch (...)
+                {
+                    error = "unknown exception during production project roundtrip";
+                }
+
+                // Do not leave behind a potentially authoritative recovery
+                // project. The path was generated uniquely for this CI mode.
+                const bool deleted = temporary.deleteFile();
+                if (! deleted && temporary.existsAsFile())
+                {
+                    success = false;
+                    error += " (temporary project cleanup failed)";
+                }
+
+                juce::Logger::writeToLog (success
+                    ? "[APEX CI PROJECT] PASS: real GUI + synthetic Touch + native track-volume Latch lanes roundtrip"
+                    : "[APEX CI PROJECT] FAIL: " + error);
+                setApplicationReturnValue (success ? 0 : 1);
+                quit();
             });
         }
 

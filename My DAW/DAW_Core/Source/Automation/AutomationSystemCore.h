@@ -75,12 +75,13 @@ namespace apex::automation
             if (lastRegistration)
                 bridge.detachFromParameter (id);
 
-            const bool removed = registry.unregisterParameter (id);
-            if (removed)
-            {
-                laneStore.removeLane (id);
-                modeState.clearOverride (id);
-            }
+            // A parameter registration belongs to the MIXER UI/host lifetime,
+            // not to the project lane lifetime. Rebuilding a MixerStrip,
+            // collapsing a folder or closing a plugin editor must never erase
+            // persisted automation or its Read/Write/Touch/Latch/Trim mode.
+            // True track deletion and New Project explicitly discard the
+            // corresponding project-scoped lanes/modes at their own boundary.
+            registry.unregisterParameter (id);
         }
 
         // ----- Hosted plugin attachment ---------------------------------

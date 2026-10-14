@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 
 #include <memory>
+#include <cstdint>
 
 namespace DAW {
 
@@ -50,6 +51,9 @@ public:
 
     /** Call after user Save succeeds. Clears userDirty only. */
     void markCleanManualSave();
+
+    /** Invalidate old autosave completions after a successful Load/New Project. */
+    void onProjectLoaded();
 
     bool isUserDirty()      const noexcept { return userDirty_.load(); }
     bool isAutosaveDirty()  const noexcept { return autosaveDirty_.load(); }
@@ -109,8 +113,7 @@ private:
     // Kicks off background write. Must be called from message thread.
     void performAutosaveAsync();
 
-    // Plugin-state throttle: accumulate plugin-only dirty events, fire at most
-    // once per kPluginThrottleSecs.
+    // Limit plugin-only bookkeeping frequency; never suppress autosave-dirty.
     static constexpr int kPluginThrottleSecs = 10;
     juce::Time lastPluginOnlyDirtyTime_;
 
@@ -130,6 +133,10 @@ private:
     std::atomic<bool>        userDirty_      { false };
     std::atomic<bool>        autosaveDirty_  { false };
     std::atomic<bool>        writing_        { false };
+
+    // Message-thread-only revisions. Worker completions return through callAsync.
+    std::uint64_t            dirtyRevision_  = 0;
+    std::uint64_t            sessionEpoch_   = 0;
     std::atomic<bool>        recording_      { false };
     std::atomic<bool>        exporting_      { false };
     std::atomic<bool>        scanning_       { false };

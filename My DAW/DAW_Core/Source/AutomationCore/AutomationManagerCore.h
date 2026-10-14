@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AutomationLaneCore.h"
+#include "AutomationAdvancedMemoryValidationCore.h"
 #include "AutomationSnapshotPublisherCore.h"
 #include "AutomationClipRegionCore.h"
 #include "AutomationClipClipboardCore.h"
@@ -409,6 +410,7 @@ public:
     {
         lanes_.clear();
         clipRegions_.clear();
+        advancedMemories_ = {}; // new project must not inherit stale A/B
         publishSnapshot();
     }
 
@@ -458,6 +460,16 @@ public:
             }
         }
 
+        if (advancedMemories_.isValid())
+        {
+            juce::ValueTree rescaledMemories;
+            if (AutomationAdvancedMemoryValidationCore::rescaleMemories(
+                    advancedMemories_, factor, rescaledMemories))
+                advancedMemories_ = std::move(rescaledMemories);
+            else
+                advancedMemories_ = {}; // never expose wrongly timed A/B states
+        }
+
         publishSnapshot();
     }
 
@@ -472,6 +484,21 @@ public:
 
     const std::vector<AutomationLaneCore>& getLanes() const noexcept { return lanes_; }
     const std::vector<AutomationClipRegionCore>& getClipRegions() const noexcept { return clipRegions_; }
+
+    // Whole-lane replacement tools must not silently lose their edits on
+    // publishSnapshot(), which re-materializes clip-owned points into lanes.
+    // Use this from the message thread before freehand/full-curve/transform.
+    bool hasClipRegionsForParameter(const TrackID& trackId,
+                                    const juce::String& parameterId) const noexcept
+    {
+        return std::any_of(clipRegions_.begin(), clipRegions_.end(),
+            [&](const AutomationClipRegionCore& region)
+            {
+                return region.isValid() && region.trackId == trackId
+                    && region.parameterId == parameterId
+                    && !region.localPoints.empty();
+            });
+    }
 
     AutomationClipRegionCore* findClipRegion(const juce::Uuid& regionId) noexcept
     {
@@ -610,8 +637,7 @@ public:
     {
         if (const auto* region = findClipRegion(regionId))
         {
-            AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
-            return true;
+            return AutomationArticulatorToolsCore::copyState(*region, clipClipboard_);
         }
 
         return false;
@@ -621,13 +647,20 @@ public:
     {
         if (auto* region = findClipRegion(regionId))
         {
+            // Validate and construct replacement BEFORE touching the existing
+            // lane. Empty/wrong-parameter clipboard must never delete points.
+            if (!clipClipboard_.canPasteTo(*region))
+                return false;
+
+            auto replacement = *region;
+            if (!AutomationArticulatorToolsCore::pasteState(replacement, clipClipboard_))
+                return false;
+
             clearLanePointsInRegionRange(*region);
-            const bool changed = AutomationArticulatorToolsCore::pasteState(*region, clipClipboard_);
-            if (changed)
-                syncClipRegionToLane(*region);
-            if (changed)
-                publishSnapshot();
-            return changed;
+            region->localPoints = std::move(replacement.localPoints);
+            syncClipRegionToLane(*region);
+            publishSnapshot();
+            return true;
         }
 
         return false;
@@ -692,6 +725,33 @@ public:
     AutomationClipClipboardCore& getClipClipboard() noexcept { return clipClipboard_; }
     const AutomationClipClipboardCore& getClipClipboard() const noexcept { return clipClipboard_; }
 
+    // Project-owned A/B memories (not live DSP automation). Stored as a
+    // detached, optional AutomationAdvancedMemories child in Automation V2.
+    // The editor validates each contained memory using the strict Snapshot
+    // serializer/deserializer before presentation or application.
+    void setAdvancedMemories(const juce::ValueTree& memories)
+    {
+        if (!memories.isValid())
+        {
+            advancedMemories_ = {};
+            return;
+        }
+
+        // Reject corrupt snapshots before storing, not only when the UI
+        // eventually tries to deserialize them. A malformed project cannot
+        // silently poison a later save or undo history.
+        if (!AutomationAdvancedMemoryValidationCore::validMemories(memories))
+            return;
+
+        advancedMemories_ = memories.createCopy();
+    }
+
+    juce::ValueTree getAdvancedMemories() const
+    {
+        return advancedMemories_.isValid()
+            ? advancedMemories_.createCopy() : juce::ValueTree{};
+    }
+
     juce::ValueTree getState() const
     {
         return getStateFilteredByClipExistence({});
@@ -735,6 +795,8 @@ public:
             regions.addChild(region.getState(), -1, nullptr);
         }
         automation.addChild(regions, -1, nullptr);
+        if (advancedMemories_.isValid())
+            automation.addChild(advancedMemories_.createCopy(), -1, nullptr);
 
         return automation;
     }
@@ -744,6 +806,7 @@ public:
     {
         lanes_.clear();
         clipRegions_.clear();
+        advancedMemories_ = {};
 
         if (automation.isValid())
         {
@@ -751,6 +814,11 @@ public:
             for (int i = 0; i < automation.getNumChildren(); ++i)
             {
                 auto laneTree = automation.getChild(i);
+                if (laneTree.hasType("AutomationAdvancedMemories"))
+                {
+                    setAdvancedMemories(laneTree);
+                    continue;
+                }
                 if (laneTree.hasType("AutomationClipRegions"))
                 {
                     for (int r = 0; r < laneTree.getNumChildren(); ++r)
@@ -1127,6 +1195,12 @@ private:
 
     void clearLanePointsInRegionRange(const AutomationClipRegionCore& region)
     {
+        // Empty clips are placeholders, not destructive "erase automation"
+        // commands. Creating, moving or deleting one must preserve existing
+        // lane points that happen to occupy the same time range.
+        if (region.localPoints.empty())
+            return;
+
         if (auto* lane = findEditableLane(region.trackId, region.parameterId))
         {
             const int64_t start = region.startSample;
@@ -1142,8 +1216,8 @@ private:
 
     void syncClipRegionToLane(const AutomationClipRegionCore& region)
     {
-        if (!region.isValid())
-            return;
+        if (!region.isValid() || region.localPoints.empty())
+            return; // never erase an unrelated envelope for an empty clip
 
         auto& lane = getOrCreateLane(region.trackId, region.parameterId);
         const int64_t start = region.startSample;
@@ -1182,6 +1256,7 @@ private:
 
     std::vector<AutomationLaneCore> lanes_;
     std::vector<AutomationClipRegionCore> clipRegions_;
+    juce::ValueTree advancedMemories_; // detached state, never read on audio callback
     AutomationClipClipboardCore clipClipboard_;
     SegmentShapeClipboard segmentClipboard_;
     float copiedPointValue_ = 0.0f;
@@ -1208,7 +1283,16 @@ inline void AutomationSnapshotPublisherCore::publish(const AutomationManagerCore
         snap->lanes.push_back(std::move(laneSnap));
     }
 
-    std::atomic_store_explicit(&snapshot_, snap, std::memory_order_release);
+    // Reserve control-thread retention BEFORE the RT-visible exchange:
+    // a GUI allocation failure must not publish a snapshot without being
+    // able to keep the previous one off the audio thread.
+    collectRetiredSnapshotsOnControlThread();
+    retiredSnapshots_.reserve(retiredSnapshots_.size() + 1);
+    std::shared_ptr<const AutomationSnapshot> published = std::move(snap);
+    auto prior = std::atomic_exchange_explicit(
+        &snapshot_, std::move(published), std::memory_order_acq_rel);
+    if (prior != nullptr)
+        retiredSnapshots_.push_back(std::move(prior));
 }
 
 } // namespace DAW

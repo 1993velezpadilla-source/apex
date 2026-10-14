@@ -2,6 +2,10 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
+#include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
+#include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
+#include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
+#include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include "ClipSplitCore.h"
 #include "ClipGlueCore.h"
 #include "ClipMuteCore.h"
@@ -5625,12 +5629,17 @@ void ArrangementViewCore::setAutomationManager(DAW::AutomationManagerCore* autom
         m_automationUpdateTimer = nullptr;
     }
 
+    ++m_groupedAutomationManagerEpoch;
+    m_selectedSnapshotA = {};
+    m_selectedSnapshotB = {}; // never replay A/B from an old project/manager
+    m_vst3MacroTargets.clear(); // never reuse VST3 targets across sessions
     m_automationManager = automationManager;
     m_automationContainers.clear();
 
     if (m_automationManager)
     {
         m_automationHelper = std::make_unique<DAW::AutomationUIHelper>(*m_automationManager);
+        restoreSelectedSnapshots(); // reopen already-loaded project memories
 
         // Start update timer for curve invalidation (33ms = ~30 FPS)
         m_automationUpdateTimer = std::make_unique<AutomationUpdateTimer>(*this);
@@ -5664,6 +5673,47 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
     auto container = std::make_unique<DAW::AutomationLaneContainerComponent>(
         *m_automationHelper, trackId
     );
+    juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
+    container->setGroupedCurveCallback(
+        [safeOwner](const DAW::TrackID& source, const juce::String& parameter,
+                    const std::vector<DAW::AutomationPoint>& points) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyGroupedCurveFromSelectedClips(source, parameter, points);
+            return false;
+        });
+    container->setNativeMacroCallback(
+        [safeOwner](const DAW::TrackID& source, const juce::String& parameter,
+                    const std::vector<DAW::AutomationPoint>& points) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyNativeMacroFromSelectedClips(
+                    source, parameter, points);
+            return false;
+        });
+    container->setVst3MacroCallback(
+        [safeOwner](const DAW::TrackID& source, const juce::String& parameter,
+                    const std::vector<DAW::AutomationPoint>& points) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyVst3MacroFromLastTouched(source, parameter, points);
+            return false;
+        });
+    container->setVst3MacroTargetCallback(
+        [safeOwner](DAW::AutomationLaneComponent::Vst3MacroTargetAction action) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applyVst3MacroTargetAction(action);
+            return false;
+        });
+    container->setSelectedSnapshotCallback(
+        [safeOwner](const DAW::TrackID& source, const juce::String& parameter,
+                    DAW::AutomationLaneComponent::SelectedSnapshotAction action) -> bool
+        {
+            if (auto* owner = safeOwner.getComponent())
+                return owner->applySelectedSnapshotAction(source, parameter, action);
+            return false;
+        });
     auto* ptr = container.get();
 
     addAndMakeVisible(container.get());
@@ -5672,6 +5722,696 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
 
     resized();
     return ptr;
+}
+
+
+
+bool ArrangementViewCore::applyNativeMacroFromSelectedClips(
+    const DAW::TrackID& sourceTrack, const juce::String& sourceParameter,
+    const std::vector<DAW::AutomationPoint>& sourcePoints)
+{
+    using M = DAW::AutomationMacroMappingCore;
+    const juce::String volume(DAW::AutomationLaneCore::trackVolumeParameterId);
+    const juce::String pan(DAW::AutomationLaneCore::trackPanParameterId);
+    if (m_automationManager == nullptr || m_automationHelper == nullptr
+        || m_engineTrackManager == nullptr
+        || (sourceParameter != volume && sourceParameter != pan)
+        || sourcePoints.empty() || sourcePoints.size() > M::maxMacroPoints)
+        return false;
+
+    const auto* origin = m_automationManager->findLane(
+        sourceTrack, sourceParameter);
+    if (origin == nullptr || !origin->isEnabled()
+        || m_automationManager->hasClipRegionsForParameter(
+            sourceTrack, sourceParameter)
+        || !DAW::AutomationMultiParameterSnapshotCore::validPointsForParameter(
+            sourceParameter, sourcePoints))
+        return false;
+
+    // Native source values become one 0..1 macro envelope. Intentional
+    // destination mapping: every selected track's already EXISTING native
+    // volume lane [0,2] and pan lane [-1,1]. All-or-nothing (no phantom
+    // lanes), and never guess VST3 parameter instances or stepped ranges.
+    std::vector<DAW::AutomationPoint> normalized = sourcePoints;
+    for (auto& point : normalized)
+    {
+        point.value = sourceParameter == volume
+            ? point.value * 0.5f
+            : (point.value + 1.0f) * 0.5f;
+    }
+
+    std::vector<DAW::TrackID> selectedTracks;
+    const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+    for (const auto& selected : m_selection.getSelectedIds())
+    {
+        const auto* clip = m_clipState.findClip(selected);
+        if (clip == nullptr || clip->trackIndex < masterOffset)
+            return false;
+
+        auto* track = m_engineTrackManager->getTrack(
+            clip->trackIndex - masterOffset);
+        if (track == nullptr)
+            return false;
+
+        const auto id = track->getID();
+        if (std::find(selectedTracks.begin(), selectedTracks.end(), id)
+            == selectedTracks.end())
+            selectedTracks.push_back(id);
+    }
+    if (selectedTracks.size() < 2
+        || selectedTracks.size() * 2 > M::maxBindings
+        || std::find(selectedTracks.begin(), selectedTracks.end(), sourceTrack)
+            == selectedTracks.end())
+        return false;
+
+    std::vector<M::Binding> bindings;
+    bindings.reserve(selectedTracks.size() * 2);
+    for (const auto& track : selectedTracks)
+    {
+        for (const auto& parameter : { volume, pan })
+        {
+            const auto* lane = m_automationManager->findLane(track, parameter);
+            if (lane == nullptr || !lane->isEnabled()
+                || m_automationManager->hasClipRegionsForParameter(
+                    track, parameter))
+                return false;
+
+            M::Binding binding;
+            binding.target = { track, parameter };
+            binding.minimum = parameter == volume ? 0.0f : -1.0f;
+            binding.maximum = parameter == volume ? 2.0f : 1.0f;
+            bindings.push_back(std::move(binding));
+        }
+    }
+
+    M::Plan plan;
+    if (!M::compile(*m_automationManager, normalized, bindings, plan))
+        return false;
+
+    const double sr = m_engineSampleRate, bpm = m_tempoBpm;
+    if (!std::isfinite(sr) || sr <= 0.0
+        || !std::isfinite(bpm) || bpm <= 0.0)
+        return false;
+
+    // Global history and editor/manager lifetime guards; the transaction
+    // rolls back all lanes together on undo and publishes one DSP snapshot.
+    juce::Component::SafePointer<ArrangementViewCore> owner(this);
+    auto* expectedManager = m_automationManager;
+    const auto expectedEpoch = m_groupedAutomationManagerEpoch;
+    auto replay = [owner, expectedManager, expectedEpoch, plan, sr, bpm](
+        bool useAfter)
+    {
+        auto* view = owner.getComponent();
+        if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_groupedAutomationManagerEpoch != expectedEpoch
+            || view->m_automationHelper == nullptr
+            || !M::apply(*expectedManager, plan, useAfter))
+            return;
+
+        // Mirror ALL native target lanes through exactly one PPQ map swap.
+        // If bridge validation fails, restore the manager transaction and
+        // leave the preexisting PPQ envelopes unchanged (no partial group).
+        std::vector<DAW::AutomationMultiParameterSnapshotCore::Target> targets;
+        targets.reserve(plan.changes.size());
+        for (const auto& change : plan.changes)
+            targets.push_back(change.target);
+        const double liveSr = view->m_engineSampleRate;
+        const double liveBpm = view->m_tempoBpm;
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets, liveSr, liveBpm))
+        {
+            M::apply(*expectedManager, plan, !useAfter);
+            return;
+        }
+
+        for (const auto& change : plan.changes)
+        {
+            if (auto it = view->m_automationContainers.find(
+                    change.target.trackId);
+                it != view->m_automationContainers.end()
+                && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+
+            view->repaintAutomationLane(
+                change.target.trackId, change.target.parameterId);
+        }
+    };
+
+    struct NativeMacroUndo final : DAW::AutomationAction
+    {
+        explicit NativeMacroUndo(std::function<void(bool)> action)
+            : replay(std::move(action)) {}
+        void redo() override { replay(true); }
+        void undo() override { replay(false); }
+        juce::String getDescription() const override
+        {
+            return "Macro: Selected Tracks Volume + PAN";
+        }
+        std::function<void(bool)> replay;
+    };
+
+    DAW::UndoManager undo;
+    undo.doAction(std::make_unique<NativeMacroUndo>(std::move(replay)));
+    return true;
+}
+
+
+bool ArrangementViewCore::applyVst3MacroTargetAction(
+    DAW::AutomationLaneComponent::Vst3MacroTargetAction action)
+{
+    using Guard = DAW::AutomationMacroVst3TargetCore;
+    if (action == DAW::AutomationLaneComponent::Vst3MacroTargetAction::Clear)
+    {
+        m_vst3MacroTargets.clear();
+        return true;
+    }
+
+    if (m_automationManager == nullptr || m_engineTrackManager == nullptr)
+        return false;
+
+    const auto touch = DAW::LastTouchedPluginParameterCore::getInstance().get();
+    if (!touch.isValid() || touch.pluginInstanceId.isEmpty())
+        return false;
+    auto* track = m_engineTrackManager->getTrack(touch.trackId);
+    auto* chain = track != nullptr ? track->getPluginChain() : nullptr;
+    auto* slot = chain != nullptr ? chain->getSlot(touch.pluginSlotIndex) : nullptr;
+    if (slot == nullptr || slot->getPluginInstanceId() != touch.pluginInstanceId)
+        return false;
+    auto* processor = slot->getProcessor();
+    auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+    if (vst3 == nullptr
+        || vst3->getPluginDescription().pluginFormatName != "VST3")
+        return false;
+
+    DAW::AutomationMacroMappingCore::Binding binding;
+    if (!Guard::verify(touch, track->getID(), touch.pluginSlotIndex,
+                       slot->getPluginInstanceId(), processor->getParameters(),
+                       *m_automationManager, binding))
+        return false;
+    return m_vst3MacroTargets.add(touch);
+}
+
+
+bool ArrangementViewCore::applyVst3MacroFromLastTouched(
+    const DAW::TrackID& sourceTrack, const juce::String& sourceParameter,
+    const std::vector<DAW::AutomationPoint>& sourcePoints)
+{
+    using M = DAW::AutomationMacroMappingCore;
+    using Guard = DAW::AutomationMacroVst3TargetCore;
+    const juce::String volume(DAW::AutomationLaneCore::trackVolumeParameterId);
+    const juce::String pan(DAW::AutomationLaneCore::trackPanParameterId);
+    if (m_automationManager == nullptr || m_automationHelper == nullptr
+        || m_engineTrackManager == nullptr
+        || (sourceParameter != volume && sourceParameter != pan)
+        || sourcePoints.empty() || sourcePoints.size() > M::maxMacroPoints
+        || !DAW::AutomationMultiParameterSnapshotCore::validPointsForParameter(
+            sourceParameter, sourcePoints))
+        return false;
+
+    const auto* origin = m_automationManager->findLane(sourceTrack, sourceParameter);
+    if (origin == nullptr || !origin->isEnabled()
+        || m_automationManager->hasClipRegionsForParameter(sourceTrack, sourceParameter))
+        return false;
+
+    // The user explicitly fills the target bank by touching a parameter and
+    // invoking Add. With an empty bank, retain the original single-target
+    // last-touched behavior. Never infer targets from display names.
+    std::vector<DAW::LastTouchedPluginParameter> targets;
+    if (m_vst3MacroTargets.empty())
+        targets.push_back(DAW::LastTouchedPluginParameterCore::getInstance().get());
+    else
+        targets = m_vst3MacroTargets.targets();
+
+    if (targets.empty() || targets.size() > M::maxBindings)
+        return false;
+
+    // BEFORE any mutation, verify ALL live destinations: UUID, slot, track,
+    // VST3 format, automatable continuous parameter, enabled core lane.
+    // A stale member invalidates the entire edit, not a partial subset.
+    std::vector<M::Binding> bindings;
+    bindings.reserve(targets.size());
+    for (const auto& touched : targets)
+    {
+        if (!touched.isValid() || touched.pluginInstanceId.isEmpty())
+            return false;
+        auto* hostTrack = m_engineTrackManager->getTrack(touched.trackId);
+        auto* chain = hostTrack != nullptr ? hostTrack->getPluginChain() : nullptr;
+        auto* slot = chain != nullptr ? chain->getSlot(touched.pluginSlotIndex) : nullptr;
+        if (slot == nullptr || slot->getPluginInstanceId() != touched.pluginInstanceId)
+            return false;
+        auto* processor = slot->getProcessor();
+        auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+        if (vst3 == nullptr || vst3->getPluginDescription().pluginFormatName != "VST3")
+            return false;
+
+        M::Binding binding;
+        if (!Guard::verify(touched, hostTrack->getID(), touched.pluginSlotIndex,
+                           slot->getPluginInstanceId(), processor->getParameters(),
+                           *m_automationManager, binding))
+            return false;
+        bindings.push_back(std::move(binding));
+    }
+
+    std::vector<DAW::AutomationPoint> normalized = sourcePoints;
+    for (auto& point : normalized)
+        point.value = sourceParameter == volume
+            ? point.value * 0.5f : (point.value + 1.0f) * 0.5f;
+
+    M::Plan plan;
+    if (!M::compile(*m_automationManager, normalized, bindings, plan)
+        || plan.changes.size() != targets.size())
+        return false;
+
+    const double sr = m_engineSampleRate, bpm = m_tempoBpm;
+    if (!std::isfinite(sr) || !std::isfinite(bpm) || sr <= 0.0 || bpm <= 0.0)
+        return false;
+
+    juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
+    auto* expectedManager = m_automationManager;
+    const auto epoch = m_groupedAutomationManagerEpoch;
+    auto replay = [safeOwner, expectedManager, epoch, targets, plan](
+        bool useAfter)
+    {
+        auto* view = safeOwner.getComponent();
+        if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_groupedAutomationManagerEpoch != epoch
+            || view->m_automationHelper == nullptr
+            || view->m_engineTrackManager == nullptr
+            || targets.size() != plan.changes.size())
+            return;
+
+        // The transport might have changed tempo/sample rate after editing:
+        // always mirror PPQ using the current transport configuration.
+        const double liveSr = view->m_engineSampleRate;
+        const double liveBpm = view->m_tempoBpm;
+        if (!std::isfinite(liveSr) || !std::isfinite(liveBpm)
+            || liveSr <= 0.0 || liveBpm <= 0.0)
+            return;
+
+        // Undo/Redo preflights EVERY destination again BEFORE changing even
+        // one lane. Never trust the earlier parameter pointer/approval.
+        for (size_t i = 0; i < targets.size(); ++i)
+        {
+            const auto& touched = targets[i];
+            auto* hostTrack = view->m_engineTrackManager->getTrack(touched.trackId);
+            auto* chain = hostTrack != nullptr ? hostTrack->getPluginChain() : nullptr;
+            auto* slot = chain != nullptr ? chain->getSlot(touched.pluginSlotIndex) : nullptr;
+            if (slot == nullptr || slot->getPluginInstanceId() != touched.pluginInstanceId)
+                return;
+            auto* processor = slot->getProcessor();
+            auto* vst3 = dynamic_cast<juce::AudioPluginInstance*>(processor);
+            if (vst3 == nullptr
+                || vst3->getPluginDescription().pluginFormatName != "VST3")
+                return;
+
+            M::Binding checked;
+            if (!Guard::verify(touched, hostTrack->getID(),
+                               touched.pluginSlotIndex, slot->getPluginInstanceId(),
+                               processor->getParameters(), *expectedManager, checked)
+                || !(checked.target == plan.changes[i].target))
+                return;
+        }
+
+        // Manager publishes once; the PPQ lane store also publishes the
+        // complete destination bank in one immutable map swap, not once per
+        // plugin. No partial PPQ mirror is observable by a pinned RT map.
+        if (!M::apply(*expectedManager, plan, useAfter))
+            return;
+        if (!DAW::AutomationLaneComponent::syncHostVerifiedVst3BatchToApex(
+                *view->m_automationHelper, plan.changes, liveSr, liveBpm))
+        {
+            // Restore the manager if PPQ preparation/publication failed.
+            // M::apply performs version-state preflights before reversal.
+            M::apply(*expectedManager, plan, !useAfter);
+            return;
+        }
+
+        for (const auto& change : plan.changes)
+        {
+
+            if (auto it = view->m_automationContainers.find(change.target.trackId);
+                it != view->m_automationContainers.end() && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+            view->repaintAutomationLane(change.target.trackId, change.target.parameterId);
+        }
+    };
+
+    struct Vst3MacroUndo final : DAW::AutomationAction
+    {
+        explicit Vst3MacroUndo(std::function<void(bool)> callback)
+            : replay(std::move(callback)) {}
+        void redo() override { replay(true); }
+        void undo() override { replay(false); }
+        juce::String getDescription() const override
+        {
+            return "Macro: Selected Continuous VST3 Parameters";
+        }
+        std::function<void(bool)> replay;
+    };
+
+    DAW::UndoManager undo;
+    undo.doAction(std::make_unique<Vst3MacroUndo>(std::move(replay)));
+    return true;
+}
+
+bool ArrangementViewCore::applyGroupedCurveFromSelectedClips(
+    const DAW::TrackID& sourceTrack, const juce::String& parameterId,
+    const std::vector<DAW::AutomationPoint>& points)
+{
+    if (m_automationManager == nullptr || m_automationHelper == nullptr
+        || m_engineTrackManager == nullptr
+        || !DAW::AutomationGroupedCurveCore::isSupportedParameter(parameterId))
+        return false;
+
+    // Explicit selected clips are the *only* selection authority. Never infer
+    // a group from visible tracks, folders or a plugin display name.
+    std::vector<DAW::TrackID> selectedTracks;
+    const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+    for (const auto& clipId : m_selection.getSelectedIds())
+    {
+        const auto* clip = m_clipState.findClip(clipId);
+        if (clip == nullptr)
+            return false; // stale selection; abort all rather than partial edit
+
+        const int engineIndex = clip->trackIndex - masterOffset;
+        if (engineIndex < 0)
+            return false;
+
+        auto* track = m_engineTrackManager->getTrack(engineIndex);
+        if (track == nullptr)
+            return false;
+
+        const auto id = track->getID();
+        if (std::find(selectedTracks.begin(), selectedTracks.end(), id)
+            == selectedTracks.end())
+            selectedTracks.push_back(id);
+    }
+
+    // Keep the origin in the explicitly selected set; minimum TWO tracks.
+    if (selectedTracks.size() < 2
+        || std::find(selectedTracks.begin(), selectedTracks.end(), sourceTrack)
+           == selectedTracks.end())
+        return false;
+
+    DAW::AutomationGroupedCurveCore::Batch edit;
+    if (!DAW::AutomationGroupedCurveCore::prepare(
+            *m_automationManager, parameterId, selectedTracks, points, edit))
+        return false;
+
+    const double sr = m_engineSampleRate;
+    const double bpm = m_tempoBpm;
+    if (!std::isfinite(sr) || !std::isfinite(bpm) || sr <= 0.0 || bpm <= 0.0)
+        return false;
+
+    // Global history may outlive a recreated arrangement editor. Capture
+    // JUCE's safe UI pointer, not an unguarded this/helper reference.
+    juce::Component::SafePointer<ArrangementViewCore> owner(this);
+    auto* expectedManager = m_automationManager;
+    const auto expectedEpoch = m_groupedAutomationManagerEpoch;
+    auto replay = [owner, expectedManager, expectedEpoch, edit, sr, bpm](bool after)
+    {
+        auto* view = owner.getComponent();
+        if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_groupedAutomationManagerEpoch != expectedEpoch
+            || view->m_automationHelper == nullptr)
+            return;
+
+        if (!DAW::AutomationGroupedCurveCore::apply(*expectedManager, edit, after))
+            return;
+
+        // One immutable PPQ publication covers every grouped native lane.
+        std::vector<DAW::AutomationMultiParameterSnapshotCore::Target> targets;
+        targets.reserve(edit.lanes.size());
+        for (const auto& lane : edit.lanes)
+            targets.push_back({ lane.trackId, lane.parameterId });
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets,
+                view->m_engineSampleRate, view->m_tempoBpm))
+        {
+            DAW::AutomationGroupedCurveCore::apply(*expectedManager, edit, !after);
+            return;
+        }
+
+        for (const auto& target : edit.lanes)
+        {
+            if (auto it = view->m_automationContainers.find(target.trackId);
+                it != view->m_automationContainers.end() && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+
+            view->repaintAutomationLane(target.trackId, target.parameterId);
+        }
+    };
+
+    struct GroupedUndoAction final : DAW::AutomationAction
+    {
+        explicit GroupedUndoAction(std::function<void(bool)> fn) : replay(std::move(fn)) {}
+        void redo() override { replay(true); }
+        void undo() override { replay(false); }
+        juce::String getDescription() const override { return "Grouped Automation Curve"; }
+        std::function<void(bool)> replay;
+    };
+
+    DAW::UndoManager undo;
+    undo.doAction(std::make_unique<GroupedUndoAction>(std::move(replay)));
+    return true;
+}
+
+
+bool ArrangementViewCore::persistSelectedSnapshots()
+{
+    if (m_automationManager == nullptr)
+        return false;
+
+    using Core = DAW::AutomationMultiParameterSnapshotCore;
+    juce::ValueTree memories("AutomationAdvancedMemories");
+    const auto save = [&](const Core::Snapshot& snapshot, const char* slot)
+    {
+        if (!snapshot.isValid())
+            return true;
+
+        auto state = Core::serializeSnapshot(snapshot);
+        if ((int)state.getProperty("version", 0) != 1
+            || state.getNumChildren() != (int)snapshot.lanes.size())
+            return false;
+        state.setProperty("slot", slot, nullptr);
+        memories.addChild(state, -1, nullptr);
+        return true;
+    };
+
+    // One malformed A/B state must not invalidate a valid state already
+    // attached to the project. Stage both before replacing the subtree.
+    if (!save(m_selectedSnapshotA, "A")
+        || !save(m_selectedSnapshotB, "B"))
+        return false;
+
+    m_automationManager->setAdvancedMemories(
+        memories.getNumChildren() == 0 ? juce::ValueTree{} : memories);
+    return true;
+}
+
+void ArrangementViewCore::restoreSelectedSnapshots()
+{
+    m_selectedSnapshotA = {};
+    m_selectedSnapshotB = {};
+    if (m_automationManager == nullptr)
+        return;
+
+    const auto memories = m_automationManager->getAdvancedMemories();
+    if (!memories.isValid())
+        return;
+
+    using Core = DAW::AutomationMultiParameterSnapshotCore;
+    bool hadA = false, hadB = false;
+    for (int i = 0; i < memories.getNumChildren(); ++i)
+    {
+        const auto state = memories.getChild(i);
+        const auto slot = state.getProperty("slot", "").toString();
+        const bool isA = slot == "A";
+        if ((!isA && slot != "B") || (isA ? hadA : hadB))
+        {
+            m_selectedSnapshotA = {};
+            m_selectedSnapshotB = {};
+            return;
+        }
+
+        Core::Snapshot loaded;
+        if (!Core::deserializeSnapshot(state, loaded))
+        {
+            m_selectedSnapshotA = {};
+            m_selectedSnapshotB = {};
+            return;
+        }
+
+        if (isA)
+        {
+            hadA = true;
+            m_selectedSnapshotA = std::move(loaded);
+        }
+        else
+        {
+            hadB = true;
+            m_selectedSnapshotB = std::move(loaded);
+        }
+    }
+}
+
+bool ArrangementViewCore::applySelectedSnapshotAction(
+    const DAW::TrackID& sourceTrack, const juce::String& parameterId,
+    DAW::AutomationLaneComponent::SelectedSnapshotAction action)
+{
+    using Core = DAW::AutomationMultiParameterSnapshotCore;
+    using Action = DAW::AutomationLaneComponent::SelectedSnapshotAction;
+
+    if (m_automationManager == nullptr || m_automationHelper == nullptr
+        || m_engineTrackManager == nullptr
+        || (parameterId != DAW::AutomationLaneCore::trackVolumeParameterId
+            && parameterId != DAW::AutomationLaneCore::trackPanParameterId))
+        return false;
+
+    // Rehydrate from the authoritative manager on each action, including
+    // projects whose state was loaded after the editor was constructed.
+    restoreSelectedSnapshots();
+
+    // Treat selected arrangement CLIPS as explicit track authority; a
+    // visible track alone never authorizes a snapshot/macro mass edit.
+    std::vector<DAW::TrackID> tracks;
+    const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+    for (const auto& selected : m_selection.getSelectedIds())
+    {
+        const auto* clip = m_clipState.findClip(selected);
+        if (clip == nullptr || clip->trackIndex < masterOffset)
+            return false;
+        const auto engineIndex = clip->trackIndex - masterOffset;
+        auto* track = m_engineTrackManager->getTrack(engineIndex);
+        if (track == nullptr)
+            return false;
+        const auto id = track->getID();
+        if (std::find(tracks.begin(), tracks.end(), id) == tracks.end())
+            tracks.push_back(id);
+    }
+    if (tracks.size() < 2
+        || std::find(tracks.begin(), tracks.end(), sourceTrack) == tracks.end())
+        return false;
+
+    std::vector<Core::Target> targets;
+    targets.reserve(tracks.size() * 2);
+    for (const auto& track : tracks)
+    {
+        size_t found = 0;
+        for (const auto& id : {
+                 juce::String(DAW::AutomationLaneCore::trackVolumeParameterId),
+                 juce::String(DAW::AutomationLaneCore::trackPanParameterId) })
+        {
+            const auto* lane = m_automationManager->findLane(track, id);
+            if (lane != nullptr && lane->isEnabled() && !lane->points.empty())
+            {
+                targets.push_back({track, id});
+                ++found;
+            }
+        }
+        if (found == 0 || targets.size() > Core::maxParameters)
+            return false; // each selected track must have actual automation
+    }
+
+    if (action == Action::CaptureA || action == Action::CaptureB)
+    {
+        Core::Snapshot captured;
+        if (!Core::capture(*m_automationManager, targets, captured))
+            return false;
+        if (action == Action::CaptureA)
+            m_selectedSnapshotA = std::move(captured);
+        else
+            m_selectedSnapshotB = std::move(captured);
+        return persistSelectedSnapshots();
+    }
+
+    if (action != Action::MorphHalf
+        || !m_selectedSnapshotA.isValid() || !m_selectedSnapshotB.isValid()
+        || targets.size() != m_selectedSnapshotA.lanes.size()
+        || targets.size() != m_selectedSnapshotB.lanes.size())
+        return false;
+
+    // No accidental mixing of a prior selection with a newly selected set.
+    for (const auto& target : targets)
+    {
+        const auto hasTarget = [&](const Core::Snapshot& snap)
+        {
+            return std::any_of(snap.lanes.begin(), snap.lanes.end(),
+                [&](const Core::LaneCapture& entry)
+                {
+                    return entry.target == target;
+                });
+        };
+        if (!hasTarget(m_selectedSnapshotA) || !hasTarget(m_selectedSnapshotB))
+            return false;
+    }
+
+    const double sr = m_engineSampleRate;
+    const double bpm = m_tempoBpm;
+    if (!std::isfinite(sr) || !std::isfinite(bpm) || sr <= 0.0 || bpm <= 0.0)
+        return false;
+
+    Core::Plan plan;
+    if (!Core::planMorph(*m_automationManager, m_selectedSnapshotA,
+                         m_selectedSnapshotB, 0.5f, plan))
+        return false;
+
+    // Same unified Undo stack as normal edit gestures. The replay payload
+    // retains a safe component pointer and original manager epoch; a project
+    // switch cannot write its previous session's captured automation.
+    juce::Component::SafePointer<ArrangementViewCore> owner(this);
+    auto* expectedManager = m_automationManager;
+    const auto expectedEpoch = m_groupedAutomationManagerEpoch;
+    const auto replay = [owner, expectedManager, expectedEpoch,
+                         plan, sr, bpm](bool after)
+    {
+        auto* view = owner.getComponent();
+        if (view == nullptr || view->m_automationManager != expectedManager
+            || view->m_groupedAutomationManagerEpoch != expectedEpoch
+            || view->m_automationHelper == nullptr)
+            return;
+
+        if (!Core::apply(*expectedManager, plan, after))
+            return; // no partial changes if any lane was edited meanwhile
+
+        // Publish every A/B morph destination to PPQ as ONE transaction.
+        // Guard Undo/Redo against stale lanes and failed PPQ conversion.
+        std::vector<Core::Target> targets;
+        targets.reserve(plan.changes.size());
+        for (const auto& change : plan.changes)
+            targets.push_back(change.target);
+        if (!DAW::AutomationLaneComponent::syncNativeBatchToApex(
+                *view->m_automationHelper, targets,
+                view->m_engineSampleRate, view->m_tempoBpm))
+        {
+            Core::apply(*expectedManager, plan, !after);
+            return;
+        }
+        for (const auto& change : plan.changes)
+        {
+            if (auto it = view->m_automationContainers.find(change.target.trackId);
+                it != view->m_automationContainers.end() && it->second != nullptr)
+                it->second->invalidateAllCurvePaths();
+            view->repaintAutomationLane(
+                change.target.trackId, change.target.parameterId);
+        }
+    };
+
+    struct MorphUndoAction final : DAW::AutomationAction
+    {
+        explicit MorphUndoAction(std::function<void(bool)> action)
+            : replay(std::move(action)) {}
+        void redo() override { replay(true); }
+        void undo() override { replay(false); }
+        juce::String getDescription() const override
+        {
+            return "Selected Tracks A/B Morph 50%";
+        }
+        std::function<void(bool)> replay;
+    };
+    DAW::UndoManager undo;
+    undo.doAction(std::make_unique<MorphUndoAction>(replay));
+    return true;
 }
 
 void ArrangementViewCore::showAutomationLane(

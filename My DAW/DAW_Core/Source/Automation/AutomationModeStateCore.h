@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <atomic>
 #include <memory>
+#include <algorithm>
+#include <vector>
 
 namespace apex::automation
 {
@@ -31,14 +33,26 @@ namespace apex::automation
         };
 
     public:
+        struct ModeEpoch
+        {
+            std::uint64_t parameter = 0;
+            std::uint64_t globalDefault = 0;
+
+            bool operator!= (const ModeEpoch& rhs) const noexcept
+            {
+                return parameter != rhs.parameter || globalDefault != rhs.globalDefault;
+            }
+        };
+
         AutomationModeState() = default;
 
         // ----- Global default -------------------------------------------
 
         void setGlobalDefaultMode (AutomationMode m) noexcept
         {
-            globalDefault.store (static_cast<std::uint8_t> (m),
-                                 std::memory_order_release);
+            const auto next = static_cast<std::uint8_t> (m);
+            if (globalDefault.exchange (next, std::memory_order_acq_rel) != next)
+                defaultModeEpoch.fetch_add (1, std::memory_order_release);
         }
 
         AutomationMode getGlobalDefaultMode() const noexcept
@@ -53,13 +67,35 @@ namespace apex::automation
         {
             const juce::ScopedLock sl (mapLock);
             auto it = modes.find (id);
+            const auto next = static_cast<std::uint8_t> (m);
             if (it == modes.end())
             {
-                it = modes.emplace (id, std::make_shared<std::atomic<std::uint8_t>> (0)).first;
+                it = modes.emplace (id, std::make_shared<std::atomic<std::uint8_t>> (next)).first;
+                ++modeEpochs[id];  // Adding an override is a state transition.
                 publishLocked();
             }
-            it->second->store (static_cast<std::uint8_t> (m),
-                               std::memory_order_release);
+            else if (it->second->load (std::memory_order_acquire) != next)
+            {
+                it->second->store (next, std::memory_order_release);
+                ++modeEpochs[id];
+            }
+        }
+
+        // Message-thread recorder probe: unlike the current mode enum, this
+        // detects Read->Latch->Read (or Latch->Read->Latch) that completes
+        // entirely between two 90 Hz recorder polls. The epoch of an
+        // overridden parameter excludes global-default changes; unchanged
+        // parameters are therefore not quarantined by an unrelated update.
+        ModeEpoch getModeEpoch (ParameterID id) const noexcept
+        {
+            const juce::ScopedLock sl (mapLock);
+            ModeEpoch result;
+            const auto it = modeEpochs.find (id);
+            if (it != modeEpochs.end())
+                result.parameter = it->second;
+            if (modes.find (id) == modes.end())
+                result.globalDefault = defaultModeEpoch.load (std::memory_order_acquire);
+            return result;
         }
 
         AutomationMode getMode (ParameterID id) const noexcept
@@ -122,13 +158,18 @@ namespace apex::automation
         void clearOverride (ParameterID id)
         {
             const juce::ScopedLock sl (mapLock);
-            modes.erase (id);
-            publishLocked();
+            if (modes.erase (id) != 0)
+            {
+                ++modeEpochs[id];
+                publishLocked();
+            }
         }
 
         void clearAll()
         {
             const juce::ScopedLock sl (mapLock);
+            for (const auto& entry : modes)
+                ++modeEpochs[entry.first];
             modes.clear();
             latched.clear();
             publishLocked();
@@ -207,10 +248,22 @@ namespace apex::automation
 
         void restoreState (const juce::ValueTree& state)
         {
-            if (! state.isValid()) return;
-            ++publishBatchDepth_;
-            clearAll();
-            const auto defaultMode = static_cast<AutomationMode> (
+            // Older projects may not contain a ModeState subtree. A missing
+            // subtree means the old song's Write/Latch state must be discarded,
+            // not silently inherited by the newly opened song.
+            if (! state.isValid())
+            {
+                clearAll();
+                setGlobalDefaultMode (AutomationMode::Read);
+                return;
+            }
+            {
+                // Restore the batch depth even if a malformed ValueTree or
+                // failed allocation throws. No RT map publication mid-restore.
+                const juce::ScopedValueSetter<int> batchDepthGuard (
+                    publishBatchDepth_, publishBatchDepth_ + 1);
+                clearAll();
+                const auto defaultMode = static_cast<AutomationMode> (
                 juce::jlimit (0, 5, (int) state.getProperty ("globalDefault", (int) AutomationMode::Read)));
             setGlobalDefaultMode (defaultMode);
             for (int i = 0; i < state.getNumChildren(); ++i)
@@ -225,7 +278,7 @@ namespace apex::automation
                     juce::jlimit (0, 5, (int) entry.getProperty ("mode", (int) AutomationMode::Read)));
                 setMode (id, mode);
             }
-            --publishBatchDepth_;
+            } // Batch guard leaves the previous depth unchanged.
             const juce::ScopedLock sl (mapLock);
             publishLocked();
         }
@@ -237,6 +290,20 @@ namespace apex::automation
         }
 
     private:
+        // Called only under mapLock by the control thread. A single retired
+        // slot was unsafe when several mode/latch changes happened during
+        // one device callback reading an older immutable mode map.
+        void collectRetiredModeSnapshotsLocked() noexcept
+        {
+            auto end = std::remove_if (retiredModeSnapshots_.begin(),
+                                       retiredModeSnapshots_.end(),
+                [] (const std::shared_ptr<const StateSnapshot>& prior) noexcept
+                {
+                    return prior.use_count() == 1;
+                });
+            retiredModeSnapshots_.erase (end, retiredModeSnapshots_.end());
+        }
+
         // Copy-on-write publication (message thread only, mapLock held).
         // Copies only shared_ptrs — the underlying atomics are shared, so
         // value changes after publication are visible through any snapshot.
@@ -248,19 +315,27 @@ namespace apex::automation
             snap->modes   = modes;
             snap->latched = latched;
             std::shared_ptr<const StateSnapshot> immutableSnap = std::move (snap);
+            collectRetiredModeSnapshotsLocked();
+            retiredModeSnapshots_.reserve (retiredModeSnapshots_.size() + 1);
             auto old = std::atomic_exchange_explicit (&published_, std::move (immutableSnap), std::memory_order_acq_rel);
-            retiredModeSnapshot_ = std::move (old);   // destroyed at the NEXT publish (message thread)
+            if (old != nullptr)
+                retiredModeSnapshots_.push_back (std::move (old));
         }
 
         std::atomic<std::uint8_t> globalDefault {
             static_cast<std::uint8_t> (AutomationMode::Read) };
+        std::atomic<std::uint64_t> defaultModeEpoch { 0 };
 
         std::unordered_map<ParameterID, std::shared_ptr<std::atomic<std::uint8_t>>> modes;
         std::unordered_map<ParameterID, std::shared_ptr<std::atomic<bool>>>         latched;
+        // Message-thread-only transition counters under mapLock. Keep the
+        // counter after clearOverride so removing/re-adding the same mode
+        // cannot masquerade as a continuous recording session.
+        std::unordered_map<ParameterID, std::uint64_t> modeEpochs;
         mutable juce::CriticalSection mapLock;
 
         std::shared_ptr<const StateSnapshot> published_;
-        std::shared_ptr<const StateSnapshot> retiredModeSnapshot_;   // message-thread retire slot
+        std::vector<std::shared_ptr<const StateSnapshot>> retiredModeSnapshots_;
         int publishBatchDepth_ = 0;   // message thread only
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationModeState)
