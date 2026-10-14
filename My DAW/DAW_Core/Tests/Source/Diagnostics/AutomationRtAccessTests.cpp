@@ -1671,7 +1671,7 @@ public:
         auto lane = lanes.findLane(id);
         expect(lane != nullptr, "lane retained");
         if (lane == nullptr) return;
-        auto snap = lane->getSnapshot();
+        auto snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "first take committed");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
@@ -1688,7 +1688,7 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
         expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "new session published");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
@@ -1704,7 +1704,7 @@ public:
         expectEquals(arms.getArmTransitionCount(), after,
                      "setting the same armed value is not a transition");
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "lane remains intact");
         if (snap != nullptr && !snap->empty())
             expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
@@ -1787,7 +1787,7 @@ public:
         auto lane = lanes.findLane(id);
         expect(lane != nullptr, "lane preserved");
         if (lane == nullptr) return;
-        auto snap = lane->getSnapshot();
+        auto snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "first take committed");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 2.25),
@@ -1801,7 +1801,7 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
         expect(enqueue(AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && !snap->empty(), "second take exists");
         if (snap == nullptr || snap->empty()) return;
         expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.75),
@@ -2246,7 +2246,7 @@ public:
         expect(enqueue(latchID, AutomationGestureQueue::EventKind::GestureBegin, 4.5, 0.7f));
         expect(enqueue(latchID, AutomationGestureQueue::EventKind::ValueChange, 4.75, 0.25f));
         recorder.drainForTests();
-        firstSnap = first->getSnapshot();
+        firstSnap = lanes.findLane(latchID)->getSnapshot();
         expect(firstSnap != nullptr && !firstSnap->empty(), "fresh take committed");
         if (firstSnap != nullptr && !firstSnap->empty())
             expectWithinAbsoluteError(AutomationLane::evaluateAt(*firstSnap, 4.75),
@@ -2763,7 +2763,7 @@ public:
             if (lane == nullptr) return;
             auto checkEarlier = [&](const char* stage)
             {
-                const auto snapshot = lane->getSnapshot();
+                const auto snapshot = lanes.findLane(id)->getSnapshot();
                 expect(snapshot != nullptr, "snapshot exists");
                 if (snapshot == nullptr) return;
                 for (double at : {0.125, 0.25, 0.5, 0.75, 1.0, 1.125, 1.25, 1.375})
@@ -2777,7 +2777,7 @@ public:
             };
 
             checkEarlier("first same-timestamp touch");
-            auto snapshot = lane->getSnapshot();
+            auto snapshot = lanes.findLane(id)->getSnapshot();
             expect(snapshot != nullptr && !snapshot->empty(), "first change committed");
             if (snapshot != nullptr && !snapshot->empty())
                 expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 1.5),
@@ -2787,7 +2787,7 @@ public:
             expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.75, 0.5f));
             recorder.drainForTests();
             checkEarlier("second live commit");
-            snapshot = lane->getSnapshot();
+            snapshot = lanes.findLane(id)->getSnapshot();
             expect(snapshot != nullptr && !snapshot->empty(), "second change committed");
             if (snapshot != nullptr && !snapshot->empty())
                 expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 1.75),
@@ -2797,7 +2797,7 @@ public:
             expect(push(AutomationGestureQueue::EventKind::GestureEnd, 2.5, 0.5f));
             recorder.drainForTests();
             checkEarlier("after releasing control");
-            snapshot = lane->getSnapshot();
+            snapshot = lanes.findLane(id)->getSnapshot();
             expect(snapshot != nullptr && !snapshot->empty(), "post-release source persists");
             if (snapshot != nullptr && !snapshot->empty())
                 expectWithinAbsoluteError(AutomationLane::evaluateAt(*snapshot, 3.0),
@@ -2871,7 +2871,7 @@ public:
         expect(push(AutomationGestureQueue::EventKind::GestureEnd, 1.0, 0.95f));
         clock.publishFromAudioThread(1.25, 0.001, true);
         recorder.drainForTests();
-        auto snapshot = lane->getSnapshot();
+        auto snapshot = lanes.findLane(id)->getSnapshot();
         expect(snapshot != nullptr && snapshot->size() == 4,
                "pre-Play knob movements never create recorded breakpoints");
         if (snapshot != nullptr)
@@ -2884,7 +2884,7 @@ public:
         expect(push(AutomationGestureQueue::EventKind::ValueChange, 1.75, 0.85f));
         expect(push(AutomationGestureQueue::EventKind::GestureEnd, 2.0, 0.85f));
         recorder.drainForTests();
-        snapshot = lane->getSnapshot();
+        snapshot = lanes.findLane(id)->getSnapshot();
         expect(snapshot != nullptr && !snapshot->empty(), "fresh take persisted");
         if (snapshot != nullptr && !snapshot->empty())
         {
@@ -2903,7 +2903,7 @@ public:
         expect(push(AutomationGestureQueue::EventKind::ValueChange, 3.5, 0.98f));
         clock.publishFromAudioThread(4.0, 0.001, true);
         recorder.drainForTests();
-        snapshot = lane->getSnapshot();
+        snapshot = lanes.findLane(id)->getSnapshot();
         expect(snapshot != nullptr && !snapshot->empty(), "recorded lane retained");
         if (snapshot != nullptr && !snapshot->empty())
         {
