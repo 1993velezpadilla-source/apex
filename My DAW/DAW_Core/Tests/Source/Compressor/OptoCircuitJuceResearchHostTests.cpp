@@ -982,6 +982,20 @@ public:
                 run(2*frames,frames,false);
                 expectEquals(owner.collectRetiredOnControlThread(),
                              static_cast<std::size_t>(2));
+                // >64 control-plane edits WITHOUT an audio reader must not
+                // consume the bounded RCU-retirement quota. Regression for
+                // accidentally retaining a control-local Reader while
+                // calling publishPrepared().
+                for(std::uint64_t generation=704;generation<=800;++generation) {
+                    graph.version=generation;
+                    expect(owner.publishPrepared(graph,&delays,2));
+                }
+                expectEquals(owner.latestPublicationOnControlThread(),
+                             static_cast<std::uint64_t>(100));
+                expectEquals(owner.retainedGenerationsOnControlThread(),
+                             static_cast<std::size_t>(1));
+                expectEquals(owner.collectRetiredOnControlThread(),
+                             static_cast<std::size_t>(1));
             }
         }
 
