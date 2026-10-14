@@ -205,6 +205,13 @@ public:
         g.drawText("A",1125,23,50,47,juce::Justification::centred);
 
         Visual::panel(g,{16.0f,104.0f,1168.0f,210.0f});
+        // APEX lighting uses real radial gradients under the hosted controls.
+        // The spectral columns in idle mode remain explicitly decorative;
+        // only frequencyHz/cents come from the live pitch tracker.
+        g.setGradientFill(juce::ColourGradient(Visual::gold().withAlpha(0.12f),
+                           400.0f,181.0f,Visual::gold().withAlpha(0.0f),
+                           400.0f,279.0f,true));
+        g.fillEllipse(240.0f,107.0f,320.0f,204.0f);
         // Reference concept's characteristic low cyan illumination. Applied
         // beneath live note/controls, so contrast of the text remains safe.
         g.setGradientFill(juce::ColourGradient(Visual::cyan().withAlpha(0.15f),
@@ -212,6 +219,21 @@ public:
                            550.0f,215.0f,false));
         g.fillRoundedRectangle(juce::Rectangle<float>(16.0f,104.0f,1168.0f,210.0f),18.0f);
         Visual::sectionTitle(g,"T R A C K E D   P I T C H",35.0f,116.0f);
+        // Layered vector aurora is a purely decorative brand motif; the
+        // numbered +/- 100-cent scale and live pointer are real values.
+        for(int lane=0;lane<5;++lane) {
+            juce::Path aurora;
+            for(int px=66;px<=752;px+=7) {
+                const float t=(px-66)/686.0f;
+                const float slope=static_cast<float>(lane)*3.5f;
+                const float yy=216.0f-slope-12.0f*std::sin(12.6f*t+lane*0.21f)
+                                     *std::sin(t*3.14159265f);
+                if(px==66)aurora.startNewSubPath(static_cast<float>(px),yy);
+                else aurora.lineTo(static_cast<float>(px),yy);
+            }
+            g.setColour(Visual::cyan().withAlpha(0.035f+lane*0.008f));
+            g.strokePath(aurora,juce::PathStrokeType(1.0f));
+        }
         // Pitch grid and cents meter are real calibrated MIDI-cents readouts.
         constexpr float gridL=58.0f,gridR=754.0f,gridY=243.0f;
         for(int n=0;n<=20;++n) {
@@ -221,16 +243,28 @@ public:
         }
         for(int n=0;n<77;++n) {
             const float x=gridL+9.0f*n;
-            const float envelope=std::exp(-std::pow((n-39.0f)/31.0f,2.0f));
+            const float envelope=std::exp(-std::pow((n-39.0f)/30.0f,2.0f));
             const float wave=std::abs(std::sin(n*0.34f)*std::cos(n*0.19f));
-            const float h=7.0f+37.0f*envelope*(0.20f+wave);
-            const auto shade=n<40?Visual::cyan():Visual::gold();
+            const float h=5.0f+42.0f*envelope*(0.28f+wave);
+            const auto shade=n<26?Visual::gold():n<59?Visual::cyan():Visual::gold();
             // In standby this is intentionally decorative, not an analyzer.
-            g.setColour(shade.withAlpha(trackedHz_>=55.0f?0.50f:0.20f));
-            g.fillRoundedRectangle(x,gridY-h,4.1f,h,1.1f);
+            const float alpha=trackedHz_>=55.0f?0.72f:0.45f;
+            g.setGradientFill(juce::ColourGradient(shade.withAlpha(alpha),
+                    x,gridY,shade.withAlpha(alpha*0.12f),
+                    x,gridY-h,false));
+            g.fillRoundedRectangle(x,gridY-h,4.4f,h,1.1f);
         }
-        g.setColour(Visual::muted().withAlpha(0.6f));
+        g.setColour(Visual::cyan().withAlpha(0.52f));
         g.drawHorizontalLine(static_cast<int>(gridY),gridL,gridR);
+        // Calibrated 0-cent centre line and endpoint ticks.
+        g.setColour(Visual::gold().withAlpha(0.51f));
+        g.fillRoundedRectangle((gridL+gridR)*0.5f-0.7f,185.0f,
+                               1.4f,59.0f,0.7f);
+        for(int n=0;n<=20;++n) {
+            const float x=gridL+(gridR-gridL)*n/20.0f;
+            g.setColour(Visual::muted().withAlpha(n%5==0?0.65f:0.23f));
+            g.fillRect(x,gridY+3.0f,1.0f,n%5==0?10.0f:5.0f);
+        }
         for(int n=0;n<5;++n) {
             const int cents=(n-2)*50;
             const float x=gridL+(gridR-gridL)*n/4.0f;
@@ -277,9 +311,11 @@ public:
         g.fillRect(749.0f,621.0f,1.0f,98.0f);
         g.setColour(Visual::cyan().withAlpha(0.22f));
         g.fillRect(777.0f,686.0f,374.0f,1.0f);
-
-        g.setColour(Visual::muted().withAlpha(0.5f));
-        g.setFont(juce::Font(juce::FontOptions(10.0f)));
+        // Reference look: soft cyan/amber light from selected preset.
+        g.setGradientFill(juce::ColourGradient(Visual::gold().withAlpha(0.10f),
+                           139.0f,685.0f,Visual::gold().withAlpha(0.0f),
+                           139.0f,610.0f,true));
+        g.fillRoundedRectangle(juce::Rectangle<float>(50.0f,622.0f,207.0f,80.0f),10.0f);
         // No clipped footer underneath the lower panel; the real latency
         // is explicitly visible as plugin PDC inside the options area.
     }
