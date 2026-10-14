@@ -1,0 +1,47 @@
+name: APEX Opto Parallel Dry PDC Research
+on:
+  push:
+    paths:
+      - ".github/workflows/apex-opto-parallel-dry-research.yml"
+      - "My DAW/DAW_Core/Source/PluginHostCore/PluginParallelDryDelayResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp"
+  pull_request:
+    paths:
+      - ".github/workflows/apex-opto-parallel-dry-research.yml"
+      - "My DAW/DAW_Core/Source/PluginHostCore/PluginParallelDryDelayResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dry-pdc:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: "Standalone dry PDC / ${{ matrix.os }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux C++17 ASAN/UBSAN dry-delay contract
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp" \
+            -o /tmp/apex-dry-pdc
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-dry-pdc
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Windows MSVC C++17 dry-delay contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:apex-dry-pdc.exe "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC dry PDC compile failed" }
+          ./apex-dry-pdc.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC dry PDC tests failed" }
