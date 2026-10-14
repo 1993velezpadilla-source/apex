@@ -132,7 +132,7 @@ int main()
         };
         const auto profile44=measure(44100),profile48=measure(48000);
         assert(profile44.exposureDb>1 && profile48.exposureDb>1);
-        for(const auto pair:{
+        for(const auto& pair:{
                 std::pair<double,double>{profile44.exposureDb,profile48.exposureDb},
                 {profile44.release100msDb,profile48.release100msDb},
                 {profile44.release500msDb,profile48.release500msDb},
