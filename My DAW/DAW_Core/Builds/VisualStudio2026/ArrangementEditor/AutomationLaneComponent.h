@@ -111,8 +111,7 @@ public:
 
         auto& registry = KR::getInstance();
         const auto id = registry.getOrCreateID(key);
-        auto& apexLane = apex::automation::AutomationLaneStore::getInstance()
-                             .getOrCreateLane(id);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
         apex::automation::AutomationLane::PointVector ppqPoints;
         ppqPoints.reserve(lane->points.size());
         const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
@@ -125,7 +124,7 @@ public:
                 juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
             });
         }
-        apexLane.replacePoints(std::move(ppqPoints));
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(ppqPoints));
     }
 
     // Only call after the arrangement host has re-verified exact VST3
@@ -147,8 +146,7 @@ public:
         auto& registry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         const auto key = "plugin." + trackId + ".core." + coreParameterId;
         const auto id = registry.getOrCreateID(key);
-        auto& storeLane = apex::automation::AutomationLaneStore::getInstance()
-                              .getOrCreateLane(id);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
         apex::automation::AutomationLane::PointVector converted;
         converted.reserve(lane->points.size());
         const double ppqPerSample = tempoBpm / (60.0 * sampleRate);
@@ -159,7 +157,7 @@ public:
                 toApexCurveType(point.curveToNext),
                 juce::jlimit(-1.0f, 1.0f, point.tensionToNext)
             });
-        storeLane.replacePoints(std::move(converted));
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(converted));
     }
 
     /**
@@ -1720,7 +1718,7 @@ private:
 
         auto& registry = apex::automation::AutomationParameterKeyRegistry::getInstance();
         const auto id = registry.getOrCreateID(key);
-        auto& apexLane = apex::automation::AutomationLaneStore::getInstance().getOrCreateLane(id);
+        auto& apexStore = apex::automation::AutomationLaneStore::getInstance();
 
         apex::automation::AutomationLane::PointVector points;
         points.reserve(lane->points.size());
@@ -1744,7 +1742,9 @@ private:
             });
         }
 
-        apexLane.replacePoints(std::move(points));
+        // Publish a new lane/map generation so a pinned DSP callback cannot
+        // observe an in-place GUI edit halfway through its plugin chain.
+        (void) apexStore.replaceOrCreateLanePoints(id, std::move(points));
     }
 
     juce::String apexKeyForParameter() const
