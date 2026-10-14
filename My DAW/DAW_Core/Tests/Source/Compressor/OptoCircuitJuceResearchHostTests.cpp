@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include "../../../Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
 #include "../../../Source/AutomationCore/PluginSlotMixCore.h"
+#include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -86,6 +87,65 @@ private:
     std::array<float,64> samples_{};
     std::size_t cursor_=0;
     int latency_=0;
+};
+// Exact, deterministic 32-sample 2-channel plugin for actual PluginChainCore
+// tests. Distinct from the FIR compressor (which has legitimate pre-ringing).
+class ExactHostDelayResearchPlugin final : public juce::AudioPluginInstance {
+public:
+    ExactHostDelayResearchPlugin()
+      : AudioPluginInstance(BusesProperties()
+            .withInput("Input",juce::AudioChannelSet::stereo(),true)
+            .withOutput("Output",juce::AudioChannelSet::stereo(),true)) {}
+    const juce::String getName() const override {return "APEX Exact Latency Test";}
+    void fillInPluginDescription(juce::PluginDescription& d) const override {
+        d.name=getName();
+        d.descriptiveName=getName();
+        d.pluginFormatName="APEX Test";
+        d.manufacturerName="APEX";
+        d.version="1";
+        d.uniqueId=0x454C3332;
+        d.deprecatedUid=d.uniqueId;
+        d.numInputChannels=2;
+        d.numOutputChannels=2;
+        d.isInstrument=false;
+    }
+    bool isBusesLayoutSupported(const BusesLayout& l) const override {
+        return l.getMainInputChannelSet()==juce::AudioChannelSet::stereo()
+            && l.getMainOutputChannelSet()==juce::AudioChannelSet::stereo();
+    }
+    void prepareToPlay(double sr,int block) override {
+        setRateAndBufferSizeDetails(sr,block);
+        reset();
+        setLatencySamples(32);
+    }
+    void releaseResources() override {}
+    void reset() override {for(auto& v:delay_)v.fill(0.f);index_=0;}
+    void processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) override {
+        if(b.getNumChannels()<2)return;
+        float* l=b.getWritePointer(0);
+        float* r=b.getWritePointer(1);
+        for(int n=0;n<b.getNumSamples();++n) {
+            const float oldL=delay_[0][index_],oldR=delay_[1][index_];
+            delay_[0][index_]=l[n];delay_[1][index_]=r[n];
+            l[n]=oldL;r[n]=oldR;
+            index_=(index_+1)%32;
+        }
+    }
+    bool acceptsMidi() const override {return false;}
+    bool producesMidi() const override {return false;}
+    double getTailLengthSeconds() const override {return 0.0;}
+    bool hasEditor() const override {return false;}
+    juce::AudioProcessorEditor* createEditor() override {return nullptr;}
+    int getNumPrograms() override {return 1;}
+    int getCurrentProgram() override {return 0;}
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override {return "Default";}
+    void changeProgramName(int,const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override {}
+    void setStateInformation(const void*,int) override {}
+private:
+    std::array<std::array<float,32>,2> delay_{};
+    std::size_t index_=0;
 };
 } // namespace
 
@@ -262,6 +322,50 @@ public:
                 probe.releaseResources();
             }
         }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        beginTest("Real PluginChainCore slot + chain 32-sample PDC 44.1k/48k");
+        for(const double sampleRate:{44100.0,48000.0}) {
+            for(const int frames:{64,128}) {
+                DAW::PluginChainCore chain;
+                chain.prepare(sampleRate,frames);
+                expectEquals(chain.appendPluginInstanceForTesting(
+                    std::make_unique<ExactHostDelayResearchPlugin>()),0);
+                expectEquals(chain.totalLatencySamples(),32);
+                chain.setSlotMix(0,.5f);
+                chain.setChainOutputMix(.5f);
+                constexpr int total=512;
+                std::vector<float> originalL(total),originalR(total);
+                for(int n=0;n<total;++n) {
+                    originalL[static_cast<std::size_t>(n)]=
+                        static_cast<float>(.27*std::cos(.049*n));
+                    originalR[static_cast<std::size_t>(n)]=
+                        static_cast<float>(.22*std::sin(.063*n));
+                }
+                constexpr double factor=2.0; // two equal-power half mixes of
+                // perfectly correlated 32-sample delayed wet and dry.
+                for(int start=0;start<total;start+=frames) {
+                    juce::AudioBuffer<float> audio(2,frames);
+                    for(int n=0;n<frames;++n) {
+                        audio.setSample(0,n,originalL[static_cast<std::size_t>(start+n)]);
+                        audio.setSample(1,n,originalR[static_cast<std::size_t>(start+n)]);
+                    }
+                    chain.processBlock(audio,frames);
+                    for(int n=0;n<frames;++n) {
+                        const int at=start+n;
+                        const double expectedL=at<32?0.0:
+                            factor*originalL[static_cast<std::size_t>(at-32)];
+                        const double expectedR=at<32?0.0:
+                            factor*originalR[static_cast<std::size_t>(at-32)];
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(0,n)),expectedL,3.e-5);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(1,n)),expectedR,3.e-5);
+                    }
+                }
+            }
+        }
+#endif
 
         beginTest("Changing quality during prepare updates latency without callback toggles");
         OptoCircuitJuceResearchProbe probe(false);
