@@ -200,8 +200,66 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expect (found.size() == 3,
-                    "findAllTypesForFile must expose G10, C4 and Parametric EQ");
+            expect (found.size() == 4,
+                    "findAllTypesForFile must expose G10, C4, Parametric EQ and Tune Live");
+            if (found.size() == 4)
+                expectEquals (found[3]->fileOrIdentifier,
+                              juce::String (APEX::TuneLive::Processor::kFileOrIdentifier),
+                              "Tune Live appends after the existing native family without breaking IDs");
+        }
+
+        // The new native vocal insert must be constructible by the SAME
+        // AudioPluginFormatManager that also creates G10/C4/EQ.
+        {
+            juce::String error;
+            auto tune = manager.createPluginInstance (
+                DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                48000.0, 128, error);
+            expect (tune != nullptr, "unified native host must create Tune Live: " + error);
+            if (tune != nullptr)
+            {
+                expect (dynamic_cast<APEX::TuneLive::Processor*> (tune.get()) != nullptr,
+                        "host created the real Tune Live processor");
+                expectEquals (tune->getNumParameters(),
+                              static_cast<int> (APEX::TuneLive::Processor::kNumParams),
+                              "all 11 native parameters are hosted");
+                tune->prepareToPlay (48000.0, 128);
+                expectEquals (tune->getLatencySamples(), 1920,
+                              "production native Tune Live reports honest 40-ms plugin PDC");
+
+                // Verify all native parameter IDs are discoverable by the
+                // existing APEX automation-binding mechanism. This tests
+                // the actual manager-created instance, not a mock processor.
+                int tagged = 0;
+                for (auto* parameter : tune->getParameters())
+                    if (dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+                        ++tagged;
+                expectEquals (tagged, static_cast<int> (APEX::TuneLive::Processor::kNumParams),
+                              "APEX automation finds IDs on every Tune Live parameter");
+
+                // Persist a host-created instance into project-style
+                // binary state and reopen into an independent instance.
+                auto* amount = tune->getParameters()[APEX::TuneLive::Processor::kAmount];
+                amount->setValueNotifyingHost (0.735f);
+                juce::MemoryBlock projectState;
+                tune->getStateInformation (projectState);
+                expect (projectState.getSize() > 0, "host obtains session state");
+                juce::String reopenError;
+                auto reopen = manager.createPluginInstance (
+                    DAW::ApexNativePluginFormat::createTuneLiveDescription(),
+                    48000.0, 128, reopenError);
+                expect (reopen != nullptr,
+                        "saved Tune Live must reopen through the native format: " + reopenError);
+                if (reopen != nullptr)
+                {
+                    reopen->setStateInformation (projectState.getData(),
+                                                 static_cast<int> (projectState.getSize()));
+                    expectWithinAbsoluteError (
+                        reopen->getParameters()[APEX::TuneLive::Processor::kAmount]->getValue(),
+                        0.735f, 1.0e-4f,
+                        "correction amount survives a real host session reload");
+                }
+            }
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.

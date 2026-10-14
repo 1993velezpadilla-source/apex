@@ -35,6 +35,7 @@ public:
         seedNativeG10Entry();
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
+        seedNativeTuneLiveEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -268,6 +269,7 @@ private:
         seedNativeG10Entry();
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
+        seedNativeTuneLiveEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -315,6 +317,13 @@ private:
     {
         auto description = APEX::ParametricEQ::NativePluginFormat::createDescription();
         cache_.cacheFromDescription(description);
+    }
+
+    // APEX Tune Live remains intrinsic, including after a clean rescan.
+    void seedNativeTuneLiveEntry()
+    {
+        cache_.cacheFromDescription (
+            DAW::ApexNativePluginFormat::createTuneLiveDescription());
     }
 
     void savePersistentData()

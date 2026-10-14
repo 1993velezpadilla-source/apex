@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one unified APEX Native format discovers and creates all three natives");
+        beginTest ("one unified APEX Native format discovers and creates all four natives");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 3,
-                      "G10/C4 ordering stays stable and Parametric EQ appends once");
-        if (descriptions.size() == 3)
+        expectEquals (descriptions.size(), 4,
+                      "G10/C4/ParametricEQ ordering stays stable and Tune Live appends once");
+        if (descriptions.size() == 4)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -109,6 +109,8 @@ private:
                           juce::String ("APEX::C4"));
             expectEquals (descriptions[2]->fileOrIdentifier,
                           juce::String (Processor::kFileOrIdentifier));
+            expectEquals (descriptions[3]->fileOrIdentifier,
+                          juce::String (APEX::TuneLive::Processor::kFileOrIdentifier));
         }
 
         juce::String error;

@@ -1,0 +1,268 @@
+name: Tune Live portable DSP regression
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/**'
+      - 'My DAW/DAW_Core/Tests/TuneLive/**'
+      - '.github/workflows/apex-tune-live-dsp.yml'
+  push:
+    branches: [feature/apex-tune-live-native-v1]
+  workflow_dispatch:
+
+# Only the newest PR head is worth expensive full-DSP tests.
+# Rapid iterations previously queued many superseded runs.
+concurrency:
+  group: tune-live-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify pinned Signalsmith Stretch revision
+        shell: bash
+        run: |
+          test "$(git -C "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" rev-parse HEAD)" = "57b93f4e9206a089a45387eaa39bdc9f310d3308"
+      - name: Build owned sources strict; compile pinned third-party headers as system includes
+        shell: bash
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp" -o tune_live_yin_test
+          ./tune_live_yin_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" -o tune_live_voice_test
+          ./tune_live_voice_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_early_onset.cpp" -o tune_live_early_onset
+          ./tune_live_early_onset
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_early_octave_ambiguity.cpp" -o tune_live_octave_guard
+          ./tune_live_octave_guard
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" -o tune_live_preset_test
+          ./tune_live_preset_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" -o tune_live_wet_test
+          ./tune_live_wet_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp" -o tune_live_matrix_test
+          ./tune_live_matrix_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp" -o tune_live_no_alloc_test
+          ./tune_live_no_alloc_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_shifter_window_study.cpp" -o tune_live_shifter_study
+          ./tune_live_shifter_study
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_vowel_study.cpp" -o tune_live_vowel_study
+          ./tune_live_vowel_study
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" -o tune_live_18ms_probe
+          ./tune_live_18ms_probe
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_12ms_feasibility.cpp" -o tune_live_12ms_study
+          ./tune_live_12ms_study
+          # Isolated time-domain period-guided alternative; F0 oracle study only.
+          # Safety gates are strict; tonal accuracy is measured, not promoted.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided.cpp" -o tune_live_period_guided
+          ./tune_live_period_guided
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_safety.cpp" -o tune_live_period_safety
+          ./tune_live_period_safety
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_tracked.cpp" -o tune_live_tracked
+          ./tune_live_tracked
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_dynamics.cpp" -o tune_live_dynamics
+          ./tune_live_dynamics
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_fast_onset.cpp" -o tune_live_fast_tracked
+          ./tune_live_fast_tracked
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_formant_telemetry.cpp" -o tune_live_formant_diag
+          ./tune_live_formant_diag
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_wet_vibrato.cpp" -o tune_live_vibrato_test
+          ./tune_live_vibrato_test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_eight_insert_telemetry.cpp" -o tune_live_eight_insert
+          ./tune_live_eight_insert
+          # Automation hot-switch with 1..257 sample callbacks, including
+          # retune/key/formants/bypass; must return to exact 40ms dry PDC.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" -o tune_live_switch
+          ./tune_live_switch
+          # Reuse ONE actual HQ40 processor across hardware setup changes;
+          # validate pristine PDC after non-audio-thread reset.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" -o tune_live_lifecycle
+          ./tune_live_lifecycle
+          # Check WET real voice correction when the host callback size
+          # changes independently of 128-sample prepared maximum buffer.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" -o tune_live_variable_wet
+          ./tune_live_variable_wet
+          # A sustained detuned vowel must recover PDC-aligned unpitched
+          # consonant/hiss and silence under 1..521-sample host callbacks.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp" -o tune_live_unvoiced_return
+          ./tune_live_unvoiced_return
+          # Real 40ms wet vocal across large octave jumps, with policy
+          # target hysteresis, 1..521 sample callbacks and GNU sanitizers.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_rapid_note_transitions.cpp" -o tune_live_note_leaps
+          ./tune_live_note_leaps
+          # Reproduce three continuous vocal glides with +/−14c vibrato
+          # and compare same 40ms wet DSP under host partitions.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_glissando_vibrato_transitions.cpp" -o tune_live_glissando
+          ./tune_live_glissando
+          # Research-only A2/A3/A4 ±30-cent F0 accuracy audit,
+          # independent 8192-sample Hann/Goertzel estimator vs DSP YIN.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_low_register_spectral_diagnostic.cpp" -o tune_live_register_spectrum
+          ./tune_live_register_spectrum
+          # RESEARCH ONLY: ten direct shifter downshift transfer experiments
+          # to separate spectral-shifter residual from note-detector bias.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/research_downshift_transfer.cpp" -o tune_live_downshift_transfer
+          ./tune_live_downshift_transfer
+          # NON-SHIPPING: invert measured shifter transfer on four A3/A4
+          # +25/+30 cent test tones. Do not activate compensation in APEX.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/research_downshift_compensation.cpp" -o tune_live_downshift_compensation
+          ./tune_live_downshift_compensation
+          # Produce real WAV files with the actual shipped HQ40 engine and
+          # isolated causal research backend, and exercise PCM24 read/write.
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" -o tune_live_audition
+          ./tune_live_audition --self-test tune_live_audition
+          ./tune_live_audition --input tune_live_audition_source.wav --prefix tune_live_reload
+  msvc-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Compile and enforce ALL portable DSP tests on MSVC (fail fast)
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_yin_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_yin.cpp" || exit /b 1
+          tune_live_yin_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_voice_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_voice_control.cpp" || exit /b 1
+          tune_live_voice_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_early_onset.exe "My DAW/DAW_Core/Tests/TuneLive/test_early_onset.cpp" || exit /b 1
+          tune_live_early_onset.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_octave_guard.exe "My DAW/DAW_Core/Tests/TuneLive/test_early_octave_ambiguity.cpp" || exit /b 1
+          tune_live_octave_guard.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_preset_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_presets.cpp" || exit /b 1
+          tune_live_preset_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_wet_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_audio.cpp" || exit /b 1
+          tune_live_wet_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_matrix_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_rt_matrix.cpp" || exit /b 1
+          tune_live_matrix_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_no_alloc_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_no_alloc.cpp" || exit /b 1
+          tune_live_no_alloc_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_shifter_study.exe "My DAW/DAW_Core/Tests/TuneLive/test_shifter_window_study.cpp" || exit /b 1
+          tune_live_shifter_study.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_vowel_study.exe "My DAW/DAW_Core/Tests/TuneLive/test_vowel_study.cpp" || exit /b 1
+          tune_live_vowel_study.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_18ms_probe.exe "My DAW/DAW_Core/Tests/TuneLive/test_18ms_profile.cpp" || exit /b 1
+          tune_live_18ms_probe.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_12ms_study.exe "My DAW/DAW_Core/Tests/TuneLive/test_12ms_feasibility.cpp" || exit /b 1
+          tune_live_12ms_study.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_period_guided.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided.cpp" || exit /b 1
+          tune_live_period_guided.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_period_safety.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_safety.cpp" || exit /b 1
+          tune_live_period_safety.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_tracked.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_tracked.cpp" || exit /b 1
+          tune_live_tracked.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_dynamics.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_dynamics.cpp" || exit /b 1
+          tune_live_dynamics.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_fast_tracked.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_fast_onset.cpp" || exit /b 1
+          tune_live_fast_tracked.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /W4 /WX /Fe:tune_live_formant_diag.exe "My DAW/DAW_Core/Tests/TuneLive/test_period_guided_formant_telemetry.cpp" || exit /b 1
+          tune_live_formant_diag.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_vibrato_test.exe "My DAW/DAW_Core/Tests/TuneLive/test_wet_vibrato.cpp" || exit /b 1
+          tune_live_vibrato_test.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_eight_insert.exe "My DAW/DAW_Core/Tests/TuneLive/test_eight_insert_telemetry.cpp" || exit /b 1
+          tune_live_eight_insert.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_switch.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_control_switch.cpp" || exit /b 1
+          tune_live_switch.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_lifecycle.exe "My DAW/DAW_Core/Tests/TuneLive/test_prepare_lifecycle.cpp" || exit /b 1
+          tune_live_lifecycle.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_variable_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_variable_callback_pitch.cpp" || exit /b 1
+          tune_live_variable_wet.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_unvoiced_return.exe "My DAW/DAW_Core/Tests/TuneLive/test_unvoiced_articulation_return.cpp" || exit /b 1
+          tune_live_unvoiced_return.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_note_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_rapid_note_transitions.cpp" || exit /b 1
+          tune_live_note_leaps.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_glissando.exe "My DAW/DAW_Core/Tests/TuneLive/test_glissando_vibrato_transitions.cpp" || exit /b 1
+          tune_live_glissando.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_register_spectrum.exe "My DAW/DAW_Core/Tests/TuneLive/test_low_register_spectral_diagnostic.cpp" || exit /b 1
+          tune_live_register_spectrum.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_downshift_transfer.exe "My DAW/DAW_Core/Tests/TuneLive/research_downshift_transfer.cpp" || exit /b 1
+          tune_live_downshift_transfer.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_downshift_compensation.exe "My DAW/DAW_Core/Tests/TuneLive/research_downshift_compensation.cpp" || exit /b 1
+          tune_live_downshift_compensation.exe || exit /b 1
+          cl /nologo /std:c++17 /EHsc /O2 /I "My DAW/DAW_Core/Source/ThirdParty" /I "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" /Fe:tune_live_audition.exe "My DAW/DAW_Core/Tests/TuneLive/tune_live_offline_audition.cpp" || exit /b 1
+          tune_live_audition.exe --self-test tune_live_audition || exit /b 1
+          tune_live_audition.exe --input tune_live_audition_source.wav --prefix tune_live_reload || exit /b 1
+      - name: Publish offline audition test WAVs and Windows CLI (not shipping plug-in)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tune-live-offline-research-windows
+          path: |
+            tune_live_audition.exe
+            tune_live_audition_source.wav
+            tune_live_audition_dry.wav
+            tune_live_audition_hq40.wav
+            tune_live_audition_causal_research.wav
+          if-no-files-found: error
+          retention-days: 7

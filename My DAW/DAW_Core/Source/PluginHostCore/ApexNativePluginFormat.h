@@ -4,6 +4,7 @@
 #include "../G10Core/G10NativePluginFormat.h"
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
+#include "../TuneLiveCore/ApexTuneLiveProcessor.h"
 
 namespace DAW {
 
@@ -31,6 +32,27 @@ class ApexNativePluginFormat final : public juce::AudioPluginFormat
 public:
     static constexpr const char* kFormatName = "APEX Native";
 
+    static juce::PluginDescription createTuneLiveDescription()
+    {
+        juce::PluginDescription desc;
+        desc.name = desc.descriptiveName = APEX::TuneLive::Processor::kPluginName;
+        desc.pluginFormatName = kFormatName;
+        desc.manufacturerName = "APEX";
+        desc.category = "Pitch Shift";
+        desc.version = APEX::TuneLive::Processor::kVersion;
+        desc.fileOrIdentifier = APEX::TuneLive::Processor::kFileOrIdentifier;
+        desc.uniqueId = desc.deprecatedUid = APEX::TuneLive::Processor::kUniqueId;
+        desc.isInstrument = false;
+        desc.numInputChannels = desc.numOutputChannels = 2;
+        return desc;
+    }
+    static bool isTuneLiveDescription (const juce::PluginDescription& desc)
+    {
+        return desc.uniqueId == APEX::TuneLive::Processor::kUniqueId
+            && desc.pluginFormatName.equalsIgnoreCase (kFormatName)
+            && desc.fileOrIdentifier == APEX::TuneLive::Processor::kFileOrIdentifier;
+    }
+
     juce::String getName() const override { return kFormatName; }
 
     void findAllTypesForFile (juce::OwnedArray<juce::PluginDescription>& results,
@@ -42,6 +64,7 @@ public:
             APEX::C4::C4NativePluginFormat::createC4Description()));
         results.add (new juce::PluginDescription (
             APEX::ParametricEQ::NativePluginFormat::createDescription()));
+        results.add (new juce::PluginDescription (createTuneLiveDescription()));
     }
 
     /** The manager matches on getName() AND this predicate; accept every
@@ -51,7 +74,8 @@ public:
         return fileOrIdentifier.isEmpty()
             || fileOrIdentifier == APEX::G10::G10NativePluginFormat::createG10Description().fileOrIdentifier
             || fileOrIdentifier == APEX::C4::C4NativePluginFormat::createC4Description().fileOrIdentifier
-            || fileOrIdentifier == APEX::ParametricEQ::Processor::kFileOrIdentifier;
+            || fileOrIdentifier == APEX::ParametricEQ::Processor::kFileOrIdentifier
+            || fileOrIdentifier == APEX::TuneLive::Processor::kFileOrIdentifier;
     }
 
     juce::String getNameOfPluginFromIdentifier (const juce::String& fileOrIdentifier) override
@@ -62,6 +86,8 @@ public:
             return APEX::C4::C4NativePluginFormat::createC4Description().name;
         if (fileOrIdentifier == APEX::ParametricEQ::Processor::kFileOrIdentifier)
             return APEX::ParametricEQ::Processor::kPluginName;
+        if (fileOrIdentifier == APEX::TuneLive::Processor::kFileOrIdentifier)
+            return APEX::TuneLive::Processor::kPluginName;
         return {};
     }
 
@@ -74,7 +100,8 @@ public:
     {
         return APEX::G10::G10NativePluginFormat::isG10Description (desc)
             || APEX::C4::C4NativePluginFormat::isC4Description (desc)
-            || APEX::ParametricEQ::NativePluginFormat::isDescription (desc);
+            || APEX::ParametricEQ::NativePluginFormat::isDescription (desc)
+            || isTuneLiveDescription (desc);
     }
 
     bool canScanForPlugins() const override { return false; }
@@ -115,6 +142,8 @@ protected:
                 instance = std::make_unique<APEX::G10::G10Processor>();
             else if (APEX::ParametricEQ::NativePluginFormat::isDescription (description))
                 instance = std::make_unique<APEX::ParametricEQ::Processor>();
+            else if (isTuneLiveDescription (description))
+                instance = std::make_unique<APEX::TuneLive::Processor>();
             else
                 error = "Not an APEX native plugin (identifier="
                     + description.fileOrIdentifier + ").";
