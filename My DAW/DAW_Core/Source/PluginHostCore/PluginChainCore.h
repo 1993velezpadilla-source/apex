@@ -264,6 +264,12 @@ public:
         // this NON-REALTIME thread. The audio callback only verifies capacity
         // and never resizes these buffers.
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         // Re-seed automation smoothers from the restored parameter values
         // before the chain becomes visible to realtime processing.
@@ -299,6 +305,12 @@ public:
         // offline bus layouts, so the computed worst-case channel count is
         // authoritative before any offline processing begins.
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         publishSnapshot();
     }
@@ -326,6 +338,12 @@ public:
         // this non-realtime thread AFTER the slots re-negotiated their
         // realtime bus layouts (transition back from offline export).
         prepareSidechainScratchCapacity(blockSize);
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // Reprepare resets plugin DSP and every slot's bypass/dry FIFO. The
+        // aggregate chain FIFO must reset too, even if the new rate preserves
+        // the same 32-sample latency and therefore prepare() is idempotent.
+        chainDryPdc_.reset();
+#endif
 
         publishSnapshot();
     }
