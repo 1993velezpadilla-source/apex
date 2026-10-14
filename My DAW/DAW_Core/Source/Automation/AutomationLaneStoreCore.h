@@ -371,14 +371,26 @@ namespace apex::automation
                 if (replacement.id == kInvalidParameterID
                     || prepared.count(replacement.id) != 0)
                     return false;
+                double previousPPQ = -1.0;
                 for (const auto& point : replacement.points)
+                {
+                    // Bridges are already sorted by source timeline. Reject
+                    // duplicated/reversed knots instead of silently sorting
+                    // or discarding authored automation during an upsert.
+                    if (createMissingLanes && point.timePPQ <= previousPPQ)
+                        return false;
+                    previousPPQ = point.timePPQ;
                     if (!std::isfinite(point.timePPQ)
                         || point.timePPQ < 0.0
                         || !std::isfinite(point.normalizedValue)
                         || point.normalizedValue < 0.0f
                         || point.normalizedValue > 1.0f
-                        || !std::isfinite(point.curveTension))
+                        || !std::isfinite(point.curveTension)
+                        || (createMissingLanes
+                            && (point.curveTension < -1.0f
+                                || point.curveTension > 1.0f)))
                         return false;
+                }
 
                 auto lane = std::make_shared<AutomationLane>(replacement.id);
                 lane->replacePoints(std::move(replacement.points));
