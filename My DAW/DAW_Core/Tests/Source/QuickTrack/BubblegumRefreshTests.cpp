@@ -365,8 +365,6 @@ public:
                 expect(hasDestination(initial, destinationId), "post-fader cable exists");
                 if (initial.empty()) return;
                 const auto originalId = initial.front().sendId;
-                const int before = h.refresh.topologyRefreshCount;
-
                 h.sends.setSendPreFader(h.graph, sourceId, destinationId, true);
                 expect(h.sends.isSendPreFader(h.graph, sourceId, destinationId),
                        "engine route switches to pre-fader");
@@ -376,9 +374,18 @@ public:
                 if (records.empty()) return;
                 expectEquals(records.front().sendId, originalId,
                              "pre/post mode preserves the cable and automation identity");
-                expect(h.refresh.topologyRefreshCount > before
-                           || h.graph.getGraphVersion() > 0,
-                       "pre/post change publishes routing state");
+                auto published = h.graph.getSnapshotPublisher().get();
+                expect(published != nullptr, "pre-fader state has a published audio snapshot");
+                bool foundPreSend = false;
+                const auto* sourceNode = h.graph.getNodeByTrackId(sourceId);
+                const auto* destinationNode = h.graph.getNodeByTrackId(destinationId);
+                if (published && sourceNode && destinationNode)
+                    for (const auto& edge : published->edges)
+                        if (edge.sourceNodeId == sourceNode->id
+                            && edge.destNodeId == destinationNode->id
+                            && edge.type == ConnectionType::PreSend)
+                            foundPreSend = true;
+                expect(foundPreSend, "engine snapshot contains pre-fader audio edge");
 
                 bubblegum::BubblegumAnchorResolver resolver;
                 resolver.setTrackBounds(sourceId, { 20.0f, 80.0f, 1.0f, 1.0f });
