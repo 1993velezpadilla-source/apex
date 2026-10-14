@@ -200,6 +200,46 @@ public:
                    "Undelayed dry leaks before x4 wet. Main host still needs fix.");
         }
 
+        beginTest("44.1 kHz JUCE latency contract and 64/128 dry-bypass timing");
+        for(const int frames:{64,128}) {
+            for(const bool magnetic:{false,true}) {
+                OptoCircuitJuceResearchProbe probe(magnetic);
+                APEX::Compressor::ApexOptoCircuitResearchParameters p;
+                p.mix=0.0;
+                probe.setResearchParameters(p);
+                probe.prepareToPlay(44100.0,frames);
+                expectEquals(probe.getSampleRate(),44100.0);
+                expectEquals(probe.getLatencySamples(),magnetic?32:0);
+                std::vector<float> dryL(384),dryR(384);
+                for(int n=0;n<384;++n) {
+                    dryL[static_cast<std::size_t>(n)]=
+                        static_cast<float>(.31*std::cos(n*.045));
+                    dryR[static_cast<std::size_t>(n)]=
+                        static_cast<float>(.19*std::sin(n*.073));
+                }
+                auto outL=dryL,outR=dryR;
+                for(int start=0;start<384;start+=frames) {
+                    float* channels[]={outL.data()+start,outR.data()+start};
+                    juce::AudioBuffer<float> buffer(channels,2,frames);
+                    probe.processBlock(buffer,midi);
+                }
+                const int latency=magnetic?32:0;
+                for(int n=0;n<384;++n) {
+                    const double expectedL=n<latency?0.0:
+                        dryL[static_cast<std::size_t>(n-latency)];
+                    const double expectedR=n<latency?0.0:
+                        dryR[static_cast<std::size_t>(n-latency)];
+                    expectWithinAbsoluteError(
+                        static_cast<double>(outL[static_cast<std::size_t>(n)]),
+                        expectedL,1.e-6);
+                    expectWithinAbsoluteError(
+                        static_cast<double>(outR[static_cast<std::size_t>(n)]),
+                        expectedR,1.e-6);
+                }
+                probe.releaseResources();
+            }
+        }
+
         beginTest("Changing quality during prepare updates latency without callback toggles");
         OptoCircuitJuceResearchProbe probe(false);
         probe.prepareToPlay(sr,128);
