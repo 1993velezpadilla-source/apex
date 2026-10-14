@@ -5,6 +5,7 @@
 #include "../../../Source/CompressorCore/ApexOptoCircuitPathResearchCore.h"
 #include "../../../Source/AutomationCore/PluginSlotMixCore.h"
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
+#include "../../../Source/PDCCore/ProgrammeRoutePdcJuceResearchBridge.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -679,6 +680,63 @@ public:
             }
         }
 #endif
+
+        beginTest("Immutable RoutingSnapshot + plugin-latency map produces correct send/bus PDC plan");
+        {
+            using Planner=DAW::PdcResearch::ProgrammeRoutePdcPlannerResearchCore;
+            using Bridge=DAW::PdcResearch::ProgrammeRoutePdcJuceResearchBridge;
+            DAW::RoutingSnapshot graph;
+            graph.nodes={
+                {"RN_voice","vocal",DAW::RoutingNodeType::Track,true},
+                {"RN_bass","bass",DAW::RoutingNodeType::Track,true},
+                {"RN_aux","aux",DAW::RoutingNodeType::Bus,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.processingOrder={"RN_voice","RN_bass","RN_aux","master"};
+            const auto edge=[](const char* id,const char* src,
+                               const char* dst,DAW::ConnectionType type) {
+                DAW::RoutingSnapshot::EdgeSnapshot e;
+                e.id=id; e.sourceNodeId=src;e.destNodeId=dst;e.type=type;
+                return e;
+            };
+            graph.edges={
+                edge("voice-main","RN_voice","master",DAW::ConnectionType::Direct),
+                edge("voice-send","RN_voice","RN_aux",DAW::ConnectionType::Send),
+                edge("bass-send","RN_bass","RN_aux",DAW::ConnectionType::PreSend),
+                edge("aux-main","RN_aux","master",DAW::ConnectionType::Direct),
+                edge("bass-main","RN_bass","master",DAW::ConnectionType::Direct),
+                edge("bass-key","RN_bass","RN_voice",DAW::ConnectionType::Sidechain)};
+            // The normal AudioEngine snapshot stores the authoritative track
+            // IDs, not mutable PluginChainCore instances.
+            std::map<DAW::TrackID,int> publishedLatencies={
+                {"vocal",32},{"bass",0},{"aux",16}};
+            Planner planned;
+            expect(Bridge::build(graph,&publishedLatencies,planned));
+            expect(planned.valid());
+            const auto requiresDelay=[&](const char* id,int samples) {
+                const auto* found=planned.findEdge(id);
+                expect(found!=nullptr,id);
+                if(found)expectEquals(found->delaySamples,samples);
+            };
+            requiresDelay("voice-main",16); // voice total 32 vs wet path 48
+            requiresDelay("voice-send",0);
+            requiresDelay("bass-send",32);  // align BEFORE the aux compressor
+            requiresDelay("aux-main",0);
+            requiresDelay("bass-main",48);
+            expect(planned.findEdge("bass-key")==nullptr,
+                   "Sidechain key must not be treated as parallel audio");
+            const auto* aux=planned.findNode("RN_aux");
+            expect(aux!=nullptr);
+            if(aux)expectEquals(aux->outputLatency,48);
+            // Inactive send disappears and stops affecting the aux merge.
+            graph.edges[2].active=false;
+            expect(Bridge::build(graph,&publishedLatencies,planned));
+            expect(planned.findEdge("bass-send")==nullptr);
+            expectEquals(planned.findEdge("voice-main")->delaySamples,16);
+            // Corrupt topological order must fail closed.
+            graph.processingOrder={"RN_aux","RN_voice","RN_bass","master"};
+            expect(!Bridge::build(graph,&publishedLatencies,planned));
+            expect(!planned.valid());
+        }
 
         beginTest("Changing quality during prepare updates latency without callback toggles");
         OptoCircuitJuceResearchProbe probe(false);
