@@ -21,12 +21,40 @@ public:
     static constexpr std::size_t invalidIndex=
         ProgrammeRoutePdcPreparedResearchCore::invalidIndex;
     bool prepare(const RoutingSnapshot& snapshot,
-                 const std::map<TrackID,int>* chainLatencies,int channels) {
+                 const std::map<TrackID,int>* chainLatencies,int channels,
+                 const ProgrammeRoutePdcJuceDispatchResearchCore* old=nullptr) {
         ProgrammeRoutePdcPlannerResearchCore plan;
         if(!ProgrammeRoutePdcJuceResearchBridge::build(
                 snapshot,chainLatencies,plan))return false;
         auto next=std::make_unique<ProgrammeRoutePdcPreparedResearchCore>();
-        if(!next->prepare(plan,channels))return false;
+        // History may be retained ONLY for a same-identity unchanged
+        // programme route. A recycled ID, changed endpoint/type/tap, or
+        // changed latency gets a NEW line instead of stale audio.
+        std::vector<std::string> compatible;
+        if(old!=nullptr && old!=this && old->bank_) {
+            compatible.reserve(snapshot.edges.size());
+            for(const auto& edge:snapshot.edges) {
+                if(edge.type==ConnectionType::Sidechain||!edge.active||
+                   edge.bypassed)continue;
+                if(plan.findEdge(edge.id.toStdString())==nullptr)continue;
+                for(const auto& earlier:old->routeMetadata_) {
+                    if(earlier.id==edge.id &&
+                       earlier.sourceNodeId==edge.sourceNodeId &&
+                       earlier.destNodeId==edge.destNodeId &&
+                       earlier.type==edge.type &&
+                       earlier.tapPoint==edge.tapPoint &&
+                       earlier.destinationPluginId==edge.destinationPluginId &&
+                       earlier.destinationBusIndex==edge.destinationBusIndex &&
+                       earlier.active&&!earlier.bypassed) {
+                        compatible.push_back(edge.id.toStdString());
+                        break;
+                    }
+                }
+            }
+        }
+        if(!next->prepare(plan,channels,
+                          old!=nullptr&&old!=this?old->bank_.get():nullptr,
+                          &compatible))return false;
         std::vector<std::size_t> nextEdges(snapshot.edges.size(),invalidIndex);
         for(std::size_t i=0;i<snapshot.edges.size();++i) {
             const auto& edge=snapshot.edges[i];
@@ -55,6 +83,7 @@ public:
         bank_.swap(next);
         edges_.swap(nextEdges);
         locals_.swap(nextLocal);
+        routeMetadata_=snapshot.edges;
         version_=snapshot.version;
         return true;
     }
@@ -93,6 +122,7 @@ private:
     std::unique_ptr<ProgrammeRoutePdcPreparedResearchCore> bank_;
     std::vector<std::size_t> edges_;
     std::vector<std::size_t> locals_;
+    std::vector<RoutingSnapshot::EdgeSnapshot> routeMetadata_;
     std::uint64_t version_=0;
 };
 } // namespace DAW::PdcResearch
