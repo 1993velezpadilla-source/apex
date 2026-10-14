@@ -352,6 +352,9 @@ public:
             if (slot) slot->reset();
         for (auto& core : bypassCores_)
             if (core) core->reset();
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        chainDryPdc_.reset();
+#endif
     }
 
     // ── Slot management (message thread) ─────────────────────────────────
