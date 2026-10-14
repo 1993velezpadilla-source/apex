@@ -6171,6 +6171,162 @@ public:
 };
 static AutomationV2ConcurrentCallbackPinGauntletTests automationV2ConcurrentCallbackPinGauntletTests;
 
+/**
+ * Legacy sample-domain publication must obey the same two-thread lifetime
+ * contract as PPQ. Simulate a device callback holding an immutable legacy
+ * generation while the control thread repeatedly edits a vocal envelope.
+ * The protected old state must remain unchanged and be reclaimed by control.
+ */
+class AutomationV2LegacyConcurrentPublicationGauntletTests final : public juce::UnitTest
+{
+public:
+    AutomationV2LegacyConcurrentPublicationGauntletTests()
+        : juce::UnitTest("automation.v2-legacy-concurrent-publication-gauntlet.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        DAW::AutomationManagerCore manager;
+        const juce::String track("VOICE-LEGACY-CONCURRENT");
+        const juce::String parameter(DAW::AutomationLaneCore::trackVolumeParameterId);
+        manager.addPoint(track, parameter, 0, 0.20f);
+
+        auto oldest = manager.getSnapshotPublisher().get();
+        expect(oldest != nullptr);
+        if (oldest == nullptr) return;
+        const auto oldVersion = oldest->version;
+        std::weak_ptr<const DAW::AutomationSnapshot> weakOldest(oldest);
+
+        std::atomic<int> phase {0};
+        std::atomic<bool> initialValueCorrect {false};
+        std::atomic<bool> pinnedValueUnchanged {false};
+        std::atomic<bool> refreshedValueCorrect {false};
+        std::thread audio([&, pinned = std::move(oldest)]() mutable
+        {
+            const auto oldLane = pinned->findLaneRT(track, parameter);
+            initialValueCorrect.store(
+                oldLane != nullptr && oldLane->points.size() == 1
+                && std::abs(oldLane->points.front().value - 0.20f) < 1.0e-5f,
+                std::memory_order_release);
+            phase.store(1, std::memory_order_release);
+
+            const auto deadline = std::chrono::steady_clock::now()
+                                + std::chrono::seconds(10);
+            while (phase.load(std::memory_order_acquire) < 2
+                   && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::yield();
+
+            const auto stillOld = pinned->findLaneRT(track, parameter);
+            pinnedValueUnchanged.store(
+                stillOld != nullptr && stillOld->points.size() == 1
+                && std::abs(stillOld->points.front().value - 0.20f) < 1.0e-5f,
+                std::memory_order_release);
+
+            // The next simulated block must see all of the new points.
+            pinned.reset();
+            const auto updated = manager.getSnapshotPublisher().get();
+            const auto updatedLane = updated != nullptr
+                ? updated->findLaneRT(track, parameter) : nullptr;
+            refreshedValueCorrect.store(
+                updated != nullptr && updated->version > oldVersion
+                && updatedLane != nullptr && updatedLane->points.size() == 49
+                && std::abs(updatedLane->points.back().value - 0.80f) < 1.0e-5f,
+                std::memory_order_release);
+            phase.store(3, std::memory_order_release);
+        });
+
+        const auto deadline = std::chrono::steady_clock::now()
+                            + std::chrono::seconds(10);
+        while (phase.load(std::memory_order_acquire) == 0
+               && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        const bool entered = phase.load(std::memory_order_acquire) == 1;
+
+        if (entered)
+            for (int i = 1; i <= 48; ++i)
+                manager.addPoint(track, parameter, i * 128,
+                                 i == 48 ? 0.80f : 0.25f + (float)i * 0.01f);
+        phase.store(2, std::memory_order_release);
+        audio.join();
+
+        beginTest("Control publishes 48 edits while audio pins one immutable legacy version");
+        expect(entered);
+        expect(initialValueCorrect.load(std::memory_order_acquire));
+        expect(pinnedValueUnchanged.load(std::memory_order_acquire));
+
+        beginTest("Next audio block receives new sample-domain envelope");
+        expect(refreshedValueCorrect.load(std::memory_order_acquire));
+
+        beginTest("Last RT reference never destroys old envelope");
+        expect(!weakOldest.expired());
+        manager.addPoint(track, parameter, 49 * 128, 0.90f);
+        expect(weakOldest.expired(),
+               "the subsequent control publish must reclaim the old generation");
+    }
+};
+static AutomationV2LegacyConcurrentPublicationGauntletTests
+    automationV2LegacyConcurrentPublicationGauntletTests;
+
+/** Read, Write, Touch, Latch and Trim must retain explicit, disjoint write
+ * rules and keep mode-epoch transitions observable to the 90 Hz recorder. */
+class AutomationV2ModeTruthTableGauntletTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ModeTruthTableGauntletTests()
+        : juce::UnitTest("automation.v2-mode-truth-table-gauntlet.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+        AutomationModeState modes;
+        constexpr ParameterID id = 938001;
+        modes.setGlobalDefaultMode(AutomationMode::Read);
+
+        beginTest("Read follows the lane but cannot overwrite it");
+        expect(modes.getModeRT(id) == AutomationMode::Read);
+        expect(modes.isReadingRT(id));
+        expect(!modes.isWriting(id, true));
+
+        beginTest("Write records even without a gesture");
+        modes.setMode(id, AutomationMode::Write);
+        expect(modes.getModeRT(id) == AutomationMode::Write);
+        expect(modes.isWriting(id, false));
+
+        beginTest("Touch records only while the user touches the control");
+        modes.setMode(id, AutomationMode::Touch);
+        expect(!modes.isWriting(id, false));
+        expect(modes.isWriting(id, true));
+
+        beginTest("Latch continues writing after touch until latch clears");
+        modes.setMode(id, AutomationMode::Latch);
+        expect(!modes.isWriting(id, false));
+        modes.setLatchHeld(id, true);
+        expect(modes.latchHeldRT(id));
+        expect(modes.isWriting(id, false));
+        modes.clearAllLatches();
+        expect(!modes.latchHeldRT(id));
+        expect(!modes.isWriting(id, false));
+
+        beginTest("Trim requires gesture and Read mode stays read-only");
+        modes.setMode(id, AutomationMode::Trim);
+        expect(!modes.isWriting(id, false));
+        expect(modes.isWriting(id, true));
+        modes.setMode(id, AutomationMode::Read);
+        expect(!modes.isWriting(id, true));
+
+        beginTest("Fast mode round trip must be visible through recorder epoch");
+        const auto before = modes.getModeEpoch(id);
+        modes.setMode(id, AutomationMode::Latch);
+        modes.setMode(id, AutomationMode::Read);
+        const auto after = modes.getModeEpoch(id);
+        expect(after != before);
+        expect(modes.getModeRT(id) == AutomationMode::Read);
+    }
+};
+static AutomationV2ModeTruthTableGauntletTests
+    automationV2ModeTruthTableGauntletTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
