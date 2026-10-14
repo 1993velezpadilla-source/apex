@@ -5972,6 +5972,63 @@ public:
 };
 static AutomationV2LegacySnapshotRetirementTests automationV2LegacySnapshotRetirementTests;
 
+/**
+ * Direct lane edits can publish new point vectors without changing the PPQ
+ * lane map. Even if a callback pins the map, the OLD point vector must never
+ * be freed when its last audio reader exits. Only a later control edit may
+ * reclaim retired point generations.
+ */
+class AutomationV2DirectLanePointRetirementTests final : public juce::UnitTest
+{
+public:
+    AutomationV2DirectLanePointRetirementTests()
+        : juce::UnitTest("automation.v2-direct-lane-point-control-thread-reclamation.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Lane = apex::automation::AutomationLane;
+        Lane lane(930001);
+        lane.replacePoints({{0.0, 0.15f}});
+
+        beginTest("Three direct GUI edits retain the old DSP-pinned point vector");
+        auto heldByAudio = lane.getSnapshot();
+        expect(heldByAudio != nullptr);
+        if (heldByAudio == nullptr) return;
+        std::weak_ptr<const Lane::PointVector> original(heldByAudio);
+        expectWithinAbsoluteError(heldByAudio->front().normalizedValue,
+                                  0.15f, 0.00001f);
+
+        lane.replacePoints({{0.0, 0.25f}});
+        lane.addPoint({1.0, 0.50f});
+        expect(lane.setPoint(0, {0.0, 0.75f}));
+        const auto latest = lane.getSnapshot();
+        expect(latest != heldByAudio);
+        expectWithinAbsoluteError(heldByAudio->front().normalizedValue,
+                                  0.15f, 0.00001f);
+        expect(!original.expired());
+        heldByAudio.reset(); // the realtime callback has ended
+        expect(!original.expired(),
+               "audio must not destroy its previously pinned point vector");
+
+        beginTest("Next control edit reclaims old point generation");
+        expect(lane.removePoint(1));
+        expect(original.expired(),
+               "retired point vectors are reclaimed by control edits only");
+
+        beginTest("Repeated direct point reads keep realtime access allocation-free");
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            for (int i = 0; i < 512; ++i)
+            {
+                auto view = lane.getSnapshot();
+                juce::ignoreUnused(view);
+            }
+        }
+    }
+};
+static AutomationV2DirectLanePointRetirementTests automationV2DirectLanePointRetirementTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
