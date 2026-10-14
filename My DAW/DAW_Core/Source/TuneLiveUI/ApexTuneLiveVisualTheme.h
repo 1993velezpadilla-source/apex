@@ -40,7 +40,7 @@ inline void panel(juce::Graphics& g,juce::Rectangle<float> bounds,float radius=1
              bounds.getX()+radius,bounds.getY(),
              juce::Colours::white.withAlpha(0.0f),
              bounds.getX()+radius,bounds.getY()+38.0f,false));
-        g.fillRect(bounds.removeFromTop(38.0f));
+        g.fillRect(bounds.withHeight(38.0f));
     }
     g.setColour(cyan().withAlpha(0.28f));
     g.drawRoundedRectangle(bounds.reduced(0.6f),radius,1.2f);
