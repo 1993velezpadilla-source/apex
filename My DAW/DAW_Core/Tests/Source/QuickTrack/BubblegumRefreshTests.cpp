@@ -164,7 +164,8 @@ private:
             if (connection == nullptr)
                 continue;
 
-            const bool isSend = connection->type == ConnectionType::Send;
+            const bool isSend = connection->type == ConnectionType::Send
+                             || connection->type == ConnectionType::PreSend;
             const bool isDirect = connection->type == ConnectionType::Direct;
             if ((isSend || isDirect)
                 && static_cast<bubblegum::SendId>(connection->id.hashCode64()) == sendId)
@@ -341,6 +342,70 @@ public:
                 if (inactive != nullptr)
                     expect(inactive->state == bubblegum::SendVisualState::ExistsInactive,
                            "bypassed Send maps to ExistsInactive without deleting identity");
+            }
+        }
+
+
+        beginTest("PreFaderQuickSendRetainsCableIdentityAndCanBeDeleted");
+        {
+            Harness h;
+            const auto* doubles = QuickTrackRoleCatalog::findById("doubles");
+            auto result = h.builder.createBatch({ { doubles, 1 } });
+            expect(result.ok(), "Quick Send source fixture exists");
+            if (result.ok())
+            {
+                const TrackID sourceId = result.created[0].trackId;
+                const TrackID destinationId = "Bubblegum-PreFader-Reverb";
+                h.graph.addNode("Pre-Fader Reverb", RoutingNodeType::Bus, destinationId);
+                h.sends.createSend(h.graph, sourceId, destinationId, 0.6f);
+
+                bubblegum::BubblegumRoutingAdapterSourceSyncExample adapter;
+                FixedSourceSync sync { sourceId };
+                const auto initial = adapter.getSendRecords(h.graph, sync, {});
+                expect(hasDestination(initial, destinationId), "post-fader cable exists");
+                if (initial.empty()) return;
+                const auto originalId = initial.front().sendId;
+                const int before = h.refresh.topologyRefreshCount;
+
+                h.sends.setSendPreFader(h.graph, sourceId, destinationId, true);
+                expect(h.sends.isSendPreFader(h.graph, sourceId, destinationId),
+                       "engine route switches to pre-fader");
+                const auto records = adapter.getSendRecords(h.graph, sync, {});
+                expect(hasDestination(records, destinationId),
+                       "pre-fader Send remains visible in routing adapter");
+                if (records.empty()) return;
+                expectEquals(records.front().sendId, originalId,
+                             "pre/post mode preserves the cable and automation identity");
+                expect(h.refresh.topologyRefreshCount > before
+                           || h.graph.getGraphVersion() > 0,
+                       "pre/post change publishes routing state");
+
+                bubblegum::BubblegumAnchorResolver resolver;
+                resolver.setTrackBounds(sourceId, { 20.0f, 80.0f, 1.0f, 1.0f });
+                resolver.setTrackBounds(destinationId, { 220.0f, 80.0f, 1.0f, 1.0f });
+                GraphSendStateAdapter state(h.graph);
+                bubblegum::BubblegumCableSnapshotBuilder builder;
+                const auto active = builder.build(records, state, resolver);
+                const auto* cable = findSnapshot(active, sourceId, destinationId);
+                expect(cable != nullptr && cable->visible,
+                       "pre-fader route paints a visible cable");
+
+                h.sends.toggleSendActive(h.graph, sourceId, destinationId);
+                const auto muted = adapter.getSendRecords(h.graph, sync, {});
+                const auto mutedSnapshots = builder.build(muted, state, resolver);
+                const auto* mutedCable = findSnapshot(mutedSnapshots, sourceId, destinationId);
+                expect(mutedCable != nullptr,
+                       "bypassed pre-fader Send still has a cable");
+                if (mutedCable)
+                    expect(mutedCable->state == bubblegum::SendVisualState::ExistsInactive,
+                           "pre-fader bypass shows inactive state");
+
+                h.sends.deleteSend(h.graph, sourceId, destinationId);
+                expect(!h.sends.sendExists(h.graph, sourceId, destinationId),
+                       "Quick Send delete removes PreSend too");
+                const auto removed = adapter.getSendRecords(h.graph, sync, {});
+                expect(!hasDestination(removed, destinationId),
+                       "cable disappears after deleting pre-fader Send");
             }
         }
 
