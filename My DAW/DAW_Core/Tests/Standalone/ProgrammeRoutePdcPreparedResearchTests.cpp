@@ -135,6 +135,7 @@ static void localTrackInput(int block) {
     }
 }
 int main(){
+    // Test coverage includes graph-wide sample-path parity.
     for(int rate:{44100,48000})
         for(int frames:{1,31,64,128})
             impulseJourney(frames,rate);
