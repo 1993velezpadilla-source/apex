@@ -1,4 +1,4 @@
-// APEX Opto 2A: host-shaped STANDALONE 48 kHz CPU survey.
+// APEX Opto 2A: host-shaped STANDALONE 44.1/48 kHz CPU survey.
 // This is NOT a measurement inside APEX DAW, VST3, Windows audio engine,
 // an Apollo driver, or user hardware. CI runner noise makes timings advisory.
 // No heap allocations/locks are needed by the research DSP callback.
@@ -15,13 +15,13 @@ using APEX::Compressor::ApexOptoCircuitPathResearchCore;
 using APEX::Compressor::ApexOptoCircuitResearchParameters;
 
 namespace {
-constexpr int sampleRate=48000;
 constexpr int maxFrames=128;
 constexpr int measuredBlocks=512;
 constexpr double pi=3.14159265358979323846;
 using Clock=std::chrono::steady_clock;
 
-void survey(int blockFrames,bool magnetic) {
+void survey(int sampleRate,int blockFrames,bool magnetic) {
+    if(sampleRate!=44100 && sampleRate!=48000)std::abort();
     if(blockFrames!=64 && blockFrames!=128)std::abort();
     ApexOptoCircuitPathResearchCore dsp;
     dsp.prepare(sampleRate,magnetic);
@@ -78,7 +78,8 @@ void survey(int blockFrames,bool magnetic) {
     const auto maxMs=callbackMs.back();
     const double dspShare=100.0*totalMs/audioMs;
     std::cout<<std::fixed<<std::setprecision(4)
-             <<"mode="<<(magnetic?"4x":"1x")
+             <<"sample_rate="<<sampleRate
+             <<" mode="<<(magnetic?"4x":"1x")
              <<" frames="<<blockFrames
              <<" callback_budget_ms="<<deadlineMs
              <<" total_dsp_ms="<<totalMs
@@ -92,9 +93,10 @@ void survey(int blockFrames,bool magnetic) {
 } // namespace
 
 int main(){
-    for(int frames:{64,128}){
-        survey(frames,false);
-        survey(frames,true);
+    for(int rate:{44100,48000})
+      for(int frames:{64,128}){
+        survey(rate,frames,false);
+        survey(rate,frames,true);
     }
-    std::cout<<"APEX Opto 48k stereo block survey completed (no host qualification)\n";
+    std::cout<<"APEX Opto 44.1k/48k stereo block survey completed (no host qualification)\n";
 }
