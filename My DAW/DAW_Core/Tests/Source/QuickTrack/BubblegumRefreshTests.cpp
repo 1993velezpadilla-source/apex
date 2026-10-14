@@ -365,7 +365,12 @@ public:
                 expect(hasDestination(initial, destinationId), "post-fader cable exists");
                 if (initial.empty()) return;
                 const auto originalId = initial.front().sendId;
+                const int refreshesBeforePre = h.refresh.topologyRefreshCount;
                 h.sends.setSendPreFader(h.graph, sourceId, destinationId, true);
+                expect(h.refresh.topologyRefreshCount > refreshesBeforePre,
+                       "PRE/POST transition invalidates the actual routing UI listener");
+                expect(!h.refresh.snapshotCacheValid,
+                       "PRE/POST transition invalidates cached cable presentation");
                 expect(h.sends.isSendPreFader(h.graph, sourceId, destinationId),
                        "engine route switches to pre-fader");
                 const auto records = adapter.getSendRecords(h.graph, sync, {});
