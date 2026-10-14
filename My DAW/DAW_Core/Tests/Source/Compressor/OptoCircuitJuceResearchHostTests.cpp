@@ -838,6 +838,83 @@ public:
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        beginTest("AudioEngine research opt-in dispatch aligns direct + send + bus exactly once");
+        for(const double rate:{44100.0,48000.0})
+        {
+            for(const int frames:{31,64,128})
+            {
+                DAW::AudioEngine engine;
+                // No Release audio rendering is enabled: runtime opt-in
+                // exists exclusively in the APEXTests preprocessor build.
+                expectEquals(static_cast<int>(
+                    engine.getMonitoringPdcMode()),
+                    static_cast<int>(DAW::LiveMonitoringBypassCore::Mode::Bypass));
+                engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+                DAW::RoutingSnapshot graph;
+                graph.version=610;
+                graph.nodes={
+                    {"vocal-node","vocal",DAW::RoutingNodeType::Track,true},
+                    {"aux-node","aux",DAW::RoutingNodeType::Bus,true},
+                    {"master","master",DAW::RoutingNodeType::Master,true}};
+                graph.processingOrder={"vocal-node","aux-node","master"};
+                DAW::RoutingSnapshot::EdgeSnapshot direct,send,bus;
+                direct.id="direct";direct.sourceNodeId="vocal-node";
+                direct.destNodeId="master";direct.type=DAW::ConnectionType::Direct;
+                send.id="send";send.sourceNodeId="vocal-node";
+                send.destNodeId="aux-node";send.type=DAW::ConnectionType::Send;
+                bus.id="bus";bus.sourceNodeId="aux-node";
+                bus.destNodeId="master";bus.type=DAW::ConnectionType::Direct;
+                graph.edges={direct,send,bus};
+                std::map<DAW::TrackID,int> delays={{"vocal",32},{"aux",16}};
+                expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    graph,&delays,2,rate));
+                DAW::PluginParallelDryDelayResearchCore vocalFx,auxFx;
+                expect(vocalFx.prepare(2,32));
+                expect(auxFx.prepare(2,16));
+                constexpr int total=499;
+                for(int start=0;start<total;start+=frames)
+                {
+                    const int n=std::min(frames,total-start);
+                    juce::AudioBuffer<float> dry(2,n),wet(2,n);
+                    for(int i=0;i<n;++i)
+                    {
+                        const int at=start+i;
+                        dry.setSample(0,i,static_cast<float>(.14*std::sin(at*.057)));
+                        dry.setSample(1,i,static_cast<float>(.18*std::cos(at*.041)));
+                    }
+                    vocalFx.process(dry.getArrayOfWritePointers(),2,n);
+                    for(int ch=0;ch<2;++ch)
+                        wet.copyFrom(ch,0,dry,ch,0,n);
+                    expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,dry));
+                    expect(engine.renderOnePreparedGraphEdgeForTests(graph,1,wet));
+                    auxFx.process(wet.getArrayOfWritePointers(),2,n);
+                    expect(engine.renderOnePreparedGraphEdgeForTests(graph,2,wet));
+                    for(int i=0;i<n;++i)
+                    {
+                        const int at=start+i-48;
+                        const double expectedL=at<0?0.0:2.*.14*std::sin(at*.057);
+                        const double expectedR=at<0?0.0:2.*.18*std::cos(at*.041);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(dry.getSample(0,i)+wet.getSample(0,i)),
+                            expectedL,2.e-6);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(dry.getSample(1,i)+wet.getSample(1,i)),
+                            expectedR,2.e-6);
+                    }
+                }
+                juce::AudioBuffer<float> check(2,31);
+                check.clear();
+                graph.version=611;
+                expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check),
+                       "stale graph cannot dispatch a mismatched PDC bank");
+                // A format reprepare must replace histories atomically.
+                expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    graph,&delays,2,rate));
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                expect(engine.collectGraphPdcRetiredOnControlThread()>0);
+            }
+        }
+
         beginTest("Actual AudioEngine stages immutable programme PDC at control boundary without changing renderer");
         {
             // Compile and instantiate the ACTUAL engine under the APEXTests
