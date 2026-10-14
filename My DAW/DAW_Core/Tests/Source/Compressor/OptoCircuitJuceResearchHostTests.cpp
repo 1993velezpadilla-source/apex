@@ -921,6 +921,70 @@ public:
             }
         }
 
+        beginTest("Stable route survives graph publication with uninterrupted 16-sample PDC history");
+        for(const int frames:{31,64}) {
+            for(const double rate:{44100.0,48000.0}) {
+                using Owner=DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore;
+                DAW::RoutingSnapshot graph;
+                graph.version=701;
+                graph.nodes={
+                    {"vocal","track-vocal",DAW::RoutingNodeType::Track,true},
+                    {"aux","track-aux",DAW::RoutingNodeType::Bus,true},
+                    {"master","master",DAW::RoutingNodeType::Master,true}};
+                graph.processingOrder={"vocal","aux","master"};
+                DAW::RoutingSnapshot::EdgeSnapshot dry,send,wet;
+                dry.id="stable-dry";dry.sourceNodeId="vocal";
+                dry.destNodeId="master";dry.type=DAW::ConnectionType::Direct;
+                send.id="stable-send";send.sourceNodeId="vocal";
+                send.destNodeId="aux";send.type=DAW::ConnectionType::Send;
+                wet.id="stable-wet";wet.sourceNodeId="aux";
+                wet.destNodeId="master";wet.type=DAW::ConnectionType::Direct;
+                graph.edges={dry,send,wet};
+                std::map<DAW::TrackID,int> delays={
+                    {"track-vocal",32},{"track-aux",16}};
+                Owner owner;
+                expect(owner.publishPrepared(graph,&delays,2));
+                auto run=[&](int first,int count,bool expectContinuous) {
+                    auto scope=owner.readRealtime();
+                    expect(static_cast<bool>(scope));
+                    expectEquals(scope->dispatch.edgeDelay(0),16);
+                    juce::AudioBuffer<float> stereo(2,count);
+                    for(int i=0;i<count;++i) {
+                        stereo.setSample(0,i,static_cast<float>((first+i+1)*.001));
+                        stereo.setSample(1,i,static_cast<float>(-(first+i+1)*.002));
+                    }
+                    expect(scope->dispatch.processEdge(
+                        scope->graph.version,0,stereo.getArrayOfWritePointers(),2,count));
+                    for(int i=0;i<count;++i) {
+                        const int source=first+i-16;
+                        const double left=source<0||(!expectContinuous&&i<16)
+                            ?0.0:(source+1)*.001;
+                        const double right=source<0||(!expectContinuous&&i<16)
+                            ?0.0:-(source+1)*.002;
+                        expectWithinAbsoluteError(
+                            static_cast<double>(stereo.getSample(0,i)),left,1.e-5);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(stereo.getSample(1,i)),right,1.e-5);
+                    }
+                };
+                run(0,frames,true);
+                // Unchanged route identity + delay MUST reuse the exact ring
+                // history instead of inserting 16 new silent samples.
+                graph.version=702;
+                expect(owner.publishPrepared(graph,&delays,2));
+                run(frames,frames,true);
+                // Changing the TAP identity on a route forces a fresh bank
+                // for this edge even though its ID and delay are the same.
+                // This intentionally gates old, semantically unrelated audio.
+                graph.edges[0].tapPoint=DAW::TapPoint::PostFX;
+                graph.version=703;
+                expect(owner.publishPrepared(graph,&delays,2));
+                run(2*frames,frames,false);
+                expectEquals(owner.collectRetiredOnControlThread(),
+                             static_cast<std::size_t>(2));
+            }
+        }
+
         beginTest("Changing quality during prepare updates latency without callback toggles");
         OptoCircuitJuceResearchProbe probe(false);
         probe.prepareToPlay(sr,128);
