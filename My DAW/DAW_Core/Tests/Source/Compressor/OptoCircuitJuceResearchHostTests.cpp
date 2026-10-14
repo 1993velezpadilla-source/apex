@@ -7,6 +7,7 @@
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcJuceResearchBridge.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcJuceDispatchResearchCore.h"
+#include "../../../Source/PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -830,6 +831,93 @@ public:
                 expect(!dispatcher.prepare(graph,&latencies,2));
                 expectEquals(dispatcher.version(),static_cast<std::uint64_t>(208));
                 expectEquals(dispatcher.edgeDelay(0),0);
+            }
+        }
+
+        beginTest("Control-published RoutingSnapshot and PDC bank remain coherent across concurrent generations");
+        {
+            using Owner=DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore;
+            DAW::RoutingSnapshot g;
+            g.version=500;
+            g.nodes={
+                {"vocal-node","vocal",DAW::RoutingNodeType::Track,true},
+                {"aux-node","aux",DAW::RoutingNodeType::Bus,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            g.processingOrder={"vocal-node","aux-node","master"};
+            const auto edge=[](const char* id,const char* src,const char* dst,
+                               DAW::ConnectionType type) {
+                DAW::RoutingSnapshot::EdgeSnapshot e;
+                e.id=id;e.sourceNodeId=src;e.destNodeId=dst;e.type=type;
+                return e;
+            };
+            g.edges={
+                edge("dry","vocal-node","master",DAW::ConnectionType::Direct),
+                edge("to-aux","vocal-node","aux-node",DAW::ConnectionType::Send),
+                edge("wet","aux-node","master",DAW::ConnectionType::Direct)};
+            std::map<DAW::TrackID,int> latencies={
+                {"vocal",32},{"aux",16}};
+            Owner owner;
+            expect(owner.publishPrepared(g,&latencies,2));
+            expectEquals(owner.latestPublicationOnControlThread(),
+                         static_cast<std::uint64_t>(1));
+            {
+                auto old=owner.readRealtime();
+                expect(static_cast<bool>(old));
+                expectEquals(old->graph.version,static_cast<std::uint64_t>(500));
+                expectEquals(old->dispatch.edgeDelay(0),16);
+                // Commit a new routing generation while the prior audio
+                // reader is STILL using its original snapshot and bank.
+                g.edges[1].active=false;
+                g.version=501;
+                expect(owner.publishPrepared(g,&latencies,2));
+                expectEquals(owner.latestPublicationOnControlThread(),
+                             static_cast<std::uint64_t>(2));
+                expectEquals(owner.retainedGenerationsOnControlThread(),
+                             static_cast<std::size_t>(1));
+                expectEquals(owner.collectRetiredOnControlThread(),
+                             static_cast<std::size_t>(0));
+                {
+                    auto fresh=owner.readRealtime();
+                    expect(static_cast<bool>(fresh));
+                    expectEquals(fresh->graph.version,
+                                 static_cast<std::uint64_t>(501));
+                    expectEquals(fresh->dispatch.edgeDelay(0),0);
+                    expectEquals(fresh->dispatch.edgeDelay(1),-1);
+                    float l[64]{},r[64]{};
+                    l[0]=.4f;r[0]=-.2f;
+                    float* data[]={l,r};
+                    expect(fresh->dispatch.processEdge(
+                        fresh->graph.version,0,data,2,64));
+                    expectWithinAbsoluteError(static_cast<double>(l[0]),
+                                              .4,1.e-6);
+                    expectWithinAbsoluteError(static_cast<double>(r[0]),
+                                              -.2,1.e-6);
+                    expect(!fresh->dispatch.processEdge(
+                        old->graph.version,0,data,2,64));
+                }
+                float l[64]{},r[64]{};
+                l[0]=.35f;r[0]=-.15f;
+                float* data[]={l,r};
+                expect(old->dispatch.processEdge(
+                    old->graph.version,0,data,2,64));
+                expectWithinAbsoluteError(static_cast<double>(l[16]),
+                                          .35,1.e-6);
+                expectWithinAbsoluteError(static_cast<double>(r[16]),
+                                          -.15,1.e-6);
+                expectEquals(old->graph.version,static_cast<std::uint64_t>(500));
+                expectEquals(old->dispatch.edgeDelay(0),16);
+            }
+            expectEquals(owner.collectRetiredOnControlThread(),
+                         static_cast<std::size_t>(1));
+            g.processingOrder={"master","vocal-node","aux-node"};
+            expect(!owner.publishPrepared(g,&latencies,2));
+            expectEquals(owner.latestPublicationOnControlThread(),
+                         static_cast<std::uint64_t>(2));
+            {
+                auto unchanged=owner.readRealtime();
+                expectEquals(unchanged->graph.version,
+                             static_cast<std::uint64_t>(501));
+                expectEquals(unchanged->dispatch.edgeDelay(0),0);
             }
         }
 
