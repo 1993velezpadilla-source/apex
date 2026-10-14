@@ -83,7 +83,8 @@ public:
         for(std::size_t i=0;i<live.edges.size();++i) {
             const auto& a=live.edges[i];
             const auto& b=prepared.edges[i];
-            if(a.id!=b.id || a.sourceNodeId!=b.sourceNodeId ||
+            if(a.retiring || b.retiring ||
+               a.id!=b.id || a.sourceNodeId!=b.sourceNodeId ||
                a.destNodeId!=b.destNodeId || a.type!=b.type ||
                a.active!=b.active || a.bypassed!=b.bypassed ||
                a.tapPoint!=b.tapPoint ||
