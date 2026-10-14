@@ -10,6 +10,8 @@
 #include "../../../Source/PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
 #include "../../../Source/AudioEngineCore/AudioEngine.h"
+// Compiles the conditional message-thread graph publication interface too.
+#include "../../../Source/AppCore/ApplicationCore.h"
 #endif
 #include <array>
 #include <algorithm>
@@ -1000,6 +1002,17 @@ public:
             expect(owner.publishPrepared(graph,&latencies,2,48000.0));
             expectEquals(owner.latestPublicationOnControlThread(),
                          static_cast<std::uint64_t>(1));
+            // Leave a nonzero impulse in the previously published ring.
+            // A changed absolute source timing must not replay it later.
+            {
+                auto original=owner.readRealtime();
+                float oldL[1]={.6f},oldR[1]={-.3f};
+                float* oldStereo[]={oldL,oldR};
+                expect(original->dispatch.processEdge(
+                    graph.version,0,oldStereo,2,1));
+                expectEquals(oldL[0],0.0f);
+                expectEquals(oldR[0],0.0f);
+            }
             // A new insertion latency changes absolute source timing even
             // when direct-route PDC compensation is still exactly 16.
             latencies["voice"]=48;
