@@ -369,6 +369,106 @@ public:
                 }
             }
         }
+        beginTest("Real PluginChainCore clears slot+chain dry FIFOs on reset");
+        for(const double rate:{44100.0,48000.0}) {
+            DAW::PluginChainCore chain;
+            chain.prepare(rate,64);
+            expectEquals(chain.appendPluginInstanceForTesting(
+                std::make_unique<ExactHostDelayResearchPlugin>()),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            // Populate history on all three delay lines.
+            for(int block=0;block<8;++block) {
+                juce::AudioBuffer<float> audio(2,64);
+                for(int ch=0;ch<2;++ch)
+                    for(int n=0;n<64;++n)
+                        audio.setSample(ch,n,ch==0?.42f:-.29f);
+                chain.processBlock(audio,64);
+            }
+            chain.reset();
+            juce::AudioBuffer<float> impulse(2,64);
+            impulse.clear();
+            impulse.setSample(0,0,.40f);
+            impulse.setSample(1,0,-.20f);
+            chain.processBlock(impulse,64);
+            for(int i=0;i<64;++i) {
+                const double factor=1.0+0.7071067811865475244;
+                const double left=i==32?factor*.4:0;
+                const double right=i==32?factor*(-.2):0;
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(0,i)),left,3.e-5);
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(1,i)),right,3.e-5);
+            }
+        }
+
+        beginTest("Real host PDC retains dry history when slot and chain are fully wet");
+        for(const double rate:{44100.0,48000.0}) {
+            DAW::PluginChainCore chain;
+            chain.prepare(rate,64);
+            expectEquals(chain.appendPluginInstanceForTesting(
+                std::make_unique<ExactHostDelayResearchPlugin>()),0);
+            chain.setSlotMix(0,1.0f);
+            chain.setChainOutputMix(1.0f);
+            // Must record dry history despite no audible dry gain.
+            for(int b=0;b<8;++b) {
+                juce::AudioBuffer<float> audio(2,64);
+                for(int i=0;i<64;++i) {
+                    audio.setSample(0,i,.33f);
+                    audio.setSample(1,i,-.19f);
+                }
+                chain.processBlock(audio,64);
+            }
+            chain.setSlotMix(0,0.0f);
+            chain.setChainOutputMix(0.0f);
+            juce::AudioBuffer<float> audio(2,64);
+            audio.clear();
+            chain.processBlock(audio,64);
+            for(int i=0;i<32;++i) {
+                expectWithinAbsoluteError(
+                    static_cast<double>(audio.getSample(0,i)),.33,1.e-6);
+                expectWithinAbsoluteError(
+                    static_cast<double>(audio.getSample(1,i)),-.19,1.e-6);
+            }
+            for(int i=32;i<64;++i) {
+                expectWithinAbsoluteError(
+                    static_cast<double>(audio.getSample(0,i)),0.0,1.e-6);
+                expectWithinAbsoluteError(
+                    static_cast<double>(audio.getSample(1,i)),0.0,1.e-6);
+            }
+        }
+
+        beginTest("Real host PDC bypass after fade stays aligned after reset");
+        for(const double rate:{44100.0,48000.0}) {
+            DAW::PluginChainCore chain;
+            chain.prepare(rate,64);
+            expectEquals(chain.appendPluginInstanceForTesting(
+                std::make_unique<ExactHostDelayResearchPlugin>()),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            chain.setSlotBypassed(0,true);
+            // Fade length ~5 ms and must settle before the impulse.
+            for(int b=0;b<8;++b) {
+                juce::AudioBuffer<float> zeros(2,64);
+                zeros.clear();
+                chain.processBlock(zeros,64);
+            }
+            chain.reset();
+            juce::AudioBuffer<float> impulse(2,64);
+            impulse.clear();
+            impulse.setSample(0,0,.3f);
+            impulse.setSample(1,0,-.15f);
+            chain.processBlock(impulse,64);
+            const double factor=1.4142135623730951; // dry plus dry at 50% chain
+            for(int i=0;i<64;++i) {
+                const double left=i==32?.3*factor:0.0;
+                const double right=i==32?-.15*factor:0.0;
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(0,i)),left,3.e-5);
+                expectWithinAbsoluteError(
+                    static_cast<double>(impulse.getSample(1,i)),right,3.e-5);
+            }
+        }
 #endif
 
         beginTest("Changing quality during prepare updates latency without callback toggles");
