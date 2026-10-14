@@ -64,6 +64,15 @@ public:
     // Caller must have fully stopped realtime readers before destroying
     // this publisher; destruction remains on control thread.
     Reader readRealtime() noexcept{return Reader(*this);}
+    // Control thread only: serialize all publishPrepared() calls. This pointer
+    // is stable until the NEXT control publication, even while an audio
+    // Reader holds the same published state. Do NOT hold it past publish().
+    // Unlike readRealtime(), this does not artificially pin an RCU reader
+    // and therefore cannot exhaust the retirement budget when there are
+    // many successive UI edits but no actual realtime readers.
+    PreparedState* activeStateControlOnly() const noexcept {
+        return active_.get();
+    }
     bool publishPrepared(std::unique_ptr<PreparedState> next) {
         if(!next)return false;
         collectRetired();
