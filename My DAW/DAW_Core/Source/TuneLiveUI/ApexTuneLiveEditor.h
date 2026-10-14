@@ -430,7 +430,7 @@ private:
         // not a separate hidden preset flag. Host recall or manual tweaking
         // can therefore never display a misleading selected profile.
         const auto close=[this](int id,float expected) {
-            return std::abs(parameter(id).getValue()-expected)<0.012f;
+            return std::abs(parameter(id).getValue()-expected)<0.0015f;
         };
         int matchingStyle=-1;
         for(int i=0;i<3;++i) {
@@ -488,9 +488,19 @@ private:
             const float midi=69.0f+12.0f*std::log2(hz/reference);
             const int note=juce::jlimit(0,127,juce::roundToInt(midi));
             trackedCents_=(midi-static_cast<float>(note))*100.0f;
-            constexpr std::array<const char*,12> names{{
+            // Honor the spelling currently selected by the artist: Bb/Ab
+            // modes show Bb/Ab on the tracked display instead of A#/G#.
+            // This only affects text, never pitch classes, DSP or state.
+            constexpr std::array<const char*,12> sharpNames{{
                 "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
             }};
+            constexpr std::array<const char*,12> flatNames{{
+                "C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"
+            }};
+            const int selected=keys_.getSelectedId();
+            const bool useFlats=selected==3 || selected==6 || selected==10
+                                 || selected==13 || selected==16;
+            const auto& names=useFlats?flatNames:sharpNames;
             pitchLabel_.setText(juce::String(names[static_cast<std::size_t>(note%12)])
                 +juce::String(note/12-1),juce::dontSendNotification);
             pitchCaption_.setText(juce::String((midi-note)*100.0f,1)
