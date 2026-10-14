@@ -914,7 +914,11 @@ public:
                 graph.edges[1].active=false;
                 expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
                 graph.edges[1].active=true;
+                graph.edges[0].gain=.42f;
                 expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                graph.edges[0].retiring=true;
+                expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                graph.edges[0].retiring=false;
                 graph.edges[0].tapPoint=DAW::TapPoint::PostFX;
                 expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
                 graph.edges[0].tapPoint=DAW::TapPoint::PreFX;
