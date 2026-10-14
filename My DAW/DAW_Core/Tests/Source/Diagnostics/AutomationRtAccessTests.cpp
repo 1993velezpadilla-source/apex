@@ -6327,6 +6327,101 @@ public:
 static AutomationV2ModeTruthTableGauntletTests
     automationV2ModeTruthTableGauntletTests;
 
+/**
+ * Parameter-mode, key-registry and hosted/native parameter-map publications
+ * must retain every superseded generation, not only the immediately previous
+ * one. Rapid message-thread changes inside a 128-sample callback previously
+ * risked leaving an RT reader as the last owner of an older shared map.
+ */
+class AutomationV2MetadataRtRetirementGauntletTests final : public juce::UnitTest
+{
+public:
+    AutomationV2MetadataRtRetirementGauntletTests()
+        : juce::UnitTest("automation.v2-metadata-rt-retirement-gauntlet.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using namespace apex::automation;
+
+        beginTest("Mode snapshots retain oldest audio generation after rapid map mutations");
+        AutomationModeState modes;
+        modes.setMode(939001, AutomationMode::Read);
+        auto oldModeMap = modes.getStateSnapshotRT();
+        expect(oldModeMap != nullptr);
+        if (oldModeMap != nullptr)
+        {
+            std::weak_ptr<std::remove_reference_t<decltype(*oldModeMap)>>
+                weakOld(oldModeMap);
+            modes.setMode(939002, AutomationMode::Write);
+            modes.setMode(939003, AutomationMode::Touch);
+            modes.clearOverride(939003);
+            expect(!weakOld.expired());
+            oldModeMap.reset(); // audio block finishes
+            expect(!weakOld.expired(),
+                   "mode metadata must be retired off the audio thread");
+            modes.setMode(939004, AutomationMode::Latch);
+            expect(weakOld.expired(),
+                   "next control mode publish reclaims unpinned old map");
+        }
+
+        beginTest("Parameter-key snapshots remain pinned over three key registrations");
+        AutomationParameterKeyRegistry keys;
+        keys.getOrCreateID("plugin.rt-939101.cutoff");
+        auto oldKeys = keys.getKeySnapshotRT();
+        expect(oldKeys != nullptr);
+        if (oldKeys != nullptr)
+        {
+            std::weak_ptr<std::remove_reference_t<decltype(*oldKeys)>>
+                weakOld(oldKeys);
+            keys.getOrCreateID("plugin.rt-939102.drive");
+            keys.getOrCreateID("plugin.rt-939103.mix");
+            keys.getOrCreateID("track.rt-939104.send");
+            expect(oldKeys->size() == 1);
+            oldKeys.reset();
+            expect(!weakOld.expired(),
+                   "key map must outlive its RT reader");
+            keys.getOrCreateID("track.rt-939105.volume");
+            expect(weakOld.expired());
+        }
+
+        beginTest("Parameter-map snapshots retain replaced generations during churn");
+        AutomationParameterRegistry registry;
+        for (const auto id : {939201u})
+            registry.createParameter(id, "initial", ParameterRange{});
+        auto oldParameters = registry.getSnapshotRT();
+        expect(oldParameters != nullptr);
+        if (oldParameters != nullptr)
+        {
+            std::weak_ptr<std::remove_reference_t<decltype(*oldParameters)>>
+                weakOld(oldParameters);
+            registry.createParameter(939202u, "track pan", ParameterRange{});
+            registry.createParameter(939203u, "plugin wet", ParameterRange{});
+            registry.unregisterParameter(939202u);
+            expect(oldParameters->size() == 1);
+            oldParameters.reset();
+            expect(!weakOld.expired(),
+                   "registry map must outlive its audio callback");
+            registry.createParameter(939204u, "track gain", ParameterRange{});
+            expect(weakOld.expired());
+        }
+
+        beginTest("Repeated realtime metadata reads remain allocation-free");
+        {
+            juce::UnitTestAllocationChecker checker(*this);
+            for (int i = 0; i < 512; ++i)
+            {
+                auto mode = modes.getModeRT(939001);
+                auto key = keys.findIDRT("plugin.rt-939101.cutoff");
+                auto view = registry.getSnapshotRT();
+                juce::ignoreUnused(mode, key, view);
+            }
+        }
+    }
+};
+static AutomationV2MetadataRtRetirementGauntletTests
+    automationV2MetadataRtRetirementGauntletTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
