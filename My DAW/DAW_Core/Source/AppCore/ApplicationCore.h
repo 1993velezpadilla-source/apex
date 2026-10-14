@@ -179,7 +179,7 @@ public:
     {
         if(currentSampleRate_<=0.0 || routingGraph_==nullptr)return;
         auto* message=juce::MessageManager::getInstanceWithoutCreating();
-        if(message!=nullptr && !message->isThisTheMessageThread())return;
+        if(message==nullptr || !message->isThisTheMessageThread())return;
         auto graph=routingGraph_->getSnapshotPublisher().get();
         if(!graph)return;
         auto latency=audioEngine_.getChainLatenciesRT();
