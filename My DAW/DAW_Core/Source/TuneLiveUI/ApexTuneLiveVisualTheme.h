@@ -16,15 +16,36 @@ inline juce::Colour ivory()      { return juce::Colour::fromRGB(241, 237, 232); 
 inline juce::Colour muted()      { return juce::Colour::fromRGB(164, 185, 203); }
 
 inline void panel(juce::Graphics& g,juce::Rectangle<float> bounds,float radius=18.0f) {
-    g.setColour(juce::Colours::black.withAlpha(0.75f));
-    g.fillRoundedRectangle(bounds.translated(0.0f,3.0f),radius);
-    g.setGradientFill(juce::ColourGradient(panelTop(),bounds.getTopLeft(),
-                                         panelBottom(),bounds.getBottomRight(),false));
+    // Real layered vector glass. All geometry is local to the JUCE paint
+    // callback: there is no texture loading and no audio-thread work.
+    g.setColour(juce::Colours::black.withAlpha(0.82f));
+    g.fillRoundedRectangle(bounds.translated(0.0f,4.0f),radius);
+    juce::ColourGradient body(juce::Colour::fromRGB(22,38,55),
+        bounds.getTopLeft(),juce::Colour::fromRGB(7,19,30),
+        bounds.getBottomRight(),false);
+    body.addColour(0.40,juce::Colour::fromRGB(12,27,42));
+    body.addColour(0.78,juce::Colour::fromRGB(7,19,30));
+    g.setGradientFill(body);
     g.fillRoundedRectangle(bounds,radius);
-    g.setColour(cyan().withAlpha(0.29f));
+    {
+        juce::Graphics::ScopedSaveState clip(g);
+        g.reduceClipRegion(bounds.toNearestInt());
+        // Reference's blue underlighting and warm glass-edge reflections.
+        g.setGradientFill(juce::ColourGradient(cyan().withAlpha(0.16f),
+             bounds.getCentreX(),bounds.getBottom(),
+             cyan().withAlpha(0.0f),bounds.getCentreX(),
+             bounds.getBottom()-105.0f,true));
+        g.fillRect(bounds.reduced(radius*0.5f,0.0f));
+        g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.085f),
+             bounds.getX()+radius,bounds.getY(),
+             juce::Colours::white.withAlpha(0.0f),
+             bounds.getX()+radius,bounds.getY()+38.0f,false));
+        g.fillRect(bounds.removeFromTop(38.0f));
+    }
+    g.setColour(cyan().withAlpha(0.28f));
     g.drawRoundedRectangle(bounds.reduced(0.6f),radius,1.2f);
-    g.setColour(juce::Colours::white.withAlpha(0.06f));
-    g.drawHorizontalLine(static_cast<int>(bounds.getY()+3.0f),
+    g.setColour(juce::Colours::white.withAlpha(0.11f));
+    g.drawHorizontalLine(static_cast<int>(bounds.getY()+2.0f),
                          bounds.getX()+radius,bounds.getRight()-radius);
 }
 inline void sectionTitle(juce::Graphics& g,const juce::String& title,float x,float y) {
@@ -59,9 +80,12 @@ public:
         const float radius=size*0.37f;
         const float angle=startAngle+position*(endAngle-startAngle);
         const juce::Rectangle<float> circle(cx-radius,cy-radius,2.0f*radius,2.0f*radius);
-        // Scale the light and texture with the knob; no raster assets.
-        g.setColour(juce::Colours::black.withAlpha(0.75f));
-        g.fillEllipse(circle.expanded(7.0f).translated(0.0f,3.0f));
+        // Concentric brushed-metal bevels and luminous progress arc.
+        // Scale with component bounds; no stored bitmap or processBlock work.
+        g.setColour(juce::Colours::black.withAlpha(0.82f));
+        g.fillEllipse(circle.expanded(11.0f).translated(0.0f,5.0f));
+        g.setColour(cyan().withAlpha(0.075f));
+        g.fillEllipse(circle.expanded(14.0f));
         for(int i=0;i<=42;++i) {
             const float a=startAngle+static_cast<float>(i)*(endAngle-startAngle)/42.0f;
             const float r0=radius+12.0f,r1=radius+14.5f;
@@ -77,26 +101,40 @@ public:
         g.setColour(juce::Colour::fromRGB(47,69,79));
         g.strokePath(track,juce::PathStrokeType(6.0f,juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
-        g.setColour(gold().withAlpha(0.22f));
-        g.strokePath(lit,juce::PathStrokeType(12.0f,juce::PathStrokeType::curved,
+        g.setColour(gold().withAlpha(0.12f));
+        g.strokePath(lit,juce::PathStrokeType(16.0f,juce::PathStrokeType::curved,
+                                             juce::PathStrokeType::rounded));
+        g.setColour(gold().withAlpha(0.38f));
+        g.strokePath(lit,juce::PathStrokeType(8.5f,juce::PathStrokeType::curved,
                                              juce::PathStrokeType::rounded));
         g.setColour(gold());
-        g.strokePath(lit,juce::PathStrokeType(5.2f,juce::PathStrokeType::curved,
+        g.strokePath(lit,juce::PathStrokeType(4.7f,juce::PathStrokeType::curved,
                                              juce::PathStrokeType::rounded));
-        g.setGradientFill(juce::ColourGradient(juce::Colour::fromRGB(93,113,126),
-                                             circle.getTopLeft(),
-                                             juce::Colour::fromRGB(13,23,32),
-                                             circle.getBottomRight(),false));
+        juce::ColourGradient rim(juce::Colour::fromRGB(145,164,177),
+                                 circle.getTopLeft(),
+                                 juce::Colour::fromRGB(9,17,26),
+                                 circle.getBottomRight(),false);
+        rim.addColour(0.29,juce::Colour::fromRGB(64,82,98));
+        rim.addColour(0.68,juce::Colour::fromRGB(18,32,44));
+        g.setGradientFill(rim);
         g.fillEllipse(circle);
-        g.setColour(juce::Colour::fromRGB(9,19,28));
-        g.fillEllipse(circle.reduced(7.0f));
-        g.setGradientFill(juce::ColourGradient(juce::Colour::fromRGB(37,52,65),
-                                             circle.getTopLeft(),
-                                             juce::Colour::fromRGB(10,19,29),
-                                             circle.getBottomRight(),false));
-        g.fillEllipse(circle.reduced(10.0f));
-        g.setColour(juce::Colours::white.withAlpha(0.12f));
-        g.drawEllipse(circle.reduced(10.0f),1.0f);
+        g.setColour(juce::Colour::fromRGB(6,14,22));
+        g.fillEllipse(circle.reduced(5.0f));
+        const auto face=circle.reduced(9.0f);
+        juce::ColourGradient metal(juce::Colour::fromRGB(50,66,80),
+                                  face.getTopLeft(),
+                                  juce::Colour::fromRGB(7,17,27),
+                                  face.getBottomRight(),false);
+        metal.addColour(0.47,juce::Colour::fromRGB(26,40,54));
+        g.setGradientFill(metal);
+        g.fillEllipse(face);
+        g.setColour(juce::Colours::white.withAlpha(0.16f));
+        g.drawEllipse(face,1.1f);
+        g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.12f),
+                    face.getCentreX(),face.getY(),
+                    juce::Colours::white.withAlpha(0.0f),
+                    face.getCentreX(),face.getCentreY(),false));
+        g.fillEllipse(face.reduced(9.0f));
         const float tip=radius+4.5f;
         g.setColour(gold().withAlpha(0.20f));
         g.fillEllipse(cx+std::sin(angle)*tip-9.0f,
@@ -138,6 +176,27 @@ public:
             g.setColour(gold().withAlpha(0.10f));
             g.fillRoundedRectangle(r.reduced(3.0f),5.0f);
         }
+        // Hairline waveform on all three preset buttons echoes the mockup.
+        for(int lane=0;lane<4;++lane) {
+            juce::Path wave;
+            const float baseline=r.getCentreY()+7.0f+lane*2.6f;
+            for(int i=0;i<=24;++i) {
+                const float tx=static_cast<float>(i)/24.0f;
+                const float xx=r.getX()+9.0f+tx*(r.getWidth()-18.0f);
+                const float yy=baseline-8.0f*std::sin(tx*6.2831853f
+                                         +lane*0.17f)*std::sin(tx*3.14159265f);
+                if(i==0)wave.startNewSubPath(xx,yy); else wave.lineTo(xx,yy);
+            }
+            g.setColour(accent.withAlpha(selected?0.13f:0.08f));
+            g.strokePath(wave,juce::PathStrokeType(0.75f));
+        }
+    }
+    void drawButtonText(juce::Graphics& g,juce::TextButton& button,
+                        bool, bool) override {
+        g.setColour(button.getToggleState()?gold():ivory());
+        g.setFont(juce::Font(juce::FontOptions(13.8f).withStyle("Bold")));
+        g.drawText(button.getButtonText(),button.getLocalBounds(),
+                   juce::Justification::centred);
     }
     void drawToggleButton(juce::Graphics& g,juce::ToggleButton& button,
                           bool hovered,bool pressed) override {
