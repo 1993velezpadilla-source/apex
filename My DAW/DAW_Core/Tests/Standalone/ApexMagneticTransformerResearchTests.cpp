@@ -26,8 +26,7 @@ static double harmonic(const std::vector<double>& audio,int hz,int sr,int start)
     }
     return 2*std::hypot(re,im)/(audio.size()-start);
 }
-static std::vector<double> render(int factor,double drive,int hz) {
-    constexpr int sr=48000;
+static std::vector<double> render(int factor,double drive,int hz,int sr=48000) {
     ApexMagneticResearchSettings p;
     p.oversampling=factor;p.drive=drive;p.dcBias=0;p.fluxCoupling=0;
     ApexMagneticTransformerResearchCore c;c.prepare(sr,p);
@@ -77,6 +76,34 @@ int main(){
                " x1="<<folded<<" x4="<<reduced<<"\n";
     assert(folded>.001 && cleanAlias<folded*.1);
     assert(reduced<folded*.65); // demonstrable reduction, not alias-free
+    // 44.1 kHz must be a first-class recording rate, not an invalid-input
+    // smoke check. 10 kHz -> third harmonic at 30 kHz folds to 14.1 kHz.
+    {
+        constexpr int rate=44100;
+        constexpr int foldedHz=rate-30000;
+        const auto unfiltered44=render(1,2.7,10000,rate);
+        const auto filtered44=render(4,2.7,10000,rate);
+        const double alias1x=harmonic(unfiltered44,foldedHz,rate,rate/2);
+        const double alias4x=harmonic(filtered44,foldedHz,rate,rate/2);
+        std::cout<<"44.1k alias 10k->14.1k: x1="<<alias1x
+                 <<" x4="<<alias4x<<"\\n";
+        assert(alias1x>.001);
+        assert(alias4x<alias1x*.65);
+        ApexMagneticResearchSettings settings;
+        settings.drive=0;
+        settings.oversampling=4;
+        ApexMagneticTransformerResearchCore impulse44;
+        impulse44.prepare(rate,settings);
+        assert(impulse44.latencySamples()==16);
+        double peak44=0;
+        int peakAt=-1;
+        for(int n=0;n<96;++n) {
+            const double v=std::abs(impulse44.process(n==0?1.0:0.0));
+            if(v>peak44) { peak44=v;peakAt=n; }
+        }
+        assert(peak44>.05);
+        assert(std::abs(peakAt-16)<=2);
+    }
     const double fundamental=harmonic(render(4,0,1000),1000,48000,24000);
     assert(fundamental>.7&&fundamental<1.1);
 
