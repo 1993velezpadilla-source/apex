@@ -7,6 +7,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp"
       - "My DAW/DAW_Core/Source/PDCCore/ProgrammeRoutePdcPlannerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPlannerResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/PDCCore/ProgrammeRoutePdcPreparedResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp"
   pull_request:
     paths:
       - ".github/workflows/apex-opto-parallel-dry-research.yml"
@@ -14,6 +16,8 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/PluginParallelDryDelayResearchTests.cpp"
       - "My DAW/DAW_Core/Source/PDCCore/ProgrammeRoutePdcPlannerResearchCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPlannerResearchTests.cpp"
+      - "My DAW/DAW_Core/Source/PDCCore/ProgrammeRoutePdcPreparedResearchCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp"
   workflow_dispatch:
 permissions:
   contents: read
@@ -42,6 +46,11 @@ jobs:
             "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPlannerResearchTests.cpp" \
             -o /tmp/apex-route-pdc
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-route-pdc
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp" \
+            -o /tmp/apex-route-processed
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 /tmp/apex-route-processed
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
@@ -58,3 +67,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MSVC routing DAG PDC compile failed" }
           ./apex-route-pdc.exe
           if ($LASTEXITCODE -ne 0) { throw "MSVC routing DAG PDC tests failed" }
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:apex-route-processed.exe "My DAW/DAW_Core/Tests/Standalone/ProgrammeRoutePdcPreparedResearchTests.cpp"
+          if ($LASTEXITCODE -ne 0) { throw "MSVC prepared route audio test compile failed" }
+          ./apex-route-processed.exe
+          if ($LASTEXITCODE -ne 0) { throw "MSVC prepared route audio test failed" }
