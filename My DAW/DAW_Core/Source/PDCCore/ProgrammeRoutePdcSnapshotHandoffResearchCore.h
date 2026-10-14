@@ -32,7 +32,14 @@ public:
                          int channels) {
         auto next=std::make_unique<PreparedGeneration>();
         next->graph=graph;
-        if(!next->dispatch.prepare(next->graph,chainLatencies,channels))
+        // Control retains an RCU Reader for the duration of preparation,
+        // including publication. DSP objects from unchanged route IDs can
+        // share delay history with the prior generation safely: the route
+        // metadata never mutates, and audio has only ONE DSP writer.
+        auto previous=publisher_.readRealtime();
+        if(!next->dispatch.prepare(
+                next->graph,chainLatencies,channels,
+                previous?&previous->dispatch:nullptr))
             return false;
         if(publicationGeneration_==UINT64_MAX)return false;
         next->publicationGeneration=publicationGeneration_+1;
