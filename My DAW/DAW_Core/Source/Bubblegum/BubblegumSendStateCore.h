@@ -97,7 +97,8 @@ public:
         if (!srcNode || !destNode) return;
         DBG("DELETE send: source=" << sourceId << " target=" << targetId);
         graph.disconnect(srcNode->id, destNode->id, ConnectionType::Send);
-        // Verify full removal
+        graph.disconnect(srcNode->id, destNode->id, ConnectionType::PreSend);
+        // Verify full removal, including pre-fader sends
         bool stillExists = sendExists(graph, sourceId, targetId);
         DBG("POST-DELETE hasSend? source=" << sourceId << " target=" << targetId << " -> " << (int)stillExists);
     }
