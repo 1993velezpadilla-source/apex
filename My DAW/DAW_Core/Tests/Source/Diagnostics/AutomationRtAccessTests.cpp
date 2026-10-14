@@ -6407,12 +6407,16 @@ public:
         }
 
         beginTest("Repeated realtime metadata reads remain allocation-free");
+        // The RT code receives a PRE-EXISTING String key. Constructing one
+        // from a string literal inside the checked loop would incorrectly
+        // attribute a test-harness conversion allocation to DSP metadata reads.
+        const juce::String cachedKey("plugin.rt-939101.cutoff");
         {
             juce::UnitTestAllocationChecker checker(*this);
             for (int i = 0; i < 512; ++i)
             {
                 auto mode = modes.getModeRT(939001);
-                auto key = keys.findIDRT("plugin.rt-939101.cutoff");
+                auto key = keys.findIDRT(cachedKey);
                 auto view = registry.getSnapshotRT();
                 juce::ignoreUnused(mode, key, view);
             }
