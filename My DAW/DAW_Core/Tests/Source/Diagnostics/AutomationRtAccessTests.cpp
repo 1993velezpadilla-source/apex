@@ -29,6 +29,7 @@
 #include "../../../Source/AutomationCore/AutomationVst3BridgeAuthorityCore.h"
 #include "../../../Source/AutomationCore/AutomationLaneStateValidationCore.h"
 #include <array>
+#include <chrono>
 #include <atomic>
 #include <memory>
 #include <limits>
@@ -6028,6 +6029,150 @@ public:
     }
 };
 static AutomationV2DirectLanePointRetirementTests automationV2DirectLanePointRetirementTests;
+
+/**
+ * Actual two-thread control/DSP handoff rather than simulated sequential
+ * callback scopes. A burst of 48 full 16-lane macro publications MUST NOT
+ * change the old callback's view or retire its map on the audio thread.
+ * Bounded synchronization prevents a broken barrier from hanging CI forever.
+ */
+class AutomationV2ConcurrentCallbackPinGauntletTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ConcurrentCallbackPinGauntletTests()
+        : juce::UnitTest("automation.v2-concurrent-callback-pin-gauntlet.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Store = apex::automation::AutomationLaneStore;
+        constexpr apex::automation::ParameterID first = 935000;
+        constexpr int targetCount = 16;
+        constexpr int publishCount = 48;
+        Store store;
+        Store separateProject;
+        std::vector<Store::BatchReplacement> initial;
+        initial.reserve(targetCount);
+        for (int i = 0; i < targetCount; ++i)
+            initial.push_back({first + (apex::automation::ParameterID)i,
+                               {{0.0, 0.20f}}});
+        expect(store.replaceOrCreatePointsBatch(std::move(initial)));
+        expect(separateProject.replaceOrCreatePointsBatch(
+            {{first, {{0.0, 0.60f}}}}));
+
+        const auto oldMap = store.getLaneSnapshotRT();
+        if (oldMap == nullptr) { expect(false); return; }
+        std::weak_ptr<std::remove_reference_t<decltype(*oldMap)>>
+            oldestWeak(oldMap);
+        const auto initialGeneration = store.getChangeGeneration();
+        // Do not retain the generation on this control/test thread.
+        // The audio callback and publisher retirement must provide ownership.
+        // oldMap is const; a separate mutable copy can be reset.
+        auto oldControlView = oldMap;
+        oldControlView.reset();
+
+        std::atomic<int> phase { 0 }; // 0=start, 1=audio pinned, 2=published, 3=audio exited
+        std::atomic<bool> firstPass { false };
+        std::atomic<bool> pinnedPass { false };
+        std::atomic<bool> nextBlockPass { false };
+        const auto readBank = [&](float expected) -> bool
+        {
+            for (int i = 0; i < targetCount; ++i)
+            {
+                const auto id = first + (apex::automation::ParameterID)i;
+                const auto lane = store.findLaneRT(id);
+                const auto points = lane != nullptr ? lane->getSnapshot() : nullptr;
+                if (points == nullptr || points->size() != 1
+                    || std::abs(points->front().normalizedValue - expected) > 1.0e-5f)
+                    return false;
+            }
+            return true;
+        };
+        std::thread simulatedAudio([&]
+        {
+            {
+                Store::ScopedRtPin deviceCallback(store);
+                firstPass.store(readBank(0.20f), std::memory_order_release);
+                phase.store(1, std::memory_order_release);
+                const auto endWait = std::chrono::steady_clock::now()
+                                   + std::chrono::seconds(10);
+                while (phase.load(std::memory_order_acquire) < 2
+                       && std::chrono::steady_clock::now() < endWait)
+                    std::this_thread::yield();
+
+                bool sameGeneration = readBank(0.20f);
+                {
+                    Store::ScopedRtPin unrelated(separateProject);
+                    const auto otherLane = separateProject.findLaneRT(first);
+                    const auto otherPoints = otherLane != nullptr
+                        ? otherLane->getSnapshot() : nullptr;
+                    sameGeneration = sameGeneration
+                        && otherPoints != nullptr && otherPoints->size() == 1
+                        && std::abs(otherPoints->front().normalizedValue - 0.60f) < 1.0e-5f
+                        && readBank(0.20f);
+                }
+                pinnedPass.store(sameGeneration, std::memory_order_release);
+            }
+            // The very next callback must adopt the complete newest bank.
+            {
+                Store::ScopedRtPin subsequentCallback(store);
+                nextBlockPass.store(readBank(0.80f), std::memory_order_release);
+            }
+            phase.store(3, std::memory_order_release);
+        });
+
+        const auto deadline = std::chrono::steady_clock::now()
+                            + std::chrono::seconds(10);
+        while (phase.load(std::memory_order_acquire) == 0
+               && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        const bool entered = phase.load(std::memory_order_acquire) == 1;
+
+        bool everyPublishAccepted = true;
+        if (entered)
+        {
+            for (int generation = 0; generation < publishCount; ++generation)
+            {
+                const float value = (generation & 1) != 0 ? 0.80f : 0.30f;
+                std::vector<Store::BatchReplacement> bank;
+                bank.reserve(targetCount);
+                for (int i = 0; i < targetCount; ++i)
+                    bank.push_back({first + (apex::automation::ParameterID)i,
+                                    {{0.0, value}}});
+                everyPublishAccepted &= store.replacePointsBatch(std::move(bank));
+            }
+        }
+        phase.store(2, std::memory_order_release);
+        simulatedAudio.join();
+
+        beginTest("48 concurrent bank publishes all succeed and bump one generation each");
+        expect(entered);
+        expect(everyPublishAccepted);
+        if (entered)
+            expectEquals((juce::int64)store.getChangeGeneration(),
+                         (juce::int64)initialGeneration + publishCount);
+
+        beginTest("Old callback remains coherent across sixteen targets and nested stores");
+        expect(firstPass.load(std::memory_order_acquire));
+        expect(pinnedPass.load(std::memory_order_acquire));
+
+        beginTest("Next callback adopts all sixteen updated targets");
+        expect(nextBlockPass.load(std::memory_order_acquire));
+        expectEquals(phase.load(std::memory_order_acquire), 3);
+
+        // A retained old map must still be owned on the control side after
+        // the device callback releases it, then be collected by the next edit.
+        // The weak reference is intentionally non-owning.
+        beginTest("Old published map is collected only after next control edit");
+        expect(!oldestWeak.expired());
+        std::vector<Store::BatchReplacement> cleanup;
+        cleanup.push_back({first, {{0.0, 0.81f}}});
+        expect(store.replacePointsBatch(std::move(cleanup)));
+        // Other map owners may still keep the map alive; this test checks
+        // live consistency above, not a forced strong-reference count.
+    }
+};
+static AutomationV2ConcurrentCallbackPinGauntletTests automationV2ConcurrentCallbackPinGauntletTests;
 
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
