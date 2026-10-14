@@ -6,6 +6,12 @@ on:
       - "My DAW/DAW_Core/Tests/APEXTests.jucer"
       - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Source/PDCCore/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.cpp"
+      - "My DAW/DAW_Core/Source/RoutingCore/RoutingSnapshot.h"
+      - "My DAW/DAW_Core/Source/RoutingCore/RoutingGraph.h"
       - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
   push:
     paths:
@@ -13,6 +19,12 @@ on:
       - "My DAW/DAW_Core/Tests/APEXTests.jucer"
       - "My DAW/DAW_Core/Tests/Source/Compressor/OptoCircuitJuceResearchHostTests.cpp"
       - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Source/PDCCore/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.cpp"
+      - "My DAW/DAW_Core/Source/RoutingCore/RoutingSnapshot.h"
+      - "My DAW/DAW_Core/Source/RoutingCore/RoutingGraph.h"
       - "My DAW/DAW_Core/Scripts/test_opto_juce_research_host.ps1"
   workflow_dispatch:
 permissions:
