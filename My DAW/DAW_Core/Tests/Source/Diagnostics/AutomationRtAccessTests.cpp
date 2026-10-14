@@ -1206,7 +1206,8 @@ public:
         expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
                        std::numeric_limits<double>::infinity(), 0.9f));
         recorder.drainForTests();
-        snap = lane->getSnapshot();
+        // Resolve newly published lane (COW): the prior pointer is immutable.
+        snap = lanes.findLane(id)->getSnapshot();
         expect(snap != nullptr && snap->size() == beforeSize,
                "invalid PPQ cannot introduce NaN/Inf into the lane");
     }
@@ -2018,7 +2019,8 @@ public:
             expect(enqueue(AutomationGestureQueue::EventKind::ValueChange,
                            4.5, 0.99f));
             recorder.drainForTests();
-            snap = lane->getSnapshot();
+            // Resolve newly published lane (COW): the prior pointer is immutable.
+            snap = lanes.findLane(id)->getSnapshot();
             expect(snap != nullptr && !snap->empty(), "Read keeps existing lane");
             if (snap == nullptr || snap->empty()) return;
             expectWithinAbsoluteError(AutomationLane::evaluateAt(*snap, 4.5),
