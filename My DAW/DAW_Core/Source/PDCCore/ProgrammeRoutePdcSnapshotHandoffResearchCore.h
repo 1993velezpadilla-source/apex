@@ -32,11 +32,12 @@ public:
                          int channels) {
         auto next=std::make_unique<PreparedGeneration>();
         next->graph=graph;
-        // Control retains an RCU Reader for the duration of preparation,
-        // including publication. DSP objects from unchanged route IDs can
-        // share delay history with the prior generation safely: the route
-        // metadata never mutates, and audio has only ONE DSP writer.
-        auto previous=publisher_.readRealtime();
+        // Serialized control thread reads the currently owned generation
+        // without acquiring an artificial realtime Reader. Otherwise each
+        // publication would prevent its own retirement collection, eventually
+        // exhausting the 64-generation budget even when audio is stopped.
+        // Metadata stays immutable; DSP state has a single realtime writer.
+        const auto* previous=publisher_.activeStateControlOnly();
         if(!next->dispatch.prepare(
                 next->graph,chainLatencies,channels,
                 previous?&previous->dispatch:nullptr))
