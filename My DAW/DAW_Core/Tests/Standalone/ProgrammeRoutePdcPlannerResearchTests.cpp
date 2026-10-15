@@ -180,6 +180,38 @@ int main() {
         assert(!p.build(nodes,edges,order));
         assert(!p.valid() && p.edgePlans().empty());
     }
+    // Large send-heavy DAG regression for control-thread incoming-edge index.
+    // Every direct source must be delayed to the longest aux path.
+    {
+        ProgrammeRoutePdcPlannerResearchCore p;
+        std::vector<Node> nodes;
+        std::vector<Edge> edges;
+        std::vector<std::string> order;
+        for(int i=0;i<128;++i) {
+            const std::string id="track-"+std::to_string(i);
+            nodes.push_back({id,i%33,true});
+            order.push_back(id);
+            edges.push_back({"direct-"+std::to_string(i),id,"master",
+                             EdgeKind::Direct});
+            edges.push_back({"send-"+std::to_string(i),id,"aux",
+                             EdgeKind::Send});
+        }
+        nodes.push_back({"aux",16,false});
+        nodes.push_back({"master",0,false});
+        order.push_back("aux");
+        order.push_back("master");
+        edges.push_back({"aux-master","aux","master",EdgeKind::Direct});
+        assert(p.build(nodes,edges,order));
+        assert(arrival(p,"aux")==32);
+        assert(output(p,"aux")==48);
+        assert(arrival(p,"master")==48);
+        assert(p.edgePlans().size()==257);
+        for(int i=0;i<128;++i) {
+            const int own=i%33;
+            assert(delay(p,("send-"+std::to_string(i)).c_str())==32-own);
+            assert(delay(p,("direct-"+std::to_string(i)).c_str())==48-own);
+        }
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
