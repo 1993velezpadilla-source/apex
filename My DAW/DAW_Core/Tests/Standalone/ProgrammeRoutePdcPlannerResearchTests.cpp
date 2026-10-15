@@ -138,6 +138,48 @@ int main() {
         const double milliseconds=1000.0*(double)delay(p,"t-m")/rate;
         assert(milliseconds>0 && milliseconds<1.0);
     }
+    // Control-plane live-edit simulation: rebuild immutable plans after a
+    // QuickSend toggle or plugin-latency notification. The audio callback
+    // must consume only fully prepared generations, never build these here.
+    for(const int rate:{44100,48000,96000}) {
+        (void)rate; // Integer-sample planner must not depend on sample rate.
+        ProgrammeRoutePdcPlannerResearchCore p;
+        std::vector<Node> nodes={
+            {"voice",32,true},{"bass",0,true},
+            {"aux",16,false},{"master",0,false}};
+        std::vector<Edge> edges={
+            {"voice-direct","voice","master",EdgeKind::Direct},
+            {"bass-direct","bass","master",EdgeKind::Direct},
+            {"voice-send","voice","aux",EdgeKind::Send},
+            {"bass-send","bass","aux",EdgeKind::PreSend},
+            {"aux-out","aux","master",EdgeKind::Direct}};
+        const std::vector<std::string> order={"voice","bass","aux","master"};
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"bass-send")==32);
+        assert(delay(p,"bass-direct")==48);
+        assert(delay(p,"voice-direct")==16);
+        // Disable both sends: the aux is disconnected and cannot affect
+        // the master timeline even though its plugin retains 16 samples.
+        edges[2].active=false;edges[3].active=false;
+        assert(p.build(nodes,edges,order));
+        assert(p.findEdge("voice-send")==nullptr);
+        assert(p.findEdge("bass-send")==nullptr);
+        assert(delay(p,"bass-direct")==32);
+        assert(delay(p,"voice-direct")==0);
+        // Gain-only edits do not change this topology's compensation.
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"bass-direct")==32);
+        // Restore sends and notify a new 64-sample aux plugin latency.
+        edges[2].active=true;edges[3].active=true;nodes[2].ownProcessorLatency=64;
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"bass-send")==32);
+        assert(delay(p,"bass-direct")==96);
+        assert(delay(p,"voice-direct")==64);
+        // Invalid latency must fail closed rather than expose stale plans.
+        nodes[2].ownProcessorLatency=-1;
+        assert(!p.build(nodes,edges,order));
+        assert(!p.valid() && p.edgePlans().empty());
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
