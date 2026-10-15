@@ -80,17 +80,22 @@ public:
                 return fail("programme route violates topological order/cycle");
         }
 
+        // Index participating incoming programme routes once on the control
+        // thread. The previous full edge scan per node was O(nodes * edges),
+        // making large send-heavy sessions expensive to prepare.
+        std::vector<std::vector<std::size_t>> incoming(nodes.size());
+        for(std::size_t i=0;i<edges.size();++i) {
+            if(!participates(edges[i],nodes,nodeIndex))continue;
+            incoming[nodeIndex.at(edges[i].destination)].push_back(
+                nodeIndex.at(edges[i].source));
+        }
         nodePlans_.resize(nodes.size());
         for(const auto& name:topoOrder) {
             const auto nodeIdx=nodeIndex.at(name);
             const auto& node=nodes[nodeIdx];
             int incomingMax=0;
-            for(const auto& edge:edges) {
-                if(edge.destination!=name || !participates(edge,nodes,nodeIndex))
-                    continue;
-                const auto src=nodeIndex.at(edge.source);
+            for(const auto src:incoming[nodeIdx])
                 incomingMax=std::max(incomingMax,nodePlans_[src].outputLatency);
-            }
             auto& result=nodePlans_[nodeIdx];
             result.id=name;
             result.arrivalLatency=incomingMax;
