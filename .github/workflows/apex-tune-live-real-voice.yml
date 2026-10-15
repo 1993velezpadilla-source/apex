@@ -199,6 +199,7 @@ jobs:
           for singer in human low high; do
             ./tune_live_harmonic_human_renderer --prefix "vocadito_${singer}"
             test -s "vocadito_${singer}_harmonic_live_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_residual_research.wav"
             test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
           done
       - name: Research-only real singer A-B downshift compensation with bit-exact HQ40 identity gate
@@ -298,10 +299,13 @@ jobs:
             vocadito_human_hq40.wav
             vocadito_human_causal_research.wav
             vocadito_human_harmonic_live_research.wav
+            vocadito_human_harmonic_live_residual_research.wav
             vocadito_human_HARMONIC_LIVE_RESEARCH.txt
             vocadito_low_harmonic_live_research.wav
+            vocadito_low_harmonic_live_residual_research.wav
             vocadito_low_HARMONIC_LIVE_RESEARCH.txt
             vocadito_high_harmonic_live_research.wav
+            vocadito_high_harmonic_live_residual_research.wav
             vocadito_high_HARMONIC_LIVE_RESEARCH.txt
             vocadito_human_research18.wav
             vocadito_human_research12.wav
