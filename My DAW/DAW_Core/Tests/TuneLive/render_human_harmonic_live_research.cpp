@@ -16,7 +16,8 @@ namespace {
 using APEX::TuneLive::Research::HarmonicLivePrototype;
 constexpr int blockSize=128;
 
-Wave renderLive(const Wave& input, bool early, bool residual) {
+Wave renderLive(const Wave& input, bool early, bool residual,
+                bool fastEngagement=false, bool fastTransitions=false) {
     Wave out=input;
     HarmonicLivePrototype engine;
     engine.prepare(input.rate,input.channels);
@@ -27,6 +28,8 @@ Wave renderLive(const Wave& input, bool early, bool residual) {
     engine.setVoiceSettings(settings);
     engine.enableEarlyOnset(early);
     engine.enableResidualPreservation(residual);
+    engine.enableFastEngagement(fastEngagement);
+    engine.enableExperimentalEarlyTransitions(fastTransitions);
     std::array<float,blockSize> left{},right{};
     for(std::size_t offset=0;offset<input.frames();offset+=blockSize) {
         const int n=static_cast<int>(std::min<std::size_t>(
@@ -47,6 +50,8 @@ Wave renderLive(const Wave& input, bool early, bool residual) {
         }
     }
     std::cout<<"VOCADITO_CAUSAL_LIVE residual="<<residual<<" early="<<early
+             <<" fast_wet="<<fastEngagement
+             <<" fast_note_transitions="<<fastTransitions
              <<" first_F0_ms="<<1000.0*engine.firstVoiceSample()/input.rate
              <<" first_halfwet_ms="<<1000.0*engine.firstHalfWetSample()/input.rate
              <<" final_source_hz="<<engine.sourceHz()<<"\n";
@@ -63,24 +68,34 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Unsupported short/empty real singer WAV");
         const Wave candidate=renderLive(source,true,false);
         const Wave preserved=renderLive(source,true,true);
+        const Wave fast=renderLive(source,true,true,true,true);
         const auto levels=level(candidate);
         const auto residualLevels=level(preserved);
+        const auto fastLevels=level(fast);
         if(!std::isfinite(levels.peak) || !std::isfinite(levels.rms) ||
            levels.rms<1.0e-7 ||
            !std::isfinite(residualLevels.peak) ||
-           !std::isfinite(residualLevels.rms) || residualLevels.rms<1.0e-7)
+           !std::isfinite(residualLevels.rms) || residualLevels.rms<1.0e-7 ||
+           !std::isfinite(fastLevels.peak) ||
+           !std::isfinite(fastLevels.rms) || fastLevels.rms<1.0e-7)
             throw std::runtime_error("Predictive LIVE generated invalid/silent human audio");
         const std::string result=prefix+"_harmonic_live_research.wav";
         writeWave24(result,candidate);
         const std::string residualFile=prefix+"_harmonic_live_residual_research.wav";
         writeWave24(residualFile,preserved);
+        const std::string fastFile=prefix+"_harmonic_live_fast_research.wav";
+        writeWave24(fastFile,fast);
         const Wave validated=readWave(result);
         const Wave residualValidated=readWave(residualFile);
+        const Wave fastValidated=readWave(fastFile);
         if(validated.frames()!=source.frames() ||
            validated.rate!=source.rate || validated.channels!=source.channels ||
            residualValidated.frames()!=source.frames() ||
            residualValidated.rate!=source.rate ||
-           residualValidated.channels!=source.channels)
+           residualValidated.channels!=source.channels ||
+           fastValidated.frames()!=source.frames() ||
+           fastValidated.rate!=source.rate ||
+           fastValidated.channels!=source.channels)
             throw std::runtime_error("LIVE human PCM24 round-trip corrupted format");
         const std::string report=prefix+"_HARMONIC_LIVE_RESEARCH.txt";
         std::ofstream out(report);
@@ -96,6 +111,9 @@ int main(int argc,char** argv) {
            <<"Residual replacement peak="<<residualLevels.peak
            <<" RMS="<<residualLevels.rms
            <<" clipped_frames="<<residualLevels.clips<<"\n"
+           <<"Opt-in 1-period fast-engagement peak="<<fastLevels.peak
+           <<" RMS="<<fastLevels.rms
+           <<" clipped_frames="<<fastLevels.clips<<"\n"
            <<"Dry input and output have same frame count, but this is NOT "
              "proof of 0ms perceived voice correction, formants or note reaction.\n"
            <<"Compare separately level-matched to approved HQ40 and dry; "
@@ -105,6 +123,7 @@ int main(int argc,char** argv) {
                :"No PCM24 output clipping detected in this take.\n");
         std::cout<<"REAL_HARMONIC_LIVE_RENDER "<<result
                  <<" residual_file="<<residualFile
+                 <<" fast_wet_file="<<fastFile
                  <<" peak="<<levels.peak<<" clips="<<levels.clips<<"\n";
         return 0;
     } catch(const std::exception& e) {
