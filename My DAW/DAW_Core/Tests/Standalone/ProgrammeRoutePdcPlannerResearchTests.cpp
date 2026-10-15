@@ -235,6 +235,41 @@ int main() {
         for(const auto& edge:p.edgePlans())
             assert(edge.delaySamples==0);
     }
+    // Deterministic dense DAG: cross-check every edge delay against a
+    // separately computed longest-path reference, including reconvergence.
+    {
+        ProgrammeRoutePdcPlannerResearchCore p;
+        std::vector<Node> nodes;
+        std::vector<Edge> edges;
+        std::vector<std::string> order;
+        std::vector<int> reference(32,0);
+        for(int i=0;i<32;++i) {
+            const auto id="dense-"+std::to_string(i);
+            const int latency=(i*7)%19;
+            nodes.push_back({id,latency,i==0});
+            order.push_back(id);
+            int arrivalLatency=0;
+            for(int j=0;j<i;++j) {
+                if((i+j)%3==0 || j==i-1) {
+                    edges.push_back({"dense-edge-"+std::to_string(j)+"-"+
+                        std::to_string(i),"dense-"+std::to_string(j),id,
+                        EdgeKind::Send});
+                    arrivalLatency=std::max(arrivalLatency,reference[j]);
+                }
+            }
+            reference[i]=arrivalLatency+latency;
+        }
+        assert(p.build(nodes,edges,order));
+        for(int i=0;i<32;++i)
+            assert(output(p,("dense-"+std::to_string(i)).c_str())==reference[i]);
+        for(const auto& e:edges) {
+            const auto* src=p.findNode(e.source);
+            const auto* dst=p.findNode(e.destination);
+            assert(src && dst);
+            assert(delay(p,e.id.c_str())==
+                   dst->arrivalLatency-src->outputLatency);
+        }
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
