@@ -55,6 +55,7 @@ public:
         sampleCount_=0;
         firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
         lastLargeNoteJumpSample_=-1;
+        lastVoicedEstimateSample_=-1;
         largeNoteJumpCount_=0;
         voicedSamples_=0;
         initializedPhase_=false;
@@ -181,7 +182,13 @@ private:
             // the new fundamental before fading corrected partials back in.
             // This cannot remove YIN reacquisition time, but avoids using
             // an A3 spectral envelope to synthesize an unrelated A4 attack.
-            if(voiced_ && sourceHz_>=55.0 &&
+            // Full YIN can briefly mark audio unvoiced across an abrupt
+            // leap. Preserve the last trustworthy source pitch for 100 ms
+            // rather than requiring two consecutive voiced frames. A genuine
+            // long silence never triggers this cross-note comparison.
+            if(sourceHz_>=55.0 && lastVoicedEstimateSample_>=0 &&
+                (sampleCount_-lastVoicedEstimateSample_)<
+                    static_cast<int64_t>(rate_*0.100) &&
                 std::abs(1200.0*std::log2(estimate.hz/sourceHz_))>600.0) {
                 for(auto& channel:partials_)
                     for(auto& partial:channel)partial={};
@@ -192,6 +199,7 @@ private:
                 ++largeNoteJumpCount_;
             }
             sourceHz_=estimate.hz;
+            lastVoicedEstimateSample_=sampleCount_;
             targetHz_=sourceHz_*ratio;
             const double radians=2.0*3.14159265358979323846/rate_;
             stepSource_={std::cos(sourceHz_*radians),
@@ -200,6 +208,8 @@ private:
                          std::sin(targetHz_*radians)};
             partialStep_=std::clamp(sourceHz_/(2.0*rate_),0.00001,0.2);
             if(!voiced_) {
+                for(auto& channel:partials_)
+                    for(auto& partial:channel)partial={};
                 voicedSamples_=0;
                 initializedPhase_=false;
                 if(firstVoiceSample_<0)firstVoiceSample_=sampleCount_;
@@ -241,7 +251,8 @@ private:
     float envelopeL_=0.0f,envelopeR_=0.0f;
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
-            firstEarlySample_=-1,lastLargeNoteJumpSample_=-1;
+            firstEarlySample_=-1,lastLargeNoteJumpSample_=-1,
+            lastVoicedEstimateSample_=-1;
     int largeNoteJumpCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
          residualMode_=false;
