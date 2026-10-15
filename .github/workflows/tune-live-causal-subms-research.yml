@@ -4,6 +4,7 @@ on:
     paths:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
       - '.github/workflows/tune-live-causal-subms-research.yml'
   workflow_dispatch:
 
@@ -28,11 +29,17 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" \
             -o tune_live_harmonic_research
           ./tune_live_harmonic_research | tee harmonic_research_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" \
+            -o tune_live_one_ms_transient
+          ./tune_live_one_ms_transient | tee one_ms_transient_ubuntu.log
       - name: Publish unedited diagnostic results, not a release certificate
         uses: actions/upload-artifact@v4
         with:
           name: tune-live-causal-harmonic-research-linux
-          path: harmonic_research_ubuntu.log
+          path: |
+            harmonic_research_ubuntu.log
+            one_ms_transient_ubuntu.log
           if-no-files-found: error
           retention-days: 14
 
@@ -49,10 +56,15 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_harmonic_research.exe "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" || exit /b 1
           tune_live_harmonic_research.exe > harmonic_research_windows.log || (type harmonic_research_windows.log & exit /b 1)
           type harmonic_research_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_one_ms_transient.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" || exit /b 1
+          tune_live_one_ms_transient.exe > one_ms_transient_windows.log || (type one_ms_transient_windows.log & exit /b 1)
+          type one_ms_transient_windows.log
       - name: Publish measured windows diagnostic
         uses: actions/upload-artifact@v4
         with:
           name: tune-live-causal-harmonic-research-windows
-          path: harmonic_research_windows.log
+          path: |
+            harmonic_research_windows.log
+            one_ms_transient_windows.log
           if-no-files-found: error
           retention-days: 14
