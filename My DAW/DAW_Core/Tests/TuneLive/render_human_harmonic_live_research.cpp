@@ -16,7 +16,7 @@ namespace {
 using APEX::TuneLive::Research::HarmonicLivePrototype;
 constexpr int blockSize=128;
 
-Wave renderLive(const Wave& input, bool early) {
+Wave renderLive(const Wave& input, bool early, bool residual) {
     Wave out=input;
     HarmonicLivePrototype engine;
     engine.prepare(input.rate,input.channels);
@@ -26,6 +26,7 @@ Wave renderLive(const Wave& input, bool early) {
     settings.flexTune=0.0f;settings.noteHysteresis=0.10f;
     engine.setVoiceSettings(settings);
     engine.enableEarlyOnset(early);
+    engine.enableResidualPreservation(residual);
     std::array<float,blockSize> left{},right{};
     for(std::size_t offset=0;offset<input.frames();offset+=blockSize) {
         const int n=static_cast<int>(std::min<std::size_t>(
@@ -45,7 +46,7 @@ Wave renderLive(const Wave& input, bool early) {
                 out.data[frame*2+1]=right[static_cast<std::size_t>(i)];
         }
     }
-    std::cout<<"VOCADITO_CAUSAL_LIVE early="<<early
+    std::cout<<"VOCADITO_CAUSAL_LIVE residual="<<residual<<" early="<<early
              <<" first_F0_ms="<<1000.0*engine.firstVoiceSample()/input.rate
              <<" first_halfwet_ms="<<1000.0*engine.firstHalfWetSample()/input.rate
              <<" final_source_hz="<<engine.sourceHz()<<"\n";
@@ -60,16 +61,26 @@ int main(int argc,char** argv) {
         const auto source=readWave(prefix+"_source.wav");
         if(source.frames()<source.rate || source.channels<1 || source.channels>2)
             throw std::runtime_error("Unsupported short/empty real singer WAV");
-        const Wave candidate=renderLive(source,true);
+        const Wave candidate=renderLive(source,true,false);
+        const Wave preserved=renderLive(source,true,true);
         const auto levels=level(candidate);
+        const auto residualLevels=level(preserved);
         if(!std::isfinite(levels.peak) || !std::isfinite(levels.rms) ||
-           levels.rms<1.0e-7)
+           levels.rms<1.0e-7 ||
+           !std::isfinite(residualLevels.peak) ||
+           !std::isfinite(residualLevels.rms) || residualLevels.rms<1.0e-7)
             throw std::runtime_error("Predictive LIVE generated invalid/silent human audio");
         const std::string result=prefix+"_harmonic_live_research.wav";
         writeWave24(result,candidate);
+        const std::string residualFile=prefix+"_harmonic_live_residual_research.wav";
+        writeWave24(residualFile,preserved);
         const Wave validated=readWave(result);
+        const Wave residualValidated=readWave(residualFile);
         if(validated.frames()!=source.frames() ||
-           validated.rate!=source.rate || validated.channels!=source.channels)
+           validated.rate!=source.rate || validated.channels!=source.channels ||
+           residualValidated.frames()!=source.frames() ||
+           residualValidated.rate!=source.rate ||
+           residualValidated.channels!=source.channels)
             throw std::runtime_error("LIVE human PCM24 round-trip corrupted format");
         const std::string report=prefix+"_HARMONIC_LIVE_RESEARCH.txt";
         std::ofstream out(report);
@@ -82,6 +93,9 @@ int main(int argc,char** argv) {
            <<" frames="<<source.frames()<<"\n"
            <<"Peak="<<levels.peak<<" RMS="<<levels.rms
            <<" clipped_frames="<<levels.clips<<"\n"
+           <<"Residual replacement peak="<<residualLevels.peak
+           <<" RMS="<<residualLevels.rms
+           <<" clipped_frames="<<residualLevels.clips<<"\n"
            <<"Dry input and output have same frame count, but this is NOT "
              "proof of 0ms perceived voice correction, formants or note reaction.\n"
            <<"Compare separately level-matched to approved HQ40 and dry; "
@@ -90,6 +104,7 @@ int main(int argc,char** argv) {
                ?"WARNING: candidate clips; do not use this take for blind sound-quality ranking.\n"
                :"No PCM24 output clipping detected in this take.\n");
         std::cout<<"REAL_HARMONIC_LIVE_RENDER "<<result
+                 <<" residual_file="<<residualFile
                  <<" peak="<<levels.peak<<" clips="<<levels.clips<<"\n";
         return 0;
     } catch(const std::exception& e) {
