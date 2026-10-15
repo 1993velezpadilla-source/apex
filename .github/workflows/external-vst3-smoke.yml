@@ -2,14 +2,46 @@ name: External open-source VST3 smoke
 on:
   push:
     paths:
+      # CI must re-run real hosted VST3 canaries when APEX automation,
+      # plugin host, or their regressions change (not just this workflow).
       - .github/workflows/external-vst3-smoke.yml
       - "My DAW/DAW_Core/Scripts/fetch_external_vst3.ps1"
-      - "My DAW/DAW_Core/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp"
+      - "My DAW/DAW_Core/Scripts/run_apex_tests.ps1"
+      - "My DAW/DAW_Core/Source/Automation/**"
+      - "My DAW/DAW_Core/Source/AutomationCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/**"
+      - "My DAW/DAW_Core/Source/PluginSandboxCore/**"
+      - "My DAW/DAW_Core/Source/AutomationSequence/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/TrackCore/Track.h"
+      - "My DAW/DAW_Core/Source/UICore/MixerPanel.h"
+      - "My DAW/DAW_Core/Source/ProjectCore/ProjectManager.*"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/Automation*"
+      - "My DAW/DAW_Core/Tests/Source/PluginHost/**"
+      - "My DAW/DAW_Core/Tests/Source/Diagnostics/Automation*"
+      - "My DAW/DAW_Core/Tests/Source/Arrangement/Automation*"
+      - "My DAW/DAW_Core/Tests/Fixtures/VST3/**"
   pull_request:
     paths:
+      # CI must re-run real hosted VST3 canaries when APEX automation,
+      # plugin host, or their regressions change (not just this workflow).
       - .github/workflows/external-vst3-smoke.yml
       - "My DAW/DAW_Core/Scripts/fetch_external_vst3.ps1"
-      - "My DAW/DAW_Core/Tests/Source/PluginHost/PluginBusLayoutMatrixTests.cpp"
+      - "My DAW/DAW_Core/Scripts/run_apex_tests.ps1"
+      - "My DAW/DAW_Core/Source/Automation/**"
+      - "My DAW/DAW_Core/Source/AutomationCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/**"
+      - "My DAW/DAW_Core/Source/PluginSandboxCore/**"
+      - "My DAW/DAW_Core/Source/AutomationSequence/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/TrackCore/Track.h"
+      - "My DAW/DAW_Core/Source/UICore/MixerPanel.h"
+      - "My DAW/DAW_Core/Source/ProjectCore/ProjectManager.*"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/Automation*"
+      - "My DAW/DAW_Core/Tests/Source/PluginHost/**"
+      - "My DAW/DAW_Core/Tests/Source/Diagnostics/Automation*"
+      - "My DAW/DAW_Core/Tests/Source/Arrangement/Automation*"
+      - "My DAW/DAW_Core/Tests/Fixtures/VST3/**"
   workflow_dispatch:
 permissions:
   contents: read
