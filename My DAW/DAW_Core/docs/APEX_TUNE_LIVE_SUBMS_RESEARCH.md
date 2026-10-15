@@ -67,3 +67,34 @@ mean the candidate reached its wet latency or perceived quality target.
 The experimental synthesis **must stay off by default**; no claim of
 near-zero latency, Antares parity or commercially usable sound is justified
 at this stage. Measuring and rejecting unsuccessful designs is progress.
+
+## New 48-sample / 1ms transient gate (research only)
+
+We added an optional **causal residual-preservation** path that replaces
+predicted *unshifted* harmonics with the tracked corrected harmonics while
+leaving the microphone's current-sample spectral residual (consonants,
+breath, unmodeled partials) in the output. That means the direct transient
+path no longer waits for the pitch-shifter's spectral frame.
+
+The strict `test_live_one_ms_transient.cpp` inserts an isolated impulse
+into a **previously acquired, actively tuned** voice at 48kHz and checks
+whether it is audible **in the same output sample**, not after the 48-sample
+(1ms) budget. The first 1ms of an entirely new, unknown sung note is
+explicitly asserted **not** to have a pitch classification. Do not confuse
+the two phenomena.
+
+Initial Linux ASan/UBSan test run `38659642372` was GREEN:
+- Voiced source ~223.846Hz, immediate impulse gain **0.941968**.
+- Voiced source ~447.691Hz, immediate impulse gain **0.889493**.
+- Both corrected paths were at 100% wet when the impulse arrived,
+  with finite output; no added lookahead on this isolated transient.
+- The streaming short-onset tracker still takes around **14.65ms** to
+  recognize a fresh A3/A4 note at 48kHz, and the actual 50%-wet first
+  correction still requires **26.85–34.02ms** on synthetic signals.
+  This is **NOT a 1ms note-response or overall latency result**.
+
+A full real-singer pipeline now writes separate residual-preserving 24-bit
+research WAVs for Vocadito reference, high and low registers and tests that
+the renders remain finite and non-silent. Their levels and tone must
+still be evaluated. A silent/zero-delay *dry* branch alone is not
+an acceptable substitute for actually hearing pitch correction.
