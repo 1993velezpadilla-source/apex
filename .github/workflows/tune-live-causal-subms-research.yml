@@ -5,6 +5,7 @@ on:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
       - '.github/workflows/tune-live-causal-subms-research.yml'
   workflow_dispatch:
 
@@ -33,6 +34,10 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" \
             -o tune_live_one_ms_transient
           ./tune_live_one_ms_transient | tee one_ms_transient_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" \
+            -o tune_live_causal_no_alloc
+          ./tune_live_causal_no_alloc | tee causal_rt_no_alloc_ubuntu.log
       - name: Publish unedited diagnostic results, not a release certificate
         uses: actions/upload-artifact@v4
         with:
@@ -40,6 +45,7 @@ jobs:
           path: |
             harmonic_research_ubuntu.log
             one_ms_transient_ubuntu.log
+            causal_rt_no_alloc_ubuntu.log
           if-no-files-found: error
           retention-days: 14
 
@@ -59,6 +65,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_one_ms_transient.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" || exit /b 1
           tune_live_one_ms_transient.exe > one_ms_transient_windows.log || (type one_ms_transient_windows.log & exit /b 1)
           type one_ms_transient_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_no_alloc.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" || exit /b 1
+          tune_live_causal_no_alloc.exe > causal_rt_no_alloc_windows.log || (type causal_rt_no_alloc_windows.log & exit /b 1)
+          type causal_rt_no_alloc_windows.log
       - name: Publish measured windows diagnostic
         uses: actions/upload-artifact@v4
         with:
@@ -66,5 +75,6 @@ jobs:
           path: |
             harmonic_research_windows.log
             one_ms_transient_windows.log
+            causal_rt_no_alloc_windows.log
           if-no-files-found: error
           retention-days: 14
