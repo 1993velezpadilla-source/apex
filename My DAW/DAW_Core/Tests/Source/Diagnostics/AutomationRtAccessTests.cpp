@@ -6594,6 +6594,66 @@ public:
 static AutomationV2ArrangementBridgeCallbackIsolationTests
     automationV2ArrangementBridgeCallbackIsolationTests;
 
+/**
+ * The arrangement canvas must repaint when a PPQ COW curve changes, goes
+ * away, and is recreated. Cache snapshot ownership, not the raw vector
+ * address: an allocator can reuse that address after old points are freed.
+ */
+class AutomationV2ArrangementRepaintIdentityTests final : public juce::UnitTest
+{
+public:
+    AutomationV2ArrangementRepaintIdentityTests()
+        : juce::UnitTest("automation.v2-arrangement-repaint-owner-identity.v1",
+                         "APEX.Diagnostics") {}
+
+    void runTest() override
+    {
+        using Bridge = apex::automation::AutomationArrangementBridge;
+        using Store = apex::automation::AutomationLaneStore;
+        using Keys = apex::automation::AutomationParameterKeyRegistry;
+        const juce::String track("V2-REPAINT-IDENTITY-20261014");
+        const juce::String send("V2-REPAINT-SEND");
+        const auto key = Keys::trackSendBypassKey(track, send);
+        const auto id = Bridge::sendBypassID(track, send);
+        auto& bridge = Bridge::getInstance();
+        auto& store = Store::getInstance();
+
+        store.removeLane(id);
+        bridge.invalidateSnapshotCache(key);
+
+        beginTest("A new PPQ curve invalidates once and an unchanged curve stays quiet");
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        bridge.addSendBypassBreakpoint(track, send, 0.0, false, 44100.0, 120.0);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+
+        beginTest("A COW generation swap invalidates the cached curve once");
+        bridge.addSendBypassBreakpoint(track, send, 128.0, true, 44100.0, 120.0);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+
+        beginTest("Lane removal and recreation each repaint exactly once");
+        store.removeLane(id);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        bridge.addSendBypassBreakpoint(track, send, 256.0, true, 48000.0, 120.0);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+
+        beginTest("Explicit invalidation repaints a still-live generation");
+        bridge.invalidateSnapshotCache(key);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+
+        store.removeLane(id);
+        expect(bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        expect(!bridge.hasSnapshotChangedSinceLastPaintForKey(key));
+        bridge.invalidateSnapshotCache(key);
+    }
+};
+static AutomationV2ArrangementRepaintIdentityTests
+    automationV2ArrangementRepaintIdentityTests;
+
 class AutomationV2PpqBatchPublicationTests final : public juce::UnitTest
 {
 public:
