@@ -68,12 +68,19 @@ public:
                nodeIndex.find(edge.destination)==nodeIndex.end())
                 return fail("edge references nonexistent node");
         }
-        std::unordered_map<std::string,std::size_t> topo;
-        topo.reserve(topoOrder.size());
-        for(std::size_t pos=0;pos<topoOrder.size();++pos)
-            if(nodeIndex.find(topoOrder[pos])==nodeIndex.end() ||
-               !topo.emplace(topoOrder[pos],pos).second)
+        // Topological positions are indexed by node number, not strings.
+        // Resolve once during control-thread preparation.
+        std::vector<std::size_t> topoPosition(nodes.size(),nodes.size());
+        std::vector<std::size_t> orderedNodes;
+        orderedNodes.reserve(nodes.size());
+        for(std::size_t pos=0;pos<topoOrder.size();++pos) {
+            const auto found=nodeIndex.find(topoOrder[pos]);
+            if(found==nodeIndex.end() ||
+               topoPosition[found->second]!=nodes.size())
                 return fail("topological order contains unknown/duplicate node");
+            topoPosition[found->second]=pos;
+            orderedNodes.push_back(found->second);
+        }
         // Pre-resolve active route endpoints on the control thread. Avoid
         // repeating string hash lookups while calculating each node's inputs.
         std::vector<std::vector<std::size_t>> incoming(nodes.size());
@@ -81,20 +88,19 @@ public:
             if(!participates(edge,nodes,nodeIndex))continue;
             const auto src=nodeIndex.at(edge.source);
             const auto dst=nodeIndex.at(edge.destination);
-            if(topo.at(edge.source)>=topo.at(edge.destination))
+            if(topoPosition[src]>=topoPosition[dst])
                 return fail("programme route violates topological order/cycle");
             incoming[dst].push_back(src);
         }
 
         nodePlans_.resize(nodes.size());
-        for(const auto& name:topoOrder) {
-            const auto nodeIdx=nodeIndex.at(name);
+        for(const auto nodeIdx:orderedNodes) {
             const auto& node=nodes[nodeIdx];
             int incomingMax=0;
             for(const auto src:incoming[nodeIdx])
                 incomingMax=std::max(incomingMax,nodePlans_[src].outputLatency);
             auto& result=nodePlans_[nodeIdx];
-            result.id=name;
+            result.id=node.id;
             result.arrivalLatency=incomingMax;
             result.localInputDelay=node.hasIndependentInput?incomingMax:0;
             if(incomingMax>maxLatencySamples-node.ownProcessorLatency)
