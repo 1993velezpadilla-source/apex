@@ -34,7 +34,7 @@ public:
         early_.prepare(rate_);
         // No dynamic allocation in prepare or process; control coefficients
         // are computed here or only when the pitch tracker emits a frame.
-        wetStep_=1.0/(0.008*rate_+1.0);
+        wetStep_=1.0/((fastEngagement_?0.001:0.008)*rate_+1.0);
         reset();
     }
     void reset() noexcept {
@@ -80,6 +80,16 @@ public:
     // and retain current-input residual (consonants/breath/noise) instantly.
     // NOT a formant-verified production mode.
     void enableResidualPreservation(bool enabled) noexcept {residualMode_=enabled;}
+    // EXPERIMENTAL: earlier *wet mix* onset, not earlier F0 recognition.
+    // Default remains 3 periods / 8ms crossfade. In fast mode require
+    // only one observed source period / 1ms crossfade. Neither bound
+    // is a plugin-PDC nor a first-note latency guarantee.
+    // Set only off the audio callback before processing; there is no
+    // concurrently automated parameter until host safety is validated.
+    void enableFastEngagement(bool enabled) noexcept {
+        fastEngagement_=enabled;
+        wetStep_=1.0/((enabled?0.001:0.008)*rate_+1.0);
+    }
     void process(float* const* data,int channels,int length) noexcept {
         if(!data || channels!=channels_ || length<=0 || !data[0] ||
            (channels_==2 && !data[1]))return;
@@ -165,7 +175,8 @@ public:
             // reaches the dry output immediately while the experimental
             // predicted voiced signal takes multiple F0 periods to mature.
             const bool mature=voiced_ && sourceHz_>0.0 &&
-                voicedSamples_>=static_cast<int>(3.0*rate_/sourceHz_);
+                voicedSamples_>=static_cast<int>(
+                    (fastEngagement_?1.0:3.0)*rate_/sourceHz_);
             const double requested=mature?targetWet_:0.0;
             wet_+=(requested-wet_)*wetStep_;
             if(firstHalfWetSample_<0 && wet_>=0.5)
@@ -293,6 +304,7 @@ private:
             lastVoicedEstimateSample_=-1,lastFastTransitionSample_=-1;
     int largeNoteJumpCount_=0,fastTransitionCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
-         fastTransitionsEnabled_=false,residualMode_=false;
+         fastTransitionsEnabled_=false,residualMode_=false,
+         fastEngagement_=false;
 };
 }}} // namespace APEX::TuneLive::Research
