@@ -212,6 +212,29 @@ int main() {
             assert(delay(p,("direct-"+std::to_string(i)).c_str())==48-own);
         }
     }
+    // Sparse chain: a large graph with few routes must retain exact
+    // accumulated latency and local-input alignment at every hop.
+    {
+        ProgrammeRoutePdcPlannerResearchCore p;
+        std::vector<Node> nodes;
+        std::vector<Edge> edges;
+        std::vector<std::string> order;
+        for(int i=0;i<64;++i) {
+            const auto id="stage-"+std::to_string(i);
+            nodes.push_back({id,1,i==0});
+            order.push_back(id);
+            if(i>0)
+                edges.push_back({"hop-"+std::to_string(i),
+                                 "stage-"+std::to_string(i-1),id,
+                                 EdgeKind::Direct});
+        }
+        assert(p.build(nodes,edges,order));
+        assert(output(p,"stage-63")==64);
+        assert(arrival(p,"stage-63")==63);
+        assert(p.edgePlans().size()==63);
+        for(const auto& edge:p.edgePlans())
+            assert(edge.delaySamples==0);
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
