@@ -1,0 +1,58 @@
+name: Tune Live causal sub-ms research (NOT shipping)
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
+      - '.github/workflows/tune-live-causal-subms-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: causal-research-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-address-undefined-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build and test actual production tracker + experimental synthesizer
+        shell: bash
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" \
+            -o tune_live_harmonic_research
+          ./tune_live_harmonic_research | tee harmonic_research_ubuntu.log
+      - name: Publish unedited diagnostic results, not a release certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: tune-live-causal-harmonic-research-linux
+          path: harmonic_research_ubuntu.log
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-msvc:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: C++17 MSVC build and wet audio experiment
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_harmonic_research.exe "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" || exit /b 1
+          tune_live_harmonic_research.exe > harmonic_research_windows.log || (type harmonic_research_windows.log & exit /b 1)
+          type harmonic_research_windows.log
+      - name: Publish measured windows diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: tune-live-causal-harmonic-research-windows
+          path: harmonic_research_windows.log
+          if-no-files-found: error
+          retention-days: 14
