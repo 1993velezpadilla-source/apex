@@ -63,6 +63,11 @@ public:
     // Research-only optional early seed for >=200 Hz, with octave veto.
     // No production host exposure; primary YIN remains authoritative.
     void enableEarlyOnset(bool enabled) noexcept {earlyEnabled_=enabled;}
+    // Experimental residual-preserving voiced replacement:
+    // subtract the tracked unshifted harmonics, insert shifted harmonics,
+    // and retain current-input residual (consonants/breath/noise) instantly.
+    // NOT a formant-verified production mode.
+    void enableResidualPreservation(bool enabled) noexcept {residualMode_=enabled;}
     void process(float* const* data,int channels,int length) noexcept {
         if(!data || channels!=channels_ || length<=0 || !data[0] ||
            (channels_==2 && !data[1]))return;
@@ -98,6 +103,7 @@ public:
             // multiplies, not per-harmonic sin()/cos() on each audio sample.
             Unit src=phaseSource_,out=phaseOutput_;
             std::array<double,2> synth{{0.0,0.0}};
+            std::array<double,2> unshifted{{0.0,0.0}};
             for(int h=0;h<kHarmonics;++h) {
                 const double harmonicHz=targetHz_*static_cast<double>(h+1);
                 const bool withinNyquist=harmonicHz<rate_*0.46;
@@ -109,6 +115,8 @@ public:
                         p.sine+=partialStep_*(2.0*dry[c]*src.imag-p.sine);
                         synth[static_cast<std::size_t>(c)]+=
                             p.cosine*out.real+p.sine*out.imag;
+                        unshifted[static_cast<std::size_t>(c)]+=
+                            p.cosine*src.real+p.sine*src.imag;
                     }
                 }
                 src=multiply(src,phaseSource_);
@@ -124,7 +132,11 @@ public:
             if(firstHalfWetSample_<0 && wet_>=0.5)
                 firstHalfWetSample_=sampleCount_;
             for(int c=0;c<channels_;++c) {
-                const double result=(1.0-wet_)*dry[c]+wet_*synth[static_cast<std::size_t>(c)];
+                const double predicted=residualMode_
+                    ?dry[c]+synth[static_cast<std::size_t>(c)]
+                              -unshifted[static_cast<std::size_t>(c)]
+                    :synth[static_cast<std::size_t>(c)];
+                const double result=(1.0-wet_)*dry[c]+wet_*predicted;
                 data[c][i]=std::isfinite(result)
                     ?static_cast<float>(std::clamp(result,-8.0,8.0)):0.0f;
             }
@@ -211,6 +223,7 @@ private:
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
             firstEarlySample_=-1;
-    bool voiced_=false,initializedPhase_=false,earlyEnabled_=false;
+    bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
+         residualMode_=false;
 };
 }}} // namespace APEX::TuneLive::Research
