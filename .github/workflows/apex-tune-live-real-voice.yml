@@ -202,6 +202,18 @@ jobs:
             test -s "vocadito_${singer}_harmonic_live_residual_research.wav"
             test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
           done
+      - name: Reject gross sibilance-energy loss in causal residual LIVE across 3 real singers
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_human_residual_bands.cpp" \
+            -o tune_live_harmonic_sibilance_gate
+          for singer in human low high; do
+            ./tune_live_harmonic_sibilance_gate --prefix "vocadito_${singer}" | tee "vocadito_${singer}_HARMONIC_LIVE_BANDS_REPORT.txt"
+          done
       - name: Research-only real singer A-B downshift compensation with bit-exact HQ40 identity gate
         shell: bash
         run: |
@@ -307,6 +319,9 @@ jobs:
             vocadito_high_harmonic_live_research.wav
             vocadito_high_harmonic_live_residual_research.wav
             vocadito_high_HARMONIC_LIVE_RESEARCH.txt
+            vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_low_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_high_HARMONIC_LIVE_BANDS_REPORT.txt
             vocadito_human_research18.wav
             vocadito_human_research12.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
