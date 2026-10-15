@@ -134,12 +134,50 @@ static void localTrackInput(int block) {
         }
     }
 }
+// Mono source-to-master sample path, including callback boundaries.
+static void monoRoute(int block) {
+    ProgrammeRoutePdcPlannerResearchCore plan;
+    assert(plan.build({{"voice",32,true},{"bass",0,true},{"master",0,false}},
+                      {{"voice-master","voice","master",EdgeKind::Direct},
+                       {"bass-master","bass","master",EdgeKind::Direct}},
+                      {"voice","bass","master"}));
+    ProgrammeRoutePdcPreparedResearchCore bank;
+    assert(bank.prepare(plan,1));
+    const auto voiceIndex=bank.findEdgeIndex("voice-master");
+    const auto bassIndex=bank.findEdgeIndex("bass-master");
+    assert(bank.edgeDelaySamples(voiceIndex)==0);
+    assert(bank.edgeDelaySamples(bassIndex)==32);
+    PluginParallelDryDelayResearchCore voiceFx;
+    assert(voiceFx.prepare(1,32));
+    for(int start=0;start<391;start+=block) {
+        const int count=std::min(block,391-start);
+        std::vector<float> voice(static_cast<std::size_t>(count),0.f);
+        std::vector<float> bass(static_cast<std::size_t>(count),0.f);
+        for(int i=0;i<count;++i) {
+            voice[static_cast<std::size_t>(i)]=start+i==0?.25f:0.f;
+            bass[static_cast<std::size_t>(i)]=start+i==0?.5f:0.f;
+        }
+        float* voiceData[]={voice.data()};
+        float* bassData[]={bass.data()};
+        voiceFx.process(voiceData,1,count);
+        assert(bank.processEdge(voiceIndex,voiceData,1,count));
+        assert(bank.processEdge(bassIndex,bassData,1,count));
+        for(int i=0;i<count;++i) {
+            const float expected=start+i==32?.75f:0.f;
+            assert(std::abs(voice[static_cast<std::size_t>(i)]+
+                            bass[static_cast<std::size_t>(i)]-expected)<1.e-6f);
+        }
+    }
+}
 int main(){
     // Test coverage includes graph-wide sample-path parity.
     for(int rate:{44100,48000,96000})
         for(int frames:{1,31,64,128,256,1024})
             impulseJourney(frames,rate);
-    for(int frames:{1,31,64,128,256,1024})localTrackInput(frames);
+    for(int frames:{1,31,64,128,256,1024}) {
+        localTrackInput(frames);
+        monoRoute(frames);
+    }
     ProgrammeRoutePdcPlannerResearchCore plan;
     assert(plan.build({{"source",16,true},{"master",0,false}},
                       {{"route","source","master",EdgeKind::Direct}},
