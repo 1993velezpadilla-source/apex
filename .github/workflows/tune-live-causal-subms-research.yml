@@ -8,6 +8,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp'
       - '.github/workflows/tune-live-causal-subms-research.yml'
   workflow_dispatch:
 
@@ -48,6 +49,10 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp" \
             -o tune_live_causal_fast_leaps
           ./tune_live_causal_fast_leaps | tee causal_fast_leaps_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" \
+            -o tune_live_causal_fast_wet
+          ./tune_live_causal_fast_wet | tee causal_fast_wet_ubuntu.log
       - name: Publish unedited diagnostic results, not a release certificate
         uses: actions/upload-artifact@v4
         with:
@@ -58,6 +63,7 @@ jobs:
             causal_rt_no_alloc_ubuntu.log
             causal_note_leaps_ubuntu.log
             causal_fast_leaps_ubuntu.log
+            causal_fast_wet_ubuntu.log
           if-no-files-found: error
           retention-days: 14
 
@@ -86,6 +92,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_fast_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp" || exit /b 1
           tune_live_causal_fast_leaps.exe > causal_fast_leaps_windows.log || (type causal_fast_leaps_windows.log & exit /b 1)
           type causal_fast_leaps_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_fast_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" || exit /b 1
+          tune_live_causal_fast_wet.exe > causal_fast_wet_windows.log || (type causal_fast_wet_windows.log & exit /b 1)
+          type causal_fast_wet_windows.log
       - name: Publish measured windows diagnostic
         uses: actions/upload-artifact@v4
         with:
@@ -96,5 +105,6 @@ jobs:
             causal_rt_no_alloc_windows.log
             causal_note_leaps_windows.log
             causal_fast_leaps_windows.log
+            causal_fast_wet_windows.log
           if-no-files-found: error
           retention-days: 14
