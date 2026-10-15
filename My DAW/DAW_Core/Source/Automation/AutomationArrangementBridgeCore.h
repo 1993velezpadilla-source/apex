@@ -432,17 +432,19 @@ namespace apex::automation
             if (paramID == kInvalidParameterID)
                 return false;
             auto lane = AutomationLaneStore::getInstance().findLane (paramID);
-            if (lane == nullptr)
-                return false;
-
-            auto current = lane->getSnapshot();
-            const void* currentPtr = static_cast<const void*> (current.get());
+            const AutomationLane::Snapshot current =
+                lane != nullptr ? lane->getSnapshot() : AutomationLane::Snapshot{};
 
             const juce::ScopedLock sl (lastSnapLock);
             auto& last = lastSnapshotPtr[fullKey];
-            if (last != currentPtr)
+            // Raw data pointers can be reused after the old snapshot dies
+            // (ABA), silently skipping a GUI repaint. Compare shared_ptr
+            // ownership instead. A weak_ptr keeps only the control block,
+            // not a potentially huge retired automation curve, alive.
+            // A removed lane must also notify its canvas exactly once.
+            if (last.owner_before (current) || current.owner_before (last))
             {
-                last = currentPtr;
+                last = current;
                 return true;
             }
             return false;
@@ -451,7 +453,7 @@ namespace apex::automation
         void invalidateSnapshotCache (const juce::String& key)
         {
             const juce::ScopedLock sl (lastSnapLock);
-            lastSnapshotPtr[key] = nullptr;
+            lastSnapshotPtr[key].reset();
         }
 
     private:
@@ -563,7 +565,7 @@ namespace apex::automation
         }
 
         mutable juce::CriticalSection lastSnapLock;
-        std::unordered_map<juce::String, const void*, StringHash> lastSnapshotPtr;
+        std::unordered_map<juce::String, std::weak_ptr<const AutomationLane::PointVector>, StringHash> lastSnapshotPtr;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomationArrangementBridge)
     };
