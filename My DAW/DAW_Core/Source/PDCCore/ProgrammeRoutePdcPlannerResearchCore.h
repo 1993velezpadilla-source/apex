@@ -83,14 +83,23 @@ public:
         }
         // Pre-resolve active route endpoints on the control thread. Avoid
         // repeating string hash lookups while calculating each node's inputs.
+        struct ActiveRoute {
+            std::size_t edgeIndex;
+            std::size_t sourceIndex;
+            std::size_t destinationIndex;
+        };
+        std::vector<ActiveRoute> activeRoutes;
+        activeRoutes.reserve(edges.size());
         std::vector<std::vector<std::size_t>> incoming(nodes.size());
-        for(const auto& edge:edges) {
+        for(std::size_t edgeIndex=0;edgeIndex<edges.size();++edgeIndex) {
+            const auto& edge=edges[edgeIndex];
             if(!participates(edge,nodes,nodeIndex))continue;
             const auto src=nodeIndex.at(edge.source);
             const auto dst=nodeIndex.at(edge.destination);
             if(topoPosition[src]>=topoPosition[dst])
                 return fail("programme route violates topological order/cycle");
             incoming[dst].push_back(src);
+            activeRoutes.push_back({edgeIndex,src,dst});
         }
 
         nodePlans_.resize(nodes.size());
@@ -108,17 +117,15 @@ public:
             result.outputLatency=node.active?
                 incomingMax+node.ownProcessorLatency:0;
         }
-        edgePlans_.reserve(edges.size());
-        for(const auto& edge:edges) {
-            if(!participates(edge,nodes,nodeIndex))continue;
-            const auto src=nodeIndex.at(edge.source);
-            const auto dst=nodeIndex.at(edge.destination);
-            const int srcLatency=nodePlans_[src].outputLatency;
-            const int dstArrival=nodePlans_[dst].arrivalLatency;
+        edgePlans_.reserve(activeRoutes.size());
+        for(const auto& route:activeRoutes) {
+            const int srcLatency=nodePlans_[route.sourceIndex].outputLatency;
+            const int dstArrival=nodePlans_[route.destinationIndex].arrivalLatency;
             if(dstArrival<srcLatency)
                 return fail("negative route compensation: corrupt plan");
             edgePlans_.push_back({
-                edge.id,dstArrival-srcLatency,srcLatency,dstArrival});
+                edges[route.edgeIndex].id,dstArrival-srcLatency,
+                srcLatency,dstArrival});
         }
         valid_=true;
         return true;
