@@ -14,6 +14,7 @@
 // 1ms/PDC/Antares claim is permitted until full wet timing, voice listening,
 // click, CPU, formant and ASIO mic-to-ear gates are independently green.
 #include "../ApexTuneLiveVoiceControl.h"
+#include "ApexTuneLiveEarlyOnsetProbe.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,6 +31,7 @@ public:
                ?sampleRate:48000.0;
         channels_=std::clamp(channels,1,2);
         tracker_.prepare(rate_);
+        early_.prepare(rate_);
         // No dynamic allocation in prepare or process; control coefficients
         // are computed here or only when the pitch tracker emits a frame.
         wetStep_=1.0/(0.008*rate_+1.0);
@@ -37,6 +39,7 @@ public:
     }
     void reset() noexcept {
         tracker_.reset();
+        early_.reset();
         policy_.reset();
         for(auto& ch:partials_)
             for(auto& p:ch)p={};
@@ -50,13 +53,16 @@ public:
         partialStep_=0.0;
         voiced_=false;
         sampleCount_=0;
-        firstVoiceSample_=firstHalfWetSample_=-1;
+        firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
         voicedSamples_=0;
         initializedPhase_=false;
     }
     // Research settings are established off the audio callback; this
     // wrapper is not yet wired to concurrent host automation.
     void setVoiceSettings(VoiceSettings settings) noexcept {settings_=settings;}
+    // Research-only optional early seed for >=200 Hz, with octave veto.
+    // No production host exposure; primary YIN remains authoritative.
+    void enableEarlyOnset(bool enabled) noexcept {earlyEnabled_=enabled;}
     void process(float* const* data,int channels,int length) noexcept {
         if(!data || channels!=channels_ || length<=0 || !data[0] ||
            (channels_==2 && !data[1]))return;
@@ -68,41 +74,15 @@ public:
             envelopeR_+=(std::abs(dry[1])-envelopeR_)*envelopeStep;
             const float detector=(channels_==2 && envelopeR_>1.2f*envelopeL_)
                                    ?dry[1]:dry[0];
+            const bool preliminary=earlyEnabled_ && early_.push(detector);
             if(tracker_.push(detector)) {
-                const auto estimate=tracker_.latest();
-                const auto decision=policy_.update(estimate,settings_);
-                const bool acceptable=decision.voiced &&
-                         std::isfinite(estimate.hz) &&
-                         estimate.hz>=55.0f && estimate.hz<=1200.0f &&
-                         std::isfinite(decision.shiftSemitones);
-                if(acceptable) {
-                    const double ratio=std::pow(2.0,
-                        std::clamp(static_cast<double>(decision.shiftSemitones),
-                                   -2.5,2.5)/12.0);
-                    sourceHz_=estimate.hz;
-                    targetHz_=sourceHz_*ratio;
-                    const double radians=2.0*3.14159265358979323846/rate_;
-                    stepSource_={std::cos(sourceHz_*radians),
-                                 std::sin(sourceHz_*radians)};
-                    stepOutput_={std::cos(targetHz_*radians),
-                                 std::sin(targetHz_*radians)};
-                    // EMA over two source periods. Harmonic amplitude cannot
-                    // be inferred from a single incoming sample.
-                    partialStep_=std::clamp(sourceHz_/(2.0*rate_),
-                                           0.00001,0.2);
-                    if(!voiced_) {
-                        voicedSamples_=0;
-                        initializedPhase_=false;
-                        if(firstVoiceSample_<0)firstVoiceSample_=sampleCount_;
-                    }
-                    voiced_=true;
-                    const bool actuallyTuning=std::abs(decision.shiftSemitones)>0.01f;
-                    targetWet_=actuallyTuning?1.0:0.0;
-                } else {
-                    voiced_=false;
-                    targetWet_=0.0;
-                    voicedSamples_=0;
-                }
+                updatePitch(tracker_.latest(),false);
+            } else if(preliminary && !voiced_ && early_.latest().voiced) {
+                // Two stable short-window analyses prevent a one-frame
+                // false onset. Main production tracker supersedes this seed.
+                const auto e=early_.latest();
+                const PitchTracker::Result estimate{e.hz,e.confidence,true};
+                updatePitch(estimate,true);
             }
             if(voiced_) {
                 ++voicedSamples_;
@@ -165,10 +145,44 @@ public:
     double targetHz() const noexcept {return targetHz_;}
     double researchWetMix() const noexcept {return wet_;}
     int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
+    int64_t firstEarlySample() const noexcept {return firstEarlySample_;}
     int64_t firstHalfWetSample() const noexcept {return firstHalfWetSample_;}
     int64_t processedSamples() const noexcept {return sampleCount_;}
     double trackerWindowMs() const noexcept {return tracker_.analysisWindowMs();}
 private:
+    void updatePitch(PitchTracker::Result estimate,bool earlySeed) noexcept {
+        const auto decision=policy_.update(estimate,settings_);
+        const bool acceptable=decision.voiced &&
+                 std::isfinite(estimate.hz) &&
+                 estimate.hz>=55.0f && estimate.hz<=1200.0f &&
+                 std::isfinite(decision.shiftSemitones);
+        if(acceptable) {
+            const double ratio=std::pow(2.0,
+                std::clamp(static_cast<double>(decision.shiftSemitones),
+                           -2.5,2.5)/12.0);
+            sourceHz_=estimate.hz;
+            targetHz_=sourceHz_*ratio;
+            const double radians=2.0*3.14159265358979323846/rate_;
+            stepSource_={std::cos(sourceHz_*radians),
+                         std::sin(sourceHz_*radians)};
+            stepOutput_={std::cos(targetHz_*radians),
+                         std::sin(targetHz_*radians)};
+            partialStep_=std::clamp(sourceHz_/(2.0*rate_),0.00001,0.2);
+            if(!voiced_) {
+                voicedSamples_=0;
+                initializedPhase_=false;
+                if(firstVoiceSample_<0)firstVoiceSample_=sampleCount_;
+            }
+            if(earlySeed && firstEarlySample_<0)
+                firstEarlySample_=sampleCount_;
+            voiced_=true;
+            targetWet_=std::abs(decision.shiftSemitones)>0.01f?1.0:0.0;
+        } else {
+            voiced_=false;
+            targetWet_=0.0;
+            voicedSamples_=0;
+        }
+    }
     struct Unit {double real=1.0,imag=0.0;};
     struct Partial {double cosine=0.0,sine=0.0;};
     static Unit multiply(Unit a,Unit b) noexcept {
@@ -186,6 +200,7 @@ private:
         return std::clamp(x,-8.0f,8.0f);
     }
     PitchTracker tracker_;
+    EarlyOnsetProbe early_;
     VoiceControl policy_;
     VoiceSettings settings_{};
     std::array<std::array<Partial,kHarmonics>,2> partials_{};
@@ -194,7 +209,8 @@ private:
            wet_=0.0,targetWet_=0.0,wetStep_=0.0,partialStep_=0.0;
     float envelopeL_=0.0f,envelopeR_=0.0f;
     int channels_=1,voicedSamples_=0;
-    int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1;
-    bool voiced_=false,initializedPhase_=false;
+    int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
+            firstEarlySample_=-1;
+    bool voiced_=false,initializedPhase_=false,earlyEnabled_=false;
 };
 }}} // namespace APEX::TuneLive::Research
