@@ -2,6 +2,7 @@
 // prepare/process/state/editor. A real Windows GUI+audio smoke without
 // requiring an Apollo Solo on GitHub runners.
 #include "../../Source/TuneLiveCore/ApexTuneLiveProcessor.h"
+#include "../../Source/TuneLiveCore/Research/ApexTuneLiveCausalJUCEAdapter.h"
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -222,6 +223,51 @@ int main() {
                         ?1200.0*std::log2(monoPitch.hz/440.0):9999.0;
     if(!monoPitch.voiced || std::abs(monoCents)>18.0)
         return fail("mono host failed to actually pitch-correct Apollo-like mic");
+
+    // A completely separate JUCE 8 AudioPluginInstance executes the
+    // causal/residual LIVE experiment in real linked Windows JUCE code.
+    // NOT registered with APEX Native; never changes HQ40 by itself.
+    // Zero FIXED lookahead metadata is not a claim of 1ms note detection.
+    APEX::TuneLive::Research::CausalJUCEAdapter candidate;
+    candidate.prepareToPlay(48000.0,128);
+    if(candidate.getLatencySamples()!=0)
+        return fail("causal research host added fixed plugin lookahead");
+    juce::AudioBuffer<float> researchAudio(2,128);
+    APEX::TuneLive::PitchTracker researchPitch;
+    researchPitch.prepare(48000.0);
+    for(int i=0;i<48000;i+=128) {
+        for(int n=0;n<128;++n) {
+            const double t=static_cast<double>(i+n)/48000.0;
+            const float sample=static_cast<float>(0.27*std::sin(
+                6.283185307179586*447.691*t));
+            researchAudio.setSample(0,n,sample);
+            researchAudio.setSample(1,n,sample);
+        }
+        candidate.processBlock(researchAudio,midi);
+        for(int c=0;c<2;++c)
+            for(int n=0;n<128;++n)
+                if(!std::isfinite(researchAudio.getSample(c,n)))
+                    return fail("causal research JUCE returned invalid audio");
+        if(i>=24000)
+            for(int n=0;n<128;++n)
+                researchPitch.push(researchAudio.getSample(0,n));
+    }
+    const auto researchF0=researchPitch.latest();
+    const double researchCents=researchF0.voiced
+        ?1200.0*std::log2(researchF0.hz/440.0):9999.0;
+    if(!researchF0.voiced || std::abs(researchCents)>18.0 ||
+       candidate.researchWetMix()<0.95)
+        return fail("causal research hosted wet audio was not pitch-corrected");
+    if(candidate.firstVoiceSample()<0 || candidate.firstHalfWetSample()<0 ||
+       candidate.firstHalfWetSample()<candidate.firstVoiceSample())
+        return fail("causal research hosted F0 onset telemetry invalid");
+    std::cout<<"CAUSAL_JUCE_RESEARCH fixed_pdc_samples="
+             <<candidate.getLatencySamples()
+             <<" firstF0_ms="<<1000.0*candidate.firstVoiceSample()/48000.0
+             <<" firstWet50_ms="<<1000.0*candidate.firstHalfWetSample()/48000.0
+             <<" late_wet_cents="<<researchCents
+             <<" NO_1MS_FIRST_NOTE_RESPONSE_CLAIM\\n";
+    candidate.releaseResources();
 
     editor.reset();
     plugin.releaseResources();
