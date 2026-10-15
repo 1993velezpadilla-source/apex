@@ -26,7 +26,6 @@ std::vector<float> sing(double sr) {
     double phase=0.0;
     for(int i=0;i<samples;++i) {
         const double t=i/sr;
-        const bool silence=t>=0.85 && t<1.05;
         const double base=t<0.45?220.0:440.0;
         const double cents=t<0.45?30.0:t<1.05?-30.0:30.0;
         const double hz=base*std::pow(2.0,cents/1200.0);
