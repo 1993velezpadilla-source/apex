@@ -187,7 +187,13 @@ public:
         if(stereo.getNumChannels()!=2 || stereo.getNumSamples()<=0)
             return false;
         auto reader=graphPdcPreflight_.readRealtime();
+        // Mirror the render-block eligibility gate. A test helper must not
+        // accept stale plugin-latency or sample-rate snapshots.
         if(!reader ||
+           reader->sampleRate!=sampleRate_ ||
+           reader->dispatch.channels()!=2 ||
+           graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)!=
+               graphPdcLatencyRevision_.load(std::memory_order_acquire) ||
            !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
                sameProgrammeRoutingRealtime(graph,reader->graph) ||
            edgePosition>=graph.edges.size())return false;
