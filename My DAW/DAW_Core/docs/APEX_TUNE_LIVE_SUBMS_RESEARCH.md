@@ -26,7 +26,7 @@ other inserts. Retune Speed is not audio path latency.
 
 - Uses the **actual** production PitchTracker (YIN) and musical VoiceControl;
   the engine receives only original audio, **not** a known input-F0 oracle.
-- Reconstructs up to 12 harmonic partials with a rolling causal EMA envelope
+- Reconstructs up to 24 harmonic partials with a rolling causal EMA envelope
   and forward-moving phase oscillators at the corrected target frequency.
 - No explicit lookahead, no delay line in the dry branch; input is passed
   straight through while the detector/synthesizer acquires the singer's F0.
