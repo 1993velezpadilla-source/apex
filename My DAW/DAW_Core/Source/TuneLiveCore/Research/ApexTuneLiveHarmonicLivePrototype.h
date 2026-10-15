@@ -25,7 +25,7 @@ namespace APEX { namespace TuneLive { namespace Research {
 
 class HarmonicLivePrototype final {
 public:
-    static constexpr int kHarmonics=12;
+    static constexpr int kHarmonics=24;
     void prepare(double sampleRate,int channels=1) noexcept {
         rate_=(std::isfinite(sampleRate) && sampleRate>=8000.0 && sampleRate<=192000.0)
                ?sampleRate:48000.0;
