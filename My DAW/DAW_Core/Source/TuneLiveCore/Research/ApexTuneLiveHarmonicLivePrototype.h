@@ -56,6 +56,8 @@ public:
         firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
         lastLargeNoteJumpSample_=-1;
         lastVoicedEstimateSample_=-1;
+        lastFastTransitionSample_=-1;
+        fastTransitionCount_=0;
         largeNoteJumpCount_=0;
         voicedSamples_=0;
         initializedPhase_=false;
@@ -66,6 +68,13 @@ public:
     // Research-only optional early seed for >=200 Hz, with octave veto.
     // No production host exposure; primary YIN remains authoritative.
     void enableEarlyOnset(bool enabled) noexcept {earlyEnabled_=enabled;}
+    // OFF by default. This speculative transition seed requires two
+    // independent, agreeing short-window F0 frames with an octave veto;
+    // the ordinary longer YIN still supplies authoritative sustained pitch.
+    // It cannot make first-note recognition a 1ms operation.
+    void enableExperimentalEarlyTransitions(bool enabled) noexcept {
+        fastTransitionsEnabled_=enabled;
+    }
     // Experimental residual-preserving voiced replacement:
     // subtract the tracked unshifted harmonics, insert shifted harmonics,
     // and retain current-input residual (consonants/breath/noise) instantly.
@@ -84,13 +93,40 @@ public:
                                    ?dry[1]:dry[0];
             const bool preliminary=earlyEnabled_ && early_.push(detector);
             if(tracker_.push(detector)) {
-                updatePitch(tracker_.latest(),false);
-            } else if(preliminary && !voiced_ && early_.latest().voiced) {
-                // Two stable short-window analyses prevent a one-frame
-                // false onset. Main production tracker supersedes this seed.
+                const auto primary=tracker_.latest();
+                // After an EARLY predicted octave switch, the full YIN
+                // window still contains part of the PREVIOUS note. Never
+                // rewind to a stale octave during this short overlap.
+                // If full YIN agrees, or the window expires, it takes over.
+                const bool overlapsPredictedLeap=
+                    fastTransitionsEnabled_ && primary.voiced &&
+                    lastFastTransitionSample_>=0 &&
+                    (sampleCount_-lastFastTransitionSample_)<
+                        static_cast<int64_t>(rate_*0.020) &&
+                    primary.hz>=55.0f && sourceHz_>=55.0 &&
+                    std::abs(1200.0*std::log2(primary.hz/sourceHz_))>650.0;
+                if(!overlapsPredictedLeap)
+                    updatePitch(primary,false);
+            } else if(preliminary && early_.latest().voiced) {
+                // Early detector is not given an oracle; it observes the
+                // actual mic samples and requires two agreeing estimates.
                 const auto e=early_.latest();
                 const PitchTracker::Result estimate{e.hz,e.confidence,true};
-                updatePitch(estimate,true);
+                if(!voiced_) {
+                    updatePitch(estimate,true);
+                } else if(fastTransitionsEnabled_ && sourceHz_>=55.0 &&
+                          e.confidence>=0.90f &&
+                          std::abs(1200.0*std::log2(e.hz/sourceHz_))>650.0 &&
+                          (lastFastTransitionSample_<0 ||
+                           (sampleCount_-lastFastTransitionSample_)>
+                                static_cast<int64_t>(rate_*0.045))) {
+                    // Short-window octave disagreement is intentionally
+                    // restricted to large jumps; ordinary vibrato/neighbor
+                    // semitone shifts remain under the full YIN authority.
+                    updatePitch(estimate,true);
+                    lastFastTransitionSample_=sampleCount_;
+                    ++fastTransitionCount_;
+                }
             }
             if(voiced_) {
                 ++voicedSamples_;
@@ -162,6 +198,8 @@ public:
     int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
     int64_t firstEarlySample() const noexcept {return firstEarlySample_;}
     int largeNoteJumpCount() const noexcept {return largeNoteJumpCount_;}
+    int fastTransitionCount() const noexcept {return fastTransitionCount_;}
+    int64_t lastFastTransitionSample() const noexcept {return lastFastTransitionSample_;}
     int64_t lastLargeNoteJumpSample() const noexcept {return lastLargeNoteJumpSample_;}
     int64_t firstHalfWetSample() const noexcept {return firstHalfWetSample_;}
     int64_t processedSamples() const noexcept {return sampleCount_;}
@@ -252,9 +290,9 @@ private:
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
             firstEarlySample_=-1,lastLargeNoteJumpSample_=-1,
-            lastVoicedEstimateSample_=-1;
-    int largeNoteJumpCount_=0;
+            lastVoicedEstimateSample_=-1,lastFastTransitionSample_=-1;
+    int largeNoteJumpCount_=0,fastTransitionCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
-         residualMode_=false;
+         fastTransitionsEnabled_=false,residualMode_=false;
 };
 }}} // namespace APEX::TuneLive::Research
