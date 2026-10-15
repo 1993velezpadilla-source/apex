@@ -53,15 +53,20 @@ int main(int argc,char** argv) {
         const Wave reference=readWave(prefix+"_source.wav");
         const Wave candidate=readWave(prefix+"_harmonic_live_residual_research.wav");
         const Wave noResidual=readWave(prefix+"_harmonic_live_research.wav");
+        const Wave fastCandidate=readWave(prefix+"_harmonic_live_fast_research.wav");
         if(reference.frames()!=candidate.frames() ||
            reference.frames()!=noResidual.frames() ||
            reference.rate!=candidate.rate || reference.rate!=noResidual.rate ||
            reference.channels!=candidate.channels ||
-           reference.channels!=noResidual.channels)
+           reference.channels!=noResidual.channels ||
+           reference.frames()!=fastCandidate.frames() ||
+           reference.rate!=fastCandidate.rate ||
+           reference.channels!=fastCandidate.channels)
             throw std::runtime_error("Candidate and source have unequal PCM length/rate/channels");
         const auto original=measure(reference);
         const auto residual=measure(candidate);
         const auto harmonicOnly=measure(noResidual);
+        const auto fastEnergy=measure(fastCandidate);
         const double ratio2=residual.high2k/original.high2k;
         const double ratio6=residual.high6k/original.high6k;
         const double loudness=residual.rms/original.rms;
@@ -71,6 +76,31 @@ int main(int argc,char** argv) {
         const bool passed=ratio2>=0.75 && ratio2<=1.25 &&
                           ratio6>=0.75 && ratio6<=1.25 &&
                           loudness>=0.55 && loudness<=1.6;
+        const double fastRatio2=fastEnergy.high2k/original.high2k;
+        const double fastRatio6=fastEnergy.high6k/original.high6k;
+        const double fastLoudness=fastEnergy.rms/original.rms;
+        // Keep a conservative objective signal-integrity safety bound.
+        // These filters alone CANNOT prove formants or subjective quality.
+        const bool fastBands=fastRatio2>=0.65 && fastRatio2<=1.40 &&
+                             fastRatio6>=0.65 && fastRatio6<=1.40 &&
+                             fastLoudness>=0.50 && fastLoudness<=1.75;
+        double deltaRms=0.0,maxFastStep=0.0,fastPeak=0.0;
+        for(std::size_t sample=0;sample<fastCandidate.data.size();++sample) {
+            const double fast=fastCandidate.data[sample];
+            const double slow=candidate.data[sample];
+            const double difference=fast-slow;
+            deltaRms+=difference*difference;
+            fastPeak=std::max(fastPeak,std::abs(fast));
+            if(sample>=static_cast<std::size_t>(fastCandidate.channels)) {
+                const auto previous=sample-static_cast<std::size_t>(fastCandidate.channels);
+                maxFastStep=std::max(maxFastStep,std::abs(
+                                  fast-fastCandidate.data[previous]));
+            }
+        }
+        deltaRms=std::sqrt(deltaRms/fastCandidate.data.size());
+        const bool fastSafety=std::isfinite(fastPeak) && fastPeak<1.0 &&
+                              maxFastStep<0.98 && deltaRms>1.0e-6;
+        const bool allPassed=passed && fastBands && fastSafety;
         std::cout<<std::fixed<<std::setprecision(5)
                  <<"VOCADITO_CAUSAL_RESIDUAL_BANDS source="<<prefix
                  <<" sr="<<reference.rate
@@ -83,9 +113,16 @@ int main(int argc,char** argv) {
                  <<" source_residual_rms_ratio="<<loudness
                  <<" normalized_high2k_ratio="<<ratio2
                  <<" normalized_high6k_ratio="<<ratio6
-                 <<" accepted="<<passed
+                 <<" fast_high2k_ratio="<<fastRatio2
+                 <<" fast_high6k_ratio="<<fastRatio6
+                 <<" fast_source_rms_ratio="<<fastLoudness
+                 <<" fast_peak="<<fastPeak
+                 <<" fast_max_adjacent_step="<<maxFastStep
+                 <<" fast_minus_slow_rms="<<deltaRms
+                 <<" fast_signal_safety="<<fastSafety
+                 <<" accepted="<<allPassed
                  <<" (NOT pitch fidelity / <1ms singer response / ABX)\n";
-        return passed?0:1;
+        return allPassed?0:1;
     } catch(const std::exception& e) {
         std::cerr<<"VOCADITO_CAUSAL_RESIDUAL_BANDS_ERROR "<<e.what()<<"\n";
         return 1;
