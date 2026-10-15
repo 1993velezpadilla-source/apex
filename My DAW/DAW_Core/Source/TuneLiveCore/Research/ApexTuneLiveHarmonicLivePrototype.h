@@ -1,0 +1,200 @@
+#pragma once
+// APEX Tune Live — non-shipping harmonic prediction experiment.
+//
+// Unlike the existing ~40ms spectral shifter, this candidate does not
+// deliberately delay the dry signal or use a forward-lookahead buffer.
+// It reconstructs voiced partials from past samples, then drives those
+// partials at the quantized target frequency. No known source-F0 oracle:
+// original input samples go through the actual production PitchTracker and
+// VoiceControl. Its *effective audible attack/quality latency* is NOT 1ms:
+// F0 detection and harmonic coefficient settling still require cycles.
+//
+// EXPERIMENT ONLY: harmonic resynthesis can alter vowel identity, transient
+// envelopes, consonants, phase and breath noise. No host registration or
+// 1ms/PDC/Antares claim is permitted until full wet timing, voice listening,
+// click, CPU, formant and ASIO mic-to-ear gates are independently green.
+#include "../ApexTuneLiveVoiceControl.h"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+
+namespace APEX { namespace TuneLive { namespace Research {
+
+class HarmonicLivePrototype final {
+public:
+    static constexpr int kHarmonics=12;
+    void prepare(double sampleRate,int channels=1) noexcept {
+        rate_=(std::isfinite(sampleRate) && sampleRate>=8000.0 && sampleRate<=192000.0)
+               ?sampleRate:48000.0;
+        channels_=std::clamp(channels,1,2);
+        tracker_.prepare(rate_);
+        // No dynamic allocation in prepare or process; control coefficients
+        // are computed here or only when the pitch tracker emits a frame.
+        wetStep_=1.0/(0.008*rate_+1.0);
+        reset();
+    }
+    void reset() noexcept {
+        tracker_.reset();
+        policy_.reset();
+        for(auto& ch:partials_)
+            for(auto& p:ch)p={};
+        phaseSource_={1.0,0.0};
+        phaseOutput_={1.0,0.0};
+        stepSource_={1.0,0.0};
+        stepOutput_={1.0,0.0};
+        sourceHz_=targetHz_=0.0;
+        envelopeL_=envelopeR_=0.0f;
+        wet_=targetWet_=0.0;
+        partialStep_=0.0;
+        voiced_=false;
+        sampleCount_=0;
+        firstVoiceSample_=firstHalfWetSample_=-1;
+        voicedSamples_=0;
+        initializedPhase_=false;
+    }
+    // Research settings are established off the audio callback; this
+    // wrapper is not yet wired to concurrent host automation.
+    void setVoiceSettings(VoiceSettings settings) noexcept {settings_=settings;}
+    void process(float* const* data,int channels,int length) noexcept {
+        if(!data || channels!=channels_ || length<=0 || !data[0] ||
+           (channels_==2 && !data[1]))return;
+        const float envelopeStep=static_cast<float>(1.0/(0.010*rate_+1.0));
+        for(int i=0;i<length;++i) {
+            std::array<float,2> dry{{safe(data[0][i]),
+                 channels_==2?safe(data[1][i]):0.0f}};
+            envelopeL_+=(std::abs(dry[0])-envelopeL_)*envelopeStep;
+            envelopeR_+=(std::abs(dry[1])-envelopeR_)*envelopeStep;
+            const float detector=(channels_==2 && envelopeR_>1.2f*envelopeL_)
+                                   ?dry[1]:dry[0];
+            if(tracker_.push(detector)) {
+                const auto estimate=tracker_.latest();
+                const auto decision=policy_.update(estimate,settings_);
+                const bool acceptable=decision.voiced &&
+                         std::isfinite(estimate.hz) &&
+                         estimate.hz>=55.0f && estimate.hz<=1200.0f &&
+                         std::isfinite(decision.shiftSemitones);
+                if(acceptable) {
+                    const double ratio=std::pow(2.0,
+                        std::clamp(static_cast<double>(decision.shiftSemitones),
+                                   -2.5,2.5)/12.0);
+                    sourceHz_=estimate.hz;
+                    targetHz_=sourceHz_*ratio;
+                    const double radians=2.0*3.14159265358979323846/rate_;
+                    stepSource_={std::cos(sourceHz_*radians),
+                                 std::sin(sourceHz_*radians)};
+                    stepOutput_={std::cos(targetHz_*radians),
+                                 std::sin(targetHz_*radians)};
+                    // EMA over two source periods. Harmonic amplitude cannot
+                    // be inferred from a single incoming sample.
+                    partialStep_=std::clamp(sourceHz_/(2.0*rate_),
+                                           0.00001,0.2);
+                    if(!voiced_) {
+                        voicedSamples_=0;
+                        initializedPhase_=false;
+                        if(firstVoiceSample_<0)firstVoiceSample_=sampleCount_;
+                    }
+                    voiced_=true;
+                    const bool actuallyTuning=std::abs(decision.shiftSemitones)>0.01f;
+                    targetWet_=actuallyTuning?1.0:0.0;
+                } else {
+                    voiced_=false;
+                    targetWet_=0.0;
+                    voicedSamples_=0;
+                }
+            }
+            if(voiced_) {
+                ++voicedSamples_;
+                if(!initializedPhase_) {
+                    // Both oscillators share the same instantaneous phase
+                    // before diverging in frequency. Do not confuse this
+                    // phase continuity with verified transient latency.
+                    phaseOutput_=phaseSource_;
+                    initializedPhase_=true;
+                }
+            }
+            // Multiple complex harmonic phasors are generated by repeated
+            // multiplies, not per-harmonic sin()/cos() on each audio sample.
+            Unit src=phaseSource_,out=phaseOutput_;
+            std::array<double,2> synth{{0.0,0.0}};
+            for(int h=0;h<kHarmonics;++h) {
+                const double harmonicHz=targetHz_*static_cast<double>(h+1);
+                const bool withinNyquist=harmonicHz<rate_*0.46;
+                for(int c=0;c<channels_;++c) {
+                    auto& p=partials_[static_cast<std::size_t>(c)]
+                                      [static_cast<std::size_t>(h)];
+                    if(voiced_ && withinNyquist) {
+                        p.cosine+=partialStep_*(2.0*dry[c]*src.real-p.cosine);
+                        p.sine+=partialStep_*(2.0*dry[c]*src.imag-p.sine);
+                        synth[static_cast<std::size_t>(c)]+=
+                            p.cosine*out.real+p.sine*out.imag;
+                    }
+                }
+                src=multiply(src,phaseSource_);
+                out=multiply(out,phaseOutput_);
+            }
+            // No fake 'one millisecond latency' from metadata. The source
+            // reaches the dry output immediately while the experimental
+            // predicted voiced signal takes multiple F0 periods to mature.
+            const bool mature=voiced_ && sourceHz_>0.0 &&
+                voicedSamples_>=static_cast<int>(3.0*rate_/sourceHz_);
+            const double requested=mature?targetWet_:0.0;
+            wet_+=(requested-wet_)*wetStep_;
+            if(firstHalfWetSample_<0 && wet_>=0.5)
+                firstHalfWetSample_=sampleCount_;
+            for(int c=0;c<channels_;++c) {
+                const double result=(1.0-wet_)*dry[c]+wet_*synth[static_cast<std::size_t>(c)];
+                data[c][i]=std::isfinite(result)
+                    ?static_cast<float>(std::clamp(result,-8.0,8.0)):0.0f;
+            }
+            if(voiced_) {
+                phaseSource_=multiply(phaseSource_,stepSource_);
+                phaseOutput_=multiply(phaseOutput_,stepOutput_);
+                // Bound accumulated oscillator floating-point drift.
+                if((sampleCount_&1023)==1023) {
+                    normalize(phaseSource_);
+                    normalize(phaseOutput_);
+                }
+            }
+            ++sampleCount_;
+        }
+    }
+    bool voiced() const noexcept {return voiced_;}
+    double sourceHz() const noexcept {return sourceHz_;}
+    double targetHz() const noexcept {return targetHz_;}
+    double researchWetMix() const noexcept {return wet_;}
+    int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
+    int64_t firstHalfWetSample() const noexcept {return firstHalfWetSample_;}
+    int64_t processedSamples() const noexcept {return sampleCount_;}
+    double trackerWindowMs() const noexcept {return tracker_.analysisWindowMs();}
+private:
+    struct Unit {double real=1.0,imag=0.0;};
+    struct Partial {double cosine=0.0,sine=0.0;};
+    static Unit multiply(Unit a,Unit b) noexcept {
+        return {a.real*b.real-a.imag*b.imag,
+                a.real*b.imag+a.imag*b.real};
+    }
+    static void normalize(Unit& u) noexcept {
+        const double mag=std::sqrt(u.real*u.real+u.imag*u.imag);
+        if(mag>1.0e-9 && std::isfinite(mag)) {
+            u.real/=mag;u.imag/=mag;
+        } else u={1.0,0.0};
+    }
+    static float safe(float x) noexcept {
+        if(!std::isfinite(x)||std::abs(x)<1.0e-20f)return 0.0f;
+        return std::clamp(x,-8.0f,8.0f);
+    }
+    PitchTracker tracker_;
+    VoiceControl policy_;
+    VoiceSettings settings_{};
+    std::array<std::array<Partial,kHarmonics>,2> partials_{};
+    Unit phaseSource_{},phaseOutput_{},stepSource_{},stepOutput_{};
+    double rate_=48000.0,sourceHz_=0.0,targetHz_=0.0,
+           wet_=0.0,targetWet_=0.0,wetStep_=0.0,partialStep_=0.0;
+    float envelopeL_=0.0f,envelopeR_=0.0f;
+    int channels_=1,voicedSamples_=0;
+    int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1;
+    bool voiced_=false,initializedPhase_=false;
+};
+}}} // namespace APEX::TuneLive::Research
