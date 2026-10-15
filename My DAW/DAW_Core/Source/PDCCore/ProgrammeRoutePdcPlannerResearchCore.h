@@ -74,21 +74,18 @@ public:
             if(nodeIndex.find(topoOrder[pos])==nodeIndex.end() ||
                !topo.emplace(topoOrder[pos],pos).second)
                 return fail("topological order contains unknown/duplicate node");
+        // Pre-resolve active route endpoints on the control thread. Avoid
+        // repeating string hash lookups while calculating each node's inputs.
+        std::vector<std::vector<std::size_t>> incoming(nodes.size());
         for(const auto& edge:edges) {
             if(!participates(edge,nodes,nodeIndex))continue;
+            const auto src=nodeIndex.at(edge.source);
+            const auto dst=nodeIndex.at(edge.destination);
             if(topo.at(edge.source)>=topo.at(edge.destination))
                 return fail("programme route violates topological order/cycle");
+            incoming[dst].push_back(src);
         }
 
-        // Index participating incoming programme routes once on the control
-        // thread. The previous full edge scan per node was O(nodes * edges),
-        // making large send-heavy sessions expensive to prepare.
-        std::vector<std::vector<std::size_t>> incoming(nodes.size());
-        for(std::size_t i=0;i<edges.size();++i) {
-            if(!participates(edges[i],nodes,nodeIndex))continue;
-            incoming[nodeIndex.at(edges[i].destination)].push_back(
-                nodeIndex.at(edges[i].source));
-        }
         nodePlans_.resize(nodes.size());
         for(const auto& name:topoOrder) {
             const auto nodeIdx=nodeIndex.at(name);
