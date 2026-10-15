@@ -269,6 +269,54 @@ int main() {
              <<" NO_1MS_FIRST_NOTE_RESPONSE_CLAIM\\n";
     candidate.releaseResources();
 
+    // Real JUCE 8 streaming-host test for the guarded early octave seed.
+    // We generate phase-continuous A3+30c -> A4-30c vocal-like harmonics;
+    // no known pitch is handed to the processor.
+    candidate.prepareToPlay(48000.0,128);
+    APEX::TuneLive::PitchTracker researchLeapPitch;
+    researchLeapPitch.prepare(48000.0);
+    double sourcePhase=0.0;
+    for(int i=0;i<48000;i+=128) {
+        for(int n=0;n<128;++n) {
+            const double hzIn=(i+n)<21600
+                ?220.0*std::pow(2.0,30.0/1200.0)
+                :440.0*std::pow(2.0,-30.0/1200.0);
+            sourcePhase+=6.283185307179586*hzIn/48000.0;
+            const float sample=static_cast<float>(
+                0.24*std::sin(sourcePhase)
+                +0.045*std::sin(2.0*sourcePhase+0.18)
+                +0.018*std::sin(3.0*sourcePhase+0.24));
+            researchAudio.setSample(0,n,sample);
+            researchAudio.setSample(1,n,sample);
+        }
+        candidate.processBlock(researchAudio,midi);
+        for(int n=0;n<128;++n) {
+            const float sample=researchAudio.getSample(0,n);
+            if(!std::isfinite(sample) ||
+               !std::isfinite(researchAudio.getSample(1,n)))
+                return fail("causal JUCE early leap generated invalid audio");
+            if(i>=36000)researchLeapPitch.push(sample);
+        }
+    }
+    const double leapTimeMs=1000.0*candidate.lastFastTransitionSample()/48000.0;
+    if(candidate.getLatencySamples()!=0 ||
+       candidate.fastTransitionCount()<1 ||
+       leapTimeMs<450.0 || leapTimeMs>470.0)
+        return fail("real JUCE host failed guarded early A3-A4 switch");
+    const auto leapWet=researchLeapPitch.latest();
+    const double leapCents=leapWet.voiced
+        ?1200.0*std::log2(leapWet.hz/440.0):9999.0;
+    if(!leapWet.voiced || std::abs(leapCents)>18.0 ||
+       candidate.researchWetMix()<0.95)
+        return fail("causal JUCE fast-leap wet audio lost tonal accuracy");
+    std::cout<<"CAUSAL_JUCE_FAST_LEAP fixed_pdc_samples="
+             <<candidate.getLatencySamples()
+             <<" first_octave_seed_ms="<<leapTimeMs
+             <<" fast_jump_count="<<candidate.fastTransitionCount()
+             <<" final_wet_cents="<<leapCents
+             <<" NO_1MS_PITCH_DECISION_CLAIM\\n";
+    candidate.releaseResources();
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
