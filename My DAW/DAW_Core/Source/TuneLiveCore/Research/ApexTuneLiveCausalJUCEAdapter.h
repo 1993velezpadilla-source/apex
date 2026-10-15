@@ -56,6 +56,7 @@ public:
         settings.noteHysteresis=0.1f;
         live_.setVoiceSettings(settings);
         live_.enableEarlyOnset(true);
+        live_.enableExperimentalEarlyTransitions(true);
         live_.enableResidualPreservation(true);
         // No fixed delay/lookahead in this dry plus harmonic-residual
         // resynthesis candidate. Does NOT verify acoustic voice response.
@@ -73,6 +74,10 @@ public:
     }
     double researchWetMix() const noexcept {return live_.researchWetMix();}
     int64_t firstVoiceSample() const noexcept {return live_.firstVoiceSample();}
+    int fastTransitionCount() const noexcept {return live_.fastTransitionCount();}
+    int64_t lastFastTransitionSample() const noexcept {
+        return live_.lastFastTransitionSample();
+    }
     int64_t firstHalfWetSample() const noexcept {return live_.firstHalfWetSample();}
     bool hasEditor() const override {return false;}
     juce::AudioProcessorEditor* createEditor() override {return nullptr;}
