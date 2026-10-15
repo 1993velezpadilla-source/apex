@@ -6,6 +6,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp'
       - '.github/workflows/tune-live-causal-subms-research.yml'
   workflow_dispatch:
 
@@ -38,6 +39,10 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" \
             -o tune_live_causal_no_alloc
           ./tune_live_causal_no_alloc | tee causal_rt_no_alloc_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp" \
+            -o tune_live_causal_note_leaps
+          ./tune_live_causal_note_leaps | tee causal_note_leaps_ubuntu.log
       - name: Publish unedited diagnostic results, not a release certificate
         uses: actions/upload-artifact@v4
         with:
@@ -46,6 +51,7 @@ jobs:
             harmonic_research_ubuntu.log
             one_ms_transient_ubuntu.log
             causal_rt_no_alloc_ubuntu.log
+            causal_note_leaps_ubuntu.log
           if-no-files-found: error
           retention-days: 14
 
@@ -68,6 +74,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_no_alloc.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" || exit /b 1
           tune_live_causal_no_alloc.exe > causal_rt_no_alloc_windows.log || (type causal_rt_no_alloc_windows.log & exit /b 1)
           type causal_rt_no_alloc_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_note_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp" || exit /b 1
+          tune_live_causal_note_leaps.exe > causal_note_leaps_windows.log || (type causal_note_leaps_windows.log & exit /b 1)
+          type causal_note_leaps_windows.log
       - name: Publish measured windows diagnostic
         uses: actions/upload-artifact@v4
         with:
@@ -76,5 +85,6 @@ jobs:
             harmonic_research_windows.log
             one_ms_transient_windows.log
             causal_rt_no_alloc_windows.log
+            causal_note_leaps_windows.log
           if-no-files-found: error
           retention-days: 14
