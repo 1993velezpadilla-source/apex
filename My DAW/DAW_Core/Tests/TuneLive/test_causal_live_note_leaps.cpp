@@ -44,13 +44,15 @@ std::vector<float> sing(double sr) {
 struct Result {
     std::vector<float> output;
     int noteJumps=0;
+    int fastTransitions=0;
+    int64_t lastFastTransition=-1;
     int64_t lastJump=-1;
     double finalHz=0.0;
     double maxStep=0.0;
     double wet=0.0;
     bool finite=true;
 };
-Result test(double sr, bool oddBlocks) {
+Result test(double sr, bool oddBlocks, bool fast=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     Result result;
     result.output=sing(sr);
@@ -58,6 +60,7 @@ Result test(double sr, bool oddBlocks) {
     engine.prepare(sr);
     engine.setVoiceSettings(hardSettings());
     engine.enableEarlyOnset(true);
+    engine.enableExperimentalEarlyTransitions(fast);
     engine.enableResidualPreservation(true);
     constexpr std::array<int,7> hops{{1,48,128,257,17,2,64}};
     int cursor=0,iterations=0;
@@ -78,6 +81,8 @@ Result test(double sr, bool oddBlocks) {
                  std::abs(static_cast<double>(value-result.output[i-1])));
     }
     result.noteJumps=engine.largeNoteJumpCount();
+    result.fastTransitions=engine.fastTransitionCount();
+    result.lastFastTransition=engine.lastFastTransitionSample();
     result.lastJump=engine.lastLargeNoteJumpSample();
     result.wet=engine.researchWetMix();
     APEX::TuneLive::PitchTracker measured;
