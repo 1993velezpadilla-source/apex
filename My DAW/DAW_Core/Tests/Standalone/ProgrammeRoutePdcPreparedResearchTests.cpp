@@ -100,7 +100,7 @@ static void impulseJourney(int block,int rate) {
         }
     }
     const double compensatedMs=1000.*48/rate;
-    assert(compensatedMs>.9 && compensatedMs<1.1);
+    assert(std::abs(compensatedMs-(48000.0/rate))<1.e-12);
 }
 static void localTrackInput(int block) {
     ProgrammeRoutePdcPlannerResearchCore plan;
@@ -136,10 +136,10 @@ static void localTrackInput(int block) {
 }
 int main(){
     // Test coverage includes graph-wide sample-path parity.
-    for(int rate:{44100,48000})
-        for(int frames:{1,31,64,128})
+    for(int rate:{44100,48000,96000})
+        for(int frames:{1,31,64,128,256,1024})
             impulseJourney(frames,rate);
-    for(int frames:{1,31,64,128})localTrackInput(frames);
+    for(int frames:{1,31,64,128,256,1024})localTrackInput(frames);
     ProgrammeRoutePdcPlannerResearchCore plan;
     assert(plan.build({{"source",16,true},{"master",0,false}},
                       {{"route","source","master",EdgeKind::Direct}},
@@ -157,6 +157,6 @@ int main(){
     assert(!bank.processEdge(bank.findEdgeIndex("route"),nullptr,2,5));
     assert(!bank.processLocalInput(bank.invalidIndex,channels,1,5));
     std::cout<<"APEX prepared route PDC: per-edge stereo multiway mix,"
-             <<" 44.1/48k, 1/31/64/128 callback segmentation,"
+             <<" 44.1/48/96k, 1/31/64/128/256/1024 callback segmentation,"
              <<" reset/local-source/invalid bounds GREEN\n";
 }
