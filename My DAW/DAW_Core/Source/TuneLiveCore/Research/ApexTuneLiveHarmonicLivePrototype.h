@@ -54,6 +54,8 @@ public:
         voiced_=false;
         sampleCount_=0;
         firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
+        lastLargeNoteJumpSample_=-1;
+        largeNoteJumpCount_=0;
         voicedSamples_=0;
         initializedPhase_=false;
     }
@@ -158,6 +160,8 @@ public:
     double researchWetMix() const noexcept {return wet_;}
     int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
     int64_t firstEarlySample() const noexcept {return firstEarlySample_;}
+    int largeNoteJumpCount() const noexcept {return largeNoteJumpCount_;}
+    int64_t lastLargeNoteJumpSample() const noexcept {return lastLargeNoteJumpSample_;}
     int64_t firstHalfWetSample() const noexcept {return firstHalfWetSample_;}
     int64_t processedSamples() const noexcept {return sampleCount_;}
     double trackerWindowMs() const noexcept {return tracker_.analysisWindowMs();}
@@ -172,6 +176,21 @@ private:
             const double ratio=std::pow(2.0,
                 std::clamp(static_cast<double>(decision.shiftSemitones),
                            -2.5,2.5)/12.0);
+            // A large sung-note leap invalidates harmonic coefficients from
+            // the old vowel. Decay to instantaneous dry/residual and learn
+            // the new fundamental before fading corrected partials back in.
+            // This cannot remove YIN reacquisition time, but avoids using
+            // an A3 spectral envelope to synthesize an unrelated A4 attack.
+            if(voiced_ && sourceHz_>=55.0 &&
+                std::abs(1200.0*std::log2(estimate.hz/sourceHz_))>600.0) {
+                for(auto& channel:partials_)
+                    for(auto& partial:channel)partial={};
+                voicedSamples_=0;
+                targetWet_=0.0;
+                initializedPhase_=false;
+                lastLargeNoteJumpSample_=sampleCount_;
+                ++largeNoteJumpCount_;
+            }
             sourceHz_=estimate.hz;
             targetHz_=sourceHz_*ratio;
             const double radians=2.0*3.14159265358979323846/rate_;
@@ -222,7 +241,8 @@ private:
     float envelopeL_=0.0f,envelopeR_=0.0f;
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
-            firstEarlySample_=-1;
+            firstEarlySample_=-1,lastLargeNoteJumpSample_=-1;
+    int largeNoteJumpCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
          residualMode_=false;
 };
