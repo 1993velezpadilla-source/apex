@@ -63,6 +63,7 @@ int main() {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     bool safe=true;
     int acousticallyEligible=0;
+    std::array<double,4> baselineWet48{};
     for(double rate:std::array<double,3>{{44100,48000,96000}})
       for(double target:std::array<double,2>{{220,440}})
         for(double cents:std::array<double,2>{{-30,30}}) {
@@ -107,6 +108,11 @@ int main() {
                  engine.firstHalfWetSample()>engine.firstVoiceSample();
         const bool eligible=outputHz>0 && std::abs(residual)<18.0;
         acousticallyEligible+=eligible;
+        if(rate==48000.0) {
+            const int index=(target>300?2:0)+(cents>0?1:0);
+            baselineWet48[static_cast<std::size_t>(index)]=
+                1000.0*engine.firstHalfWetSample()/rate;
+        }
         safe &= finite && peak<2.0 && rms>0.007 &&
                 matchedSource && engine.researchWetMix()>0.95;
         std::cout<<"CAUSAL_HARMONIC rate="<<rate<<" input_hz="<<input
@@ -118,6 +124,48 @@ int main() {
                  <<" rms="<<rms<<" peak="<<peak
                  <<" processing_ms="<<cpuMs
                  <<" source_ok="<<matchedSource<<" safe="<<finite<<"\n";
+    }
+    // Direct A/B: guarded ~14ms short-window F0 seed versus the existing
+    // full tracker, WITH ACTUAL WET AUDIO. The onset acceleration is not a
+    // declaration of <1ms algorithmic delay or a human voice quality pass.
+    int fasterCases=0,accurateFast=0;
+    for(double target:std::array<double,2>{{220.0,440.0}})
+      for(double cents:std::array<double,2>{{-30.0,30.0}}) {
+        constexpr double rate=48000.0;
+        const double input=target*std::pow(2.0,cents/1200.0);
+        const int count=static_cast<int>(1.4*rate);
+        std::vector<float> output(static_cast<std::size_t>(count));
+        for(int i=0;i<count;++i)
+            output[static_cast<std::size_t>(i)]=voiced(rate,input,i);
+        HarmonicLivePrototype rapid;
+        rapid.prepare(rate);
+        rapid.setVoiceSettings(hard());
+        rapid.enableEarlyOnset(true);
+        for(int i=0;i<count;) {
+            const int n=std::min(128,count-i);
+            float* mono[1]={output.data()+i};
+            rapid.process(mono,1,n);
+            i+=n;
+        }
+        const auto wetMs=1000.0*rapid.firstHalfWetSample()/rate;
+        const auto firstMs=1000.0*rapid.firstVoiceSample()/rate;
+        const int index=(target>300?2:0)+(cents>0?1:0);
+        const double baseline=baselineWet48[static_cast<std::size_t>(index)];
+        const double hz=autocorrHz(output,rate,target);
+        const double error=hz>0?1200.0*std::log2(hz/target):9999.0;
+        const bool faster=rapid.firstEarlySample()>=0 &&
+             firstMs>0 && firstMs<21.3125 &&
+             wetMs>0 && wetMs<baseline;
+        const bool corrected=std::abs(error)<18.0;
+        fasterCases+=faster;
+        accurateFast+=corrected;
+        safe &= faster && corrected;
+        std::cout<<"CAUSAL_FAST_F0 target="<<target<<" cents="<<cents
+                 <<" baseline_wet50_ms="<<baseline
+                 <<" fast_first_f0_ms="<<firstMs
+                 <<" fast_wet50_ms="<<wetMs
+                 <<" residual_cents="<<error
+                 <<" actual_faster="<<faster<<" corrected="<<corrected<<"\\n";
     }
     // Stereo right-only microphones: zero crosstalk and poison guards.
     {
@@ -148,6 +196,8 @@ int main() {
                  <<" acquired_source="<<engine.sourceHz()<<"\n";
     }
     std::cout<<"CAUSAL_HARMONIC_EXPERIMENT safety="<<safe
+             <<" fast_f0_cases="<<fasterCases<<"/4"
+             <<" fast_accurate="<<accurateFast<<"/4"
              <<" synthetic_F0_eligible="<<acousticallyEligible
              <<"/12; NOTE: neither a verified 1ms wet-delay bound nor "
                "formant/voice/ASIO certification\n";
