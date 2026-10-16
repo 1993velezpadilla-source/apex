@@ -22,7 +22,7 @@
 #include <vector>
 
 namespace {
-constexpr int kVariants=7;
+constexpr int kVariants=8;
 struct Note {int nearest=-1;double cents=0.0;bool voiced=false;};
 Note decode(APEX::TuneLive::PitchTracker::Result r) {
     if(!r.voiced || r.hz<55.0f || !std::isfinite(r.hz))return {};
@@ -53,12 +53,13 @@ int main(int argc,char** argv) {
             prefix+"_harmonic_live_fast_research.wav",
             prefix+"_harmonic_live_high_research.wav",
             prefix+"_harmonic_live_ultra_research.wav",
-            prefix+"_harmonic_live_ultra_4hop_research.wav"
+            prefix+"_harmonic_live_ultra_4hop_research.wav",
+            prefix+"_harmonic_live_ultra_consensus_research.wav"
         }};
         std::array<Wave,kVariants> waves{{
             readWave(paths[0]),readWave(paths[1]),
             readWave(paths[2]),readWave(paths[3]),
-            readWave(paths[4]),readWave(paths[5]),readWave(paths[6])
+            readWave(paths[4]),readWave(paths[5]),readWave(paths[6]),readWave(paths[7])
         }};
         const auto& dry=waves[0];
         if(dry.frames()<dry.rate || (dry.channels!=1&&dry.channels!=2))
@@ -114,7 +115,7 @@ int main(int argc,char** argv) {
               <<"REAL_SINGER_CAUSAL_F0_RESEARCH prefix="<<prefix
               <<" sr="<<dry.rate<<" original_updates="<<totalUpdates
               <<" stable_source_updates="<<stableVoicedUpdates<<"\n";
-        const std::array<const char*,6> labels{{"HQ40","NORMAL","FAST","FAST_HIGH","ULTRA_HIGH","ULTRA_4HOP"}};
+        const std::array<const char*,7> labels{{"HQ40","NORMAL","FAST","FAST_HIGH","ULTRA_HIGH","ULTRA_4HOP","ULTRA_CONSENSUS"}};
         bool valid=stableVoicedUpdates>=20;
         for(int i=0;i<kVariants-1;++i) {
             const auto& x=measures[static_cast<std::size_t>(i)];
@@ -169,6 +170,7 @@ int main(int argc,char** argv) {
         const auto& prior=measures[3];
         const auto& ultra=measures[4];
         const auto& fastHop=measures[5];
+        const auto& consensus=measures[6];
         const bool ultraStable=
             ultra.octave<=prior.octave+2 &&
             ultra.otherWrongNote<=prior.otherWrongNote+3 &&
@@ -185,6 +187,18 @@ int main(int argc,char** argv) {
             fastHop.unvoiced<=ultra.unvoiced+5 &&
             fastHop.paired+8>=ultra.paired;
         valid &=fastHopStable;
+        const bool consensusStable=consensus.octave<=fastHop.octave+1 &&
+            consensus.otherWrongNote<=fastHop.otherWrongNote+2 &&
+            consensus.unvoiced<=fastHop.unvoiced+5 &&
+            consensus.paired+8>=fastHop.paired;
+        valid &=consensusStable;
+        report<<"REAL_SINGER_ULTRA_CONSENSUS_F0 prefix="<<prefix
+              <<" fast_hop_octave="<<fastHop.octave
+              <<" guarded_octave="<<consensus.octave
+              <<" fast_hop_wrong_note="<<fastHop.otherWrongNote
+              <<" guarded_wrong_note="<<consensus.otherWrongNote
+              <<" accepted="<<consensusStable
+              <<" NOT_FORMANT_OR_TRANSIENT_CERTIFICATE=1\n";
         report<<"REAL_SINGER_4HOP_STABLE_F0 prefix="<<prefix
               <<" prior_octave="<<ultra.octave
               <<" four_hop_octave="<<fastHop.octave
