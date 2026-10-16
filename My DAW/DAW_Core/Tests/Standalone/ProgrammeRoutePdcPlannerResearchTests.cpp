@@ -292,6 +292,35 @@ int main() {
         assert(p.build(safe,safeEdges,{"source","master"}));
         assert(p.valid() && delay(p,"direct")==0);
     }
+    // QuickSend/AutoSend lifecycle: disabling and restoring a send must
+    // remove/recreate its compensation without leaking the previous plan.
+    {
+        ProgrammeRoutePdcPlannerResearchCore p;
+        std::vector<Node> nodes={
+            {"vocal",24,true},{"aux",40,false},{"master",0,false}};
+        std::vector<Edge> edges={
+            {"vocal-dry","vocal","master",EdgeKind::Direct},
+            {"vocal-send","vocal","aux",EdgeKind::Send},
+            {"aux-out","aux","master",EdgeKind::Direct}};
+        const std::vector<std::string> order={"vocal","aux","master"};
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"vocal-dry")==40);
+        edges[1].active=false;
+        assert(p.build(nodes,edges,order));
+        assert(p.findEdge("vocal-send")==nullptr);
+        assert(delay(p,"vocal-dry")==0);
+        edges[1].active=true;
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"vocal-dry")==40);
+        // VST3 plugin latency notification on the aux route.
+        nodes[1].ownProcessorLatency=72;
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"vocal-dry")==72);
+        // Bypassed sends cannot influence master arrival timing.
+        edges[1].bypassed=true;
+        assert(p.build(nodes,edges,order));
+        assert(delay(p,"vocal-dry")==0);
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
