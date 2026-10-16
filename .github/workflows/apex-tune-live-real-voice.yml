@@ -203,6 +203,7 @@ jobs:
             test -s "vocadito_${singer}_harmonic_live_fast_research.wav"
             test -s "vocadito_${singer}_harmonic_live_high_research.wav"
             test -s "vocadito_${singer}_harmonic_live_ultra_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_smooth_research.wav"
             test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
           done
       - name: Reject gross sibilance-energy loss in causal residual LIVE across 3 real singers
@@ -242,6 +243,19 @@ jobs:
           for singer in human low high; do
             ./tune_live_human_transient_hotspots --prefix "vocadito_${singer}"
             test -s "vocadito_${singer}_ULTRA_LOCAL_TRANSIENT_AUDIT.txt"
+          done
+      - name: Audit ultra research optional dry-leap reset on 3 real voices (no quality presumption)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_ultra_dry_reset_experiment.cpp" \
+            -o tune_live_human_dry_reset_experiment
+          for singer in human low high; do
+            ./tune_live_human_dry_reset_experiment --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_ULTRA_DRY_RESET_RESEARCH.txt"
           done
       - name: Measure independent sustained-note F0 on real HQ40 vs fast LIVE research singers
         shell: bash
@@ -357,18 +371,21 @@ jobs:
             vocadito_human_harmonic_live_fast_research.wav
             vocadito_human_harmonic_live_high_research.wav
             vocadito_human_harmonic_live_ultra_research.wav
+            vocadito_human_harmonic_live_ultra_smooth_research.wav
             vocadito_human_HARMONIC_LIVE_RESEARCH.txt
             vocadito_low_harmonic_live_research.wav
             vocadito_low_harmonic_live_residual_research.wav
             vocadito_low_harmonic_live_fast_research.wav
             vocadito_low_harmonic_live_high_research.wav
             vocadito_low_harmonic_live_ultra_research.wav
+            vocadito_low_harmonic_live_ultra_smooth_research.wav
             vocadito_low_HARMONIC_LIVE_RESEARCH.txt
             vocadito_high_harmonic_live_research.wav
             vocadito_high_harmonic_live_residual_research.wav
             vocadito_high_harmonic_live_fast_research.wav
             vocadito_high_harmonic_live_high_research.wav
             vocadito_high_harmonic_live_ultra_research.wav
+            vocadito_high_harmonic_live_ultra_smooth_research.wav
             vocadito_high_HARMONIC_LIVE_RESEARCH.txt
             vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
             vocadito_low_HARMONIC_LIVE_BANDS_REPORT.txt
@@ -382,6 +399,9 @@ jobs:
             vocadito_human_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
             vocadito_low_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
             vocadito_high_ULTRA_LOCAL_TRANSIENT_AUDIT.txt
+            vocadito_human_ULTRA_DRY_RESET_RESEARCH.txt
+            vocadito_low_ULTRA_DRY_RESET_RESEARCH.txt
+            vocadito_high_ULTRA_DRY_RESET_RESEARCH.txt
             vocadito_human_research18.wav
             vocadito_human_research12.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
