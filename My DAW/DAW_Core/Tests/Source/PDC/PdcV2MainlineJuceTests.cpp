@@ -314,6 +314,57 @@ public:
             }
 
 
+        beginTest("Legacy monitor oversized callback chunks stay exact and allocation-free");
+        // A 16k-frame offline callback intentionally exceeds the prepared
+        // 64/128/256/512-frame RT scratch. Both the in-block impulse and a
+        // delayed tail crossing into the next callback must be sample exact.
+        for(const double rate:{44100.0,48000.0,96000.0})
+        for(const int frames:{64,128,256,512})
+        {
+            DAW::RoutingSnapshot graph;
+            graph.version=1004;
+            graph.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.nodeIndexById["fast"]=0;
+            graph.nodeIndexById["slow"]=1;
+            graph.nodeIndexById["master"]=2;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow;
+            fast.id="fast-to-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-to-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            graph.edges={fast,slow};
+            const std::map<DAW::TrackID,int> latency={{"fast",0},{"slow",32}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(rate,frames);
+            legacy.sync(graph,&latency,frames);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),32);
+            std::vector<float> left(16384,0.f),right(16384,0.f);
+            left[0]=.25f;right[0]=-.125f;
+            left[16370]=.625f;right[16370]=-.3125f;
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.processEdge("fast-to-master",left.data(),right.data(),16384);
+            }
+            expectWithinAbsoluteError((double)left[32],.25,1.e-6);
+            expectWithinAbsoluteError((double)right[32],-.125,1.e-6);
+            expectEquals(left[0],0.f);
+            expectEquals(left[16370],0.f);
+            float tailL[64]{},tailR[64]{};
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.processEdge("fast-to-master",tailL,tailR,64);
+            }
+            for(int i=0;i<64;++i) {
+                expectWithinAbsoluteError((double)tailL[i],
+                    i==18?.625:0.,1.e-6);
+                expectWithinAbsoluteError((double)tailR[i],
+                    i==18?-.3125:0.,1.e-6);
+            }
+        }
+
         beginTest("Prewarmed legacy monitoring PDC sync is allocation-free");
         // Covers steady-state plan recomputation and changing the active
         // master route set without reallocating old delay banks. It does NOT
