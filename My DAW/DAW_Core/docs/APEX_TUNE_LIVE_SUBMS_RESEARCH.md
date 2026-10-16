@@ -98,3 +98,50 @@ research WAVs for Vocadito reference, high and low registers and tests that
 the renders remain finite and non-silent. Their levels and tone must
 still be evaluated. A silent/zero-delay *dry* branch alone is not
 an acceptable substitute for actually hearing pitch correction.
+
+## October 16, 2026 — observed measurements and production boundary
+
+Measured independently on Linux and MSVC research CI, using 44.1/48/96 kHz
+synthetic streaming test audio. These are **not interchangeable latencies**:
+
+| 48 kHz condition | Measured time | What actually changed |
+| --- | ---: | --- |
+| Existing shipped HQ40 declared nominal delay | ~40 ms | Full production processing model |
+| Ultra high F0 first-note acquisition, 8-hop | 7.3125 ms | Fast YIN detector observation only |
+| Ultra high F0 first-note acquisition, opt-in 4-hop | **6.9792 ms** | Fast YIN detector observation only |
+| Fast 4-hop: 440Hz, 50% *wet control envelope* | **9.875 ms** | Does not establish audible full correction |
+| Fast 4-hop: 660Hz, 50% *wet control envelope* | **9.125 ms** | Does not establish audible full correction |
+| Synthetic A3→A4, no dual high F0 consensus | 5.979 ms after leap | Note-leap detection, not final wet audio |
+| Synthetic A3→A4, with dual high F0 consensus | **7.979 ms after leap** | 2 ms longer than unguarded fast leap |
+
+**Do not advertise this as 40 ms → 6.98 ms equivalent processing
+latency.** One number is a declared production buffering budget; the other
+measures a *research-only new high-register F0 detection event*. None of
+these prove a 1 ms pitch correction or live mic-to-headphones result.
+
+**Real singer transition hardening.** At the pinned high-register Vocadito
+singer's 5.6657-second hotspot, the opt-in dual-detector consensus reduced
+the local PCM difference relative to the previous high-register algorithm
+from ~0.168 FS RMS to ~0.011 FS RMS on the worst 5ms slice. A strict
+dataset-pinned localized-waveform regression gate passes all 11 significant
+5ms windows. This proves waveform similarity to that reference, **not**
+audible transparency, objectively correct formants, or artist preference.
+Across three singer takes, sustained-note F0 noninferiority gates pass.
+Actual synthetic A3→A4 with dual consensus passes 3/3 on MSVC and Linux
+sanitizers and sustains final independent output F0 <1.1 cents from target.
+No complete acoustic onset or end-to-end ASIO validation is implied.
+
+**Other safeguards.** The hostile sibilance/plosive unvoiced regression
+covers 18 seeded cases at 44.1/48/96k. Both guarded and unguarded paths
+preserve callback partition results, reject false high-register note leaps,
+and pass verified MSVC and Linux ASan/UBSan tests. A separate eight-insert
+test combines four original and four opt-in dual-consensus instances with
+allocation watch and independently measured output F0.
+
+**Release blocker remains:** all production DSP and the native V5 GUI
+continue untouched. The prototype requires blind human listening, transient
+quality judgment, precise plugin-PDC measurement, host session restore
+testing and physical Apollo Solo/ASIO mic-monitoring measurements. A GREEN
+research CI is not permission to activate it in production. APEX Windows
+x64 Debug/Release artifacts exist for the PR, but successful compilation
+alone is not the full production certification gate.
