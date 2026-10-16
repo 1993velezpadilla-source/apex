@@ -314,6 +314,49 @@ public:
             }
 
 
+        beginTest("Legacy monitoring PDC ignores inactive and bypassed master routes");
+        {
+            DAW::RoutingSnapshot routes;
+            routes.version=1006;
+            routes.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            routes.nodeIndexById["fast"]=0;
+            routes.nodeIndexById["slow"]=1;
+            routes.nodeIndexById["master"]=2;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow;
+            fast.id="fast-to-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-to-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            routes.edges={fast,slow};
+            const std::map<DAW::TrackID,int> latencies={{"fast",0},{"slow",8192}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(48000.0,128);
+            legacy.sync(routes,&latencies,128);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),8192,
+                "active high-latency route must compensate the faster track");
+            routes.edges[1].active=false;
+            legacy.sync(routes,&latencies,128);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),0,
+                "inactive high-latency route cannot stall live monitoring");
+            routes.edges[1].active=true;
+            routes.edges[1].bypassed=true;
+            legacy.sync(routes,&latencies,128);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),0,
+                "bypassed high-latency route cannot raise the master target");
+            routes.edges[1].bypassed=false;
+            routes.nodes[1].active=false;
+            legacy.sync(routes,&latencies,128);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),0,
+                "inactive source node cannot contribute PDC latency");
+            routes.nodes[1].active=true;
+            legacy.sync(routes,&latencies,128);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),8192,
+                "reactivation must restore sample-exact master compensation");
+        }
+
         beginTest("Legacy master PDC lazy invalidation never replays dormant ring samples");
         {
             DAW::RoutingSnapshot routes;
