@@ -696,6 +696,55 @@ public:
                     static_cast<double>(impulse.getSample(1,i)),right,3.e-5);
             }
         }
+
+        beginTest("Live JUCE 16->32 latency refreshes real slot + chain dry history");
+        for(const double sampleRate:{44100.0,48000.0}) {
+            DAW::PluginChainCore chain;
+            chain.prepare(sampleRate,64);
+            auto plugin=std::make_unique<ExactHostDelayResearchPlugin>(16);
+            auto* hosted=plugin.get();
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(plugin)),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            expectEquals(chain.totalLatencySamples(),16);
+            constexpr double factor=1.0+0.7071067811865475244;
+            const auto runImpulse=[&](int latency) {
+                const float impulse=.25f;
+                float measured=0.f;
+                for(int base=0;base<512;base+=64) {
+                    juce::AudioBuffer<float> audio(2,64);
+                    audio.clear();
+                    if(base==128) {
+                        audio.setSample(0,0,impulse);
+                        audio.setSample(1,0,-impulse);
+                    }
+                    chain.processBlock(audio,64);
+                    for(int n=0;n<64;++n) {
+                        const int absolute=base+n;
+                        const double expected=absolute==128+latency
+                            ?impulse*factor:0.0;
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(0,n)),
+                            expected,4.e-5,
+                            "slot+chain wet/dry alignment after VST3 latency notification");
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(1,n)),
+                            -expected,4.e-5);
+                        if(absolute==128+latency)
+                            measured=audio.getSample(0,n);
+                    }
+                }
+                return measured;
+            };
+            const float initial=runImpulse(16);
+            hosted->setResearchLatencyOnControlThread(32);
+            expectEquals(chain.totalLatencySamples(),32);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread(),
+                   "latency refresh must drain RT readers and reprepare both dry rings");
+            const float updated=runImpulse(32);
+            expectWithinAbsoluteError(static_cast<double>(updated),
+                                      static_cast<double>(initial),4.e-5);
+        }
 #endif
 
         beginTest("Immutable RoutingSnapshot + plugin-latency map produces correct send/bus PDC plan");
