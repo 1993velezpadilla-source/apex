@@ -942,6 +942,30 @@ public:
                 expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
                     graph,&delays,2,nextRate));
                 expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                // A SAME-rate restart is a new signal timeline: the old
+                // 16-sample direct-path impulse cannot spill into playback.
+                juce::AudioBuffer<float> seed(2,1);
+                seed.setSample(0,0,1.f);
+                seed.setSample(1,0,-.5f);
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,seed));
+                engine.prepare(nextRate,frames);
+                juce::AudioBuffer<float> cleared(2,64);
+                cleared.clear();
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,cleared));
+                for(int ch=0;ch<2;++ch)
+                    for(int i=0;i<cleared.getNumSamples();++i)
+                        expectEquals(cleared.getSample(ch,i),0.f,
+                            "device restart must clear stale programme PDC");
+                // The offline-render barrier likewise starts an empty history.
+                seed.setSample(0,0,.8f);seed.setSample(1,0,-.4f);
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,seed));
+                engine.resetOfflineRenderBuffers(frames);
+                cleared.clear();
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,cleared));
+                for(int ch=0;ch<2;++ch)
+                    for(int i=0;i<cleared.getNumSamples();++i)
+                        expectEquals(cleared.getSample(ch,i),0.f,
+                            "offline export must clear stale programme PDC");
                 expect(engine.collectGraphPdcRetiredOnControlThread()>0);
             }
         }
