@@ -16,6 +16,7 @@
 #include "../ApexTuneLiveVoiceControl.h"
 #include "ApexTuneLiveEarlyOnsetProbe.h"
 #include "ApexTuneLiveHighRegisterProbe.h"
+#include "ApexTuneLiveMidRegisterProbe.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -34,6 +35,7 @@ public:
         tracker_.prepare(rate_);
         early_.prepare(rate_);
         high_.prepare(rate_);
+        mid_.prepare(rate_);
         // No dynamic allocation in prepare or process; control coefficients
         // are computed here or only when the pitch tracker emits a frame.
         slowWetStep_=1.0/(0.008*rate_+1.0);
@@ -44,6 +46,7 @@ public:
         tracker_.reset();
         early_.reset();
         high_.reset();
+        mid_.reset();
         policy_.reset();
         for(auto& ch:partials_)
             for(auto& p:ch)p={};
@@ -59,6 +62,7 @@ public:
         sampleCount_=0;
         firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
         firstHighSample_=-1;
+        firstMidSample_=-1;
         lastLargeNoteJumpSample_=-1;
         lastVoicedEstimateSample_=-1;
         lastFastTransitionSample_=-1;
@@ -78,6 +82,12 @@ public:
     // anything in 1ms, nor replace the authoritative longer-window YIN.
     void enableHighRegisterOnset(bool enabled) noexcept {
         highRegisterEnabled_=enabled;
+    }
+    // Research-only 128-frame mid-range 260–420Hz note onset; forbidden
+    // by default and does not predict newly sung pitches within 1ms.
+    // Two agreeing acoustic frames plus lower-octave veto required.
+    void enableMidRegisterOnset(bool enabled) noexcept {
+        midRegisterEnabled_=enabled;
     }
     // OFF by default. This speculative transition seed requires two
     // independent, agreeing short-window F0 frames with an octave veto;
@@ -114,6 +124,7 @@ public:
                                    ?dry[1]:dry[0];
             const bool preliminary=earlyEnabled_ && early_.push(detector);
             const bool earlyHigh=highRegisterEnabled_ && high_.push(detector);
+            const bool earlyMid=midRegisterEnabled_ && mid_.push(detector);
             if(tracker_.push(detector)) {
                 const auto primary=tracker_.latest();
                 // After an EARLY predicted octave switch, the full YIN
@@ -138,6 +149,15 @@ public:
                 updatePitch(estimate,true);
                 if(voiced_ && firstHighSample_<0)
                     firstHighSample_=sampleCount_;
+            } else if(!voiced_ && earlyMid && mid_.latest().voiced &&
+                      mid_.latest().confidence>=0.95f) {
+                // Lower-mid singer hypothesis is independently octave-vetoed;
+                // long-history YIN must eventually confirm the estimate.
+                const auto e=mid_.latest();
+                const PitchTracker::Result estimate{e.hz,e.confidence,true};
+                updatePitch(estimate,true);
+                if(voiced_ && firstMidSample_<0)
+                    firstMidSample_=sampleCount_;
             } else if(preliminary && early_.latest().voiced) {
                 // Early detector is not given an oracle; it observes the
                 // actual mic samples and requires two agreeing estimates.
@@ -240,6 +260,7 @@ public:
     int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
     int64_t firstEarlySample() const noexcept {return firstEarlySample_;}
     int64_t firstHighSample() const noexcept {return firstHighSample_;}
+    int64_t firstMidSample() const noexcept {return firstMidSample_;}
     int largeNoteJumpCount() const noexcept {return largeNoteJumpCount_;}
     int fastTransitionCount() const noexcept {return fastTransitionCount_;}
     int64_t lastFastTransitionSample() const noexcept {return lastFastTransitionSample_;}
@@ -324,6 +345,7 @@ private:
     PitchTracker tracker_;
     EarlyOnsetProbe early_;
     HighRegisterOnsetProbe high_;
+    MidRegisterOnsetProbe mid_;
     VoiceControl policy_;
     VoiceSettings settings_{};
     std::array<std::array<Partial,kHarmonics>,2> partials_{};
@@ -336,10 +358,11 @@ private:
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
             firstEarlySample_=-1,lastLargeNoteJumpSample_=-1,
             lastVoicedEstimateSample_=-1,lastFastTransitionSample_=-1,
-            firstHighSample_=-1;
+            firstHighSample_=-1,firstMidSample_=-1;
     int largeNoteJumpCount_=0,fastTransitionCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
          fastTransitionsEnabled_=false,residualMode_=false,
-         fastEngagement_=false,highRegisterEnabled_=false;
+         fastEngagement_=false,highRegisterEnabled_=false,
+         midRegisterEnabled_=false;
 };
 }}} // namespace APEX::TuneLive::Research
