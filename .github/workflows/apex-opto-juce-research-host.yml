@@ -34,7 +34,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   host-boundary:
-    name: JUCE AudioProcessor x4 latency / Windows Release
+    name: APEX PDC + Opto JUCE / Windows ${{ matrix.configuration }}
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
@@ -49,12 +53,12 @@ jobs:
       - name: Verify pinned dependencies and generate JUCE test project
         run: .\Scripts\prepare_ci.ps1
       - name: Compile APEXTests and run opto host boundary gate
-        run: .\Scripts\test_opto_juce_research_host.ps1 -Configuration Release
+        run: .\Scripts\test_opto_juce_research_host.ps1 -Configuration ${{ matrix.configuration }}
       - name: Preserve evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: opto2a-juce-research-${{ github.sha }}
+          name: opto2a-pdc-juce-${{ matrix.configuration }}-${{ github.sha }}
           path: |
             My DAW/DAW_Core/evidence/runs/
           if-no-files-found: warn
