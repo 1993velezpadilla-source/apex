@@ -22,7 +22,7 @@
 #include <vector>
 
 namespace {
-constexpr int kVariants=5;
+constexpr int kVariants=6;
 struct Note {int nearest=-1;double cents=0.0;bool voiced=false;};
 Note decode(APEX::TuneLive::PitchTracker::Result r) {
     if(!r.voiced || r.hz<55.0f || !std::isfinite(r.hz))return {};
@@ -51,11 +51,13 @@ int main(int argc,char** argv) {
             prefix+"_hq40.wav",
             prefix+"_harmonic_live_residual_research.wav",
             prefix+"_harmonic_live_fast_research.wav",
-            prefix+"_harmonic_live_high_research.wav"
+            prefix+"_harmonic_live_high_research.wav",
+            prefix+"_harmonic_live_ultra_research.wav"
         }};
         std::array<Wave,kVariants> waves{{
             readWave(paths[0]),readWave(paths[1]),
-            readWave(paths[2]),readWave(paths[3]),readWave(paths[4])
+            readWave(paths[2]),readWave(paths[3]),
+            readWave(paths[4]),readWave(paths[5])
         }};
         const auto& dry=waves[0];
         if(dry.frames()<dry.rate || (dry.channels!=1&&dry.channels!=2))
@@ -111,9 +113,9 @@ int main(int argc,char** argv) {
               <<"REAL_SINGER_CAUSAL_F0_RESEARCH prefix="<<prefix
               <<" sr="<<dry.rate<<" original_updates="<<totalUpdates
               <<" stable_source_updates="<<stableVoicedUpdates<<"\n";
-        const std::array<const char*,4> labels{{"HQ40","NORMAL","FAST","FAST_HIGH"}};
+        const std::array<const char*,5> labels{{"HQ40","NORMAL","FAST","FAST_HIGH","ULTRA_HIGH"}};
         bool valid=stableVoicedUpdates>=20;
-        for(int i=0;i<4;++i) {
+        for(int i=0;i<5;++i) {
             const auto& x=measures[static_cast<std::size_t>(i)];
             const double cents=median(x.correctedCents);
             const double improvement=median(x.improvements);
@@ -143,7 +145,7 @@ int main(int argc,char** argv) {
         // Does NOT certify the singer's identity, perception, ASIO timing
         // or musical truth from 12-TET alone.
         if(prefix=="vocadito_low") {
-            for(int k=2;k<=3;++k) {
+            for(int k=2;k<=4;++k) {
                 const auto& candidate=measures[static_cast<std::size_t>(k)];
                 const double cents=median(candidate.correctedCents);
                 const bool safe=candidate.paired>=500 &&
@@ -153,13 +155,30 @@ int main(int argc,char** argv) {
                     cents>=0.0 && cents<=12.0;
                 valid &=safe;
                 report<<"REAL_SINGER_LOW_REGISTER_OCTAVE_GUARD option="
-                      <<(k==2?"FAST":"FAST_HIGH")
+                      <<(k==2?"FAST":(k==3?"FAST_HIGH":"ULTRA_HIGH"))
                       <<" protected="<<safe
                       <<" octave_errors="<<candidate.octave
                       <<" paired="<<candidate.paired
                       <<" median_12TET_cents="<<cents<<"\\n";
             }
         }
+        // Optional ultra-high onset MUST NOT regress real measured stable
+        // singer notes compared with the prior 96-frame high/mid renderer.
+        // Counts derive from independent output F0, not detector metadata.
+        const auto& prior=measures[3];
+        const auto& ultra=measures[4];
+        const bool ultraStable=
+            ultra.octave<=prior.octave+2 &&
+            ultra.otherWrongNote<=prior.otherWrongNote+3 &&
+            ultra.unvoiced<=prior.unvoiced+10 &&
+            ultra.paired+15>=prior.paired;
+        valid &=ultraStable;
+        report<<"REAL_SINGER_ULTRA_F0_REGRESSION prefix="<<prefix
+              <<" prior_octave="<<prior.octave
+              <<" ultra_octave="<<ultra.octave
+              <<" prior_wrong_note="<<prior.otherWrongNote
+              <<" ultra_wrong_note="<<ultra.otherWrongNote
+              <<" accepted="<<ultraStable<<"\\n";
         report<<"REAL_SINGER_CAUSAL_F0_DATA_VALID="<<valid
               <<" NOT_1MS_ACQUISITION_OR_FORMANT_CERTIFICATE=1\n";
         const std::string target=prefix+"_FAST_HUMAN_F0_COMPARISON.txt";
