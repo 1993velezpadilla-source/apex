@@ -146,6 +146,64 @@ static void independentSources(int rate) {
     assert(direct.requestedDelaySamples()==16);
     assert(aux.requestedDelaySamples()==32);
 }
+
+/*
+ * A measurable synthetic pop guard for delay-change crossfades.  The input
+ * sinusoids have a known per-sample Lipschitz bound L.  A crossfade between
+ * two taps from the SAME bounded waveform may add at most 2*A/(N-1), where
+ * A is the maximum source amplitude and N is the crossfade sample count.
+ * This catches abrupt tap changes without claiming acoustic clicklessness
+ * for arbitrary discontinuous audio, plugins, or the physical Apollo path.
+ */
+static void boundedSmoothRetiming(int rate,int block) {
+    ProgrammeEdgeRetimingResearchCore p;
+    assert(p.prepare(2,128,0,rate,5.0));
+    constexpr int events[][2] = {
+        {600,96},{650,16},{680,64},{1320,128},{1360,0},
+        {1875,80},{1900,24},{2590,0},{2800,127},{2801,1},{3265,48}
+    };
+    constexpr int eventCount=static_cast<int>(sizeof(events)/sizeof(events[0]));
+    constexpr int total=4096;
+    const int fadeN=std::max(1,static_cast<int>(std::round(rate*.005)));
+    const float leftBound=static_cast<float>(.37*.019+.17*.11)
+        +1.08f/static_cast<float>(std::max(1,fadeN-1))+2.e-6f;
+    const float rightBound=static_cast<float>(.29*.033+.16*.07)
+        +.90f/static_cast<float>(std::max(1,fadeN-1))+2.e-6f;
+    float lastL=0.f,lastR=0.f;
+    int nextEvent=0,at=0;
+    while(at<total) {
+        while(nextEvent<eventCount&&events[nextEvent][0]==at) {
+            assert(p.requestDelaySamples(events[nextEvent][1]));
+            ++nextEvent;
+        }
+        int count=std::min(block,total-at);
+        if(nextEvent<eventCount)
+            count=std::min(count,events[nextEvent][0]-at);
+        assert(count>0&&count<=128);
+        float l[128]{},r[128]{};
+        for(int i=0;i<count;++i) {
+            l[i]=leftAt(at+i);
+            r[i]=rightAt(at+i);
+        }
+        float* channels[]={l,r};
+        assert(p.process(channels,2,count));
+        for(int i=0;i<count;++i) {
+            const int n=at+i;
+            assert(std::isfinite(l[i])&&std::isfinite(r[i]));
+            if(n>=512) {
+                // The first 512 samples warm up all possible delay taps.
+                assert(std::abs(l[i]-lastL)<=leftBound);
+                assert(std::abs(r[i]-lastR)<=rightBound);
+            }
+            lastL=l[i];
+            lastR=r[i];
+        }
+        at+=count;
+    }
+    assert(nextEvent==eventCount);
+    assert(p.fadeRemainingSamples()==0);
+    assert(p.currentlyRenderingDelaySamples()==48);
+}
 int main() {
     ProgrammeEdgeRetimingResearchCore invalid;
     assert(!invalid.prepare(0,32,0,48000));
@@ -158,6 +216,7 @@ int main() {
             for(int delay:{0,1,16,32,48,96})
                 staticLatency(rate,block,delay);
             changingLatency(rate,block);
+            boundedSmoothRetiming(rate,block);
         }
         independentSources(rate);
     }
