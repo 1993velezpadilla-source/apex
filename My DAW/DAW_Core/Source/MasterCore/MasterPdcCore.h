@@ -54,19 +54,23 @@ public:
         int maxLatency = 0;
         for (const auto& e : snapshot.edges)
         {
-            if (e.type != ConnectionType::Direct || e.destNodeId != "master")
+            // Match the audible routing fanout: inactive/bypassed direct
+            // edges are never summed, so they must not raise the latency
+            // target for unrelated active tracks (especially live monitoring).
+            if (e.type != ConnectionType::Direct || e.destNodeId != "master"
+                || !e.active || e.bypassed)
+                continue;
+            const auto nodeIt = snapshot.nodeIndexById.find(e.sourceNodeId);
+            if (nodeIt == snapshot.nodeIndexById.end()
+                || nodeIt->second >= snapshot.nodes.size()
+                || !snapshot.nodes[nodeIt->second].active)
                 continue;
             int latency = 0;
             if (latencies != nullptr)
             {
-                const auto nodeIt = snapshot.nodeIndexById.find(e.sourceNodeId);
-                if (nodeIt != snapshot.nodeIndexById.end()
-                    && nodeIt->second < snapshot.nodes.size())
-                {
-                    const auto latIt = latencies->find(snapshot.nodes[nodeIt->second].trackId);
-                    if (latIt != latencies->end())
-                        latency = juce::jmax(0, latIt->second);
-                }
+                const auto latIt = latencies->find(snapshot.nodes[nodeIt->second].trackId);
+                if (latIt != latencies->end())
+                    latency = juce::jmax(0, latIt->second);
             }
             desired_.push_back({ e.id, latency });
             maxLatency = juce::jmax(maxLatency, latency);
