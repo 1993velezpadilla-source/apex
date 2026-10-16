@@ -1259,6 +1259,41 @@ public:
         return total;
     }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+    // Message/control thread ONLY, after a hosted VST3/JUCE processor
+    // announces a different setLatencySamples() without a slot edit.
+    // Close RT reader admission before modifying delay-ring storage. Unlike
+    // a full chain reprepare, this preserves unrelated DSP and plugin state.
+    bool refreshResearchHostDryPdcForChangedLatencyOnControlThread()
+    {
+        ControlEditScope edit(*this);
+        if(!edit)return false;
+        const int width=juce::jmax(2,preparedScratchChannels_);
+        // Validate the entire requested change before modifying any ring.
+        // This matches PluginParallelDryDelayResearchCore's validated limits.
+        int total=0;
+        for(std::size_t i=0;i<slots_.size();++i) {
+            if(!slots_[i])continue;
+            const int latency=slots_[i]->getLatencySamples();
+            if(latency<0 || latency>131072 || total>131072-latency)
+                return false;
+            total+=latency;
+        }
+        if(width>32)return false;
+        for(std::size_t i=0;i<slots_.size() && i<bypassCores_.size();++i) {
+            if(!slots_[i] || !bypassCores_[i])continue;
+            const int required=slots_[i]->getLatencySamples();
+            if(bypassCores_[i]->researchDryLatency()!=required)
+                if(!bypassCores_[i]->configureResearchDryDelay(width,required))
+                    return false;
+        }
+        if(chainDryPdc_.latencySamples()!=total)
+            if(!chainDryPdc_.prepare(width,total))
+                return false;
+        return true;
+    }
+#endif
+
     // ── Audio thread ─────────────────────────────────────────────────────
 
     void processBlock(juce::AudioBuffer<float>& buffer, int numSamples)
