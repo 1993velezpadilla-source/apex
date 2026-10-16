@@ -4,6 +4,8 @@ on:
     paths:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHighRegisterProbe.h'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveUltraHighProbe.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveMidRegisterProbe.h'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_mid_register_wet.cpp'
@@ -65,6 +67,10 @@ jobs:
             -o tune_live_high_register_yin
           ./tune_live_high_register_yin | tee high_register_yin_ubuntu.log
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp" \
+            -o tune_live_ultra_high_yin
+          ./tune_live_ultra_high_yin | tee ultra_high_yin_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp" \
             -o tune_live_mid_register_yin
           ./tune_live_mid_register_yin | tee mid_register_yin_ubuntu.log
@@ -92,6 +98,7 @@ jobs:
             causal_fast_leaps_ubuntu.log
             causal_fast_wet_ubuntu.log
             high_register_yin_ubuntu.log
+            ultra_high_yin_ubuntu.log
             mid_register_yin_ubuntu.log
             mid_register_wet_ubuntu.log
             high_register_wet_ubuntu.log
@@ -130,6 +137,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_high_register_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp" || exit /b 1
           tune_live_high_register_yin.exe > high_register_yin_windows.log || (type high_register_yin_windows.log & exit /b 1)
           type high_register_yin_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_high_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp" || exit /b 1
+          tune_live_ultra_high_yin.exe > ultra_high_yin_windows.log || (type ultra_high_yin_windows.log & exit /b 1)
+          type ultra_high_yin_windows.log
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_mid_register_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp" || exit /b 1
           tune_live_mid_register_yin.exe > mid_register_yin_windows.log || (type mid_register_yin_windows.log & exit /b 1)
           type mid_register_yin_windows.log
@@ -154,6 +164,7 @@ jobs:
             causal_fast_leaps_windows.log
             causal_fast_wet_windows.log
             high_register_yin_windows.log
+            ultra_high_yin_windows.log
             mid_register_yin_windows.log
             mid_register_wet_windows.log
             high_register_wet_windows.log
