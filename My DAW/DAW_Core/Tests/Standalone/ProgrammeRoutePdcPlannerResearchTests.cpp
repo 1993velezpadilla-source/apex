@@ -309,8 +309,13 @@ int main() {
         edges[1].active=false;
         assert(p.build(nodes,edges,order));
         assert(p.findEdge("vocal-send")==nullptr);
-        // Aux output still exists; retain alignment for possible FX tails.
-        assert(delay(p,"vocal-dry")==40);
+        // The disconnected aux has zero input-arrival latency, but its
+        // 40-sample insert remains routed to master. Its output latency is
+        // therefore 40 (not 64), and the 24-sample vocal needs 16 more.
+        // Keeping the aux path is conservative for lingering plugin tails.
+        assert(arrival(p,"aux")==0);
+        assert(output(p,"aux")==40);
+        assert(delay(p,"vocal-dry")==16);
         edges[2].active=false;
         assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==0);
@@ -323,11 +328,14 @@ int main() {
         nodes[1].ownProcessorLatency=72;
         assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==72);
-        // Bypassed send still leaves the aux output active for a tail.
+        // After bypass, the isolated aux contributes its own 72 samples,
+        // but no longer carries the vocal's preceding 24-sample latency.
         edges[1].bypassed=true;
         assert(p.build(nodes,edges,order));
         assert(p.findEdge("vocal-send")==nullptr);
-        assert(delay(p,"vocal-dry")==72);
+        assert(arrival(p,"aux")==0);
+        assert(output(p,"aux")==72);
+        assert(delay(p,"vocal-dry")==48);
         // With the aux-master edge disabled, no wet path can reach master.
         edges[2].active=false;
         assert(p.build(nodes,edges,order));
