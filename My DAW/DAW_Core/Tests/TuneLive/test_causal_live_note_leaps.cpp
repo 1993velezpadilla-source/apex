@@ -52,7 +52,8 @@ struct Result {
     double wet=0.0;
     bool finite=true;
 };
-Result test(double sr, bool oddBlocks, bool fast=false) {
+Result test(double sr, bool oddBlocks, bool fast=false,
+            bool ultraTransitions=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     Result result;
     result.output=sing(sr);
@@ -61,6 +62,7 @@ Result test(double sr, bool oddBlocks, bool fast=false) {
     engine.setVoiceSettings(hardSettings());
     engine.enableEarlyOnset(true);
     engine.enableExperimentalEarlyTransitions(fast);
+    engine.enableUltraHighRegisterOnset(ultraTransitions);
     engine.enableResidualPreservation(true);
     constexpr std::array<int,7> hops{{1,48,128,257,17,2,64}};
     int cursor=0,iterations=0;
