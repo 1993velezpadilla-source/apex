@@ -100,6 +100,10 @@ public:
     void enableUltraHighFastHopResearch(bool enabled) noexcept {
         ultra_.enableFastHopResearch(enabled);
     }
+    // Experimental independent-confirmation gate; default OFF.
+    void enableUltraLeapConsensusResearch(bool enabled) noexcept {
+        ultraLeapConsensusEnabled_=enabled;
+    }
     // Research-only 128-frame mid-range 260–420Hz note onset; forbidden
     // by default and does not predict newly sung pitches within 1ms.
     // Two agreeing acoustic frames plus lower-octave veto required.
@@ -180,6 +184,12 @@ public:
             } else if(voiced_ && fastTransitionsEnabled_ &&
                       earlyUltra && ultra_.latest().voiced &&
                       ultra_.latest().confidence>=0.95f &&
+                      (!ultraLeapConsensusEnabled_ ||
+                       (high_.latest().voiced &&
+                        high_.latest().confidence>=0.95f &&
+                        high_.latest().hz>0.0f &&
+                        std::abs(1200.0f*std::log2(
+                            ultra_.latest().hz/high_.latest().hz))<65.0f)) &&
                       sourceHz_>=55.0 &&
                       lastVoicedEstimateSample_>=0 &&
                       (sampleCount_-lastVoicedEstimateSample_)<
@@ -425,6 +435,6 @@ private:
          fastTransitionsEnabled_=false,residualMode_=false,
          fastEngagement_=false,highRegisterEnabled_=false,
          midRegisterEnabled_=false,ultraHighEnabled_=false,
-         noteLeapDryResetEnabled_=false;
+         noteLeapDryResetEnabled_=false,ultraLeapConsensusEnabled_=false;
 };
 }}} // namespace APEX::TuneLive::Research
