@@ -36,6 +36,7 @@ public:
         high_.prepare(rate_);
         // No dynamic allocation in prepare or process; control coefficients
         // are computed here or only when the pitch tracker emits a frame.
+        slowWetStep_=1.0/(0.008*rate_+1.0);
         wetStep_=1.0/((fastEngagement_?0.001:0.008)*rate_+1.0);
         reset();
     }
@@ -194,11 +195,21 @@ public:
             // No fake 'one millisecond latency' from metadata. The source
             // reaches the dry output immediately while the experimental
             // predicted voiced signal takes multiple F0 periods to mature.
+            // REAL SINGER SAFETY: <160Hz voices sometimes produce a
+            // transient octave in the experimental 1-period crossfade.
+            // The 3-period / 8ms original research engagement performed
+            // better on the measured low-register Vocadito excerpt.
+            // Treat this as conservative quality protection, NOT sub-1ms
+            // pitch response. Keep high notes on the accelerated path.
+            const bool lowVoiceConservative=fastEngagement_ &&
+                sourceHz_>0.0 && sourceHz_<160.0;
             const bool mature=voiced_ && sourceHz_>0.0 &&
                 voicedSamples_>=static_cast<int>(
-                    (fastEngagement_?1.0:3.0)*rate_/sourceHz_);
+                    ((fastEngagement_&&!lowVoiceConservative)?1.0:3.0)
+                    *rate_/sourceHz_);
             const double requested=mature?targetWet_:0.0;
-            wet_+=(requested-wet_)*wetStep_;
+            wet_+=(requested-wet_)*
+                (lowVoiceConservative?slowWetStep_:wetStep_);
             if(firstHalfWetSample_<0 && wet_>=0.5)
                 firstHalfWetSample_=sampleCount_;
             for(int c=0;c<channels_;++c) {
@@ -318,7 +329,8 @@ private:
     std::array<std::array<Partial,kHarmonics>,2> partials_{};
     Unit phaseSource_{},phaseOutput_{},stepSource_{},stepOutput_{};
     double rate_=48000.0,sourceHz_=0.0,targetHz_=0.0,
-           wet_=0.0,targetWet_=0.0,wetStep_=0.0,partialStep_=0.0;
+           wet_=0.0,targetWet_=0.0,wetStep_=0.0,slowWetStep_=0.0,
+           partialStep_=0.0;
     float envelopeL_=0.0f,envelopeR_=0.0f;
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
