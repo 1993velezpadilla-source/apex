@@ -313,6 +313,54 @@ public:
                 }
             }
 
+
+        beginTest("Legacy master PDC lazy invalidation never replays dormant ring samples");
+        {
+            DAW::RoutingSnapshot routes;
+            routes.version=1007;
+            routes.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            routes.nodeIndexById["fast"]=0;
+            routes.nodeIndexById["slow"]=1;
+            routes.nodeIndexById["master"]=2;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow;
+            fast.id="fast-to-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-to-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            routes.edges={fast,slow};
+            const std::map<DAW::TrackID,int> latencies={{"fast",0},{"slow",32}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(48000.0,64);
+            legacy.sync(routes,&latencies,64);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),32);
+            float firstL[64]{},firstR[64]{};
+            firstL[50]=.75f;firstR[50]=-.375f;
+            legacy.processEdge("fast-to-master",firstL,firstR,64);
+            // That impulse is still pending in legacy's 32-sample ring.
+            // While V2 owns the route, legacy advances NO samples.
+            legacy.invalidateStreamingHistoryForTimelineSwitch();
+            legacy.sync(routes,&latencies,64); // same route and same latency
+            float freshL[64]{},freshR[64]{};
+            legacy.processEdge("fast-to-master",freshL,freshR,64);
+            for(int i=0;i<64;++i) {
+                expectEquals(freshL[i],0.f,
+                    "returning to legacy must not replay pre-V2 audio");
+                expectEquals(freshR[i],0.f,
+                    "both channels must suppress stale history");
+            }
+            float newL[64]{},newR[64]{};
+            newL[0]=.25f;newR[0]=-.125f;
+            legacy.processEdge("fast-to-master",newL,newR,64);
+            for(int i=0;i<64;++i) {
+                expectWithinAbsoluteError(static_cast<double>(newL[i]),
+                                          i==32?.25:0.0,1.e-6);
+                expectWithinAbsoluteError(static_cast<double>(newR[i]),
+                                          i==32?-.125:0.0,1.e-6);
+            }
+        }
         beginTest("Real AudioEngine track + bus + master loops follow live QuickSend toggles");
         {
             DAW::TrackManager tracks;
@@ -408,6 +456,15 @@ public:
                 monitorBuffer.clear();
                 expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
                 timeline+=128;
+                const auto staleReturn=engine.getGraphPdcPreflightCounters();
+                expectEquals(staleReturn.renderedBlocks,duringArm.renderedBlocks,
+                    "stale V2 delay history must NOT resume after monitoring gap");
+                // The UI/message thread stages fresh histories before
+                // allowing V2 to resume. This cannot run in the audio thread.
+                expect(stage());
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
                 const auto afterArm=engine.getGraphPdcPreflightCounters();
                 expect(afterArm.renderedBlocks>duringArm.renderedBlocks,
                        "PDC V2 must resume after disarming the track");
@@ -430,9 +487,16 @@ public:
                 monitorBuffer.clear();
                 expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
                 timeline+=128;
+                const auto secondStaleReturn=engine.getGraphPdcPreflightCounters();
+                expectEquals(secondStaleReturn.renderedBlocks,secondArm.renderedBlocks,
+                    "second monitoring gap must also reject old V2 histories");
+                expect(stage());
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
                 expect(engine.getGraphPdcPreflightCounters().renderedBlocks>
-                       secondArm.renderedBlocks,
-                       "V2 must resume after the second monitoring fallback");
+                       secondStaleReturn.renderedBlocks,
+                       "V2 must resume only after the second fresh control stage");
                 (void)engine.collectGraphPdcRetiredOnControlThread();
             }
         }
