@@ -9,6 +9,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_leap_dry_reset.cpp'
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveMidRegisterProbe.h'
@@ -88,6 +89,10 @@ jobs:
             -o tune_live_ultra_leap
           ./tune_live_ultra_leap | tee ultra_leap_ubuntu.log
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp" \
+            -o tune_live_ultra_consensus_leap
+          ./tune_live_ultra_consensus_leap | tee ultra_consensus_leap_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp" \
             -o tune_live_ultra_noise
           ./tune_live_ultra_noise | tee ultra_noise_ubuntu.log
@@ -127,6 +132,7 @@ jobs:
             ultra_wet_ubuntu.log
             ultra_4hop_ubuntu.log
             ultra_leap_ubuntu.log
+            ultra_consensus_leap_ubuntu.log
             ultra_noise_ubuntu.log
             ultra_dry_reseed_ubuntu.log
             mid_register_yin_ubuntu.log
@@ -179,6 +185,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_leap.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp" || exit /b 1
           tune_live_ultra_leap.exe > ultra_leap_windows.log || (type ultra_leap_windows.log & exit /b 1)
           type ultra_leap_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_consensus_leap.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp" || exit /b 1
+          tune_live_ultra_consensus_leap.exe > ultra_consensus_leap_windows.log || (type ultra_consensus_leap_windows.log & exit /b 1)
+          type ultra_consensus_leap_windows.log
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_noise.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp" || exit /b 1
           tune_live_ultra_noise.exe > ultra_noise_windows.log || (type ultra_noise_windows.log & exit /b 1)
           type ultra_noise_windows.log
@@ -213,6 +222,7 @@ jobs:
             ultra_wet_windows.log
             ultra_4hop_windows.log
             ultra_leap_windows.log
+            ultra_consensus_leap_windows.log
             ultra_noise_windows.log
             ultra_dry_reseed_windows.log
             mid_register_yin_windows.log
