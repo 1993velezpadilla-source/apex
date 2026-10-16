@@ -347,6 +347,13 @@ void ApplicationCore::initialize()
     DBG("ApplicationCore::initialize() - DAW subsystems initialized successfully");
     DBG("ApplicationCore: Gamepad support available (disabled by default)");
     appendStartupTrace("initialize.complete");
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // Poll ONLY on the JUCE message thread. Live VST3 latency notifications
+    // need not cause any chain-structure callback. Never query them on RT.
+    if(auto* message=juce::MessageManager::getInstanceWithoutCreating())
+        if(message->isThisTheMessageThread())
+            startTimer(40);
+#endif
 }
 
 void ApplicationCore::shutdown()
@@ -372,6 +379,9 @@ void ApplicationCore::shutdown()
     }
 
     DBG("ApplicationCore::shutdown() - Shutting down DAW subsystems");
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    stopTimer();
+#endif
 
     recordingEngine_.shutdown();
 
@@ -426,6 +436,42 @@ void ApplicationCore::shutdown()
 
     DBG("ApplicationCore::shutdown() - DAW subsystems shut down successfully");
 }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+void ApplicationCore::timerCallback()
+{
+    // Serialized with graph/chain mutation on the JUCE message thread.
+    // No polling, object lifetime access, allocation or locks on audio RT.
+    if(shutdownComplete_ || routingGraph_==nullptr || currentSampleRate_<=0.0 ||
+       pluginChainPublicationBatchDepth_!=0 ||
+       isOfflineRendering_.load(std::memory_order_acquire) ||
+       projectStateRestoreSuspensionActive_.load(std::memory_order_acquire))
+        return;
+
+    const auto published=audioEngine_.getChainLatenciesRT();
+    if(!published)return;
+    std::size_t activeChains=0;
+    bool changed=false;
+    for(const auto& [trackId,chain]:pluginChains_) {
+        if(!chain)continue;
+        ++activeChains;
+        const int latency=HostedPluginIsolationCore::effectiveHostedLatencySamples(
+            chain->totalLatencySamples());
+        const auto it=published->find(trackId);
+        if(it==published->end() || it->second!=latency) {
+            changed=true;
+            break;
+        }
+    }
+    if(!changed && activeChains==published->size())return;
+
+    // Publishes the COMPLETE immutable latency map and stages the graph PDC
+    // plan on control only. Revision mismatch rejects stale DSP in the audio
+    // thread until this coherent bank has been committed.
+    publishPluginChainLatencies();
+    audioEngine_.markMasterPdcDirty();
+}
+#endif
 
 void ApplicationCore::queueVocalTuneBackgroundJob(std::function<void()> job)
 {
