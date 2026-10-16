@@ -211,15 +211,21 @@ static const bubblegum::CableWorldSnapshot* findSnapshot(
     return nullptr;
 }
 
+static const bubblegum::BubblegumSendRecord* findSendRecord(
+    const std::vector<bubblegum::BubblegumSendRecord>& records,
+    const TrackID& destination)
+{
+    for (const auto& record : records)
+        if (record.destinationTrackId == destination)
+            return &record;
+    return nullptr;
+}
+
 static bool hasDestination(
     const std::vector<bubblegum::BubblegumSendRecord>& records,
     const TrackID& destination)
 {
-    return std::any_of(records.begin(), records.end(),
-                       [&destination](const auto& record)
-                       {
-                           return record.destinationTrackId == destination;
-                       });
+    return findSendRecord(records, destination) != nullptr;
 }
 
 class BubblegumRefreshTests final : public juce::UnitTest
@@ -362,9 +368,13 @@ public:
                 bubblegum::BubblegumRoutingAdapterSourceSyncExample adapter;
                 FixedSourceSync sync { sourceId };
                 const auto initial = adapter.getSendRecords(h.graph, sync, {});
-                expect(hasDestination(initial, destinationId), "post-fader cable exists");
-                if (initial.empty()) return;
-                const auto originalId = initial.front().sendId;
+                const auto* originalRecord = findSendRecord(initial, destinationId);
+                expect(originalRecord != nullptr, "post-fader target cable exists");
+                if (originalRecord == nullptr) return;
+                // The source may ALSO have a Direct→Master cable. Do not compare
+                // records.front() across snapshots: that can compare Master IDs
+                // twice and falsely claim this PRE send preserved its identity.
+                const auto originalId = originalRecord->sendId;
                 const int refreshesBeforePre = h.refresh.topologyRefreshCount;
                 h.sends.setSendPreFader(h.graph, sourceId, destinationId, true);
                 expect(h.refresh.topologyRefreshCount > refreshesBeforePre,
@@ -374,11 +384,12 @@ public:
                 expect(h.sends.isSendPreFader(h.graph, sourceId, destinationId),
                        "engine route switches to pre-fader");
                 const auto records = adapter.getSendRecords(h.graph, sync, {});
-                expect(hasDestination(records, destinationId),
+                const auto* preRecord = findSendRecord(records, destinationId);
+                expect(preRecord != nullptr,
                        "pre-fader Send remains visible in routing adapter");
-                if (records.empty()) return;
-                expectEquals(records.front().sendId, originalId,
-                             "pre/post mode preserves the cable and automation identity");
+                if (preRecord == nullptr) return;
+                expectEquals(preRecord->sendId, originalId,
+                             "PRE send preserves its own cable and automation identity");
                 auto published = h.graph.getSnapshotPublisher().get();
                 expect(published != nullptr, "pre-fader state has a published audio snapshot");
                 bool foundPreSend = false;
@@ -418,6 +429,108 @@ public:
                 const auto removed = adapter.getSendRecords(h.graph, sync, {});
                 expect(!hasDestination(removed, destinationId),
                        "cable disappears after deleting pre-fader Send");
+            }
+        }
+
+        beginTest("MixedPrePostSendsPreserveIdentityAndProjectRouting");
+        {
+            Harness h;
+            const auto* doubles = QuickTrackRoleCatalog::findById("doubles");
+            const auto created = h.builder.createBatch({ { doubles, 1 } });
+            expect(created.ok(), "mixed PRE/POST source track exists");
+            if (created.ok())
+            {
+                const TrackID source = created.created[0].trackId;
+                const TrackID preBus = "Bubblegum-Mixed-PreBus";
+                const TrackID postBus = "Bubblegum-Mixed-PostBus";
+                h.graph.addNode("PRE Bus", RoutingNodeType::Bus, preBus);
+                h.graph.addNode("POST Bus", RoutingNodeType::Bus, postBus);
+                h.sends.createSend(h.graph, source, preBus, 0.4f);
+                h.sends.createSend(h.graph, source, postBus, 0.8f);
+
+                bubblegum::BubblegumRoutingAdapterSourceSyncExample adapter;
+                FixedSourceSync sync { source };
+                const auto initial = adapter.getSendRecords(h.graph, sync, {});
+                const auto* initialPre = findSendRecord(initial, preBus);
+                const auto* initialPost = findSendRecord(initial, postBus);
+                expect(initialPre != nullptr && initialPost != nullptr,
+                       "both send destinations have independent cable records");
+                if (initialPre != nullptr && initialPost != nullptr)
+                {
+                    const auto preId = initialPre->sendId;
+                    const auto postId = initialPost->sendId;
+                    expect(preId != postId, "distinct destinations have distinct cable IDs");
+
+                    h.sends.setSendPreFader(h.graph, source, preBus, true);
+                    expectEquals(h.sends.getSendPreFaderSummary(h.graph, source), 3,
+                                 "PRE and POST sends are reported as MIX");
+                    expect(h.sends.isSendPreFader(h.graph, source, preBus),
+                           "only the selected target became PRE");
+                    expect(!h.sends.isSendPreFader(h.graph, source, postBus),
+                           "sibling POST target was left unchanged");
+                    expect(!h.sends.areAllSendsPreFader(h.graph, source),
+                           "mixed mode does not report all sends PRE");
+
+                    const auto mixed = adapter.getSendRecords(h.graph, sync, {});
+                    const auto* mixedPre = findSendRecord(mixed, preBus);
+                    const auto* mixedPost = findSendRecord(mixed, postBus);
+                    expect(mixedPre != nullptr && mixedPost != nullptr,
+                           "both mixed-mode cables remain visible in adapter");
+                    if (mixedPre != nullptr && mixedPost != nullptr)
+                    {
+                        expectEquals(mixedPre->sendId, preId,
+                                     "only PRE target retains its exact RouteID-derived cable ID");
+                        expectEquals(mixedPost->sendId, postId,
+                                     "unmodified POST target retains its exact cable ID");
+                    }
+
+                    const auto savedGraph = h.graph.getState().createCopy();
+                    h.sends.setAllSendPreFader(h.graph, source, true);
+                    expectEquals(h.sends.getSendPreFaderSummary(h.graph, source), 2,
+                                 "source-wide PRE changes both sends");
+                    expect(h.sends.areAllSendsPreFader(h.graph, source),
+                           "all-pre predicate agrees with all-PRE routing");
+                    h.sends.setAllSendPreFader(h.graph, source, false);
+                    expectEquals(h.sends.getSendPreFaderSummary(h.graph, source), 1,
+                                 "source-wide POST changes both sends back");
+
+                    h.graph.restoreState(savedGraph);
+                    expectEquals(h.sends.getSendPreFaderSummary(h.graph, source), 3,
+                                 "reloading routing restores the mixed PRE/POST selection");
+                    expect(h.sends.isSendPreFader(h.graph, source, preBus)
+                               && !h.sends.isSendPreFader(h.graph, source, postBus),
+                           "project reload preserves the individual PRE/POST taps");
+                    const auto reloaded = adapter.getSendRecords(h.graph, sync, {});
+                    const auto* reloadedPre = findSendRecord(reloaded, preBus);
+                    const auto* reloadedPost = findSendRecord(reloaded, postBus);
+                    expect(reloadedPre != nullptr && reloadedPost != nullptr,
+                           "restored PRE and POST routes both have cable records");
+                    if (reloadedPre != nullptr && reloadedPost != nullptr)
+                    {
+                        expectEquals(reloadedPre->sendId, preId,
+                                     "PRE target cable identity survives routing serialization");
+                        expectEquals(reloadedPost->sendId, postId,
+                                     "POST target cable identity survives routing serialization");
+                    }
+
+                    const auto snapshot = h.graph.getSnapshotPublisher().get();
+                    bool preAudioEdge = false, postAudioEdge = false;
+                    const auto* sourceNode = h.graph.getNodeByTrackId(source);
+                    const auto* preNode = h.graph.getNodeByTrackId(preBus);
+                    const auto* postNode = h.graph.getNodeByTrackId(postBus);
+                    if (snapshot && sourceNode && preNode && postNode)
+                        for (const auto& edge : snapshot->edges)
+                        {
+                            preAudioEdge |= edge.sourceNodeId == sourceNode->id
+                                && edge.destNodeId == preNode->id
+                                && edge.type == ConnectionType::PreSend;
+                            postAudioEdge |= edge.sourceNodeId == sourceNode->id
+                                && edge.destNodeId == postNode->id
+                                && edge.type == ConnectionType::Send;
+                        }
+                    expect(preAudioEdge && postAudioEdge,
+                           "restored audio snapshot uses PRE and POST taps independently");
+                }
             }
         }
 
