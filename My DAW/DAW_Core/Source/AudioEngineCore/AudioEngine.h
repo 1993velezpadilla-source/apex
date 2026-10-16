@@ -2219,7 +2219,13 @@ private:
         // Its destructor only decreases an atomic counter (RCU retirement is
         // exclusively performed by the control thread).
         auto stagedGraphReader=graphPdcPreflight_.readRealtime();
-        const bool matches=stagedGraphReader &&
+        // If an oversized callback exceeds prepared edge scratch, fall
+        // back for the WHOLE routing block. A late edge-level failure
+        // could otherwise mix delayed direct paths with undelayed sends.
+        const bool scratchReady=numSamples>0 &&
+            static_cast<std::size_t>(numSamples)<=masterPdcScratchL_.size() &&
+            static_cast<std::size_t>(numSamples)<=masterPdcScratchR_.size();
+        const bool matches=scratchReady && stagedGraphReader &&
             stagedGraphReader->sampleRate==sampleRate_ &&
             stagedGraphReader->dispatch.channels()==2 &&
             DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
