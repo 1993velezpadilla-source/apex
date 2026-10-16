@@ -35,7 +35,8 @@ int main() {
                 high.push(sample);
                 normal.push(sample);
             }
-            const auto a=high.latest(),b=normal.latest();
+            const auto a=high.latest();
+            const auto b=normal.latest();
             const double fast=1000.0*high.firstVoicedSample()/sr;
             const double baseline=1000.0*normal.firstVoicedSample()/sr;
             const bool accurate=a.voiced && a.confidence>=0.70f &&
