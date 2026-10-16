@@ -43,7 +43,8 @@ namespace
                 if (connection == nullptr)
                     continue;
                 // Match Send connections and Direct→master connections.
-                const bool isSend   = (connection->type == DAW::ConnectionType::Send);
+                const bool isSend   = (connection->type == DAW::ConnectionType::Send
+                                    || connection->type == DAW::ConnectionType::PreSend);
                 const bool isDirect = (connection->type == DAW::ConnectionType::Direct);
                 if (!isSend && !isDirect)
                     continue;
