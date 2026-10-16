@@ -197,6 +197,14 @@ public:
            !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
                sameProgrammeRoutingRealtime(graph,reader->graph) ||
            edgePosition>=graph.edges.size())return false;
+        // Match the live monitor-safety rule: the experimental programme
+        // delay must never be tested as eligible while an active track is
+        // record-armed (that path uses the legacy monitoring authority).
+        if(tracks_!=nullptr)
+            for(const auto& meta:graph.nodes)
+                if(meta.type==RoutingNodeType::Track && meta.active)
+                    if(auto* source=tracks_->getTrack(meta.trackId))
+                        if(source->isArmed())return false;
         return reader->dispatch.processEdge(
             graph.version,edgePosition,stereo.getArrayOfWritePointers(),2,
             stereo.getNumSamples());
