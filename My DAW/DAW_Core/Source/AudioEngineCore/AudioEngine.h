@@ -239,6 +239,32 @@ public:
             stereo.getNumSamples());
     }
 
+    // Test-only accessor: each routed sidechain must own an independent
+    // delay history, even when two sends target the SAME compressor/track.
+    int getSidechainPdcDelayForTests(const RouteID& route) const noexcept
+    {
+        const auto it=pdcLines_.find(route);
+        return it!=pdcLines_.end()?it->second.getDelaySamples():-1;
+    }
+    bool processSidechainPdcForTests(const RouteID& route,
+                                    juce::AudioBuffer<float>& audio) noexcept
+    {
+        const int frames=audio.getNumSamples();
+        if(audio.getNumChannels()!=2 || frames<=0 ||
+           static_cast<std::size_t>(frames)>pdcScratchL_.size() ||
+           static_cast<std::size_t>(frames)>pdcScratchR_.size())
+            return false;
+        const auto it=pdcLines_.find(route);
+        if(it==pdcLines_.end() || it->second.getDelaySamples()<=0)
+            return false;
+        auto& line=it->second;
+        line.push(audio.getReadPointer(0),audio.getReadPointer(1),frames);
+        line.read(pdcScratchL_.data(),pdcScratchR_.data(),frames);
+        audio.copyFrom(0,0,pdcScratchL_.data(),frames);
+        audio.copyFrom(1,0,pdcScratchR_.data(),frames);
+        return true;
+    }
+
     std::size_t collectGraphPdcRetiredOnControlThread()
     {
         return graphPdcPreflight_.collectRetiredOnControlThread();
@@ -1996,7 +2022,7 @@ private:
         return { clipPanLeftRamp_.data(), clipPanRightRamp_.data() };
     }
 
-    /** (Re)build sidechain PDC delay lines from the ADOPTED routing snapshot
+    /** (Re)build PER-EDGE sidechain PDC delay lines from the ADOPTED routing snapshot
      *  and the published chain-latency map — never from the live RoutingGraph
      *  or the pluginChains_ map. Called from prepare() (message thread) and
      *  from syncNodeBuffers() on graph-change blocks (audio thread); race-free
@@ -2031,9 +2057,9 @@ private:
             const int delay = SoundEngine::ApexPluginPdcContractCore::computeSidechainDelaySamples(
                 latencyOfNode(edge.sourceNodeId), latencyOfNode(edge.destNodeId));
 
-            auto lineIt = pdcLines_.find(edge.destNodeId);
+            auto lineIt = pdcLines_.find(edge.id);
             if (lineIt == pdcLines_.end())
-                lineIt = pdcLines_.emplace(edge.destNodeId, SoundEngine::ApexPdcDelayLineCore{}).first;
+                lineIt = pdcLines_.emplace(edge.id, SoundEngine::ApexPdcDelayLineCore{}).first;
             auto& line = lineIt->second;
             const int capacity = SoundEngine::ApexPluginPdcContractCore::computeDelayLineCapacity(delay, safeBlock);
             if (line.getCapacity() < capacity)
@@ -2996,7 +3022,7 @@ private:
                 tapR = trackBuf.getReadPointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
             }
 
-            auto pdcIt = pdcLines_.find(edge.destNodeId);
+            auto pdcIt = pdcLines_.find(edge.id);
             if (pdcIt != pdcLines_.end() && pdcIt->second.getDelaySamples() > 0)
             {
                 auto& line = pdcIt->second;
@@ -3201,7 +3227,7 @@ private:
             auto* scL   = scBuf.getWritePointer(0);
             auto* scR   = scBuf.getWritePointer(juce::jmin(1, scBuf.getNumChannels() - 1));
 
-            auto pdcIt = pdcLines_.find(edge.destNodeId);
+            auto pdcIt = pdcLines_.find(edge.id);
             if (pdcIt != pdcLines_.end() && pdcIt->second.getDelaySamples() > 0)
             {
                 auto& line = pdcIt->second;
