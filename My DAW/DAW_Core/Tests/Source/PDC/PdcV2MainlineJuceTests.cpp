@@ -322,6 +322,8 @@ public:
                 expect(beforeArm.matchingBlocks>0);
                 expect(beforeArm.renderedBlocks>0,
                        "match is NOT enough: an actual AudioEngine block must run graph PDC");
+                expectEquals(beforeArm.legacyResyncs,static_cast<std::uint64_t>(0),
+                    "while V2 is active the legacy graph planner must NOT rebuild");
                 vocal->setArmed(true);
                 juce::AudioBuffer<float> monitorBuffer(2,128);
                 monitorBuffer.clear();
@@ -332,6 +334,8 @@ public:
                     "record-armed monitoring MUST use legacy compensation authority");
                 expect(duringArm.monitoringFallbackBlocks>
                        beforeArm.monitoringFallbackBlocks);
+                expect(duringArm.legacyResyncs>beforeArm.legacyResyncs,
+                    "first armed fallback block must synchronize legacy PDC before rendering");
                 vocal->setArmed(false);
                 monitorBuffer.clear();
                 expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
