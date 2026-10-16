@@ -56,6 +56,8 @@ public:
         settings.noteHysteresis=0.1f;
         live_.setVoiceSettings(settings);
         live_.enableEarlyOnset(true);
+        live_.enableHighRegisterOnset(true);
+        live_.enableFastEngagement(true);
         live_.enableExperimentalEarlyTransitions(true);
         live_.enableResidualPreservation(true);
         // No fixed delay/lookahead in this dry plus harmonic-residual
@@ -74,6 +76,7 @@ public:
     }
     double researchWetMix() const noexcept {return live_.researchWetMix();}
     int64_t firstVoiceSample() const noexcept {return live_.firstVoiceSample();}
+    int64_t firstHighSample() const noexcept {return live_.firstHighSample();}
     int fastTransitionCount() const noexcept {return live_.fastTransitionCount();}
     int64_t lastFastTransitionSample() const noexcept {
         return live_.lastFastTransitionSample();
