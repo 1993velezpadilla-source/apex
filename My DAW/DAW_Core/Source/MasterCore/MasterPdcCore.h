@@ -50,50 +50,46 @@ public:
         for (auto& [id, line] : edgeDelays_)
             line.usedInCurrentSync = false;
 
-        // Compute the required per-edge latencies (desired_ is a reused
-        // member — no allocation after the first sync at a given graph size).
-        desired_.clear();
-        int maxLatency = 0;
-        for (const auto& e : snapshot.edges)
+        // Compute the target in two allocation-free passes over the
+        // immutable routing snapshot. The former desired_ vector grew in
+        // sync() on the audio callback when a larger graph was published.
+        // Do not copy edge IDs or allocate a temporary edge plan here.
+        const auto latencyOfMasterEdge=[&](const RoutingSnapshot::EdgeSnapshot& e) -> int
         {
-            // Match the audible routing fanout: inactive/bypassed direct
-            // edges are never summed, so they must not raise the latency
-            // target for unrelated active tracks (especially live monitoring).
-            if (e.type != ConnectionType::Direct || e.destNodeId != "master"
+            if(e.type!=ConnectionType::Direct || e.destNodeId!="master"
                 || !e.active || e.bypassed)
-                continue;
-            const auto nodeIt = snapshot.nodeIndexById.find(e.sourceNodeId);
-            if (nodeIt == snapshot.nodeIndexById.end()
-                || nodeIt->second >= snapshot.nodes.size()
-                || !snapshot.nodes[nodeIt->second].active)
-                continue;
-            int latency = 0;
-            if (latencies != nullptr)
-            {
-                const auto latIt = latencies->find(snapshot.nodes[nodeIt->second].trackId);
-                if (latIt != latencies->end())
-                    latency = juce::jmax(0, latIt->second);
-            }
-            desired_.push_back({ e.id, latency });
-            maxLatency = juce::jmax(maxLatency, latency);
-        }
+                return -1;
+            const auto nodeIt=snapshot.nodeIndexById.find(e.sourceNodeId);
+            if(nodeIt==snapshot.nodeIndexById.end() ||
+               nodeIt->second>=snapshot.nodes.size() ||
+               !snapshot.nodes[nodeIt->second].active)
+                return -1;
+            if(latencies==nullptr)return 0;
+            const auto found=latencies->find(snapshot.nodes[nodeIt->second].trackId);
+            return found!=latencies->end()?juce::jmax(0,found->second):0;
+        };
+        int maxLatency=0;
+        for(const auto& e:snapshot.edges)
+            if(const int latency=latencyOfMasterEdge(e);latency>=0)
+                maxLatency=juce::jmax(maxLatency,latency);
 
-        // Apply in place. Lines are created only for edges that actually
-        // need compensation; existing lines keep their history when the
-        // capacity still fits.
-        const int safeBlock = juce::jmax(juce::jmax(blockSize_, 8192), numSamples);
-        for (const auto& d : desired_)
+        // Recompute only the edges that actually need a master delay.
+        // Ring creation/growth for a *new* route still needs a prepared
+        // control-thread owner before this fallback can be RT-certified.
+        const int safeBlock=juce::jmax(juce::jmax(blockSize_,8192),numSamples);
+        for(const auto& e:snapshot.edges)
         {
-            const int delay = juce::jmax(0, maxLatency - d.latency);
-            if (delay <= 0)
-                continue;
-            auto& line = edgeDelays_[d.id];
-            const int capacity = juce::jmax(safeBlock * 4, delay + safeBlock * 2);
-            if (line.buf.getNumSamples() < capacity)
-                line.prepare(capacity);   // rare grow: reallocates + clears THIS line only
+            const int latency=latencyOfMasterEdge(e);
+            if(latency<0)continue;
+            const int delay=juce::jmax(0,maxLatency-latency);
+            if(delay<=0)continue;
+            auto& line=edgeDelays_[e.id];
+            const int capacity=juce::jmax(safeBlock*4,delay+safeBlock*2);
+            if(line.buf.getNumSamples()<capacity)
+                line.prepare(capacity);
             line.setCrossfadeSamples(pdcFadeSamples_);
-            line.delaySamples = delay;
-            line.usedInCurrentSync = true;
+            line.delaySamples=delay;
+            line.usedInCurrentSync=true;
         }
 
         // Inactive/bypassed or now zero-compensation paths stop advancing.
@@ -268,17 +264,10 @@ private:
         }
     };
 
-    struct EdgeLatency
-    {
-        RouteID id;
-        int     latency = 0;
-    };
-
     struct StringHash { size_t operator()(const juce::String& s) const noexcept { return (size_t)s.hashCode64(); } };
     int blockSize_ = 512;
     int pdcFadeSamples_ = 0;
     std::unordered_map<RouteID, DelayLine, StringHash> edgeDelays_;
-    std::vector<EdgeLatency> desired_;
     std::vector<float> scratchL_, scratchR_;
 };
 
