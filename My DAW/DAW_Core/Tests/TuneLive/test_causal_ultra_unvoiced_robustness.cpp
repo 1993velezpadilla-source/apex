@@ -38,7 +38,8 @@ struct Result {
     double finalCents=9999.0,maxStep=0.0;
     bool finite=true;
 };
-Result run(double rate, int type, int chunks, std::uint32_t seed) {
+Result run(double rate, int type, int chunks, std::uint32_t seed,
+           bool guarded=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     const int size=static_cast<int>(0.70*rate);
     std::vector<float> audio(static_cast<std::size_t>(size),0.0f);
@@ -75,6 +76,10 @@ Result run(double rate, int type, int chunks, std::uint32_t seed) {
     engine.enableMidRegisterOnset(true);
     engine.enableHighRegisterOnset(true);
     engine.enableUltraHighRegisterOnset(true);
+    if(guarded) {
+        engine.enableUltraHighFastHopResearch(true);
+        engine.enableUltraLeapConsensusResearch(true);
+    }
     engine.enableExperimentalEarlyTransitions(true);
     engine.enableFastEngagement(true);
     engine.enableResidualPreservation(true);
@@ -113,6 +118,8 @@ int main() {
             for(std::uint32_t seed:std::array<std::uint32_t,2>{{0x5A17C81u,0xBEEFAB11u}}) {
                 const auto fixed=run(rate,type,0,seed);
                 const auto varied=run(rate,type,1,seed);
+                const auto consensus=run(rate,type,0,seed,true);
+                const auto guardedChunks=run(rate,type,1,seed,true);
                 const bool exactlySame=fixed.firstVoice==varied.firstVoice &&
                     fixed.firstUltra==varied.firstUltra &&
                     fixed.fastJumps==varied.fastJumps &&
@@ -124,9 +131,24 @@ int main() {
                     fixed.firstUltra<0 && fixed.fastJumps==0 &&
                     std::abs(fixed.finalCents)<18.0 &&
                     (type!=1 || fixed.noteJumps==0);
+                const bool protectedPartition=
+                    consensus.firstVoice==guardedChunks.firstVoice &&
+                    consensus.firstUltra==guardedChunks.firstUltra &&
+                    consensus.fastJumps==guardedChunks.fastJumps &&
+                    consensus.noteJumps==guardedChunks.noteJumps &&
+                    std::abs(consensus.finalCents-guardedChunks.finalCents)<0.0001;
+                const bool consensusNoiseSafe=type==0?
+                    consensus.firstUltra<0 && consensus.fastJumps==0 &&
+                    consensus.firstVoice<0:
+                    consensus.firstUltra<0 && consensus.fastJumps==0 &&
+                    std::abs(consensus.finalCents)<18.0 &&
+                    (type!=1 || consensus.noteJumps==0);
                 const bool okay=exactlySame && noiseSafe &&
+                    protectedPartition && consensusNoiseSafe &&
                     fixed.finite && varied.finite &&
-                    fixed.maxStep<0.85 && varied.maxStep<0.85;
+                    consensus.finite && guardedChunks.finite &&
+                    fixed.maxStep<0.85 && varied.maxStep<0.85 &&
+                    consensus.maxStep<0.85 && guardedChunks.maxStep<0.85;
                 success &=okay;passCount+=okay;
                 std::cout<<"ULTRA_ADVERSARIAL rate="<<rate
                     <<" type="<<type<<" seed="<<seed
@@ -136,11 +158,15 @@ int main() {
                     <<" octave_jumps="<<fixed.noteJumps
                     <<" final_output_cents="<<fixed.finalCents
                     <<" same_any_block_partition="<<exactlySame
+                    <<" guarded_any_block_partition="<<protectedPartition
+                    <<" guarded_false_up_leaps="<<consensus.fastJumps
+                    <<" guarded_octave_jumps="<<consensus.noteJumps
+                    <<" guarded_safe="<<consensusNoiseSafe
                     <<" safe="<<okay<<"\n";
             }
         }
     }
-    std::cout<<"ULTRA_ADVERSARIAL_GATE stable_cases="<<passCount
+    std::cout<<"ULTRA_ADVERSARIAL_GATE stable_and_consensus_cases="<<passCount
              <<"/18 verdict="<<(success?"PASS":"FAIL")
              <<" NOT_1MS_ACOUSTIC_PITCH_DECISION=1\n";
     return success?0:1;
