@@ -4,9 +4,9 @@
 // Time window = 2048 samples, hop = 1024 samples; this is not proof of
 // subjective vocal naturalness, phase coherence or formant identity.
 // No production code/HQ40 is altered by this test.
-#define main old_formant_proxy_entry_not_called
+#define APEX_ULTRA_SPECTRAL_HELPER_ONLY 1
 #include "test_human_log_spectrum_formant_proxy.cpp"
-#undef main
+#undef APEX_ULTRA_SPECTRAL_HELPER_ONLY
 #include <algorithm>
 #include <cmath>
 #include <fstream>
