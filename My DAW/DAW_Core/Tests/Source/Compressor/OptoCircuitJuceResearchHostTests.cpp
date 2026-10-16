@@ -857,9 +857,10 @@ public:
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
         beginTest("AudioEngine research opt-in dispatch aligns direct + send + bus exactly once");
-        for(const double rate:{44100.0,48000.0})
+        // Exercise 44.1/48/96 kHz and ASIO-sized as well as irregular blocks.
+        for(const double rate:{44100.0,48000.0,96000.0})
         {
-            for(const int frames:{31,64,128})
+            for(const int frames:{1,31,64,128,256,1024})
             {
                 DAW::AudioEngine engine;
                 // Match the engine device format before staging a PDC bank.
