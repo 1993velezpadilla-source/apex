@@ -1,10 +1,10 @@
 #pragma once
 // Experimental ULTRA-HIGH REGISTER YIN hypothesis: 80-frame window.
-// Strict 430–1000Hz research range. 392–420Hz stays with the longer mid-register detector.
+// Strict 420–1000Hz research range. 392–420Hz stays with the longer mid-register detector.
 // Research-only SHORT-HISTORY YIN onset estimator. Not a replacement for
 // the full C2-capable YIN authority, not shipped, and not a PDC statement.
 // Its harmonic short-window estimate requires two agreeing frames. Frequencies
-// below 430 Hz intentionally have no early-onset claim.
+// below 420 Hz intentionally have no early-onset claim.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -23,7 +23,7 @@ public:
         detectorRate_=rate_/decimation_;
         pole_=std::exp(-2.0*3.14159265358979323846*1800.0/rate_);
         minLag_=std::max(2,static_cast<int>(detectorRate_/1000.0));
-        maxLag_=std::clamp(static_cast<int>(std::ceil(detectorRate_/430.0)),
+        maxLag_=std::clamp(static_cast<int>(std::ceil(detectorRate_/420.0)),
                            minLag_+2,kMaxLag);
         reset();
     }
@@ -113,7 +113,7 @@ private:
                 period+=std::clamp(0.5*(a-c)/denom,-0.5,0.5);
         }
         const float hz=static_cast<float>(detectorRate_/period);
-        if(!std::isfinite(hz)||hz<430.0f||hz>1000.0f)return {};
+        if(!std::isfinite(hz)||hz<420.0f||hz>1000.0f)return {};
         // Guard against notes 220–400Hz masquerading as upper harmonics.
         // A real 220-Hz F0 with a strong 440-Hz harmonic can fool
         // an ~6.7ms short-window YIN detector into a premature A4 lock.
