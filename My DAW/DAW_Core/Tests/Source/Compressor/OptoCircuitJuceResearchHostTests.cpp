@@ -933,6 +933,15 @@ public:
                 expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
                     graph,&delays,2,rate));
                 expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
+                // A device-rate switch rejects the old DSP bank even when
+                // the routing snapshot is otherwise still identical.
+                const double nextRate=rate==44100.0?48000.0:44100.0;
+                engine.prepare(nextRate,frames);
+                expect(!engine.renderOnePreparedGraphEdgeForTests(graph,0,check),
+                       "device rate change must reject stale PDC history");
+                expect(engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    graph,&delays,2,nextRate));
+                expect(engine.renderOnePreparedGraphEdgeForTests(graph,0,check));
                 expect(engine.collectGraphPdcRetiredOnControlThread()>0);
             }
         }
