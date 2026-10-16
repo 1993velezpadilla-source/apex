@@ -2,7 +2,7 @@
 
 <JUCERPROJECT id="SM4V7O" name="DAW_Core" projectType="guiapp" useAppConfig="0"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
-              defines="JUCE_ASIO=1 JUCE_PLUGINHOST_VST3=1">
+              defines="JUCE_ASIO=1 JUCE_PLUGINHOST_VST3=1 APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT=1 APEX_PDC_V2_PRODUCTION_CANDIDATE=1">
   <MAINGROUP id="jbD8r4" name="DAW_Core">
     <GROUP id="{76F8C13A-9DB7-C0DF-C6DB-61E091DFB695}" name="Source">
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000001}" name="AppCore">
