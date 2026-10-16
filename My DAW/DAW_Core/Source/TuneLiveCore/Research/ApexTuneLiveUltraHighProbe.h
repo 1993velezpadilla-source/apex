@@ -45,7 +45,7 @@ public:
         ring_[static_cast<std::size_t>(ringPosition_)]=static_cast<float>(low2_);
         ringPosition_=(ringPosition_+1)%kWindow;
         if(filled_<kWindow)++filled_;
-        if(++hop_<kHop)return false;
+        if(++hop_<hopSize_)return false;
         hop_=0;
         if(filled_<kWindow)return false;
         const Result candidate=measure();
@@ -59,6 +59,17 @@ public:
         result_=stableCount_>=2?candidate:Result{};
         if(result_.voiced && firstSample_<0)firstSample_=samples_;
         return true;
+    }
+    // NONSHIPPING: halve YIN hop from 8 to 4 *decimated* samples.
+    // This saves at most one ~0.33ms analysis interval when a new 80-frame
+    // high note appears; it does NOT shorten acoustic window or prove 1ms.
+    // Configure only when stopped, before push(); never automate from audio.
+    void enableFastHopResearch(bool enabled) noexcept {
+        hopSize_=enabled?4:kHop;
+        hop_=0;
+        stableCount_=0;
+        priorCandidate_=0.0f;
+        result_={};
     }
     Result latest() const noexcept {return result_;}
     int64_t firstVoicedSample() const noexcept {return firstSample_;}
@@ -154,6 +165,7 @@ private:
            low1_=0.0,low2_=0.0;
     int decimation_=4,minLag_=12,maxLag_=72;
     int ringPosition_=0,filled_=0,substep_=0,hop_=0,stableCount_=0;
+    int hopSize_=kHop; // Off by default; 8 is the tested 80-frame authority.
     int octaveVetoCount_=0;
     int64_t samples_=0,firstSample_=-1;
     float priorCandidate_=0.0f;
