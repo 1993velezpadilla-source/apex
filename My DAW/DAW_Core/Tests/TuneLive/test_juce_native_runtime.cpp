@@ -263,14 +263,14 @@ int main() {
     if(candidate.firstVoiceSample()<0 || candidate.firstHalfWetSample()<0 ||
        candidate.firstHalfWetSample()<candidate.firstVoiceSample())
         return fail("causal research hosted F0 onset telemetry invalid");
-    if(candidate.firstHighSample()<0 ||
-       candidate.firstHighSample()>480 ||
-       candidate.firstHalfWetSample()>720)
-        return fail("research JUCE high-register wet path exceeded 10ms F0 / 15ms half-wet budgets");
+    if(candidate.firstUltraSample()<0 ||
+       candidate.firstUltraSample()>384 ||
+       candidate.firstHalfWetSample()>528)
+        return fail("research JUCE ultra-high F0 exceeded 8ms or first half-wet 11ms");
     std::cout<<"CAUSAL_JUCE_RESEARCH fixed_pdc_samples="
              <<candidate.getLatencySamples()
              <<" firstF0_ms="<<1000.0*candidate.firstVoiceSample()/48000.0
-             <<" highRegisterF0_ms="<<1000.0*candidate.firstHighSample()/48000.0
+             <<" ultraRegisterF0_ms="<<1000.0*candidate.firstUltraSample()/48000.0
              <<" firstWet50_ms="<<1000.0*candidate.firstHalfWetSample()/48000.0
              <<" late_wet_cents="<<researchCents
              <<" NO_1MS_FIRST_NOTE_RESPONSE_CLAIM\\n";
@@ -370,8 +370,8 @@ int main() {
             ?1200.0*std::log2(pitch.hz/440.0):9999.0;
         if(std::abs(centsOutput)>18.0 ||
            insert.researchWetMix()<0.95 ||
-           insert.firstHighSample()<0 ||
-           insert.firstHighSample()>480)
+           insert.firstUltraSample()<0 ||
+           insert.firstUltraSample()>384)
             return fail("eight real JUCE LIVE inserts lost high-register wet tuning");
         insert.releaseResources();
     }
@@ -475,6 +475,7 @@ int main() {
        midJUCE.firstMidSample()<0 ||
        midJUCE.firstMidSample()>static_cast<int64_t>(48000.0*0.014) ||
        midJUCE.firstHighSample()>=0 ||
+       midJUCE.firstUltraSample()>=0 ||
        midJUCE.firstHalfWetSample()>static_cast<int64_t>(48000.0*0.019) ||
        !midTuned.voiced || std::abs(midCents)>18.0 ||
        midJUCE.researchWetMix()<0.95)
