@@ -106,6 +106,18 @@ public:
         return true;
     }
     Reader readRealtime() noexcept{return publisher_.readRealtime();}
+    // Device restart / offline export opens a NEW audio timeline even if the
+    // routing version, plugin latency and sample rate remain identical.
+    // Keeping the previous per-edge ring would leak the previous playback's
+    // tail into the first export/device block. Caller MUST own APEX's audio
+    // callback barrier and serialize this with control-plane publications.
+    // Fail closed if a realtime reader is still using any shared ring.
+    bool resetPreparedHistoriesAfterReadersDrainOnControlThread() noexcept {
+        if(publisher_.activeReaders()!=0)return false;
+        if(auto* current=publisher_.activeStateControlOnly())
+            current->dispatch.resetAfterReadersDrain();
+        return true;
+    }
     std::size_t collectRetiredOnControlThread() {
         return publisher_.collectRetired();
     }
