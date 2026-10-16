@@ -2409,6 +2409,15 @@ private:
             masterPdcDirty_.store(true, std::memory_order_relaxed);
         }
 
+        // Only ONE routing-PDC authority is allowed to prepare delays in
+        // each callback. While the control-prepared V2 graph is rendering,
+        // do not rebuild unused legacy delay rings on the audio thread.
+        // Keep masterPdcDirty_ set: the first fallback block (record-arm,
+        // routing mismatch, sample-rate change) then synchronizes the
+        // legacy MasterPdcCore BEFORE processing any audible route.
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        if (graphPdcActiveRt_ == nullptr)
+#endif
         if (masterPdcDirty_.exchange(false, std::memory_order_acquire))
         {
             // PDC recompute consumes ONLY published state: the adopted routing
