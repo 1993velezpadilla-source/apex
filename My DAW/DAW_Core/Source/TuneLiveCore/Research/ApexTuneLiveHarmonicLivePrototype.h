@@ -160,6 +160,26 @@ public:
                 updatePitch(estimate,true);
                 if(voiced_ && firstUltraSample_<0)
                     firstUltraSample_=sampleCount_;
+            } else if(voiced_ && fastTransitionsEnabled_ &&
+                      earlyUltra && ultra_.latest().voiced &&
+                      ultra_.latest().confidence>=0.95f &&
+                      sourceHz_>=55.0 &&
+                      lastVoicedEstimateSample_>=0 &&
+                      (sampleCount_-lastVoicedEstimateSample_)<
+                          static_cast<int64_t>(rate_*0.100) &&
+                      (ultra_.latest().hz/sourceHz_)>1.45f &&
+                      (lastFastTransitionSample_<0 ||
+                       sampleCount_-lastFastTransitionSample_>
+                          static_cast<int64_t>(rate_*0.045))) {
+                // Optional UPWARD-only high-register note-leap hint.
+                // The 80-frame tracker has passed dedicated 220/330/392Hz
+                // false-octave stress and must agree across two frames.
+                // Still a hypothesis, never claim 1ms/ASIO certification.
+                const auto e=ultra_.latest();
+                const PitchTracker::Result estimate{e.hz,e.confidence,true};
+                updatePitch(estimate,true);
+                lastFastTransitionSample_=sampleCount_;
+                ++fastTransitionCount_;
             } else if(!voiced_ && earlyHigh && high_.latest().voiced &&
                       high_.latest().confidence>=0.95f) {
                 // 2 agreeing short-window analyses of actual samples, then
