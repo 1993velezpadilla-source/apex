@@ -98,6 +98,25 @@ public:
         std::fill(scratchR_.begin(), scratchR_.end(), 0.0f);
     }
 
+    /** A research V2->legacy handoff starts a new legacy sample timeline.
+     *  A sync() recomputes compensation but deliberately retains ring history;
+     *  therefore sync() alone cannot safely revive a ring that was dormant
+     *  while V2 rendered. This invalidates freshness WITHOUT clearing or
+     *  reallocating potentially huge JUCE buffers in the audio callback.
+     *  read() silences taps until newly pushed samples have filled the delay.
+     *  Only call at a coherent whole-block authority switch.
+     */
+    void invalidateStreamingHistoryForTimelineSwitch() noexcept
+    {
+        for (auto& [id, line] : edgeDelays_)
+        {
+            line.primed = 0;
+            line.currentReadDelay = -1;
+            line.previousReadDelay = 0;
+            line.fadeRemaining = 0;
+        }
+    }
+
     /** Returns the stored compensation delay for an edge (0 if none). */
     int getEdgeDelay(const RouteID& id) const noexcept
     {
@@ -189,6 +208,12 @@ private:
 
             const auto* rL = buf.getReadPointer(0);
             const auto* rR = buf.getReadPointer(1);
+            // push() already wrote the current block. The number of samples
+            // which were known-fresh BEFORE this block is primed - n, clamped
+            // for the fully wrapped ring. A tap older than that + i must
+            // return silence: physical ring bytes may belong to a previous
+            // V2/legacy timeline. This check is allocation-free and O(1).
+            const int freshBeforeBlock = juce::jmax(0, primed - n);
             for (int i = 0; i < n; ++i)
             {
                 const int posNew = (writePos - currentReadDelay - n + i + cap * 4) % cap;
@@ -196,14 +221,19 @@ private:
                 {
                     const int posOld = (writePos - previousReadDelay - n + i + cap * 4) % cap;
                     const float t = 1.0f - (float) fadeRemaining / (float) fadeSamples;
-                    L[i] = rL[posOld] * (1.0f - t) + rL[posNew] * t;
-                    R[i] = rR[posOld] * (1.0f - t) + rR[posNew] * t;
+                    const bool oldValid = freshBeforeBlock + i >= previousReadDelay;
+                    const bool newValid = freshBeforeBlock + i >= currentReadDelay;
+                    L[i] = (oldValid ? rL[posOld] : 0.0f) * (1.0f - t)
+                         + (newValid ? rL[posNew] : 0.0f) * t;
+                    R[i] = (oldValid ? rR[posOld] : 0.0f) * (1.0f - t)
+                         + (newValid ? rR[posNew] : 0.0f) * t;
                     --fadeRemaining;
                 }
                 else
                 {
-                    L[i] = rL[posNew];
-                    R[i] = rR[posNew];
+                    const bool newValid = freshBeforeBlock + i >= currentReadDelay;
+                    L[i] = newValid ? rL[posNew] : 0.0f;
+                    R[i] = newValid ? rR[posNew] : 0.0f;
                 }
             }
         }
