@@ -38,7 +38,9 @@ namespace bubblegum
                 // Include Send connections and Direct→master connections.
                 // Direct connections to non-master nodes are internal bus routing
                 // and should not appear as user-facing cables.
-                const bool isSend   = (send->type == DAW::ConnectionType::Send);
+                // Pre-fader sends are real sends and must keep their cable visible.
+                const bool isSend   = (send->type == DAW::ConnectionType::Send
+                                    || send->type == DAW::ConnectionType::PreSend);
                 const bool isDirect = (send->type == DAW::ConnectionType::Direct);
                 if (!isSend && !isDirect) continue;
 
