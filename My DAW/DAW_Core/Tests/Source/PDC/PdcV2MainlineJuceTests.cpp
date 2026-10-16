@@ -347,7 +347,9 @@ public:
             }
         }
 
-        beginTest("Real routed AudioEngine impulse PDC: 32+16, send edit, aux latency 64");
+        beginTest("Real routed AudioEngine impulse: post-fader Send / PreSend, aux latency edit");
+        for(const auto sendKind:{DAW::ConnectionType::Send,DAW::ConnectionType::PreSend})
+        {
         for(const double sr:{44100.0,48000.0,96000.0})
         {
             for(const int maxFrames:{31,128})
@@ -360,7 +362,7 @@ public:
                 auto* bus=graph.addNode("FX bus",DAW::RoutingNodeType::Bus,
                                         "pdc-impulse-bus");
                 auto* send=trackNode&&bus?graph.connect(
-                    trackNode->id,bus->id,DAW::ConnectionType::Send):nullptr;
+                    trackNode->id,bus->id,sendKind):nullptr;
                 expect(vocal!=nullptr && trackNode!=nullptr &&
                        bus!=nullptr && send!=nullptr);
                 if(!vocal || !trackNode || !bus || !send)continue;
@@ -433,7 +435,11 @@ public:
                 };
                 // Track insert 32, aux insert 16: direct must gain 16
                 // programme samples, and both impulses reach master at 48.
-                renderTo(4100,48,2.0);
+                // PreSend bypasses the source center-pan, while post-fader
+                // Send includes it. Both programme paths arrive at sample 48.
+                const double fanoutCopies=sendKind==DAW::ConnectionType::PreSend
+                    ?1.0+std::sqrt(2.0):2.0;
+                renderTo(4100,48,fanoutCopies);
                 send->active.store(false,std::memory_order_relaxed);
                 graph.notifyGraphChanged();
                 fixture.impulseAt=4600;
@@ -447,11 +453,12 @@ public:
                 fixture.impulseAt=5700;
                 expect(stage());
                 // Updated VST3-like aux latency: BOTH paths reconverge at 96.
-                renderTo(6400,96,2.0);
+                renderTo(6400,96,fanoutCopies);
                 const auto gauntlet=engine.getGraphPdcPreflightCounters();
                 expect(gauntlet.matchingBlocks>0 && gauntlet.renderedBlocks>0,
                        "sample-exact PDC pass must use LIVE experimental route, not legacy");
             }
+        }
         }
 
         beginTest("AudioEngine research opt-in dispatch aligns direct + send + bus exactly once");
