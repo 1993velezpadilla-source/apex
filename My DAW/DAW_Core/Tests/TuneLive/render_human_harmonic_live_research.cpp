@@ -19,7 +19,8 @@ constexpr int blockSize=128;
 Wave renderLive(const Wave& input, bool early, bool residual,
                 bool fastEngagement=false, bool fastTransitions=false,
                 bool highRegister=false, bool midRegister=false,
-                bool ultraHigh=false, bool dryLeapReset=false) {
+                bool ultraHigh=false, bool dryLeapReset=false,
+                bool fastHop=false) {
     Wave out=input;
     HarmonicLivePrototype engine;
     engine.prepare(input.rate,input.channels);
@@ -34,6 +35,7 @@ Wave renderLive(const Wave& input, bool early, bool residual,
     engine.enableHighRegisterOnset(highRegister);
     engine.enableMidRegisterOnset(midRegister);
     engine.enableUltraHighRegisterOnset(ultraHigh);
+    if(fastHop)engine.enableUltraHighFastHopResearch(true);
     engine.enableNoteLeapDryReset(dryLeapReset);
     engine.enableExperimentalEarlyTransitions(fastTransitions);
     std::array<float,blockSize> left{},right{};
@@ -60,6 +62,7 @@ Wave renderLive(const Wave& input, bool early, bool residual,
              <<" fast_note_transitions="<<fastTransitions
              <<" dry_leap_reset="<<dryLeapReset
              <<" ultra_high="<<ultraHigh
+             <<" ultra_fast_hop="<<fastHop
              <<" first_ultra_ms="<<(engine.firstUltraSample()>=0?
                   1000.0*engine.firstUltraSample()/input.rate:-1.0)
              <<" high_register="<<highRegister
@@ -91,12 +94,15 @@ int main(int argc,char** argv) {
         // Separate OFF-by-default wet re-seeding hypothesis. Never
         // overwrite the existing ultra or HQ40 reference WAVs.
         const Wave smooth=renderLive(source,true,true,true,true,true,true,true,true);
+        // New isolated opt-in 4-hop on exactly the same singer audio.
+        const Wave fastHop=renderLive(source,true,true,true,true,true,true,true,false,true);
         const auto levels=level(candidate);
         const auto residualLevels=level(preserved);
         const auto fastLevels=level(fast);
         const auto highLevels=level(high);
         const auto ultraLevels=level(ultra);
         const auto smoothLevels=level(smooth);
+        const auto fastHopLevels=level(fastHop);
         if(!std::isfinite(levels.peak) || !std::isfinite(levels.rms) ||
            levels.rms<1.0e-7 ||
            !std::isfinite(residualLevels.peak) ||
@@ -108,7 +114,9 @@ int main(int argc,char** argv) {
            !std::isfinite(ultraLevels.peak) ||
            !std::isfinite(ultraLevels.rms) || ultraLevels.rms<1.0e-7 ||
            !std::isfinite(smoothLevels.peak) ||
-           !std::isfinite(smoothLevels.rms) || smoothLevels.rms<1.0e-7)
+           !std::isfinite(smoothLevels.rms) || smoothLevels.rms<1.0e-7 ||
+           !std::isfinite(fastHopLevels.peak) ||
+           !std::isfinite(fastHopLevels.rms) || fastHopLevels.rms<1.0e-7)
             throw std::runtime_error("Predictive LIVE generated invalid/silent human audio");
         const std::string result=prefix+"_harmonic_live_research.wav";
         writeWave24(result,candidate);
@@ -122,12 +130,15 @@ int main(int argc,char** argv) {
         writeWave24(ultraFile,ultra);
         const std::string smoothFile=prefix+"_harmonic_live_ultra_smooth_research.wav";
         writeWave24(smoothFile,smooth);
+        const std::string fastHopFile=prefix+"_harmonic_live_ultra_4hop_research.wav";
+        writeWave24(fastHopFile,fastHop);
         const Wave validated=readWave(result);
         const Wave residualValidated=readWave(residualFile);
         const Wave fastValidated=readWave(fastFile);
         const Wave highValidated=readWave(highFile);
         const Wave ultraValidated=readWave(ultraFile);
         const Wave smoothValidated=readWave(smoothFile);
+        const Wave fastHopValidated=readWave(fastHopFile);
         if(validated.frames()!=source.frames() ||
            validated.rate!=source.rate || validated.channels!=source.channels ||
            residualValidated.frames()!=source.frames() ||
@@ -144,7 +155,10 @@ int main(int argc,char** argv) {
            ultraValidated.channels!=source.channels ||
            smoothValidated.frames()!=source.frames() ||
            smoothValidated.rate!=source.rate ||
-           smoothValidated.channels!=source.channels)
+           smoothValidated.channels!=source.channels ||
+           fastHopValidated.frames()!=source.frames() ||
+           fastHopValidated.rate!=source.rate ||
+           fastHopValidated.channels!=source.channels)
             throw std::runtime_error("LIVE human PCM24 round-trip corrupted format");
         const std::string report=prefix+"_HARMONIC_LIVE_RESEARCH.txt";
         std::ofstream out(report);
@@ -172,6 +186,9 @@ int main(int argc,char** argv) {
            <<"Ultra with OPTIONAL dry-reseed peak="<<smoothLevels.peak
            <<" RMS="<<smoothLevels.rms
            <<" clipped_frames="<<smoothLevels.clips<<"\n"
+           <<"4-hop opt-in research peak="<<fastHopLevels.peak
+           <<" RMS="<<fastHopLevels.rms
+           <<" clipped_frames="<<fastHopLevels.clips<<"\\n"
            <<"Dry input and output have same frame count, but this is NOT "
              "proof of 0ms perceived voice correction, formants or note reaction.\n"
            <<"Compare separately level-matched to approved HQ40 and dry; "
@@ -185,6 +202,7 @@ int main(int argc,char** argv) {
                  <<" high_register_file="<<highFile
                  <<" ultra_high_file="<<ultraFile
                  <<" ultra_smooth_file="<<smoothFile
+                 <<" ultra_4hop_file="<<fastHopFile
                  <<" peak="<<levels.peak<<" clips="<<levels.clips<<"\n";
         return 0;
     } catch(const std::exception& e) {
