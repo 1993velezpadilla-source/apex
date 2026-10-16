@@ -411,6 +411,28 @@ public:
                 const auto afterArm=engine.getGraphPdcPreflightCounters();
                 expect(afterArm.renderedBlocks>duringArm.renderedBlocks,
                        "PDC V2 must resume after disarming the track");
+                // Regression: after the first monitoring fallback, legacy
+                // MasterPdcCore is clean but then stops advancing while V2
+                // renders. Re-arming WITHOUT a graph/latency version change
+                // must still force a second fresh legacy resync.
+                vocal->setArmed(true);
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
+                const auto secondArm=engine.getGraphPdcPreflightCounters();
+                expectEquals(secondArm.renderedBlocks,afterArm.renderedBlocks,
+                    "second monitoring arm must also disable V2 programme PDC");
+                expect(secondArm.monitoringFallbackBlocks>
+                       afterArm.monitoringFallbackBlocks);
+                expect(secondArm.legacyResyncs>afterArm.legacyResyncs,
+                    "second fallback MUST resync legacy PDC even with unchanged routing");
+                vocal->setArmed(false);
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
+                expect(engine.getGraphPdcPreflightCounters().renderedBlocks>
+                       secondArm.renderedBlocks,
+                       "V2 must resume after the second monitoring fallback");
                 (void)engine.collectGraphPdcRetiredOnControlThread();
             }
         }
