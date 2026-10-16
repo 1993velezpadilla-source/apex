@@ -1387,6 +1387,78 @@ public:
             }
         }
 
+        beginTest("PDC local-track input history survives unrelated graph edits, never recycled track IDs");
+        {
+            using Owner=DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore;
+            DAW::RoutingSnapshot g;
+            g.version=1001;
+            g.nodes={
+                {"src","src-track",DAW::RoutingNodeType::Track,true},
+                {"dest","dest-track",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            g.processingOrder={"src","dest","master"};
+            DAW::RoutingSnapshot::EdgeSnapshot send,dry;
+            send.id="send-local";send.sourceNodeId="src";
+            send.destNodeId="dest";send.type=DAW::ConnectionType::Send;
+            dry.id="dest-master";dry.sourceNodeId="dest";
+            dry.destNodeId="master";dry.type=DAW::ConnectionType::Direct;
+            g.edges={send,dry};
+            std::map<DAW::TrackID,int> latency={
+                {"src-track",32},{"dest-track",0}};
+            Owner owner;
+            expect(owner.publishPrepared(g,&latency,2,48000.0));
+            {
+                auto reader=owner.readRealtime();
+                expectEquals(reader->dispatch.localDelay(1),32);
+                float l[8]={.5f,0,0,0,0,0,0,.125f};
+                float r[8]={-.25f,0,0,0,0,0,0,-.0625f};
+                float* audio[]={l,r};
+                expect(reader->dispatch.processLocalInput(g.version,1,audio,2,8));
+                for(int n=0;n<8;++n)
+                    expect(l[n]==0.f && r[n]==0.f);
+            }
+            // Change the graph (new sidechain metadata) without changing
+            // the local track's own identity, inputs or delay duration.
+            DAW::RoutingSnapshot::EdgeSnapshot key;
+            key.id="metadata-only";key.sourceNodeId="src";
+            key.destNodeId="dest";key.type=DAW::ConnectionType::Sidechain;
+            key.active=false;
+            g.edges.push_back(key);
+            g.version=1002;
+            expect(owner.publishPrepared(g,&latency,2,48000.0));
+            {
+                auto reader=owner.readRealtime();
+                expectEquals(reader->dispatch.localDelay(1),32);
+                float l[32]{},r[32]{};
+                float* audio[]={l,r};
+                expect(reader->dispatch.processLocalInput(g.version,1,audio,2,32));
+                for(int n=0;n<32;++n) {
+                    const float expectedL=n==24?.5f:(n==31?.125f:0.f);
+                    const float expectedR=n==24?-.25f:(n==31?-.0625f:0.f);
+                    expectWithinAbsoluteError(static_cast<double>(l[n]),
+                                              static_cast<double>(expectedL),1.e-6);
+                    expectWithinAbsoluteError(static_cast<double>(r[n]),
+                                              static_cast<double>(expectedR),1.e-6);
+                }
+                // Seed a second delayed pulse to check against ID recycling.
+                float pulseL[1]={.9f},pulseR[1]={-.45f};
+                float* pulse[]={pulseL,pulseR};
+                expect(reader->dispatch.processLocalInput(g.version,1,pulse,2,1));
+            }
+            g.nodes[1].trackId="a-new-track-reusing-node-id";
+            g.version=1003;
+            expect(owner.publishPrepared(g,&latency,2,48000.0));
+            {
+                auto reader=owner.readRealtime();
+                expectEquals(reader->dispatch.localDelay(1),32);
+                float l[40]{},r[40]{};
+                float* audio[]={l,r};
+                expect(reader->dispatch.processLocalInput(g.version,1,audio,2,40));
+                for(int n=0;n<40;++n)
+                    expect(l[n]==0.f && r[n]==0.f);
+            }
+        }
+
         beginTest("Stable route survives graph publication with uninterrupted 16-sample PDC history");
         for(const int frames:{31,64}) {
             for(const double rate:{44100.0,48000.0}) {
