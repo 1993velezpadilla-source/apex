@@ -172,6 +172,16 @@ public:
         };
     }
 
+    // Test-only source injection into the ACTUAL track, plugin and bus loops.
+    // In the shipping desktop build this callback and its storage do not exist.
+    using GraphPdcTrackInputForTests=void(*)(void*,const TrackID&,
+                                            juce::AudioBuffer<float>&,int) noexcept;
+    void setGraphPdcTrackInputForTests(void* context,
+                                      GraphPdcTrackInputForTests callback) noexcept
+    {
+        graphPdcTrackInputContext_=context;
+        graphPdcTrackInputForTests_=callback;
+    }
     // Default OFF, never enabled by product code. Test runtime opt-in can
     // render programme PDC through actual Track/Bus route loops.
     void setExperimentalGraphPdcRenderEnabledForTests(bool enabled) noexcept
@@ -1239,6 +1249,8 @@ private:
     std::atomic<std::uint64_t> graphPdcMatchedBlocks_{0};
     std::atomic<std::uint64_t> graphPdcRejectedBlocks_{0};
     std::atomic<bool> graphPdcRenderEnabled_{false};
+    void* graphPdcTrackInputContext_=nullptr;
+    GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
     std::atomic<std::uint64_t> graphPdcLatencyRevision_{0};
     std::atomic<std::uint64_t> graphPdcPreparedLatencyRevision_{0};
     // Audio-thread only, valid only during ScopedResetResearchGraphPdc.
@@ -2386,6 +2398,12 @@ private:
         if (nodeBufPtr == nullptr) return;
 
         trackBuf.clear();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // Synthetic source follows the same plugin/fader/send route as clips.
+        if(graphPdcTrackInputForTests_!=nullptr)
+            graphPdcTrackInputForTests_(graphPdcTrackInputContext_,
+                                        track->getID(),trackBuf,numSamples);
+#endif
         bool liveInputWasAdded = false;
         if (clips_)
         {
