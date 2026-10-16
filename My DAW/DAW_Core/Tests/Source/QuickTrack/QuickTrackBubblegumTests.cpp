@@ -17,6 +17,7 @@
 #include "../../../Source/RoutingCore/MasterRouteStateCore.h"
 #include "../../../Source/Bubblegum/BubblegumSendStateCore.h"
 #include "../../../Source/Bubblegum/BubblegumSendLevelCore.h"
+#include "../../../Source/Bubblegum/BubblegumSidechainStateCore.h"
 #include "../../../Source/CommandCore/GeneralCommands.h"
 
 namespace
@@ -70,6 +71,135 @@ public:
 
     void runTest() override
     {
+        beginTest("SendAndSidechainStatePublishDSPAndInvalidateCableListeners");
+        {
+            Harness h;
+            const auto* doubles = QuickTrackRoleCatalog::findById("doubles");
+            const auto result = h.builder.createBatch({ { doubles, 2 } });
+            expect(result.ok(), "two source/destination tracks available");
+            if (result.ok())
+            {
+                const TrackID source = result.created[0].trackId;
+                const TrackID destination = result.created[1].trackId;
+                auto* sourceNode = h.graph.getNodeByTrackId(source);
+                auto* destNode = h.graph.getNodeByTrackId(destination);
+                expect(sourceNode != nullptr && destNode != nullptr,
+                       "RoutingGraph source/destination nodes exist");
+                if (sourceNode != nullptr && destNode != nullptr)
+                {
+                    const auto srcNodeID = sourceNode->id;
+                    const auto destNodeID = destNode->id;
+                    struct ChangeListener final : RoutingGraph::Listener
+                    {
+                        int changes = 0;
+                        void graphChanged() override { ++changes; }
+                    } listener;
+                    h.graph.addListener(&listener);
+
+                    const auto findSnapshotEdge = [&](ConnectionType type)
+                        -> const RoutingSnapshot::EdgeSnapshot*
+                    {
+                        // This lambda is used only within each expression before
+                        // the snapshot is replaced by another graph mutation.
+                        static std::shared_ptr<const RoutingSnapshot> pinned;
+                        pinned = h.graph.getSnapshotPublisher().get();
+                        if (!pinned) return nullptr;
+                        for (const auto& edge : pinned->edges)
+                            if (edge.sourceNodeId == srcNodeID
+                                && edge.destNodeId == destNodeID
+                                && edge.type == type)
+                                return &edge;
+                        return nullptr;
+                    };
+
+                    h.sends.createSend(h.graph, source, destination, 0.45f);
+                    const int beforeMute = listener.changes;
+                    h.sends.toggleSendActive(h.graph, source, destination);
+                    const auto* mutedSend = findSnapshotEdge(ConnectionType::Send);
+                    expect(mutedSend != nullptr && !mutedSend->active,
+                           "send bypass publishes inactive snapshot to audio callback");
+                    expect(listener.changes > beforeMute,
+                           "send bypass invalidates cable overlay listener");
+
+                    const int beforeEnable = listener.changes;
+                    h.sends.setSendActive(h.graph, source, destination, true);
+                    const auto* enabledSend = findSnapshotEdge(ConnectionType::Send);
+                    expect(enabledSend != nullptr && enabledSend->active,
+                           "re-enable publishes active snapshot to audio callback");
+                    expect(listener.changes > beforeEnable,
+                           "send re-enable invalidates cable overlay listener");
+
+                    const int noOpBefore = listener.changes;
+                    h.sends.setSendActive(h.graph, source, destination, true);
+                    expectEquals(listener.changes, noOpBefore,
+                                 "no-op active write does not cause needless invalidation");
+
+                    h.sends.setSendActive(h.graph, source, destination, false);
+                    const int beforeRecreate = listener.changes;
+                    h.sends.createSend(h.graph, source, destination);
+                    const auto* recreatedSend = findSnapshotEdge(ConnectionType::Send);
+                    expect(recreatedSend != nullptr && recreatedSend->active,
+                           "reactivating an existing send publishes the DSP state");
+                    expect(listener.changes > beforeRecreate,
+                           "reactivating an existing send invalidates the cable");
+
+                    BubblegumSidechainStateCore sidechains;
+                    auto* sc = sidechains.createSidechain(
+                        h.graph, source, destination, "TestCompressor", 1, TapPoint::PreFX);
+                    expect(sc != nullptr, "sidechain test connection created");
+                    if (sc != nullptr)
+                    {
+                        const int beforeScMute = listener.changes;
+                        sidechains.toggleActive(h.graph, source, destination);
+                        const auto* mutedSc = findSnapshotEdge(ConnectionType::Sidechain);
+                        expect(mutedSc != nullptr && !mutedSc->active,
+                               "sidechain bypass is visible to immutable audio snapshot");
+                        expect(listener.changes > beforeScMute,
+                               "sidechain bypass refreshes cable listener");
+
+                        sidechains.setActive(h.graph, source, destination, true);
+                        const auto* enabledSc = findSnapshotEdge(ConnectionType::Sidechain);
+                        expect(enabledSc != nullptr && enabledSc->active,
+                               "sidechain re-enable republishes DSP state");
+
+                        const int beforeTap = listener.changes;
+                        sidechains.setTapPoint(h.graph, source, destination, TapPoint::PostMixer);
+                        const auto* postMixerSc = findSnapshotEdge(ConnectionType::Sidechain);
+                        expect(postMixerSc != nullptr
+                                   && postMixerSc->tapPoint == TapPoint::PostMixer,
+                               "sidechain tap change reaches DSP snapshot");
+                        expect(listener.changes > beforeTap,
+                               "sidechain tap switch refreshes cable listener");
+
+                        sidechains.setDestination(h.graph, source, destination, "Plugin2", 2);
+                        const auto* switchedSc = findSnapshotEdge(ConnectionType::Sidechain);
+                        expect(switchedSc != nullptr
+                                   && switchedSc->destinationPluginId == "Plugin2"
+                                   && switchedSc->destinationBusIndex == 2,
+                               "sidechain plugin/bus change reaches DSP snapshot");
+
+                        sidechains.setActive(h.graph, source, destination, false);
+                        const int beforeReenable = listener.changes;
+                        sidechains.createSidechain(
+                            h.graph, source, destination, "Plugin2", 2, TapPoint::PostMixer);
+                        const auto* reenabledSc = findSnapshotEdge(ConnectionType::Sidechain);
+                        expect(reenabledSc != nullptr && reenabledSc->active,
+                               "reusing inactive sidechain republishes active DSP edge");
+                        expect(listener.changes > beforeReenable,
+                               "sidechain reactivation refreshes cable state");
+
+                        const int noOpScBefore = listener.changes;
+                        sidechains.setActive(h.graph, source, destination, true);
+                        sidechains.setTapPoint(h.graph, source, destination, TapPoint::PostMixer);
+                        sidechains.setDestination(h.graph, source, destination, "Plugin2", 2);
+                        expectEquals(listener.changes, noOpScBefore,
+                                     "no-op sidechain writes avoid extra cable repaints");
+                    }
+                    h.graph.removeListener(&listener);
+                }
+            }
+        }
+
         beginTest("AutoBusUsesCanonicalSendPath");
         {
             Harness h;
