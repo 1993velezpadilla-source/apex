@@ -136,6 +136,30 @@ int main(int argc,char** argv) {
                   <<" median_change_vs_dry_cents="<<improvement
                   <<"\n";
         }
+        // Dataset-pinned REAL low-register regression: the accelerated
+        // 1-period crossfade previously caused 21 measured false octaves
+        // where the conservative 3-period causal mix caused zero. Prevent
+        // a future "faster" research change silently bringing them back.
+        // Does NOT certify the singer's identity, perception, ASIO timing
+        // or musical truth from 12-TET alone.
+        if(prefix=="vocadito_low") {
+            for(int k=2;k<=3;++k) {
+                const auto& candidate=measures[static_cast<std::size_t>(k)];
+                const double cents=median(candidate.correctedCents);
+                const bool safe=candidate.paired>=500 &&
+                    candidate.octave<=2 &&
+                    candidate.unvoiced<=30 &&
+                    candidate.otherWrongNote<=6 &&
+                    cents>=0.0 && cents<=12.0;
+                valid &=safe;
+                report<<"REAL_SINGER_LOW_REGISTER_OCTAVE_GUARD option="
+                      <<(k==2?"FAST":"FAST_HIGH")
+                      <<" protected="<<safe
+                      <<" octave_errors="<<candidate.octave
+                      <<" paired="<<candidate.paired
+                      <<" median_12TET_cents="<<cents<<"\\n";
+            }
+        }
         report<<"REAL_SINGER_CAUSAL_F0_DATA_VALID="<<valid
               <<" NOT_1MS_ACQUISITION_OR_FORMANT_CERTIFICATE=1\n";
         const std::string target=prefix+"_FAST_HUMAN_F0_COMPARISON.txt";
