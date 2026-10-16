@@ -758,7 +758,11 @@ public:
             }
         }
         lastRoutingSnapshotVersion_ = 0;
-        masterPdc_.prepare(sampleRate, blockSize);
+        // MasterPdcCore::processEdge may allocate when a callback exceeds
+        // its prepared scratch capacity. Allocate to the same 8192-frame
+        // worst-case block as the engine on the control thread, not at the
+        // first 256/512-frame export or device-sized render callback.
+        masterPdc_.prepare(sampleRate, worstCaseBlock);
         masterMeter_.prepare(sampleRate, blockSize);
         prepareTrackInputProcessors(sampleRate, blockSize);
 
