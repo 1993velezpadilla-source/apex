@@ -13,6 +13,9 @@
 #include "MuteFadeCore.h"
 #include "../MasterCore/MasterPdcCore.h"
 #include "../PDCCore/LiveMonitoringBypassCore.h"
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+#include "../PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
+#endif
 #include "../MeteringCore/MeteringFacadeCore.h"
 #include "../MeteringCore/TrackPeakMeterManagerCore.h"
 #include "../PluginHostCore/PluginChainCore.h"
@@ -143,6 +146,102 @@ public:
         audioFiles_ = audioFiles;
     }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // CONTROL THREAD ONLY. Allocate and publish an immutable graph PDC plan.
+    // This does not enable the planner on the audio route.
+    bool stageProgrammeGraphPdcPreflightOnControlThread(
+        const RoutingSnapshot& graph,const std::map<TrackID,int>* latencies,
+        int channels,double sampleRate)
+    {
+        const auto revision=graphPdcLatencyRevision_.load(std::memory_order_acquire);
+        // Control gate publishes preallocated routing bank.
+        if(!graphPdcPreflight_.publishPrepared(
+               graph,latencies,channels,sampleRate))
+            return false;
+        graphPdcPreparedLatencyRevision_.store(revision,std::memory_order_release);
+        return true;
+    }
+    struct GraphPdcPreflightCounters {
+        std::uint64_t matchingBlocks=0;
+        std::uint64_t rejectedBlocks=0;
+        std::uint64_t renderedBlocks=0;
+        std::uint64_t monitoringFallbackBlocks=0;
+    };
+    GraphPdcPreflightCounters getGraphPdcPreflightCounters() const noexcept
+    {
+        return {
+            graphPdcMatchedBlocks_.load(std::memory_order_relaxed),
+            graphPdcRejectedBlocks_.load(std::memory_order_relaxed),
+            graphPdcRenderedBlocks_.load(std::memory_order_relaxed),
+            graphPdcMonitoringFallbackBlocks_.load(std::memory_order_relaxed)
+        };
+    }
+
+    // Test-only source injection into the ACTUAL track, plugin and bus loops.
+    // In the shipping desktop build this callback and its storage do not exist.
+    using GraphPdcTrackInputForTests=void(*)(void*,const TrackID&,
+                                            juce::AudioBuffer<float>&,int) noexcept;
+    void setGraphPdcTrackInputForTests(void* context,
+                                      GraphPdcTrackInputForTests callback) noexcept
+    {
+        graphPdcTrackInputContext_=context;
+        graphPdcTrackInputForTests_=callback;
+    }
+    // Test-only insert latency DSP in ACTUAL Track/Bus render loops, after
+    // plugin processing and before fader/mute/send routing. Removed entirely
+    // from the shipping Desktop build by the compile-time research flag.
+    using GraphPdcInsertForTests=void(*)(void*,const TrackID&,
+                                        juce::AudioBuffer<float>&,int) noexcept;
+    void setGraphPdcInsertForTests(void* context,
+                                  GraphPdcInsertForTests callback) noexcept
+    {
+        graphPdcInsertContext_=context;
+        graphPdcInsertForTests_=callback;
+    }
+    // Default OFF, never enabled by product code. Test runtime opt-in can
+    // render programme PDC through actual Track/Bus route loops.
+    void setExperimentalGraphPdcRenderEnabledForTests(bool enabled) noexcept
+    {
+        graphPdcRenderEnabled_.store(enabled,std::memory_order_release);
+    }
+    // The same delay dispatch used in track/bus loops, exposed for focused
+    // JUCE sample-level testing without requiring an ASIO device.
+    bool renderOnePreparedGraphEdgeForTests(const RoutingSnapshot& graph,
+                                            std::size_t edgePosition,
+                                            juce::AudioBuffer<float>& stereo) noexcept
+    {
+        if(stereo.getNumChannels()!=2 || stereo.getNumSamples()<=0)
+            return false;
+        auto reader=graphPdcPreflight_.readRealtime();
+        // Mirror the render-block eligibility gate. A test helper must not
+        // accept stale plugin-latency or sample-rate snapshots.
+        if(!reader ||
+           reader->sampleRate!=sampleRate_ ||
+           reader->dispatch.channels()!=2 ||
+           graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)!=
+               graphPdcLatencyRevision_.load(std::memory_order_acquire) ||
+           !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
+               sameProgrammeRoutingRealtime(graph,reader->graph) ||
+           !reader->dispatch.coversAllActiveProgrammeEdges(graph) ||
+           edgePosition>=graph.edges.size())return false;
+        // Match the live monitor-safety rule: the experimental programme
+        // delay must never be tested as eligible while an active track is
+        // record-armed (that path uses the legacy monitoring authority).
+        if(tracks_!=nullptr)
+            for(const auto& meta:graph.nodes)
+                if(meta.type==RoutingNodeType::Track && meta.active)
+                    if(auto* source=tracks_->getTrack(meta.trackId))
+                        if(source->isArmed())return false;
+        return reader->dispatch.processEdge(
+            graph.version,edgePosition,stereo.getArrayOfWritePointers(),2,
+            stereo.getNumSamples());
+    }
+
+    std::size_t collectGraphPdcRetiredOnControlThread()
+    {
+        return graphPdcPreflight_.collectRetiredOnControlThread();
+    }
+#endif
     /** C3: publish the immutable plugin-chain map snapshot (MESSAGE THREAD,
      *  ApplicationCore). The audio thread reads ONLY this snapshot — never
      *  the live std::map (RB-tree rotation during a concurrent find is UB). */
@@ -214,6 +313,9 @@ public:
     void publishChainLatencies(std::shared_ptr<const ChainLatencyMap> latencies) noexcept
     {
         std::atomic_store_explicit(&chainLatencies_, std::move(latencies), std::memory_order_release);
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        graphPdcLatencyRevision_.fetch_add(1,std::memory_order_release);
+#endif
     }
     /** Acquire the current latency map (audio-thread safe, lock-free). */
     std::shared_ptr<const ChainLatencyMap> getChainLatenciesRT() const noexcept
@@ -342,6 +444,14 @@ public:
             if (core)
                 core->prepare(sampleRate_, capacity, 2);
         masterPdc_.reset();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // Offline export begins a fresh timeline just like MasterPdcCore.
+        const bool offlineGraphPdcResetOk=
+            graphPdcPreflight_.resetPreparedHistoriesAfterReadersDrainOnControlThread();
+        jassert(offlineGraphPdcResetOk);
+        if(!offlineGraphPdcResetOk)
+            graphPdcRenderEnabled_.store(false,std::memory_order_release);
+#endif
         for (auto& [id, line] : pdcLines_)
             line.prepare(line.getCapacity() > 0 ? line.getCapacity() : 1);
         masterWasProcessed_ = false;
@@ -470,6 +580,15 @@ public:
         // snapshot here so replacing it in processWithSnapshot() can never
         // become the last-owner release of an old project on the audio thread.
         pluginChainsBlockSnap_.reset();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // New device timeline: stale delayed samples must not survive a
+        // restart, including a restart at the SAME sample rate.
+        const bool graphPdcResetOk=
+            graphPdcPreflight_.resetPreparedHistoriesAfterReadersDrainOnControlThread();
+        jassert(graphPdcResetOk);
+        if(!graphPdcResetOk)
+            graphPdcRenderEnabled_.store(false,std::memory_order_release);
+#endif
 
         sampleRate_ = sampleRate;
         blockSize_  = blockSize;
@@ -596,6 +715,11 @@ public:
                 // audio callback, stalling the callback and producing audible
                 // cracking at large block sizes.
                 routingBuffers_.syncFromSnapshot(*prepSnap, worstCaseBlock);
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+                // Diagnostic staging during device preparation (control).
+                (void)stageProgrammeGraphPdcPreflightOnControlThread(
+                    *prepSnap,latencies.get(),2,sampleRate_);
+#endif
             }
         }
         lastRoutingSnapshotVersion_ = 0;
@@ -1156,6 +1280,22 @@ private:
     std::unordered_map<juce::String, SoundEngine::ApexPdcDelayLineCore, JuceStringHash> pdcLines_;
     MasterPdcCore masterPdc_;
     std::atomic<bool> masterPdcDirty_ { true };
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore graphPdcPreflight_;
+    std::atomic<std::uint64_t> graphPdcMatchedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcRejectedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcRenderedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcMonitoringFallbackBlocks_{0};
+    std::atomic<bool> graphPdcRenderEnabled_{false};
+    void* graphPdcTrackInputContext_=nullptr;
+    GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
+    void* graphPdcInsertContext_=nullptr;
+    GraphPdcInsertForTests graphPdcInsertForTests_=nullptr;
+    std::atomic<std::uint64_t> graphPdcLatencyRevision_{0};
+    std::atomic<std::uint64_t> graphPdcPreparedLatencyRevision_{0};
+    // Audio-thread only, valid only during ScopedResetResearchGraphPdc.
+    DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::PreparedGeneration* graphPdcActiveRt_=nullptr;
+#endif
 
     // Published per-track plugin-chain latency map (message thread publishes,
     // audio thread acquires). Read via getChainLatenciesRT() only.
@@ -2148,6 +2288,37 @@ private:
         juce::Logger::writeToLog(msg);
     }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // Test-only actual signal path. Caller must have adopted the matching
+    // snapshot and retained one RCU Reader through the ENTIRE graph callback.
+    // The two preallocated scratch channels are reused edge-by-edge, so one
+    // path cannot accidentally overwrite a destination or another send.
+    // A successful dispatch REPLACES legacy MasterPdcCore for this edge;
+    // never stack both delays (otherwise dry routes are compensated twice).
+    bool applyExperimentalProgrammeEdgePdc(
+        const RoutingSnapshot::EdgeSnapshot& edge,const RoutingSnapshot* snap,
+        const float*& srcL,const float*& srcR,int samples) noexcept
+    {
+        if(!graphPdcActiveRt_ || !snap || samples<=0 ||
+           snap->edges.empty() ||
+           (int)masterPdcScratchL_.size()<samples ||
+           (int)masterPdcScratchR_.size()<samples)
+            return false;
+        const auto* ptr=&edge;
+        if(ptr<snap->edges.data() ||
+           ptr>=snap->edges.data()+snap->edges.size())
+            return false;
+        const auto index=static_cast<std::size_t>(ptr-snap->edges.data());
+        std::memcpy(masterPdcScratchL_.data(),srcL,sizeof(float)*(size_t)samples);
+        std::memcpy(masterPdcScratchR_.data(),srcR,sizeof(float)*(size_t)samples);
+        float* channels[]={masterPdcScratchL_.data(),masterPdcScratchR_.data()};
+        if(!graphPdcActiveRt_->dispatch.processEdge(
+               snap->version,index,channels,2,samples))
+            return false;
+        srcL=channels[0];srcR=channels[1];
+        return true;
+    }
+#endif
     // ── Snapshot-based routing processing (audio thread — zero locks) ────
     void processWithSnapshot(const RoutingSnapshot* snap,
                              const juce::AudioSourceChannelInfo& output,
@@ -2181,6 +2352,52 @@ private:
         // Refresh the per-block plugin-chain view from the published
         // snapshot (C3) — one atomic load per block, then lock-free finds.
         pluginChainsBlockSnap_ = getPluginChainsSnapshotRT();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // The Reader outlives ALL routed edge processing in this callback.
+        // Its destructor only decreases an atomic counter (RCU retirement is
+        // exclusively performed by the control thread).
+        auto stagedGraphReader=graphPdcPreflight_.readRealtime();
+        // If an oversized callback exceeds prepared edge scratch, fall
+        // back for the WHOLE routing block. A late edge-level failure
+        // could otherwise mix delayed direct paths with undelayed sends.
+        const bool scratchReady=numSamples>0 &&
+            static_cast<std::size_t>(numSamples)<=masterPdcScratchL_.size() &&
+            static_cast<std::size_t>(numSamples)<=masterPdcScratchR_.size();
+        const bool matches=scratchReady && stagedGraphReader &&
+            stagedGraphReader->sampleRate==sampleRate_ &&
+            stagedGraphReader->dispatch.channels()==2 &&
+            DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
+                sameProgrammeRoutingRealtime(*snap,stagedGraphReader->graph) &&
+            stagedGraphReader->dispatch.coversAllActiveProgrammeEdges(*snap) &&
+            graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)==
+                graphPdcLatencyRevision_.load(std::memory_order_acquire);
+        if(matches)
+            graphPdcMatchedBlocks_.fetch_add(1,std::memory_order_relaxed);
+        else
+            graphPdcRejectedBlocks_.fetch_add(1,std::memory_order_relaxed);
+        bool routeRenderAllowed=matches &&
+            graphPdcRenderEnabled_.load(std::memory_order_acquire);
+        // C6 monitoring gate: any record-armed track forces the existing
+        // per-track monitored master-PDC path for the WHOLE graph block.
+        // Never mix two different programme compensation authorities.
+        if(routeRenderAllowed && tracks_!=nullptr)
+            for(const auto& meta:snap->nodes)
+                if(meta.type==RoutingNodeType::Track && meta.active)
+                    if(auto* source=tracks_->getTrack(meta.trackId))
+                        if(source->isArmed()) {
+                            routeRenderAllowed=false;
+                            graphPdcMonitoringFallbackBlocks_.fetch_add(
+                                1,std::memory_order_relaxed);
+                            break;
+                        }
+        if(routeRenderAllowed)
+            graphPdcRenderedBlocks_.fetch_add(1,std::memory_order_relaxed);
+        graphPdcActiveRt_=routeRenderAllowed?stagedGraphReader.get():nullptr;
+        struct ScopedResetResearchGraphPdc final {
+            AudioEngine* engine;
+            ~ScopedResetResearchGraphPdc() {engine->graphPdcActiveRt_=nullptr;}
+        } resetGraphPdcOnExit{this};
+#endif
 
         // The adopted immutable snapshot is the only synchronization authority.
         // Reading live graphVersion here created a torn old-snapshot/new-version
@@ -2316,6 +2533,12 @@ private:
         if (nodeBufPtr == nullptr) return;
 
         trackBuf.clear();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // Synthetic source follows the same plugin/fader/send route as clips.
+        if(graphPdcTrackInputForTests_!=nullptr)
+            graphPdcTrackInputForTests_(graphPdcTrackInputContext_,
+                                        track->getID(),trackBuf,numSamples);
+#endif
         bool liveInputWasAdded = false;
         if (clips_)
         {
@@ -2342,6 +2565,19 @@ private:
         }
 
         liveInputWasAdded = addLiveInputToTrackBuffer(*track, numSamples);
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // Local clips/live input exist BEFORE incoming routed tracks are
+        // summed. Delay ONLY this local source branch when its destination
+        // already receives a slower upstream programme path.
+        if(graphPdcActiveRt_!=nullptr)
+        {
+            const auto ni=snap->nodeIndexById.find(nodeMeta->id);
+            if(ni!=snap->nodeIndexById.end())
+                (void)graphPdcActiveRt_->dispatch.processLocalInput(
+                    snap->version,ni->second,trackBuf.getArrayOfWritePointers(),
+                    2,numSamples);
+        }
+#endif
 
         {
             auto* incomingBufPtr = findNodeBuffer(nodeMeta->id);
@@ -2508,6 +2744,11 @@ private:
         // Ø runs after hosted inserts and before both send taps and fader.
         track->applyPolarityTo(trackBuf, numSamples);
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        if(graphPdcInsertForTests_!=nullptr)
+            graphPdcInsertForTests_(graphPdcInsertContext_,track->getID(),
+                                    trackBuf,numSamples);
+#endif
         // Volume and pan
         auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
         float trackVolume = track->getVolume();
@@ -2623,8 +2864,11 @@ private:
 
             const float* sendGain = getConnectionGainRamp(edge.id, edge.gain, numSamples);
             auto& destBuf = *destBufPtr;
-            auto* srcL = trackBuf.getReadPointer(0);
-            auto* srcR = trackBuf.getReadPointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
+            const float* srcL = trackBuf.getReadPointer(0);
+            const float* srcR = trackBuf.getReadPointer(juce::jmin(1, trackBuf.getNumChannels() - 1));
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+            (void)applyExperimentalProgrammeEdgePdc(edge,snap,srcL,srcR,numSamples);
+#endif
             auto* dstL = destBuf.getWritePointer(0);
             auto* dstR = destBuf.getWritePointer(juce::jmin(1, destBuf.getNumChannels() - 1));
             SoundEngine::ApexMixFanoutCore::addStereoWithGainAndMute(srcL, srcR, sendGain, muteRamp, dstL, dstR, numSamples);
@@ -2663,7 +2907,13 @@ private:
             auto& destBuf = *destBufPtr;
             const float* routeSrcL = tbL;
             const float* routeSrcR = tbR;
-            if (edge.destNodeId == "master")
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+            const bool researchCompensated=
+                applyExperimentalProgrammeEdgePdc(edge,snap,routeSrcL,routeSrcR,numSamples);
+#else
+            const bool researchCompensated=false;
+#endif
+            if (edge.destNodeId == "master" && !researchCompensated)
             {
                 if ((int)masterPdcScratchL_.size() < numSamples)
                 {
@@ -2808,6 +3058,11 @@ private:
             }
         }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        if(graphPdcInsertForTests_!=nullptr)
+            graphPdcInsertForTests_(graphPdcInsertContext_,nodeMeta->trackId,
+                                    nodeBuf,numSamples);
+#endif
         // Independent bus Ø polarity, applied after bus insert processing.
         if (busTrack != nullptr)
             busTrack->applyPolarityTo(nodeBuf, numSamples);
@@ -2880,7 +3135,13 @@ private:
             auto& destBuf = *destBufPtr;
             const float* routeSrcL = bufL;
             const float* routeSrcR = bufR;
-            if (edge.destNodeId == "master")
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+            const bool researchCompensated=
+                applyExperimentalProgrammeEdgePdc(edge,snap,routeSrcL,routeSrcR,numSamples);
+#else
+            const bool researchCompensated=false;
+#endif
+            if (edge.destNodeId == "master" && !researchCompensated)
             {
                 if ((int)masterPdcScratchL_.size() < numSamples)
                 {
