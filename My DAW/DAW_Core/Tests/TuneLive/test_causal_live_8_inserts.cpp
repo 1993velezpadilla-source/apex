@@ -49,6 +49,14 @@ int main() {
             t.engine.setVoiceSettings(voice);
             t.engine.enableEarlyOnset(true);
             t.engine.enableHighRegisterOnset(true);
+            // Four simultaneous opt-in guarded tracks exercise the faster
+            // high-register path alongside four unchanged baseline tracks.
+            // The DSP callback remains allocation-watched for all eight.
+            if(id>=4) {
+                t.engine.enableUltraHighRegisterOnset(true);
+                t.engine.enableUltraHighFastHopResearch(true);
+                t.engine.enableUltraLeapConsensusResearch(true);
+            }
             t.engine.enableExperimentalEarlyTransitions(true);
             t.engine.enableResidualPreservation(true);
             t.engine.enableFastEngagement(true);
@@ -107,20 +115,30 @@ int main() {
             if(output.voiced && output.hz>0.0f)
                 t.wetCents=1200.0*std::log2(output.hz/t.targetHz);
             const bool high=t.targetHz>=400.0;
-            const bool hasSeed=t.engine.firstHighSample()>=0;
+            const bool hasUltra=t.engine.firstUltraSample()>=0;
+            const bool hasHigh=t.engine.firstHighSample()>=0;
+            const bool hasSeed=hasHigh||hasUltra;
+            const int64_t earliestSeed=hasUltra&&hasHigh?
+                std::min(t.engine.firstUltraSample(),t.engine.firstHighSample()):
+                (hasUltra?t.engine.firstUltraSample():t.engine.firstHighSample());
+            const bool guarded=id>=4;
             const bool valid=t.valid && t.peak<1.0 &&
                t.engine.researchWetMix()>0.95 &&
                std::abs(t.wetCents)<18.0 &&
                hasSeed==high &&
-               (high? t.engine.firstHighSample()<static_cast<int64_t>(0.011*rate)
-                    :true);
+               (!guarded || hasUltra==high) &&
+               (high? earliestSeed>=0 &&
+                      earliestSeed<static_cast<int64_t>(0.011*rate):true);
             safe &=valid;
             std::cout<<"CAUSAL_8_INSERT rate="<<rate<<" insert="<<id
                      <<" channels="<<t.channels
                      <<" input="<<t.inputHz<<" target="<<t.targetHz
                      <<" wet_cents="<<t.wetCents
-                     <<" first_high_ms="<<(hasSeed?
+                     <<" guarded_consensus="<<guarded
+                     <<" first_high_ms="<<(hasHigh?
                        1000.0*t.engine.firstHighSample()/rate:-1.0)
+                     <<" first_ultra_ms="<<(hasUltra?
+                       1000.0*t.engine.firstUltraSample()/rate:-1.0)
                      <<" wet="<<t.engine.researchWetMix()
                      <<" peak="<<t.peak<<" valid="<<valid<<"\n";
         }
