@@ -929,7 +929,27 @@ public:
                 expectWithinAbsoluteError(restored,direct,
                     std::max(.002,0.10*direct),
                     "disabling the send must remove its routed signal");
-                expect(engine.getGraphPdcPreflightCounters().matchingBlocks>0);
+                const auto beforeArm=engine.getGraphPdcPreflightCounters();
+                expect(beforeArm.matchingBlocks>0);
+                expect(beforeArm.renderedBlocks>0,
+                       "match is NOT enough: an actual AudioEngine block must run graph PDC");
+                vocal->setArmed(true);
+                juce::AudioBuffer<float> monitorBuffer(2,128);
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
+                const auto duringArm=engine.getGraphPdcPreflightCounters();
+                expectEquals(duringArm.renderedBlocks,beforeArm.renderedBlocks,
+                    "record-armed monitoring MUST use legacy compensation authority");
+                expect(duringArm.monitoringFallbackBlocks>
+                       beforeArm.monitoringFallbackBlocks);
+                vocal->setArmed(false);
+                monitorBuffer.clear();
+                expect(engine.renderOfflineBlock(monitorBuffer,128,timeline));
+                timeline+=128;
+                const auto afterArm=engine.getGraphPdcPreflightCounters();
+                expect(afterArm.renderedBlocks>duringArm.renderedBlocks,
+                       "PDC V2 must resume after disarming the track");
                 (void)engine.collectGraphPdcRetiredOnControlThread();
             }
         }
@@ -1035,7 +1055,9 @@ public:
                 expect(stage());
                 // Updated VST3-like aux latency: BOTH paths reconverge at 96.
                 renderTo(6400,96,2.0);
-                expect(engine.getGraphPdcPreflightCounters().matchingBlocks>0);
+                const auto gauntlet=engine.getGraphPdcPreflightCounters();
+                expect(gauntlet.matchingBlocks>0 && gauntlet.renderedBlocks>0,
+                       "sample-exact PDC pass must use LIVE experimental route, not legacy");
             }
         }
 
