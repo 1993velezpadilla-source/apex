@@ -270,6 +270,28 @@ int main() {
                    dst->arrivalLatency-src->outputLatency);
         }
     }
+    // Worst-case accumulated latency must fail closed without exposing
+    // partially constructed edge plans or stale state from an earlier build.
+    {
+        ProgrammeRoutePdcPlannerResearchCore p;
+        const std::vector<Node> safe={
+            {"source",1,true},{"master",0,false}};
+        const std::vector<Edge> safeEdges={
+            {"direct","source","master",EdgeKind::Direct}};
+        assert(p.build(safe,safeEdges,{"source","master"}));
+        assert(p.valid() && p.edgePlans().size()==1);
+        const std::vector<Node> overflow={
+            {"source",ProgrammeRoutePdcPlannerResearchCore::maxLatencySamples,
+             true},{"aux",1,false},{"master",0,false}};
+        const std::vector<Edge> overflowEdges={
+            {"send","source","aux",EdgeKind::Send},
+            {"wet","aux","master",EdgeKind::Direct}};
+        assert(!p.build(overflow,overflowEdges,{"source","aux","master"}));
+        assert(!p.valid());
+        assert(p.nodePlans().empty() && p.edgePlans().empty());
+        assert(p.build(safe,safeEdges,{"source","master"}));
+        assert(p.valid() && delay(p,"direct")==0);
+    }
     std::cout<<"APEX routing PDC DAG research: direct/send/pre/folder,"
              <<" reconvergence, local-input alignment, sidechain isolation,"
              <<" bypass/inactive/cycle/overflow validation GREEN\n";
