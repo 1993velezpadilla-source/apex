@@ -190,6 +190,30 @@ def main():
             "note": "Difference is not proof of audible quality or pitch accuracy",
         })
     top = sorted(hot, key=lambda event: -event["ultra_vs_previous_diff_rms"])[:12]
+    # Actual-singer, dataset-pinned non-regression for this PARTICULAR
+    # ultra-high transition. Match a known good prior signal at each 5ms
+    # anomaly, not global mean errors (which masked a 10.74 dB hotspot).
+    # Source timing and test data are pinned by the Vocadito CI workflow.
+    # This is waveform-similarity protection, NOT perceptual/formant proof.
+    serious = [event for event in hot
+               if event["ultra_vs_previous_diff_rms"] > 0.05]
+    guarded = bool(serious) and all(
+        event["consensus_vs_previous_high_diff_rms"] <
+            0.18 * event["ultra_vs_previous_diff_rms"]
+        and event["consensus_adjacent_step_peak"] <
+            event["previous_adjacent_step_peak"] + 0.03
+        for event in serious
+    )
+    worst_ratio = max(
+        (event["consensus_vs_previous_high_diff_rms"] /
+         event["ultra_vs_previous_diff_rms"] for event in serious),
+        default=-1.0,
+    )
+    print(f"ULTRA_REAL_SINGER_CONSENSUS_LOCAL_GATE prefix={prefix} "
+          f"serious_5ms_windows={len(serious)} "
+          f"worst_consensus_to_previous_ratio={worst_ratio:.6f} "
+          f"local_waveform_nonregression={int(guarded)} "
+          "NOT_PERCEPTUAL_CERTIFICATION=1")
     report = {
         "source": prefix, "rate": rate, "micro_window_ms": 5,
         "micro_windows_with_rms_difference_gt_0_007": len(hot),
@@ -199,6 +223,9 @@ def main():
         "four_hop_vs_eight_hop_full_focus_rms": math.sqrt(
             sum((hop[j] - ultra[j]) ** 2 for j in range(len(hop))) / len(hop)),
         "largest_micro_differences": top,
+        "serious_5ms_windows": len(serious),
+        "worst_consensus_to_prior_differential_ratio": worst_ratio,
+        "consensus_local_waveform_nonregression": guarded,
         "warning": "Do not infer pops/clicks, formant preservation, corrected F0 or 1ms from this table.",
     }
     (out / "MICROTRANSIENT_FORENSICS.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -221,6 +248,8 @@ def main():
         "Dataset source and license: VOCADITO_LICENSE_AND_EVIDENCE.txt "
         "(Vocadito CC BY 4.0).\n"
     )
+    if prefix == "vocadito_high" and not guarded:
+        raise ValueError("Guarded high singer >0.05FS 5ms hotspot failed waveform nonregression; NEVER promote research mode")
     print(f"ULTRA_FOCUS_BLIND_AB_READY prefix={prefix} center={center:.6f}s "
           f"delta={delta:.5f}db start={start/rate:.6f}s end={end/rate:.6f}s "
           f"target_rms={level:.6f} variants={len(labels)} NOT_ARTIST_APPROVAL=1")
