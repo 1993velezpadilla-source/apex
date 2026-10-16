@@ -18,7 +18,7 @@ struct Result {
     bool finite=true;
 };
 Result run(double rate,double target,bool fast,bool highSeed=false,
-           bool midSeed=false,bool ultraSeed=false) {
+           bool midSeed=false,bool ultraSeed=false,bool ultraFastHop=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     const int samples=static_cast<int>(1.2*rate);
     const double input=target*std::pow(2.0,30.0/1200.0);
@@ -41,6 +41,7 @@ Result run(double rate,double target,bool fast,bool highSeed=false,
     candidate.enableHighRegisterOnset(highSeed);
     candidate.enableMidRegisterOnset(midSeed);
     candidate.enableUltraHighRegisterOnset(ultraSeed);
+    if(ultraFastHop)candidate.enableUltraHighFastHopResearch(true);
     candidate.enableResidualPreservation(true);
     candidate.enableFastEngagement(fast);
     constexpr std::array<int,6> chunks{{1,48,128,257,17,64}};
