@@ -107,7 +107,11 @@ public:
         auto* existing = findConnection(graph, sourceId, destId);
         if (existing)
         {
-            existing->active.store(true, std::memory_order_relaxed);
+            if (!existing->active.load(std::memory_order_relaxed))
+            {
+                existing->active.store(true, std::memory_order_relaxed);
+                graph.notifyGraphChanged();
+            }
             DBG("[SC] createSidechain reactivated: " << sourceId << " -> " << destId);
             return existing;
         }
@@ -129,6 +133,9 @@ public:
         if (!c) return;
         const bool newActive = !c->active.load(std::memory_order_relaxed);
         c->active.store(newActive, std::memory_order_relaxed);
+        // Sidechain EdgeSnapshot.active is immutable: republish it for the DSP
+        // and invalidate the cable overlay state in the same transaction.
+        graph.notifyGraphChanged();
         DBG("[SC] toggleActive: " << sourceId << " -> " << destId
             << " active=" << (int)newActive);
     }
@@ -139,7 +146,11 @@ public:
                     bool active)
     {
         auto* c = findConnection(graph, sourceId, destId);
-        if (c) c->active.store(active, std::memory_order_relaxed);
+        if (c && c->active.load(std::memory_order_relaxed) != active)
+        {
+            c->active.store(active, std::memory_order_relaxed);
+            graph.notifyGraphChanged();
+        }
     }
 
     /** Fully remove the sidechain connection (trash button). */
@@ -161,7 +172,11 @@ public:
                       TapPoint tap)
     {
         auto* c = findConnection(graph, sourceId, destId);
-        if (c) c->tapPoint = tap;
+        if (c && c->tapPoint != tap)
+        {
+            c->tapPoint = tap;
+            graph.notifyGraphChanged();
+        }
     }
 
     /** Update destination plugin / bus on an existing sidechain connection. */
@@ -173,8 +188,12 @@ public:
     {
         auto* c = findConnection(graph, sourceId, destId);
         if (!c) return;
-        c->destinationPluginId = pluginId;
-        c->destinationBusIndex = busIndex;
+        if (c->destinationPluginId != pluginId || c->destinationBusIndex != busIndex)
+        {
+            c->destinationPluginId = pluginId;
+            c->destinationBusIndex = busIndex;
+            graph.notifyGraphChanged();
+        }
     }
 
 private:
