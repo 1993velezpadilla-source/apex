@@ -22,7 +22,7 @@
 #include <vector>
 
 namespace {
-constexpr int kVariants=4;
+constexpr int kVariants=5;
 struct Note {int nearest=-1;double cents=0.0;bool voiced=false;};
 Note decode(APEX::TuneLive::PitchTracker::Result r) {
     if(!r.voiced || r.hz<55.0f || !std::isfinite(r.hz))return {};
@@ -49,12 +49,13 @@ int main(int argc,char** argv) {
         const std::array<std::string,kVariants> paths{{
             prefix+"_source.wav",
             prefix+"_hq40.wav",
+            prefix+"_harmonic_live_residual_research.wav",
             prefix+"_harmonic_live_fast_research.wav",
             prefix+"_harmonic_live_high_research.wav"
         }};
         std::array<Wave,kVariants> waves{{
             readWave(paths[0]),readWave(paths[1]),
-            readWave(paths[2]),readWave(paths[3])
+            readWave(paths[2]),readWave(paths[3]),readWave(paths[4])
         }};
         const auto& dry=waves[0];
         if(dry.frames()<dry.rate || (dry.channels!=1&&dry.channels!=2))
@@ -110,9 +111,9 @@ int main(int argc,char** argv) {
               <<"REAL_SINGER_CAUSAL_F0_RESEARCH prefix="<<prefix
               <<" sr="<<dry.rate<<" original_updates="<<totalUpdates
               <<" stable_source_updates="<<stableVoicedUpdates<<"\n";
-        const std::array<const char*,3> labels{{"HQ40","FAST","FAST_HIGH"}};
+        const std::array<const char*,4> labels{{"HQ40","NORMAL","FAST","FAST_HIGH"}};
         bool valid=stableVoicedUpdates>=20;
-        for(int i=0;i<3;++i) {
+        for(int i=0;i<4;++i) {
             const auto& x=measures[static_cast<std::size_t>(i)];
             const double cents=median(x.correctedCents);
             const double improvement=median(x.improvements);
