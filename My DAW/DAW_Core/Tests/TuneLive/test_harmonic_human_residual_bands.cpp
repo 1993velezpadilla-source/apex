@@ -54,6 +54,7 @@ int main(int argc,char** argv) {
         const Wave candidate=readWave(prefix+"_harmonic_live_residual_research.wav");
         const Wave noResidual=readWave(prefix+"_harmonic_live_research.wav");
         const Wave fastCandidate=readWave(prefix+"_harmonic_live_fast_research.wav");
+        const Wave highCandidate=readWave(prefix+"_harmonic_live_high_research.wav");
         if(reference.frames()!=candidate.frames() ||
            reference.frames()!=noResidual.frames() ||
            reference.rate!=candidate.rate || reference.rate!=noResidual.rate ||
@@ -61,12 +62,16 @@ int main(int argc,char** argv) {
            reference.channels!=noResidual.channels ||
            reference.frames()!=fastCandidate.frames() ||
            reference.rate!=fastCandidate.rate ||
-           reference.channels!=fastCandidate.channels)
+           reference.channels!=fastCandidate.channels ||
+           reference.frames()!=highCandidate.frames() ||
+           reference.rate!=highCandidate.rate ||
+           reference.channels!=highCandidate.channels)
             throw std::runtime_error("Candidate and source have unequal PCM length/rate/channels");
         const auto original=measure(reference);
         const auto residual=measure(candidate);
         const auto harmonicOnly=measure(noResidual);
         const auto fastEnergy=measure(fastCandidate);
+        const auto highEnergy=measure(highCandidate);
         const double ratio2=residual.high2k/original.high2k;
         const double ratio6=residual.high6k/original.high6k;
         const double loudness=residual.rms/original.rms;
@@ -100,7 +105,26 @@ int main(int argc,char** argv) {
         deltaRms=std::sqrt(deltaRms/fastCandidate.data.size());
         const bool fastSafety=std::isfinite(fastPeak) && fastPeak<1.0 &&
                               maxFastStep<0.98 && deltaRms>1.0e-6;
-        const bool allPassed=passed && fastBands && fastSafety;
+        // High-register mode is optional and only seeds >=400Hz voiced
+        // passages. For low singers it may correctly be byte-equivalent
+        // to the existing fast path: NEVER demand fabricated differences.
+        const double highRatio2=highEnergy.high2k/original.high2k;
+        const double highRatio6=highEnergy.high6k/original.high6k;
+        const double highLoudness=highEnergy.rms/original.rms;
+        double highPeak=0.0,highStep=0.0;
+        for(std::size_t sample=0;sample<highCandidate.data.size();++sample) {
+            const double value=highCandidate.data[sample];
+            highPeak=std::max(highPeak,std::abs(value));
+            if(sample>=static_cast<std::size_t>(highCandidate.channels))
+                highStep=std::max(highStep,std::abs(value-highCandidate.data[
+                    sample-static_cast<std::size_t>(highCandidate.channels)]));
+        }
+        const bool highSafe=highRatio2>=0.60 && highRatio2<=1.45 &&
+            highRatio6>=0.60 && highRatio6<=1.45 &&
+            highLoudness>=0.45 && highLoudness<=1.8 &&
+            std::isfinite(highPeak) && highPeak<1.0 &&
+            std::isfinite(highStep) && highStep<0.98;
+        const bool allPassed=passed && fastBands && fastSafety && highSafe;
         std::cout<<std::fixed<<std::setprecision(5)
                  <<"VOCADITO_CAUSAL_RESIDUAL_BANDS source="<<prefix
                  <<" sr="<<reference.rate
@@ -120,6 +144,11 @@ int main(int argc,char** argv) {
                  <<" fast_max_adjacent_step="<<maxFastStep
                  <<" fast_minus_slow_rms="<<deltaRms
                  <<" fast_signal_safety="<<fastSafety
+                 <<" high_register_2k_ratio="<<highRatio2
+                 <<" high_register_6k_ratio="<<highRatio6
+                 <<" high_register_peak="<<highPeak
+                 <<" high_register_adjacent_step="<<highStep
+                 <<" high_register_safety="<<highSafe
                  <<" accepted="<<allPassed
                  <<" (NOT pitch fidelity / <1ms singer response / ABX)\n";
         return allPassed?0:1;
