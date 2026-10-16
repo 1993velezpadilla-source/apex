@@ -106,6 +106,16 @@ public:
     void enableExperimentalEarlyTransitions(bool enabled) noexcept {
         fastTransitionsEnabled_=enabled;
     }
+    // NONSHIPPING, OFF by default. On a >600-cent NOTE LEAP, the
+    // resynth partials are deliberately reset. Existing code cleared the
+    // target wet once but immediately restored it in updatePitch(), while
+    // leaving current wet_ near 1; that could let newly relearned partials
+    // enter the audio at full strength. Optional dry-reset makes the wet
+    // envelope ramp back in after an observed source period. Research gate
+    // requires human singer AB first; not an assertion about formants.
+    void enableNoteLeapDryReset(bool enabled) noexcept {
+        noteLeapDryResetEnabled_=enabled;
+    }
     // Experimental residual-preserving voiced replacement:
     // subtract the tracked unshifted harmonics, insert shifted harmonics,
     // and retain current-input residual (consonants/breath/noise) instantly.
@@ -337,6 +347,7 @@ private:
                     for(auto& partial:channel)partial={};
                 voicedSamples_=0;
                 targetWet_=0.0;
+                if(noteLeapDryResetEnabled_)wet_=0.0;
                 initializedPhase_=false;
                 lastLargeNoteJumpSample_=sampleCount_;
                 ++largeNoteJumpCount_;
@@ -406,6 +417,7 @@ private:
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
          fastTransitionsEnabled_=false,residualMode_=false,
          fastEngagement_=false,highRegisterEnabled_=false,
-         midRegisterEnabled_=false,ultraHighEnabled_=false;
+         midRegisterEnabled_=false,ultraHighEnabled_=false,
+         noteLeapDryResetEnabled_=false;
 };
 }}} // namespace APEX::TuneLive::Research
