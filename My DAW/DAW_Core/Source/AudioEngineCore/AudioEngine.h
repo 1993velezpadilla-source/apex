@@ -182,6 +182,17 @@ public:
         graphPdcTrackInputContext_=context;
         graphPdcTrackInputForTests_=callback;
     }
+    // Test-only insert latency DSP in ACTUAL Track/Bus render loops, after
+    // plugin processing and before fader/mute/send routing. Removed entirely
+    // from the shipping Desktop build by the compile-time research flag.
+    using GraphPdcInsertForTests=void(*)(void*,const TrackID&,
+                                        juce::AudioBuffer<float>&,int) noexcept;
+    void setGraphPdcInsertForTests(void* context,
+                                  GraphPdcInsertForTests callback) noexcept
+    {
+        graphPdcInsertContext_=context;
+        graphPdcInsertForTests_=callback;
+    }
     // Default OFF, never enabled by product code. Test runtime opt-in can
     // render programme PDC through actual Track/Bus route loops.
     void setExperimentalGraphPdcRenderEnabledForTests(bool enabled) noexcept
@@ -1251,6 +1262,8 @@ private:
     std::atomic<bool> graphPdcRenderEnabled_{false};
     void* graphPdcTrackInputContext_=nullptr;
     GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
+    void* graphPdcInsertContext_=nullptr;
+    GraphPdcInsertForTests graphPdcInsertForTests_=nullptr;
     std::atomic<std::uint64_t> graphPdcLatencyRevision_{0};
     std::atomic<std::uint64_t> graphPdcPreparedLatencyRevision_{0};
     // Audio-thread only, valid only during ScopedResetResearchGraphPdc.
@@ -2607,6 +2620,12 @@ private:
             }
         }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        if(graphPdcInsertForTests_!=nullptr)
+            graphPdcInsertForTests_(graphPdcInsertContext_,track->getID(),
+                                    trackBuf,numSamples);
+#endif
+
         // Volume and pan
         auto& volumeRamp = getOrCreateVolumeRamp(track->getID());
         float trackVolume = track->getVolume();
@@ -2898,6 +2917,12 @@ private:
                     transport_ ? transport_->getTempo() : 120.0, numSamples);
             }
         }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        if(graphPdcInsertForTests_!=nullptr)
+            graphPdcInsertForTests_(graphPdcInsertContext_,nodeMeta->trackId,
+                                    nodeBuf,numSamples);
+#endif
 
         // Bus polarity is applied after inserts and before fader/routing.
         if (busTrack != nullptr)
