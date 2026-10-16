@@ -64,6 +64,9 @@ class ApplicationCore : private TrackManager::Listener,
                          private RoutingGraph::Listener,
                         private FaderRangeCore::Listener,
                         private TransportController::Listener
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+                       , private juce::Timer
+#endif
 {
 public:
     ApplicationCore();
@@ -409,6 +412,11 @@ public:
     }
 
 private:
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // Research-only control-plane polling catches live VST3 latency changes
+    // that do not fire structural PluginChainCore change callbacks.
+    void timerCallback() override;
+#endif
     void beginPluginChainPublicationBatch() noexcept
     {
         ++pluginChainPublicationBatchDepth_;
