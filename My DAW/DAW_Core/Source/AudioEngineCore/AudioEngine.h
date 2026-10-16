@@ -412,6 +412,15 @@ public:
             if (core)
                 core->prepare(sampleRate_, capacity, 2);
         masterPdc_.reset();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // Offline export begins a fresh timeline just like MasterPdcCore.
+        const bool offlineGraphPdcResetOk=
+            graphPdcPreflight_.resetPreparedHistoriesAfterReadersDrainOnControlThread();
+        jassert(offlineGraphPdcResetOk);
+        if(!offlineGraphPdcResetOk)
+            graphPdcRenderEnabled_.store(false,std::memory_order_release);
+#endif
+
         for (auto& [id, line] : pdcLines_)
             line.prepare(line.getCapacity() > 0 ? line.getCapacity() : 1);
         masterWasProcessed_ = false;
@@ -529,7 +538,17 @@ public:
         // become the last-owner release of an old project on the audio thread.
         pluginChainsBlockSnap_.reset();
 
-        sampleRate_ = sampleRate;
+        
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        // New device timeline: stale delayed samples must not survive a
+        // restart, including a restart at the SAME sample rate.
+        const bool graphPdcResetOk=
+            graphPdcPreflight_.resetPreparedHistoriesAfterReadersDrainOnControlThread();
+        jassert(graphPdcResetOk);
+        if(!graphPdcResetOk)
+            graphPdcRenderEnabled_.store(false,std::memory_order_release);
+#endif
+sampleRate_ = sampleRate;
         blockSize_  = blockSize;
         // Pre-allocate all buffers for the worst-case block size (8192).
         // This prevents crashes when ASIO4ALL or other drivers reconfigure
