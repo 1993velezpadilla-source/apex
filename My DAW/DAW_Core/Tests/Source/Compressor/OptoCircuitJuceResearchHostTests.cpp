@@ -866,6 +866,106 @@ public:
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        beginTest("Hosted JUCE plugin dynamic latency 16->32 restages actual PDC routes");
+        for(const int frames:{31,128}) {
+            DAW::TrackManager tracks;
+            auto* voice=tracks.createTrack("JUCE PDC voice");
+            auto* auxTrack=tracks.createTrack("JUCE PDC aux");
+            auxTrack->setRole(DAW::TrackRole::Bus);
+            DAW::RoutingGraph routing;
+            auto* v=routing.addNode("voice",DAW::RoutingNodeType::Track,voice->getID());
+            auto* b=routing.addNode("aux",DAW::RoutingNodeType::Bus,auxTrack->getID());
+            auto* send=routing.connect(v->id,b->id,DAW::ConnectionType::Send);
+            expect(send!=nullptr);
+            if(!send)continue;
+            auto chain=std::make_shared<DAW::PluginChainCore>();
+            chain->prepare(48000.0,frames);
+            auto probe=std::make_unique<ExactHostDelayResearchPlugin>(16);
+            auto* hosted=probe.get();
+            expectEquals(chain->appendPluginInstanceForTesting(std::move(probe)),0);
+            expectEquals(chain->totalLatencySamples(),16);
+            DAW::AudioEngine engine;
+            engine.setSubsystems(&tracks,nullptr,nullptr,&routing);
+            engine.prepare(48000.0,frames);
+            auto chains=std::make_shared<DAW::AudioEngine::PluginChainSnapshotMap>();
+            (*chains)[auxTrack->getID()]=chain;
+            engine.publishPluginChainsSnapshot(chains);
+            const auto publishLatencies=[&](){
+                auto latency=std::make_shared<DAW::AudioEngine::ChainLatencyMap>();
+                (*latency)[voice->getID()]=0;
+                (*latency)[auxTrack->getID()]=chain->totalLatencySamples();
+                engine.publishChainLatencies(latency);
+                return latency;
+            };
+            auto latencies=publishLatencies();
+            const auto stage=[&]() {
+                auto graph=routing.getSnapshotPublisher().get();
+                return graph && engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    *graph,latencies.get(),2,48000.0);
+            };
+            expect(stage());
+            struct Source {std::int64_t pos=0,impulse=333;};
+            Source input;
+            engine.setGraphPdcTrackInputForTests(
+                &input,[](void* ptr,const DAW::TrackID&,
+                          juce::AudioBuffer<float>& output,int n) noexcept {
+                    auto& state=*static_cast<Source*>(ptr);
+                    for(int i=0;i<n;++i)
+                        if(state.pos++==state.impulse) {
+                            output.setSample(0,i,.30f);
+                            output.setSample(1,i,-.15f);
+                        }
+                });
+            engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+            const auto pass=[&](std::int64_t stop,int expectedDelay){
+                float observed=0.f;
+                while(input.pos<stop) {
+                    const auto begin=input.pos;
+                    const int n=static_cast<int>(std::min<std::int64_t>(
+                        frames,stop-begin));
+                    juce::AudioBuffer<float> output(2,n);
+                    output.clear();
+                    expect(engine.renderOfflineBlock(output,n,begin));
+                    expectEquals(input.pos,begin+n);
+                    for(int i=0;i<n;++i) {
+                        const auto sampleTime=begin+i;
+                        const float left=output.getSample(0,i);
+                        const float right=output.getSample(1,i);
+                        if(sampleTime==input.impulse+expectedDelay) {
+                            observed=left;
+                            expect(left>.08f && right<-.04f,
+                                   "direct + wet paths must align at new latency");
+                        } else {
+                            expectWithinAbsoluteError(
+                                static_cast<double>(left),0.0,2.e-5);
+                            expectWithinAbsoluteError(
+                                static_cast<double>(right),0.0,2.e-5);
+                        }
+                    }
+                }
+                return observed;
+            };
+            const float first=pass(1200,16);
+            hosted->setResearchLatencyOnControlThread(32);
+            expectEquals(hosted->getLatencySamples(),32);
+            expectEquals(chain->totalLatencySamples(),32);
+            latencies=publishLatencies();
+            // Invalid revision MUST reject the old plan until publication.
+            juce::AudioBuffer<float> stale(2,1);
+            stale.clear();
+            auto snapshot=routing.getSnapshotPublisher().get();
+            expect(!engine.renderOnePreparedGraphEdgeForTests(
+                *snapshot,0,stale),
+                "changed JUCE AudioProcessor latency must reject stale PDC bank");
+            expect(stage());
+            input.impulse=1500;
+            const float second=pass(2300,32);
+            expectWithinAbsoluteError(static_cast<double>(first),
+                                      static_cast<double>(second),.02,
+                                      "changing VST3-like latency must preserve wet/dry amplitude");
+            expect(engine.getGraphPdcPreflightCounters().renderedBlocks>0);
+        }
+
         beginTest("Real AudioEngine track + bus + master loops follow live QuickSend toggles");
         {
             DAW::TrackManager tracks;
