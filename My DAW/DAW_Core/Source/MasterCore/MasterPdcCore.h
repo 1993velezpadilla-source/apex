@@ -43,10 +43,12 @@ public:
               const std::map<TrackID, int>* latencies,
               int numSamples)
     {
-        // Disable every existing line (keeps buffers alive for reuse —
-        // processEdge() early-outs on delaySamples <= 0).
+        // Mark active compensation edges without dropping any delay's
+        // history yet. A route that stops being audible will be invalidated
+        // AFTER the new plan is known. Otherwise a bypassed route could
+        // later replay audio from before it was deactivated.
         for (auto& [id, line] : edgeDelays_)
-            line.delaySamples = 0;
+            line.usedInCurrentSync = false;
 
         // Compute the required per-edge latencies (desired_ is a reused
         // member — no allocation after the first sync at a given graph size).
@@ -91,7 +93,25 @@ public:
                 line.prepare(capacity);   // rare grow: reallocates + clears THIS line only
             line.setCrossfadeSamples(pdcFadeSamples_);
             line.delaySamples = delay;
+            line.usedInCurrentSync = true;
         }
+
+        // Inactive/bypassed or now zero-compensation paths stop advancing.
+        // Invalidate only their freshness; clearing a large JUCE AudioBuffer
+        // in the callback would be both unnecessary and expensive. Preserve
+        // active nonzero paths so latency edits retain their smooth crossfade.
+        for (auto& [id, line] : edgeDelays_)
+            if (!line.usedInCurrentSync)
+            {
+                if (line.delaySamples > 0)
+                {
+                    line.primed = 0;
+                    line.currentReadDelay = -1;
+                    line.previousReadDelay = 0;
+                    line.fadeRemaining = 0;
+                }
+                line.delaySamples = 0;
+            }
     }
 
     void reset()
@@ -158,6 +178,7 @@ private:
         juce::AudioBuffer<float> buf;
         int writePos = 0;
         int delaySamples = 0;
+        bool usedInCurrentSync = false;
         int primed = 0;
         int currentReadDelay = -1;
         int previousReadDelay = 0;
