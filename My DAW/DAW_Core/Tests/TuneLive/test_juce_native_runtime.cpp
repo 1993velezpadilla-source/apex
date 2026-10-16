@@ -439,6 +439,55 @@ int main() {
     baselineImpulse.releaseResources();
     alteredImpulse.releaseResources();
 
+    // Mid-range fast LIVE test through a REAL linked JUCE 8 instance.
+    // C#4 (277.1826 Hz) +30 cents is actual chromatic tuning target.
+    // This verifies emitted WET audio independently; zero fixed
+    // lookahead does NOT assert a 1ms first-note pitch response.
+    APEX::TuneLive::Research::CausalJUCEAdapter midJUCE;
+    midJUCE.prepareToPlay(48000.0,128);
+    APEX::TuneLive::PitchTracker midOutputPitch;
+    midOutputPitch.prepare(48000.0);
+    constexpr double midTargetHz=277.18263;
+    constexpr double midInputHz=midTargetHz*1.0174796921026863;
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int i=0;i<128;++i) {
+            const double phase=6.283185307179586*
+                               midInputHz*(frame+i)/48000.0;
+            const float value=static_cast<float>(
+                0.24*std::sin(phase)+
+                0.045*std::sin(2.0*phase+0.18)+
+                0.018*std::sin(3.0*phase+0.24));
+            researchAudio.setSample(0,i,value);
+            researchAudio.setSample(1,i,value);
+        }
+        midJUCE.processBlock(researchAudio,midi);
+        for(int i=0;i<128;++i) {
+            const float y=researchAudio.getSample(0,i);
+            if(!std::isfinite(y))
+                return fail("JUCE mid-register LIVE emitted invalid PCM");
+            if(frame>=28000)midOutputPitch.push(y);
+        }
+    }
+    const auto midTuned=midOutputPitch.latest();
+    const double midCents=midTuned.voiced?
+        1200.0*std::log2(midTuned.hz/midTargetHz):9999.0;
+    if(midJUCE.getLatencySamples()!=0 ||
+       midJUCE.firstMidSample()<0 ||
+       midJUCE.firstMidSample()>static_cast<int64_t>(48000.0*0.014) ||
+       midJUCE.firstHighSample()>=0 ||
+       midJUCE.firstHalfWetSample()>static_cast<int64_t>(48000.0*0.019) ||
+       !midTuned.voiced || std::abs(midCents)>18.0 ||
+       midJUCE.researchWetMix()<0.95)
+        return fail("linked JUCE 8 guarded mid F0 / wet onset or pitch gate");
+    std::cout<<"CAUSAL_JUCE_MID_REGISTER fixed_lookahead_samples="
+             <<midJUCE.getLatencySamples()
+             <<" first_mid_ms="<<1000.0*midJUCE.firstMidSample()/48000.0
+             <<" first_half_wet_ms="
+             <<1000.0*midJUCE.firstHalfWetSample()/48000.0
+             <<" corrected_cents="<<midCents
+             <<" no_1ms_new_note_claim=1\\n";
+    midJUCE.releaseResources();
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
