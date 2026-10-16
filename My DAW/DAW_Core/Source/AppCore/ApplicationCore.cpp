@@ -452,24 +452,34 @@ void ApplicationCore::timerCallback()
     if(!published)return;
     std::size_t activeChains=0;
     bool changed=false;
+    bool hostDryPrepared=true;
     for(const auto& [trackId,chain]:pluginChains_) {
         if(!chain)continue;
         ++activeChains;
         const int latency=HostedPluginIsolationCore::effectiveHostedLatencySamples(
             chain->totalLatencySamples());
         const auto it=published->find(trackId);
-        if(it==published->end() || it->second!=latency) {
-            changed=true;
-            break;
-        }
+        if(it!=published->end() && it->second==latency)continue;
+        changed=true;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // A VST3 can change its latency without any insert/remove event.
+        // Its slot-bypass dry ring AND chain-wide dry ring must follow the
+        // newly reported latency, not the previous prepare() value. Reader
+        // admission is drained by PluginChainCore on this control thread.
+        if(!chain->refreshResearchHostDryPdcForChangedLatencyOnControlThread())
+            hostDryPrepared=false;
+#endif
     }
     if(!changed && activeChains==published->size())return;
 
-    // Publishes the COMPLETE immutable latency map and stages the graph PDC
-    // plan on control only. Revision mismatch rejects stale DSP in the audio
-    // thread until this coherent bank has been committed.
+    // Publish the changed map even if dry-ring preparation fails: the
+    // revision gate rejects stale PDC rather than silently accepting it.
     publishPluginChainLatencies();
     audioEngine_.markMasterPdcDirty();
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+    if(!hostDryPrepared)
+        audioEngine_.setExperimentalGraphPdcRenderEnabledForTests(false);
+#endif
 }
 #endif
 
