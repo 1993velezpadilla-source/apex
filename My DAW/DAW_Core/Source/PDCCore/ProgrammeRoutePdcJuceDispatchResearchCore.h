@@ -52,9 +52,30 @@ public:
                 }
             }
         }
+        // Local tracks may have their own clips/input PLUS incoming sends.
+        // A structural edit elsewhere must not zero their in-flight history
+        // when track identity and local compensation are unchanged.
+        std::vector<std::string> compatibleLocal;
+        if(old!=nullptr && old!=this && old->bank_) {
+            compatibleLocal.reserve(snapshot.nodes.size());
+            for(const auto& node:snapshot.nodes) {
+                if(node.type!=RoutingNodeType::Track || !node.active)continue;
+                const auto* planned=plan.findNode(node.id.toStdString());
+                if(!planned || planned->localInputDelay<=0)continue;
+                for(const auto& previousNode:old->nodeMetadata_) {
+                    if(previousNode.id==node.id &&
+                       previousNode.trackId==node.trackId &&
+                       previousNode.type==node.type &&
+                       previousNode.active) {
+                        compatibleLocal.push_back(node.id.toStdString());
+                        break;
+                    }
+                }
+            }
+        }
         if(!next->prepare(plan,channels,
                           old!=nullptr&&old!=this?old->bank_.get():nullptr,
-                          &compatible))return false;
+                          &compatible,&compatibleLocal))return false;
         std::vector<std::size_t> nextEdges(snapshot.edges.size(),invalidIndex);
         for(std::size_t i=0;i<snapshot.edges.size();++i) {
             const auto& edge=snapshot.edges[i];
@@ -81,11 +102,13 @@ public:
         // Copy metadata BEFORE publication, so an allocation exception
         // cannot leave the old bank combined with new index bindings.
         std::vector<RoutingSnapshot::EdgeSnapshot> nextMetadata=snapshot.edges;
+        std::vector<RoutingSnapshot::NodeSnapshot> nextNodeMetadata=snapshot.nodes;
         // All swaps are non-throwing. No partial graph generation escapes.
         bank_.swap(next);
         edges_.swap(nextEdges);
         locals_.swap(nextLocal);
         routeMetadata_.swap(nextMetadata);
+        nodeMetadata_.swap(nextNodeMetadata);
         version_=snapshot.version;
         return true;
     }
@@ -142,6 +165,7 @@ private:
     std::vector<std::size_t> edges_;
     std::vector<std::size_t> locals_;
     std::vector<RoutingSnapshot::EdgeSnapshot> routeMetadata_;
+    std::vector<RoutingSnapshot::NodeSnapshot> nodeMetadata_;
     std::uint64_t version_=0;
 };
 } // namespace DAW::PdcResearch
