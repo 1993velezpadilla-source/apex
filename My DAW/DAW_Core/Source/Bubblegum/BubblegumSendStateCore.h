@@ -97,7 +97,8 @@ public:
         if (!srcNode || !destNode) return;
         DBG("DELETE send: source=" << sourceId << " target=" << targetId);
         graph.disconnect(srcNode->id, destNode->id, ConnectionType::Send);
-        // Verify full removal
+        graph.disconnect(srcNode->id, destNode->id, ConnectionType::PreSend);
+        // Verify full removal, including pre-fader sends
         bool stillExists = sendExists(graph, sourceId, targetId);
         DBG("POST-DELETE hasSend? source=" << sourceId << " target=" << targetId << " -> " << (int)stillExists);
     }
@@ -261,7 +262,9 @@ public:
         }
         if (changed)
         {
-            graph.publishSnapshotOnly();
+            // Pre/post changes alter cable presentation as well as DSP routing.
+            // Publish the audio snapshot AND invalidate UI listeners immediately.
+            graph.notifyGraphChanged();
             DBG("SET pre-fader sends: source=" << sourceId << " preFader=" << (int)preFader);
         }
     }
@@ -317,7 +320,9 @@ public:
         }
         if (changed)
         {
-            graph.publishSnapshotOnly();
+            // Pre/post changes alter cable presentation as well as DSP routing.
+            // Publish the audio snapshot AND invalidate UI listeners immediately.
+            graph.notifyGraphChanged();
             DBG("SET send pre-fader: source=" << sourceId << " target=" << targetId
                 << " preFader=" << (int)preFader);
         }

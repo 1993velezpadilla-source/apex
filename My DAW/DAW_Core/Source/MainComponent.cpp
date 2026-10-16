@@ -2952,14 +2952,15 @@ MainComponent::MainComponent()
         bgV2.handleTargetTap(targetId);
         refreshBubblegumOffscreenState();
         if (bubblegumPanel_ && bubblegumPanel_->isVisible()) bubblegumPanel_->refresh();
-        cableOverlay_.repaint();
+        // A repaint without cache invalidation can redraw old cables.
+        cableOverlay_.requestTopologyRefresh();
     };
     offscreenEndpoint_.onDeleteSend = [this](const DAW::TrackID& targetId)
     {
         appCore_.getBubblegumV2().removeSend(targetId);
         refreshBubblegumOffscreenState();
         if (bubblegumPanel_ && bubblegumPanel_->isVisible()) bubblegumPanel_->refresh();
-        cableOverlay_.repaint();
+        cableOverlay_.requestTopologyRefresh();
     };
 
     mixerWindow_->onCableToggleClicked = [this]
@@ -2971,7 +2972,8 @@ MainComponent::MainComponent()
             mixerWindow_->cableVisible = mixerPanel_->areCablesVisible();
             mixerWindow_->refreshToolbar();
         }
-        cableOverlay_.repaint();
+        // Toggling hidden/visible must also invalidate the offscreen frame.
+        cableOverlay_.requestTopologyRefresh();
     };
 
     pluginSidePanel_ = std::make_unique<DAW::MixerPluginSidePanel>(appCore_.getPluginScanner());
@@ -4039,6 +4041,7 @@ MainComponent::MainComponent()
         if (mixerPanel_)
             mixerPanel_->debugLastSendToggle_ = "Src=" + srcId;
         refreshBubblegumFeedback();
+        cableOverlay_.requestTopologyRefresh();
     };
     addChildComponent(bubblegumPanel_.get());
 
