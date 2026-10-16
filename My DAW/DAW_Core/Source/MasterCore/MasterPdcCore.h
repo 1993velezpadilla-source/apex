@@ -166,7 +166,7 @@ public:
         // inside the callback. Push/read per chunk preserves delayed samples
         // across chunk AND callback boundaries without overwriting the ring.
         const int chunkLimit=juce::jmin(
-            (int)scratchL_.size(),(int)scratchR_.size(),
+            juce::jmin((int)scratchL_.size(),(int)scratchR_.size()),
             it->second.buf.getNumSamples()-1);
         for(int offset=0;offset<numSamples;)
         {
