@@ -261,9 +261,14 @@ int main() {
     if(candidate.firstVoiceSample()<0 || candidate.firstHalfWetSample()<0 ||
        candidate.firstHalfWetSample()<candidate.firstVoiceSample())
         return fail("causal research hosted F0 onset telemetry invalid");
+    if(candidate.firstHighSample()<0 ||
+       candidate.firstHighSample()>480 ||
+       candidate.firstHalfWetSample()>720)
+        return fail("research JUCE high-register wet path exceeded 10ms F0 / 15ms half-wet budgets");
     std::cout<<"CAUSAL_JUCE_RESEARCH fixed_pdc_samples="
              <<candidate.getLatencySamples()
              <<" firstF0_ms="<<1000.0*candidate.firstVoiceSample()/48000.0
+             <<" highRegisterF0_ms="<<1000.0*candidate.firstHighSample()/48000.0
              <<" firstWet50_ms="<<1000.0*candidate.firstHalfWetSample()/48000.0
              <<" late_wet_cents="<<researchCents
              <<" NO_1MS_FIRST_NOTE_RESPONSE_CLAIM\\n";
