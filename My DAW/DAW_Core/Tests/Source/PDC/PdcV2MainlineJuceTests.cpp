@@ -314,6 +314,50 @@ public:
             }
 
 
+        beginTest("Prewarmed legacy monitoring PDC sync is allocation-free");
+        // Covers steady-state plan recomputation and changing the active
+        // master route set without reallocating old delay banks. It does NOT
+        // certify the still-unprepared first appearance of a new route.
+        for(const double rate:{44100.0,48000.0,96000.0})
+        for(const int frames:{64,128,256,512})
+        {
+            DAW::RoutingSnapshot graph;
+            graph.version=1005;
+            graph.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.nodeIndexById["fast"]=0;
+            graph.nodeIndexById["slow"]=1;
+            graph.nodeIndexById["master"]=2;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow;
+            fast.id="fast-to-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-to-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            graph.edges={fast,slow};
+            const std::map<DAW::TrackID,int> latency={{"fast",0},{"slow",256}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(rate,8192);
+            legacy.sync(graph,&latency,frames); // allocate once outside callback
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),256);
+            float left[512]{},right[512]{};
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                for(int iteration=0;iteration<64;++iteration)
+                {
+                    graph.edges[1].active=(iteration%4)!=1;
+                    graph.edges[1].bypassed=(iteration%4)==2;
+                    legacy.sync(graph,&latency,frames);
+                    legacy.processEdge("fast-to-master",left,right,frames);
+                }
+            }
+            graph.edges[1].active=true;
+            graph.edges[1].bypassed=false;
+            legacy.sync(graph,&latency,frames);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),256);
+        }
+
         beginTest("Legacy monitoring PDC ignores inactive and bypassed master routes");
         {
             DAW::RoutingSnapshot routes;
