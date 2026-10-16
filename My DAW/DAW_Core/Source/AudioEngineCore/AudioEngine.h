@@ -154,11 +154,16 @@ public:
         int channels,double sampleRate)
     {
         const auto revision=graphPdcLatencyRevision_.load(std::memory_order_acquire);
-        // Control gate publishes preallocated routing bank.
+        const auto timelineEpoch=graphPdcTimelineEpoch_.load(std::memory_order_acquire);
+        const bool newTimeline=timelineEpoch!=
+            graphPdcPreparedTimelineEpoch_.load(std::memory_order_acquire);
+        // Control gate publishes preallocated routing bank. A monitoring gap
+        // leaves the old V2 edge history stale, even when routing is identical.
         if(!graphPdcPreflight_.publishPrepared(
-               graph,latencies,channels,sampleRate))
+               graph,latencies,channels,sampleRate,newTimeline))
             return false;
         graphPdcPreparedLatencyRevision_.store(revision,std::memory_order_release);
+        graphPdcPreparedTimelineEpoch_.store(timelineEpoch,std::memory_order_release);
         return true;
     }
     struct GraphPdcPreflightCounters {
@@ -222,6 +227,8 @@ public:
            reader->dispatch.channels()!=2 ||
            graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)!=
                graphPdcLatencyRevision_.load(std::memory_order_acquire) ||
+           graphPdcPreparedTimelineEpoch_.load(std::memory_order_acquire)!=
+               graphPdcTimelineEpoch_.load(std::memory_order_acquire) ||
            !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
                sameProgrammeRoutingRealtime(graph,reader->graph) ||
            !reader->dispatch.coversAllActiveProgrammeEdges(graph) ||
@@ -1322,6 +1329,12 @@ private:
     GraphPdcInsertForTests graphPdcInsertForTests_=nullptr;
     std::atomic<std::uint64_t> graphPdcLatencyRevision_{0};
     std::atomic<std::uint64_t> graphPdcPreparedLatencyRevision_{0};
+    // V2 edges stop advancing whenever monitoring requires legacy PDC.
+    // The RT callback marks a new epoch. Only a freshly prepared control
+    // generation may re-enable V2 after that monitoring gap.
+    std::atomic<std::uint64_t> graphPdcTimelineEpoch_{0};
+    std::atomic<std::uint64_t> graphPdcPreparedTimelineEpoch_{0};
+    bool graphPdcLegacyHistoryInvalidationPending_=false; // audio thread only
     // Audio-thread only, valid only during ScopedResetResearchGraphPdc.
     DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::PreparedGeneration* graphPdcActiveRt_=nullptr;
 #endif
@@ -2399,7 +2412,9 @@ private:
                 sameProgrammeRoutingRealtime(*snap,stagedGraphReader->graph) &&
             stagedGraphReader->dispatch.coversAllActiveProgrammeEdges(*snap) &&
             graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)==
-                graphPdcLatencyRevision_.load(std::memory_order_acquire);
+                graphPdcLatencyRevision_.load(std::memory_order_acquire) &&
+            graphPdcPreparedTimelineEpoch_.load(std::memory_order_acquire)==
+                graphPdcTimelineEpoch_.load(std::memory_order_acquire);
         if(matches)
             graphPdcMatchedBlocks_.fetch_add(1,std::memory_order_relaxed);
         else
@@ -2428,6 +2443,19 @@ private:
             // graph/version/latency); otherwise the frozen legacy bank could
             // replay samples from an earlier monitoring timeline.
             masterPdcDirty_.store(true,std::memory_order_relaxed);
+            graphPdcLegacyHistoryInvalidationPending_=true;
+        }
+        else if(graphPdcLegacyHistoryInvalidationPending_)
+        {
+            // sync() preserves old raw delay bytes. Invalidate their
+            // freshness without clearing buffers or allocating on the RT
+            // callback. A subsequent legacy push will prime fresh samples.
+            masterPdc_.invalidateStreamingHistoryForTimelineSwitch();
+            graphPdcLegacyHistoryInvalidationPending_=false;
+            masterPdcDirty_.store(true,std::memory_order_relaxed);
+            // V2 histories are now dormant: reject their reuse until the
+            // control plane publishes an entirely fresh bank for this epoch.
+            graphPdcTimelineEpoch_.fetch_add(1,std::memory_order_acq_rel);
         }
         graphPdcActiveRt_=routeRenderAllowed?stagedGraphReader.get():nullptr;
         struct ScopedResetResearchGraphPdc final {
