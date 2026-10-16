@@ -166,6 +166,7 @@ public:
         std::uint64_t rejectedBlocks=0;
         std::uint64_t renderedBlocks=0;
         std::uint64_t monitoringFallbackBlocks=0;
+        std::uint64_t legacyResyncs=0;
     };
     GraphPdcPreflightCounters getGraphPdcPreflightCounters() const noexcept
     {
@@ -173,7 +174,8 @@ public:
             graphPdcMatchedBlocks_.load(std::memory_order_relaxed),
             graphPdcRejectedBlocks_.load(std::memory_order_relaxed),
             graphPdcRenderedBlocks_.load(std::memory_order_relaxed),
-            graphPdcMonitoringFallbackBlocks_.load(std::memory_order_relaxed)
+            graphPdcMonitoringFallbackBlocks_.load(std::memory_order_relaxed),
+            graphPdcLegacyResyncs_.load(std::memory_order_relaxed)
         };
     }
 
@@ -1286,6 +1288,7 @@ private:
     std::atomic<std::uint64_t> graphPdcRejectedBlocks_{0};
     std::atomic<std::uint64_t> graphPdcRenderedBlocks_{0};
     std::atomic<std::uint64_t> graphPdcMonitoringFallbackBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcLegacyResyncs_{0};
     std::atomic<bool> graphPdcRenderEnabled_{false};
     void* graphPdcTrackInputContext_=nullptr;
     GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
@@ -2428,6 +2431,9 @@ private:
             // free/clear of delay history).
             auto latencies = getChainLatenciesRT();
             masterPdc_.sync(*snap, latencies.get(), numSamples);
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+            graphPdcLegacyResyncs_.fetch_add(1,std::memory_order_relaxed);
+#endif
         }
 
         // Ensure per-node buffers are cleared by the routing buffer nucleus.
