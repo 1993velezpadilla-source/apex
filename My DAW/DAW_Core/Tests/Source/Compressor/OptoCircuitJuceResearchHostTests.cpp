@@ -846,6 +846,10 @@ public:
             for(const int frames:{31,64,128})
             {
                 DAW::AudioEngine engine;
+                // Match the engine device format before staging a PDC bank.
+                // The realtime safety gate rejects banks prepared for any
+                // other sample rate; a default-constructed engine is 44.1k.
+                engine.prepare(rate,frames);
                 // No Release audio rendering is enabled: runtime opt-in
                 // exists exclusively in the APEXTests preprocessor build.
                 expectEquals(static_cast<int>(
