@@ -17,7 +17,8 @@ using APEX::TuneLive::Research::HarmonicLivePrototype;
 constexpr int blockSize=128;
 
 Wave renderLive(const Wave& input, bool early, bool residual,
-                bool fastEngagement=false, bool fastTransitions=false) {
+                bool fastEngagement=false, bool fastTransitions=false,
+                bool highRegister=false) {
     Wave out=input;
     HarmonicLivePrototype engine;
     engine.prepare(input.rate,input.channels);
@@ -29,6 +30,7 @@ Wave renderLive(const Wave& input, bool early, bool residual,
     engine.enableEarlyOnset(early);
     engine.enableResidualPreservation(residual);
     engine.enableFastEngagement(fastEngagement);
+    engine.enableHighRegisterOnset(highRegister);
     engine.enableExperimentalEarlyTransitions(fastTransitions);
     std::array<float,blockSize> left{},right{};
     for(std::size_t offset=0;offset<input.frames();offset+=blockSize) {
@@ -52,6 +54,9 @@ Wave renderLive(const Wave& input, bool early, bool residual,
     std::cout<<"VOCADITO_CAUSAL_LIVE residual="<<residual<<" early="<<early
              <<" fast_wet="<<fastEngagement
              <<" fast_note_transitions="<<fastTransitions
+             <<" high_register="<<highRegister
+             <<" first_high_ms="<<(engine.firstHighSample()>=0?
+                 1000.0*engine.firstHighSample()/input.rate:-1.0)
              <<" first_F0_ms="<<1000.0*engine.firstVoiceSample()/input.rate
              <<" first_halfwet_ms="<<1000.0*engine.firstHalfWetSample()/input.rate
              <<" final_source_hz="<<engine.sourceHz()<<"\n";
@@ -69,15 +74,19 @@ int main(int argc,char** argv) {
         const Wave candidate=renderLive(source,true,false);
         const Wave preserved=renderLive(source,true,true);
         const Wave fast=renderLive(source,true,true,true,true);
+        const Wave high=renderLive(source,true,true,true,true,true);
         const auto levels=level(candidate);
         const auto residualLevels=level(preserved);
         const auto fastLevels=level(fast);
+        const auto highLevels=level(high);
         if(!std::isfinite(levels.peak) || !std::isfinite(levels.rms) ||
            levels.rms<1.0e-7 ||
            !std::isfinite(residualLevels.peak) ||
            !std::isfinite(residualLevels.rms) || residualLevels.rms<1.0e-7 ||
            !std::isfinite(fastLevels.peak) ||
-           !std::isfinite(fastLevels.rms) || fastLevels.rms<1.0e-7)
+           !std::isfinite(fastLevels.rms) || fastLevels.rms<1.0e-7 ||
+           !std::isfinite(highLevels.peak) ||
+           !std::isfinite(highLevels.rms) || highLevels.rms<1.0e-7)
             throw std::runtime_error("Predictive LIVE generated invalid/silent human audio");
         const std::string result=prefix+"_harmonic_live_research.wav";
         writeWave24(result,candidate);
@@ -85,9 +94,12 @@ int main(int argc,char** argv) {
         writeWave24(residualFile,preserved);
         const std::string fastFile=prefix+"_harmonic_live_fast_research.wav";
         writeWave24(fastFile,fast);
+        const std::string highFile=prefix+"_harmonic_live_high_research.wav";
+        writeWave24(highFile,high);
         const Wave validated=readWave(result);
         const Wave residualValidated=readWave(residualFile);
         const Wave fastValidated=readWave(fastFile);
+        const Wave highValidated=readWave(highFile);
         if(validated.frames()!=source.frames() ||
            validated.rate!=source.rate || validated.channels!=source.channels ||
            residualValidated.frames()!=source.frames() ||
@@ -95,7 +107,10 @@ int main(int argc,char** argv) {
            residualValidated.channels!=source.channels ||
            fastValidated.frames()!=source.frames() ||
            fastValidated.rate!=source.rate ||
-           fastValidated.channels!=source.channels)
+           fastValidated.channels!=source.channels ||
+           highValidated.frames()!=source.frames() ||
+           highValidated.rate!=source.rate ||
+           highValidated.channels!=source.channels)
             throw std::runtime_error("LIVE human PCM24 round-trip corrupted format");
         const std::string report=prefix+"_HARMONIC_LIVE_RESEARCH.txt";
         std::ofstream out(report);
@@ -114,6 +129,9 @@ int main(int argc,char** argv) {
            <<"Opt-in 1-period fast-engagement peak="<<fastLevels.peak
            <<" RMS="<<fastLevels.rms
            <<" clipped_frames="<<fastLevels.clips<<"\n"
+           <<"High-register accelerated peak="<<highLevels.peak
+           <<" RMS="<<highLevels.rms
+           <<" clipped_frames="<<highLevels.clips<<"\n"
            <<"Dry input and output have same frame count, but this is NOT "
              "proof of 0ms perceived voice correction, formants or note reaction.\n"
            <<"Compare separately level-matched to approved HQ40 and dry; "
@@ -124,6 +142,7 @@ int main(int argc,char** argv) {
         std::cout<<"REAL_HARMONIC_LIVE_RENDER "<<result
                  <<" residual_file="<<residualFile
                  <<" fast_wet_file="<<fastFile
+                 <<" high_register_file="<<highFile
                  <<" peak="<<levels.peak<<" clips="<<levels.clips<<"\n";
         return 0;
     } catch(const std::exception& e) {
