@@ -934,6 +934,111 @@ public:
             }
         }
 
+        beginTest("Real routed AudioEngine impulse PDC: 32+16, send edit, aux latency 64");
+        for(const double sr:{44100.0,48000.0,96000.0})
+        {
+            for(const int maxFrames:{31,128})
+            {
+                DAW::TrackManager tracks;
+                auto* vocal=tracks.createTrack("PDC impulse vocal");
+                DAW::RoutingGraph graph;
+                auto* trackNode=vocal?graph.addNode(
+                    "vocal",DAW::RoutingNodeType::Track,vocal->getID()):nullptr;
+                auto* bus=graph.addNode("FX bus",DAW::RoutingNodeType::Bus,
+                                        "pdc-impulse-bus");
+                auto* send=trackNode&&bus?graph.connect(
+                    trackNode->id,bus->id,DAW::ConnectionType::Send):nullptr;
+                expect(vocal!=nullptr && trackNode!=nullptr &&
+                       bus!=nullptr && send!=nullptr);
+                if(!vocal || !trackNode || !bus || !send)continue;
+                struct Fixture {
+                    DAW::TrackID vocalId;
+                    DAW::TrackID busId;
+                    DAW::PluginParallelDryDelayResearchCore vocalFx,busFx;
+                    std::int64_t sample=0;
+                    std::int64_t impulseAt=3100;
+                } fixture;
+                fixture.vocalId=vocal->getID();
+                fixture.busId=bus->trackId;
+                expect(fixture.vocalFx.prepare(2,32));
+                expect(fixture.busFx.prepare(2,16));
+                DAW::AudioEngine engine;
+                engine.setSubsystems(&tracks,nullptr,nullptr,&graph);
+                engine.prepare(sr,maxFrames);
+                engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+                engine.setGraphPdcTrackInputForTests(
+                    &fixture,[](void* ctx,const DAW::TrackID&,
+                                juce::AudioBuffer<float>& buffer,int frames) noexcept {
+                        auto& f=*static_cast<Fixture*>(ctx);
+                        for(int n=0;n<frames;++n) {
+                            if(f.sample++!=f.impulseAt)continue;
+                            buffer.setSample(0,n,.25f);
+                            buffer.setSample(1,n,-.125f);
+                        }
+                    });
+                engine.setGraphPdcInsertForTests(
+                    &fixture,[](void* ctx,const DAW::TrackID& id,
+                                juce::AudioBuffer<float>& buffer,int n) noexcept {
+                        auto& f=*static_cast<Fixture*>(ctx);
+                        if(id==f.vocalId)
+                            f.vocalFx.process(buffer.getArrayOfWritePointers(),2,n);
+                        else if(id==f.busId)
+                            f.busFx.process(buffer.getArrayOfWritePointers(),2,n);
+                    });
+                std::map<DAW::TrackID,int> latencies={
+                    {fixture.vocalId,32},{fixture.busId,16}};
+                const auto stage=[&]() {
+                    auto snap=graph.getSnapshotPublisher().get();
+                    return snap && engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                        *snap,&latencies,2,sr);
+                };
+                expect(stage());
+                const auto renderTo=[&](std::int64_t stop,int expectedDelay,
+                                         double copies) {
+                    while(fixture.sample<stop) {
+                        const auto begin=fixture.sample;
+                        const int n=static_cast<int>(std::min<std::int64_t>(
+                            maxFrames,stop-begin));
+                        juce::AudioBuffer<float> output(2,n);
+                        output.clear();
+                        expect(engine.renderOfflineBlock(output,n,begin));
+                        expectEquals(fixture.sample,begin+n);
+                        for(int i=0;i<n;++i) {
+                            const auto at=begin+i;
+                            for(int ch=0;ch<2;++ch) {
+                                const double amplitude=ch==0?.25:-.125;
+                                const double expected=
+                                    at==fixture.impulseAt+expectedDelay
+                                    ? amplitude*std::sqrt(.5)*copies : 0.0;
+                                expectWithinAbsoluteError(
+                                    static_cast<double>(output.getSample(ch,i)),
+                                    expected,2.e-4,
+                                    "whole-graph impulse: all paths must align to one sample");
+                            }
+                        }
+                    }
+                };
+                // Track insert 32, aux insert 16: direct must gain 16
+                // programme samples, and both impulses reach master at 48.
+                renderTo(4100,48,2.0);
+                send->active.store(false,std::memory_order_relaxed);
+                graph.notifyGraphChanged();
+                fixture.impulseAt=4600;
+                expect(stage());
+                // Without a send, only the vocal's own 32-sample delay remains.
+                renderTo(5200,32,1.0);
+                send->active.store(true,std::memory_order_relaxed);
+                graph.notifyGraphChanged();
+                expect(fixture.busFx.prepare(2,64));
+                latencies[fixture.busId]=64;
+                fixture.impulseAt=5700;
+                expect(stage());
+                // Updated VST3-like aux latency: BOTH paths reconverge at 96.
+                renderTo(6400,96,2.0);
+                expect(engine.getGraphPdcPreflightCounters().matchingBlocks>0);
+            }
+        }
+
         beginTest("AudioEngine research opt-in dispatch aligns direct + send + bus exactly once");
         // Exercise 44.1/48/96 kHz and ASIO-sized as well as irregular blocks.
         for(const double rate:{44100.0,48000.0,96000.0})
