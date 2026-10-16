@@ -18,7 +18,7 @@ constexpr int blockSize=128;
 
 Wave renderLive(const Wave& input, bool early, bool residual,
                 bool fastEngagement=false, bool fastTransitions=false,
-                bool highRegister=false) {
+                bool highRegister=false, bool midRegister=false) {
     Wave out=input;
     HarmonicLivePrototype engine;
     engine.prepare(input.rate,input.channels);
@@ -31,6 +31,7 @@ Wave renderLive(const Wave& input, bool early, bool residual,
     engine.enableResidualPreservation(residual);
     engine.enableFastEngagement(fastEngagement);
     engine.enableHighRegisterOnset(highRegister);
+    engine.enableMidRegisterOnset(midRegister);
     engine.enableExperimentalEarlyTransitions(fastTransitions);
     std::array<float,blockSize> left{},right{};
     for(std::size_t offset=0;offset<input.frames();offset+=blockSize) {
@@ -55,6 +56,9 @@ Wave renderLive(const Wave& input, bool early, bool residual,
              <<" fast_wet="<<fastEngagement
              <<" fast_note_transitions="<<fastTransitions
              <<" high_register="<<highRegister
+             <<" mid_register="<<midRegister
+             <<" first_mid_ms="<<(engine.firstMidSample()>=0?
+                 1000.0*engine.firstMidSample()/input.rate:-1.0)
              <<" first_high_ms="<<(engine.firstHighSample()>=0?
                  1000.0*engine.firstHighSample()/input.rate:-1.0)
              <<" first_F0_ms="<<1000.0*engine.firstVoiceSample()/input.rate
@@ -74,7 +78,8 @@ int main(int argc,char** argv) {
         const Wave candidate=renderLive(source,true,false);
         const Wave preserved=renderLive(source,true,true);
         const Wave fast=renderLive(source,true,true,true,true);
-        const Wave high=renderLive(source,true,true,true,true,true);
+        // Combined guarded high/mid notes, STILL research-only.
+        const Wave high=renderLive(source,true,true,true,true,true,true);
         const auto levels=level(candidate);
         const auto residualLevels=level(preserved);
         const auto fastLevels=level(fast);
