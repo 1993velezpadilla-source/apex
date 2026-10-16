@@ -856,6 +856,84 @@ public:
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        beginTest("Real AudioEngine track + bus + master loops follow live QuickSend toggles");
+        {
+            DAW::TrackManager tracks;
+            auto* vocal=tracks.createTrack("PDC route probe");
+            DAW::RoutingGraph routing;
+            auto* source=vocal?routing.addNode(
+                "PDC track",DAW::RoutingNodeType::Track,vocal->getID()):nullptr;
+            auto* aux=routing.addNode("PDC aux",DAW::RoutingNodeType::Bus,"pdc-test-aux");
+            auto* send=source&&aux?routing.connect(
+                source->id,aux->id,DAW::ConnectionType::Send):nullptr;
+            expect(vocal!=nullptr && source!=nullptr && aux!=nullptr && send!=nullptr);
+            if(vocal && source && aux && send) {
+                send->active.store(false,std::memory_order_relaxed);
+                routing.notifyGraphChanged();
+                DAW::AudioEngine engine;
+                engine.setSubsystems(&tracks,nullptr,nullptr,&routing);
+                engine.prepare(48000.0,128);
+                struct SignalState {std::int64_t sample=0;};
+                SignalState input;
+                engine.setGraphPdcTrackInputForTests(
+                    &input,[](void* context,const DAW::TrackID&,
+                              juce::AudioBuffer<float>& audio,int frames) noexcept {
+                        auto& sourceState=*static_cast<SignalState*>(context);
+                        for(int n=0;n<frames;++n) {
+                            const double phase=2.0*juce::MathConstants<double>::pi*
+                                1000.0*static_cast<double>(sourceState.sample++)/48000.0;
+                            audio.setSample(0,n,static_cast<float>(0.15*std::sin(phase)));
+                            audio.setSample(1,n,static_cast<float>(0.10*std::cos(phase)));
+                        }
+                    });
+                engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+                const std::map<DAW::TrackID,int> latency={
+                    {vocal->getID(),0},{"pdc-test-aux",0}};
+                const auto stage=[&]() {
+                    auto graph=routing.getSnapshotPublisher().get();
+                    return graph && engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                        *graph,&latency,2,48000.0);
+                };
+                expect(stage());
+                std::int64_t timeline=0;
+                const auto measureRms=[&]() {
+                    double squares=0.0;
+                    int measured=0;
+                    juce::AudioBuffer<float> output(2,128);
+                    for(int block=0;block<30;++block) {
+                        output.clear();
+                        expect(engine.renderOfflineBlock(output,128,timeline));
+                        timeline+=128;
+                        if(block>=10)
+                            for(int n=0;n<128;++n) {
+                                const auto sample=output.getSample(0,n);
+                                squares+=static_cast<double>(sample)*sample;
+                                ++measured;
+                            }
+                    }
+                    return std::sqrt(squares/static_cast<double>(measured));
+                };
+                const double direct=measureRms();
+                expect(direct>1.e-4,"direct vocal signal must reach master");
+                send->active.store(true,std::memory_order_relaxed);
+                routing.notifyGraphChanged();
+                expect(stage());
+                const double parallel=measureRms();
+                expectWithinAbsoluteError(parallel,2.0*direct,
+                    std::max(.002,0.10*direct),
+                    "real track->send->bus->master must double the direct path");
+                send->active.store(false,std::memory_order_relaxed);
+                routing.notifyGraphChanged();
+                expect(stage());
+                const double restored=measureRms();
+                expectWithinAbsoluteError(restored,direct,
+                    std::max(.002,0.10*direct),
+                    "disabling the send must remove its routed signal");
+                expect(engine.getGraphPdcPreflightCounters().matchingBlocks>0);
+                (void)engine.collectGraphPdcRetiredOnControlThread();
+            }
+        }
+
         beginTest("AudioEngine research opt-in dispatch aligns direct + send + bus exactly once");
         // Exercise 44.1/48/96 kHz and ASIO-sized as well as irregular blocks.
         for(const double rate:{44100.0,48000.0,96000.0})
