@@ -292,8 +292,9 @@ int main() {
         assert(p.build(safe,safeEdges,{"source","master"}));
         assert(p.valid() && delay(p,"direct")==0);
     }
-    // QuickSend/AutoSend lifecycle: disabling and restoring a send must
-    // remove/recreate its compensation without leaking the previous plan.
+    // QuickSend/AutoSend lifecycle. Turning a send off does NOT automatically
+    // disconnect the aux-to-master path: reverb/delay tails can still render
+    // on that bus. Only removing that output route removes the PDC obligation.
     {
         ProgrammeRoutePdcPlannerResearchCore p;
         std::vector<Node> nodes={
@@ -308,16 +309,27 @@ int main() {
         edges[1].active=false;
         assert(p.build(nodes,edges,order));
         assert(p.findEdge("vocal-send")==nullptr);
+        // Aux output still exists; retain alignment for possible FX tails.
+        assert(delay(p,"vocal-dry")==40);
+        edges[2].active=false;
+        assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==0);
+        // Restore both routes to the original parallel wet/dry topology.
         edges[1].active=true;
+        edges[2].active=true;
         assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==40);
         // VST3 plugin latency notification on the aux route.
         nodes[1].ownProcessorLatency=72;
         assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==72);
-        // Bypassed sends cannot influence master arrival timing.
+        // Bypassed send still leaves the aux output active for a tail.
         edges[1].bypassed=true;
+        assert(p.build(nodes,edges,order));
+        assert(p.findEdge("vocal-send")==nullptr);
+        assert(delay(p,"vocal-dry")==72);
+        // With the aux-master edge disabled, no wet path can reach master.
+        edges[2].active=false;
         assert(p.build(nodes,edges,order));
         assert(delay(p,"vocal-dry")==0);
     }
