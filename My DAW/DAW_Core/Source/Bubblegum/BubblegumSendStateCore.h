@@ -69,7 +69,9 @@ public:
             {
                 c->active.store(true, std::memory_order_relaxed);
                 c->gain.store(level, std::memory_order_relaxed);
-                graph.publishSnapshotOnly();
+                // A previously existing send changed both DSP and visible state.
+                // publishSnapshotOnly() omits RoutingGraph listener invalidation.
+                graph.notifyGraphChanged();
                 return;
             }
         }
@@ -117,7 +119,7 @@ public:
             {
                 const bool before = c->active.load(std::memory_order_relaxed);
                 c->active.store(!before, std::memory_order_relaxed);
-                graph.publishSnapshotOnly();
+                graph.notifyGraphChanged();
                 DBG("TOGGLE send: source=" << sourceId << " target=" << targetId << " active=" << (int)!before);
                 return;
             }
@@ -145,7 +147,7 @@ public:
                 if (!c->active.load(std::memory_order_relaxed))
                 {
                     c->active.store(true, std::memory_order_relaxed);
-                    graph.publishSnapshotOnly();
+                    graph.notifyGraphChanged();
                     DBG("CREATE send (reactivated): source=" << sourceId << " target=" << targetId);
                 }
                 else
@@ -201,8 +203,11 @@ public:
         {
             if (c->destNodeId == destNode->id && isSendConnection(c->type))
             {
-                c->active.store(active, std::memory_order_relaxed);
-                graph.publishSnapshotOnly();
+                if (c->active.load(std::memory_order_relaxed) != active)
+                {
+                    c->active.store(active, std::memory_order_relaxed);
+                    graph.notifyGraphChanged();
+                }
                 return;
             }
         }
