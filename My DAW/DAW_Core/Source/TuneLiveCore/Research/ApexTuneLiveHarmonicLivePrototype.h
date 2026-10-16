@@ -15,6 +15,7 @@
 // click, CPU, formant and ASIO mic-to-ear gates are independently green.
 #include "../ApexTuneLiveVoiceControl.h"
 #include "ApexTuneLiveEarlyOnsetProbe.h"
+#include "ApexTuneLiveHighRegisterProbe.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,6 +33,7 @@ public:
         channels_=std::clamp(channels,1,2);
         tracker_.prepare(rate_);
         early_.prepare(rate_);
+        high_.prepare(rate_);
         // No dynamic allocation in prepare or process; control coefficients
         // are computed here or only when the pitch tracker emits a frame.
         wetStep_=1.0/((fastEngagement_?0.001:0.008)*rate_+1.0);
@@ -40,6 +42,7 @@ public:
     void reset() noexcept {
         tracker_.reset();
         early_.reset();
+        high_.reset();
         policy_.reset();
         for(auto& ch:partials_)
             for(auto& p:ch)p={};
@@ -54,6 +57,7 @@ public:
         voiced_=false;
         sampleCount_=0;
         firstVoiceSample_=firstHalfWetSample_=firstEarlySample_=-1;
+        firstHighSample_=-1;
         lastLargeNoteJumpSample_=-1;
         lastVoicedEstimateSample_=-1;
         lastFastTransitionSample_=-1;
@@ -68,6 +72,12 @@ public:
     // Research-only optional early seed for >=200 Hz, with octave veto.
     // No production host exposure; primary YIN remains authoritative.
     void enableEarlyOnset(bool enabled) noexcept {earlyEnabled_=enabled;}
+    // OFF by default. This guarded 96-sample high-register hypothesis
+    // can pre-seed F0 for >=400Hz *new* notes only. This does NOT predict
+    // anything in 1ms, nor replace the authoritative longer-window YIN.
+    void enableHighRegisterOnset(bool enabled) noexcept {
+        highRegisterEnabled_=enabled;
+    }
     // OFF by default. This speculative transition seed requires two
     // independent, agreeing short-window F0 frames with an octave veto;
     // the ordinary longer YIN still supplies authoritative sustained pitch.
@@ -102,6 +112,7 @@ public:
             const float detector=(channels_==2 && envelopeR_>1.2f*envelopeL_)
                                    ?dry[1]:dry[0];
             const bool preliminary=earlyEnabled_ && early_.push(detector);
+            const bool earlyHigh=highRegisterEnabled_ && high_.push(detector);
             if(tracker_.push(detector)) {
                 const auto primary=tracker_.latest();
                 // After an EARLY predicted octave switch, the full YIN
@@ -117,6 +128,15 @@ public:
                     std::abs(1200.0*std::log2(primary.hz/sourceHz_))>650.0;
                 if(!overlapsPredictedLeap)
                     updatePitch(primary,false);
+            } else if(!voiced_ && earlyHigh && high_.latest().voiced &&
+                      high_.latest().confidence>=0.95f) {
+                // 2 agreeing short-window analyses of actual samples, then
+                // later full YIN re-acquires as the trustworthy authority.
+                const auto e=high_.latest();
+                const PitchTracker::Result estimate{e.hz,e.confidence,true};
+                updatePitch(estimate,true);
+                if(voiced_ && firstHighSample_<0)
+                    firstHighSample_=sampleCount_;
             } else if(preliminary && early_.latest().voiced) {
                 // Early detector is not given an oracle; it observes the
                 // actual mic samples and requires two agreeing estimates.
@@ -208,6 +228,7 @@ public:
     double researchWetMix() const noexcept {return wet_;}
     int64_t firstVoiceSample() const noexcept {return firstVoiceSample_;}
     int64_t firstEarlySample() const noexcept {return firstEarlySample_;}
+    int64_t firstHighSample() const noexcept {return firstHighSample_;}
     int largeNoteJumpCount() const noexcept {return largeNoteJumpCount_;}
     int fastTransitionCount() const noexcept {return fastTransitionCount_;}
     int64_t lastFastTransitionSample() const noexcept {return lastFastTransitionSample_;}
@@ -291,6 +312,7 @@ private:
     }
     PitchTracker tracker_;
     EarlyOnsetProbe early_;
+    HighRegisterOnsetProbe high_;
     VoiceControl policy_;
     VoiceSettings settings_{};
     std::array<std::array<Partial,kHarmonics>,2> partials_{};
@@ -301,10 +323,11 @@ private:
     int channels_=1,voicedSamples_=0;
     int64_t sampleCount_=0,firstVoiceSample_=-1,firstHalfWetSample_=-1,
             firstEarlySample_=-1,lastLargeNoteJumpSample_=-1,
-            lastVoicedEstimateSample_=-1,lastFastTransitionSample_=-1;
+            lastVoicedEstimateSample_=-1,lastFastTransitionSample_=-1,
+            firstHighSample_=-1;
     int largeNoteJumpCount_=0,fastTransitionCount_=0;
     bool voiced_=false,initializedPhase_=false,earlyEnabled_=false,
          fastTransitionsEnabled_=false,residualMode_=false,
-         fastEngagement_=false;
+         fastEngagement_=false,highRegisterEnabled_=false;
 };
 }}} // namespace APEX::TuneLive::Research
