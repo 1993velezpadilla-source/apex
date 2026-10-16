@@ -337,6 +337,7 @@ public:
             slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
             graph.edges={fast,slow};
             const std::map<DAW::TrackID,int> latency={{"fast",0},{"slow",32}};
+            const DAW::RouteID fastRoute{"fast-to-master"};
             DAW::MasterPdcCore legacy;
             legacy.prepare(rate,frames);
             legacy.sync(graph,&latency,frames);
@@ -346,7 +347,7 @@ public:
             left[16370]=.625f;right[16370]=-.3125f;
             {
                 juce::UnitTestAllocationChecker checker(*this);
-                legacy.processEdge("fast-to-master",left.data(),right.data(),16384);
+                legacy.processEdge(fastRoute,left.data(),right.data(),16384);
             }
             expectWithinAbsoluteError((double)left[32],.25,1.e-6);
             expectWithinAbsoluteError((double)right[32],-.125,1.e-6);
@@ -355,7 +356,7 @@ public:
             float tailL[64]{},tailR[64]{};
             {
                 juce::UnitTestAllocationChecker checker(*this);
-                legacy.processEdge("fast-to-master",tailL,tailR,64);
+                legacy.processEdge(fastRoute,tailL,tailR,64);
             }
             for(int i=0;i<64;++i) {
                 expectWithinAbsoluteError((double)tailL[i],
@@ -388,6 +389,7 @@ public:
             slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
             graph.edges={fast,slow};
             const std::map<DAW::TrackID,int> latency={{"fast",0},{"slow",256}};
+            const DAW::RouteID fastRoute{"fast-to-master"};
             DAW::MasterPdcCore legacy;
             legacy.prepare(rate,8192);
             legacy.sync(graph,&latency,frames); // allocate once outside callback
@@ -400,7 +402,7 @@ public:
                     graph.edges[1].active=(iteration%4)!=1;
                     graph.edges[1].bypassed=(iteration%4)==2;
                     legacy.sync(graph,&latency,frames);
-                    legacy.processEdge("fast-to-master",left,right,frames);
+                    legacy.processEdge(fastRoute,left,right,frames);
                 }
             }
             graph.edges[1].active=true;
