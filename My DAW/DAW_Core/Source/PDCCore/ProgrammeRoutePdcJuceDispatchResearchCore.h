@@ -91,6 +91,23 @@ public:
     }
     std::uint64_t version() const noexcept{return version_;}
     int channels() const noexcept{return bank_?bank_->channels():0;}
+    // Called once per realtime block before opting into graph-wide PDC.
+    // The audio engine must NEVER mix a partly prepared graph plan with
+    // legacy/direct routing inside one block: every audible programme edge
+    // has to be mapped to its prepared delay (including zero-delay taps).
+    // This is a bounded index-only scan: no allocations, locks or hashes.
+    bool coversAllActiveProgrammeEdges(const RoutingSnapshot& graph) const noexcept {
+        if(!bank_ || graph.version!=version_ ||
+           graph.edges.size()!=edges_.size())return false;
+        for(std::size_t i=0;i<graph.edges.size();++i) {
+            const auto& edge=graph.edges[i];
+            if(edge.active && !edge.bypassed &&
+               edge.type!=ConnectionType::Sidechain &&
+               edges_[i]==invalidIndex)
+                return false;
+        }
+        return true;
+    }
     int edgeDelay(std::size_t edgePosition) const noexcept {
         if(!bank_||edgePosition>=edges_.size() ||
            edges_[edgePosition]==invalidIndex)return -1;
