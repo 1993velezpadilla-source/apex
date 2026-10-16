@@ -55,6 +55,7 @@ int main(int argc,char** argv) {
         const Wave noResidual=readWave(prefix+"_harmonic_live_research.wav");
         const Wave fastCandidate=readWave(prefix+"_harmonic_live_fast_research.wav");
         const Wave highCandidate=readWave(prefix+"_harmonic_live_high_research.wav");
+        const Wave ultraCandidate=readWave(prefix+"_harmonic_live_ultra_research.wav");
         if(reference.frames()!=candidate.frames() ||
            reference.frames()!=noResidual.frames() ||
            reference.rate!=candidate.rate || reference.rate!=noResidual.rate ||
@@ -65,13 +66,17 @@ int main(int argc,char** argv) {
            reference.channels!=fastCandidate.channels ||
            reference.frames()!=highCandidate.frames() ||
            reference.rate!=highCandidate.rate ||
-           reference.channels!=highCandidate.channels)
+           reference.channels!=highCandidate.channels ||
+           reference.frames()!=ultraCandidate.frames() ||
+           reference.rate!=ultraCandidate.rate ||
+           reference.channels!=ultraCandidate.channels)
             throw std::runtime_error("Candidate and source have unequal PCM length/rate/channels");
         const auto original=measure(reference);
         const auto residual=measure(candidate);
         const auto harmonicOnly=measure(noResidual);
         const auto fastEnergy=measure(fastCandidate);
         const auto highEnergy=measure(highCandidate);
+        const auto ultraEnergy=measure(ultraCandidate);
         const double ratio2=residual.high2k/original.high2k;
         const double ratio6=residual.high6k/original.high6k;
         const double loudness=residual.rms/original.rms;
@@ -124,7 +129,29 @@ int main(int argc,char** argv) {
             highLoudness>=0.45 && highLoudness<=1.8 &&
             std::isfinite(highPeak) && highPeak<1.0 &&
             std::isfinite(highStep) && highStep<0.98;
-        const bool allPassed=passed && fastBands && fastSafety && highSafe;
+        const double ultra2=ultraEnergy.high2k/original.high2k;
+        const double ultra6=ultraEnergy.high6k/original.high6k;
+        const double ultraRms=ultraEnergy.rms/original.rms;
+        double ultraPeak=0.0,ultraStep=0.0;
+        for(std::size_t i=0;i<ultraCandidate.data.size();++i) {
+            const double x=ultraCandidate.data[i];
+            ultraPeak=std::max(ultraPeak,std::abs(x));
+            if(i>=static_cast<std::size_t>(ultraCandidate.channels)) {
+                const auto prior=i-static_cast<std::size_t>(ultraCandidate.channels);
+                ultraStep=std::max(ultraStep,
+                    std::abs(x-ultraCandidate.data[prior]));
+            }
+        }
+        // An optional predictor can correctly do nothing to low singers:
+        // do not require a fabricated audio difference. But it must NOT
+        // introduce clipping or gross spectral losses in ANY real singer.
+        const bool ultraSafe=ultra2>=0.60 && ultra2<=1.45 &&
+            ultra6>=0.60 && ultra6<=1.45 &&
+            ultraRms>=0.45 && ultraRms<=1.8 &&
+            std::isfinite(ultraPeak) && ultraPeak<1.0 &&
+            std::isfinite(ultraStep) && ultraStep<0.98;
+        const bool allPassed=passed && fastBands && fastSafety &&
+                             highSafe && ultraSafe;
         std::cout<<std::fixed<<std::setprecision(5)
                  <<"VOCADITO_CAUSAL_RESIDUAL_BANDS source="<<prefix
                  <<" sr="<<reference.rate
@@ -149,6 +176,11 @@ int main(int argc,char** argv) {
                  <<" high_register_peak="<<highPeak
                  <<" high_register_adjacent_step="<<highStep
                  <<" high_register_safety="<<highSafe
+                 <<" ultra_2k_ratio="<<ultra2
+                 <<" ultra_6k_ratio="<<ultra6
+                 <<" ultra_peak="<<ultraPeak
+                 <<" ultra_adjacent_step="<<ultraStep
+                 <<" ultra_signal_safety="<<ultraSafe
                  <<" accepted="<<allPassed
                  <<" (NOT pitch fidelity / <1ms singer response / ABX)\n";
         return allPassed?0:1;
