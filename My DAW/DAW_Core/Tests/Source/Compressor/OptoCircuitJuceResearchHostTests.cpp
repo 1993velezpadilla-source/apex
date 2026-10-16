@@ -776,6 +776,8 @@ public:
                 expectEquals(dispatcher.edgeDelay(1),0);
                 expectEquals(dispatcher.edgeDelay(2),0);
                 expectEquals(dispatcher.edgeDelay(3),-1);
+                expect(dispatcher.coversAllActiveProgrammeEdges(graph),
+                       "all active programme edges are prepared; sidechain excluded");
                 DAW::PluginParallelDryDelayResearchCore vocalFx,auxFx;
                 expect(vocalFx.prepare(2,32));
                 expect(auxFx.prepare(2,16));
@@ -836,6 +838,20 @@ public:
                 expect(!dispatcher.prepare(graph,&latencies,2));
                 expectEquals(dispatcher.version(),static_cast<std::uint64_t>(208));
                 expectEquals(dispatcher.edgeDelay(0),0);
+                // An active edge targeting an inactive aux has no prepared
+                // delay. Reject the ENTIRE experimental block rather than
+                // compensating direct but accidentally sending aux dry.
+                graph.processingOrder={"vocal-node","aux-node","master"};
+                graph.nodes[1].active=false;
+                graph.edges[1].active=true;
+                graph.version=210;
+                expect(dispatcher.prepare(graph,&latencies,2));
+                expect(!dispatcher.coversAllActiveProgrammeEdges(graph));
+                graph.edges[1].active=false;
+                graph.edges[2].active=false;
+                graph.version=211;
+                expect(dispatcher.prepare(graph,&latencies,2));
+                expect(dispatcher.coversAllActiveProgrammeEdges(graph));
             }
         }
 
