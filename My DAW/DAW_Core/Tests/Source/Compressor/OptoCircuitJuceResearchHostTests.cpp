@@ -128,6 +128,16 @@ public:
         setLatencySamples(latency_);
     }
     void releaseResources() override {}
+    // A real JUCE AudioPluginInstance changes its advertised latency while
+    // remaining inserted. Models a VST3 lookahead/quality change without
+    // structurally rebuilding PluginChainCore.
+    void setResearchLatencyOnControlThread(int samples) {
+        jassert(samples==16 || samples==32);
+        if(samples!=16 && samples!=32)return;
+        latency_=samples;
+        reset();
+        setLatencySamples(samples);
+    }
     void reset() override {for(auto& v:delay_)v.fill(0.f);index_=0;}
     void processBlock(juce::AudioBuffer<float>& b,juce::MidiBuffer&) override {
         if(b.getNumChannels()<2)return;
