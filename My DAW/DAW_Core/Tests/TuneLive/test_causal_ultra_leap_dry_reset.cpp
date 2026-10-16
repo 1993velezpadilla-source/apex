@@ -94,8 +94,15 @@ int main() {
             newMode.minPostWet<0.20 &&
             newMode.recoveredMs>0.0 &&
             newMode.recoveredMs<45.0;
+        // The initial hypothesis of legacy wet staying near 100% was
+        // WRONG in this fixture: primary YIN itself briefly returns
+        // unvoiced on the octave change, so existing wet_ naturally
+        // falls to 5–10%. Do not erase that evidence or claim that
+        // dry-reseed fixes a missing fade. Assert only the measurable
+        // additional full reset while retaining sound-integrity gates.
         const bool normalUnchanged=old.preWet>0.90 &&
-            old.minPostWet>newMode.minPostWet+0.25;
+            old.minPostWet<0.20 &&
+            old.minPostWet>newMode.minPostWet+0.03;
         const bool integrity=newMode.finite && old.finite &&
             mixedBlocks.finite && newMode.leaps>=1 &&
             newMode.fastTransitions>=1 &&
