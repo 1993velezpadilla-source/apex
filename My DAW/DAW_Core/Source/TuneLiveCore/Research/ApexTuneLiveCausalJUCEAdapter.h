@@ -57,6 +57,7 @@ public:
         live_.setVoiceSettings(settings);
         live_.enableEarlyOnset(true);
         live_.enableHighRegisterOnset(true);
+        live_.enableMidRegisterOnset(true);
         live_.enableFastEngagement(true);
         live_.enableExperimentalEarlyTransitions(true);
         live_.enableResidualPreservation(true);
@@ -77,6 +78,7 @@ public:
     double researchWetMix() const noexcept {return live_.researchWetMix();}
     int64_t firstVoiceSample() const noexcept {return live_.firstVoiceSample();}
     int64_t firstHighSample() const noexcept {return live_.firstHighSample();}
+    int64_t firstMidSample() const noexcept {return live_.firstMidSample();}
     int fastTransitionCount() const noexcept {return live_.fastTransitionCount();}
     int64_t lastFastTransitionSample() const noexcept {
         return live_.lastFastTransitionSample();
