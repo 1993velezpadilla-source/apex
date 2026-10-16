@@ -2420,7 +2420,15 @@ private:
                             break;
                         }
         if(routeRenderAllowed)
+        {
             graphPdcRenderedBlocks_.fetch_add(1,std::memory_order_relaxed);
+            // Legacy MasterPdcCore did not advance its delay histories while
+            // V2 owned routing. Force a fresh legacy resync on EVERY return
+            // from V2 (including a second record-arm toggle with unchanged
+            // graph/version/latency); otherwise the frozen legacy bank could
+            // replay samples from an earlier monitoring timeline.
+            masterPdcDirty_.store(true,std::memory_order_relaxed);
+        }
         graphPdcActiveRt_=routeRenderAllowed?stagedGraphReader.get():nullptr;
         struct ScopedResetResearchGraphPdc final {
             AudioEngine* engine;
