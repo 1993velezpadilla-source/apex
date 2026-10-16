@@ -202,6 +202,7 @@ jobs:
             test -s "vocadito_${singer}_harmonic_live_residual_research.wav"
             test -s "vocadito_${singer}_harmonic_live_fast_research.wav"
             test -s "vocadito_${singer}_harmonic_live_high_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_research.wav"
             test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
           done
       - name: Reject gross sibilance-energy loss in causal residual LIVE across 3 real singers
@@ -329,16 +330,19 @@ jobs:
             vocadito_human_harmonic_live_residual_research.wav
             vocadito_human_harmonic_live_fast_research.wav
             vocadito_human_harmonic_live_high_research.wav
+            vocadito_human_harmonic_live_ultra_research.wav
             vocadito_human_HARMONIC_LIVE_RESEARCH.txt
             vocadito_low_harmonic_live_research.wav
             vocadito_low_harmonic_live_residual_research.wav
             vocadito_low_harmonic_live_fast_research.wav
             vocadito_low_harmonic_live_high_research.wav
+            vocadito_low_harmonic_live_ultra_research.wav
             vocadito_low_HARMONIC_LIVE_RESEARCH.txt
             vocadito_high_harmonic_live_research.wav
             vocadito_high_harmonic_live_residual_research.wav
             vocadito_high_harmonic_live_fast_research.wav
             vocadito_high_harmonic_live_high_research.wav
+            vocadito_high_harmonic_live_ultra_research.wav
             vocadito_high_HARMONIC_LIVE_RESEARCH.txt
             vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
             vocadito_low_HARMONIC_LIVE_BANDS_REPORT.txt
