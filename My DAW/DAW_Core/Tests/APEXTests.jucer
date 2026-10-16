@@ -2,9 +2,13 @@
 
 <JUCERPROJECT id="ApexTests01" name="APEXTests" projectType="consoleapp" bundleIdentifier="com.apex.APEXTests"
               companyName="Apex" companyCopyright="Apex" useAppConfig="0" addUsingNamespaceToJuceHeader="0"
-              jucerFormatVersion="1" defines="JUCE_ENABLE_ALLOCATION_HOOKS=1 JUCE_STRICT_REFCOUNTEDPOINTER=1 APEX_ENABLE_TEST_HOOKS=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1">
+              jucerFormatVersion="1" defines="JUCE_ENABLE_ALLOCATION_HOOKS=1 JUCE_STRICT_REFCOUNTEDPOINTER=1 APEX_ENABLE_TEST_HOOKS=1 APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1">
   <MAINGROUP id="ApexTestsMG" name="APEXTests">
     <GROUP id="{A1A1A1A1-0000-0000-0000-000000000001}" name="Source">
+      <GROUP id="{A1A1A1A1-0000-0000-0000-0000000000F2}" name="PDC V2">
+        <FILE id="PDC2_MAIN_JUCE1" name="PdcV2MainlineJuceTests.cpp" compile="1" resource="0"
+              file="Source/PDC/PdcV2MainlineJuceTests.cpp"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000010}" name="Smoke">
         <FILE id="SM_CPP1" name="RunnerSmokeTests.cpp" compile="1" resource="0"
               file="Source/Smoke/RunnerSmokeTests.cpp"/>
