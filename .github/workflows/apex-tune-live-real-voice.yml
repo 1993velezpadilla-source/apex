@@ -217,6 +217,19 @@ jobs:
           for singer in human low high; do
             ./tune_live_harmonic_sibilance_gate --prefix "vocadito_${singer}" | tee "vocadito_${singer}_HARMONIC_LIVE_BANDS_REPORT.txt"
           done
+      - name: Independent 13-band voiced-singer spectrum comparison (proxy only; NOT validated formants)
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_human_log_spectrum_formant_proxy.cpp" \
+            -o tune_live_log_spectrum_human
+          for singer in human low high; do
+            ./tune_live_log_spectrum_human --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt"
+          done
       - name: Measure independent sustained-note F0 on real HQ40 vs fast LIVE research singers
         shell: bash
         run: |
@@ -350,6 +363,9 @@ jobs:
             vocadito_human_FAST_HUMAN_F0_COMPARISON.txt
             vocadito_low_FAST_HUMAN_F0_COMPARISON.txt
             vocadito_high_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_human_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
+            vocadito_low_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
+            vocadito_high_LOG_SPECTRAL_ENVELOPE_DIAGNOSTIC.txt
             vocadito_human_research18.wav
             vocadito_human_research12.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
