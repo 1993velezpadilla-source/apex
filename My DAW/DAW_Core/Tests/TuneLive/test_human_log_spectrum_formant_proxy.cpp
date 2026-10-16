@@ -150,6 +150,9 @@ Stats compare(const Wave& dry,const Wave& prior,const Wave& ultra) {
     return stats;
 }
 }
+#ifdef APEX_ULTRA_SPECTRAL_HELPER_ONLY
+#define main disabled_human_spectral_entry
+#endif
 int main(int argc,char** argv) {
     try {
         if(argc!=3 || std::string(argv[1])!="--prefix")
@@ -196,3 +199,7 @@ int main(int argc,char** argv) {
         return 1;
     }
 }
+
+#ifdef APEX_ULTRA_SPECTRAL_HELPER_ONLY
+#undef main
+#endif
