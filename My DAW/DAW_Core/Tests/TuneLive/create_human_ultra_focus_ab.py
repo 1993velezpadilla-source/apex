@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produce reproducible, RMS-level-matched, blinded research clips of a real-voice glitch.
+"""Produce reproducible, RMS-level-matched, blinded research clips of a localized real-voice spectral change.
 
 Designed for CI's licensed Vocadito PCM WAV render; uses only the stdlib.
 DOES NOT imply singer quality, correct formants, or 1 ms correction.
@@ -69,8 +69,17 @@ def main():
             data[key.strip()] = value.strip()
     delta = float(data["worst_13band_delta_db"])
     center = float(data["worst_13band_time_seconds"])
-    if not math.isfinite(delta) or not math.isfinite(center) or delta <= 5.0 or center < 0:
-        raise ValueError("No localized >5 dB real-vocal candidate for blinded audition")
+    if not math.isfinite(delta) or not math.isfinite(center):
+        raise ValueError("Nonfinite localized real-vocal measurement")
+    if delta <= 5.0 or center < 0:
+        out = pathlib.Path(args.out)
+        out.mkdir(exist_ok=True, parents=True)
+        (out / "NO_LOCALIZED_AB_NEEDED.txt").write_text(
+            f"No >5 dB voiced 13-band hotspot detected for {prefix} (max={delta:.4f} dB).\n"
+            "Automated spectral differences are not proof of natural vocal quality.\n"
+        )
+        print(f"ULTRA_FOCUS_NO_LOCALIZED_HOTSPOT prefix={prefix} max={delta:.4f}dB")
+        return
 
     wavs = {name: pathlib.Path(f"{prefix}_{stem}.wav") for name, stem in VARIANTS.items()}
     with wave.open(str(next(iter(wavs.values()))), "rb") as reference:
