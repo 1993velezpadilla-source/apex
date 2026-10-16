@@ -257,6 +257,17 @@ jobs:
             ./tune_live_human_dry_reset_experiment --prefix "vocadito_${singer}"
             test -s "vocadito_${singer}_ULTRA_DRY_RESET_RESEARCH.txt"
           done
+      - name: Prepare blind level-matched WAV A-B/C at highest measured singer transition hotspot
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This stage does not auto-pass any subjective quality gate.
+          # If a >5 dB localized spectral change exists, create sample-synchronous,
+          # PCM24 level-matched A/B/C of the previous, ultra, and reset variants.
+          python3 "My DAW/DAW_Core/Tests/TuneLive/create_human_ultra_focus_ab.py" \
+            --prefix vocadito_high --out ULTRA_VOCAL_FOCUS_AB
+          test -s ULTRA_VOCAL_FOCUS_AB/LISTEN_FIRST.txt || \
+            test -s ULTRA_VOCAL_FOCUS_AB/NO_LOCALIZED_AB_NEEDED.txt
       - name: Measure independent sustained-note F0 on real HQ40 vs fast LIVE research singers
         shell: bash
         run: |
@@ -421,6 +432,7 @@ jobs:
             vocadito_high_research18.wav
             vocadito_high_research12.wav
             vocadito_high_PITCH_COMPARISON.txt
+            ULTRA_VOCAL_FOCUS_AB/
             VOCADITO_REGISTER_MATRIX_LICENSE.txt
             HUMAN_HIGH_REGISTER_SPECTRAL_OCTAVE_AUDIT.txt
             vocadito_human_research_compensated.wav
