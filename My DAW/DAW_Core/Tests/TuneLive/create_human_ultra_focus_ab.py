@@ -85,6 +85,9 @@ def main():
     # DRY is an explicitly labeled natural-voice control, not a fourth
     # anonymized tune candidate. It is sample-aligned with research outputs.
     wavs["dry_control"] = pathlib.Path(f"{prefix}_source.wav")
+    # 4-hop is a NEW separate research candidate, not part of the pinned
+    # A/B/C assignment or its ordering on earlier CI artifacts.
+    wavs["ultra_4hop"] = pathlib.Path(f"{prefix}_harmonic_live_ultra_4hop_research.wav")
     with wave.open(str(next(iter(wavs.values()))), "rb") as reference:
         rate, count = reference.getframerate(), reference.getnframes()
     start = max(0, min(round((center - 0.8) * rate), count - 1))
@@ -121,6 +124,14 @@ def main():
     # changing their stable blinded A/B/C assignments. Unlike HQ40 it has
     # the same nominal time origin as these non-lookahead research WAVs.
     dry_rate, dry_ch, dry_pcm, dry_rms, dry_peak = segments["dry_control"]
+    hop_rate, hop_ch, hop_pcm, hop_rms, hop_peak = segments["ultra_4hop"]
+    hop_file = "ULTRA_4HOP_UNBLINDED_RESEARCH.wav"
+    save_pcm24(out / hop_file, hop_pcm, hop_rate, hop_ch, level / hop_rms)
+    manifest["ultra_4hop_research_candidate"] = {
+        "file": hop_file, "gain": level / hop_rms,
+        "input_rms": hop_rms, "input_peak": hop_peak,
+        "not_blinded": True, "not_a_shipping_mode": True,
+    }
     dry_filename = "DRY_SINGER_REFERENCE.wav"
     save_pcm24(out / dry_filename, dry_pcm, dry_rate, dry_ch, level / dry_rms)
     manifest["natural_source_reference"] = {
@@ -135,6 +146,7 @@ def main():
     prior = segments["previous_high"][2]
     ultra = segments["ultra"][2]
     reset = segments["ultra_dry_reset"][2]
+    hop = segments["ultra_4hop"][2]
     dry = segments["dry_control"][2]
     ch_count = segments["previous_high"][1]
     hot = []
@@ -144,6 +156,8 @@ def main():
         diff_power = sum((ultra[j] - prior[j]) ** 2 for j in range(offset, stop))
         diff_rms = math.sqrt(diff_power / n)
         source_rms = math.sqrt(sum(dry[j] ** 2 for j in range(offset, stop)) / n)
+        hop_diff_rms = math.sqrt(sum((hop[j] - ultra[j]) ** 2
+                                     for j in range(offset, stop)) / n)
         if diff_rms <= 0.007:
             continue
         def max_step(pcm):
@@ -152,9 +166,11 @@ def main():
         hot.append({
             "original_time_s": (start + offset // ch_count) / rate,
             "ultra_vs_previous_diff_rms": diff_rms,
+            "four_hop_vs_eight_hop_diff_rms": hop_diff_rms,
             "dry_rms": source_rms,
             "previous_adjacent_step_peak": max_step(prior),
             "ultra_adjacent_step_peak": max_step(ultra),
+            "four_hop_adjacent_step_peak": max_step(hop),
             "reset_adjacent_step_peak": max_step(reset),
             "dry_adjacent_step_peak": max_step(dry),
             "note": "Difference is not proof of audible quality or pitch accuracy",
@@ -163,6 +179,8 @@ def main():
     report = {
         "source": prefix, "rate": rate, "micro_window_ms": 5,
         "micro_windows_with_rms_difference_gt_0_007": len(hot),
+        "four_hop_vs_eight_hop_full_focus_rms": math.sqrt(
+            sum((hop[j] - ultra[j]) ** 2 for j in range(len(hop))) / len(hop)),
         "largest_micro_differences": top,
         "warning": "Do not infer pops/clicks, formant preservation, corrected F0 or 1ms from this table.",
     }
@@ -173,6 +191,7 @@ def main():
         "APEX Tune Live V5 ultra predictor — REAL VOCADITO SINGER LOCAL HOTSPOT\n"
         "Listen A/B/C with matched playback levels, and DO NOT read UNBLIND until rating.\n"
         "DRY_SINGER_REFERENCE.wav is the level-matched ORIGINAL for context only; do not confuse with HQ40.\n"
+        "ULTRA_4HOP_UNBLINDED_RESEARCH.wav is a fourth faster-cadence candidate; no objective perceptual approval.\n"
         "MICROTRANSIENT_FORENSICS.json contains objective 5ms local changes, NOT a listening approval.\n"
         "Pay attention to attack pops, timbre/vowels, glides, pitch jumps and artifacts.\n"
         "Files are equal-length, equal-RMS PCM24 excerpts from sample-synchronous "
