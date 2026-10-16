@@ -96,15 +96,15 @@ public:
                     } listener;
                     h.graph.addListener(&listener);
 
+                    std::shared_ptr<const RoutingSnapshot> pinnedSnapshot;
                     const auto findSnapshotEdge = [&](ConnectionType type)
                         -> const RoutingSnapshot::EdgeSnapshot*
                     {
-                        // This lambda is used only within each expression before
-                        // the snapshot is replaced by another graph mutation.
-                        static std::shared_ptr<const RoutingSnapshot> pinned;
-                        pinned = h.graph.getSnapshotPublisher().get();
-                        if (!pinned) return nullptr;
-                        for (const auto& edge : pinned->edges)
+                        // Keep each returned edge alive until the next query.
+                        // This local pin is released when the regression ends.
+                        pinnedSnapshot = h.graph.getSnapshotPublisher().get();
+                        if (!pinnedSnapshot) return nullptr;
+                        for (const auto& edge : pinnedSnapshot->edges)
                             if (edge.sourceNodeId == srcNodeID
                                 && edge.destNodeId == destNodeID
                                 && edge.type == type)
