@@ -548,7 +548,8 @@ public:
         if(!graphPdcResetOk)
             graphPdcRenderEnabled_.store(false,std::memory_order_release);
 #endif
-sampleRate_ = sampleRate;
+
+        sampleRate_ = sampleRate;
         blockSize_  = blockSize;
         // Pre-allocate all buffers for the worst-case block size (8192).
         // This prevents crashes when ASIO4ALL or other drivers reconfigure
