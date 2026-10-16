@@ -163,12 +163,16 @@ public:
     struct GraphPdcPreflightCounters {
         std::uint64_t matchingBlocks=0;
         std::uint64_t rejectedBlocks=0;
+        std::uint64_t renderedBlocks=0;
+        std::uint64_t monitoringFallbackBlocks=0;
     };
     GraphPdcPreflightCounters getGraphPdcPreflightCounters() const noexcept
     {
         return {
             graphPdcMatchedBlocks_.load(std::memory_order_relaxed),
-            graphPdcRejectedBlocks_.load(std::memory_order_relaxed)
+            graphPdcRejectedBlocks_.load(std::memory_order_relaxed),
+            graphPdcRenderedBlocks_.load(std::memory_order_relaxed),
+            graphPdcMonitoringFallbackBlocks_.load(std::memory_order_relaxed)
         };
     }
 
@@ -1259,6 +1263,8 @@ private:
     DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore graphPdcPreflight_;
     std::atomic<std::uint64_t> graphPdcMatchedBlocks_{0};
     std::atomic<std::uint64_t> graphPdcRejectedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcRenderedBlocks_{0};
+    std::atomic<std::uint64_t> graphPdcMonitoringFallbackBlocks_{0};
     std::atomic<bool> graphPdcRenderEnabled_{false};
     void* graphPdcTrackInputContext_=nullptr;
     GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
@@ -2271,7 +2277,14 @@ private:
             for(const auto& meta:snap->nodes)
                 if(meta.type==RoutingNodeType::Track && meta.active)
                     if(auto* source=tracks_->getTrack(meta.trackId))
-                        if(source->isArmed()) {routeRenderAllowed=false;break;}
+                        if(source->isArmed()) {
+                            routeRenderAllowed=false;
+                            graphPdcMonitoringFallbackBlocks_.fetch_add(
+                                1,std::memory_order_relaxed);
+                            break;
+                        }
+        if(routeRenderAllowed)
+            graphPdcRenderedBlocks_.fetch_add(1,std::memory_order_relaxed);
         graphPdcActiveRt_=routeRenderAllowed?stagedGraphReader.get():nullptr;
         struct ScopedResetResearchGraphPdc final {
             AudioEngine* engine;
