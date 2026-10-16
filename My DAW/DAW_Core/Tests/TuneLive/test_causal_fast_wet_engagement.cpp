@@ -13,11 +13,11 @@
 namespace {
 constexpr double pi=3.14159265358979323846;
 struct Result {
-    double voiceMs=0.0,halfWetMs=0.0,wetCents=9999.0;
+    double voiceMs=0.0,halfWetMs=0.0,wetCents=9999.0,highMs=-1.0;
     double maxOutputStep=0.0,wetMix=0.0;
     bool finite=true;
 };
-Result run(double rate,double target,bool fast) {
+Result run(double rate,double target,bool fast,bool highSeed=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     const int samples=static_cast<int>(1.2*rate);
     const double input=target*std::pow(2.0,30.0/1200.0);
@@ -37,6 +37,7 @@ Result run(double rate,double target,bool fast) {
     policy.flexTune=0.0f;policy.noteHysteresis=0.1f;
     candidate.setVoiceSettings(policy);
     candidate.enableEarlyOnset(true);
+    candidate.enableHighRegisterOnset(highSeed);
     candidate.enableResidualPreservation(true);
     candidate.enableFastEngagement(fast);
     constexpr std::array<int,6> chunks{{1,48,128,257,17,64}};
@@ -62,6 +63,8 @@ Result run(double rate,double target,bool fast) {
     if(checked.voiced && checked.hz>0.0f)
         result.wetCents=1200.0*std::log2(checked.hz/target);
     result.voiceMs=1000.0*candidate.firstVoiceSample()/rate;
+    result.highMs=candidate.firstHighSample()>=0?
+        1000.0*candidate.firstHighSample()/rate:-1.0;
     result.halfWetMs=1000.0*candidate.firstHalfWetSample()/rate;
     result.wetMix=candidate.researchWetMix();
     return result;
