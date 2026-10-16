@@ -13,12 +13,12 @@
 namespace {
 constexpr double pi=3.14159265358979323846;
 struct Result {
-    double voiceMs=0.0,halfWetMs=0.0,wetCents=9999.0,highMs=-1.0,midMs=-1.0;
+    double voiceMs=0.0,halfWetMs=0.0,wetCents=9999.0,highMs=-1.0,midMs=-1.0,ultraMs=-1.0;
     double maxOutputStep=0.0,wetMix=0.0;
     bool finite=true;
 };
 Result run(double rate,double target,bool fast,bool highSeed=false,
-           bool midSeed=false) {
+           bool midSeed=false,bool ultraSeed=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     const int samples=static_cast<int>(1.2*rate);
     const double input=target*std::pow(2.0,30.0/1200.0);
@@ -40,6 +40,7 @@ Result run(double rate,double target,bool fast,bool highSeed=false,
     candidate.enableEarlyOnset(true);
     candidate.enableHighRegisterOnset(highSeed);
     candidate.enableMidRegisterOnset(midSeed);
+    candidate.enableUltraHighRegisterOnset(ultraSeed);
     candidate.enableResidualPreservation(true);
     candidate.enableFastEngagement(fast);
     constexpr std::array<int,6> chunks{{1,48,128,257,17,64}};
@@ -69,6 +70,8 @@ Result run(double rate,double target,bool fast,bool highSeed=false,
         1000.0*candidate.firstHighSample()/rate:-1.0;
     result.midMs=candidate.firstMidSample()>=0?
         1000.0*candidate.firstMidSample()/rate:-1.0;
+    result.ultraMs=candidate.firstUltraSample()>=0?
+        1000.0*candidate.firstUltraSample()/rate:-1.0;
     result.halfWetMs=1000.0*candidate.firstHalfWetSample()/rate;
     result.wetMix=candidate.researchWetMix();
     return result;
