@@ -357,6 +357,65 @@ public:
                 "reactivation must restore sample-exact master compensation");
         }
 
+        beginTest("Legacy PDC bypass must not replay an old pending impulse");
+        for (const double rate : {44100.0,48000.0,96000.0})
+        for (const int frames : {64,128,256,512})
+        for (const bool bypassRoute : {false,true})
+        {
+            DAW::RoutingSnapshot routes;
+            routes.version=1008;
+            routes.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            routes.nodeIndexById["fast"]=0;
+            routes.nodeIndexById["slow"]=1;
+            routes.nodeIndexById["master"]=2;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow;
+            fast.id="fast-to-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-to-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            routes.edges={fast,slow};
+            const std::map<DAW::TrackID,int> latencies={{"fast",0},{"slow",32}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(rate,512);
+            legacy.sync(routes,&latencies,frames);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),32);
+            float left[512]{},right[512]{};
+            // Store an impulse in the last ten samples so the remaining
+            // 32-sample delay holds it across the next block.
+            left[frames-10]=.625f;
+            right[frames-10]=-.3125f;
+            legacy.processEdge("fast-to-master",left,right,frames);
+            if(bypassRoute)routes.edges[1].bypassed=true;
+            else routes.edges[1].active=false;
+            legacy.sync(routes,&latencies,frames);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),0);
+            if(bypassRoute)routes.edges[1].bypassed=false;
+            else routes.edges[1].active=true;
+            legacy.sync(routes,&latencies,frames);
+            expectEquals(legacy.getEdgeDelay("fast-to-master"),32);
+            std::fill_n(left,frames,0.0f);
+            std::fill_n(right,frames,0.0f);
+            legacy.processEdge("fast-to-master",left,right,frames);
+            for(int i=0;i<frames;++i) {
+                expectEquals(left[i],0.f,
+                    "master PDC must not replay a pre-bypass pending impulse");
+                expectEquals(right[i],0.f);
+            }
+            std::fill_n(left,frames,0.0f);
+            std::fill_n(right,frames,0.0f);
+            left[0]=.25f;right[0]=-.125f;
+            legacy.processEdge("fast-to-master",left,right,frames);
+            for(int i=0;i<frames;++i) {
+                expectWithinAbsoluteError(static_cast<double>(left[i]),
+                    i==32?.25:0.0,1.e-6);
+                expectWithinAbsoluteError(static_cast<double>(right[i]),
+                    i==32?-.125:0.0,1.e-6);
+            }
+        }
+
         beginTest("Legacy master PDC lazy invalidation never replays dormant ring samples");
         {
             DAW::RoutingSnapshot routes;
