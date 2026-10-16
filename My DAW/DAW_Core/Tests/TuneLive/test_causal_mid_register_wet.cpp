@@ -2,6 +2,7 @@
 // actually accelerates the WET pitch-corrected audio, not only detector
 // metadata, using identical phase-continuous synthetic sung harmonics.
 // A3 220Hz must NOT trigger this midrange option; HQ40 is protected.
+// Use CHROMATIC target notes (C#4/E4/G4), not an arbitrary 270Hz target.
 // These timings are not one-millisecond F0 decisions or ASIO measurements.
 #define main old_fast_engagement_test_main_disabled
 #include "test_causal_fast_wet_engagement.cpp"
@@ -10,7 +11,7 @@ int main() {
     bool all=true;
     int faster=0,lowSafe=0;
     for(double rate:std::array<double,3>{{44100.0,48000.0,96000.0}}) {
-        for(double target:std::array<double,3>{{270.0,330.0,392.0}}) {
+        for(double target:std::array<double,3>{{277.18263,330.0,392.0}}) {
             const auto old=run(rate,target,true,false,false);
             const auto mid=run(rate,target,true,false,true);
             const double saved=old.halfWetMs-mid.halfWetMs;
