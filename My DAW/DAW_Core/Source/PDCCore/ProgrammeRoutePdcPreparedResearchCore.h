@@ -25,7 +25,8 @@ public:
     // the RCU publisher until all readers leave; no RT shared_ptr copies.
     bool prepare(const ProgrammeRoutePdcPlannerResearchCore& plan,int channels,
                  const ProgrammeRoutePdcPreparedResearchCore* oldBank=nullptr,
-                 const std::vector<std::string>* reusableIds=nullptr) {
+                 const std::vector<std::string>* reusableIds=nullptr,
+                 const std::vector<std::string>* reusableLocalIds=nullptr) {
         if(!plan.valid()||channels<1||channels>32)return false;
         std::vector<EdgeDelay> newEdges;
         std::vector<LocalInputDelay> newInputs;
@@ -71,8 +72,27 @@ public:
             auto& target=newInputs.back();
             target.id=node.id;
             target.delaySamples=node.localInputDelay;
-            target.line=std::make_shared<PluginParallelDryDelayResearchCore>();
-            if(!target.line->prepare(channels,node.localInputDelay))return false;
+            // A QuickSend/topology edit elsewhere must not discard the
+            // independent local-input history of a still-identical track.
+            // Reuse only when graph metadata, sample rate (caller), channel
+            // format and this exact delay are ALL unchanged. Sharing is
+            // single-writer only, protected by the publisher's RCU lifetime.
+            if(oldBank!=nullptr && reusableLocalIds!=nullptr &&
+               oldBank->channels_==channels &&
+               std::find(reusableLocalIds->begin(),reusableLocalIds->end(),
+                         node.id)!=reusableLocalIds->end()) {
+                for(const auto& old:oldBank->localInputs_) {
+                    if(old.id==node.id &&
+                       old.delaySamples==node.localInputDelay) {
+                        target.line=old.line;
+                        break;
+                    }
+                }
+            }
+            if(!target.line) {
+                target.line=std::make_shared<PluginParallelDryDelayResearchCore>();
+                if(!target.line->prepare(channels,node.localInputDelay))return false;
+            }
         }
         // Atomic with respect to the *control-thread* transaction: on
         // failed preparation, existing banks remain untouched. Caller MUST
