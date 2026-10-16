@@ -194,6 +194,57 @@ public:
             expect(engine.getGraphPdcPreflightCounters().renderedBlocks>0);
         }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        beginTest("Live JUCE hosted latency 16->32 aligns slot and chain Dry/Wet");
+        for(const double sampleRate:{44100.0,48000.0}) {
+            DAW::PluginChainCore chain;
+            chain.prepare(sampleRate,64);
+            auto plugin=std::make_unique<ExactHostDelayResearchPlugin>(16);
+            auto* hosted=plugin.get();
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(plugin)),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            expectEquals(chain.totalLatencySamples(),16);
+            constexpr double factor=1.0+0.7071067811865475244;
+            const auto runImpulse=[&](int latency) {
+                const float impulse=.25f;
+                float measured=0.f;
+                for(int base=0;base<512;base+=64) {
+                    juce::AudioBuffer<float> audio(2,64);
+                    audio.clear();
+                    if(base==128) {
+                        audio.setSample(0,0,impulse);
+                        audio.setSample(1,0,-impulse);
+                    }
+                    chain.processBlock(audio,64);
+                    for(int n=0;n<64;++n) {
+                        const int absolute=base+n;
+                        const double expected=absolute==128+latency
+                            ?impulse*factor:0.0;
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(0,n)),
+                            expected,4.e-5,
+                            "VST3-like latency must align both slot and chain Dry/Wet");
+                        expectWithinAbsoluteError(
+                            static_cast<double>(audio.getSample(1,n)),
+                            -expected,4.e-5);
+                        if(absolute==128+latency)
+                            measured=audio.getSample(0,n);
+                    }
+                }
+                return measured;
+            };
+            const float initial=runImpulse(16);
+            hosted->setResearchLatencyOnControlThread(32);
+            expectEquals(chain.totalLatencySamples(),32);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread(),
+                   "latency notification must refresh slot AND chain dry rings");
+            const float updated=runImpulse(32);
+            expectWithinAbsoluteError(static_cast<double>(updated),
+                                      static_cast<double>(initial),4.e-5);
+        }
+#endif
+
         beginTest("Real AudioEngine track + bus + master loops follow live QuickSend toggles");
         {
             DAW::TrackManager tracks;
