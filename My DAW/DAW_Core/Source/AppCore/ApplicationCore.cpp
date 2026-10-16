@@ -470,7 +470,15 @@ void ApplicationCore::timerCallback()
             hostDryPrepared=false;
 #endif
     }
-    if(!changed && activeChains==published->size())return;
+    if(!changed && activeChains==published->size()) {
+        // RoutingGraph::publishSnapshotOnly() may republish a QuickSend
+        // active/bypass/tap change without notifying graph listeners or
+        // changing the graph version. A bounded control-thread refresh
+        // keeps the prepared bank in step; identical routing does not
+        // allocate or reset delay history (publishPrepared fast path).
+        refreshExperimentalGraphPdcAfterPublication();
+        return;
+    }
 
     // Publish the changed map even if dry-ring preparation fails: the
     // revision gate rejects stale PDC rather than silently accepting it.
@@ -1292,6 +1300,13 @@ void ApplicationCore::connectionRemoved(const RouteID& connId)
 void ApplicationCore::graphChanged()
 {
     syncPluginChainSidechainBusConfig();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // QuickSend, AutoSend, pre-fader and bus topology changes can preserve
+    // the plugin-latency map. In that case publishPluginChainLatencies()
+    // is NOT called, so a routing-only edit must stage its own coherent
+    // graph-PDC bank. The helper enforces JUCE message-thread ownership.
+    refreshExperimentalGraphPdcAfterPublication();
+#endif
 }
 
 void ApplicationCore::transportStateChanged()
