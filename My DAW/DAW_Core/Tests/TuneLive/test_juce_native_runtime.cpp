@@ -382,6 +382,63 @@ int main() {
              <<" independently_wet_tuned=8/8"
              <<" CI_VM_CPU_IS_NOT_APOLLO_OR_ASIO=1\\n";
 
+    // A/B SAME-SAMPLE acoustic impulse proof through TWO independently
+    // linked JUCE8 instances with their correction already 100% wet.
+    // Unlike getLatencySamples()==0, this probes emitted PCM output and
+    // stereo crosstalk on the actual research wet/residual audio path.
+    // It is NOT 1ms F0 acquisition or an ASIO roundtrip measurement.
+    APEX::TuneLive::Research::CausalJUCEAdapter baselineImpulse;
+    APEX::TuneLive::Research::CausalJUCEAdapter alteredImpulse;
+    baselineImpulse.prepareToPlay(48000.0,128);
+    alteredImpulse.prepareToPlay(48000.0,128);
+    juce::AudioBuffer<float> unchanged(2,128),injected(2,128);
+    constexpr int impulseAt=32000;
+    constexpr float injection=0.25f;
+    double immediateDelta=0.0;
+    bool preImpulseIdentical=true,stereoNoLeak=true;
+    for(int frame=0;frame<38400;frame+=128) {
+        for(int n=0;n<128;++n) {
+            const int sampleIndex=frame+n;
+            const double radians=6.283185307179586*
+                                 447.691*sampleIndex/48000.0;
+            const float dry=static_cast<float>(
+                0.24*std::sin(radians)+
+                0.05*std::sin(2.0*radians+0.2));
+            unchanged.setSample(0,n,dry);
+            unchanged.setSample(1,n,dry);
+            injected.setSample(0,n,dry+(sampleIndex==impulseAt?injection:0.0f));
+            injected.setSample(1,n,dry);
+        }
+        baselineImpulse.processBlock(unchanged,midi);
+        alteredImpulse.processBlock(injected,midi);
+        for(int n=0;n<128;++n) {
+            const int sampleIndex=frame+n;
+            const double leftDelta=static_cast<double>(
+                injected.getSample(0,n)-unchanged.getSample(0,n));
+            const double rightDelta=static_cast<double>(
+                injected.getSample(1,n)-unchanged.getSample(1,n));
+            if(sampleIndex<impulseAt)
+                preImpulseIdentical &=leftDelta==0.0 && rightDelta==0.0;
+            if(sampleIndex==impulseAt)immediateDelta=leftDelta/injection;
+            if(sampleIndex<=impulseAt)stereoNoLeak &=rightDelta==0.0;
+        }
+    }
+    if(!preImpulseIdentical||!stereoNoLeak||
+       !std::isfinite(immediateDelta)||
+       immediateDelta<0.70||immediateDelta>1.30||
+       baselineImpulse.researchWetMix()<0.95||
+       alteredImpulse.researchWetMix()<0.95)
+        return fail("real linked JUCE causal wet impulse path is delayed, lost or crossfed");
+    std::cout<<"CAUSAL_JUCE_WET_IMPULSE sr=48000 wet=1"
+             <<" injected_at_sample="<<impulseAt
+             <<" heard_at_sample="<<impulseAt
+             <<" impulse_immediate_gain="<<immediateDelta
+             <<" host_fixed_pdc="<<alteredImpulse.getLatencySamples()
+             <<" no_right_channel_crosstalk="<<stereoNoLeak
+             <<" singer_note_detection_not_1ms=1\\n";
+    baselineImpulse.releaseResources();
+    alteredImpulse.releaseResources();
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
