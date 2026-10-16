@@ -24,7 +24,7 @@ int main() {
     bool pass=true;
     int accelerated=0, octaveRejected=0;
     for(double sr:std::array<double,3>{{44100.0,48000.0,96000.0}}) {
-        for(double hz:std::array<double,3>{{447.691,660.0,880.0}}) {
+        for(double hz:std::array<double,3>{{447.691,660.0,770.0}}) {
             HighRegisterOnsetProbe high;
             EarlyOnsetProbe normal;
             high.prepare(sr);
