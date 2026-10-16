@@ -493,7 +493,13 @@ public:
                             audio.setSample(1,n,static_cast<float>(0.10*std::cos(phase)));
                         }
                     });
+#if !defined(APEX_PDC_V2_PRODUCTION_CANDIDATE) || !APEX_PDC_V2_PRODUCTION_CANDIDATE
                 engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+#endif
+                // In the production-candidate regression configuration this
+                // fixture deliberately does NOT flip the test override: the
+                // live APEX AudioEngine must opt into V2 by default, then the
+                // armed-track guard and control refresh must still work.
                 const std::map<DAW::TrackID,int> latency={
                     {vocal->getID(),0},{"pdc-test-aux",0}};
                 const auto stage=[&]() {
