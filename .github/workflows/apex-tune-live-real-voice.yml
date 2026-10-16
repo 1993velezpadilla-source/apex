@@ -216,6 +216,19 @@ jobs:
           for singer in human low high; do
             ./tune_live_harmonic_sibilance_gate --prefix "vocadito_${singer}" | tee "vocadito_${singer}_HARMONIC_LIVE_BANDS_REPORT.txt"
           done
+      - name: Measure independent sustained-note F0 on real HQ40 vs fast LIVE research singers
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty" \
+            -isystem "My DAW/DAW_Core/Source/ThirdParty/signalsmith-stretch" \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_human_sustained_pitch.cpp" \
+            -o causal_human_pitch_diagnostics
+          for singer in human low high; do
+            ./causal_human_pitch_diagnostics --prefix "vocadito_${singer}"
+            test -s "vocadito_${singer}_FAST_HUMAN_F0_COMPARISON.txt"
+          done
       - name: Research-only real singer A-B downshift compensation with bit-exact HQ40 identity gate
         shell: bash
         run: |
@@ -330,6 +343,9 @@ jobs:
             vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
             vocadito_low_HARMONIC_LIVE_BANDS_REPORT.txt
             vocadito_high_HARMONIC_LIVE_BANDS_REPORT.txt
+            vocadito_human_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_low_FAST_HUMAN_F0_COMPARISON.txt
+            vocadito_high_FAST_HUMAN_F0_COMPARISON.txt
             vocadito_human_research18.wav
             vocadito_human_research12.wav
             VOCADITO_LICENSE_AND_EVIDENCE.txt
