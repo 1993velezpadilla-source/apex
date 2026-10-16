@@ -95,7 +95,7 @@ public:
         constexpr int sr=48000;
         juce::MidiBuffer midi;
         beginTest("Hosted JUCE plugin dynamic latency 16->32 restages actual PDC routes");
-        for(const int frames:{31,128}) {
+        for(const int frames:{31,64,128,256,512}) {
             DAW::TrackManager tracks;
             auto* voice=tracks.createTrack("JUCE PDC voice");
             auto* auxTrack=tracks.createTrack("JUCE PDC aux");
@@ -506,7 +506,7 @@ public:
         {
         for(const double sr:{44100.0,48000.0,96000.0})
         {
-            for(const int maxFrames:{31,128})
+            for(const int maxFrames:{31,64,128,256,512})
             {
                 DAW::TrackManager tracks;
                 auto* vocal=tracks.createTrack("PDC impulse vocal");
@@ -619,7 +619,7 @@ public:
         // Exercise 44.1/48/96 kHz and ASIO-sized as well as irregular blocks.
         for(const double rate:{44100.0,48000.0,96000.0})
         {
-            for(const int frames:{1,31,64,128,256,1024})
+            for(const int frames:{1,31,64,128,256,512,1024})
             {
                 DAW::AudioEngine engine;
                 // Match the engine device format before staging a PDC bank.
