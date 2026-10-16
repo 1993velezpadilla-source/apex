@@ -1326,7 +1326,15 @@ private:
     std::atomic<std::uint64_t> graphPdcRenderedBlocks_{0};
     std::atomic<std::uint64_t> graphPdcMonitoringFallbackBlocks_{0};
     std::atomic<std::uint64_t> graphPdcLegacyResyncs_{0};
+    // Enabled only in the feature-branch production CANDIDATE binary.
+    // The release build on main remains untouched until all CI, transition
+    // and physical-monitoring gates pass. Record-armed tracks still fall
+    // back to the existing low-latency monitoring authority each block.
+#if defined(APEX_PDC_V2_PRODUCTION_CANDIDATE) && APEX_PDC_V2_PRODUCTION_CANDIDATE
+    std::atomic<bool> graphPdcRenderEnabled_{true};
+#else
     std::atomic<bool> graphPdcRenderEnabled_{false};
+#endif
     void* graphPdcTrackInputContext_=nullptr;
     GraphPdcTrackInputForTests graphPdcTrackInputForTests_=nullptr;
     void* graphPdcInsertContext_=nullptr;
