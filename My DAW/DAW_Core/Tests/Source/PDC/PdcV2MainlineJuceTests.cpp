@@ -245,6 +245,74 @@ public:
         }
 #endif
 
+        beginTest("Two independent sidechain PDC histories targeting one compressor (Track + Bus)");
+        // Regression: the old destNodeId-indexed ring made these two
+        // completely different sources overwrite EACH OTHER on every block.
+        // Route IDs, not compressor destination IDs, own detector history.
+        for(const double sampleRate:{44100.0,48000.0,96000.0})
+            for(const int blockSize:{1,31,128})
+            {
+                DAW::TrackManager tracks;
+                auto* voice=tracks.createTrack("sidechain-voice");
+                auto* bus=tracks.createTrack("sidechain-bus");
+                auto* compressor=tracks.createTrack("sidechain-target");
+                bus->setRole(DAW::TrackRole::Bus);
+                DAW::RoutingGraph routing;
+                auto* voiceNode=routing.addNode(
+                    "Voice SC",DAW::RoutingNodeType::Track,voice->getID());
+                auto* busNode=routing.addNode(
+                    "Bus SC",DAW::RoutingNodeType::Bus,bus->getID());
+                auto* targetNode=routing.addNode(
+                    "Target SC",DAW::RoutingNodeType::Track,compressor->getID());
+                auto* voiceKey=routing.connect(
+                    voiceNode->id,targetNode->id,DAW::ConnectionType::Sidechain);
+                auto* busKey=routing.connect(
+                    busNode->id,targetNode->id,DAW::ConnectionType::Sidechain);
+                expect(voiceKey!=nullptr && busKey!=nullptr);
+                if(!voiceKey || !busKey)continue;
+                expect(voiceKey->id!=busKey->id);
+                DAW::AudioEngine engine;
+                engine.setSubsystems(&tracks,nullptr,nullptr,&routing);
+                auto chainLatency=std::make_shared<DAW::AudioEngine::ChainLatencyMap>();
+                (*chainLatency)[voice->getID()]=64;
+                (*chainLatency)[bus->getID()]=24;
+                (*chainLatency)[compressor->getID()]=16;
+                engine.publishChainLatencies(chainLatency);
+                engine.prepare(sampleRate,blockSize);
+                expectEquals(engine.getSidechainPdcDelayForTests(voiceKey->id),48);
+                expectEquals(engine.getSidechainPdcDelayForTests(busKey->id),8);
+                for(int start=0;start<128;start+=blockSize)
+                {
+                    const int frames=std::min(blockSize,128-start);
+                    juce::AudioBuffer<float> v(2,frames),b(2,frames);
+                    v.clear();b.clear();
+                    if(start==0) {
+                        v.setSample(0,0,.5f);v.setSample(1,0,-.25f);
+                        b.setSample(0,0,-.75f);b.setSample(1,0,.375f);
+                    }
+                    expect(engine.processSidechainPdcForTests(voiceKey->id,v));
+                    expect(engine.processSidechainPdcForTests(busKey->id,b));
+                    for(int i=0;i<frames;++i)
+                    {
+                        const auto t=start+i;
+                        expectWithinAbsoluteError(
+                            static_cast<double>(v.getSample(0,i)),
+                            t==48?.5:0.0,1.e-6,
+                            "Track sidechain must retain its OWN 48-sample history");
+                        expectWithinAbsoluteError(
+                            static_cast<double>(v.getSample(1,i)),
+                            t==48?-.25:0.0,1.e-6);
+                        expectWithinAbsoluteError(
+                            static_cast<double>(b.getSample(0,i)),
+                            t==8?-.75:0.0,1.e-6,
+                            "Bus sidechain must retain its OWN 8-sample history");
+                        expectWithinAbsoluteError(
+                            static_cast<double>(b.getSample(1,i)),
+                            t==8?.375:0.0,1.e-6);
+                    }
+                }
+            }
+
         beginTest("Real AudioEngine track + bus + master loops follow live QuickSend toggles");
         {
             DAW::TrackManager tracks;
