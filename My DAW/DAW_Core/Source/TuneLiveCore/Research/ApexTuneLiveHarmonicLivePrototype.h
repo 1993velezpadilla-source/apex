@@ -93,6 +93,13 @@ public:
     void enableUltraHighRegisterOnset(bool enabled) noexcept {
         ultraHighEnabled_=enabled;
     }
+    // NONSHIPPING faster 4-hop YIN candidate, opt-in after prepare() and
+    // before processing. Still requires the 80-frame acoustic history and
+    // two agreeing frames; do not claim 1ms pitch recognition or monitor
+    // with it without real-voice listening.
+    void enableUltraHighFastHopResearch(bool enabled) noexcept {
+        ultra_.enableFastHopResearch(enabled);
+    }
     // Research-only 128-frame mid-range 260–420Hz note onset; forbidden
     // by default and does not predict newly sung pitches within 1ms.
     // Two agreeing acoustic frames plus lower-octave veto required.
