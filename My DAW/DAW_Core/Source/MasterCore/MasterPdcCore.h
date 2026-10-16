@@ -155,17 +155,28 @@ public:
         if (it == edgeDelays_.end()
             || (effectiveDelayOverride < 0 && it->second.delaySamples <= 0))
             return;
-        if ((int)scratchL_.size() < numSamples)
+        if(numSamples<=0 || L==nullptr || R==nullptr ||
+           scratchL_.empty() || scratchR_.empty() ||
+           it->second.buf.getNumSamples()<2)
+            return;
+        const int effectiveDelay=effectiveDelayOverride>=0
+            ?effectiveDelayOverride:it->second.delaySamples;
+        // The RT scratch bank was prepared on the control thread. Split a
+        // larger render into sequential chunks rather than reallocating it
+        // inside the callback. Push/read per chunk preserves delayed samples
+        // across chunk AND callback boundaries without overwriting the ring.
+        const int chunkLimit=juce::jmin(
+            (int)scratchL_.size(),(int)scratchR_.size(),
+            it->second.buf.getNumSamples()-1);
+        for(int offset=0;offset<numSamples;)
         {
-            scratchL_.assign((size_t)numSamples, 0.0f);
-            scratchR_.assign((size_t)numSamples, 0.0f);
+            const int frames=juce::jmin(chunkLimit,numSamples-offset);
+            it->second.push(L+offset,R+offset,frames);
+            it->second.read(scratchL_.data(),scratchR_.data(),frames,effectiveDelay);
+            std::memcpy(L+offset,scratchL_.data(),sizeof(float)*(size_t)frames);
+            std::memcpy(R+offset,scratchR_.data(),sizeof(float)*(size_t)frames);
+            offset+=frames;
         }
-        const int effectiveDelay = effectiveDelayOverride >= 0
-            ? effectiveDelayOverride : it->second.delaySamples;
-        it->second.push(L, R, numSamples);
-        it->second.read(scratchL_.data(), scratchR_.data(), numSamples, effectiveDelay);
-        std::memcpy(L, scratchL_.data(), sizeof(float) * (size_t)numSamples);
-        std::memcpy(R, scratchR_.data(), sizeof(float) * (size_t)numSamples);
     }
 
 private:
