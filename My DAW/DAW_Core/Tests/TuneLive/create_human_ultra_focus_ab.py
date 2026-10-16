@@ -82,6 +82,9 @@ def main():
         return
 
     wavs = {name: pathlib.Path(f"{prefix}_{stem}.wav") for name, stem in VARIANTS.items()}
+    # DRY is an explicitly labeled natural-voice control, not a fourth
+    # anonymized tune candidate. It is sample-aligned with research outputs.
+    wavs["dry_control"] = pathlib.Path(f"{prefix}_source.wav")
     with wave.open(str(next(iter(wavs.values()))), "rb") as reference:
         rate, count = reference.getframerate(), reference.getnframes()
     start = max(0, min(round((center - 0.8) * rate), count - 1))
@@ -114,10 +117,63 @@ def main():
         manifest["unblind"][letter] = {"variant": name, "source_wav": str(wavs[name]),
                                        "gain": gain, "input_rms": rms, "input_peak": peak,
                                        "output_pcm24": filename}
+    # Level-match the untouched source to all three research variants without
+    # changing their stable blinded A/B/C assignments. Unlike HQ40 it has
+    # the same nominal time origin as these non-lookahead research WAVs.
+    dry_rate, dry_ch, dry_pcm, dry_rms, dry_peak = segments["dry_control"]
+    dry_filename = "DRY_SINGER_REFERENCE.wav"
+    save_pcm24(out / dry_filename, dry_pcm, dry_rate, dry_ch, level / dry_rms)
+    manifest["natural_source_reference"] = {
+        "file": dry_filename, "gain": level / dry_rms,
+        "input_rms": dry_rms, "input_peak": dry_peak,
+        "not_blinded": True, "not_pdc_aligned_with_HQ40": True,
+    }
+    # A local time-domain companion to the existing 2048-point spectral
+    # hotspot: report 5ms peaks in PCM difference and adjacent-sample steps.
+    # This is a signal diagnostic, NOT evidence that the pitch/glide is right.
+    width = max(1, round(rate * .005))
+    prior = segments["previous_high"][2]
+    ultra = segments["ultra"][2]
+    reset = segments["ultra_dry_reset"][2]
+    dry = segments["dry_control"][2]
+    ch_count = segments["previous_high"][1]
+    hot = []
+    for offset in range(0, len(prior) - width * ch_count + 1, width * ch_count):
+        stop = offset + width * ch_count
+        n = stop - offset
+        diff_power = sum((ultra[j] - prior[j]) ** 2 for j in range(offset, stop))
+        diff_rms = math.sqrt(diff_power / n)
+        source_rms = math.sqrt(sum(dry[j] ** 2 for j in range(offset, stop)) / n)
+        if diff_rms <= 0.007:
+            continue
+        def max_step(pcm):
+            return max(abs(pcm[j] - pcm[j-ch_count])
+                       for j in range(offset+ch_count, stop))
+        hot.append({
+            "original_time_s": (start + offset // ch_count) / rate,
+            "ultra_vs_previous_diff_rms": diff_rms,
+            "dry_rms": source_rms,
+            "previous_adjacent_step_peak": max_step(prior),
+            "ultra_adjacent_step_peak": max_step(ultra),
+            "reset_adjacent_step_peak": max_step(reset),
+            "dry_adjacent_step_peak": max_step(dry),
+            "note": "Difference is not proof of audible quality or pitch accuracy",
+        })
+    top = sorted(hot, key=lambda event: -event["ultra_vs_previous_diff_rms"])[:12]
+    report = {
+        "source": prefix, "rate": rate, "micro_window_ms": 5,
+        "micro_windows_with_rms_difference_gt_0_007": len(hot),
+        "largest_micro_differences": top,
+        "warning": "Do not infer pops/clicks, formant preservation, corrected F0 or 1ms from this table.",
+    }
+    (out / "MICROTRANSIENT_FORENSICS.json").write_text(json.dumps(report, indent=2) + "\n")
+    manifest["microtransient_report"] = "MICROTRANSIENT_FORENSICS.json"
     (out / "UNBLIND_AFTER_LISTENING.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (out / "LISTEN_FIRST.txt").write_text(
         "APEX Tune Live V5 ultra predictor — REAL VOCADITO SINGER LOCAL HOTSPOT\n"
         "Listen A/B/C with matched playback levels, and DO NOT read UNBLIND until rating.\n"
+        "DRY_SINGER_REFERENCE.wav is the level-matched ORIGINAL for context only; do not confuse with HQ40.\n"
+        "MICROTRANSIENT_FORENSICS.json contains objective 5ms local changes, NOT a listening approval.\n"
         "Pay attention to attack pops, timbre/vowels, glides, pitch jumps and artifacts.\n"
         "Files are equal-length, equal-RMS PCM24 excerpts from sample-synchronous "
         "research variants; level gain differs per file.\n"
