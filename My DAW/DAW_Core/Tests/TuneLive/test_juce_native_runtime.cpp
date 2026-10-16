@@ -3,6 +3,8 @@
 // requiring an Apollo Solo on GitHub runners.
 #include "../../Source/TuneLiveCore/ApexTuneLiveProcessor.h"
 #include "../../Source/TuneLiveCore/Research/ApexTuneLiveCausalJUCEAdapter.h"
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -321,6 +323,64 @@ int main() {
              <<" final_wet_cents="<<leapCents
              <<" NO_1MS_PITCH_DECISION_CLAIM\\n";
     candidate.releaseResources();
+
+    // Stress EIGHT isolated causal JUCE8 AudioPluginInstance inserts, not
+    // merely an unhosted DSP object. Production HQ40 remains unchanged.
+    // CPU timing is from an Actions Windows VM, NOT Apollo Solo hardware.
+    constexpr int kLiveInserts=8;
+    std::array<APEX::TuneLive::Research::CausalJUCEAdapter,kLiveInserts> liveInserts{};
+    std::array<APEX::TuneLive::PitchTracker,kLiveInserts> checkedInserts{};
+    for(int id=0;id<kLiveInserts;++id) {
+        liveInserts[static_cast<std::size_t>(id)].prepareToPlay(48000.0,128);
+        checkedInserts[static_cast<std::size_t>(id)].prepare(48000.0);
+        if(liveInserts[static_cast<std::size_t>(id)].getLatencySamples()!=0)
+            return fail("eight JUCE LIVE inserts report nonzero fixed lookahead");
+    }
+    const auto stressStart=std::chrono::steady_clock::now();
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int id=0;id<kLiveInserts;++id) {
+            for(int i=0;i<128;++i) {
+                const double radians=6.283185307179586*447.691*
+                                     (frame+i)/48000.0;
+                const float value=static_cast<float>(
+                    0.24*std::sin(radians)+
+                    0.05*std::sin(2.0*radians+0.21));
+                researchAudio.setSample(0,i,value);
+                researchAudio.setSample(1,i,value);
+            }
+            auto& insert=liveInserts[static_cast<std::size_t>(id)];
+            insert.processBlock(researchAudio,midi);
+            for(int i=0;i<128;++i) {
+                const auto l=researchAudio.getSample(0,i);
+                const auto r=researchAudio.getSample(1,i);
+                if(!std::isfinite(l)||!std::isfinite(r))
+                    return fail("eight hosted LIVE inserts emitted NaN");
+                if(frame>=24000)
+                    checkedInserts[static_cast<std::size_t>(id)].push(l);
+            }
+        }
+    }
+    const double eightSeconds=
+        std::chrono::duration<double>(std::chrono::steady_clock::now()-
+                                      stressStart).count();
+    for(int id=0;id<kLiveInserts;++id) {
+        auto& insert=liveInserts[static_cast<std::size_t>(id)];
+        const auto pitch=checkedInserts[static_cast<std::size_t>(id)].latest();
+        const double centsOutput=pitch.voiced && pitch.hz>0.0f
+            ?1200.0*std::log2(pitch.hz/440.0):9999.0;
+        if(std::abs(centsOutput)>18.0 ||
+           insert.researchWetMix()<0.95 ||
+           insert.firstHighSample()<0 ||
+           insert.firstHighSample()>480)
+            return fail("eight real JUCE LIVE inserts lost high-register wet tuning");
+        insert.releaseResources();
+    }
+    std::cout<<"CAUSAL_JUCE_8_INSTANCES count="<<kLiveInserts
+             <<" sample_rate=48000 buffer=128"
+             <<" total_audio_s=1 total_wall_s="<<eightSeconds
+             <<" fixed_lookahead_samples=0"
+             <<" independently_wet_tuned=8/8"
+             <<" CI_VM_CPU_IS_NOT_APOLLO_OR_ASIO=1\\n";
 
     editor.reset();
     plugin.releaseResources();
