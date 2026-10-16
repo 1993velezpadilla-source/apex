@@ -88,6 +88,7 @@ def main():
     # 4-hop is a NEW separate research candidate, not part of the pinned
     # A/B/C assignment or its ordering on earlier CI artifacts.
     wavs["ultra_4hop"] = pathlib.Path(f"{prefix}_harmonic_live_ultra_4hop_research.wav")
+    wavs["ultra_consensus"] = pathlib.Path(f"{prefix}_harmonic_live_ultra_consensus_research.wav")
     with wave.open(str(next(iter(wavs.values()))), "rb") as reference:
         rate, count = reference.getframerate(), reference.getnframes()
     start = max(0, min(round((center - 0.8) * rate), count - 1))
@@ -125,6 +126,14 @@ def main():
     # the same nominal time origin as these non-lookahead research WAVs.
     dry_rate, dry_ch, dry_pcm, dry_rms, dry_peak = segments["dry_control"]
     hop_rate, hop_ch, hop_pcm, hop_rms, hop_peak = segments["ultra_4hop"]
+    conf_rate, conf_ch, conf_pcm, conf_rms, conf_peak = segments["ultra_consensus"]
+    consensus_file = "ULTRA_CONSENSUS_UNBLINDED_RESEARCH.wav"
+    save_pcm24(out / consensus_file, conf_pcm, conf_rate, conf_ch, level / conf_rms)
+    manifest["ultra_consensus_research_candidate"] = {
+        "file": consensus_file, "gain": level / conf_rms,
+        "input_rms": conf_rms, "input_peak": conf_peak,
+        "not_blinded": True, "not_a_shipping_mode": True,
+    }
     hop_file = "ULTRA_4HOP_UNBLINDED_RESEARCH.wav"
     save_pcm24(out / hop_file, hop_pcm, hop_rate, hop_ch, level / hop_rms)
     manifest["ultra_4hop_research_candidate"] = {
@@ -147,6 +156,7 @@ def main():
     ultra = segments["ultra"][2]
     reset = segments["ultra_dry_reset"][2]
     hop = segments["ultra_4hop"][2]
+    consensus = segments["ultra_consensus"][2]
     dry = segments["dry_control"][2]
     ch_count = segments["previous_high"][1]
     hot = []
@@ -158,6 +168,8 @@ def main():
         source_rms = math.sqrt(sum(dry[j] ** 2 for j in range(offset, stop)) / n)
         hop_diff_rms = math.sqrt(sum((hop[j] - ultra[j]) ** 2
                                      for j in range(offset, stop)) / n)
+        consensus_high_rms = math.sqrt(sum((consensus[j] - prior[j]) ** 2
+                                           for j in range(offset, stop)) / n)
         if diff_rms <= 0.007:
             continue
         def max_step(pcm):
@@ -167,10 +179,12 @@ def main():
             "original_time_s": (start + offset // ch_count) / rate,
             "ultra_vs_previous_diff_rms": diff_rms,
             "four_hop_vs_eight_hop_diff_rms": hop_diff_rms,
+            "consensus_vs_previous_high_diff_rms": consensus_high_rms,
             "dry_rms": source_rms,
             "previous_adjacent_step_peak": max_step(prior),
             "ultra_adjacent_step_peak": max_step(ultra),
             "four_hop_adjacent_step_peak": max_step(hop),
+            "consensus_adjacent_step_peak": max_step(consensus),
             "reset_adjacent_step_peak": max_step(reset),
             "dry_adjacent_step_peak": max_step(dry),
             "note": "Difference is not proof of audible quality or pitch accuracy",
@@ -179,6 +193,9 @@ def main():
     report = {
         "source": prefix, "rate": rate, "micro_window_ms": 5,
         "micro_windows_with_rms_difference_gt_0_007": len(hot),
+        "consensus_vs_prior_high_full_focus_rms": math.sqrt(
+            sum((consensus[j] - prior[j]) ** 2
+                for j in range(len(consensus))) / len(consensus)),
         "four_hop_vs_eight_hop_full_focus_rms": math.sqrt(
             sum((hop[j] - ultra[j]) ** 2 for j in range(len(hop))) / len(hop)),
         "largest_micro_differences": top,
@@ -192,6 +209,7 @@ def main():
         "Listen A/B/C with matched playback levels, and DO NOT read UNBLIND until rating.\n"
         "DRY_SINGER_REFERENCE.wav is the level-matched ORIGINAL for context only; do not confuse with HQ40.\n"
         "ULTRA_4HOP_UNBLINDED_RESEARCH.wav is a fourth faster-cadence candidate; no objective perceptual approval.\n"
+        "ULTRA_CONSENSUS_UNBLINDED_RESEARCH.wav verifies dual-YIN crosscheck, NOT a release candidate.\n"
         "MICROTRANSIENT_FORENSICS.json contains objective 5ms local changes, NOT a listening approval.\n"
         "Pay attention to attack pops, timbre/vowels, glides, pitch jumps and artifacts.\n"
         "Files are equal-length, equal-RMS PCM24 excerpts from sample-synchronous "
