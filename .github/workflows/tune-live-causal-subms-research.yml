@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHighRegisterProbe.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
@@ -53,6 +55,10 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" \
             -o tune_live_causal_fast_wet
           ./tune_live_causal_fast_wet | tee causal_fast_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp" \
+            -o tune_live_high_register_yin
+          ./tune_live_high_register_yin | tee high_register_yin_ubuntu.log
       - name: Publish unedited diagnostic results, not a release certificate
         uses: actions/upload-artifact@v4
         with:
@@ -64,6 +70,7 @@ jobs:
             causal_note_leaps_ubuntu.log
             causal_fast_leaps_ubuntu.log
             causal_fast_wet_ubuntu.log
+            high_register_yin_ubuntu.log
           if-no-files-found: error
           retention-days: 14
 
@@ -95,6 +102,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_fast_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" || exit /b 1
           tune_live_causal_fast_wet.exe > causal_fast_wet_windows.log || (type causal_fast_wet_windows.log & exit /b 1)
           type causal_fast_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_high_register_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp" || exit /b 1
+          tune_live_high_register_yin.exe > high_register_yin_windows.log || (type high_register_yin_windows.log & exit /b 1)
+          type high_register_yin_windows.log
       - name: Publish measured windows diagnostic
         uses: actions/upload-artifact@v4
         with:
@@ -106,5 +116,6 @@ jobs:
             causal_note_leaps_windows.log
             causal_fast_leaps_windows.log
             causal_fast_wet_windows.log
+            high_register_yin_windows.log
           if-no-files-found: error
           retention-days: 14
