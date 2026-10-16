@@ -196,6 +196,7 @@ public:
                graphPdcLatencyRevision_.load(std::memory_order_acquire) ||
            !DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
                sameProgrammeRoutingRealtime(graph,reader->graph) ||
+           !reader->dispatch.coversAllActiveProgrammeEdges(graph) ||
            edgePosition>=graph.edges.size())return false;
         // Match the live monitor-safety rule: the experimental programme
         // delay must never be tested as eligible while an active track is
@@ -2223,6 +2224,7 @@ private:
             stagedGraphReader->dispatch.channels()==2 &&
             DAW::PdcResearch::ProgrammeRoutePdcSnapshotHandoffResearchCore::
                 sameProgrammeRoutingRealtime(*snap,stagedGraphReader->graph) &&
+            stagedGraphReader->dispatch.coversAllActiveProgrammeEdges(*snap) &&
             graphPdcPreparedLatencyRevision_.load(std::memory_order_acquire)==
                 graphPdcLatencyRevision_.load(std::memory_order_acquire);
         if(matches)
