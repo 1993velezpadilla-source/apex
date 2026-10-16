@@ -203,6 +203,7 @@ jobs:
             test -s "vocadito_${singer}_harmonic_live_fast_research.wav"
             test -s "vocadito_${singer}_harmonic_live_high_research.wav"
             test -s "vocadito_${singer}_harmonic_live_ultra_research.wav"
+            test -s "vocadito_${singer}_harmonic_live_ultra_4hop_research.wav"
             test -s "vocadito_${singer}_harmonic_live_ultra_smooth_research.wav"
             test -s "vocadito_${singer}_HARMONIC_LIVE_RESEARCH.txt"
           done
@@ -382,6 +383,7 @@ jobs:
             vocadito_human_harmonic_live_fast_research.wav
             vocadito_human_harmonic_live_high_research.wav
             vocadito_human_harmonic_live_ultra_research.wav
+            vocadito_human_harmonic_live_ultra_4hop_research.wav
             vocadito_human_harmonic_live_ultra_smooth_research.wav
             vocadito_human_HARMONIC_LIVE_RESEARCH.txt
             vocadito_low_harmonic_live_research.wav
@@ -389,6 +391,7 @@ jobs:
             vocadito_low_harmonic_live_fast_research.wav
             vocadito_low_harmonic_live_high_research.wav
             vocadito_low_harmonic_live_ultra_research.wav
+            vocadito_low_harmonic_live_ultra_4hop_research.wav
             vocadito_low_harmonic_live_ultra_smooth_research.wav
             vocadito_low_HARMONIC_LIVE_RESEARCH.txt
             vocadito_high_harmonic_live_research.wav
@@ -396,6 +399,7 @@ jobs:
             vocadito_high_harmonic_live_fast_research.wav
             vocadito_high_harmonic_live_high_research.wav
             vocadito_high_harmonic_live_ultra_research.wav
+            vocadito_high_harmonic_live_ultra_4hop_research.wav
             vocadito_high_harmonic_live_ultra_smooth_research.wav
             vocadito_high_HARMONIC_LIVE_RESEARCH.txt
             vocadito_human_HARMONIC_LIVE_BANDS_REPORT.txt
