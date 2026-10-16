@@ -1132,6 +1132,8 @@ public:
                              static_cast<std::size_t>(1));
                 expectEquals(owner.collectRetiredOnControlThread(),
                              static_cast<std::size_t>(0));
+                expect(!owner.resetPreparedHistoriesAfterReadersDrainOnControlThread(),
+                       "never reset a delay ring while an RT reader is alive");
                 {
                     auto fresh=owner.readRealtime();
                     expect(static_cast<bool>(fresh));
@@ -1165,6 +1167,8 @@ public:
             }
             expectEquals(owner.collectRetiredOnControlThread(),
                          static_cast<std::size_t>(1));
+            expect(owner.resetPreparedHistoriesAfterReadersDrainOnControlThread(),
+                   "after RT quiescence a timeline reset is safe");
             g.processingOrder={"master","vocal-node","aux-node"};
             expect(!owner.publishPrepared(g,&latencies,2));
             expectEquals(owner.latestPublicationOnControlThread(),
