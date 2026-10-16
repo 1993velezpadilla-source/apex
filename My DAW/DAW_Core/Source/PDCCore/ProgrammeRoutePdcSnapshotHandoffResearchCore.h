@@ -28,18 +28,22 @@ public:
         std::map<TrackID,int> latencyMap;
     };
     using Reader=ProgrammePdcRcuPublisherResearchCore<PreparedGeneration>::Reader;
+    // forceFreshHistory starts a new timeline after a legacy monitoring gap;
+    // never reuse the V2 edge rings that were dormant during that gap.
     // Called by ONE serialized control thread only. Graph copy, validation,
     // all DSP allocation, mapping, and publication happen off audio thread.
     bool publishPrepared(const RoutingSnapshot& graph,
                          const std::map<TrackID,int>* chainLatencies,
-                         int channels,double sampleRate=48000.0) {
+                         int channels,double sampleRate=48000.0,
+                         bool forceFreshHistory=false) {
         if(!std::isfinite(sampleRate)||sampleRate<8000.0||
            sampleRate>384000.0)return false;
         // Gain-only republishing does not change the programme path or DSP
         // timings. Leave the current history intact instead of allocating a
         // fresh bank whenever a user moves a send gain.
         const auto* previous=publisher_.activeStateControlOnly();
-        if(previous && previous->sampleRate==sampleRate &&
+        if(previous && !forceFreshHistory &&
+           previous->sampleRate==sampleRate &&
            previous->dispatch.channels()==channels &&
            sameProgrammeRoutingRealtime(graph,previous->graph) &&
            (chainLatencies?previous->latencyMap==*chainLatencies:
@@ -57,7 +61,8 @@ public:
         // A sample-rate reprepare is a different timeline. Retaining the
         // previous ring across 44.1 <-> 48 kHz would replay stale samples,
         // even if the route ID and integer delay both remained unchanged.
-        const auto* reusable=previous && previous->sampleRate==sampleRate
+        const auto* reusable=previous && !forceFreshHistory &&
+            previous->sampleRate==sampleRate
             ? &previous->dispatch : nullptr;
         if(!next->dispatch.prepare(
                 next->graph,chainLatencies,channels,reusable))
