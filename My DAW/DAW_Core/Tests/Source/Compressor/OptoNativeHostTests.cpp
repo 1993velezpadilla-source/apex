@@ -349,4 +349,14 @@ public:
         comp.releaseResources();
     }
 };
-static OptoNativeHostTests optoNativeHostTests;
+
+// Explicitly referenced by the test executable's main() so MSVC Release
+// /GL + /LTCG + /OPT:REF cannot discard this unit test's static registration.
+// Debug built and ran 363 assertions, but the optimized compressor-only
+// Release run previously reported ZERO result groups (runner exit 2).
+// Function-local static avoids double registration.
+void registerApexOptoNativeHostTests()
+{
+    static OptoNativeHostTests test;
+    juce::ignoreUnused(test);
+}
