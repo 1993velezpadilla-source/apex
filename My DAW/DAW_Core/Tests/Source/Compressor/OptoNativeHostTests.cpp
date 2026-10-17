@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "../../../Source/PluginHostCore/ApexNativePluginFormat.h"
 #include "../../../Source/CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include <cmath>
 
 class OptoNativeHostTests final : public juce::UnitTest
@@ -183,6 +184,80 @@ public:
         expectEquals(static_cast<int>(restored.getParameterAt(
             APEX::Compressor::Voicing).getUnits()),2,
             "FAST/CLASSIC/SLOW must survive session save-close-reopen");
+
+        beginTest("Actual APEX PluginChain insert/process/save/reopen with native Opto 2A");
+        {
+            DAW::PluginChainCore trackChain;
+            trackChain.prepare(48000.0,128);
+            juce::String chainError;
+            const int slot=trackChain.appendPlugin(opto,manager,chainError);
+            expectEquals(slot,0,"APEX mixer must insert the native compressor");
+            expect(chainError.isEmpty(),chainError);
+            if(slot==0 && trackChain.getSlot(0)!=nullptr)
+            {
+                auto* live=dynamic_cast<OptoProcessor*>(
+                    trackChain.getSlot(0)->getProcessor());
+                expect(live!=nullptr,"actual mixer slot must own OptoProcessor");
+                if(live!=nullptr)
+                {
+                    live->getParameterAt(APEX::Compressor::PeakReduction).setValue(.8f);
+                    live->getParameterAt(APEX::Compressor::Gain).setValue(0.f);
+                    live->getParameterAt(APEX::Compressor::ColorEnabled).setValue(0.f);
+                    live->getParameterAt(APEX::Compressor::Voicing).setValue(1.f);
+                    trackChain.setSlotMix(0,1.f);
+                    trackChain.setChainOutputMix(1.f);
+                    juce::AudioBuffer<float> routed(2,128);
+                    for(int block=0;block<128;++block)
+                    {
+                        for(int n=0;n<128;++n)
+                        {
+                            routed.setSample(0,n,.7f);
+                            routed.setSample(1,n,.35f);
+                        }
+                        trackChain.processBlock(routed,128);
+                    }
+                    expect(live->getGainReductionMeterDb()>1.f,
+                           "inserted native compressor must actually reduce gain");
+                    expect(routed.getSample(0,127)<.7f,
+                           "track chain must route processed wet audio, not unprocessed dry");
+                    expectWithinAbsoluteError(
+                        static_cast<double>(routed.getSample(0,127)/.7f),
+                        static_cast<double>(routed.getSample(1,127)/.35f),
+                        1.e-4,"stereo channels must remain compression-linked");
+
+                    juce::ValueTree saved;
+                    juce::String saveError;
+                    const bool captured=trackChain.captureStateForPersistence(
+                        saved,saveError);
+                    expect(captured,saveError);
+                    if(captured)
+                    {
+                        DAW::PluginChainCore reopened;
+                        reopened.prepare(48000.0,128);
+                        juce::String restoreError;
+                        const bool restoredOk=reopened.restoreState(
+                            saved,manager,restoreError);
+                        expect(restoredOk,restoreError);
+                        expectEquals(reopened.getNumSlots(),1);
+                        if(restoredOk && reopened.getSlot(0)!=nullptr)
+                        {
+                            auto* p=dynamic_cast<OptoProcessor*>(
+                                reopened.getSlot(0)->getProcessor());
+                            expect(p!=nullptr,"saved native plugin must resolve by stable identifier");
+                            if(p)
+                            {
+                                expectEquals(static_cast<int>(
+                                    p->getParameterAt(APEX::Compressor::Voicing).getUnits()),
+                                    2,"SLOW voicing survives full mixer session restore");
+                                expectWithinAbsoluteError(static_cast<double>(
+                                    p->getParameterAt(APEX::Compressor::PeakReduction)
+                                        .getValue()),.8,1.e-5);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         beginTest("Stereo key link lowers both channels equally, no dry-source printing");
         OptoProcessor comp;
