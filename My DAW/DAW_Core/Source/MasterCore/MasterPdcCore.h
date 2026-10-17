@@ -120,7 +120,7 @@ private:
                     ++realtimeUnpreparedEdges_;
                     continue;
                 }
-                it=edgeDelays_.emplace(e.id,DelayLine{}).first;
+                it=edgeDelays_.try_emplace(e.id).first;
             }
             auto& line=it->second;
             const int capacity=juce::jmax(safeBlock*4,delay+safeBlock*2);
