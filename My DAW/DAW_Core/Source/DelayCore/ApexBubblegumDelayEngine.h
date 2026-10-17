@@ -113,7 +113,7 @@ public:
         const float desiredMix=settings_.mix;
         const double desiredOutput=std::pow(10.0,settings_.outputDb/20.0);
         const double hpCoeff=std::exp(-twoPi*settings_.highpassHz/rate_);
-        const double highCut=std::min(settings_.lowpassHz,rate_*0.45);
+        const double highCut=std::min(static_cast<double>(settings_.lowpassHz),rate_*0.45);
         const double lowCoeff=std::exp(-twoPi*highCut/rate_);
         const bool highEnabled=settings_.highpassHz>20.01f;
         const bool lowEnabled=settings_.lowpassHz<19999.0f;
