@@ -546,6 +546,66 @@ int main() {
              <<" research_only_no_1ms_pitch_recognition_or_artist_quality=1\n";
     fastHosted.releaseResources();
 
+    // The METADATA-only assertion above is insufficient on its own.
+    // Independently inject an impulse into a fully acquired, 100%-wet
+    // guarded HALF-CYCLE JUCE instance. Require immediate left-channel
+    // signal-through and no right-channel leakage in real processBlock.
+    APEX::TuneLive::Research::CausalJUCEAdapter fastDryRef,fastImpulse;
+    fastDryRef.enableGuardedHalfCycleResearch(true);
+    fastImpulse.enableGuardedHalfCycleResearch(true);
+    fastDryRef.prepareToPlay(48000.0,128);
+    fastImpulse.prepareToPlay(48000.0,128);
+    juce::AudioBuffer<float> fastDryBuffer(2,128),fastHitBuffer(2,128);
+    constexpr int kFastImpulseSample=32000;
+    constexpr float kFastImpulseStrength=0.25f;
+    bool fastBeforeIdentical=true,fastRightIsolated=true;
+    double fastImpulseResponse=0.0;
+    for(int frame=0;frame<38400;frame+=128) {
+        for(int n=0;n<128;++n) {
+            const int position=frame+n;
+            const double phase=6.283185307179586*447.691*position/48000.0;
+            const float v=static_cast<float>(0.24*std::sin(phase)+
+                                 0.05*std::sin(2.0*phase+0.2));
+            fastDryBuffer.setSample(0,n,v);
+            fastDryBuffer.setSample(1,n,v);
+            fastHitBuffer.setSample(0,n,v+(position==kFastImpulseSample?
+                                      kFastImpulseStrength:0.0f));
+            fastHitBuffer.setSample(1,n,v);
+        }
+        fastDryRef.processBlock(fastDryBuffer,midi);
+        fastImpulse.processBlock(fastHitBuffer,midi);
+        for(int n=0;n<128;++n) {
+            const int position=frame+n;
+            const double left=static_cast<double>(
+                fastHitBuffer.getSample(0,n)-fastDryBuffer.getSample(0,n));
+            const double right=static_cast<double>(
+                fastHitBuffer.getSample(1,n)-fastDryBuffer.getSample(1,n));
+            if(position<kFastImpulseSample)
+                fastBeforeIdentical &=left==0.0 && right==0.0;
+            if(position<=kFastImpulseSample)fastRightIsolated &=right==0.0;
+            if(position==kFastImpulseSample)
+                fastImpulseResponse=left/kFastImpulseStrength;
+        }
+    }
+    if(fastDryRef.getLatencySamples()!=0 ||
+       fastImpulse.getLatencySamples()!=0 ||
+       fastDryRef.researchWetMix()<0.95 ||
+       fastImpulse.researchWetMix()<0.95 ||
+       !fastBeforeIdentical || !fastRightIsolated ||
+       !std::isfinite(fastImpulseResponse) ||
+       fastImpulseResponse<0.70 || fastImpulseResponse>1.30)
+        return fail("guarded half-cycle real JUCE wet impulse path introduced lookahead/crosstalk");
+    std::cout<<"CAUSAL_JUCE_GUARDED_HALFCYCLE_REAL_PCM_IMPULSE"
+             <<" injection_sample="<<kFastImpulseSample
+             <<" output_first_sample="<<kFastImpulseSample
+             <<" extra_delay_samples=0"
+             <<" immediate_gain="<<fastImpulseResponse
+             <<" no_channel_bleed="<<fastRightIsolated
+             <<" plugin_reported_pdc_samples="<<fastImpulse.getLatencySamples()
+             <<" NOT_WHOLE_PITCH_CHANGED_VOICE_OR_ASIO_LATENCY=1\\n";
+    fastDryRef.releaseResources();
+    fastImpulse.releaseResources();
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
