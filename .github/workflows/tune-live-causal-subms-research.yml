@@ -21,6 +21,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_8_inserts.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp'
@@ -53,6 +54,10 @@ jobs:
             "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" \
             -o tune_live_one_ms_transient
           ./tune_live_one_ms_transient | tee one_ms_transient_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp" \
+            -o tune_live_sub1ms_signal_path
+          ./tune_live_sub1ms_signal_path | tee sub1ms_signal_path_ubuntu.log
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" \
             -o tune_live_causal_no_alloc
@@ -128,6 +133,7 @@ jobs:
           path: |
             harmonic_research_ubuntu.log
             one_ms_transient_ubuntu.log
+            sub1ms_signal_path_ubuntu.log
             causal_rt_no_alloc_ubuntu.log
             causal_note_leaps_ubuntu.log
             causal_fast_leaps_ubuntu.log
@@ -164,6 +170,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_one_ms_transient.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" || exit /b 1
           tune_live_one_ms_transient.exe > one_ms_transient_windows.log || (type one_ms_transient_windows.log & exit /b 1)
           type one_ms_transient_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_sub1ms_signal_path.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp" || exit /b 1
+          tune_live_sub1ms_signal_path.exe > sub1ms_signal_path_windows.log || (type sub1ms_signal_path_windows.log & exit /b 1)
+          type sub1ms_signal_path_windows.log
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_no_alloc.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" || exit /b 1
           tune_live_causal_no_alloc.exe > causal_rt_no_alloc_windows.log || (type causal_rt_no_alloc_windows.log & exit /b 1)
           type causal_rt_no_alloc_windows.log
@@ -222,6 +231,7 @@ jobs:
           path: |
             harmonic_research_windows.log
             one_ms_transient_windows.log
+            sub1ms_signal_path_windows.log
             causal_rt_no_alloc_windows.log
             causal_note_leaps_windows.log
             causal_fast_leaps_windows.log
