@@ -349,6 +349,11 @@ void ApplicationCore::initialize()
     DBG("ApplicationCore::initialize() - DAW subsystems initialized successfully");
     DBG("ApplicationCore: Gamepad support available (disabled by default)");
     appendStartupTrace("initialize.complete");
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    if(auto* message=juce::MessageManager::getInstanceWithoutCreating())
+        if(message->isThisTheMessageThread())
+            startTimer(40);
+#endif
 }
 
 void ApplicationCore::shutdown()
@@ -374,6 +379,9 @@ void ApplicationCore::shutdown()
     }
 
     DBG("ApplicationCore::shutdown() - Shutting down DAW subsystems");
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    stopTimer();
+#endif
 
     recordingEngine_.shutdown();
 
@@ -428,6 +436,60 @@ void ApplicationCore::shutdown()
 
     DBG("ApplicationCore::shutdown() - DAW subsystems shut down successfully");
 }
+
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+void ApplicationCore::timerCallback()
+{
+    // Serialized with graph/chain mutation on the JUCE message thread.
+    // No polling, object lifetime access, allocation or locks on audio RT.
+    if(shutdownComplete_ || routingGraph_==nullptr || currentSampleRate_<=0.0 ||
+       pluginChainPublicationBatchDepth_!=0 ||
+       isOfflineRendering_.load(std::memory_order_acquire) ||
+       projectStateRestoreSuspensionActive_.load(std::memory_order_acquire))
+        return;
+
+    const auto published=audioEngine_.getChainLatenciesRT();
+    if(!published)return;
+    std::size_t activeChains=0;
+    bool changed=false;
+    bool hostDryPrepared=true;
+    for(const auto& [trackId,chain]:pluginChains_) {
+        if(!chain)continue;
+        ++activeChains;
+        const int latency=HostedPluginIsolationCore::effectiveHostedLatencySamples(
+            chain->totalLatencySamples());
+        const auto it=published->find(trackId);
+        if(it!=published->end() && it->second==latency)continue;
+        changed=true;
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        // A VST3 can change its latency without any insert/remove event.
+        // Its slot-bypass dry ring AND chain-wide dry ring must follow the
+        // newly reported latency, not the previous prepare() value. Reader
+        // admission is drained by PluginChainCore on this control thread.
+        if(!chain->refreshResearchHostDryPdcForChangedLatencyOnControlThread())
+            hostDryPrepared=false;
+#endif
+    }
+    if(!changed && activeChains==published->size()) {
+        // RoutingGraph::publishSnapshotOnly() may republish a QuickSend
+        // active/bypass/tap change without notifying graph listeners or
+        // changing the graph version. A bounded control-thread refresh
+        // keeps the prepared bank in step; identical routing does not
+        // allocate or reset delay history (publishPrepared fast path).
+        refreshExperimentalGraphPdcAfterPublication();
+        return;
+    }
+
+    // Publish the changed map even if dry-ring preparation fails: the
+    // revision gate rejects stale PDC rather than silently accepting it.
+    publishPluginChainLatencies();
+    audioEngine_.markMasterPdcDirty();
+#if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+    if(!hostDryPrepared)
+        audioEngine_.setExperimentalGraphPdcRenderEnabledForTests(false);
+#endif
+}
+#endif
 
 void ApplicationCore::queueVocalTuneBackgroundJob(std::function<void()> job)
 {
@@ -1238,6 +1300,13 @@ void ApplicationCore::connectionRemoved(const RouteID& connId)
 void ApplicationCore::graphChanged()
 {
     syncPluginChainSidechainBusConfig();
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // QuickSend, AutoSend, pre-fader and bus topology changes can preserve
+    // the plugin-latency map. In that case publishPluginChainLatencies()
+    // is NOT called, so a routing-only edit must stage its own coherent
+    // graph-PDC bank. The helper enforces JUCE message-thread ownership.
+    refreshExperimentalGraphPdcAfterPublication();
+#endif
 }
 
 void ApplicationCore::transportStateChanged()

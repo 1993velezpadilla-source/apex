@@ -1,0 +1,57 @@
+name: APEX PDC V2 Mainline JUCE
+on:
+  push:
+    paths:
+      - ".github/workflows/apex-pdc-v2-mainline-juce.yml"
+      - "My DAW/DAW_Core/Scripts/test_pdc_v2_mainline.ps1"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+      - "My DAW/DAW_Core/Tests/Source/PDC/**"
+      - "My DAW/DAW_Core/Source/PDCCore/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.cpp"
+  pull_request:
+    paths:
+      - ".github/workflows/apex-pdc-v2-mainline-juce.yml"
+      - "My DAW/DAW_Core/Scripts/test_pdc_v2_mainline.ps1"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+      - "My DAW/DAW_Core/Tests/Source/PDC/**"
+      - "My DAW/DAW_Core/Source/PDCCore/**"
+      - "My DAW/DAW_Core/Source/AudioEngineCore/AudioEngine.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.h"
+      - "My DAW/DAW_Core/Source/AppCore/ApplicationCore.cpp"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apex-pdc-mainline-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  live-pdc:
+    name: APEX PDC V2 JUCE / Windows ${{ matrix.configuration }}
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Verify pinned dependencies and generate JUCE project
+        run: .\Scripts\prepare_ci.ps1
+      - name: Compile current APEXTests and test PDC V2 routing + sidechain
+        run: .\Scripts\test_pdc_v2_mainline.ps1 -Configuration ${{ matrix.configuration }}
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-pdc-v2-mainline-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn

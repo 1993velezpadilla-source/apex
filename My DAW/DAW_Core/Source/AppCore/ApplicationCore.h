@@ -65,6 +65,9 @@ class ApplicationCore : private TrackManager::Listener,
                          private RoutingGraph::Listener,
                         private FaderRangeCore::Listener,
                         private TransportController::Listener
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+                       , private juce::Timer
+#endif
 {
 public:
     ApplicationCore();
@@ -242,6 +245,26 @@ public:
         folderBusStateModel_.update(std::move(snap));
     }
 
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    // MESSAGE THREAD ONLY: stage the ACTUAL published graph snapshot and the
+    // ALREADY published plugin latencies as one prepared PDC generation.
+    // No audio callbacks build maps, search routing strings or allocate here.
+    // This research path is absent from the shipping JUCE application.
+    void refreshExperimentalGraphPdcAfterPublication()
+    {
+        if(currentSampleRate_<=0.0 || routingGraph_==nullptr)return;
+        auto* message=juce::MessageManager::getInstanceWithoutCreating();
+        if(message==nullptr || !message->isThisTheMessageThread())return;
+        auto graph=routingGraph_->getSnapshotPublisher().get();
+        if(!graph)return;
+        auto latency=audioEngine_.getChainLatenciesRT();
+        (void)audioEngine_.stageProgrammeGraphPdcPreflightOnControlThread(
+            *graph,latency.get(),2,currentSampleRate_);
+        // Frees only when no audio readers can hold the retired generation.
+        (void)audioEngine_.collectGraphPdcRetiredOnControlThread();
+    }
+#endif
+
     /** Publish per-track chain latencies so the audio thread can recompute
      *  PDC without touching pluginChains_ or the live RoutingGraph.
      *  MESSAGE THREAD only (allocates). Call after any chain mutation that
@@ -254,6 +277,9 @@ public:
                 (*latencies)[trackId] = HostedPluginIsolationCore::effectiveHostedLatencySamples(
                     chain->totalLatencySamples());
         audioEngine_.publishChainLatencies(std::move(latencies));
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+        refreshExperimentalGraphPdcAfterPublication();
+#endif
     }
 
     /** C3: publish an immutable snapshot of the plugin-chain map so the
@@ -458,6 +484,9 @@ public:
     }
 
 private:
+#if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
+    void timerCallback() override;
+#endif
     void beginPluginChainPublicationBatch() noexcept
     {
         ++pluginChainPublicationBatchDepth_;
