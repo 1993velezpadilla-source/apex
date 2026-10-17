@@ -130,14 +130,16 @@ public:
     void process(float& left,float& right) noexcept
     {
         // No allocation, locks, JUCE access, or branches on GUI state.
-        const float dryL=std::isfinite(left)?std::max(-8.0f,std::min(8.0f,left)):0.0f;
-        const float dryR=std::isfinite(right)?std::max(-8.0f,std::min(8.0f,right)):0.0f;
+        const float dryL=std::isfinite(left)?left:0.0f;
+        const float dryR=std::isfinite(right)?right:0.0f;
+        const float feedL=std::max(-8.0f,std::min(8.0f,dryL));
+        const float feedR=std::max(-8.0f,std::min(8.0f,dryR));
         const float targetPre=settings_.predelayMs*0.001f*static_cast<float>(sampleRate_);
         predelayCurrent_+=smoothAlpha_*(targetPre-predelayCurrent_);
         mixCurrent_+=smoothAlpha_*(settings_.mix-mixCurrent_);
 
         // Store then tap: zero pre-delay admits the current sample.
-        pre_[0].push(dryL); pre_[1].push(dryR);
+        pre_[0].push(feedL); pre_[1].push(feedR);
         float preL=pre_[0].tap(predelayCurrent_);
         float preR=pre_[1].tap(predelayCurrent_);
         const float inputGain=settings_.bypass?0.0f:1.0f;
