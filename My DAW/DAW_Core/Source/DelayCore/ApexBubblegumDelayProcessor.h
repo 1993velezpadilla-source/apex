@@ -151,7 +151,17 @@ public:
         const double feedback=juce::jlimit(0.0,2.0,
             static_cast<double>(getParameterAt(Feedback).getUnits())/100.0);
         if(feedback>=0.999) return 60.0; // potentially self-oscillating.
-        const auto ms=juce::jlimit(1.0,3500.0,engine_.getTimeMs());
+        // Tail query may run outside the audio callback. Read only lock-free
+        // hosted controls and the atomic tempo snapshot, never engine state.
+        const int sync=static_cast<int>(getParameterAt(SyncMode).getUnits());
+        const int note=juce::jlimit(0,12,static_cast<int>(getParameterAt(Note).getUnits()));
+        const double bpm=sync==2
+            ? static_cast<double>(getParameterAt(ManualBpm).getUnits())
+            : getHostTempoForDisplay();
+        const double ms=juce::jlimit(1.0,3500.0,sync==0
+            ? static_cast<double>(getParameterAt(TimeMs).getUnits())
+            : 60000.0*Engine::kNoteBeats[static_cast<std::size_t>(note)]
+                /juce::jmax(1.0,bpm));
         const double repeats=feedback<0.001?1.0:
             1.0+std::ceil(std::log(0.001)/std::log(feedback));
         return juce::jlimit(0.001,60.0,repeats*ms/1000.0);
