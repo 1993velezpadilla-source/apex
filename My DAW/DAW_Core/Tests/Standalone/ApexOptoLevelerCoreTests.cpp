@@ -147,6 +147,70 @@ static void testOriginalOpticalVoicings()
         for(size_t n=0;n<a.size();++n)near(a[n],b[n],1.e-6);
     }
 }
+static void testClickBoundedColorAutomation()
+{
+    // Optical dynamics and Color use the same split-invariant smoothing
+    // clock. Enabling a strong nonlinear stage may NEVER step abruptly from
+    // the original waveform in the very next sample.
+    for (double sr : {44100.0,48000.0,96000.0})
+    {
+        OptoParameters prm;
+        prm.peakReduction=0;
+        prm.gainDb=0;
+        prm.mix=1;
+        prm.colorEnabled=false;
+        prm.colorDrive=4;
+        ApexOptoLevelerCore single;
+        single.setParameters(prm);
+        single.prepare(sr);
+        std::vector<float> steady(512,.35f);
+        single.process(steady.data(),nullptr,(int)steady.size());
+        near(steady.back(),.35,1.e-6);
+
+        prm.colorEnabled=true;
+        single.setParameters(prm);
+        float first=.35f;
+        single.process(&first,nullptr,1);
+        assert(std::abs(first-.35f)<.005f);
+        std::vector<float> saturated(8192,.35f);
+        single.process(saturated.data(),nullptr,(int)saturated.size());
+        assert(std::abs(saturated.back()-.35f)>.02f);
+        const float beforeOff=saturated.back();
+
+        prm.colorEnabled=false;
+        single.setParameters(prm);
+        float firstOff=.35f;
+        single.process(&firstOff,nullptr,1);
+        assert(std::abs(firstOff-beforeOff)<.005f);
+        std::vector<float> restored(8192,.35f);
+        single.process(restored.data(),nullptr,(int)restored.size());
+        near(restored.back(),.35,1.e-5);
+
+        // The exact same toggle and drive automation timeline must render
+        // identically whether audio arrives in 31 or 128-sample host blocks.
+        auto render=[sr](int frames) {
+            ApexOptoLevelerCore dsp;
+            OptoParameters p;p.peakReduction=0;p.colorEnabled=false;
+            p.colorDrive=4;p.mix=1;
+            dsp.setParameters(p);dsp.prepare(sr);
+            std::vector<float> audio(2048,.35f);
+            for(int off=0;off<(int)audio.size();)
+            {
+                if(off==512) {p.colorEnabled=true;dsp.setParameters(p);}
+                if(off==1024) {p.colorDrive=1.5;dsp.setParameters(p);}
+                if(off==1536) {p.colorEnabled=false;dsp.setParameters(p);}
+                const int nextBoundary=off<512?512:(off<1024?1024:(off<1536?1536:2048));
+                const int n=std::min(frames,nextBoundary-off);
+                dsp.process(audio.data()+off,nullptr,n);
+                off+=n;
+            }
+            return audio;
+        };
+        const auto block128=render(128), block31=render(31);
+        for(size_t n=0;n<block128.size();++n)
+            near(block128[n],block31[n],2.e-6);
+    }
+}
 static void testVuBallistics()
 {
     OptoVuBallisticsCore one, split;
@@ -180,5 +244,6 @@ int main()
     std::cerr << "bypass\n"; testBypassAndParameterChanges();
     std::cerr << "VU ballistics\\n"; testVuBallistics();
     testOriginalOpticalVoicings();
-    std::cout<<"APEX Opto Core: 8 suites PASS (algorithm scaffold only; no hardware match claim)\n";
+    testClickBoundedColorAutomation();
+    std::cout<<"APEX Opto Core: 9 suites PASS (algorithm scaffold only; no hardware match claim)\n";
 }
