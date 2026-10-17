@@ -5,6 +5,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../ReverieCore/ApexReverieProcessor.h"
 
 namespace DAW {
 
@@ -47,6 +48,10 @@ public:
         APEX::Compressor::OptoProcessor optoPrototype;
         optoPrototype.fillInPluginDescription(opto);
         results.add(new juce::PluginDescription(opto));
+        juce::PluginDescription reverie;
+        APEX::Reverie::Processor reveriePrototype;
+        reveriePrototype.fillInPluginDescription(reverie);
+        results.add(new juce::PluginDescription(reverie));
     }
 
     /** The manager matches on getName() AND this predicate; accept every
@@ -57,7 +62,8 @@ public:
             || fileOrIdentifier == APEX::G10::G10NativePluginFormat::createG10Description().fileOrIdentifier
             || fileOrIdentifier == APEX::C4::C4NativePluginFormat::createC4Description().fileOrIdentifier
             || fileOrIdentifier == APEX::ParametricEQ::Processor::kFileOrIdentifier
-            || fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier;
+            || fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier
+            || fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier;
     }
 
     juce::String getNameOfPluginFromIdentifier (const juce::String& fileOrIdentifier) override
@@ -70,6 +76,8 @@ public:
             return APEX::ParametricEQ::Processor::kPluginName;
         if (fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
             return APEX::Compressor::OptoProcessor::kPluginName;
+        if (fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
+            return APEX::Reverie::Processor::kPluginName;
         return {};
     }
 
@@ -85,7 +93,10 @@ public:
             || APEX::ParametricEQ::NativePluginFormat::isDescription (desc)
             || (desc.uniqueId == APEX::Compressor::OptoProcessor::kUniqueId
                 && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
-                && desc.fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier);
+                && desc.fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
+            || (desc.uniqueId == APEX::Reverie::Processor::kUniqueId
+                && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
+                && desc.fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier);
     }
 
     bool canScanForPlugins() const override { return false; }
@@ -130,6 +141,10 @@ protected:
                 && description.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && description.fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
                 instance = std::make_unique<APEX::Compressor::OptoProcessor>();
+            else if (description.uniqueId == APEX::Reverie::Processor::kUniqueId
+                && description.pluginFormatName.equalsIgnoreCase(kFormatName)
+                && description.fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
+                instance = std::make_unique<APEX::Reverie::Processor>();
             else
                 error = "Not an APEX native plugin (identifier="
                     + description.fileOrIdentifier + ").";
