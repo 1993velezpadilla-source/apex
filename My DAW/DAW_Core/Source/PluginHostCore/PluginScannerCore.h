@@ -12,6 +12,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../DelayCore/ApexBubblegumDelayProcessor.h"
 
 namespace DAW {
 
@@ -37,6 +38,7 @@ public:
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumDelayEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -271,6 +273,7 @@ private:
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumDelayEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -327,6 +330,16 @@ private:
     void seedNativeOpto2AEntry()
     {
         APEX::Compressor::OptoProcessor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Native Bubblegum Delay is not a disk plugin: seed its stable identity
+        before every browser rebuild, including clean and forced rescans. */
+    void seedNativeBubblegumDelayEntry()
+    {
+        APEX::Delay::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
