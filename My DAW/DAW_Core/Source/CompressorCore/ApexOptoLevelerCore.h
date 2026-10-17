@@ -68,6 +68,8 @@ public:
         scLowL_ = scLowR_ = 0.0;
         currentMix_ = parameters_.mix;
         currentGain_ = dbToGain(parameters_.gainDb);
+        currentColorDrive_ = parameters_.colorDrive;
+        currentColorBlend_ = parameters_.colorEnabled ? 1.0 : 0.0;
         activeMix_ = parameters_.bypass ? 0.0 : 1.0;
         hasProcessed_ = false;
         gainReductionDb_ = 0.0;
@@ -90,6 +92,8 @@ public:
             activeMix_ = parameters_.bypass ? 0.0 : 1.0;
             currentMix_ = parameters_.mix;
             currentGain_ = dbToGain(parameters_.gainDb);
+            currentColorDrive_ = parameters_.colorDrive;
+            currentColorBlend_ = parameters_.colorEnabled ? 1.0 : 0.0;
         }
     }
 
@@ -111,12 +115,18 @@ public:
         const double thresholdActive = parameters_.peakReduction > 0.0 ? 1.0 : 0.0;
         const double targetMix = parameters_.mix;
         const double targetGain = dbToGain(parameters_.gainDb);
+        const double targetColorBlend = parameters_.colorEnabled ? 1.0 : 0.0;
+        const double targetColorDrive = parameters_.colorDrive;
         for (int n = 0; n < frames; ++n)
         {
             const double dryL = sanitiseInput(left[n]);
             const double dryR = stereo ? sanitiseInput(right[n]) : dryL;
             currentMix_ = controlCoeff_ * currentMix_ + (1.0 - controlCoeff_) * targetMix;
             currentGain_ = controlCoeff_ * currentGain_ + (1.0 - controlCoeff_) * targetGain;
+            currentColorBlend_ = controlCoeff_ * currentColorBlend_
+                               + (1.0 - controlCoeff_) * targetColorBlend;
+            currentColorDrive_ = controlCoeff_ * currentColorDrive_
+                               + (1.0 - controlCoeff_) * targetColorDrive;
             const double targetActive = parameters_.bypass ? 0.0 : 1.0;
             activeMix_ = controlCoeff_ * activeMix_ + (1.0 - controlCoeff_) * targetActive;
             if (std::abs(activeMix_ - targetActive) < 1.0e-10)
@@ -195,10 +205,16 @@ public:
             const double appliedGain = dbToGain(-gainReductionDb_);
             double wetL = dryL * appliedGain;
             double wetR = dryR * appliedGain;
-            if (parameters_.colorEnabled)
+            // Moving the Color toggle/drive while monitoring must not
+            // instantaneously replace the waveform.  Keep saturation out
+            // of the zero-blend path (no extra CPU at factory default).
+            // The 5 ms response is invariant to host callback partitions.
+            if (currentColorBlend_ > 1.0e-12)
             {
-                wetL = color(wetL, parameters_.colorDrive);
-                wetR = color(wetR, parameters_.colorDrive);
+                const double coloredL = color(wetL, currentColorDrive_);
+                const double coloredR = stereo ? color(wetR, currentColorDrive_) : coloredL;
+                wetL += (coloredL - wetL) * currentColorBlend_;
+                wetR += (coloredR - wetR) * currentColorBlend_;
             }
             wetL *= currentGain_;
             wetR *= currentGain_;
@@ -241,6 +257,7 @@ private:
     double scLowL_ = 0.0, scLowR_ = 0.0, currentMix_ = 1.0, currentGain_ = 1.0;
     double gainReductionDb_ = 0.0;
     double activeMix_ = 1.0;
+    double currentColorBlend_ = 0.0, currentColorDrive_ = 1.0;
     bool hasProcessed_ = false;
     double cachedSlowCoeff_ = 1.0;
     int slowCoeffSamplesUntilRefresh_ = 0;
