@@ -489,6 +489,63 @@ int main() {
              <<" no_1ms_new_note_claim=1\\n";
     midJUCE.releaseResources();
 
+    // FASTEST guarded half-cycle mode is exposed ONLY via the separate
+    // unregistered JUCE research adapter. This is a genuine hosted Audio-
+    // PluginInstance path, not just isolated portable DSP, so verify actual
+    // JUCE PDC metadata, emitted PCM tuning and sample-synchronous attacks.
+    // None of this qualifies as 1ms unknown-note recognition or shipping.
+    APEX::TuneLive::Research::CausalJUCEAdapter fastHosted;
+    fastHosted.enableGuardedHalfCycleResearch(true);
+    fastHosted.prepareToPlay(48000.0,128);
+    if(fastHosted.getLatencySamples()!=0)
+        return fail("guarded half-cycle research JUCE reported fixed lookahead");
+    juce::PluginDescription fastDesc;
+    fastHosted.fillInPluginDescription(fastDesc);
+    if(fastDesc.pluginFormatName=="APEX Native" ||
+       fastDesc.fileOrIdentifier==APEX::TuneLive::Processor::kFileOrIdentifier)
+        return fail("experimental half-cycle adapter aliased shipping plugin identity");
+    APEX::TuneLive::PitchTracker fastOutput;
+    fastOutput.prepare(48000.0);
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int i=0;i<128;++i) {
+            const double t=(frame+i)/48000.0;
+            const float sample=static_cast<float>(
+                0.26*std::sin(6.283185307179586*447.691*t)+
+                0.05*std::sin(6.283185307179586*2.0*447.691*t+0.31)+
+                0.018*std::sin(6.283185307179586*3.0*447.691*t+0.13));
+            researchAudio.setSample(0,i,sample);
+            researchAudio.setSample(1,i,sample);
+        }
+        fastHosted.processBlock(researchAudio,midi);
+        for(int i=0;i<128;++i) {
+            const float out=researchAudio.getSample(0,i);
+            if(!std::isfinite(out) ||
+               !std::isfinite(researchAudio.getSample(1,i)))
+                return fail("guarded half-cycle JUCE host emitted nonfinite audio");
+            if(frame>=24000)fastOutput.push(out);
+        }
+    }
+    const auto fastResult=fastOutput.latest();
+    const double fastCents=fastResult.voiced && fastResult.hz>0.0f
+        ?1200.0*std::log2(fastResult.hz/440.0):9999.0;
+    const double fastFirstF0Ms=1000.0*fastHosted.firstVoiceSample()/48000.0;
+    const double fastHalfWetMs=1000.0*fastHosted.firstHalfWetSample()/48000.0;
+    if(!fastResult.voiced || std::abs(fastCents)>18.0 ||
+       fastHosted.researchWetMix()<0.95 ||
+       fastHosted.firstUltraSample()<0 ||
+       fastFirstF0Ms<6.0 || fastFirstF0Ms>7.3 ||
+       fastHalfWetMs<fastFirstF0Ms || fastHalfWetMs>9.0)
+        return fail("fast guarded research JUCE first note/wet control or F0 outside measured fixture");
+    if(plugin.getLatencySamples()!=1920)
+        return fail("hosted research altered shipping HQ40 PDC");
+    std::cout<<"CAUSAL_JUCE_GUARDED_HALFCYCLE_RESEARCH"
+             <<" fixed_lookahead_samples="<<fastHosted.getLatencySamples()
+             <<" first_f0_ms="<<fastFirstF0Ms
+             <<" first_wet50_control_ms="<<fastHalfWetMs
+             <<" corrected_output_cents="<<fastCents
+             <<" research_only_no_1ms_pitch_recognition_or_artist_quality=1\n";
+    fastHosted.releaseResources();
+
     editor.reset();
     plugin.releaseResources();
     std::cout<<"PASS: JUCE 8 native runtime plugin description, 11 hosted params, "
