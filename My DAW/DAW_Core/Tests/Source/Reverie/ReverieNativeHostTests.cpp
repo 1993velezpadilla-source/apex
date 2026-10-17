@@ -58,7 +58,7 @@ public:
         expectEquals(base->getLatencySamples(),0);
 
         beginTest("Mix zero is bitwise-transparent for normal input in stereo");
-        processor->floatAt(10).setValue(0.0f);
+        base->getParameters()[10]->setValueNotifyingHost(0.0f);
         base->prepareToPlay(48000.0,128);
         juce::AudioBuffer<float> audio(2,128);
         for(int i=0;i<128;++i)
@@ -75,11 +75,11 @@ public:
         }
 
         beginTest("State survives roundtrip including mode, era, wet, predelay and bypass");
-        processor->modeParameter().setValue(0.8f); // ROOM
-        processor->eraParameter().setValue(0.5f); // 1980s
-        processor->floatAt(2).setValue(0.4f);
-        processor->floatAt(10).setValue(0.92f);
-        processor->bypassParameter().setValue(1.0f);
+        base->getParameters()[0]->setValueNotifyingHost(0.8f); // ROOM
+        base->getParameters()[1]->setValueNotifyingHost(0.5f); // 1980s
+        base->getParameters()[2]->setValueNotifyingHost(0.4f);
+        base->getParameters()[10]->setValueNotifyingHost(0.92f);
+        base->getParameters()[12]->setValueNotifyingHost(1.0f);
         juce::MemoryBlock state;
         base->getStateInformation(state);
         Processor restored;
