@@ -11,10 +11,11 @@ namespace DAW {
 /**
  *  Master-path Plugin Delay Compensation.
  *
- *  sync() runs on the audio thread when the master-PDC plan is dirty
- *  (topology change or plugin-chain latency change). It consumes ONLY
- *  published state — the adopted RoutingSnapshot plus the atomically
- *  published per-track latency map — and updates delay lines in place:
+ *  sync() is a CONTROL/TEST-only allocation-permitted prewarm.
+ *  syncRealtime() is the audio-callback fallback and NEVER creates or
+ *  grows delay lines: an unprepared edge explicitly renders uncompensated
+ *  until the control plane can stage a safely prepared bank. Both use ONLY
+ *  the adopted immutable RoutingSnapshot and published chain latencies:
  *
  *   - no iteration of the live RoutingGraph or pluginChains_ map
  *     (previously a data race with message-thread mutation);
@@ -39,9 +40,33 @@ public:
         scratchR_.assign((size_t)blockSize_, 0.0f);
     }
 
+    // No realtime callback may call this allocation-permitted method.
     void sync(const RoutingSnapshot& snapshot,
               const std::map<TrackID, int>* latencies,
               int numSamples)
+    {
+        syncImpl(snapshot,latencies,numSamples,false);
+    }
+
+    // Recompute already-prepared lines without allocating or resetting their
+    // buffers. Missing/new/too-long edges remain uncompensated for this block;
+    // the fallback deliberately prioritizes glitch-free live monitoring.
+    void syncRealtime(const RoutingSnapshot& snapshot,
+                      const std::map<TrackID,int>* latencies,
+                      int numSamples) noexcept
+    {
+        syncImpl(snapshot,latencies,numSamples,true);
+    }
+
+    std::uint64_t getRealtimeUnpreparedEdgeCount() const noexcept
+    {
+        return realtimeUnpreparedEdges_;
+    }
+
+private:
+    void syncImpl(const RoutingSnapshot& snapshot,
+                  const std::map<TrackID,int>* latencies,
+                  int numSamples,bool realtime) noexcept
     {
         // Mark active compensation edges without dropping any delay's
         // history yet. A route that stops being audible will be invalidated
@@ -83,10 +108,30 @@ public:
             if(latency<0)continue;
             const int delay=juce::jmax(0,maxLatency-latency);
             if(delay<=0)continue;
-            auto& line=edgeDelays_[e.id];
+            // std::unordered_map insertion and AudioBuffer::setSize can
+            // allocate: both are forbidden in the callback. The RT path
+            // must only access an existing prewarmed ring. A previously
+            // prepared ring needs delay+1 frames; processEdge chunks larger
+            // callback blocks against its existing scratch capacity.
+            auto it=edgeDelays_.find(e.id);
+            if(it==edgeDelays_.end())
+            {
+                if(realtime) {
+                    ++realtimeUnpreparedEdges_;
+                    continue;
+                }
+                it=edgeDelays_.emplace(e.id,DelayLine{}).first;
+            }
+            auto& line=it->second;
             const int capacity=juce::jmax(safeBlock*4,delay+safeBlock*2);
-            if(line.buf.getNumSamples()<capacity)
+            if(line.buf.getNumSamples()< (realtime ? delay+2 : capacity))
+            {
+                if(realtime) {
+                    ++realtimeUnpreparedEdges_;
+                    continue;
+                }
                 line.prepare(capacity);
+            }
             line.setCrossfadeSamples(pdcFadeSamples_);
             line.delaySamples=delay;
             line.usedInCurrentSync=true;
@@ -110,6 +155,7 @@ public:
             }
     }
 
+public:
     void reset()
     {
         for (auto& [id, line] : edgeDelays_)
@@ -280,6 +326,7 @@ private:
     int pdcFadeSamples_ = 0;
     std::unordered_map<RouteID, DelayLine, StringHash> edgeDelays_;
     std::vector<float> scratchL_, scratchR_;
+    std::uint64_t realtimeUnpreparedEdges_=0; // RT callback only
 };
 
 } // namespace DAW
