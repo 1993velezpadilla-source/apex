@@ -216,6 +216,60 @@ int main(int argc,char** argv) {
               <<" guarded_wrong_note="<<consensus.otherWrongNote
               <<" accepted="<<consensusStable
               <<" NOT_FORMANT_OR_TRANSIENT_CERTIFICATE=1\n";
+        // Whole-PCM comparison pinpoints accidental processing differences
+        // in the new faster half-cycle, including hard note transitions.
+        // Signal difference alone does not establish better/bad formants.
+        // This entire scan occurs in the OFFLINE research test, not RT.
+        const auto& refWave=waves[7];
+        const auto& candidateWave=waves[8];
+        const std::size_t window=static_cast<std::size_t>(
+            std::max(1,static_cast<int>(std::lround(dry.rate*0.005))))
+            *static_cast<std::size_t>(dry.channels);
+        double globalError=0.0,highest5ms=0.0,highestNewStep=0.0;
+        double highestRefStep=0.0;
+        std::size_t differing=0;
+        for(std::size_t start=0;start<refWave.data.size();start+=window) {
+            const std::size_t stop=std::min(start+window,refWave.data.size());
+            double square=0.0;
+            for(std::size_t n=start;n<stop;++n) {
+                const double diff=static_cast<double>(
+                    candidateWave.data[n]-refWave.data[n]);
+                square+=diff*diff;
+                globalError+=diff*diff;
+                differing+=diff!=0.0;
+                const auto channels=static_cast<std::size_t>(dry.channels);
+                if(n>=channels && n-channels>=start) {
+                    highestNewStep=std::max(highestNewStep,std::abs(
+                        static_cast<double>(candidateWave.data[n])-
+                        candidateWave.data[n-channels]));
+                    highestRefStep=std::max(highestRefStep,std::abs(
+                        static_cast<double>(refWave.data[n])-
+                        refWave.data[n-channels]));
+                }
+            }
+            highest5ms=std::max(highest5ms,
+                std::sqrt(square/static_cast<double>(stop-start)));
+        }
+        const double fullDifferenceRms=std::sqrt(
+            globalError/static_cast<double>(refWave.data.size()));
+        // Dataset-pinned guard, not general psychoacoustic acceptance.
+        // Reject gross localized "speed" artifacts. The pinned low-singer
+        // never enters the >=400Hz half-cycle gate, so demand exact identity.
+        const bool lowExact=prefix!="vocadito_low" || differing==0;
+        const bool localSafe=highest5ms<=0.035 &&
+            highestNewStep<=highestRefStep+0.03;
+        const bool halfCycleWaveformSafe=lowExact && localSafe;
+        valid &=halfCycleWaveformSafe;
+        report<<"REAL_SINGER_HALF_CYCLE_LOCAL_GATE prefix="<<prefix
+              <<" different_samples="<<differing
+              <<" full_signal_rms_difference="<<fullDifferenceRms
+              <<" largest_5ms_difference_rms="<<highest5ms
+              <<" candidate_max_sample_step="<<highestNewStep
+              <<" reference_max_sample_step="<<highestRefStep
+              <<" low_register_bit_exact="<<lowExact
+              <<" localized_nonsafety_regression="<<localSafe
+              <<" accepted="<<halfCycleWaveformSafe
+              <<" NOT_PERCEPTUAL_CERTIFICATE=1\n";
         report<<"REAL_SINGER_4HOP_STABLE_F0 prefix="<<prefix
               <<" prior_octave="<<ultra.octave
               <<" four_hop_octave="<<fastHop.octave
