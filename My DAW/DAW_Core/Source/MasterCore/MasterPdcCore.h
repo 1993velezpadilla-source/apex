@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <map>
+#include <atomic>
 #include <unordered_map>
 #include <vector>
 #include "../RoutingCore/RoutingSnapshot.h"
@@ -60,13 +61,13 @@ public:
 
     std::uint64_t getRealtimeUnpreparedEdgeCount() const noexcept
     {
-        return realtimeUnpreparedEdges_;
+        return realtimeUnpreparedEdges_.load(std::memory_order_relaxed);
     }
 
 private:
     void syncImpl(const RoutingSnapshot& snapshot,
                   const std::map<TrackID,int>* latencies,
-                  int numSamples,bool realtime) noexcept
+                  int numSamples,bool realtime)
     {
         // Mark active compensation edges without dropping any delay's
         // history yet. A route that stops being audible will be invalidated
@@ -117,7 +118,7 @@ private:
             if(it==edgeDelays_.end())
             {
                 if(realtime) {
-                    ++realtimeUnpreparedEdges_;
+                    realtimeUnpreparedEdges_.fetch_add(1,std::memory_order_relaxed);
                     continue;
                 }
                 it=edgeDelays_.try_emplace(e.id).first;
@@ -127,7 +128,7 @@ private:
             if(line.buf.getNumSamples()< (realtime ? delay+2 : capacity))
             {
                 if(realtime) {
-                    ++realtimeUnpreparedEdges_;
+                    realtimeUnpreparedEdges_.fetch_add(1,std::memory_order_relaxed);
                     continue;
                 }
                 line.prepare(capacity);
@@ -326,7 +327,7 @@ private:
     int pdcFadeSamples_ = 0;
     std::unordered_map<RouteID, DelayLine, StringHash> edgeDelays_;
     std::vector<float> scratchL_, scratchR_;
-    std::uint64_t realtimeUnpreparedEdges_=0; // RT callback only
+    std::atomic<std::uint64_t> realtimeUnpreparedEdges_{0}; // RT increments; control may read
 };
 
 } // namespace DAW
