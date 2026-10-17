@@ -314,6 +314,67 @@ public:
             }
 
 
+        beginTest("New legacy fallback edges fail closed without callback allocation");
+        {
+            DAW::RoutingSnapshot graph;
+            graph.version=1010;
+            graph.nodes={
+                {"fast","fast",DAW::RoutingNodeType::Track,true},
+                {"slow","slow",DAW::RoutingNodeType::Track,true},
+                {"fresh","fresh",DAW::RoutingNodeType::Track,true},
+                {"master","master",DAW::RoutingNodeType::Master,true}};
+            graph.nodeIndexById["fast"]=0;
+            graph.nodeIndexById["slow"]=1;
+            graph.nodeIndexById["fresh"]=2;
+            graph.nodeIndexById["master"]=3;
+            DAW::RoutingSnapshot::EdgeSnapshot fast,slow,fresh;
+            fast.id="fast-master";fast.sourceNodeId="fast";
+            fast.destNodeId="master";fast.type=DAW::ConnectionType::Direct;
+            slow.id="slow-master";slow.sourceNodeId="slow";
+            slow.destNodeId="master";slow.type=DAW::ConnectionType::Direct;
+            fresh.id="fresh-master";fresh.sourceNodeId="fresh";
+            fresh.destNodeId="master";fresh.type=DAW::ConnectionType::Direct;
+            graph.edges={fast,slow};
+            std::map<DAW::TrackID,int> latencies={
+                {"fast",0},{"slow",128},{"fresh",0}};
+            DAW::MasterPdcCore legacy;
+            legacy.prepare(48000.0,128);
+            legacy.sync(graph,&latencies,128); // message/control preparation
+            graph.edges.push_back(fresh); // change routing between callbacks
+            const auto before=legacy.getRealtimeUnpreparedEdgeCount();
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.syncRealtime(graph,&latencies,128);
+            }
+            expect(legacy.getRealtimeUnpreparedEdgeCount()>before,
+                "a newly created master edge must be rejected, never allocated on RT");
+            expectEquals(legacy.getEdgeDelay(DAW::RouteID{"fresh-master"}),0,
+                "a missing prepared ring is safely uncompensated");
+            // Control-thread reprepare is permitted only once callbacks are
+            // stopped. This test serializes both phases deliberately.
+            legacy.sync(graph,&latencies,128);
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.syncRealtime(graph,&latencies,128);
+            }
+            expectEquals(legacy.getEdgeDelay(DAW::RouteID{"fresh-master"}),128);
+            latencies["slow"]=80000; // exceeds previously prepared ring capacity
+            const auto beforeGrow=legacy.getRealtimeUnpreparedEdgeCount();
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.syncRealtime(graph,&latencies,128);
+            }
+            expect(legacy.getRealtimeUnpreparedEdgeCount()>beforeGrow,
+                "changed huge plugin latency must not resize the ring inside RT");
+            expectEquals(legacy.getEdgeDelay(DAW::RouteID{"fresh-master"}),0);
+            legacy.sync(graph,&latencies,128);
+            {
+                juce::UnitTestAllocationChecker checker(*this);
+                legacy.syncRealtime(graph,&latencies,128);
+            }
+            expectEquals(legacy.getEdgeDelay(DAW::RouteID{"fresh-master"}),80000);
+        }
+
         beginTest("Legacy monitor oversized callback chunks stay exact and allocation-free");
         // A 16k-frame offline callback intentionally exceeds the prepared
         // 64/128/256/512-frame RT scratch. Both the in-block impulse and a
