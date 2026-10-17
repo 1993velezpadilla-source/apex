@@ -60,10 +60,24 @@ public:
     juce::Rectangle<int> getNodeBoundsForTesting (int band) const;
     juce::TextButton& getAuditionButtonForTesting();
     juce::TextButton& getPhaseButtonForTesting();
+    juce::TextButton& getSketchButtonForTesting();
+    juce::TextButton& getGrabButtonForTesting();
+    juce::TextButton& getCopyButtonForTesting();
+    juce::TextButton& getPasteButtonForTesting();
+    juce::TextButton& getMatchButtonForTesting();
+    juce::TextButton& getMatchSaveButtonForTesting();
+    juce::TextButton& getMatchLoadButtonForTesting();
+    void feedMatchSpectrumForTesting (const float* db, int bins, double binHz);
+    void setGrabSpectrumForTesting (const float* db, int bins, double binHz);
+    juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const;
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
     juce::TextButton& getDynEnableButtonForTesting();
+    juce::TextButton& getDynFilterButtonForTesting();
+    juce::TextButton& getSpectralArmButtonForTesting();
+    juce::TextButton& getSpectralBandButtonForTesting();
     juce::Slider& getDynRangeSliderForTesting();
+    std::array<juce::Slider*, 3> getPrimaryDialsForTesting();
     bool isBandDynamicActiveForTesting (int band) const;
     double getDisplayedDynamicGainDbForTesting (int band) const;
     void setSelectedBandForTesting (int band);
@@ -74,10 +88,14 @@ public:
     // behaviour to be exercised through the real component hierarchy.
     juce::Rectangle<int> getTopBarBoundsForTesting() const;
     juce::Rectangle<int> getGraphBoundsForTesting() const;
+    void refreshResponseForTesting();
     juce::Rectangle<int> getInspectorBoundsForTesting() const;
     void injectGraphMouseDownForTesting (juce::Point<float> position);
     void injectGraphMouseDragForTesting (juce::Point<float> position);
     void injectGraphMouseUpForTesting (juce::Point<float> position);
+    void injectGraphDoubleClickForTesting (juce::Point<float> position);
+    void injectGraphWheelForTesting (juce::Point<float> position,
+                                    float deltaY);
 
 private:
     void selectBand (int band);
