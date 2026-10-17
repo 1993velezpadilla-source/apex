@@ -16,16 +16,18 @@ namespace APEX::Compressor
 enum ParameterIndex : int
 {
     PeakReduction = 0, Gain, Mix, Emphasis, ColorDrive,
-    Limit, ColorEnabled, Bypass, ParameterCount
+    Limit, ColorEnabled, Bypass, Voicing, ParameterCount
 };
 
 class OptoHostedParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
     OptoHostedParameter (const juce::ParameterID& id, const juce::String& name,
-                         float low, float high, float initial, bool toggle = false)
+                         float low, float high, float initial, bool toggle = false,
+                         int discreteSteps = 0)
         : juce::AudioProcessorParameterWithID(id,name),
           minimum_(low), maximum_(high), initial_(initial), toggle_(toggle),
+          discreteSteps_(discreteSteps),
           normalised_(toNormalised(initial))
     {
     }
@@ -34,38 +36,59 @@ public:
     void setValue (float n) override
     {
         if (std::isfinite(n))
-            normalised_.store(juce::jlimit(0.0f, 1.0f, n),std::memory_order_relaxed);
+        {
+            float next=juce::jlimit(0.0f,1.0f,n);
+            if (discreteSteps_>1)
+                next=std::round(next*static_cast<float>(discreteSteps_-1))
+                    /static_cast<float>(discreteSteps_-1);
+            normalised_.store(next,std::memory_order_relaxed);
+        }
     }
     float getDefaultValue() const override { return toNormalised(initial_); }
     juce::String getText(float n, int) const override
     {
         if (toggle_) return n >= 0.5f ? "On" : "Off";
+        if (discreteSteps_ == 3)
+        {
+            static constexpr const char* names[]={"FAST","CLASSIC","SLOW"};
+            return names[juce::jlimit(0,2,static_cast<int>(std::lround(fromNormalised(n))))];
+        }
         return juce::String(fromNormalised(n), 2);
     }
     float getValueForText(const juce::String& s) const override
     {
         if (toggle_)
             return (s.equalsIgnoreCase("on") || s == "1" || s.equalsIgnoreCase("true")) ? 1.0f : 0.0f;
+        if (discreteSteps_ == 3)
+        {
+            if (s.equalsIgnoreCase("FAST")) return 0.0f;
+            if (s.equalsIgnoreCase("CLASSIC")) return 0.5f;
+            if (s.equalsIgnoreCase("SLOW")) return 1.0f;
+        }
         return toNormalised(s.getFloatValue());
     }
     int getNumSteps() const override
     {
-        return toggle_ ? 2 : juce::AudioProcessorParameter::getDefaultNumParameterSteps();
+        return toggle_ ? 2 : (discreteSteps_ > 1 ? discreteSteps_
+            : juce::AudioProcessorParameter::getDefaultNumParameterSteps());
     }
     bool isBoolean() const override { return toggle_; }
-    bool isDiscrete() const override { return toggle_; }
+    bool isDiscrete() const override { return toggle_ || discreteSteps_ > 1; }
     float toNormalised(float units) const noexcept
     {
         return juce::jlimit(0.0f,1.0f,(units - minimum_)/(maximum_ - minimum_));
     }
     float fromNormalised(float n) const noexcept
     {
-        return toggle_ ? (n >= 0.5f ? 1.0f : 0.0f) : minimum_ + n * (maximum_ - minimum_);
+        if (toggle_) return n >= 0.5f ? 1.0f : 0.0f;
+        return discreteSteps_ > 1 ? std::round(n * (discreteSteps_ - 1))
+            : minimum_ + n * (maximum_ - minimum_);
     }
     float getUnits() const noexcept { return fromNormalised(getValue()); }
 private:
     const float minimum_, maximum_, initial_;
     const bool toggle_;
+    const int discreteSteps_;
     std::atomic<float> normalised_ { 0.0f };
 };
 
@@ -94,6 +117,7 @@ public:
         add(Limit, "opto.limit", "Limit", 0, 1, 0, true);
         add(ColorEnabled, "opto.color", "Color (Experimental)", 0, 1, 0, true);
         add(Bypass, "opto.bypass", "Bypass", 0, 1, 0, true);
+        add(Voicing, "opto.voice", "Optical Voice", 0, 2, 1, false, 3);
     }
 
     const juce::String getName() const override { return kPluginName; }
@@ -210,15 +234,16 @@ private:
     {
         static constexpr const char* ids[ParameterCount]={
             "opto.peak","opto.gain","opto.mix","opto.emphasis",
-            "opto.drive","opto.limit","opto.color","opto.bypass"
+            "opto.drive","opto.limit","opto.color","opto.bypass",
+            "opto.voice"
         };
         return ids[index];
     }
     void add(int index,const char* id,const char* name,float low,float high,
-             float initial,bool toggle=false)
+             float initial,bool toggle=false,int discreteSteps=0)
     {
         auto value=std::make_unique<OptoHostedParameter>(
-            juce::ParameterID(id,1),name,low,high,initial,toggle);
+            juce::ParameterID(id,1),name,low,high,initial,toggle,discreteSteps);
         params_[index]=value.get();
         addHostedParameter(std::move(value));
     }
@@ -233,6 +258,7 @@ private:
         p.limit=params_[Limit]->getUnits()>0.5f;
         p.colorEnabled=params_[ColorEnabled]->getUnits()>0.5f;
         p.bypass=params_[Bypass]->getUnits()>0.5f;
+        p.voicing=static_cast<int>(params_[Voicing]->getUnits());
         return p;
     }
 
