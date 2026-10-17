@@ -62,6 +62,7 @@ public:
         testDynamicControlsLayoutAtAllBreakpoints();
         testBandSelectionSynchronizesDynamicValues();
         testEnableToggleDrivesTheCanonicalParameter();
+        testSidechainFilterToggleDrivesCanonicalParameter();
         testSlidersAndGlobalButtonsDriveParameters();
         testPublishedVisualizationReflectsProcessorState();
         testStateRestoreAndReopenStaySynchronized();
@@ -84,11 +85,18 @@ private:
 
             const auto inspectorBounds = editor->getInspectorBoundsForTesting();
             auto& dynEnable = editor->getDynEnableButtonForTesting();
+            auto& dynFilter = editor->getDynFilterButtonForTesting();
             auto& dynRange = editor->getDynRangeSliderForTesting();
+            expect (dynEnable.isVisible(), "dynamic enable is actually attached");
+            expect (dynFilter.isVisible(), "SC filter is actually attached");
+            expect (dynRange.isVisible(), "dynamic range is actually attached");
             expect (dynEnable.isEnabled(), "dynamic enable reachable");
+            expect (dynFilter.isEnabled(), "SC filter reachable");
             expect (dynRange.isEnabled(), "dynamic range reachable");
             expect (dynEnable.getBounds().getHeight() >= 44,
                     "dynamic enable touch height");
+            expect (dynFilter.getBounds().getHeight() >= 44,
+                    "SC filter touch height");
             expect (dynRange.getBounds().getHeight() >= 44,
                     "dynamic range touch height");
             expect (dynEnable.getBounds().getX() >= 0
@@ -157,6 +165,30 @@ private:
         expect (! processor.getParametricEQParameter (
                      dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
                 "second press turns it off");
+    }
+
+    void testSidechainFilterToggleDrivesCanonicalParameter()
+    {
+        beginTest ("SC filter button drives the append-only hosted parameter");
+        auto processorStorage = std::make_unique<Processor>();
+        auto& processor = *processorStorage;
+        enableBell (processor, 0, 1000.0f, 6.0f, 4.0f);
+        processor.prepareToPlay (48000.0, 512);
+
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (900, 620);
+        editor->setSelectedBandForTesting (0);
+        auto& button = editor->getDynFilterButtonForTesting();
+        auto* parameter = processor.getParametricEQParameter (
+            dynamicFilterParameterIndex (0));
+
+        expect (! parameter->getBool(), "SC filter defaults off for migration");
+        expectEquals (juce::String ("SC Filter Off"), button.getButtonText());
+        press (button);
+        expect (parameter->getBool(), "SC filter click enables canonical parameter");
+        expectEquals (juce::String ("SC Filter On"), button.getButtonText());
+        press (button);
+        expect (! parameter->getBool(), "second click disables canonical parameter");
     }
 
     void testSlidersAndGlobalButtonsDriveParameters()
@@ -250,6 +282,7 @@ private:
         processor.prepareToPlay (48000.0, 512);
         setUnits (processor, dynamicParameterIndex (0, DynamicBandOffset::Enable), 1.0f);
         setUnits (processor, dynamicParameterIndex (0, DynamicBandOffset::Range), -7.5f);
+        setUnits (processor, dynamicFilterParameterIndex (0), 1.0f);
 
         juce::MemoryBlock state;
         processor.getStateInformation (state);
@@ -270,6 +303,12 @@ private:
         expect (restored.getParametricEQParameter (
                     dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
                 "restore preserves the dynamic enable state");
+        expect (restored.getParametricEQParameter (
+                    dynamicFilterParameterIndex (0))->getBool(),
+                "restore preserves the SC filter state");
+        expectEquals (juce::String ("SC Filter On"),
+                      editor->getDynFilterButtonForTesting().getButtonText(),
+                      "restored inspector reflects the SC filter state");
     }
 };
 
