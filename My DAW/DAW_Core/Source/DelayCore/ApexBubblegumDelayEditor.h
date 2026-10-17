@@ -145,8 +145,8 @@ public:
         const auto activeBpm=sync==2?bpm:processor_.getHostTempoForDisplay();
         const auto beats=Engine::kNoteBeats[static_cast<std::size_t>(juce::jlimit(0,12,note))];
         juce::String shown=sync==0?juce::String(ms,1)+" ms"
-            :juce::String(static_cast<int>(std::lround(60000.0*beats/
-                          activeBpm)))+" ms";
+            :juce::String(static_cast<int>(std::lround(juce::jlimit(
+                          1.0,3500.0,60000.0*beats/juce::jmax(1.0,activeBpm)))))+" ms";
         g.setColour(teal);
         g.setFont(juce::Font(juce::FontOptions(43.0f,juce::Font::bold)));
         g.drawText(shown,345,157,363,53,juce::Justification::centred);
@@ -208,25 +208,33 @@ private:
         s.onDragStart=[this,slot,parameter]
         {
             dragging_[slot]=true;
-            processor_.getParameterAt(parameter).beginChangeGesture();
-            showValue(parameter);
+            const int target=(slot==0 && syncModeForKnob_!=0)?Note:parameter;
+            dragTarget_[slot]=target;
+            processor_.getParameterAt(target).beginChangeGesture();
+            showValue(target);
         };
-        s.onDragEnd=[this,slot,parameter]
+        s.onDragEnd=[this,slot]
         {
+            processor_.getParameterAt(dragTarget_[slot]).endChangeGesture();
             dragging_[slot]=false;
-            processor_.getParameterAt(parameter).endChangeGesture();
             hideReadoutAfter_=juce::Time::getMillisecondCounterHiRes()+1500.0;
         };
         s.onValueChange=[this,slot,parameter]
         {
             if(updating_) return;
-            auto& p=processor_.getParameterAt(parameter);
+            // The large delay dial must actually change the audible delay in
+            // factory HOST mode: control rhythmic division while synced and
+            // exact milliseconds only in MS mode. Gesture ID is stable for
+            // the entire drag, even if transport/UI sync changes in flight.
+            const int target=dragging_[slot]?dragTarget_[slot]:
+                ((slot==0 && syncModeForKnob_!=0)?Note:parameter);
+            auto& p=processor_.getParameterAt(target);
             const bool needGesture=!dragging_[slot];
             if(needGesture) p.beginChangeGesture();
             p.setValueNotifyingHost(p.toNormalised(
                 static_cast<float>(knobs_[slot].getValue())));
             if(needGesture) p.endChangeGesture();
-            showValue(parameter);
+            showValue(target);
         };
         addAndMakeVisible(s);
     }
@@ -251,22 +259,69 @@ private:
         p.endChangeGesture();
         showValue(index);
     }
+    static juce::String divisionName(int index)
+    {
+        static const char* labels[]={
+            "1/32T","1/32","1/16T","1/16","1/8T","1/8.",
+            "1/8","1/4T","1/4","1/4.","1/2","1 BAR","2 BARS"
+        };
+        return labels[juce::jlimit(0,12,index)];
+    }
     void showValue(int index)
     {
         const auto& p=processor_.getParameterAt(index);
-        readout_.setText(p.getName(128).toUpperCase()+": "+p.getText(p.getValue(),128),
+        const auto value=index==Note
+            ? divisionName(static_cast<int>(std::lround(p.getUnits())))
+            : p.getText(p.getValue(),128);
+        readout_.setText(p.getName(128).toUpperCase()+": "+value,
                          juce::dontSendNotification);
         hideReadoutAfter_=juce::Time::getMillisecondCounterHiRes()+1600.0;
     }
     void syncFromParameters()
     {
         updating_=true;
+        const int selectedSync=static_cast<int>(
+            processor_.getParameterAt(SyncMode).getUnits());
+        // Do not switch slider ranges mid-drag: that would change the
+        // automatable target before a JUCE gesture has ended.
+        if(!dragging_[0] && selectedSync!=syncModeForKnob_)
+        {
+            syncModeForKnob_=selectedSync;
+            if(selectedSync!=0)
+            {
+                knobs_[0].setRange(0.0,12.0,1.0);
+                knobs_[0].setTextValueSuffix({});
+                knobs_[0].setName("SYNC DIVISION");
+                knobs_[0].setTooltip("Tempo-synced subdivision: turn the delay dial");
+                knobs_[0].textFromValueFunction=[](double value)
+                {
+                    return divisionName(static_cast<int>(std::lround(value)));
+                };
+                knobs_[0].valueFromTextFunction=[](const juce::String& value)
+                {
+                    for(int i=0;i<13;++i)
+                        if(value.trim().equalsIgnoreCase(divisionName(i)))
+                            return static_cast<double>(i);
+                    return value.getDoubleValue();
+                };
+            }
+            else
+            {
+                knobs_[0].setRange(1.0,3500.0,1.0);
+                knobs_[0].setTextValueSuffix(" ms");
+                knobs_[0].setName("DELAY (MS)");
+                knobs_[0].setTooltip("Delay duration in milliseconds");
+                knobs_[0].textFromValueFunction={};
+                knobs_[0].valueFromTextFunction={};
+            }
+        }
         constexpr int which[]={TimeMs,Feedback,ModDepth,ModRate,HiPass,LowPass,
                                Mix,OutputDb,ManualBpm};
         for(int i=0;i<9;++i)
             if(!dragging_[i])
-                knobs_[i].setValue(processor_.getParameterAt(which[i]).getUnits(),
-                                   juce::dontSendNotification);
+                knobs_[i].setValue(processor_.getParameterAt(
+                    i==0 && selectedSync!=0?Note:which[i]).getUnits(),
+                    juce::dontSendNotification);
         sync_.setSelectedId(static_cast<int>(processor_.getParameterAt(SyncMode).getUnits())+1,
                             juce::dontSendNotification);
         note_.setSelectedId(static_cast<int>(processor_.getParameterAt(Note).getUnits())+1,
@@ -291,6 +346,9 @@ private:
     DelayLookAndFeel skin_;
     std::array<juce::Slider,9> knobs_;
     std::array<bool,9> dragging_ {};
+    std::array<int,9> dragTarget_ {};
+    // -1 forces first construction to select a real source for the knob.
+    int syncModeForKnob_=-1;
     std::array<juce::ToggleButton,5> toggles_;
     juce::ComboBox sync_,note_,colour_;
     juce::TextButton tap_;
