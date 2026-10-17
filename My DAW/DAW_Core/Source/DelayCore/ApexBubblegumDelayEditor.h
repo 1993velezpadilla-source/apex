@@ -142,16 +142,17 @@ public:
         const auto note=static_cast<int>(processor_.getParameterAt(Note).getUnits());
         const auto ms=processor_.getParameterAt(TimeMs).getUnits();
         const auto bpm=processor_.getParameterAt(ManualBpm).getUnits();
+        const auto activeBpm=sync==2?bpm:processor_.getHostTempoForDisplay();
         const auto beats=Engine::kNoteBeats[static_cast<std::size_t>(juce::jlimit(0,12,note))];
         juce::String shown=sync==0?juce::String(ms,1)+" ms"
             :juce::String(static_cast<int>(std::lround(60000.0*beats/
-                          (sync==2?bpm:120.0))))+"* ms";
+                          activeBpm)))+" ms";
         g.setColour(teal);
         g.setFont(juce::Font(juce::FontOptions(43.0f,juce::Font::bold)));
         g.drawText(shown,345,157,363,53,juce::Justification::centred);
         g.setColour(juce::Colour(0xff9eabbf));
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText(sync==1?"* Host tempo drives timing (shown at 120 BPM reference)"
+        g.drawText(sync==1?"Host tempo drives timing"
                  :sync==2?"Manual BPM drives timing":"Free-running millisecond timing",
                    346,207,360,16,juce::Justification::centred);
         const char* captions[]={"DELAY","FEEDBACK","MOD DEPTH","MOD RATE",
