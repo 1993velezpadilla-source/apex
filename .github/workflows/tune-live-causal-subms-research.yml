@@ -1,0 +1,273 @@
+name: Tune Live causal sub-ms research (NOT shipping)
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHarmonicLivePrototype.h'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveHighRegisterProbe.h'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveUltraHighProbe.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_leap_dry_reset.cpp'
+      - 'My DAW/DAW_Core/Source/TuneLiveCore/Research/ApexTuneLiveMidRegisterProbe.h'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_mid_register_wet.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_high_register_wet.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_8_inserts.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_pitch_changed_audio_onset.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_half_cycle_wet_research.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp'
+      - '.github/workflows/tune-live-causal-subms-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: causal-research-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-address-undefined-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build and test actual production tracker + experimental synthesizer
+        shell: bash
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" \
+            -o tune_live_harmonic_research
+          ./tune_live_harmonic_research | tee harmonic_research_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" \
+            -o tune_live_one_ms_transient
+          ./tune_live_one_ms_transient | tee one_ms_transient_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp" \
+            -o tune_live_sub1ms_signal_path
+          ./tune_live_sub1ms_signal_path | tee sub1ms_signal_path_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_pitch_changed_audio_onset.cpp" \
+            -o tune_live_pitch_changed_onset
+          ./tune_live_pitch_changed_onset | tee pitch_changed_onset_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_half_cycle_wet_research.cpp" \
+            -o tune_live_half_cycle_wet
+          ./tune_live_half_cycle_wet | tee half_cycle_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" \
+            -o tune_live_causal_no_alloc
+          ./tune_live_causal_no_alloc | tee causal_rt_no_alloc_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp" \
+            -o tune_live_causal_note_leaps
+          ./tune_live_causal_note_leaps | tee causal_note_leaps_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp" \
+            -o tune_live_causal_fast_leaps
+          ./tune_live_causal_fast_leaps | tee causal_fast_leaps_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" \
+            -o tune_live_causal_fast_wet
+          ./tune_live_causal_fast_wet | tee causal_fast_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp" \
+            -o tune_live_high_register_yin
+          ./tune_live_high_register_yin | tee high_register_yin_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp" \
+            -o tune_live_ultra_high_yin
+          ./tune_live_ultra_high_yin | tee ultra_high_yin_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp" \
+            -o tune_live_ultra_wet
+          ./tune_live_ultra_wet | tee ultra_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp" \
+            -o tune_live_ultra_4hop
+          ./tune_live_ultra_4hop | tee ultra_4hop_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp" \
+            -o tune_live_ultra_audio_change
+          ./tune_live_ultra_audio_change | tee ultra_audio_change_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp" \
+            -o tune_live_ultra_leap
+          ./tune_live_ultra_leap | tee ultra_leap_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp" \
+            -o tune_live_ultra_consensus_leap
+          ./tune_live_ultra_consensus_leap | tee ultra_consensus_leap_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp" \
+            -o tune_live_ultra_noise
+          ./tune_live_ultra_noise | tee ultra_noise_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_leap_dry_reset.cpp" \
+            -o tune_live_ultra_dry_reseed
+          ./tune_live_ultra_dry_reseed | tee ultra_dry_reseed_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp" \
+            -o tune_live_mid_register_yin
+          ./tune_live_mid_register_yin | tee mid_register_yin_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_mid_register_wet.cpp" \
+            -o tune_live_mid_register_wet
+          ./tune_live_mid_register_wet | tee mid_register_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_high_register_wet.cpp" \
+            -o tune_live_high_register_wet
+          ./tune_live_high_register_wet | tee high_register_wet_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_8_inserts.cpp" \
+            -o tune_live_8_inserts
+          ./tune_live_8_inserts | tee causal_8_inserts_ubuntu.log
+      - name: Publish unedited diagnostic results, not a release certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: tune-live-causal-harmonic-research-linux
+          path: |
+            harmonic_research_ubuntu.log
+            one_ms_transient_ubuntu.log
+            sub1ms_signal_path_ubuntu.log
+            pitch_changed_onset_ubuntu.log
+            half_cycle_wet_ubuntu.log
+            causal_rt_no_alloc_ubuntu.log
+            causal_note_leaps_ubuntu.log
+            causal_fast_leaps_ubuntu.log
+            causal_fast_wet_ubuntu.log
+            high_register_yin_ubuntu.log
+            ultra_high_yin_ubuntu.log
+            ultra_wet_ubuntu.log
+            ultra_4hop_ubuntu.log
+            ultra_audio_change_ubuntu.log
+            ultra_leap_ubuntu.log
+            ultra_consensus_leap_ubuntu.log
+            ultra_noise_ubuntu.log
+            ultra_dry_reseed_ubuntu.log
+            mid_register_yin_ubuntu.log
+            mid_register_wet_ubuntu.log
+            high_register_wet_ubuntu.log
+            causal_8_inserts_ubuntu.log
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-msvc:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: C++17 MSVC build and wet audio experiment
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_harmonic_research.exe "My DAW/DAW_Core/Tests/TuneLive/test_harmonic_live_research.cpp" || exit /b 1
+          tune_live_harmonic_research.exe > harmonic_research_windows.log || (type harmonic_research_windows.log & exit /b 1)
+          type harmonic_research_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_one_ms_transient.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_one_ms_transient.cpp" || exit /b 1
+          tune_live_one_ms_transient.exe > one_ms_transient_windows.log || (type one_ms_transient_windows.log & exit /b 1)
+          type one_ms_transient_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_sub1ms_signal_path.exe "My DAW/DAW_Core/Tests/TuneLive/test_live_sub1ms_signal_path.cpp" || exit /b 1
+          tune_live_sub1ms_signal_path.exe > sub1ms_signal_path_windows.log || (type sub1ms_signal_path_windows.log & exit /b 1)
+          type sub1ms_signal_path_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_pitch_changed_onset.exe "My DAW/DAW_Core/Tests/TuneLive/test_pitch_changed_audio_onset.cpp" || exit /b 1
+          tune_live_pitch_changed_onset.exe > pitch_changed_onset_windows.log || (type pitch_changed_onset_windows.log & exit /b 1)
+          type pitch_changed_onset_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_half_cycle_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_half_cycle_wet_research.cpp" || exit /b 1
+          tune_live_half_cycle_wet.exe > half_cycle_wet_windows.log || (type half_cycle_wet_windows.log & exit /b 1)
+          type half_cycle_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_no_alloc.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_rt_no_alloc.cpp" || exit /b 1
+          tune_live_causal_no_alloc.exe > causal_rt_no_alloc_windows.log || (type causal_rt_no_alloc_windows.log & exit /b 1)
+          type causal_rt_no_alloc_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_note_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_note_leaps.cpp" || exit /b 1
+          tune_live_causal_note_leaps.exe > causal_note_leaps_windows.log || (type causal_note_leaps_windows.log & exit /b 1)
+          type causal_note_leaps_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_fast_leaps.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_note_leaps.cpp" || exit /b 1
+          tune_live_causal_fast_leaps.exe > causal_fast_leaps_windows.log || (type causal_fast_leaps_windows.log & exit /b 1)
+          type causal_fast_leaps_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_causal_fast_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_fast_wet_engagement.cpp" || exit /b 1
+          tune_live_causal_fast_wet.exe > causal_fast_wet_windows.log || (type causal_fast_wet_windows.log & exit /b 1)
+          type causal_fast_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_high_register_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_high_register_early_yin.cpp" || exit /b 1
+          tune_live_high_register_yin.exe > high_register_yin_windows.log || (type high_register_yin_windows.log & exit /b 1)
+          type high_register_yin_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_high_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp" || exit /b 1
+          tune_live_ultra_high_yin.exe > ultra_high_yin_windows.log || (type ultra_high_yin_windows.log & exit /b 1)
+          type ultra_high_yin_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp" || exit /b 1
+          tune_live_ultra_wet.exe > ultra_wet_windows.log || (type ultra_wet_windows.log & exit /b 1)
+          type ultra_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_4hop.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp" || exit /b 1
+          tune_live_ultra_4hop.exe > ultra_4hop_windows.log || (type ultra_4hop_windows.log & exit /b 1)
+          type ultra_4hop_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_audio_change.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp" || exit /b 1
+          tune_live_ultra_audio_change.exe > ultra_audio_change_windows.log || (type ultra_audio_change_windows.log & exit /b 1)
+          type ultra_audio_change_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_leap.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp" || exit /b 1
+          tune_live_ultra_leap.exe > ultra_leap_windows.log || (type ultra_leap_windows.log & exit /b 1)
+          type ultra_leap_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_consensus_leap.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp" || exit /b 1
+          tune_live_ultra_consensus_leap.exe > ultra_consensus_leap_windows.log || (type ultra_consensus_leap_windows.log & exit /b 1)
+          type ultra_consensus_leap_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_noise.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp" || exit /b 1
+          tune_live_ultra_noise.exe > ultra_noise_windows.log || (type ultra_noise_windows.log & exit /b 1)
+          type ultra_noise_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_dry_reseed.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_leap_dry_reset.cpp" || exit /b 1
+          tune_live_ultra_dry_reseed.exe > ultra_dry_reseed_windows.log || (type ultra_dry_reseed_windows.log & exit /b 1)
+          type ultra_dry_reseed_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_mid_register_yin.exe "My DAW/DAW_Core/Tests/TuneLive/test_mid_register_early_yin.cpp" || exit /b 1
+          tune_live_mid_register_yin.exe > mid_register_yin_windows.log || (type mid_register_yin_windows.log & exit /b 1)
+          type mid_register_yin_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_mid_register_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_mid_register_wet.cpp" || exit /b 1
+          tune_live_mid_register_wet.exe > mid_register_wet_windows.log || (type mid_register_wet_windows.log & exit /b 1)
+          type mid_register_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_high_register_wet.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_high_register_wet.cpp" || exit /b 1
+          tune_live_high_register_wet.exe > high_register_wet_windows.log || (type high_register_wet_windows.log & exit /b 1)
+          type high_register_wet_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_8_inserts.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_live_8_inserts.cpp" || exit /b 1
+          tune_live_8_inserts.exe > causal_8_inserts_windows.log || (type causal_8_inserts_windows.log & exit /b 1)
+          type causal_8_inserts_windows.log
+      - name: Publish measured windows diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: tune-live-causal-harmonic-research-windows
+          path: |
+            harmonic_research_windows.log
+            one_ms_transient_windows.log
+            sub1ms_signal_path_windows.log
+            pitch_changed_onset_windows.log
+            half_cycle_wet_windows.log
+            causal_rt_no_alloc_windows.log
+            causal_note_leaps_windows.log
+            causal_fast_leaps_windows.log
+            causal_fast_wet_windows.log
+            high_register_yin_windows.log
+            ultra_high_yin_windows.log
+            ultra_wet_windows.log
+            ultra_4hop_windows.log
+            ultra_audio_change_windows.log
+            ultra_leap_windows.log
+            ultra_consensus_leap_windows.log
+            ultra_noise_windows.log
+            ultra_dry_reseed_windows.log
+            mid_register_yin_windows.log
+            mid_register_wet_windows.log
+            high_register_wet_windows.log
+            causal_8_inserts_windows.log
+          if-no-files-found: error
+          retention-days: 14

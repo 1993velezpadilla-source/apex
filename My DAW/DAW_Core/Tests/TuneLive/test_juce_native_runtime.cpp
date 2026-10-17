@@ -2,6 +2,9 @@
 // prepare/process/state/editor. A real Windows GUI+audio smoke without
 // requiring an Apollo Solo on GitHub runners.
 #include "../../Source/TuneLiveCore/ApexTuneLiveProcessor.h"
+#include "../../Source/TuneLiveCore/Research/ApexTuneLiveCausalJUCEAdapter.h"
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -222,6 +225,386 @@ int main() {
                         ?1200.0*std::log2(monoPitch.hz/440.0):9999.0;
     if(!monoPitch.voiced || std::abs(monoCents)>18.0)
         return fail("mono host failed to actually pitch-correct Apollo-like mic");
+
+    // A completely separate JUCE 8 AudioPluginInstance executes the
+    // causal/residual LIVE experiment in real linked Windows JUCE code.
+    // NOT registered with APEX Native; never changes HQ40 by itself.
+    // Zero FIXED lookahead metadata is not a claim of 1ms note detection.
+    APEX::TuneLive::Research::CausalJUCEAdapter candidate;
+    candidate.prepareToPlay(48000.0,128);
+    if(candidate.getLatencySamples()!=0)
+        return fail("causal research host added fixed plugin lookahead");
+    juce::AudioBuffer<float> researchAudio(2,128);
+    APEX::TuneLive::PitchTracker researchPitch;
+    researchPitch.prepare(48000.0);
+    for(int i=0;i<48000;i+=128) {
+        for(int n=0;n<128;++n) {
+            const double t=static_cast<double>(i+n)/48000.0;
+            const float sample=static_cast<float>(0.27*std::sin(
+                6.283185307179586*447.691*t));
+            researchAudio.setSample(0,n,sample);
+            researchAudio.setSample(1,n,sample);
+        }
+        candidate.processBlock(researchAudio,midi);
+        for(int c=0;c<2;++c)
+            for(int n=0;n<128;++n)
+                if(!std::isfinite(researchAudio.getSample(c,n)))
+                    return fail("causal research JUCE returned invalid audio");
+        if(i>=24000)
+            for(int n=0;n<128;++n)
+                researchPitch.push(researchAudio.getSample(0,n));
+    }
+    const auto researchF0=researchPitch.latest();
+    const double researchCents=researchF0.voiced
+        ?1200.0*std::log2(researchF0.hz/440.0):9999.0;
+    if(!researchF0.voiced || std::abs(researchCents)>18.0 ||
+       candidate.researchWetMix()<0.95)
+        return fail("causal research hosted wet audio was not pitch-corrected");
+    if(candidate.firstVoiceSample()<0 || candidate.firstHalfWetSample()<0 ||
+       candidate.firstHalfWetSample()<candidate.firstVoiceSample())
+        return fail("causal research hosted F0 onset telemetry invalid");
+    if(candidate.firstUltraSample()<0 ||
+       candidate.firstUltraSample()>384 ||
+       candidate.firstHalfWetSample()>528)
+        return fail("research JUCE ultra-high F0 exceeded 8ms or first half-wet 11ms");
+    std::cout<<"CAUSAL_JUCE_RESEARCH fixed_pdc_samples="
+             <<candidate.getLatencySamples()
+             <<" firstF0_ms="<<1000.0*candidate.firstVoiceSample()/48000.0
+             <<" ultraRegisterF0_ms="<<1000.0*candidate.firstUltraSample()/48000.0
+             <<" firstWet50_ms="<<1000.0*candidate.firstHalfWetSample()/48000.0
+             <<" late_wet_cents="<<researchCents
+             <<" NO_1MS_FIRST_NOTE_RESPONSE_CLAIM\\n";
+    candidate.releaseResources();
+
+    // Real JUCE 8 streaming-host test for the guarded early octave seed.
+    // We generate phase-continuous A3+30c -> A4-30c vocal-like harmonics;
+    // no known pitch is handed to the processor.
+    candidate.prepareToPlay(48000.0,128);
+    APEX::TuneLive::PitchTracker researchLeapPitch;
+    researchLeapPitch.prepare(48000.0);
+    double sourcePhase=0.0;
+    for(int i=0;i<48000;i+=128) {
+        for(int n=0;n<128;++n) {
+            const double hzIn=(i+n)<21600
+                ?220.0*std::pow(2.0,30.0/1200.0)
+                :440.0*std::pow(2.0,-30.0/1200.0);
+            sourcePhase+=6.283185307179586*hzIn/48000.0;
+            const float sample=static_cast<float>(
+                0.24*std::sin(sourcePhase)
+                +0.045*std::sin(2.0*sourcePhase+0.18)
+                +0.018*std::sin(3.0*sourcePhase+0.24));
+            researchAudio.setSample(0,n,sample);
+            researchAudio.setSample(1,n,sample);
+        }
+        candidate.processBlock(researchAudio,midi);
+        for(int n=0;n<128;++n) {
+            const float sample=researchAudio.getSample(0,n);
+            if(!std::isfinite(sample) ||
+               !std::isfinite(researchAudio.getSample(1,n)))
+                return fail("causal JUCE early leap generated invalid audio");
+            if(i>=36000)researchLeapPitch.push(sample);
+        }
+    }
+    const double leapTimeMs=1000.0*candidate.lastFastTransitionSample()/48000.0;
+    if(candidate.getLatencySamples()!=0 ||
+       candidate.fastTransitionCount()<1 ||
+       leapTimeMs<450.0 || leapTimeMs>470.0)
+        return fail("real JUCE host failed guarded early A3-A4 switch");
+    const auto leapWet=researchLeapPitch.latest();
+    const double leapCents=leapWet.voiced
+        ?1200.0*std::log2(leapWet.hz/440.0):9999.0;
+    if(!leapWet.voiced || std::abs(leapCents)>18.0 ||
+       candidate.researchWetMix()<0.95)
+        return fail("causal JUCE fast-leap wet audio lost tonal accuracy");
+    std::cout<<"CAUSAL_JUCE_FAST_LEAP fixed_pdc_samples="
+             <<candidate.getLatencySamples()
+             <<" first_octave_seed_ms="<<leapTimeMs
+             <<" fast_jump_count="<<candidate.fastTransitionCount()
+             <<" final_wet_cents="<<leapCents
+             <<" NO_1MS_PITCH_DECISION_CLAIM\\n";
+    candidate.releaseResources();
+
+    // Stress EIGHT isolated causal JUCE8 AudioPluginInstance inserts, not
+    // merely an unhosted DSP object. Production HQ40 remains unchanged.
+    // CPU timing is from an Actions Windows VM, NOT Apollo Solo hardware.
+    constexpr int kLiveInserts=8;
+    std::array<APEX::TuneLive::Research::CausalJUCEAdapter,kLiveInserts> liveInserts{};
+    std::array<APEX::TuneLive::PitchTracker,kLiveInserts> checkedInserts{};
+    for(int id=0;id<kLiveInserts;++id) {
+        liveInserts[static_cast<std::size_t>(id)].prepareToPlay(48000.0,128);
+        checkedInserts[static_cast<std::size_t>(id)].prepare(48000.0);
+        if(liveInserts[static_cast<std::size_t>(id)].getLatencySamples()!=0)
+            return fail("eight JUCE LIVE inserts report nonzero fixed lookahead");
+    }
+    const auto stressStart=std::chrono::steady_clock::now();
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int id=0;id<kLiveInserts;++id) {
+            for(int i=0;i<128;++i) {
+                const double radians=6.283185307179586*447.691*
+                                     (frame+i)/48000.0;
+                const float value=static_cast<float>(
+                    0.24*std::sin(radians)+
+                    0.05*std::sin(2.0*radians+0.21));
+                researchAudio.setSample(0,i,value);
+                researchAudio.setSample(1,i,value);
+            }
+            auto& insert=liveInserts[static_cast<std::size_t>(id)];
+            insert.processBlock(researchAudio,midi);
+            for(int i=0;i<128;++i) {
+                const auto l=researchAudio.getSample(0,i);
+                const auto r=researchAudio.getSample(1,i);
+                if(!std::isfinite(l)||!std::isfinite(r))
+                    return fail("eight hosted LIVE inserts emitted NaN");
+                if(frame>=24000)
+                    checkedInserts[static_cast<std::size_t>(id)].push(l);
+            }
+        }
+    }
+    const double eightSeconds=
+        std::chrono::duration<double>(std::chrono::steady_clock::now()-
+                                      stressStart).count();
+    for(int id=0;id<kLiveInserts;++id) {
+        auto& insert=liveInserts[static_cast<std::size_t>(id)];
+        const auto pitch=checkedInserts[static_cast<std::size_t>(id)].latest();
+        const double centsOutput=pitch.voiced && pitch.hz>0.0f
+            ?1200.0*std::log2(pitch.hz/440.0):9999.0;
+        if(std::abs(centsOutput)>18.0 ||
+           insert.researchWetMix()<0.95 ||
+           insert.firstUltraSample()<0 ||
+           insert.firstUltraSample()>384)
+            return fail("eight real JUCE LIVE inserts lost high-register wet tuning");
+        insert.releaseResources();
+    }
+    std::cout<<"CAUSAL_JUCE_8_INSTANCES count="<<kLiveInserts
+             <<" sample_rate=48000 buffer=128"
+             <<" total_audio_s=1 total_wall_s="<<eightSeconds
+             <<" fixed_lookahead_samples=0"
+             <<" independently_wet_tuned=8/8"
+             <<" CI_VM_CPU_IS_NOT_APOLLO_OR_ASIO=1\\n";
+
+    // A/B SAME-SAMPLE acoustic impulse proof through TWO independently
+    // linked JUCE8 instances with their correction already 100% wet.
+    // Unlike getLatencySamples()==0, this probes emitted PCM output and
+    // stereo crosstalk on the actual research wet/residual audio path.
+    // It is NOT 1ms F0 acquisition or an ASIO roundtrip measurement.
+    APEX::TuneLive::Research::CausalJUCEAdapter baselineImpulse;
+    APEX::TuneLive::Research::CausalJUCEAdapter alteredImpulse;
+    baselineImpulse.prepareToPlay(48000.0,128);
+    alteredImpulse.prepareToPlay(48000.0,128);
+    juce::AudioBuffer<float> unchanged(2,128),injected(2,128);
+    constexpr int impulseAt=32000;
+    constexpr float injection=0.25f;
+    double immediateDelta=0.0;
+    bool preImpulseIdentical=true,stereoNoLeak=true;
+    for(int frame=0;frame<38400;frame+=128) {
+        for(int n=0;n<128;++n) {
+            const int sampleIndex=frame+n;
+            const double radians=6.283185307179586*
+                                 447.691*sampleIndex/48000.0;
+            const float dry=static_cast<float>(
+                0.24*std::sin(radians)+
+                0.05*std::sin(2.0*radians+0.2));
+            unchanged.setSample(0,n,dry);
+            unchanged.setSample(1,n,dry);
+            injected.setSample(0,n,dry+(sampleIndex==impulseAt?injection:0.0f));
+            injected.setSample(1,n,dry);
+        }
+        baselineImpulse.processBlock(unchanged,midi);
+        alteredImpulse.processBlock(injected,midi);
+        for(int n=0;n<128;++n) {
+            const int sampleIndex=frame+n;
+            const double leftDelta=static_cast<double>(
+                injected.getSample(0,n)-unchanged.getSample(0,n));
+            const double rightDelta=static_cast<double>(
+                injected.getSample(1,n)-unchanged.getSample(1,n));
+            if(sampleIndex<impulseAt)
+                preImpulseIdentical &=leftDelta==0.0 && rightDelta==0.0;
+            if(sampleIndex==impulseAt)immediateDelta=leftDelta/injection;
+            if(sampleIndex<=impulseAt)stereoNoLeak &=rightDelta==0.0;
+        }
+    }
+    if(!preImpulseIdentical||!stereoNoLeak||
+       !std::isfinite(immediateDelta)||
+       immediateDelta<0.70||immediateDelta>1.30||
+       baselineImpulse.researchWetMix()<0.95||
+       alteredImpulse.researchWetMix()<0.95)
+        return fail("real linked JUCE causal wet impulse path is delayed, lost or crossfed");
+    std::cout<<"CAUSAL_JUCE_WET_IMPULSE sr=48000 wet=1"
+             <<" injected_at_sample="<<impulseAt
+             <<" heard_at_sample="<<impulseAt
+             <<" impulse_immediate_gain="<<immediateDelta
+             <<" host_fixed_pdc="<<alteredImpulse.getLatencySamples()
+             <<" no_right_channel_crosstalk="<<stereoNoLeak
+             <<" singer_note_detection_not_1ms=1\\n";
+    baselineImpulse.releaseResources();
+    alteredImpulse.releaseResources();
+
+    // Mid-range fast LIVE test through a REAL linked JUCE 8 instance.
+    // C#4 (277.1826 Hz) +30 cents is actual chromatic tuning target.
+    // This verifies emitted WET audio independently; zero fixed
+    // lookahead does NOT assert a 1ms first-note pitch response.
+    APEX::TuneLive::Research::CausalJUCEAdapter midJUCE;
+    midJUCE.prepareToPlay(48000.0,128);
+    APEX::TuneLive::PitchTracker midOutputPitch;
+    midOutputPitch.prepare(48000.0);
+    constexpr double midTargetHz=277.18263;
+    constexpr double midInputHz=midTargetHz*1.0174796921026863;
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int i=0;i<128;++i) {
+            const double phase=6.283185307179586*
+                               midInputHz*(frame+i)/48000.0;
+            const float value=static_cast<float>(
+                0.24*std::sin(phase)+
+                0.045*std::sin(2.0*phase+0.18)+
+                0.018*std::sin(3.0*phase+0.24));
+            researchAudio.setSample(0,i,value);
+            researchAudio.setSample(1,i,value);
+        }
+        midJUCE.processBlock(researchAudio,midi);
+        for(int i=0;i<128;++i) {
+            const float y=researchAudio.getSample(0,i);
+            if(!std::isfinite(y))
+                return fail("JUCE mid-register LIVE emitted invalid PCM");
+            if(frame>=28000)midOutputPitch.push(y);
+        }
+    }
+    const auto midTuned=midOutputPitch.latest();
+    const double midCents=midTuned.voiced?
+        1200.0*std::log2(midTuned.hz/midTargetHz):9999.0;
+    if(midJUCE.getLatencySamples()!=0 ||
+       midJUCE.firstMidSample()<0 ||
+       midJUCE.firstMidSample()>static_cast<int64_t>(48000.0*0.014) ||
+       midJUCE.firstHighSample()>=0 ||
+       midJUCE.firstUltraSample()>=0 ||
+       midJUCE.firstHalfWetSample()>static_cast<int64_t>(48000.0*0.019) ||
+       !midTuned.voiced || std::abs(midCents)>18.0 ||
+       midJUCE.researchWetMix()<0.95)
+        return fail("linked JUCE 8 guarded mid F0 / wet onset or pitch gate");
+    std::cout<<"CAUSAL_JUCE_MID_REGISTER fixed_lookahead_samples="
+             <<midJUCE.getLatencySamples()
+             <<" first_mid_ms="<<1000.0*midJUCE.firstMidSample()/48000.0
+             <<" first_half_wet_ms="
+             <<1000.0*midJUCE.firstHalfWetSample()/48000.0
+             <<" corrected_cents="<<midCents
+             <<" no_1ms_new_note_claim=1\\n";
+    midJUCE.releaseResources();
+
+    // FASTEST guarded half-cycle mode is exposed ONLY via the separate
+    // unregistered JUCE research adapter. This is a genuine hosted Audio-
+    // PluginInstance path, not just isolated portable DSP, so verify actual
+    // JUCE PDC metadata, emitted PCM tuning and sample-synchronous attacks.
+    // None of this qualifies as 1ms unknown-note recognition or shipping.
+    APEX::TuneLive::Research::CausalJUCEAdapter fastHosted;
+    fastHosted.enableGuardedHalfCycleResearch(true);
+    fastHosted.prepareToPlay(48000.0,128);
+    if(fastHosted.getLatencySamples()!=0)
+        return fail("guarded half-cycle research JUCE reported fixed lookahead");
+    juce::PluginDescription fastDesc;
+    fastHosted.fillInPluginDescription(fastDesc);
+    if(fastDesc.pluginFormatName=="APEX Native" ||
+       fastDesc.fileOrIdentifier==APEX::TuneLive::Processor::kFileOrIdentifier)
+        return fail("experimental half-cycle adapter aliased shipping plugin identity");
+    APEX::TuneLive::PitchTracker fastOutput;
+    fastOutput.prepare(48000.0);
+    for(int frame=0;frame<48000;frame+=128) {
+        for(int i=0;i<128;++i) {
+            const double t=(frame+i)/48000.0;
+            const float sample=static_cast<float>(
+                0.26*std::sin(6.283185307179586*447.691*t)+
+                0.05*std::sin(6.283185307179586*2.0*447.691*t+0.31)+
+                0.018*std::sin(6.283185307179586*3.0*447.691*t+0.13));
+            researchAudio.setSample(0,i,sample);
+            researchAudio.setSample(1,i,sample);
+        }
+        fastHosted.processBlock(researchAudio,midi);
+        for(int i=0;i<128;++i) {
+            const float out=researchAudio.getSample(0,i);
+            if(!std::isfinite(out) ||
+               !std::isfinite(researchAudio.getSample(1,i)))
+                return fail("guarded half-cycle JUCE host emitted nonfinite audio");
+            if(frame>=24000)fastOutput.push(out);
+        }
+    }
+    const auto fastResult=fastOutput.latest();
+    const double fastCents=fastResult.voiced && fastResult.hz>0.0f
+        ?1200.0*std::log2(fastResult.hz/440.0):9999.0;
+    const double fastFirstF0Ms=1000.0*fastHosted.firstVoiceSample()/48000.0;
+    const double fastHalfWetMs=1000.0*fastHosted.firstHalfWetSample()/48000.0;
+    if(!fastResult.voiced || std::abs(fastCents)>18.0 ||
+       fastHosted.researchWetMix()<0.95 ||
+       fastHosted.firstUltraSample()<0 ||
+       fastFirstF0Ms<6.0 || fastFirstF0Ms>7.3 ||
+       fastHalfWetMs<fastFirstF0Ms || fastHalfWetMs>9.0)
+        return fail("fast guarded research JUCE first note/wet control or F0 outside measured fixture");
+    if(plugin.getLatencySamples()!=1920)
+        return fail("hosted research altered shipping HQ40 PDC");
+    std::cout<<"CAUSAL_JUCE_GUARDED_HALFCYCLE_RESEARCH"
+             <<" fixed_lookahead_samples="<<fastHosted.getLatencySamples()
+             <<" first_f0_ms="<<fastFirstF0Ms
+             <<" first_wet50_control_ms="<<fastHalfWetMs
+             <<" corrected_output_cents="<<fastCents
+             <<" research_only_no_1ms_pitch_recognition_or_artist_quality=1\n";
+    fastHosted.releaseResources();
+
+    // The METADATA-only assertion above is insufficient on its own.
+    // Independently inject an impulse into a fully acquired, 100%-wet
+    // guarded HALF-CYCLE JUCE instance. Require immediate left-channel
+    // signal-through and no right-channel leakage in real processBlock.
+    APEX::TuneLive::Research::CausalJUCEAdapter fastDryRef,fastImpulse;
+    fastDryRef.enableGuardedHalfCycleResearch(true);
+    fastImpulse.enableGuardedHalfCycleResearch(true);
+    fastDryRef.prepareToPlay(48000.0,128);
+    fastImpulse.prepareToPlay(48000.0,128);
+    juce::AudioBuffer<float> fastDryBuffer(2,128),fastHitBuffer(2,128);
+    constexpr int kFastImpulseSample=32000;
+    constexpr float kFastImpulseStrength=0.25f;
+    bool fastBeforeIdentical=true,fastRightIsolated=true;
+    double fastImpulseResponse=0.0;
+    for(int frame=0;frame<38400;frame+=128) {
+        for(int n=0;n<128;++n) {
+            const int position=frame+n;
+            const double phase=6.283185307179586*447.691*position/48000.0;
+            const float v=static_cast<float>(0.24*std::sin(phase)+
+                                 0.05*std::sin(2.0*phase+0.2));
+            fastDryBuffer.setSample(0,n,v);
+            fastDryBuffer.setSample(1,n,v);
+            fastHitBuffer.setSample(0,n,v+(position==kFastImpulseSample?
+                                      kFastImpulseStrength:0.0f));
+            fastHitBuffer.setSample(1,n,v);
+        }
+        fastDryRef.processBlock(fastDryBuffer,midi);
+        fastImpulse.processBlock(fastHitBuffer,midi);
+        for(int n=0;n<128;++n) {
+            const int position=frame+n;
+            const double left=static_cast<double>(
+                fastHitBuffer.getSample(0,n)-fastDryBuffer.getSample(0,n));
+            const double right=static_cast<double>(
+                fastHitBuffer.getSample(1,n)-fastDryBuffer.getSample(1,n));
+            if(position<kFastImpulseSample)
+                fastBeforeIdentical &=left==0.0 && right==0.0;
+            if(position<=kFastImpulseSample)fastRightIsolated &=right==0.0;
+            if(position==kFastImpulseSample)
+                fastImpulseResponse=left/kFastImpulseStrength;
+        }
+    }
+    if(fastDryRef.getLatencySamples()!=0 ||
+       fastImpulse.getLatencySamples()!=0 ||
+       fastDryRef.researchWetMix()<0.95 ||
+       fastImpulse.researchWetMix()<0.95 ||
+       !fastBeforeIdentical || !fastRightIsolated ||
+       !std::isfinite(fastImpulseResponse) ||
+       fastImpulseResponse<0.70 || fastImpulseResponse>1.30)
+        return fail("guarded half-cycle real JUCE wet impulse path introduced lookahead/crosstalk");
+    std::cout<<"CAUSAL_JUCE_GUARDED_HALFCYCLE_REAL_PCM_IMPULSE"
+             <<" injection_sample="<<kFastImpulseSample
+             <<" output_first_sample="<<kFastImpulseSample
+             <<" extra_delay_samples=0"
+             <<" immediate_gain="<<fastImpulseResponse
+             <<" no_channel_bleed="<<fastRightIsolated
+             <<" plugin_reported_pdc_samples="<<fastImpulse.getLatencySamples()
+             <<" NOT_WHOLE_PITCH_CHANGED_VOICE_OR_ASIO_LATENCY=1\\n";
+    fastDryRef.releaseResources();
+    fastImpulse.releaseResources();
 
     editor.reset();
     plugin.releaseResources();
