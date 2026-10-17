@@ -93,9 +93,8 @@ jobs:
           $defines = @($rawDefs -split ';' | Where-Object {
             $_ -and $_ -notmatch '^%\('
           })
-          if ('NOMINMAX' -notin $defines -and 'NOMINMAX=1' -notin $defines) {
-            throw 'NOMINMAX was not retained in canonical Visual Studio settings'
-          }
+          # Follow the actual mainline app definitions. The source project
+          # intentionally does not declare NOMINMAX; do not fabricate it.
 
           $juceModuleRoot = Join-Path $env:APEX_JUCE_ROOT 'modules'
           $vstSdk = Join-Path $juceModuleRoot 'juce_audio_processors_headless\format_types\VST3_SDK'
@@ -142,9 +141,8 @@ jobs:
           $definitions = @($rawDefs -split ';' | ForEach-Object {
             $_.Trim()
           } | Where-Object { $_ -and $_ -notmatch '^%\(' })
-          if ('NOMINMAX' -notin $definitions -and 'NOMINMAX=1' -notin $definitions) {
-            throw 'APEXTests project missing NOMINMAX'
-          }
+          # Keep the focused syntax probe consistent with the canonical
+          # APEXTests project instead of requiring branch-specific defines.
           $juceModules = Join-Path $env:APEX_JUCE_ROOT 'modules'
           $vstSdk = Join-Path $juceModules 'juce_audio_processors_headless\format_types\VST3_SDK'
           $args = @('/nologo', '/std:c++17', '/Zs', '/EHsc', '/W3', '/utf-8',
