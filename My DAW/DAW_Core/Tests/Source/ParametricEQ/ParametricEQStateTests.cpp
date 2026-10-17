@@ -44,11 +44,11 @@ public:
 private:
     void testFrozenAbiAndAppendedPlacements()
     {
-        beginTest ("frozen 170-prefix plus appended Phase 3/5/6 parameters = 318 stable IDs");
+        beginTest ("Phase 10 spectral extension: all 375 hosted parameter IDs pinned");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         expectEquals (processor.getParameters().size(), kNumParameters);
-        expectEquals (kNumParameters, 318);
+        expectEquals (kNumParameters, 375);
 
         std::set<std::string> ids;
         for (int index = 0; index < kNumParameters; ++index)
@@ -86,6 +86,36 @@ private:
                 expected = "peq.dyn.link";
             else if (index == kPhaseModeParameter)
                 expected = "peq.phase";
+            else if (index == kCharacterModeParameter)
+                expected = "peq.character";
+            else if (index >= kFirstDynamicFilterParameter
+                     && index < kOutputGainParameter)
+                expected = "peq.band"
+                         + juce::String (index - kFirstDynamicFilterParameter + 1)
+                               .paddedLeft ('0', 2)
+                         + ".dyn.filter";
+            else if (index == kOutputGainParameter)
+                expected = "peq.output.gain";
+            else if (index == kOutputPanParameter)
+                expected = "peq.output.pan";
+            else if (index == kOutputPhaseInvertParameter)
+                expected = "peq.output.phaseInvert";
+            else if (index == kOutputAutoGainParameter)
+                expected = "peq.output.autoGain";
+            else if (index == kOutputGainScaleParameter)
+                expected = "peq.output.gainScale";
+            else if (index == kSpectralArmParameter)
+                expected = "peq.spectral.arm";
+            else if (index >= kFirstSpectralBandParameter
+                     && index < kSpectralDensityParameter)
+                expected = "peq.band"
+                    + juce::String (index - kFirstSpectralBandParameter + 1)
+                          .paddedLeft ('0', 2)
+                    + ".spectral.enable";
+            else if (index == kSpectralDensityParameter)
+                expected = "peq.spectral.density";
+            else if (index == kSpectralTiltParameter)
+                expected = "peq.spectral.tilt";
             else
             {
                 const int band = index / 7;
@@ -108,7 +138,7 @@ private:
             expect (parameter->isStorageLockFree(),
                     "atomic storage must be lock-free: " + parameter->paramID);
         }
-        expectEquals (ids.size(), static_cast<std::size_t> (318));
+        expectEquals (ids.size(), static_cast<std::size_t> (375));
         expectEquals (Processor::getParameterId (170),
                       juce::String ("peq.band01.placement"));
         expectEquals (Processor::getParameterId (193),
@@ -127,6 +157,32 @@ private:
                       juce::String ("peq.dyn.link"));
         expectEquals (Processor::getParameterId (317),
                       juce::String ("peq.phase"));
+        expectEquals (Processor::getParameterId (318),
+                      juce::String ("peq.character"));
+        expectEquals (Processor::getParameterId (319),
+                      juce::String ("peq.band01.dyn.filter"));
+        expectEquals (Processor::getParameterId (342),
+                      juce::String ("peq.band24.dyn.filter"));
+        expectEquals (Processor::getParameterId (343),
+                      juce::String ("peq.output.gain"));
+        expectEquals (Processor::getParameterId (344),
+                      juce::String ("peq.output.pan"));
+        expectEquals (Processor::getParameterId (345),
+                      juce::String ("peq.output.phaseInvert"));
+        expectEquals (Processor::getParameterId (346),
+                      juce::String ("peq.output.autoGain"));
+        expectEquals (Processor::getParameterId (347),
+                      juce::String ("peq.output.gainScale"));
+        expectEquals (Processor::getParameterId (348),
+                      juce::String ("peq.spectral.arm"));
+        expectEquals (Processor::getParameterId (349),
+                      juce::String ("peq.band01.spectral.enable"));
+        expectEquals (Processor::getParameterId (372),
+                      juce::String ("peq.band24.spectral.enable"));
+        expectEquals (Processor::getParameterId (373),
+                      juce::String ("peq.spectral.density"));
+        expectEquals (Processor::getParameterId (374),
+                      juce::String ("peq.spectral.tilt"));
         expect (processor.getBypassParameter()
                 == processor.getParametricEQParameter (kGlobalBypassParameter));
     }
@@ -334,7 +390,7 @@ private:
         if (tree.isValid())
         {
             expectEquals (tree.getNumProperties(), kNumParameters + 2,
-                          "version + analyzer + 194 parameters");
+                          "version + analyzer + all hosted parameters");
             for (int property = 0; property < tree.getNumProperties(); ++property)
             {
                 const auto propertyName = tree.getPropertyName (property).toString();
