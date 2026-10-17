@@ -33,7 +33,8 @@ struct Render {
     int64_t firstPitchSample=-1;
     int64_t firstHalfWetSample=-1;
 };
-Render run(double rate,double note,bool guarded,bool addAttack) {
+Render run(double rate,double note,bool guarded,bool addAttack,
+           bool experimentalHalfPeriod=false) {
     using APEX::TuneLive::Research::HarmonicLivePrototype;
     const int n=static_cast<int>(rate*0.5);
     const int impulseAt=static_cast<int>(rate*0.30);
@@ -49,6 +50,7 @@ Render run(double rate,double note,bool guarded,bool addAttack) {
     engine.enableEarlyOnset(true);
     engine.enableResidualPreservation(true);
     engine.enableFastEngagement(true);
+    engine.enableHalfPeriodEngagementResearch(experimentalHalfPeriod);
     if(guarded) {
         engine.enableMidRegisterOnset(true);
         engine.enableHighRegisterOnset(true);
