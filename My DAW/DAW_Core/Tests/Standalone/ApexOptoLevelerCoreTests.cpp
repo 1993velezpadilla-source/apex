@@ -261,6 +261,37 @@ static void testMovingAutomationAtAudioBlockBoundaries()
         }
     }
 }
+static void testPeakReductionZeroUsesContinuousOpticalRelease()
+{
+    for (double rate : {44100.0,48000.0,96000.0})
+    {
+        ApexOptoLevelerCore core;
+        OptoParameters p;
+        p.peakReduction=80;
+        p.colorEnabled=false;
+        core.setParameters(p);
+        core.prepare(rate);
+        std::vector<float> loud(static_cast<size_t>(rate),.7f);
+        core.process(loud.data(),nullptr,static_cast<int>(loud.size()));
+        const double compressed=core.getGainReductionDb();
+        assert(compressed>3.0);
+        p.peakReduction=0.0;
+        core.setParameters(p);
+        float first=.7f;
+        core.process(&first,nullptr,1);
+        assert(std::isfinite(first));
+        // Disabling Peak Reduction may NOT teleport the optical release
+        // state to zero and click. It still decays using the existing
+        // sample-continuous T4-like model even with the heavy level
+        // detector shortcut disabled.
+        assert(core.getGainReductionDb()>0.9*compressed);
+        assert(first<.7f);
+        std::vector<float> release(static_cast<size_t>(rate*0.5),.7f);
+        core.process(release.data(),nullptr,static_cast<int>(release.size()));
+        assert(core.getGainReductionDb()<compressed);
+        assert(std::isfinite(release.back()));
+    }
+}
 static void testVuBallistics()
 {
     OptoVuBallisticsCore one, split;
@@ -296,5 +327,6 @@ int main()
     testOriginalOpticalVoicings();
     testClickBoundedColorAutomation();
     testMovingAutomationAtAudioBlockBoundaries();
-    std::cout<<"APEX Opto Core: 10 suites PASS (algorithm scaffold only; no hardware match claim)\n";
+    testPeakReductionZeroUsesContinuousOpticalRelease();
+    std::cout<<"APEX Opto Core: 11 suites PASS (algorithm scaffold only; no hardware match claim)\n";
 }
