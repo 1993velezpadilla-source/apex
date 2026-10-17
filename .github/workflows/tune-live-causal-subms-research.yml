@@ -8,6 +8,7 @@ on:
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_register_early_yin.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_real_wet.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp'
+      - 'My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_consensus_genuine_leap.cpp'
       - 'My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_unvoiced_robustness.cpp'
@@ -85,6 +86,10 @@ jobs:
             -o tune_live_ultra_4hop
           ./tune_live_ultra_4hop | tee ultra_4hop_ubuntu.log
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
+            "My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp" \
+            -o tune_live_ultra_audio_change
+          ./tune_live_ultra_audio_change | tee ultra_audio_change_ubuntu.log
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined \
             "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp" \
             -o tune_live_ultra_leap
           ./tune_live_ultra_leap | tee ultra_leap_ubuntu.log
@@ -131,6 +136,7 @@ jobs:
             ultra_high_yin_ubuntu.log
             ultra_wet_ubuntu.log
             ultra_4hop_ubuntu.log
+            ultra_audio_change_ubuntu.log
             ultra_leap_ubuntu.log
             ultra_consensus_leap_ubuntu.log
             ultra_noise_ubuntu.log
@@ -182,6 +188,9 @@ jobs:
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_4hop.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_high_4hop_research.cpp" || exit /b 1
           tune_live_ultra_4hop.exe > ultra_4hop_windows.log || (type ultra_4hop_windows.log & exit /b 1)
           type ultra_4hop_windows.log
+          cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_audio_change.exe "My DAW/DAW_Core/Tests/TuneLive/test_ultra_output_change_timing.cpp" || exit /b 1
+          tune_live_ultra_audio_change.exe > ultra_audio_change_windows.log || (type ultra_audio_change_windows.log & exit /b 1)
+          type ultra_audio_change_windows.log
           cl /nologo /std:c++17 /EHsc /W4 /WX /O2 /Fe:tune_live_ultra_leap.exe "My DAW/DAW_Core/Tests/TuneLive/test_causal_ultra_fast_leap.cpp" || exit /b 1
           tune_live_ultra_leap.exe > ultra_leap_windows.log || (type ultra_leap_windows.log & exit /b 1)
           type ultra_leap_windows.log
@@ -221,6 +230,7 @@ jobs:
             ultra_high_yin_windows.log
             ultra_wet_windows.log
             ultra_4hop_windows.log
+            ultra_audio_change_windows.log
             ultra_leap_windows.log
             ultra_consensus_leap_windows.log
             ultra_noise_windows.log
