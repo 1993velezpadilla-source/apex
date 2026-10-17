@@ -211,6 +211,56 @@ static void testClickBoundedColorAutomation()
             near(block128[n],block31[n],2.e-6);
     }
 }
+static void testMovingAutomationAtAudioBlockBoundaries()
+{
+    // FAST->CLASSIC->SLOW, Peak Reduction, bypass, mix and Color changes
+    // must be sample-clock invariant under different callback partitions.
+    // Keep input constant to isolate zipper/click steps from source material.
+    for(const double sampleRate : {44100.0,48000.0,96000.0})
+    {
+        const auto render=[sampleRate](int callbackFrames) {
+            ApexOptoLevelerCore dsp;
+            OptoParameters p;
+            p.peakReduction=80;
+            p.mix=1;
+            p.colorEnabled=false;
+            p.voicing=1;
+            dsp.setParameters(p);
+            dsp.prepare(sampleRate);
+            std::vector<float> audio(8192,.35f);
+            for(int offset=0;offset<(int)audio.size();)
+            {
+                switch(offset)
+                {
+                    case 1024:p.voicing=0;break;      // FAST
+                    case 2048:p.voicing=2;break;      // SLOW
+                    case 3072:p.peakReduction=0;break;
+                    case 4096:p.bypass=true;break;
+                    case 5120:p.bypass=false;break;
+                    case 6144:p.mix=.25;break;
+                    case 7168:p.colorEnabled=true;p.colorDrive=4;break;
+                    default:break;
+                }
+                dsp.setParameters(p);
+                const int next=std::min(8192,((offset/1024)+1)*1024);
+                const int frames=std::min(callbackFrames,next-offset);
+                dsp.process(audio.data()+offset,nullptr,frames);
+                offset+=frames;
+            }
+            return audio;
+        };
+        const auto whole=render(1024);
+        const auto tiny=render(31);
+        const auto device=render(128);
+        for(std::size_t i=0;i<whole.size();++i)
+        {
+            near(whole[i],tiny[i],1.e-6);
+            near(whole[i],device[i],1.e-6);
+            assert(std::isfinite(whole[i]));
+            if(i>0)assert(std::abs(whole[i]-whole[i-1])<.05f);
+        }
+    }
+}
 static void testVuBallistics()
 {
     OptoVuBallisticsCore one, split;
@@ -245,5 +295,6 @@ int main()
     std::cerr << "VU ballistics\\n"; testVuBallistics();
     testOriginalOpticalVoicings();
     testClickBoundedColorAutomation();
-    std::cout<<"APEX Opto Core: 9 suites PASS (algorithm scaffold only; no hardware match claim)\n";
+    testMovingAutomationAtAudioBlockBoundaries();
+    std::cout<<"APEX Opto Core: 10 suites PASS (algorithm scaffold only; no hardware match claim)\n";
 }
