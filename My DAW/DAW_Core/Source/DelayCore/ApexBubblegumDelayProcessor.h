@@ -210,7 +210,7 @@ private:
     {
         auto p=std::make_unique<BubblegumDelayParameter>(id,name,lo,hi,initial,steps,unit);
         parameters_[index]=p.get();
-        addBubblegumDelayParameter(std::move(p));
+        addHostedParameter(std::move(p));
     }
     Settings readSettings() const noexcept
     {
