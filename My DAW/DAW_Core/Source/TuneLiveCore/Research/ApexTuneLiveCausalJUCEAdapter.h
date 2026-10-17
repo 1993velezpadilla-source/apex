@@ -40,6 +40,13 @@ public:
                 input==juce::AudioChannelSet::stereo())
                && input==buses.getMainOutputChannelSet();
     }
+    // Nonshipping TEST-ONLY configuration. Call before prepareToPlay();
+    // do not attach to artist parameters, plugin registry or session state.
+    // This enables the fastest 4-hop dual-F0 predictor AND >=400Hz
+    // half-cycle wet study. No change to the default JUCE research mode.
+    void enableGuardedHalfCycleResearch(bool enabled) noexcept {
+        guardedHalfCycleResearch_=enabled;
+    }
     void prepareToPlay(double rate,int maximumBlockSize) override {
         const double stableRate=std::isfinite(rate) && rate>=8000.0?
                                 rate:48000.0;
@@ -60,6 +67,9 @@ public:
         live_.enableUltraHighRegisterOnset(true);
         live_.enableMidRegisterOnset(true);
         live_.enableFastEngagement(true);
+        live_.enableUltraHighFastHopResearch(guardedHalfCycleResearch_);
+        live_.enableUltraLeapConsensusResearch(guardedHalfCycleResearch_);
+        live_.enableHalfPeriodEngagementResearch(guardedHalfCycleResearch_);
         live_.enableExperimentalEarlyTransitions(true);
         live_.enableResidualPreservation(true);
         // No fixed delay/lookahead in this dry plus harmonic-residual
@@ -101,6 +111,7 @@ public:
 private:
     HarmonicLivePrototype live_;
     bool ready_=false;
+    bool guardedHalfCycleResearch_=false;
 };
 
 }}} // namespace APEX::TuneLive::Research
