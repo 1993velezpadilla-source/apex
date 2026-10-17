@@ -1,5 +1,6 @@
 #include "ParametricEQTestUtils.h"
 #include "../../../Source/ParametricEQCore/ParametricEQProcessor.h"
+#include "../../../Source/PluginHostCore/ApexNativePluginFormat.h"
 
 #include <cmath>
 #include <limits>
@@ -33,6 +34,7 @@ public:
 
     void runTest() override
     {
+        testPrismReplacesNativeEntryWithoutChangingSessionIdentity();
         testFrozenAbiAndAppendedPlacements();
         testPlacementParameterContract();
         testVersionTwoRoundTrip();
@@ -42,6 +44,32 @@ public:
     }
 
 private:
+    void testPrismReplacesNativeEntryWithoutChangingSessionIdentity()
+    {
+        beginTest ("Prism replaces the old native EQ without a duplicate or broken session ID");
+        DAW::ApexNativePluginFormat nativeFormat;
+        juce::OwnedArray<juce::PluginDescription> descriptions;
+        nativeFormat.findAllTypesForFile (descriptions, {});
+        int eqCount = 0;
+        for (auto* entry : descriptions)
+        {
+            if (entry->fileOrIdentifier != Processor::kFileOrIdentifier)
+                continue;
+            ++eqCount;
+            expectEquals (entry->name, juce::String ("APEX Prism EQ"));
+            expectEquals (entry->uniqueId, Processor::kUniqueId);
+            expectEquals (entry->pluginFormatName, juce::String ("APEX Native"));
+        }
+        expectEquals (eqCount, 1, "native plugin catalog exposes exactly one EQ");
+        auto legacy = NativePluginFormat::createDescription();
+        legacy.name = "APEX Parametric EQ";
+        legacy.descriptiveName = legacy.name;
+        expect (NativePluginFormat::isDescription (legacy),
+                "old EQ description remains valid by immutable format/UID/path");
+        expect (nativeFormat.doesPluginStillExist (legacy),
+                "an EQ instance persisted under the old display name still loads");
+    }
+
     void testFrozenAbiAndAppendedPlacements()
     {
         beginTest ("Phase 10 spectral extension: all 375 hosted parameter IDs pinned");
