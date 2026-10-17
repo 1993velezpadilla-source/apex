@@ -94,6 +94,59 @@ static void testBypassAndParameterChanges()
     std::vector<float> sound(48000,0.8f);p.process(sound.data(),nullptr,(int)sound.size());
     assert(p.getGainReductionDb()>0);
 }
+static void testOriginalOpticalVoicings()
+{
+    // FAST/CLASSIC/SLOW share one processor and differ in envelope time
+    // constants. They are original tunings, NOT measured LA-2A revisions.
+    for(const double rate:{44100.0,48000.0,96000.0})
+    {
+        auto attackAt20ms=[rate](int voice) {
+            ApexOptoLevelerCore core;core.prepare(rate);
+            OptoParameters p;p.peakReduction=80;p.colorEnabled=false;p.voicing=voice;
+            core.setParameters(p);
+            std::vector<float> loud(static_cast<size_t>(rate*0.020),.8f);
+            core.process(loud.data(),nullptr,static_cast<int>(loud.size()));
+            return core.getGainReductionDb();
+        };
+        const double aFast=attackAt20ms(0);
+        const double aClassic=attackAt20ms(1);
+        const double aSlow=attackAt20ms(2);
+        assert(aFast>aClassic && aClassic>aSlow && aSlow>0.0);
+        auto releaseAt60ms=[rate](int voice) {
+            ApexOptoLevelerCore core;core.prepare(rate);
+            OptoParameters p;p.peakReduction=80;p.colorEnabled=false;p.voicing=voice;
+            core.setParameters(p);
+            std::vector<float> loud(static_cast<size_t>(rate),.8f);
+            core.process(loud.data(),nullptr,static_cast<int>(loud.size()));
+            std::vector<float> silence(static_cast<size_t>(rate*.060),0.f);
+            core.process(silence.data(),nullptr,static_cast<int>(silence.size()));
+            return core.getGainReductionDb();
+        };
+        const double rFast=releaseAt60ms(0);
+        const double rClassic=releaseAt60ms(1);
+        const double rSlow=releaseAt60ms(2);
+        assert(rFast<rClassic && rClassic<rSlow);
+        assert(std::isfinite(rFast) && std::isfinite(rSlow));
+    }
+    OptoParameters p;p.voicing=999;
+    assert(OptoParameters::sanitise(p).voicing==2);
+    p.voicing=-999;
+    assert(OptoParameters::sanitise(p).voicing==0);
+    // Callback partitioning may NOT influence any envelope response.
+    for(int voice:{0,1,2})
+    {
+        ApexOptoLevelerCore single,sliced;
+        single.prepare(48000.0);sliced.prepare(48000.0);
+        OptoParameters prm;prm.peakReduction=64;prm.colorEnabled=false;prm.voicing=voice;
+        single.setParameters(prm);sliced.setParameters(prm);
+        std::vector<float> a(6000,.6f),b=a;
+        single.process(a.data(),nullptr,static_cast<int>(a.size()));
+        for(int n=0;n<static_cast<int>(b.size());n+=31)
+            sliced.process(b.data()+n,nullptr,
+                std::min(31,static_cast<int>(b.size())-n));
+        for(size_t n=0;n<a.size();++n)near(a[n],b[n],1.e-6);
+    }
+}
 static void testVuBallistics()
 {
     OptoVuBallisticsCore one, split;
@@ -126,5 +179,6 @@ int main()
     std::cerr << "invariance\n"; testBlockInvariance();std::cerr << "sanity\n";testInputSanitisationAndParameterSafety();
     std::cerr << "bypass\n"; testBypassAndParameterChanges();
     std::cerr << "VU ballistics\\n"; testVuBallistics();
-    std::cout<<"APEX Opto Core: 7 suites PASS (algorithm scaffold only; no hardware match claim)\n";
+    testOriginalOpticalVoicings();
+    std::cout<<"APEX Opto Core: 8 suites PASS (algorithm scaffold only; no hardware match claim)\n";
 }
