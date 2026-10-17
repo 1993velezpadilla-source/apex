@@ -93,8 +93,18 @@ public:
         meterMode_.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);
         meterMode_.setRange(0.0,2.0,1.0);
         meterMode_.setValue(processor_.getMeterMode(),juce::dontSendNotification);
+        meterMode_.onDragStart=[this] {
+            activeValueControl_=&meterMode_;
+            showControlValue(meterMode_,-1);
+        };
+        meterMode_.onDragEnd=[this] {
+            activeValueControl_=nullptr;
+            valueReadoutHideAtMs_=juce::Time::getMillisecondCounterHiRes()+1500.0;
+        };
         meterMode_.onValueChange=[this] {
             processor_.setMeterMode(static_cast<int>(meterMode_.getValue()));
+            if(activeValueControl_==&meterMode_)
+                showControlValue(meterMode_,-1);
         };
         addAndMakeVisible(meterMode_);
 
@@ -116,6 +126,23 @@ public:
             parameter.endChangeGesture();
         };
         addAndMakeVisible(voice_);
+
+        // One real, touch-safe value readout shared by all six rotary knobs.
+        // It is a non-intercepting child (not a desktop tooltip), so the
+        // performer can read the value on touchscreens as well as with a mouse
+        // without losing slider drag capture or automation gestures.
+        valueReadout_.setName("LIVE VALUE READOUT");
+        valueReadout_.setInterceptsMouseClicks(false,false);
+        valueReadout_.setJustificationType(juce::Justification::centred);
+        valueReadout_.setColour(juce::Label::backgroundColourId,
+                                juce::Colour(0xee182331));
+        valueReadout_.setColour(juce::Label::textColourId,
+                                juce::Colour(0xffffe4f3));
+        valueReadout_.setColour(juce::Label::outlineColourId,
+                                juce::Colour(0xffff56af));
+        valueReadout_.setFont(juce::Font(juce::FontOptions(15.0f,juce::Font::bold)));
+        addAndMakeVisible(valueReadout_);
+        valueReadout_.setVisible(false);
 
         setOpaque(true);
         setResizable(true,true);
@@ -165,6 +192,8 @@ public:
         emphasis_.setBounds(fit(663,310,66,55));
         drive_.setBounds(fit(822,310,66,55));
         color_.setBounds(fit(907,300,77,68));
+        if(valueReadout_.isVisible() && activeValueControl_!=nullptr)
+            positionValueReadout(*activeValueControl_);
     }
 
 private:
@@ -352,13 +381,68 @@ private:
         slider.setValue(processor_.getParameterAt(index).getUnits(),
                         juce::dontSendNotification);
         auto& param=processor_.getParameterAt(index);
-        slider.onDragStart=[&param]{param.beginChangeGesture();};
-        slider.onDragEnd=[&param]{param.endChangeGesture();};
-        slider.onValueChange=[&slider,&param]{
+        slider.onDragStart=[this,&slider,&param,index] {
+            param.beginChangeGesture();
+            activeValueControl_=&slider;
+            showControlValue(slider,index);
+        };
+        slider.onDragEnd=[this,&slider,&param] {
+            param.endChangeGesture();
+            if(activeValueControl_==&slider)
+            {
+                activeValueControl_=nullptr;
+                valueReadoutHideAtMs_=juce::Time::getMillisecondCounterHiRes()+1500.0;
+            }
+        };
+        slider.onValueChange=[this,&slider,&param,index] {
             param.setValueNotifyingHost(
                 param.toNormalised(static_cast<float>(slider.getValue())));
+            if(activeValueControl_==&slider)
+                showControlValue(slider,index);
         };
         addAndMakeVisible(slider);
+    }
+
+    void showControlValue(juce::Slider& slider,int index)
+    {
+        juce::String content;
+        if(index<0)
+        {
+            const int mode=static_cast<int>(slider.getValue());
+            content=mode==0 ? "VU  GR" : (mode==1 ? "VU  OUTPUT +4" : "VU  OUTPUT +10");
+        }
+        else
+        {
+            const auto number=juce::String(slider.getValue(),
+                                            index==ColorDrive ? 2 : 1);
+            switch(index)
+            {
+                case Gain:          content="GAIN  "+number+" dB";break;
+                case PeakReduction: content="PEAK  "+number;break;
+                case Mix:           content="MIX  "+number+" %";break;
+                case Emphasis:      content="KEY  "+number+" %";break;
+                case ColorDrive:    content="DRIVE  "+number+" x";break;
+                default:           content=number;break;
+            }
+        }
+        valueReadout_.setText(content,juce::dontSendNotification);
+        positionValueReadout(slider);
+        valueReadout_.setVisible(true);
+        valueReadout_.toFront(false);
+        valueReadoutHideAtMs_=0.0; // no timeout while actively dragging
+    }
+
+    void positionValueReadout(const juce::Slider& slider)
+    {
+        constexpr int width=164, height=34, margin=8;
+        const auto rect=slider.getBounds();
+        const int x=juce::jlimit(margin,
+            std::max(margin,getWidth()-width-margin),
+            rect.getCentreX()-width/2);
+        const int above=rect.getY()-height-6;
+        const int y=above>=margin ? above
+            : std::min(getHeight()-height-margin,rect.getBottom()+6);
+        valueReadout_.setBounds(x,y,width,height);
     }
 
     void configureSwitch(juce::ToggleButton& button,int index,bool invert,
@@ -380,6 +464,13 @@ private:
 
     void timerCallback() override
     {
+        if(activeValueControl_==nullptr && valueReadout_.isVisible()
+           && valueReadoutHideAtMs_>0.0
+           && juce::Time::getMillisecondCounterHiRes()>=valueReadoutHideAtMs_)
+        {
+            valueReadout_.setVisible(false);
+            valueReadoutHideAtMs_=0.0;
+        }
         const std::array<std::pair<juce::Slider*,int>,5> pairs {{
             {&gain_,Gain},{&peak_,PeakReduction},{&mix_,Mix},
             {&emphasis_,Emphasis},{&drive_,ColorDrive}
@@ -431,6 +522,9 @@ private:
     OptoProcessor& processor_;
     OptoRackLookAndFeel lookAndFeel_;
     juce::Slider gain_,peak_,mix_,emphasis_,drive_,meterMode_;
+    juce::Label valueReadout_;
+    juce::Slider* activeValueControl_ = nullptr; // GUI/message thread only
+    double valueReadoutHideAtMs_ = 0.0;
     juce::ComboBox voice_;
     juce::ToggleButton limit_,power_,color_;
     float needle_=1.0f;
