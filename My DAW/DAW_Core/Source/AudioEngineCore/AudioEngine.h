@@ -3012,13 +3012,10 @@ private:
 #else
             const bool researchCompensated=false;
 #endif
-            if (edge.destNodeId == "master" && !researchCompensated)
+            if (edge.destNodeId == "master" && !researchCompensated &&
+                (int)masterPdcScratchL_.size() >= numSamples &&
+                (int)masterPdcScratchR_.size() >= numSamples)
             {
-                if ((int)masterPdcScratchL_.size() < numSamples)
-                {
-                    masterPdcScratchL_.assign((size_t)numSamples, 0.0f);
-                    masterPdcScratchR_.assign((size_t)numSamples, 0.0f);
-                }
                 std::memcpy(masterPdcScratchL_.data(), tbL, sizeof(float) * (size_t)numSamples);
                 std::memcpy(masterPdcScratchR_.data(), tbR, sizeof(float) * (size_t)numSamples);
 
@@ -3039,6 +3036,14 @@ private:
                 masterPdc_.processEdge(edge.id, masterPdcScratchL_.data(), masterPdcScratchR_.data(), numSamples, pdcDelayOverride);
                 routeSrcL = masterPdcScratchL_.data();
                 routeSrcR = masterPdcScratchR_.data();
+            }
+            else if(edge.destNodeId == "master" && !researchCompensated)
+            {
+                // An unexpected oversized callback cannot allocate on RT.
+                // Pass the original audio (no compensation this block) and
+                // invalidate dormant legacy taps so no stale delay samples
+                // replay when a normal-sized callback resumes.
+                masterPdc_.invalidateStreamingHistoryForTimelineSwitch();
             }
             auto* dstL = destBuf.getWritePointer(0);
             auto* dstR = destBuf.getWritePointer(juce::jmin(1, destBuf.getNumChannels() - 1));
@@ -3240,18 +3245,23 @@ private:
 #else
             const bool researchCompensated=false;
 #endif
-            if (edge.destNodeId == "master" && !researchCompensated)
+            if (edge.destNodeId == "master" && !researchCompensated &&
+                (int)masterPdcScratchL_.size() >= numSamples &&
+                (int)masterPdcScratchR_.size() >= numSamples)
             {
-                if ((int)masterPdcScratchL_.size() < numSamples)
-                {
-                    masterPdcScratchL_.assign((size_t)numSamples, 0.0f);
-                    masterPdcScratchR_.assign((size_t)numSamples, 0.0f);
-                }
                 std::memcpy(masterPdcScratchL_.data(), bufL, sizeof(float) * (size_t)numSamples);
                 std::memcpy(masterPdcScratchR_.data(), bufR, sizeof(float) * (size_t)numSamples);
                 masterPdc_.processEdge(edge.id, masterPdcScratchL_.data(), masterPdcScratchR_.data(), numSamples);
                 routeSrcL = masterPdcScratchL_.data();
                 routeSrcR = masterPdcScratchR_.data();
+            }
+            else if(edge.destNodeId == "master" && !researchCompensated)
+            {
+                // An unexpected oversized callback cannot allocate on RT.
+                // Pass the original audio (no compensation this block) and
+                // invalidate dormant legacy taps so no stale delay samples
+                // replay when a normal-sized callback resumes.
+                masterPdc_.invalidateStreamingHistoryForTimelineSwitch();
             }
             auto* dstL = destBuf.getWritePointer(0);
             auto* dstR = destBuf.getWritePointer(juce::jmin(1, destBuf.getNumChannels() - 1));
