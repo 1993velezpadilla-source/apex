@@ -195,13 +195,23 @@ private:
                     "manager instance must be a G10Processor");
         }
 
-        // Discovery lists both family members, deterministically ordered.
+        // The existing first three family identities keep their ordering.
+        // Opto 2A is the fourth native: a new family member must not make
+        // C4's original discovery regression fail or shift historic IDs.
         {
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expect (found.size() == 3,
-                    "findAllTypesForFile must expose G10, C4 and Parametric EQ");
+            expectEquals (found.size(), 4,
+                          "discover G10, C4, Parametric EQ and Opto 2A");
+            if (found.size() == 4)
+            {
+                expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
+                expectEquals (found[1]->fileOrIdentifier, juce::String ("APEX::C4"));
+                expectEquals (found[2]->fileOrIdentifier, juce::String (
+                    APEX::ParametricEQ::Processor::kFileOrIdentifier));
+                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+            }
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.
