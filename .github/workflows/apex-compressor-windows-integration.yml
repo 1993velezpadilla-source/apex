@@ -1,0 +1,72 @@
+name: APEX Compressor Windows integration
+on:
+  push:
+    paths:
+      - ".github/workflows/apex-compressor-windows-integration.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/**"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+  pull_request:
+    paths:
+      - ".github/workflows/apex-compressor-windows-integration.yml"
+      - "My DAW/DAW_Core/Source/CompressorCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexOptoLevelerCoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Source/Compressor/**"
+      - "My DAW/DAW_Core/Tests/APEXTests.jucer"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apex-compressor-windows-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  full-build:
+    name: "Full APEX Windows ${{ matrix.configuration }} + Opto 2A Native"
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Validate repository and CI evidence
+        run: |
+          .\Scripts\test_repository_policy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\Scripts\test_validate_test_evidence.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Materialize JUCE and build dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build actual DAW including native compressor registration
+        run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
+      - name: Exercise live APEX Native plugin host and full project state
+        run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Category APEX.Compressor -Seed 0xA9E12026
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-opto-windows-evidence-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/evidence/runs/
+            My DAW/DAW_Core/evidence/opto2a_gui/*.png
+          if-no-files-found: warn
+      - name: Preserve unsigned test build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-opto-unsigned-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+            My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.pdb
+          if-no-files-found: warn

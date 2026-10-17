@@ -11,6 +11,7 @@
 #include "../G10Core/G10NativePluginFormat.h"
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
+#include "../CompressorCore/ApexOptoLevelerProcessor.h"
 
 namespace DAW {
 
@@ -35,6 +36,7 @@ public:
         seedNativeG10Entry();
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
+        seedNativeOpto2AEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -261,13 +263,14 @@ private:
 
         coordinator_.setForceRescan(forceRescan);
 
-        // Re-seed the intrinsic APEX G10/C4/Parametric EQ entries so they survive
+        // Re-seed the intrinsic APEX G10/C4/Parametric EQ/Opto 2A entries so they survive
         // full/clean rescans (the coordinator never clears the cache, but the
         // entries must exist before the scan's done-callback rebuilds the
         // browser feed).
         seedNativeG10Entry();
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
+        seedNativeOpto2AEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -314,6 +317,18 @@ private:
     void seedNativeParametricEQEntry()
     {
         auto description = APEX::ParametricEQ::NativePluginFormat::createDescription();
+        cache_.cacheFromDescription(description);
+    }
+
+    /** The unified native format also exposes Opto 2A, but merely
+        registering a format is not enough to make it visible in the GUI
+        browser. Seed its canonical identity into the persistent cache on
+        startup AND before a user-triggered rescan, just like G10/C4/EQ. */
+    void seedNativeOpto2AEntry()
+    {
+        APEX::Compressor::OptoProcessor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
     }
 
