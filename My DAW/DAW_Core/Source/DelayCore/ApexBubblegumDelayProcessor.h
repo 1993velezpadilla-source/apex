@@ -137,7 +137,10 @@ public:
         if(auto* playhead=getPlayHead())
             if(auto position=playhead->getPosition())
                 if(auto bpm=position->getBpm())
+                {
                     engine_.setHostTempo(*bpm);
+                    hostBpmDisplay_.store(*bpm,std::memory_order_relaxed);
+                }
         engine_.setSettings(readSettings());
         engine_.process(buffer.getWritePointer(0),
                         buffer.getNumChannels()>1?buffer.getWritePointer(1):nullptr,
@@ -163,6 +166,10 @@ public:
     void changeProgramName(int,const juce::String&) override {}
     bool hasEditor() const override {return true;}
     juce::AudioProcessorEditor* createEditor() override;
+    double getHostTempoForDisplay() const noexcept
+    {
+        return hostBpmDisplay_.load(std::memory_order_relaxed);
+    }
     HostedParameter& getParameterAt(int i) noexcept {return *parameters_[i];}
     const HostedParameter& getParameterAt(int i) const noexcept {return *parameters_[i];}
     void getStateInformation(juce::MemoryBlock& b) override
@@ -226,6 +233,7 @@ private:
     }};
     std::array<HostedParameter*,ParameterCount> parameters_ {};
     Engine engine_;
+    std::atomic<double> hostBpmDisplay_ {120.0};
 };
 } // namespace APEX::Delay
 
