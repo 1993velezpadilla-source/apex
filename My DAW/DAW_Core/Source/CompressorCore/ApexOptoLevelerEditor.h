@@ -98,6 +98,25 @@ public:
         };
         addAndMakeVisible(meterMode_);
 
+        // Three APEX-original optical responses inside ONE processor. Host
+        // automation and saved sessions own this choice, not a GUI-only flag.
+        voice_.setName("OPTICAL VOICE");
+        voice_.setTooltip("Optical response: FAST / CLASSIC / SLOW");
+        voice_.addItem("FAST",1);
+        voice_.addItem("CLASSIC",2);
+        voice_.addItem("SLOW",3);
+        voice_.setSelectedId(static_cast<int>(
+            processor_.getParameterAt(Voicing).getUnits())+1,
+            juce::dontSendNotification);
+        voice_.onChange=[this] {
+            auto& parameter=processor_.getParameterAt(Voicing);
+            parameter.beginChangeGesture();
+            parameter.setValueNotifyingHost(parameter.toNormalised(
+                static_cast<float>(juce::jlimit(1,3,voice_.getSelectedId())-1)));
+            parameter.endChangeGesture();
+        };
+        addAndMakeVisible(voice_);
+
         setOpaque(true);
         setResizable(true,true);
         setResizeLimits(700,285,1560,570);
@@ -139,6 +158,7 @@ public:
         limit_.setBounds(fit(106,158,71,69));
         power_.setBounds(fit(876,164,71,69));
         meterMode_.setBounds(fit(883,65,75,75));
+        voice_.setBounds(fit(322,303,144,31));
 
         // Accessible touch strip keeps the original face unobstructed.
         mix_.setBounds(fit(499,310,66,55));
@@ -306,6 +326,7 @@ private:
         label(g,"KEY EMPHASIS",636,289,120,15,10,juce::Colour(0xffd3dae5),true);
         label(g,"COLOR DRIVE",797,289,117,15,10,juce::Colour(0xffd3dae5),true);
         label(g,"COLOR",906,351,101,15,10,juce::Colour(0xffd3dae5),true);
+        label(g,"VOICE",318,289,150,14,10,juce::Colour(0xffd3dae5),true);
         label(g,"ZERO LATENCY / APEX NATIVE",314,334,158,30,9,
               juce::Colour(0xffb2a4ba));
     }
@@ -375,6 +396,10 @@ private:
         color_.setToggleState(value(ColorEnabled),juce::dontSendNotification);
         if(!meterMode_.isMouseButtonDown())
             meterMode_.setValue(processor_.getMeterMode(),juce::dontSendNotification);
+        if(!voice_.isMouseButtonDown())
+            voice_.setSelectedId(static_cast<int>(
+                processor_.getParameterAt(Voicing).getUnits())+1,
+                juce::dontSendNotification);
 
         const int mode=processor_.getMeterMode();
         float target=1.0f;
@@ -406,6 +431,7 @@ private:
     OptoProcessor& processor_;
     OptoRackLookAndFeel lookAndFeel_;
     juce::Slider gain_,peak_,mix_,emphasis_,drive_,meterMode_;
+    juce::ComboBox voice_;
     juce::ToggleButton limit_,power_,color_;
     float needle_=1.0f;
 };
