@@ -140,12 +140,16 @@ public:
             scLowR_ = scLowpassCoeff_ * scLowR_ + (1.0 - scLowpassCoeff_) * dryR;
             const double scL = dryL - parameters_.emphasis * scLowL_;
             const double scR = dryR - parameters_.emphasis * scLowR_;
-            const double levelDb = 20.0 * std::log10(
-                std::max(epsilon, std::max(std::abs(scL), std::abs(scR))));
-            const double overDb = levelDb - thresholdDb;
             double targetReduction = 0.0;
             if (thresholdActive != 0.0)
             {
+                // Zero Peak Reduction must still advance the optical state
+                // (and its gradual recovery) but requires no logarithm or
+                // variable-ratio tanh on the audio callback. This is the
+                // factory default, particularly important while recording.
+                const double levelDb = 20.0 * std::log10(
+                    std::max(epsilon, std::max(std::abs(scL), std::abs(scR))));
+                const double overDb = levelDb - thresholdDb;
                 const double kneeHalfWidthDb = parameters_.limit ? 3.0 : 7.0;
                 // Simplified variable ratio: explicitly a model to CALIBRATE.
                 const double ratio = parameters_.limit ? 30.0
