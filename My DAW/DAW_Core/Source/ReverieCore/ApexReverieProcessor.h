@@ -67,6 +67,7 @@ public:
         setRateAndBufferSizeDetails(sampleRate,blockSize);
         engine_.prepare(sampleRate);
         engine_.setSettings(settings());
+        engine_.reset(); // initial wet/dry and tap lengths match restored state
         setLatencySamples(0);
     }
     void releaseResources() override {}
