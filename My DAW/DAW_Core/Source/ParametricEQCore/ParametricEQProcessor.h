@@ -182,7 +182,9 @@ class Processor final : public juce::AudioPluginInstance
 public:
     static constexpr int kUniqueId = 0x504551; // "PEQ"
     static constexpr const char* kFormatName = "APEX Native";
-    // Preserve APEX Native format, identifier, uniqueId and state compatibility.\n    // Prism replaces the old Parametric EQ in place, not as a duplicate plugin.\n    static constexpr const char* kPluginName = "APEX Prism EQ";
+    // Preserve APEX Native format, identifier, uniqueId and state compatibility.
+    // Prism replaces the old Parametric EQ in place, not as a duplicate plugin.
+    static constexpr const char* kPluginName = "APEX Prism EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
     static constexpr const char* kVersion = "1.3.0";
