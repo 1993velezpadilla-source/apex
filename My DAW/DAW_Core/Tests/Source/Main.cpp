@@ -4,6 +4,10 @@
 #include <iostream>
 #include "WindowsCrashDiagnostics.h"
 
+// Force-link the Opto host suite even when MSVC Release enables LTCG.
+// Without this anchor, --category=APEX.Compressor may report zero tests.
+void registerApexOptoNativeHostTests();
+
 //==============================================================================
 #define APEX_STRINGIFY_IMPL(x) #x
 #define APEX_TO_STRING(x) APEX_STRINGIFY_IMPL(x)
@@ -66,6 +70,10 @@ int main (int argc, char** argv)
      DAW::ApexProcessModeStateCore::setProcessMode (processMode);
      if (processMode == DAW::ApexProcessMode::PluginWorker)
          return DAW::PluginWorkerMainCore::run (processArguments);
+
+     // Register before category listing/filtering so a Release build cannot
+     // silently drop the compressor suite when it optimises translation units.
+     registerApexOptoNativeHostTests();
 
     #if JUCE_WINDOWS
      ApexTestDiagnostics::install();
