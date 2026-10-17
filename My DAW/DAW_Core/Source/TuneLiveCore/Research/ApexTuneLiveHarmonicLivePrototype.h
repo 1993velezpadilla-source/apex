@@ -142,6 +142,16 @@ public:
         fastEngagement_=enabled;
         wetStep_=1.0/((enabled?0.001:0.008)*rate_+1.0);
     }
+    // EXPERIMENT, OFF by default. Try allowing the >=400Hz candidate
+    // harmonic coefficients to become audible after HALF of one newly
+    // observed source period rather than one full period. This may be
+    // faster but can damage attacks/formants; only objective and blind
+    // real-singer A/B may decide whether it is safe for further trials.
+    // No change to <400Hz or the conservative <160Hz fallback.
+    // Must be configured only off the audio callback.
+    void enableHalfPeriodEngagementResearch(bool enabled) noexcept {
+        halfPeriodEngagementResearch_=enabled;
+    }
     void process(float* const* data,int channels,int length) noexcept {
         if(!data || channels!=channels_ || length<=0 || !data[0] ||
            (channels_==2 && !data[1]))return;
@@ -290,10 +300,13 @@ public:
             // pitch response. Keep high notes on the accelerated path.
             const bool lowVoiceConservative=fastEngagement_ &&
                 sourceHz_>0.0 && sourceHz_<160.0;
+            const double requiredCycles=(fastEngagement_ &&
+                !lowVoiceConservative)
+                    ? (halfPeriodEngagementResearch_ && sourceHz_>=400.0
+                          ? 0.5 : 1.0)
+                    : 3.0;
             const bool mature=voiced_ && sourceHz_>0.0 &&
-                voicedSamples_>=static_cast<int>(
-                    ((fastEngagement_&&!lowVoiceConservative)?1.0:3.0)
-                    *rate_/sourceHz_);
+                voicedSamples_>=static_cast<int>(requiredCycles*rate_/sourceHz_);
             const double requested=mature?targetWet_:0.0;
             wet_+=(requested-wet_)*
                 (lowVoiceConservative?slowWetStep_:wetStep_);
@@ -435,6 +448,7 @@ private:
          fastTransitionsEnabled_=false,residualMode_=false,
          fastEngagement_=false,highRegisterEnabled_=false,
          midRegisterEnabled_=false,ultraHighEnabled_=false,
-         noteLeapDryResetEnabled_=false,ultraLeapConsensusEnabled_=false;
+         noteLeapDryResetEnabled_=false,ultraLeapConsensusEnabled_=false,
+         halfPeriodEngagementResearch_=false;
 };
 }}} // namespace APEX::TuneLive::Research
