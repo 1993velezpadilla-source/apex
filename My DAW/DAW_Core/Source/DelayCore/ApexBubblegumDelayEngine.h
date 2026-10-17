@@ -56,7 +56,7 @@ public:
     // Number of quarter-note beats, including straight, triplet and dotted options.
     static constexpr std::array<float,kNoteCount> kNoteBeats {{
         1.0f/12.0f, 0.125f, 1.0f/6.0f, 0.25f, 1.0f/3.0f, 0.75f,
-        0.5f, 2.0f/3.0f, 1.0f, 1.5f, 2.0f, 4.0f, 6.0f
+        0.5f, 2.0f/3.0f, 1.0f, 1.5f, 2.0f, 4.0f, 8.0f
     }};
     void prepare(double sampleRate)
     {
@@ -77,6 +77,7 @@ public:
         write_=0;
         sampleCounter_=0;
         phase_=0.0;
+        processed_=false;
         currentTime_=targetSamples();
         currentMix_=settings_.mix;
         currentFeedback_=settings_.feedback;
@@ -112,12 +113,10 @@ public:
         const float desiredMix=settings_.mix;
         const double desiredOutput=std::pow(10.0,settings_.outputDb/20.0);
         const double hpCoeff=std::exp(-twoPi*settings_.highpassHz/rate_);
-        const double lpCoeff=std::exp(-twoPi*settings_.lowpassHz/rate_);
         const double highCut=std::min(settings_.lowpassHz,rate_*0.45);
         const double lowCoeff=std::exp(-twoPi*highCut/rate_);
         const bool highEnabled=settings_.highpassHz>20.01f;
         const bool lowEnabled=settings_.lowpassHz<19999.0f;
-        (void)lpCoeff;
         const std::size_t length=ring_[0].size();
         for(int i=0;i<frames;++i)
         {
@@ -162,18 +161,16 @@ public:
             if(write_==length) write_=0;
             const float markedL=settings_.phaseLeft?-wetL:wetL;
             const float markedR=settings_.phaseRight?-wetR:wetR;
-            const float blend=static_cast<float>(currentMix_*bypassBlend_);
             const float gain=static_cast<float>(currentOutput_);
-            // Dry branch is un-delayed, output gain applies to active mix only.
-            left[i]=finite(inputL*(1.0f-blend)+
-                           ((1.0f-currentMix_)*inputL+currentMix_*markedL)*gain
-                           *static_cast<float>(bypassBlend_)
-                           -inputL*static_cast<float>(bypassBlend_)*(1.0f-currentMix_));
+            const float mix=static_cast<float>(currentMix_);
+            const float active=static_cast<float>(bypassBlend_);
+            const float processedL=gain*((1.0f-mix)*inputL+mix*markedL);
+            left[i]=finite(inputL+active*(processedL-inputL));
             if(stereo)
-                right[i]=finite(inputR*(1.0f-blend)+
-                           ((1.0f-currentMix_)*inputR+currentMix_*markedR)*gain
-                           *static_cast<float>(bypassBlend_)
-                           -inputR*static_cast<float>(bypassBlend_)*(1.0f-currentMix_));
+            {
+                const float processedR=gain*((1.0f-mix)*inputR+mix*markedR);
+                right[i]=finite(inputR+active*(processedR-inputR));
+            }
             ++sampleCounter_;
         }
     }
