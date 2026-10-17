@@ -253,6 +253,16 @@
         <FILE id="OPTO_CPP01" name="OptoNativeHostTests.cpp" compile="1" resource="0"
               file="Source/Compressor/OptoNativeHostTests.cpp"/>
       </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000059}" name="Bubblegum Delay">
+        <FILE id="DELAY_H1" name="ApexBubblegumDelayEngine.h" compile="0" resource="0"
+              file="../Source/DelayCore/ApexBubblegumDelayEngine.h"/>
+        <FILE id="DELAY_H2" name="ApexBubblegumDelayProcessor.h" compile="0" resource="0"
+              file="../Source/DelayCore/ApexBubblegumDelayProcessor.h"/>
+        <FILE id="DELAY_H3" name="ApexBubblegumDelayEditor.h" compile="0" resource="0"
+              file="../Source/DelayCore/ApexBubblegumDelayEditor.h"/>
+        <FILE id="DELAY_CPP1" name="DelayNativeHostTests.cpp" compile="1" resource="0"
+              file="Source/Delay/DelayNativeHostTests.cpp"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000046}" name="C4">
         <FILE id="C4_H1" name="C4TestUtils.h" compile="0" resource="0"
               file="Source/C4/C4TestUtils.h"/>
