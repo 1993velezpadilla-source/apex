@@ -12,6 +12,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../ReverieCore/ApexReverieProcessor.h"
 
 namespace DAW {
 
@@ -37,6 +38,7 @@ public:
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -271,6 +273,7 @@ private:
         seedNativeC4Entry();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeReverieEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -327,6 +330,15 @@ private:
     void seedNativeOpto2AEntry()
     {
         APEX::Compressor::OptoProcessor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Cache the intrinsic APEX Reverie identity for cold starts and rescans. */
+    void seedNativeReverieEntry()
+    {
+        APEX::Reverie::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
