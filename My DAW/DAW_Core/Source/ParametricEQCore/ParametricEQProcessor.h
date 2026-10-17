@@ -3,8 +3,11 @@
 #include <JuceHeader.h>
 
 #include "ParametricEQAuditionCore.h"
+#include "ParametricEQBiquad.h"
+#include "ParametricEQCharacterCore.h"
 #include "ParametricEQLinearPhase.h"
 #include "ParametricEQResponseCore.h"
+#include "ParametricEQSpectralBlend.h"
 #include "../AnalysisCore/ApexSpectrumAnalyzerCore.h"
 #include "../DynamicsCore/ApexDynamicsCore.h"
 
@@ -39,7 +42,27 @@ constexpr int kDynamicDetectorParameter = kFirstDynamicParameter + kDynamicBandP
 constexpr int kDynamicSidechainParameter = kDynamicDetectorParameter + 1;
 constexpr int kDynamicLinkParameter = kDynamicDetectorParameter + 2;
 constexpr int kPhaseModeParameter = kDynamicDetectorParameter + 3;
-constexpr int kNumParameters = kPhaseModeParameter + 1;
+constexpr int kCharacterModeParameter = kPhaseModeParameter + 1;
+constexpr int kFirstDynamicFilterParameter = kCharacterModeParameter + 1;
+constexpr int kDynamicFilterParameterCount = kMaxBands;
+constexpr int kOutputGainParameter = kFirstDynamicFilterParameter
+                                   + kDynamicFilterParameterCount;
+constexpr int kOutputPanParameter = kOutputGainParameter + 1;
+constexpr int kOutputPhaseInvertParameter = kOutputPanParameter + 1;
+constexpr int kOutputAutoGainParameter = kOutputPhaseInvertParameter + 1;
+constexpr int kOutputGainScaleParameter = kOutputAutoGainParameter + 1;
+// Phase 10: spectral mode is latched at prepare, never with live PDC jump.
+constexpr int kSpectralArmParameter = kOutputGainScaleParameter + 1;
+constexpr int kFirstSpectralBandParameter = kSpectralArmParameter + 1;
+constexpr int kSpectralBandParameterCount = kMaxBands;
+constexpr int kSpectralDensityParameter = kFirstSpectralBandParameter
+                                        + kSpectralBandParameterCount;
+constexpr int kSpectralTiltParameter = kSpectralDensityParameter + 1;
+constexpr int kNumParameters = kSpectralTiltParameter + 1;
+constexpr int spectralBandParameterIndex (int band) noexcept
+{
+    return kFirstSpectralBandParameter + band;
+}
 
 constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 {
@@ -49,6 +72,11 @@ constexpr int parameterIndex (int band, BandParameterOffset offset) noexcept
 constexpr int placementParameterIndex (int band) noexcept
 {
     return kFirstPlacementParameter + band;
+}
+
+constexpr int dynamicFilterParameterIndex (int band) noexcept
+{
+    return kFirstDynamicFilterParameter + band;
 }
 
 static_assert (kFirstPlacementParameter == 170 && kFirstDynamicParameter == 194,
@@ -80,8 +108,14 @@ static_assert (kDynamicDetectorParameter == 314 && kPhaseModeParameter == 317,
 constexpr int kPhaseModeMinimum = 0;
 constexpr int kPhaseModeLinear = 1;
 
-static_assert (kNumParameters == 318,
-               "Phase 6 appends peq.phase at index 317");
+static_assert (kCharacterModeParameter == 318,
+               "Phase 7 appends peq.character after the frozen Phase 6 ABI");
+static_assert (kFirstDynamicFilterParameter == 319,
+               "Phase 8 appends per-band detector filters after peq.character");
+static_assert (kOutputGainParameter == 343,
+               "Phase 9 output controls must append after Phase 8");
+static_assert (kSpectralArmParameter == 348 && kNumParameters == 375,
+               "Phase 10 must append to frozen indices 0..347");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -101,6 +135,9 @@ public:
         DetectorChoice,
         SourceChoice,
         PhaseModeChoice,
+        CharacterChoice,
+        Pan,
+        GainScale,
         DesignMode
     };
 
@@ -145,15 +182,15 @@ class Processor final : public juce::AudioPluginInstance
 public:
     static constexpr int kUniqueId = 0x504551; // "PEQ"
     static constexpr const char* kFormatName = "APEX Native";
-    static constexpr const char* kPluginName = "APEX Parametric EQ";
+    // Preserve APEX Native format, identifier, uniqueId and state compatibility.\n    // Prism replaces the old Parametric EQ in place, not as a duplicate plugin.\n    static constexpr const char* kPluginName = "APEX Prism EQ";
     static constexpr const char* kCategory = "EQ";
     static constexpr const char* kManufacturer = "APEX";
-    static constexpr const char* kVersion = "1.0.0";
+    static constexpr const char* kVersion = "1.3.0";
     static constexpr const char* kFileOrIdentifier = "APEX::ParametricEQ";
     static constexpr const char* kStateTag = "parametriceqstate";
     static constexpr const char* kVersionProperty = "version";
     static constexpr const char* kAnalyzerProperty = "peq.analyzer";
-    static constexpr int kStateVersion = 4;
+    static constexpr int kStateVersion = 7;
 
     Processor();
     ~Processor() override;
@@ -237,6 +274,16 @@ public:
     {
         return linearKernelGeneration_.load (std::memory_order_acquire);
     }
+    bool isSpectralModeArmedForTesting() const noexcept
+    {
+        return spectralPreparedEnabled_.load (std::memory_order_acquire);
+    }
+    bool isSpectralRepreparePendingForTesting() const noexcept
+    {
+        return parameters_[static_cast<std::size_t> (
+            kSpectralArmParameter)]->getBool() != spectralPreparedEnabled_.load (std::memory_order_acquire);
+    }
+
     bool isLinearPhaseModeSettledForTesting() const noexcept
     {
         return linearPhaseMode_ && modeMix_ >= 1.0;
@@ -249,7 +296,18 @@ private:
                                   const BandSettings& rhs) noexcept;
     BandSettings readBandParameters (int band) const noexcept;
     DesignMode readDesignModeParameter() const noexcept;
+    CharacterMode readCharacterModeParameter() const noexcept;
     bool readBypassParameter() const noexcept;
+    float readOutputGainDb() const noexcept;
+    float readOutputPan() const noexcept;
+    bool readOutputPhaseInvert() const noexcept;
+    bool readOutputAutoGain() const noexcept;
+    float readOutputGainScale() const noexcept;
+    static float measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept;
+    void applyOutputStage (juce::AudioBuffer<float>& buffer,
+                           int channels, int samples,
+                           float inputRmsDb) noexcept;
     void readBandPlacementParameters (
         std::array<BandSettings, kMaxBands>& settings) const noexcept;
 
@@ -261,6 +319,9 @@ private:
     void adoptDynamicParameters() noexcept;
     void computeDynamicGains (int numberOfChannels,
                               int numberOfSamples) noexcept;
+    void processSpectralMode (juce::AudioBuffer<float>& buffer,
+                              int channels, int samples,
+                              bool wetTarget) noexcept;
     void adoptPhaseMode() noexcept;
     void processLinearPhase (juce::AudioBuffer<float>& buffer,
                              int numberOfChannels, int numberOfSamples) noexcept;
@@ -307,6 +368,11 @@ private:
     std::array<APEX::Dynamics::Detector, kMaxBands> dynamicDetectors_ {};
     std::array<APEX::Dynamics::Envelope, kMaxBands> dynamicEnvelopes_ {};
     std::array<DynamicBandParameters, kMaxBands> dynamicParameters_ {};
+    std::array<BiquadCoefficients, kMaxBands> dynamicKeyFilterCoefficients_ {};
+    std::array<std::array<BiquadState, kMaxChannels>, kMaxBands>
+        dynamicKeyFilterStates_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterFrequencyHz_ {};
+    std::array<double, kMaxBands> dynamicKeyFilterQ_ {};
     std::array<double, kMaxBands> dynamicSmoothedGainDb_ {};
     std::uint32_t dynamicActiveMask_ = 0;
     bool dynamicAnyActive_ = false;
@@ -318,6 +384,14 @@ private:
     juce::AudioBuffer<float> externalKeyScratch_;
     bool externalKeyValid_ = false;
     std::array<double, kMaxBands> publishedDynamicGainDb_ {};
+
+    // Latency mode latched only during quiescent prepareToPlay. Spectral
+    // per-band enables, density and tilt may change at block boundaries.
+    std::atomic<bool> spectralPreparedEnabled_ { false };
+    bool spectralAnyBandActive_ = false;
+    SpectralAlignedBlend spectralBlend_;
+    std::array<SpectralDynamicsCore::Band, kMaxBands> spectralBands_ {};
+
 
     // Phase 6 linear-phase runtime. Kernel design runs on a dedicated
     // low-priority worker; the audio thread only adopts published
@@ -335,8 +409,14 @@ private:
     bool kernelRebuildPending_ = false;
     LinearPhaseConvolverChannel convolverCurrentL_;
     LinearPhaseConvolverChannel convolverCurrentR_;
+    // Off-diagonal LR and RL retain independent input histories. Populated
+    // only when Mid/Side or other mixing actually needs cross-channel audio.
+    LinearPhaseConvolverChannel convolverCurrentLR_;
+    LinearPhaseConvolverChannel convolverCurrentRL_;
     LinearPhaseConvolverChannel convolverNextL_;
     LinearPhaseConvolverChannel convolverNextR_;
+    LinearPhaseConvolverChannel convolverNextLR_;
+    LinearPhaseConvolverChannel convolverNextRL_;
     bool linearPhaseMode_ = false;
     bool linearPhaseTarget_ = false;
     std::uint32_t currentKernelIndex_ = 0;
@@ -348,6 +428,7 @@ private:
     double kernelStep_ = 1.0;
     juce::AudioBuffer<float> linearPhaseScratch_;
     juce::AudioBuffer<float> kernelNextScratch_;
+    juce::AudioBuffer<float> kernelCrossfeedScratch_; // prepared, no RT alloc
 
     // Audition state is audio-owned except for the lock-free mailbox and the
     // monotonic epoch, which control threads update before the audio thread
@@ -365,8 +446,10 @@ private:
     bool auditionHold_ = false;
     bool auditionReady_ = false;
 
+    CharacterCore characterCore_;
     ResponseCore responseCore_;
     Analysis::SpectrumAnalyzerCore analyzer_ { "APEX Parametric EQ Analyzer" };
+    double outputAutoGainDb_ = 0.0;
 };
 
 } // namespace APEX::ParametricEQ
