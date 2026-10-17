@@ -72,8 +72,8 @@ public:
                 inputDiffusers_[c][k].line.prepare(
                     std::max(4,static_cast<int>(std::round(
                         sampleRate_*(offsets[k]+c*1.1f)*0.001f))));
-        reset();
         setSettings(settings_);
+        reset();
     }
 
     void reset() noexcept
