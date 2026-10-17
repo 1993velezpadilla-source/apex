@@ -7,7 +7,6 @@
 
 #include <cmath>
 #include <memory>
-#include <set>
 
 namespace
 {
@@ -57,12 +56,12 @@ public:
         if(!processor)return;
         expectEquals(instance->getNumParameters(),static_cast<int>(ParameterCount));
         expect(instance->getBypassParameter()!=nullptr);
-        std::set<juce::String> ids;
+        juce::StringArray ids;
         for(auto* p:instance->getParameters())
         {
             auto* typed=dynamic_cast<juce::AudioProcessorParameterWithID*>(p);
             expect(typed!=nullptr,"every knob must have a stable host automation ID");
-            if(typed)ids.insert(typed->paramID);
+            if(typed)ids.addIfNotAlreadyThere(typed->paramID);
         }
         expectEquals(static_cast<int>(ids.size()),static_cast<int>(ParameterCount),
                      "no duplicate parameter IDs");
@@ -102,6 +101,9 @@ public:
             static_cast<double>(feedbackBefore),1e-6);
 
         beginTest("Host processing: 250 ms impulse, left/right preservation");
+        // The separate ping-pong test covers its alternating routing; this
+        // test asserts independent L/R wet routing and first-echo polarity.
+        restored.getParameterAt(PingPong).setValue(0.0f);
         restored.prepareToPlay(48000,128);
         expectEquals(restored.getLatencySamples(),0);
         constexpr int frames=13000;
