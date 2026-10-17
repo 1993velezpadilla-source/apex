@@ -6,6 +6,7 @@
 // C++17 header-only, no allocations/locks in the audio callback.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace APEX::Compressor
@@ -21,6 +22,7 @@ struct OptoParameters
     bool limit = false;          // false=Compress, true=Limit
     bool colorEnabled = true;    // analog-like output stage, bypassable for A/B
     bool bypass = false;         // returns unaltered dry samples
+    int voicing = 1;             // 0=FAST, 1=CLASSIC, 2=SLOW: APEX-original tunings
 
     static OptoParameters sanitise (OptoParameters p) noexcept
     {
@@ -34,6 +36,7 @@ struct OptoParameters
         p.mix = std::clamp(p.mix, 0.0, 1.0);
         p.emphasis = std::clamp(p.emphasis, 0.0, 1.0);
         p.colorDrive = std::clamp(p.colorDrive, 0.25, 4.0);
+        p.voicing = std::clamp(p.voicing, 0, 2);
         return p;
     }
 };
@@ -45,8 +48,12 @@ public:
     {
         sampleRate_ = (std::isfinite(sampleRate) && sampleRate >= 8000.0)
                     ? sampleRate : 48000.0;
-        attackCoeff_ = timeCoefficient(0.010); // nominal 10 ms attack
-        fastReleaseCoeff_ = timeCoefficient(0.014); // ~half reduction at 60 ms
+        // One optical plugin with three ORIGINAL envelope voicings. These
+        // are musical response choices, not measured Silver/Gray hardware.
+        attackCoeff_ = {timeCoefficient(0.004), timeCoefficient(0.010),
+                        timeCoefficient(0.020)};
+        fastReleaseCoeff_ = {timeCoefficient(0.008), timeCoefficient(0.014),
+                             timeCoefficient(0.030)};
         // Sidechain high-pass audition is intentionally sidechain-only.
         scLowpassCoeff_ = timeCoefficient(1.0 / (2.0 * 3.141592653589793 * 320.0));
         memoryAttackCoeff_ = timeCoefficient(1.75);
@@ -72,7 +79,10 @@ public:
     {
         // Call only at a safe control boundary; parent processor owns the
         // atomic parameter snapshot and automation handoff.
+        const int priorVoicing = parameters_.voicing;
         parameters_ = OptoParameters::sanitise(requested);
+        if (priorVoicing != parameters_.voicing)
+            slowCoeffSamplesUntilRefresh_ = 0;
         // Initial state restore before the first audio block should not
         // manufacture an audible ramp from the factory preset.
         if (!hasProcessed_)
@@ -93,6 +103,9 @@ public:
         if (left == nullptr || frames <= 0) return;
         hasProcessed_ = true;
         const bool stereo = right != nullptr && right != left;
+        const auto voice = static_cast<std::size_t>(parameters_.voicing);
+        const double attack = attackCoeff_[voice];
+        const double release = fastReleaseCoeff_[voice];
         constexpr double epsilon = 1.0e-25;
         const double thresholdDb = -(parameters_.peakReduction * 0.40);
         const double thresholdActive = parameters_.peakReduction > 0.0 ? 1.0 : 0.0;
@@ -140,8 +153,8 @@ public:
             const double reduction = fastReduction_ + slowReduction_;
             if (targetReduction > reduction)
             {
-                const double next = attackCoeff_ * reduction
-                                  + (1.0 - attackCoeff_) * targetReduction;
+                const double next = attack * reduction
+                                  + (1.0 - attack) * targetReduction;
                 fastReduction_ = slowReduction_ = next * 0.5;
                 slowCoeffSamplesUntilRefresh_ = 0;
             }
@@ -159,13 +172,15 @@ public:
                 // 64 samples on the continuous sample clock, not per block.
                 if (slowCoeffSamplesUntilRefresh_ <= 0)
                 {
-                    cachedSlowCoeff_ = timeCoefficient(1.0 + 14.0 * compressionMemory_);
+                    const double baseTail = voice == 0 ? 0.7 : (voice == 1 ? 1.0 : 2.0);
+                    const double memoryTail = voice == 0 ? 6.0 : (voice == 1 ? 14.0 : 18.0);
+                    cachedSlowCoeff_ = timeCoefficient(baseTail + memoryTail * compressionMemory_);
                     slowCoeffSamplesUntilRefresh_ = 64;
                 }
                 --slowCoeffSamplesUntilRefresh_;
                 const double slowCoeff = cachedSlowCoeff_;
-                fastReduction_ = fastReleaseCoeff_ * fastReduction_
-                               + (1.0 - fastReleaseCoeff_) * (0.5 * targetReduction);
+                fastReduction_ = release * fastReduction_
+                               + (1.0 - release) * (0.5 * targetReduction);
                 slowReduction_ = slowCoeff * slowReduction_
                                + (1.0 - slowCoeff) * (0.5 * targetReduction);
             }
@@ -218,7 +233,8 @@ private:
 
     OptoParameters parameters_ {};
     double sampleRate_ = 48000.0;
-    double attackCoeff_ = 0.0, fastReleaseCoeff_ = 0.0, scLowpassCoeff_ = 0.0;
+    std::array<double,3> attackCoeff_ {}, fastReleaseCoeff_ {};
+    double scLowpassCoeff_ = 0.0;
     double memoryAttackCoeff_ = 0.0, memoryReleaseCoeff_ = 0.0;
     double controlCoeff_ = 0.0;
     double fastReduction_ = 0.0, slowReduction_ = 0.0, compressionMemory_ = 0.0;
