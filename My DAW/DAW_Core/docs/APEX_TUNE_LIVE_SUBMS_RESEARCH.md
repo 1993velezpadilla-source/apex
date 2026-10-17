@@ -145,3 +145,46 @@ testing and physical Apollo Solo/ASIO mic-monitoring measurements. A GREEN
 research CI is not permission to activate it in production. APEX Windows
 x64 Debug/Release artifacts exist for the PR, but successful compilation
 alone is not the full production certification gate.
+
+## October 17, 2026 — Antares-compatible monitoring target (distinct from note detection)
+
+**Official comparison target (manufacturer's claims; not independently
+measured by APEX):** Antares AutoTune Advanced *Live* processing is specified
+as **under 1 ms** at 44.1–192 kHz. Antares specifies *Low Latency Classic*
+at **37 samples / 0.77 ms** at 48 kHz, and *Low Latency Modern* at
+**112 samples / 2.33 ms** at 48 kHz. Antares AutoTune Pro 11 separately
+has a *Use Low Latency* preference; do not silently associate the Advanced
+Live/Classic sample counts with the Pro 11 product.
+
+Manufacturer sources:
+- https://help.antarestech.com/hc/en-us/articles/53453475818004-AutoTune-Advanced-FAQ
+- https://help.antarestech.com/hc/en-us/articles/42858099043092-AutoTune-Best-Practices
+- https://www.antarestech.com/products/pitch-correction/advanced
+
+**APEX delivery definition:** Match **<1 ms of additional plugin
+signal-through / reported algorithmic latency** in a real hosted APEX Live
+mode, while maintaining demonstrable genuine *corrected* wet audio, not
+disguising a dry bypass as pitch correction. At 48 kHz **strictly under
+1 ms is at most 47 whole samples**; 48 samples is exactly 1.000 ms.
+At 44.1 kHz use <=44, at 96 kHz <=95, and at 192 kHz <=191
+samples. The actual correct rounding is
+`maximumPermittedSamples=ceil(rate*0.001)-1`. These are plugin-signal
+budgets, excluding interface buffer and DAC/ADC roundtrip. The user-facing
+mode must not be named "1ms Live" without real host measurements.
+
+Separate hard gates: (a) streaming direct-consonant component first
+output delay under 1ms **while an already tuned note is active**;
+(b) independently measured output pitch is actually corrected;
+(c) host sets honest PDC and verifies impulse offset in processing;
+(d) first newly sung F0 / note-leap recognition times explicitly disclosed,
+which remain >1ms for unknown notes; (e) blind human vowel/formant/breath
+audition at multiple registers; (f) session automation, mono/stereo,
+bypass and Apollo ASIO monitoring integrity. Never infer (c)-(f) from
+(a) or from the fact the code has no explicit delay buffer.
+
+New `test_live_sub1ms_signal_path.cpp` measures (a) and (b) at
+44.1/48/96/192k, low and high source F0, both baseline and guarded 4-hop
+research paths, with arbitrary host block boundaries; emits the actual
+first F0 acquisition and wet-control time in the same test to prevent
+confusion. New CI gates are research-only. The HQ40 shipping native host
+processor and its original ~40ms PDC remain untouched.
