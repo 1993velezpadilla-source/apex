@@ -60,7 +60,7 @@ jobs:
       - name: Prove preview builds and offline test runs without audio hardware
         shell: pwsh
         run: |
-          $monitor="build-tune-live-runtime/TuneLiveResearchMonitor_artefacts/Release/TuneLiveResearchMonitor.exe"
+          $monitor="build-tune-live-runtime/TuneLiveResearchMonitor_artefacts/Release/APEX Tune Live Research Monitor.exe"
           if (-not (Test-Path $monitor)) { throw "Missing independent research preview EXE: $monitor" }
           & $monitor --self-test
           if ($LASTEXITCODE -ne 0) { throw "APEX experimental GUI monitor self-test failed" }
@@ -69,7 +69,7 @@ jobs:
         with:
           name: APEX-TuneLive-Research-Monitor-Windows-NOT-PRODUCTION
           path: |
-            build-tune-live-runtime/TuneLiveResearchMonitor_artefacts/Release/TuneLiveResearchMonitor.exe
+            build-tune-live-runtime/TuneLiveResearchMonitor_artefacts/Release/APEX Tune Live Research Monitor.exe
             My DAW/DAW_Core/Tests/TuneLive/RESEARCH_MONITOR_README.txt
           if-no-files-found: error
           retention-days: 7
