@@ -158,6 +158,72 @@ public:
                 editor->setSize(780,330);
                 expectEquals(editor->getWidth(),780);
                 expect(editor->getNumChildComponents()>=10,"responsive resize keeps real controls");
+
+                beginTest("Six touch-friendly rotary knobs expose live values while dragging");
+                juce::Label* readout=nullptr;
+                for(int n=0;n<editor->getNumChildComponents();++n)
+                {
+                    auto* child=editor->getChildComponent(n);
+                    if(child!=nullptr && child->getName()=="LIVE VALUE READOUT")
+                        readout=dynamic_cast<juce::Label*>(child);
+                }
+                expect(readout!=nullptr,"one shared on-screen numeric value display");
+                if(readout)
+                {
+                    expect(!readout->isVisible(),"clean vintage face when no knob is active");
+                    struct Probe {const char* knob;double units;const char* shown;};
+                    const Probe probes[]={
+                        {"GAIN",12.5,"GAIN  12.5 dB"},
+                        {"PEAK REDUCTION",42.0,"PEAK  42.0"},
+                        {"PARALLEL MIX",67.5,"MIX  67.5 %"},
+                        {"EMPHASIS / KEY",80.0,"KEY  80.0 %"},
+                        {"COLOR DRIVE",2.25,"DRIVE  2.25 x"},
+                        {"METER MODE",2.0,"VU  OUTPUT +10"}
+                    };
+                    for(const auto& probe:probes)
+                    {
+                        juce::Slider* knob=nullptr;
+                        for(int n=0;n<editor->getNumChildComponents();++n)
+                        {
+                            auto* child=editor->getChildComponent(n);
+                            if(child!=nullptr && child->getName()==probe.knob)
+                                knob=dynamic_cast<juce::Slider*>(child);
+                        }
+                        expect(knob!=nullptr,juce::String(probe.knob)+" must be real JUCE slider");
+                        if(!knob)continue;
+                        expect(static_cast<bool>(knob->onDragStart),
+                               "knob must have a touch/mouse begin gesture");
+                        expect(static_cast<bool>(knob->onDragEnd),
+                               "knob must have a touch/mouse end gesture");
+                        if(!knob->onDragStart || !knob->onDragEnd)continue;
+                        knob->onDragStart();
+                        knob->setValue(probe.units,juce::sendNotificationSync);
+                        expect(readout->isVisible(),"numeric readout visible during touch drag");
+                        expectEquals(readout->getText(),juce::String(probe.shown),
+                                     "the displayed value must follow the moving knob");
+                        expect(editor->getLocalBounds().contains(readout->getBounds()),
+                               "readout must remain inside the popup window");
+                        knob->onDragEnd();
+                        expect(readout->isVisible(),
+                               "keep last value visible briefly after finger release");
+                    }
+                    editor->setSize(700,285);
+                    juce::Slider* gain=nullptr;
+                    for(int n=0;n<editor->getNumChildComponents();++n)
+                    {
+                        auto* child=editor->getChildComponent(n);
+                        if(child!=nullptr && child->getName()=="GAIN")
+                            gain=dynamic_cast<juce::Slider*>(child);
+                    }
+                    if(gain && gain->onDragStart && gain->onDragEnd)
+                    {
+                        gain->onDragStart();
+                        gain->setValue(9.5,juce::sendNotificationSync);
+                        expect(editor->getLocalBounds().contains(readout->getBounds()),
+                               "smallest editor keeps popup fully on screen");
+                        gain->onDragEnd();
+                    }
+                }
             }
         }
 
