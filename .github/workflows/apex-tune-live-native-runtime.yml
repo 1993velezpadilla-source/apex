@@ -62,8 +62,11 @@ jobs:
         run: |
           $monitor="build-tune-live-runtime/TuneLiveResearchMonitor_artefacts/Release/APEX Tune Live Research Monitor.exe"
           if (-not (Test-Path $monitor)) { throw "Missing independent research preview EXE: $monitor" }
-          & $monitor --self-test
-          if ($LASTEXITCODE -ne 0) { throw "APEX experimental GUI monitor self-test failed" }
+          # JUCE builds this as a Windows GUI subsystem executable.
+          # PowerShell's call operator can leave LASTEXITCODE null for GUI
+          # child processes. Wait explicitly and inspect the real process exit.
+          $result=Start-Process -FilePath (Resolve-Path $monitor).Path -ArgumentList '--self-test' -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "APEX experimental GUI monitor self-test failed with exit code $($result.ExitCode)" }
       - name: Publish isolated opt-in Windows microphone research preview
         uses: actions/upload-artifact@v4
         with:
