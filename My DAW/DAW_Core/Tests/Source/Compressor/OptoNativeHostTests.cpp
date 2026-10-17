@@ -63,8 +63,20 @@ public:
         {
             auto* named=dynamic_cast<juce::AudioProcessorParameterWithID*>(
                 base->getParameters()[i]);
-            expect(named != nullptr, "all eight params support stable host IDs");
+            expect(named != nullptr, "all nine params support stable host IDs");
         }
+        beginTest("A single optical plugin exposes three host-automatable voicings");
+        auto& voice=processor->getParameterAt(APEX::Compressor::Voicing);
+        expectEquals(voice.getNumSteps(),3);
+        expect(voice.isDiscrete());
+        expectEquals(voice.getText(0.f,0),juce::String("FAST"));
+        expectEquals(voice.getText(.5f,0),juce::String("CLASSIC"));
+        expectEquals(voice.getText(1.f,0),juce::String("SLOW"));
+        voice.setValue(.5f);
+        expectWithinAbsoluteError(static_cast<double>(voice.getValue()),.5,1.e-6);
+        voice.setValue(.8f);
+        expectWithinAbsoluteError(static_cast<double>(voice.getValue()),1.,1.e-6,
+                                  "continuous host data must quantize to the nearest voice");
         // Force dry at first preparation, so initial state is exact.
         processor->getParameterAt(APEX::Compressor::Mix).setValue(0.0f);
         processor->getParameterAt(APEX::Compressor::PeakReduction).setValue(1.0f);
@@ -93,7 +105,7 @@ public:
             {
                 expectEquals(editor->getWidth(),1040);
                 expectEquals(editor->getHeight(),380);
-                expect(editor->getNumChildComponents()>=9,
+                expect(editor->getNumChildComponents()>=10,
                        "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
                 // JUCE 8 defaults to GPU-backed Direct2D native images on Windows.
                 // Headless GitHub runner has no render peer; queued GPU draw
@@ -144,7 +156,7 @@ public:
                 }
                 editor->setSize(780,330);
                 expectEquals(editor->getWidth(),780);
-                expect(editor->getNumChildComponents()>=9,"responsive resize keeps real controls");
+                expect(editor->getNumChildComponents()>=10,"responsive resize keeps real controls");
             }
         }
 
@@ -154,6 +166,7 @@ public:
         processor->getParameterAt(APEX::Compressor::Emphasis).setValue(0.81f);
         processor->getParameterAt(APEX::Compressor::Limit).setValue(1.0f);
         processor->setMeterMode(2);
+        processor->getParameterAt(APEX::Compressor::Voicing).setValue(1.0f);
         juce::MemoryBlock state;
         base->getStateInformation(state);
         expect(state.getSize()>0);
@@ -167,6 +180,9 @@ public:
                                   0.81,1.e-5);
         expect(restored.getParameterAt(APEX::Compressor::Limit).getUnits()>0.5f);
         expectEquals(restored.getMeterMode(),2,"VU selector persists as UI state");
+        expectEquals(static_cast<int>(restored.getParameterAt(
+            APEX::Compressor::Voicing).getUnits()),2,
+            "FAST/CLASSIC/SLOW must survive session save-close-reopen");
 
         beginTest("Stereo key link lowers both channels equally, no dry-source printing");
         OptoProcessor comp;
