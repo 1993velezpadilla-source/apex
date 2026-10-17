@@ -15,12 +15,12 @@ enum ParameterIndex : int
     PhaseRight, Bypass, ParameterCount
 };
 
-// HostedParameter has stable IDs, lock-free control publication, and gestures
+// BubblegumDelayParameter has stable IDs, lock-free control publication, and gestures
 // via the editor. No GUI fields are DSP state.
-class HostedParameter final : public juce::AudioProcessorParameterWithID
+class BubblegumDelayParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
-    HostedParameter(const char* id,const char* name,float lo,float hi,
+    BubblegumDelayParameter(const char* id,const char* name,float lo,float hi,
                     float initial,int steps=0,const char* unit="")
         : AudioProcessorParameterWithID(juce::ParameterID(id,1),name),
           low_(lo),high_(hi),initial_(initial),steps_(steps),unit_(unit)
@@ -180,8 +180,8 @@ public:
     {
         return hostBpmDisplay_.load(std::memory_order_relaxed);
     }
-    HostedParameter& getParameterAt(int i) noexcept {return *parameters_[i];}
-    const HostedParameter& getParameterAt(int i) const noexcept {return *parameters_[i];}
+    BubblegumDelayParameter& getParameterAt(int i) noexcept {return *parameters_[i];}
+    const BubblegumDelayParameter& getParameterAt(int i) const noexcept {return *parameters_[i];}
     void getStateInformation(juce::MemoryBlock& b) override
     {
         juce::ValueTree state(kStateTag);
@@ -208,9 +208,9 @@ private:
     void add(int index,const char* id,const char* name,float lo,float hi,
              float initial,int steps=0,const char* unit="")
     {
-        auto p=std::make_unique<HostedParameter>(id,name,lo,hi,initial,steps,unit);
+        auto p=std::make_unique<BubblegumDelayParameter>(id,name,lo,hi,initial,steps,unit);
         parameters_[index]=p.get();
-        addHostedParameter(std::move(p));
+        addBubblegumDelayParameter(std::move(p));
     }
     Settings readSettings() const noexcept
     {
@@ -241,7 +241,7 @@ private:
         "delay.rate","delay.analog","delay.lofi","delay.pingpong",
         "delay.phaseL","delay.phaseR","delay.bypass"
     }};
-    std::array<HostedParameter*,ParameterCount> parameters_ {};
+    std::array<BubblegumDelayParameter*,ParameterCount> parameters_ {};
     Engine engine_;
     std::atomic<double> hostBpmDisplay_ {120.0};
 };
