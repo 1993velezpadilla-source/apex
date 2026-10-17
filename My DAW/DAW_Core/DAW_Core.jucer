@@ -1070,6 +1070,11 @@
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000052}" name="LinearPhase">
         <FILE id="PEQ_LP01" name="ParametricEQLinearPhase.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQLinearPhase.h"/>
       </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000079}" name="ReverieCore">
+        <FILE id="RV_H001" name="ApexReverieEngine.h" compile="0" resource="0" file="Source/ReverieCore/ApexReverieEngine.h"/>
+        <FILE id="RV_H002" name="ApexReverieProcessor.h" compile="0" resource="0" file="Source/ReverieCore/ApexReverieProcessor.h"/>
+        <FILE id="RV_H003" name="ApexReverieEditor.h" compile="0" resource="0" file="Source/ReverieCore/ApexReverieEditor.h"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000048}" name="ParametricEQCore">
         <FILE id="PEQ_H001" name="ParametricEQTypes.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQTypes.h"/>
         <FILE id="PEQ_H002" name="ParametricEQBiquad.h" compile="0" resource="0" file="Source/ParametricEQCore/ParametricEQBiquad.h"/>
