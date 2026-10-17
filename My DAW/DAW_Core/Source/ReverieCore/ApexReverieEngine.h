@@ -32,8 +32,8 @@ class Engine final
         {
             const int n=static_cast<int>(samples.size());
             if(n<2) return 0.0f;
-            const float d=std::max(0.0f,std::min(delay,static_cast<float>(n-2)));
-            float p=static_cast<float>(write)-d;
+            const float d=std::max(0.0f,std::min(delay,static_cast<float>(n-1)));
+            float p=static_cast<float>(write-1)-d;
             if(p<0.0f) p+=static_cast<float>(n);
             const int a=static_cast<int>(p);
             const int b=(a+1==n)?0:a+1;
@@ -82,7 +82,7 @@ public:
         for(auto& f:fdn_) f.reset();
         for(auto& side:inputDiffusers_) for(auto& d:side) d.line.reset();
         lowInput_.fill(0); dampState_.fill(0); highOutput_.fill(0);
-        lowOutput_.fill(0); phase_.fill(0); smoothedDelay_.fill(0);
+        lowOutput_.fill(0); phase_.fill(0); smoothedDelay_=delayTargets_;
         duckEnvelope_=0;
         predelayCurrent_=static_cast<float>(sampleRate_*settings_.predelayMs/1000.0f);
         mixCurrent_=settings_.mix;
@@ -123,7 +123,6 @@ public:
         lowCutAlpha_=onePole(std::min(nyquist,s.lowCutHz));
         highCutAlpha_=onePole(std::min(nyquist,std::min(s.highCutHz,eraLimit)));
         smoothAlpha_=1.0f-std::exp(-1.0f/static_cast<float>(sampleRate_*0.024));
-        duckAttack_=onePole(35.0f); // overwritten below: envelope pole for 3ms
         duckAttack_=1.0f-std::exp(-1.0f/static_cast<float>(sampleRate_*0.003));
         duckRelease_=1.0f-std::exp(-1.0f/static_cast<float>(sampleRate_*0.22));
     }
