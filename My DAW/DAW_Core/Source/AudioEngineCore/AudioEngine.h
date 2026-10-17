@@ -763,6 +763,16 @@ public:
         // worst-case block as the engine on the control thread, not at the
         // first 256/512-frame export or device-sized render callback.
         masterPdc_.prepare(sampleRate, worstCaseBlock);
+        // Device preparation is a control-plane lifecycle boundary: reserve
+        // legacy monitor/fallback rings for the published graph before the
+        // first realtime callback. Later topology changes must never insert
+        // or resize those rings on the audio thread.
+        if(routing_!=nullptr)
+            if(auto prepSnap=routing_->getSnapshotPublisher().get())
+            {
+                const auto latencies=getChainLatenciesRT();
+                masterPdc_.sync(*prepSnap,latencies.get(),worstCaseBlock);
+            }
         masterMeter_.prepare(sampleRate, blockSize);
         prepareTrackInputProcessors(sampleRate, blockSize);
 
@@ -2504,7 +2514,7 @@ private:
             // MasterPdcCore::sync updates delay lines in place (no mass
             // free/clear of delay history).
             auto latencies = getChainLatenciesRT();
-            masterPdc_.sync(*snap, latencies.get(), numSamples);
+            masterPdc_.syncRealtime(*snap, latencies.get(), numSamples);
 #if defined(APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT) && APEX_ENABLE_EXPERIMENTAL_GRAPH_PDC_PREFLIGHT
             graphPdcLegacyResyncs_.fetch_add(1,std::memory_order_relaxed);
 #endif
