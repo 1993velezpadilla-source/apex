@@ -1,0 +1,189 @@
+name: APEX Flagship EQ Gauntlet
+
+on:
+  workflow_dispatch:
+  push:
+    # PR branches already run on pull_request; do not double-build them.
+    branches: [main]
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/DAW_Core.jucer'
+      - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/**'
+      - '.github/workflows/flagship-eq-gauntlet.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/PluginScanCore/**'
+      - 'My DAW/DAW_Core/Source/PluginSandboxCore/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/DAW_Core.jucer'
+      - 'My DAW/DAW_Core/Tests/APEXTests.jucer'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/**'
+      - '.github/workflows/flagship-eq-gauntlet.yml'
+
+# Drop obsolete GUI CI runs when a newer commit arrives on the same PR.
+# Native Windows app builds are expensive and previous push+PR duplication
+# generated a large backlog of stale jobs with no additional QA value.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  parametric-eq:
+    name: Parametric EQ ${{ matrix.configuration }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # Windows CI validates the unsigned executable; trusted code signing is
+    # a release-distribution concern. Running New-SelfSignedCertificate in the
+    # post-build event can stall hosted runners after DAW_Core.exe is linked.
+    # sign_build.ps1 already supports this explicit, CI-only bypass.
+    env:
+      APEX_SKIP_SIGNING: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout APEX
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Materialize pinned JUCE 8.0.12
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = Join-Path $env:GITHUB_WORKSPACE 'My DAW\DAW_Core'
+          $contract = Get-Content (Join-Path $repoRoot 'Dependencies\apex-windows-dependencies.json') -Raw | ConvertFrom-Json
+          $juceRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot ([string] $contract.juce.rootRelativeToRepository)))
+          $juceParent = Split-Path -Parent $juceRoot
+          New-Item -ItemType Directory -Force -Path $juceParent | Out-Null
+
+          git init $juceRoot
+          git -C $juceRoot remote add origin https://github.com/juce-framework/JUCE.git
+          git -C $juceRoot fetch --depth=1 origin ([string] $contract.juce.upstreamCommit)
+          git -C $juceRoot checkout --detach FETCH_HEAD
+
+          foreach ($patchName in @(
+            '0001-apex-asio4all-compatibility.patch',
+            '0002-apex-vst3-null-editcontroller-guard.patch',
+            '0003-apex-string-null-holder-guard.patch'
+          )) {
+            $patch = Join-Path $repoRoot "Dependencies\patches\juce-8.0.12\$patchName"
+            git -C $juceRoot apply --check -p2 $patch
+            git -C $juceRoot apply -p2 $patch
+          }
+
+          $head = (git -C $juceRoot rev-parse HEAD).Trim()
+          if ($head -cne [string] $contract.juce.upstreamCommit) {
+            throw "JUCE HEAD '$head' does not match the pinned commit."
+          }
+
+      - name: Resolve VS18 / v145 toolchain
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere -PathType Leaf)) {
+            throw "vswhere.exe is unavailable on this runner."
+          }
+
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -version '[18.0,19.0)' -property installationPath).Trim()
+          if ([string]::IsNullOrWhiteSpace($vs)) {
+            throw "The hosted runner does not provide Visual Studio 18. This is an infrastructure gate, not an APEX code pass."
+          }
+
+          $msbuild = Join-Path $vs 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+          if (-not (Test-Path $msbuild -PathType Leaf)) {
+            throw "VS18 resolved, but amd64 MSBuild is missing: $msbuild"
+          }
+
+          "MSBUILD=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "VS18: $vs"
+          Write-Host "MSBuild: $msbuild"
+
+      # The EQ suite is an independent JUCE executable. Execute it *before*
+      # the much larger DAW_Core link so tests produce evidence even if the
+      # full Windows application reaches its build-time resource ceiling.
+      - name: Build APEXTests ${{ matrix.configuration }}
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @(
+            'Tests\Builds\VisualStudio2026\APEXTests.sln',
+            '/t:Build',
+            '/p:Configuration=${{ matrix.configuration }}',
+            '/p:Platform=x64',
+            '/m',
+            '/nr:false',
+            '/nologo',
+            '/v:minimal'
+          )
+          & $env:MSBUILD @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run Parametric EQ gauntlet
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'Tests\Builds\VisualStudio2026\x64\${{ matrix.configuration }}\ConsoleApp\APEXTests.exe'
+          if (-not (Test-Path $exe -PathType Leaf)) {
+            throw "APEXTests binary missing: $exe"
+          }
+          & $exe '--category=APEX.ParametricEQ' '--seed=0xA9E12026'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Real PNG frames from the JUCE software renderer, not a stylized
+      # mock-up. Retained even while the whole-DAW link is in progress.
+      - name: Upload APEX Prism GUI screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Prism-GUI-${{ matrix.configuration }}-${{ github.run_id }}
+          path: apex-eq-ui-snapshots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+      # Only after the isolated EQ suite has passed do we attempt the
+      # full DAW compilation/link. This remains a required GREEN gate.
+      - name: Build APEX ${{ matrix.configuration }}
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @(
+            'Builds\VisualStudio2026\DAW_Core.sln',
+            '/t:Build',
+            '/p:Configuration=${{ matrix.configuration }}',
+            '/p:Platform=x64',
+            '/m',
+            '/nr:false',
+            '/nologo',
+            '/v:minimal'
+          )
+          & $env:MSBUILD @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Keep the exact unsigned binary as a QA artifact. This is NOT a
+      # signed end-user release: physical ASIO and plugin-path checks remain
+      # outside CI. Fail rather than claim GREEN if the EXE is missing.
+      - name: Publish APEX Windows QA executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-EQ-Windows-${{ matrix.configuration }}-${{ github.run_id }}
+          path: My DAW/DAW_Core/Builds/VisualStudio2026/x64/${{ matrix.configuration }}/App/DAW_Core.exe
+          if-no-files-found: error
+          retention-days: 7
