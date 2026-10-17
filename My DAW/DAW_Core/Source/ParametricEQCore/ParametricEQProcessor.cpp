@@ -103,7 +103,9 @@ void Processor::adoptPhaseMode() noexcept
     }
 
     // Latency must match the audible path before the crossfade progresses.
-    setLatencySamples (requested ? kLinearPhaseLatencySamples : 0);
+    setLatencySamples ((requested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
     linearPhaseMode_ = requested;
 }
 
@@ -113,11 +115,12 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
 {
     const int channels = std::min (numberOfChannels,
                                    linearPhaseScratch_.getNumChannels());
-    if (channels <= 0)
+    if (channels <= 0 || numberOfSamples <= 0)
         return;
+    jassert (numberOfSamples <= kernelNextScratch_.getNumSamples());
+    jassert (numberOfSamples <= kernelCrossfeedScratch_.getNumSamples());
 
-    // Adopt any newly published kernel generation, starting a bounded
-    // crossfade between the old and new kernels.
+    // Adopt the worker-published kernel only at the next audio callback.
     const auto generation = linearKernelGeneration_.load (
         std::memory_order_acquire);
     if (generation != linearKernelAdoptedGeneration_)
@@ -126,8 +129,9 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
         {
             kernelTransitionActive_ = true;
             kernelMix_ = 0.0;
-            convolverNextL_.reset();
-            convolverNextR_.reset();
+            for (auto* conv : { &convolverNextL_, &convolverNextR_,
+                                &convolverNextLR_, &convolverNextRL_ })
+                conv->reset();
             nextKernelIndex_ = linearKernelActiveIndex_.load (
                 std::memory_order_acquire);
         }
@@ -136,59 +140,109 @@ void Processor::processLinearPhase (juce::AudioBuffer<float>& buffer,
             requestLinearKernelRebuild();
     }
 
-    const auto& currentKernels = linearKernels_[static_cast<std::size_t> (
-        currentKernelIndex_)];
+    const bool transitioning = kernelTransitionActive_ && kernelMix_ < 1.0;
+    const auto& currentKernels = linearKernels_[
+        static_cast<std::size_t> (currentKernelIndex_)];
+
+    // Preserve *untouched* input before any convolver mutates the block.
+    // Both the old and new FIRs must process exactly the SAME source at the
+    // SAME 2047-sample group delay, never feed one FIR into another.
+    if (transitioning)
+        for (int ch = 0; ch < channels; ++ch)
+            kernelNextScratch_.copyFrom (ch, 0, buffer, ch, 0,
+                                         numberOfSamples);
+    if (channels >= 2 && currentKernels.hasCrossfeed)
+        for (int ch = 0; ch < 2; ++ch)
+            kernelCrossfeedScratch_.copyFrom (ch, 0, buffer, ch, 0,
+                                              numberOfSamples);
+
     convolverCurrentL_.processBlock (buffer.getWritePointer (0),
                                      numberOfSamples, currentKernels.ll.data());
     if (channels >= 2)
         convolverCurrentR_.processBlock (buffer.getWritePointer (1),
                                          numberOfSamples,
                                          currentKernels.rr.data());
-    else
-        convolverCurrentR_.processBlock (buffer.getWritePointer (0),
-                                         numberOfSamples,
-                                         currentKernels.ll.data());
-
-    if (kernelTransitionActive_ && kernelMix_ < 1.0)
+    // One-channel bus: NEVER process the same samples through a second FIR.
+    if (channels >= 2 && currentKernels.hasCrossfeed)
     {
-        // Copy the dry input into the next-kernel scratch and convolve with
-        // the newly published kernel; crossfade per sample.
-        const auto& nextKernels = linearKernels_[static_cast<std::size_t> (
-            nextKernelIndex_)];
-        for (int channel = 0; channel < channels; ++channel)
-            kernelNextScratch_.copyFrom (channel, 0, buffer, channel, 0,
-                                         numberOfSamples);
-        convolverNextL_.processBlock (kernelNextScratch_.getWritePointer (0),
-                                      numberOfSamples, nextKernels.ll.data());
-        if (channels >= 2)
-            convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
-                                          numberOfSamples, nextKernels.rr.data());
-        else
-            convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (0),
-                                          numberOfSamples, nextKernels.ll.data());
-
-        for (int sample = 0; sample < numberOfSamples; ++sample)
+        // Offdiag matrix [LL LR; RL RR]: LR reads RIGHT and adds to LEFT;
+        // RL reads LEFT and adds to RIGHT. Both own separate FIR histories.
+        convolverCurrentLR_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (1), numberOfSamples,
+            currentKernels.lr.data());
+        convolverCurrentRL_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (0), numberOfSamples,
+            currentKernels.rl.data());
+        auto* left = buffer.getWritePointer (0);
+        auto* right = buffer.getWritePointer (1);
+        const auto* toLeft = kernelCrossfeedScratch_.getReadPointer (1);
+        const auto* toRight = kernelCrossfeedScratch_.getReadPointer (0);
+        for (int i = 0; i < numberOfSamples; ++i)
         {
-            const auto mix = static_cast<float> (kernelMix_);
-            for (int channel = 0; channel < channels; ++channel)
-            {
-                auto* destination = buffer.getWritePointer (channel);
-                const auto* next = kernelNextScratch_.getReadPointer (channel);
-                destination[sample] += mix * (next[sample] - destination[sample]);
-            }
-            kernelMix_ = std::min (1.0, kernelMix_ + kernelStep_);
-        }
-        if (kernelMix_ >= 1.0)
-        {
-            std::swap (convolverCurrentL_, convolverNextL_);
-            std::swap (convolverCurrentR_, convolverNextR_);
-            currentKernelIndex_ = nextKernelIndex_;
-            kernelTransitionActive_ = false;
-            convolverNextL_.reset();
-            convolverNextR_.reset();
+            left[i] += toLeft[i];
+            right[i] += toRight[i];
         }
     }
+
+    if (! transitioning)
+        return;
+
+    const auto& nextKernels = linearKernels_[
+        static_cast<std::size_t> (nextKernelIndex_)];
+    if (channels >= 2 && nextKernels.hasCrossfeed)
+        for (int ch = 0; ch < 2; ++ch)
+            kernelCrossfeedScratch_.copyFrom (ch, 0, kernelNextScratch_,
+                                              ch, 0, numberOfSamples);
+
+    convolverNextL_.processBlock (kernelNextScratch_.getWritePointer (0),
+                                  numberOfSamples, nextKernels.ll.data());
+    if (channels >= 2)
+        convolverNextR_.processBlock (kernelNextScratch_.getWritePointer (1),
+                                      numberOfSamples, nextKernels.rr.data());
+    if (channels >= 2 && nextKernels.hasCrossfeed)
+    {
+        convolverNextLR_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (1), numberOfSamples,
+            nextKernels.lr.data());
+        convolverNextRL_.processBlock (
+            kernelCrossfeedScratch_.getWritePointer (0), numberOfSamples,
+            nextKernels.rl.data());
+        auto* left = kernelNextScratch_.getWritePointer (0);
+        auto* right = kernelNextScratch_.getWritePointer (1);
+        const auto* toLeft = kernelCrossfeedScratch_.getReadPointer (1);
+        const auto* toRight = kernelCrossfeedScratch_.getReadPointer (0);
+        for (int i = 0; i < numberOfSamples; ++i)
+        {
+            left[i] += toLeft[i];
+            right[i] += toRight[i];
+        }
+    }
+
+    for (int i = 0; i < numberOfSamples; ++i)
+    {
+        const float mix = static_cast<float> (kernelMix_);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            auto* destination = buffer.getWritePointer (ch);
+            const auto* next = kernelNextScratch_.getReadPointer (ch);
+            destination[i] += mix * (next[i] - destination[i]);
+        }
+        kernelMix_ = std::min (1.0, kernelMix_ + kernelStep_);
+    }
+    if (kernelMix_ >= 1.0)
+    {
+        std::swap (convolverCurrentL_, convolverNextL_);
+        std::swap (convolverCurrentR_, convolverNextR_);
+        std::swap (convolverCurrentLR_, convolverNextLR_);
+        std::swap (convolverCurrentRL_, convolverNextRL_);
+        currentKernelIndex_ = nextKernelIndex_;
+        kernelTransitionActive_ = false;
+        for (auto* conv : { &convolverNextL_, &convolverNextR_,
+                            &convolverNextLR_, &convolverNextRL_ })
+            conv->reset();
+    }
 }
+
 namespace
 {
 
@@ -196,6 +250,11 @@ constexpr const char* kShapeNames[] =
 {
     "Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut",
     "Notch", "Band Pass", "Tilt", "Flat Tilt", "All Pass"
+};
+
+constexpr const char* kCharacterNames[] =
+{
+    "Pure", "Velvet", "Heat"
 };
 
 constexpr const char* kBandParameterSuffixes[] =
@@ -282,6 +341,10 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return normalisedValue >= 0.5f ? "External" : "Internal";
         case Kind::PhaseModeChoice:
             return normalisedValue >= 0.5f ? "Linear Phase" : "Minimum Phase";
+        case Kind::CharacterChoice:
+            return kCharacterNames[std::clamp (
+                static_cast<int> (std::lround (value)), 0,
+                kCharacterModeCount - 1)];
         case Kind::Frequency:
             return formatFrequency (value);
         case Kind::Gain:
@@ -291,6 +354,12 @@ juce::String ParametricEQParameter::getText (float normalisedValue,
             return "Q " + juce::String (value, value < 1.0f ? 3 : 2);
         case Kind::Slope:
             return juce::String (value, 1) + " dB/oct";
+        case Kind::Pan:
+            return std::abs (value) < 0.005f ? "Center"
+                 : (value < 0.0f ? "L " : "R ")
+                 + juce::String (std::abs (value) * 100.0f, 0) + "%";
+        case Kind::GainScale:
+            return juce::String (value * 100.0f, 0) + "%";
         case Kind::DesignMode:
             return normalisedValue >= 0.5f ? "Analog Matched" : "Realtime";
     }
@@ -326,6 +395,11 @@ float ParametricEQParameter::getValueForText (const juce::String& source) const
         case Kind::PhaseModeChoice:
             return text.containsIgnoreCase ("linear")
                 || text.getFloatValue() >= 0.5f ? 1.0f : 0.0f;
+        case Kind::CharacterChoice:
+            for (int index = 0; index < kCharacterModeCount; ++index)
+                if (text.equalsIgnoreCase (kCharacterNames[index]))
+                    return toNormalised (static_cast<float> (index));
+            return toNormalised (text.getFloatValue());
         case Kind::Frequency:
             return toNormalised (parseFrequency (text));
         case Kind::DesignMode:
@@ -342,6 +416,8 @@ int ParametricEQParameter::getNumSteps() const
         return 10;
     if (kind_ == Kind::Placement)
         return kChannelPlacementCount;
+    if (kind_ == Kind::CharacterChoice)
+        return kCharacterModeCount;
     if (kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
@@ -352,6 +428,7 @@ int ParametricEQParameter::getNumSteps() const
 bool ParametricEQParameter::isDiscrete() const
 {
     return kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice
         || kind_ == Kind::Toggle || kind_ == Kind::DesignMode
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice;
@@ -370,6 +447,8 @@ juce::String ParametricEQParameter::getLabel() const
         case Kind::Gain: return "dB";
         case Kind::Q: return "Q";
         case Kind::Slope: return "dB/oct";
+        case Kind::Pan: return "%";
+        case Kind::GainScale: return "%";
         default: return {};
     }
 }
@@ -394,7 +473,8 @@ float ParametricEQParameter::toNormalised (float units) const noexcept
         || kind_ == Kind::PhaseModeChoice)
         return units >= 0.5f ? 1.0f : 0.0f;
 
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return std::clamp (std::round (units), minimumUnits_, maximumUnits_)
              / std::max (1.0f, maximumUnits_);
 
@@ -416,7 +496,8 @@ float ParametricEQParameter::fromNormalised (float normalised) const noexcept
         || kind_ == Kind::DetectorChoice || kind_ == Kind::SourceChoice
         || kind_ == Kind::PhaseModeChoice)
         return normalised >= 0.5f ? 1.0f : 0.0f;
-    if (kind_ == Kind::Shape || kind_ == Kind::Placement)
+    if (kind_ == Kind::Shape || kind_ == Kind::Placement
+        || kind_ == Kind::CharacterChoice)
         return static_cast<float> (std::clamp (
             static_cast<int> (std::lround (normalised * maximumUnits_)),
             0, static_cast<int> (maximumUnits_)));
@@ -520,6 +601,49 @@ Processor::Processor()
     add (kPhaseModeParameter, ParametricEQParameter::Kind::PhaseModeChoice,
          "Phase Mode", 0.0f, 1.0f, 0.0f); // Minimum Phase default
 
+    // Phase 7: APEX-owned character stage.  Append-only ABI: all prior
+    // automation IDs and saved states retain their original indices.
+    add (kCharacterModeParameter, ParametricEQParameter::Kind::CharacterChoice,
+         "Character", 0.0f, static_cast<float> (kCharacterModeCount - 1), 0.0f);
+
+    // Phase 8: optional band-limited detector key for every dynamic band.
+    // Defaults OFF for exact migration of all earlier sessions.
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (dynamicFilterParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Dynamic SC Filter", 0.0f, 1.0f, 0.0f);
+    }
+
+    // Phase 9: complete output stage, append-only after index 342.
+    add (kOutputGainParameter, ParametricEQParameter::Kind::Gain,
+         "Output Gain", -36.0f, 36.0f, 0.0f);
+    add (kOutputPanParameter, ParametricEQParameter::Kind::Pan,
+         "Output Pan", -1.0f, 1.0f, 0.0f);
+    add (kOutputPhaseInvertParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Phase Invert", 0.0f, 1.0f, 0.0f);
+    add (kOutputAutoGainParameter, ParametricEQParameter::Kind::Toggle,
+         "Output Auto Gain", 0.0f, 1.0f, 0.0f);
+    add (kOutputGainScaleParameter, ParametricEQParameter::Kind::GainScale,
+         "Output Gain Scale", 0.0f, 2.0f, 1.0f);
+
+    // Phase 10 append-only: opt-in +24 spectral bands + density + tilt.
+    // The EQ remains minimum-phase / zero extra latency by default.
+    add (kSpectralArmParameter, ParametricEQParameter::Kind::Toggle,
+         "Spectral Engine (Restart Audio)", 0.0f, 1.0f, 0.0f);
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (spectralBandParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Spectral", 0.0f, 1.0f, 0.0f);
+    }
+    add (kSpectralDensityParameter, ParametricEQParameter::Kind::GainScale,
+         "Spectral Density", 0.0f, 1.0f, 0.5f);
+    add (kSpectralTiltParameter, ParametricEQParameter::Kind::Toggle,
+         "Spectral Tilt +3dB/oct", 0.0f, 1.0f, 1.0f);
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -558,10 +682,18 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     externalKeyScratch_.setSize (channels, block, false, false, true);
     linearPhaseScratch_.setSize (channels, block, false, false, true);
     kernelNextScratch_.setSize (channels, block, false, false, true);
+    kernelCrossfeedScratch_.setSize (channels, block, false, false, true);
     externalKeyValid_ = false;
+    // PDC-affecting spectral ARM is latched only during host reprepare.
+    spectralPreparedEnabled_ = parameters_[static_cast<std::size_t> (
+        kSpectralArmParameter)]->getBool();
+    spectralBlend_.prepare (rate);
+    spectralAnyBandActive_ = false;
     kernelStep_ = 1.0 / std::max (1.0, rate * 0.010);
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
-                             &convolverNextL_, &convolverNextR_ })
+                             &convolverCurrentLR_, &convolverCurrentRL_,
+                             &convolverNextL_, &convolverNextR_,
+                             &convolverNextLR_, &convolverNextRL_ })
         convolver->reset();
     currentKernelIndex_ = linearKernelActiveIndex_.load (std::memory_order_acquire);
     linearKernelAdoptedGeneration_ = linearKernelGeneration_.load (
@@ -580,13 +712,21 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     modeMix_ = linearRequested ? 1.0 : 0.0;
     if (linearRequested)
         requestLinearKernelRebuild();
-    setLatencySamples (linearRequested ? kLinearPhaseLatencySamples : 0);
+    setLatencySamples ((linearRequested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
     for (int band = 0; band < kMaxBands; ++band)
     {
         dynamicDetectors_[static_cast<std::size_t> (band)].prepare (rate);
         dynamicEnvelopes_[static_cast<std::size_t> (band)].prepare (
             rate, dynamicParameters_[static_cast<std::size_t> (band)].attackSeconds,
             dynamicParameters_[static_cast<std::size_t> (band)].releaseSeconds);
+        dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+            = BiquadCoefficients::identity();
+        dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)] = 0.0;
+        dynamicKeyFilterQ_[static_cast<std::size_t> (band)] = 0.0;
+        for (auto& state : dynamicKeyFilterStates_[static_cast<std::size_t> (band)])
+            state.reset();
     }
     adoptDynamicParameters();
 
@@ -596,9 +736,14 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     responsePrepareEpoch_ = responseCore_.beginPrepareEpoch();
     prepared_ = true;
     snapToPublishedParameters (true);
+    characterCore_.prepare (rate, channels);
+    characterCore_.setMode (readCharacterModeParameter());
     analyzer_.prepare (rate);
     analyzer_.signalDiscontinuity();
-    setLatencySamples (0);
+    // Keep PDC truthful.  adoptPhaseMode() owns subsequent latency changes.
+    setLatencySamples ((linearRequested ? kLinearPhaseLatencySamples : 0)
+        + (spectralPreparedEnabled_
+            ? SpectralAlignedBlend::kLatencySamples : 0));
 }
 
 void Processor::releaseResources()
@@ -613,9 +758,16 @@ void Processor::releaseResources()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
     externalKeyValid_ = false;
+    spectralBlend_.reset();
+    spectralAnyBandActive_ = false;
+    characterCore_.reset();
+    outputAutoGainDb_ = 0.0;
     analyzer_.signalDiscontinuity();
     prepared_ = false;
 }
@@ -633,10 +785,19 @@ void Processor::reset()
         detector.reset();
     for (auto& envelope : dynamicEnvelopes_)
         envelope.reset();
+    for (auto& bandStates : dynamicKeyFilterStates_)
+        for (auto& state : bandStates)
+            state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
+    characterCore_.reset();
+    spectralBlend_.reset();
+    characterCore_.setMode (readCharacterModeParameter());
+    outputAutoGainDb_ = 0.0;
     for (auto& convolver : { &convolverCurrentL_, &convolverCurrentR_,
-                             &convolverNextL_, &convolverNextR_ })
+                             &convolverCurrentLR_, &convolverCurrentRL_,
+                             &convolverNextL_, &convolverNextR_,
+                             &convolverNextLR_, &convolverNextRL_ })
         convolver->reset();
     kernelTransitionActive_ = false;
     kernelMix_ = 1.0;
@@ -660,12 +821,14 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
     if (channels <= 0 || samples <= 0)
         return;
 
+    const float inputRmsDb = measureRmsDb (buffer, channels, samples);
     analyzer_.pushPre (buffer, channels, samples);
 
     const bool bypassTarget = readBypassParameter();
     adoptPublishedParameters (bypassTarget);
     adoptDynamicParameters();
     adoptPhaseMode();
+    characterCore_.setMode (readCharacterModeParameter());
     adoptAuditionCommand();
 
     if (bypassTarget && auditionHold_)
@@ -686,6 +849,9 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
             auditionBand_.reset();
             auditionBandIndex_ = -1;
         }
+        // In armed mode the bypassed signal must STILL carry the reported
+        // 1024-sample delay. Never switch to undelayed bypass audio.
+        processSpectralMode (buffer, channels, samples, false);
         analyzer_.pushPost (buffer, channels, samples);
         if (responseDirty_)
             publishResponseFrame();
@@ -700,6 +866,8 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         && ! dynamicAnyActive_ && ! linearPhaseTarget_ && modeMix_ <= 0.0)
     {
         currentEngine_.process (buffer.getArrayOfWritePointers(), channels,
+                                samples);
+        characterCore_.process (buffer.getArrayOfWritePointers(), channels,
                                 samples);
     }
     else
@@ -721,9 +889,25 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer,
         wetStateResetForBypass_ = true;
     }
 
+    applyOutputStage (buffer, channels, samples, inputRmsDb);
+    processSpectralMode (buffer, channels, samples,
+                         ! bypassTarget && spectralAnyBandActive_);
     analyzer_.pushPost (buffer, channels, samples);
     if (responseDirty_)
         publishResponseFrame();
+}
+
+void Processor::processSpectralMode (juce::AudioBuffer<float>& buffer,
+                                     int channels, int samples,
+                                     bool wetTarget) noexcept
+{
+    if (! spectralPreparedEnabled_ || channels <= 0 || samples <= 0)
+        return;
+    float* pointers[SpectralDynamicsCore::kChannels] { nullptr, nullptr };
+    const int count = std::clamp (channels, 0, SpectralDynamicsCore::kChannels);
+    for (int channel = 0; channel < count; ++channel)
+        pointers[channel] = buffer.getWritePointer (channel);
+    spectralBlend_.process (pointers, count, samples, spectralBands_, wetTarget);
 }
 
 bool Processor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -774,7 +958,16 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
     {
         const juce::Identifier property (getParameterId (index));
         if (! state.hasProperty (property))
+        {
+            // Phase 10 appended controls do not exist in old saved sessions.
+            // Reset them to their own defaults even if a processor is reused.
+            // Never implicitly arm a lookahead/latency-bearing effect.
+            if (index >= kSpectralArmParameter)
+                parameters_[static_cast<std::size_t> (index)]->setValue (
+                    parameters_[static_cast<std::size_t> (index)]
+                        ->getDefaultValue());
             continue;
+        }
         const auto value = static_cast<float> (state.getProperty (property));
         if (std::isfinite (value))
             parameters_[static_cast<std::size_t> (index)]->setValue (value);
@@ -840,6 +1033,30 @@ juce::String Processor::getParameterId (int index)
         return "peq.dyn.link";
     if (index == kPhaseModeParameter)
         return "peq.phase";
+    if (index == kCharacterModeParameter)
+        return "peq.character";
+    if (index >= kFirstDynamicFilterParameter
+        && index < kFirstDynamicFilterParameter + kDynamicFilterParameterCount)
+        return "peq.band"
+             + juce::String (index - kFirstDynamicFilterParameter + 1)
+                   .paddedLeft ('0', 2)
+             + ".dyn.filter";
+    if (index == kOutputGainParameter) return "peq.output.gain";
+    if (index == kOutputPanParameter) return "peq.output.pan";
+    if (index == kOutputPhaseInvertParameter) return "peq.output.phaseInvert";
+    if (index == kOutputAutoGainParameter) return "peq.output.autoGain";
+    if (index == kOutputGainScaleParameter) return "peq.output.gainScale";
+    if (index == kSpectralArmParameter) return "peq.spectral.arm";
+    if (index >= kFirstSpectralBandParameter
+        && index < kSpectralDensityParameter)
+        return "peq.band"
+             + juce::String (index - kFirstSpectralBandParameter + 1)
+                   .paddedLeft ('0', 2)
+             + ".spectral.enable";
+    if (index == kSpectralDensityParameter)
+        return "peq.spectral.density";
+    if (index == kSpectralTiltParameter)
+        return "peq.spectral.tilt";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -908,7 +1125,8 @@ BandSettings Processor::readBandParameters (int band) const noexcept
     settings.frequencyHz = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Frequency))]->getUnitsValue();
     settings.gainDb = parameters_[static_cast<std::size_t> (parameterIndex (
-        band, BandParameterOffset::Gain))]->getUnitsValue();
+        band, BandParameterOffset::Gain))]->getUnitsValue()
+                    * readOutputGainScale();
     settings.q = parameters_[static_cast<std::size_t> (parameterIndex (
         band, BandParameterOffset::Q))]->getUnitsValue();
     settings.slopeDbPerOctave = parameters_[static_cast<std::size_t> (parameterIndex (
@@ -922,9 +1140,118 @@ DesignMode Processor::readDesignModeParameter() const noexcept
          ? DesignMode::AnalogMatched : DesignMode::Realtime;
 }
 
+CharacterMode Processor::readCharacterModeParameter() const noexcept
+{
+    const int index = std::clamp (
+        parameters_[static_cast<std::size_t> (kCharacterModeParameter)]
+            ->getChoiceIndex(),
+        0, kCharacterModeCount - 1);
+    return static_cast<CharacterMode> (index);
+}
+
 bool Processor::readBypassParameter() const noexcept
 {
     return parameters_[static_cast<std::size_t> (kGlobalBypassParameter)]->getBool();
+}
+
+float Processor::readOutputGainDb() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputGainParameter)]
+        ->getUnitsValue();
+}
+
+float Processor::readOutputPan() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputPanParameter)]
+            ->getUnitsValue(), -1.0f, 1.0f);
+}
+
+bool Processor::readOutputPhaseInvert() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputPhaseInvertParameter)]
+        ->getBool();
+}
+
+bool Processor::readOutputAutoGain() const noexcept
+{
+    return parameters_[static_cast<std::size_t> (kOutputAutoGainParameter)]
+        ->getBool();
+}
+
+float Processor::readOutputGainScale() const noexcept
+{
+    return std::clamp (
+        parameters_[static_cast<std::size_t> (kOutputGainScaleParameter)]
+            ->getUnitsValue(), 0.0f, 2.0f);
+}
+
+float Processor::measureRmsDb (const juce::AudioBuffer<float>& buffer,
+                               int channels, int samples) noexcept
+{
+    double sumSquares = 0.0;
+    std::uint64_t count = 0;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const auto* data = buffer.getReadPointer (channel);
+        for (int sample = 0; sample < samples; ++sample)
+        {
+            const double value = std::isfinite (data[sample])
+                               ? static_cast<double> (data[sample]) : 0.0;
+            sumSquares += value * value;
+        }
+        count += static_cast<std::uint64_t> (samples);
+    }
+
+    if (count == 0 || sumSquares <= 1.0e-18)
+        return -180.0f;
+
+    const double rms = std::sqrt (sumSquares / static_cast<double> (count));
+    return static_cast<float> (20.0 * std::log10 (std::max (rms, 1.0e-9)));
+}
+
+void Processor::applyOutputStage (juce::AudioBuffer<float>& buffer,
+                                  int channels, int samples,
+                                  float inputRmsDb) noexcept
+{
+    double autoGainTargetDb = 0.0;
+    if (readOutputAutoGain())
+    {
+        const float outputRmsDb = measureRmsDb (buffer, channels, samples);
+        if (inputRmsDb > -90.0f && outputRmsDb > -90.0f)
+            autoGainTargetDb = std::clamp (
+                static_cast<double> (inputRmsDb - outputRmsDb), -12.0, 12.0);
+    }
+
+    const double sampleRate = std::max (1.0, getSampleRate());
+    const double smoothingSeconds = 0.250;
+    const double blockAlpha = std::exp (
+        -static_cast<double> (samples) / (sampleRate * smoothingSeconds));
+    outputAutoGainDb_ = blockAlpha * outputAutoGainDb_
+                      + (1.0 - blockAlpha) * autoGainTargetDb;
+
+    const float totalGain = juce::Decibels::decibelsToGain (
+        readOutputGainDb() + static_cast<float> (outputAutoGainDb_));
+
+    const float pan = readOutputPan();
+    float leftGain = totalGain;
+    float rightGain = totalGain;
+    if (channels >= 2)
+    {
+        if (pan < 0.0f)
+            rightGain *= 1.0f + pan;
+        else if (pan > 0.0f)
+            leftGain *= 1.0f - pan;
+    }
+
+    const float polarity = readOutputPhaseInvert() ? -1.0f : 1.0f;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        const float channelGain = polarity
+                                * (channel == 0 ? leftGain : rightGain);
+        auto* data = buffer.getWritePointer (channel);
+        juce::FloatVectorOperations::multiply (data, channelGain, samples);
+    }
 }
 
 void Processor::configureEngine (
@@ -1163,6 +1490,10 @@ void Processor::processChunk (juce::AudioBuffer<float>& buffer,
         responseDirty_ = true;
     }
 
+    // Character is part of the wet path, before the global bypass blend.
+    characterCore_.process (chunk.getArrayOfWritePointers(),
+                            numberOfChannels, numberOfSamples);
+
     if (bypassMix_ > 0.0 || bypassTarget)
     {
         for (int sample = 0; sample < numberOfSamples; ++sample)
@@ -1213,6 +1544,11 @@ void Processor::completeTransitionIfReady() noexcept
 
 void Processor::adoptDynamicParameters() noexcept
 {
+    spectralAnyBandActive_ = false;
+    const double spectralDensity = parameters_[static_cast<std::size_t> (
+        kSpectralDensityParameter)]->getUnitsValue();
+    const bool spectralTilt = parameters_[static_cast<std::size_t> (
+        kSpectralTiltParameter)]->getBool();
     dynamicDetectorMode_ = parameters_[static_cast<std::size_t> (
         kDynamicDetectorParameter)]->getBool()
                          ? APEX::Dynamics::DetectorMode::Rms
@@ -1242,13 +1578,66 @@ void Processor::adoptDynamicParameters() noexcept
         next.releaseSeconds = static_cast<double> (parameters_[
             static_cast<std::size_t> (dynamicParameterIndex (
                 band, DynamicBandOffset::Release))]->getUnitsValue());
+        next.sidechainFilter = parameters_[static_cast<std::size_t> (
+            dynamicFilterParameterIndex (band))]->getBool();
         next = DynamicBandParameters::sanitised (next);
 
         const auto& previous = dynamicParameters_[static_cast<std::size_t> (band)];
+        const auto& detectorBand = targetSettings_[static_cast<std::size_t> (band)];
+        const bool detectorBandChanged
+            = dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                  != detectorBand.frequencyHz
+           || dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                  != detectorBand.q;
+        if (next.sidechainFilter && (detectorBandChanged
+                                     || ! previous.sidechainFilter))
+        {
+            dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)]
+                = FilterDesigner::designRbj (
+                    FilterShape::BandPass, detectorBand.frequencyHz,
+                    detectorBand.q, 0.0, getSampleRate());
+            dynamicKeyFilterFrequencyHz_[static_cast<std::size_t> (band)]
+                = detectorBand.frequencyHz;
+            dynamicKeyFilterQ_[static_cast<std::size_t> (band)]
+                = detectorBand.q;
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
+        else if (! next.sidechainFilter && previous.sidechainFilter)
+        {
+            for (auto& state : dynamicKeyFilterStates_[
+                    static_cast<std::size_t> (band)])
+                state.reset();
+        }
+
+        const auto& spectrumSettings = targetSettings_[
+            static_cast<std::size_t> (band)];
         const bool compatible = next.enabled
-            && isDynamicCompatibleShape (targetSettings_[
-                static_cast<std::size_t> (band)].shape);
-        if (compatible)
+            && isDynamicCompatibleShape (spectrumSettings.shape);
+        const bool spectral = spectralPreparedEnabled_ && compatible
+            && spectrumSettings.enabled && ! spectrumSettings.bypassed
+            && std::abs (next.rangeDb) > 1.0e-8
+            && (spectrumSettings.shape == FilterShape::Bell
+                || spectrumSettings.shape == FilterShape::LowShelf
+                || spectrumSettings.shape == FilterShape::HighShelf)
+            && parameters_[static_cast<std::size_t> (
+                 spectralBandParameterIndex (band))]->getBool();
+        auto& spectralBand = spectralBands_[static_cast<std::size_t> (band)];
+        spectralBand.enabled = spectral;
+        spectralBand.shape = spectrumSettings.shape;
+        spectralBand.placement = spectrumSettings.placement;
+        spectralBand.frequencyHz = spectrumSettings.frequencyHz;
+        spectralBand.q = spectrumSettings.q;
+        spectralBand.dynamic = next;
+        spectralBand.density = spectralDensity;
+        spectralBand.tilt = spectralTilt;
+        if (spectral)
+            spectralAnyBandActive_ = true;
+
+        // A spectral band must not ALSO receive the full-band dynamic
+        // biquad envelope. Static EQ bands are still processed as usual.
+        if (compatible && ! spectral)
             mask |= 1u << band;
         else
             publishedDynamicGainDb_[static_cast<std::size_t> (band)] = 0.0;
@@ -1317,6 +1706,13 @@ void Processor::computeDynamicGains (int numberOfChannels,
         auto& detector = dynamicDetectors_[static_cast<std::size_t> (band)];
         auto& envelope = dynamicEnvelopes_[static_cast<std::size_t> (band)];
         auto* gains = dynamicGainScratch_.getWritePointer (band);
+        auto& keyStates = dynamicKeyFilterStates_[static_cast<std::size_t> (band)];
+        const auto& keyCoefficients
+            = dynamicKeyFilterCoefficients_[static_cast<std::size_t> (band)];
+
+        if (externalUnavailable && parameters.sidechainFilter)
+            for (auto& state : keyStates)
+                state.reset();
 
         for (int sample = 0; sample < numberOfSamples; ++sample)
         {
@@ -1328,25 +1724,35 @@ void Processor::computeDynamicGains (int numberOfChannels,
             const double keyR = externalUnavailable ? 0.0
                               : (std::isfinite (keyRight[sample])
                                  ? static_cast<double> (keyRight[sample]) : 0.0);
+            const double detectorL = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[0].process (
+                    static_cast<float> (keyL), keyCoefficients))
+                : keyL;
+            const double detectorR = parameters.sidechainFilter
+                                     && ! externalUnavailable
+                ? static_cast<double> (keyStates[1].process (
+                    static_cast<float> (keyR), keyCoefficients))
+                : keyR;
             double levelDb = -144.0;
             switch (placement)
             {
                 case ChannelPlacement::Stereo:
-                    levelDb = detector.processStereoFrame (keyL, keyR,
+                    levelDb = detector.processStereoFrame (detectorL, detectorR,
                                                            dynamicDetectorMode_,
                                                            dynamicLink_);
                     break;
                 case ChannelPlacement::Left:
-                    levelDb = detector.processMono (keyL, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorL, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Right:
-                    levelDb = detector.processMono (keyR, dynamicDetectorMode_);
+                    levelDb = detector.processMono (detectorR, dynamicDetectorMode_);
                     break;
                 case ChannelPlacement::Mid:
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (mid, dynamicDetectorMode_);
                     break;
                 }
@@ -1354,7 +1760,7 @@ void Processor::computeDynamicGains (int numberOfChannels,
                 {
                     double mid = 0.0;
                     double side = 0.0;
-                    encodeMidSide (keyL, keyR, mid, side);
+                    encodeMidSide (detectorL, detectorR, mid, side);
                     levelDb = detector.processMono (side, dynamicDetectorMode_);
                     break;
                 }
