@@ -3225,10 +3225,8 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
     addAndMakeVisible (topBar_.get());
     addAndMakeVisible (graph_.get());
     addAndMakeVisible (inspector_.get());
-    addAndMakeVisible (eyeStamp_);
     setSize (900, 620);
     applyLayout();
-    eyeStamp_.placeInCorner (*this);
 }
 
 ParametricEQEditor::~ParametricEQEditor()
@@ -3247,10 +3245,19 @@ void ParametricEQEditor::paint (juce::Graphics& g)
     g.fillAll (Palette::background());
 }
 
+// Exact open-eye renderer shared with the boot splash.
+void ParametricEQEditor::paintOverChildren (juce::Graphics& g)
+{
+    const float w = static_cast<float> (
+        juce::jmin (92, juce::jmax (54, getWidth() / 10)));
+    APEX::Branding::EvoEyeStamp::paint (
+        g, { static_cast<float> (getWidth()) - w - 9.0f,
+             6.0f, w, w * 0.37f });
+}
+
 void ParametricEQEditor::resized()
 {
     applyLayout();
-    eyeStamp_.placeInCorner (*this);
 }
 
 void ParametricEQEditor::applyLayout()

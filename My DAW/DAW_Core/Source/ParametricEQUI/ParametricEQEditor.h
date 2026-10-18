@@ -1,7 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "../UICore/ApexEvoEyeStamp.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 #include "../ParametricEQCore/ParametricEQProcessor.h"
 
@@ -25,6 +25,7 @@ public:
 
     void resized() override;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
 
     enum class LayoutMode
     {
@@ -114,7 +115,6 @@ private:
     bool auditionArmed_ = false;
     std::uint32_t auditionToken_ = 0;
 
-    APEX::UI::EvoEyeStamp eyeStamp_;
     std::unique_ptr<TopBarComponent> topBar_;
     std::unique_ptr<EqGraphComponent> graph_;
     std::unique_ptr<InspectorComponent> inspector_;

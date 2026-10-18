@@ -62,6 +62,12 @@ static void hostSync()
     d.setHostTempo(80);assert(std::abs(d.getTimeMs()-750)<0.001);
     s.sync=2;s.manualBpm=100;d.setSettings(s);
     assert(std::abs(d.getTimeMs()-600)<0.001);
+    // 2-bar divisions must not be silently capped by the free-ms dial.
+    s.sync=1;s.note=12;d.setSettings(s);
+    d.setHostTempo(120);assert(std::abs(d.getTimeMs()-4000)<0.001);
+    d.setHostTempo(30);assert(std::abs(d.getTimeMs()-16000)<0.001);
+    s.sync=0;s.timeMs=3500;d.setSettings(s);
+    assert(std::abs(d.getTimeMs()-3500)<0.001);
 }
 static void runawaySafety()
 {

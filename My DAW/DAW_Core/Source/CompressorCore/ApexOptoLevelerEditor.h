@@ -7,7 +7,7 @@
 #include <array>
 #include <cmath>
 #include "ApexOptoLevelerProcessor.h"
-#include "../UICore/ApexEvoEyeStamp.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 namespace APEX::Compressor
 {
@@ -148,9 +148,7 @@ public:
         setOpaque(true);
         setResizable(true,true);
         setResizeLimits(700,285,1560,570);
-        addAndMakeVisible (eyeStamp_);
         setSize(1040,380);
-        eyeStamp_.placeInCorner (*this);
         startTimerHz(30);
     }
 
@@ -169,12 +167,13 @@ public:
         drawChassis(g);
         drawMeter(g);
         drawBubblegumStrip(g);
+        // Static brand stamp: the exact open boot eye, NOT the VU meter.
+        APEX::Branding::EvoEyeStamp::paint(g, {852.0f, 48.0f, 130.0f, 45.0f});
         g.restoreState();
     }
 
     void resized() override
     {
-        eyeStamp_.placeInCorner (*this);
         const auto fit=[this](float x,float y,float w,float h)
         {
             return juce::Rectangle<int>(
@@ -523,7 +522,6 @@ private:
                                       juce::roundToInt(40*getHeight()/380.0f)));
     }
 
-    APEX::UI::EvoEyeStamp eyeStamp_;
     OptoProcessor& processor_;
     OptoRackLookAndFeel lookAndFeel_;
     juce::Slider gain_,peak_,mix_,emphasis_,drive_,meterMode_;

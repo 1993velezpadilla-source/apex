@@ -137,10 +137,16 @@ public:
         if(auto* playhead=getPlayHead())
             if(auto position=playhead->getPosition())
                 if(auto bpm=position->getBpm())
-                {
-                    engine_.setHostTempo(*bpm);
-                    hostBpmDisplay_.store(*bpm,std::memory_order_relaxed);
-                }
+                    if(std::isfinite(*bpm) && *bpm>1.0 && *bpm<1000.0)
+                    {
+                        // APEX's HostPlayheadCore publishes the live project
+                        // transport BPM, including changes while playing.
+                        // Engine.setHostTempo and parameter snapshots are
+                        // allocation-free on the audio thread.
+                        engine_.setHostTempo(*bpm);
+                        hostBpmDisplay_.store(*bpm,std::memory_order_relaxed);
+                        receivedHostTempo_.store(true,std::memory_order_relaxed);
+                    }
         engine_.setSettings(readSettings());
         engine_.process(buffer.getWritePointer(0),
                         buffer.getNumChannels()>1?buffer.getWritePointer(1):nullptr,
@@ -153,15 +159,7 @@ public:
         if(feedback>=0.999) return 60.0; // potentially self-oscillating.
         // Tail query may run outside the audio callback. Read only lock-free
         // hosted controls and the atomic tempo snapshot, never engine state.
-        const int sync=static_cast<int>(getParameterAt(SyncMode).getUnits());
-        const int note=juce::jlimit(0,12,static_cast<int>(getParameterAt(Note).getUnits()));
-        const double bpm=sync==2
-            ? static_cast<double>(getParameterAt(ManualBpm).getUnits())
-            : getHostTempoForDisplay();
-        const double ms=juce::jlimit(1.0,3500.0,sync==0
-            ? static_cast<double>(getParameterAt(TimeMs).getUnits())
-            : 60000.0*Engine::kNoteBeats[static_cast<std::size_t>(note)]
-                /juce::jmax(1.0,bpm));
+        const double ms=getEffectiveDelayMsForDisplay();
         const double repeats=feedback<0.001?1.0:
             1.0+std::ceil(std::log(0.001)/std::log(feedback));
         return juce::jlimit(0.001,60.0,repeats*ms/1000.0);
@@ -179,6 +177,23 @@ public:
     double getHostTempoForDisplay() const noexcept
     {
         return hostBpmDisplay_.load(std::memory_order_relaxed);
+    }
+    bool hasHostTempo() const noexcept
+    {
+        return receivedHostTempo_.load(std::memory_order_relaxed);
+    }
+    // Shared by GUI and audio/tail calculations: Host mode always follows
+    // the project tempo; no editing the Manual BPM knob is required.
+    double getEffectiveDelayMsForDisplay() const noexcept
+    {
+        const int sync=static_cast<int>(std::lround(getParameterAt(SyncMode).getUnits()));
+        if(sync==0) return getParameterAt(TimeMs).getUnits();
+        const int note=juce::jlimit(0,12,
+            static_cast<int>(std::lround(getParameterAt(Note).getUnits())));
+        const double bpm=sync==2?getParameterAt(ManualBpm).getUnits()
+                                 :getHostTempoForDisplay();
+        return juce::jlimit(1.0,Engine::kMaxSyncedMs,60000.0
+            *Engine::kNoteBeats[static_cast<std::size_t>(note)]/juce::jmax(1.0,bpm));
     }
     BubblegumDelayParameter& getParameterAt(int i) noexcept {return *parameters_[i];}
     const BubblegumDelayParameter& getParameterAt(int i) const noexcept {return *parameters_[i];}
@@ -244,6 +259,7 @@ private:
     std::array<BubblegumDelayParameter*,ParameterCount> parameters_ {};
     Engine engine_;
     std::atomic<double> hostBpmDisplay_ {120.0};
+    std::atomic<bool> receivedHostTempo_ {false};
 };
 } // namespace APEX::Delay
 

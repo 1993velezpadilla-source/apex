@@ -2,8 +2,8 @@
 #include <JuceHeader.h>
 
 #include "../C4Core/C4Processor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include "../C4Core/C4ResponseCurveCore.h"
-#include "../UICore/ApexEvoEyeStamp.h"
 
 namespace APEX {
 namespace C4 {
@@ -865,9 +865,7 @@ public:
         setResizable (true, nullptr);
         setResizeLimits (560, 640, 1100, 1000);
 
-        addAndMakeVisible (eyeStamp_);
         setSize (660, 640);
-        eyeStamp_.placeInCorner (*this);
         startTimerHz (30);
         refresh();
     }
@@ -891,13 +889,15 @@ public:
                     juce::Justification::centredLeft, false);
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (C4Colors::textSecondary());
-        g.drawText ("CONSOLE CHARACTER EQ", juce::Rectangle<int> (220, 6, 300, 20),
+        g.drawText ("CONSOLE CHARACTER EQ", juce::Rectangle<int> (220, 6, 236, 20),
                     juce::Justification::centredLeft, false);
+        // Parked C4 retains its brand stamp for future reactivation.
+        APEX::Branding::EvoEyeStamp::paint(g,
+            {(float)getWidth()-107.0f, 2.0f, 94.0f, 25.0f});
     }
 
     void resized() override
     {
-        eyeStamp_.placeInCorner (*this);
         auto r = getLocalBounds().reduced (8, 30);
         const bool spectrumOpen = proc_.getSpectrumMode() != C4SpectrumTapMode::Closed;
 
@@ -993,7 +993,6 @@ private:
         std::unique_ptr<C4Knob> knob;
     };
 
-    APEX::UI::EvoEyeStamp eyeStamp_;
     C4Processor& proc_;
 
     std::vector<KnobEntry> knobs_;

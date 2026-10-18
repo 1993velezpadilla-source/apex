@@ -4,6 +4,7 @@
 #include "../../../Source/DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../../../Source/PluginHostCore/ApexNativePluginFormat.h"
 #include "../../../Source/PluginScanCore/PluginScanFormatsCore.h"
+#include "../../../Source/PluginHostCore/HostPlayheadCore.h"
 
 #include <cmath>
 #include <memory>
@@ -74,6 +75,67 @@ public:
         stereo.outputBuses.add(juce::AudioChannelSet::stereo());
         expect(processor->isBusesLayoutSupported(mono));
         expect(processor->isBusesLayoutSupported(stereo));
+
+        beginTest("HOST sync follows APEX project BPM, manual and MS modes remain independent");
+        {
+            DAW::HostPlayheadCore hostClock;
+            DAW::PluginTransportSnapshot clockSnapshot;
+            clockSnapshot.sampleRate=48000.0;
+            clockSnapshot.bpm=100.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            Processor tempoDelay;
+            tempoDelay.setPlayHead(&hostClock);
+            tempoDelay.prepareToPlay(48000.0,128);
+            juce::AudioBuffer<float> scratch(2,128);
+            juce::MidiBuffer empty;
+            scratch.clear();
+            expect(!tempoDelay.hasHostTempo(),"host BPM must not be reported before audio callback");
+            tempoDelay.processBlock(scratch,empty);
+            expect(tempoDelay.hasHostTempo(),"APEX HostPlayheadCore supplies real project BPM");
+            expectWithinAbsoluteError(tempoDelay.getHostTempoForDisplay(),100.0,0.01);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),450.0,0.05,
+                                      "factory dotted-eighth at 100 BPM equals 450ms");
+
+            clockSnapshot.bpm=150.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            scratch.clear();
+            tempoDelay.processBlock(scratch,empty);
+            expectWithinAbsoluteError(tempoDelay.getHostTempoForDisplay(),150.0,0.01);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),300.0,0.05,
+                                      "tempo changes automatically retime HOST delay");
+
+            // Two bars at 120 BPM are 4000 ms; at 30 BPM they are 16000 ms.
+            // Both MUST follow transport tempo instead of the 3500ms MS cap.
+            tempoDelay.getParameterAt(Note).setValue(
+                tempoDelay.getParameterAt(Note).toNormalised(12.0f));
+            clockSnapshot.bpm=120.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            scratch.clear();
+            tempoDelay.processBlock(scratch,empty);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),4000.0,0.1);
+            clockSnapshot.bpm=30.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            scratch.clear();
+            tempoDelay.processBlock(scratch,empty);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),16000.0,0.1);
+            tempoDelay.getParameterAt(Note).setValue(
+                tempoDelay.getParameterAt(Note).toNormalised(5.0f));
+
+            tempoDelay.getParameterAt(SyncMode).setValue(
+                tempoDelay.getParameterAt(SyncMode).toNormalised(2.0f));
+            tempoDelay.getParameterAt(ManualBpm).setValue(
+                tempoDelay.getParameterAt(ManualBpm).toNormalised(90.0f));
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),500.0,0.05,
+                                      "manual BPM ignores project BPM until HOST selected");
+
+            tempoDelay.getParameterAt(SyncMode).setValue(0.0f);
+            tempoDelay.getParameterAt(TimeMs).setValue(
+                tempoDelay.getParameterAt(TimeMs).toNormalised(246.0f));
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),246.0,0.05,
+                                      "MS timing is independent of project BPM");
+            tempoDelay.releaseResources();
+            tempoDelay.setPlayHead(nullptr);
+        }
 
         beginTest("Parameter restore preserves stable IDs and exact values");
         processor->getParameterAt(SyncMode).setValue(0);
@@ -157,6 +219,27 @@ public:
             expect(editor->getHeight()>=400);
             expect(editor->getNumChildComponents()>=15,
                    "multi-control touch-safe editor with readout");
+            // Validate the photo-matched responsive JUCE geometry. The two
+            // hero knobs must sit above the compact seven-knob lower band.
+            if(editor->getNumChildComponents()>=9)
+            {
+                auto* hero=dynamic_cast<juce::Slider*>(editor->getChildComponent(0));
+                auto* feedback=dynamic_cast<juce::Slider*>(editor->getChildComponent(1));
+                auto* firstLower=dynamic_cast<juce::Slider*>(editor->getChildComponent(2));
+                auto* lastLower=dynamic_cast<juce::Slider*>(editor->getChildComponent(8));
+                expect(hero!=nullptr && feedback!=nullptr && firstLower!=nullptr
+                       && lastLower!=nullptr);
+                if(hero && feedback && firstLower && lastLower)
+                {
+                    expect(hero->getBottom()<firstLower->getY(),
+                           "top and lower knob rows do not overlap");
+                    expect(firstLower->getBottom()<=437,
+                           "knob value plates never overlap footer buttons");
+                    expect(lastLower->getRight()<editor->getWidth(),
+                           "manual BPM knob stays inside reference design");
+                    expect(hero->getX()<feedback->getX());
+                }
+            }
             editor->setSize(900,450);
             expectEquals(editor->getWidth(),900);
             juce::Image screenshot(juce::Image::ARGB,900,450,true,

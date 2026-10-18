@@ -97,9 +97,11 @@ public:
             expect(editor!=nullptr);
             if(editor)
             {
-                expectEquals(editor->getWidth(),980);
+                expectEquals(editor->getWidth(),1260);
+                expectEquals(editor->getHeight(),700);
                 expect(editor->getNumChildComponents()>=23);
                 int rotaries=0;
+                juce::Array<juce::Rectangle<int>> rotaryBounds;
                 for(int i=0;i<editor->getNumChildComponents();++i)
                     if(auto* slider=dynamic_cast<juce::Slider*>(editor->getChildComponent(i)))
                     {
@@ -107,12 +109,24 @@ public:
                         expect(slider->getTextBoxPosition()==juce::Slider::TextBoxBelow);
                         expect(static_cast<bool>(slider->onDragStart));
                         expect(static_cast<bool>(slider->onDragEnd));
+                        expect(slider->isVisible());
+                        expect(editor->getLocalBounds().contains(slider->getBounds()));
+                        rotaryBounds.add(slider->getBounds());
                     }
                 expectEquals(rotaries,10);
-                editor->setSize(720,450);
-                expectEquals(editor->getWidth(),720);
-                editor->setSize(1600,840);
-                expectEquals(editor->getHeight(),840);
+                // The reference's two clearly separated rows must remain
+                // ten individual usable rotary hit targets, not an image.
+                for(int i=0;i<rotaryBounds.size();++i)
+                    for(int j=i+1;j<rotaryBounds.size();++j)
+                        expect(!rotaryBounds.getReference(i).intersects(
+                            rotaryBounds.getReference(j)),
+                            "reference GUI rotary hit areas must never overlap");
+                editor->setSize(990,550);
+                expectEquals(editor->getWidth(),990);
+                expectEquals(editor->getHeight(),550);
+                editor->setSize(1760,990);
+                expectEquals(editor->getWidth(),1760);
+                expectEquals(editor->getHeight(),990);
             }
         }
 

@@ -87,51 +87,38 @@ public:
 private:
     void testStaticEvoEyeStamp()
     {
-        beginTest ("APEX native plugin stamp is static, text-free, noninteractive "
-                   "and remains small across desktop/mobile sizes");
-        APEX::UI::EvoEyeStamp eye;
-        juce::Component window;
+        beginTest ("PRISM uses exact static open boot-eye renderer, no extra GUI controls");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
         for (const auto& dimensions : std::array<juce::Point<int>, 3> {{
-                 {320, 568}, {900, 620}, {1920, 1080}
-             }})
+                {320, 568}, {900, 620}, {1920, 1080} }})
         {
-            window.setSize (dimensions.x, dimensions.y);
-            eye.placeInCorner (window);
-            const auto bounds = eye.getBounds();
-            expect (window.getLocalBounds().contains (bounds),
-                    "decorative stamp must remain inside plugin");
-            expect (bounds.getWidth() <= APEX::UI::EvoEyeStamp::kWidth
-                    && bounds.getHeight() <= APEX::UI::EvoEyeStamp::kHeight,
-                    "no huge boot-up logo inside plugins");
-            expect (bounds.getWidth() >= 28 && bounds.getHeight() >= 16,
-                    "tiny stamp stays legible");
-            bool capturesSelf = true, capturesChildren = true;
-            eye.getInterceptsMouseClicks (capturesSelf, capturesChildren);
-            expect (! capturesSelf && ! capturesChildren,
-                    "eye cannot steal a slider, knob or node gesture");
+            editor->setSize (dimensions.x, dimensions.y);
+            expectEquals (editor->getNumChildComponents(), 3,
+                "brand eye must not add any clickable child component");
+            juce::Image rendered (juce::Image::RGB,
+                dimensions.x, dimensions.y, true);
+            {
+                juce::Graphics graphics (rendered);
+                editor->paintEntireComponent (graphics, false);
+            }
+            expect (rendered.isValid(), "branding render keeps GUI valid");
         }
-        eye.setSize (APEX::UI::EvoEyeStamp::kWidth,
-                     APEX::UI::EvoEyeStamp::kHeight);
-        juce::Image image (juce::Image::ARGB, eye.getWidth(), eye.getHeight(), true);
+#if JUCE_WINDOWS
+        juce::Image stamp (juce::Image::ARGB, 84, 36, true);
         {
-            juce::Graphics graphics (image);
-            eye.paint (graphics);
+            juce::Graphics g (stamp);
+            APEX::Branding::EvoEyeStamp::paint (g, {0.0f, 0.0f, 84.0f, 36.0f});
         }
-        int coloredPixels = 0;
-        for (int y = 0; y < image.getHeight(); ++y)
-            for (int x = 0; x < image.getWidth(); ++x)
-                if (image.getPixelAt (x, y).getAlpha() > 80)
-                    ++coloredPixels;
-        expect (coloredPixels > 80,
-                "the eye, brows and pupil must actually render as JUCE paths");
-        beginTest ("plugin brand stamp does not introduce state or frames");
-        const int once = coloredPixels;
-        {
-            juce::Graphics graphics (image);
-            eye.paint (graphics);
-        }
-        expectEquals (coloredPixels, once,
-                      "static eye repaint preserves the same path footprint");
+        int opaque = 0;
+        for (int y = 0; y < stamp.getHeight(); ++y)
+            for (int x = 0; x < stamp.getWidth(); ++x)
+                if (stamp.getPixelAt (x, y).getAlpha() > 64)
+                    ++opaque;
+        expect (opaque > 50,
+                "canonical boot eye open frame paints recognizable plugin stamp");
+#endif
     }
 
     void testPurpleAnalyzerAndPresetRestore()

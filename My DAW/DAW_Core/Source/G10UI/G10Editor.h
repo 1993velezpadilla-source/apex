@@ -1,7 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
 #include "G10SpectrumAnalyzerComponent.h"
-#include "../UICore/ApexEvoEyeStamp.h"
 #include "G10BandFaderComponent.h"
 #include "G10RotaryKnobComponent.h"
 #include "G10LevelMeterComponent.h"
@@ -130,7 +129,6 @@ private:
     // (realtime 2x / offline 4x), so ANALOG/QUALITY have no GUI controls.
     juce::TextButton bypassButton_;
     juce::LookAndFeel_V4 lookAndFeel_;
-    APEX::UI::EvoEyeStamp eyeStamp_;
 
     // Blink scheduler state (GUI thread only). The scheduler only DECIDES
     // when a blink starts; the ~220 ms animation runs on the presentation
