@@ -203,14 +203,14 @@ private:
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
             expectEquals (found.size(), 4,
-                          "discover G10, C4, Parametric EQ and Opto 2A");
+                          "discover G10, Parametric EQ, Opto 2A and Bubblegum Delay");
             if (found.size() == 4)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
-                expectEquals (found[1]->fileOrIdentifier, juce::String ("APEX::C4"));
-                expectEquals (found[2]->fileOrIdentifier, juce::String (
+                expectEquals (found[1]->fileOrIdentifier, juce::String (
                     APEX::ParametricEQ::Processor::kFileOrIdentifier));
-                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[2]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
             }
         }
 

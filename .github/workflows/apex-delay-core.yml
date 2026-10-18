@@ -1,0 +1,51 @@
+name: APEX Bubblegum Delay DSP V1
+on:
+  push:
+    paths:
+      - "My DAW/DAW_Core/Source/DelayCore/**"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexBubblegumDelayTests.cpp"
+      - ".github/workflows/apex-delay-core.yml"
+  pull_request:
+    paths:
+      - "My DAW/DAW_Core/Source/DelayCore/**"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexBubblegumDelayTests.cpp"
+      - ".github/workflows/apex-delay-core.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build C++17 with Address/UB sanitizers
+        working-directory: My DAW/DAW_Core
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            Tests/Standalone/ApexBubblegumDelayTests.cpp -o /tmp/apex-delay-test
+      - name: Run DSP gates
+        working-directory: My DAW/DAW_Core
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: /tmp/apex-delay-test
+  windows-msvc:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run native C++17 delay gates
+        shell: pwsh
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vc = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (!$vc) { throw 'Visual Studio not found' }
+          $vcvars = Join-Path $vc 'VC\Auxiliary\Build\vcvars64.bat'
+          $test = 'Tests\Standalone\ApexBubblegumDelayTests.cpp'
+          $bat = "@echo off`r`ncall `"$vcvars`" >nul`r`ncl /nologo /std:c++17 /EHsc /W4 /WX /O2 `"$test`" /Fe:apex-delay-test.exe`r`nif errorlevel 1 exit /b 1`r`napex-delay-test.exe`r`nexit /b %errorlevel%`r`n"
+          Set-Content -Path run-delay.bat -Value $bat -Encoding ascii
+          & cmd /c run-delay.bat
+          if ($LASTEXITCODE -ne 0) { throw "MSVC delay DSP gates FAILED: $LASTEXITCODE" }
