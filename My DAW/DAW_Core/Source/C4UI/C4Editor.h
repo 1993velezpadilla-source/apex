@@ -3,6 +3,7 @@
 
 #include "../C4Core/C4Processor.h"
 #include "../C4Core/C4ResponseCurveCore.h"
+#include "../UICore/ApexEvoEyeStamp.h"
 
 namespace APEX {
 namespace C4 {
@@ -864,7 +865,9 @@ public:
         setResizable (true, nullptr);
         setResizeLimits (560, 640, 1100, 1000);
 
+        addAndMakeVisible (eyeStamp_);
         setSize (660, 640);
+        eyeStamp_.placeInCorner (*this);
         startTimerHz (30);
         refresh();
     }
@@ -894,6 +897,7 @@ public:
 
     void resized() override
     {
+        eyeStamp_.placeInCorner (*this);
         auto r = getLocalBounds().reduced (8, 30);
         const bool spectrumOpen = proc_.getSpectrumMode() != C4SpectrumTapMode::Closed;
 
@@ -989,6 +993,7 @@ private:
         std::unique_ptr<C4Knob> knob;
     };
 
+    APEX::UI::EvoEyeStamp eyeStamp_;
     C4Processor& proc_;
 
     std::vector<KnobEntry> knobs_;
