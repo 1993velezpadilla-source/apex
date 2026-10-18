@@ -2560,7 +2560,12 @@ public:
         content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
                             std::max (1, contentHeight));
 
-        auto bounds = content_.getLocalBounds().reduced (8, 8);
+        // 900x300 has a 108px sheet: reserve full 88px slider hit targets
+        // plus 10px underneath the numeric readouts by trimming 4px of
+        // purely decorative top padding, never the control dimensions.
+        const bool shortSheetPadding = ! floating && owner_.getHeight() < 500;
+        auto bounds = content_.getLocalBounds().reduced (
+            8, shortSheetPadding ? 4 : 8);
         // In very short landscape windows there is room for the 112px
         // precision strip OR a heading above it, not both. Give the
         // actual FREQ / GAIN / Q controls first-viewport priority; the
