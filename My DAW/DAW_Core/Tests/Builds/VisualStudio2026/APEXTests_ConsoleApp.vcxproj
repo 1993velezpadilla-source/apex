@@ -239,6 +239,8 @@
     <ClCompile Include="..\..\Source\G10\G10EngineTests.cpp"/>
     <ClCompile Include="..\..\Source\G10\G10ProcessorTests.cpp"/>
     <ClCompile Include="..\..\Source\G10\G10FormatHostTests.cpp"/>
+    <ClCompile Include="..\..\Source\Compressor\OptoNativeHostTests.cpp"/>
+    <ClCompile Include="..\..\Source\Reverie\ReverieNativeHostTests.cpp"/>
     <ClCompile Include="..\..\Source\G10\G10RtAllocationTests.cpp"/>
     <ClCompile Include="..\..\Source\G10\G10CpuGateTests.cpp"/>
     <ClCompile Include="..\..\Source\G10\G10AnalogTests.cpp"/>

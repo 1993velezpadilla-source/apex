@@ -230,13 +230,15 @@ public:
                     "scanner seeded Opto 2A into the cache/browser");
             expect (scanner.getCache().hasCachedEntry ("APEX::BubblegumDelay"),
                     "scanner seeded Bubblegum Delay into cache/browser");
+            expect (scanner.getCache().hasCachedEntry ("APEX::ReverieReverb"),
+                    "scanner seeded Reverie into cache/browser");
             int apexNativeCount = 0;
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 4,
-                          "four visible native effects: G10/EQ/Opto/Delay");
-            expect (scanner.getCache().getCount() >= 4, "other cached entries preserved");
+            expectEquals (apexNativeCount, 5,
+                          "five visible native effects: G10/EQ/Opto/Delay/Reverie");
+            expect (scanner.getCache().getCount() >= 5, "other cached entries preserved");
         }
     }
 

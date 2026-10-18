@@ -253,6 +253,16 @@
         <FILE id="OPTO_CPP01" name="OptoNativeHostTests.cpp" compile="1" resource="0"
               file="Source/Compressor/OptoNativeHostTests.cpp"/>
       </GROUP>
+      <GROUP id="{A1A1A1A1-0000-0000-0000-000000000079}" name="Reverie">
+        <FILE id="REVERIE_H01" name="ApexReverieEngine.h" compile="0" resource="0"
+              file="../Source/ReverieCore/ApexReverieEngine.h"/>
+        <FILE id="REVERIE_H02" name="ApexReverieProcessor.h" compile="0" resource="0"
+              file="../Source/ReverieCore/ApexReverieProcessor.h"/>
+        <FILE id="REVERIE_H03" name="ApexReverieEditor.h" compile="0" resource="0"
+              file="../Source/ReverieCore/ApexReverieEditor.h"/>
+        <FILE id="REVERIE_CPP01" name="ReverieNativeHostTests.cpp" compile="1" resource="0"
+              file="Source/Reverie/ReverieNativeHostTests.cpp"/>
+      </GROUP>
       <GROUP id="{A1A1A1A1-0000-0000-0000-000000000059}" name="Bubblegum Delay">
         <FILE id="DELAY_H1" name="ApexBubblegumDelayEngine.h" compile="0" resource="0"
               file="../Source/DelayCore/ApexBubblegumDelayEngine.h"/>

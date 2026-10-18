@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one native format discovers four visible processors");
+        beginTest ("one native format discovers five visible processors");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 4,
-                      "G10/EQ/Opto/Delay visible, unfinished C4 hidden");
-        if (descriptions.size() == 4)
+        expectEquals (descriptions.size(), 5,
+                      "G10/EQ/Opto/Delay/Reverie visible, unfinished C4 hidden");
+        if (descriptions.size() == 5)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -111,6 +111,8 @@ private:
                           juce::String ("APEX::Opto2A"));
             expectEquals (descriptions[3]->fileOrIdentifier,
                           juce::String ("APEX::BubblegumDelay"));
+            expectEquals (descriptions[4]->fileOrIdentifier,
+                          juce::String ("APEX::ReverieReverb"));
         }
 
         juce::String error;

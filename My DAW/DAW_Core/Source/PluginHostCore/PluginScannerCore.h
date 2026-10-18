@@ -13,6 +13,7 @@
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
+#include "../ReverieCore/ApexReverieProcessor.h"
 
 namespace DAW {
 
@@ -39,6 +40,7 @@ public:
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativeBubblegumDelayEntry();
+        seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
         PluginScanAuditLogCore::appendStartupTrace(
@@ -274,6 +276,7 @@ private:
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativeBubblegumDelayEntry();
+        seedNativeReverieEntry();
 
         coordinator_.startScan(
             [progressCb](const PluginScanHostCoordinatorCore::ScanProgress& p)
@@ -340,6 +343,15 @@ private:
     void seedNativeBubblegumDelayEntry()
     {
         APEX::Delay::Processor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Embedded Reverie persists through startup and forced rescans. */
+    void seedNativeReverieEntry()
+    {
+        APEX::Reverie::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
