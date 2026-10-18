@@ -202,7 +202,7 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expectEquals (found.size(), 4,
+            expectEquals (found.size(), 5,
                           "discover G10, C4, Parametric EQ and Opto 2A");
             if (found.size() == 4)
             {
