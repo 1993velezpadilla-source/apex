@@ -37,6 +37,13 @@ public:
         return splash.release();
     }
 
+    // Same periodic phase as the real Win32 30fps render worker.
+    // Exposed for deterministic multi-cycle QA (not a one-shot tween).
+    static float diagnosticBlinkAmount(double elapsedSeconds)
+    {
+        return blink(elapsedSeconds);
+    }
+
     // CI/QA preview is exported FROM THE EXACT LIVE C++ RENDERER, not
     // generated art. Kept separate from the production boot animation.
     static bool renderDiagnosticFrame(const wchar_t* pngFile, float seconds)
@@ -121,8 +128,12 @@ private:
 
     static float blink(double sec)
     {
-        // Quick asymmetric organic close/open: ~0.34 sec each 3.8 sec.
-        const float phase = static_cast<float>(std::fmod(sec + 2.2, 3.8));
+        // UNBOUNDED periodic close/open while the StartupPanel is loading:
+        // 0.34-second asymmetric blink every 3.8 seconds, for ANY elapsed
+        // duration (10 seconds, 30 seconds, 10 minutes...), no one-shot flag.
+        constexpr double kBlinkPeriodSeconds = 3.8;
+        const float phase = static_cast<float>(
+            std::fmod(sec + 2.2, kBlinkPeriodSeconds));
         if (phase < 2.76f || phase > 3.10f) return 0.0f;
         if (phase < 2.90f) return ease((phase - 2.76f) / 0.14f);
         return 1.0f - ease((phase - 2.90f) / 0.20f);
@@ -1037,6 +1048,7 @@ class DAWSplashScreen
 {
 public:
     static DAWSplashScreen* launch() { return nullptr; }
+    static float diagnosticBlinkAmount(double) { return 0.0f; }
     static bool renderDiagnosticFrame(const wchar_t*, float) { return false; }
     void finish() { delete this; }
 };
