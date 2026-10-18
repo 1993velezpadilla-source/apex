@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../UICore/ApexEvoEyeStamp.h"
 
 #include "../ParametricEQCore/ParametricEQProcessor.h"
 
@@ -113,6 +114,7 @@ private:
     bool auditionArmed_ = false;
     std::uint32_t auditionToken_ = 0;
 
+    APEX::UI::EvoEyeStamp eyeStamp_;
     std::unique_ptr<TopBarComponent> topBar_;
     std::unique_ptr<EqGraphComponent> graph_;
     std::unique_ptr<InspectorComponent> inspector_;
