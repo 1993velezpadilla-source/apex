@@ -37,6 +37,10 @@ $features = @(
     @{ Name = 'Vector metal plating'; Expression = 'static void plating' },
     @{ Name = 'Live rendered eye'; Expression = 'static void iris' },
     @{ Name = 'Real frame-by-frame blink'; Expression = 'static float blink' },
+    @{ Name = 'Eyebrow safely excluded from full iris opening'; Expression = 'g\.SetClip\(&fullEye, Gdiplus::CombineModeExclude\)' },
+    @{ Name = 'Independent upper/lower closure shutters'; Expression = 'static void drawShutters' },
+    @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
+    @{ Name = 'Eyebrow lifted to anatomical clearance'; Expression = 'g\.TranslateTransform\(0\.0f, -32\.0f\)' },
     @{ Name = 'Electric iris strands'; Expression = 'for \(int i = 0; i < 78;' },
     @{ Name = 'Handcrafted APEX letterforms'; Expression = 'brand.AddLine\(P\(435, 615\)' },
     @{ Name = 'Curved layered steel ornaments'; Expression = 'static void sculptedArmour' },
@@ -50,6 +54,33 @@ foreach ($feature in $features) {
     if ($header -notmatch $feature.Expression) {
         throw "Procedural boot GUI feature missing: $($feature.Name)"
     }
+}
+
+# Prevent the old regression: drawing upper armour AFTER the iris
+# occludes the opening, and merging the two draws gives a red horizontal bar
+# with overlapping static eyebrows in the blinked-shut frame.
+$renderStart = $header.IndexOf('static void drawFrame(G& g, float seconds)')
+$renderEnd = $header.IndexOf('DWORD run()', $renderStart)
+if ($renderStart -lt 0 -or $renderEnd -lt $renderStart) {
+    throw 'Cannot inspect drawFrame z-order'
+}
+$frameBody = $header.Substring($renderStart, $renderEnd - $renderStart)
+$requiredOrder = @(
+    'g.SetClip(&fullEye, Gdiplus::CombineModeExclude)',
+    'plating(g)',
+    'g.FillPath(&chamber, &fullEye)',
+    'drawShutters(g, openness)',
+    'iris(g, seconds, openness)',
+    'drawLidRims(g, openness)',
+    'identity(g, seconds)'
+)
+$position = -1
+foreach ($call in $requiredOrder) {
+    $found = $frameBody.IndexOf($call, $position + 1, [StringComparison]::Ordinal)
+    if ($found -lt 0) {
+        throw "Evo Eye z-order violated at: $call"
+    }
+    $position = $found
 }
 
 if (-not ('ApexProceduralEyeResourceAudit' -as [type])) {
