@@ -44,7 +44,10 @@ $features = @(
     @{ Name = 'Eyebrow safely excluded from full iris opening'; Expression = 'g\.SetClip\(&fullEye, Gdiplus::CombineModeExclude\)' },
     @{ Name = 'Independent upper/lower closure shutters'; Expression = 'static void drawShutters' },
     @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
-    @{ Name = 'Angular angry inner glabella'; Expression = 'P\(583,244\)' },
+    @{ Name = 'Single-sweep angry brow visor'; Expression = 'static void drawScowlingBrow' },
+    @{ Name = 'Angled monotonic blade silhouette'; Expression = 'P\(91, 136\)' },
+    @{ Name = 'Closed shadow-black steel visor'; Expression = 'static void drawClosedVisor' },
+    @{ Name = 'No closed oval cut-out'; Expression = 'if \(openness > 0\.035f\)' },
     @{ Name = 'Twin frowning upper-lid curves'; Expression = 'static void appendUpperLid' },
     @{ Name = 'Matched lower-lid curves'; Expression = 'static void appendLowerLid' },
     @{ Name = 'A single closed chevron seam'; Expression = 'if \(openness < 0\.035f\)' },
@@ -65,6 +68,14 @@ foreach ($feature in $features) {
     }
 }
 
+# Regression: the eyebrow must be one sweep, not two bulbous circular
+# arches. Never revive two upper sculptedPlate layers or reopen the oval.
+if ($header -match 'P\(583,244\)' -or $header -match 'P\(573,254\)' -or
+    $header -notmatch 'drawScowlingBrow\(g, right\)' -or
+    $header -notmatch 'plating\(g\);\s*\}\s*else') {
+    throw 'Old M-shaped brow or full-eye closed aperture regression.'
+}
+
 # Prevent the old regression: drawing upper armour AFTER the iris
 # occludes the opening, and merging the two draws gives a red horizontal bar
 # with overlapping static eyebrows in the blinked-shut frame.
@@ -80,6 +91,7 @@ $requiredOrder = @(
     'g.FillPath(&chamber, &fullEye)',
     'drawShutters(g, openness)',
     'iris(g, seconds, openness)',
+    'drawClosedVisor(g, openness)',
     'drawLidRims(g, openness)',
     'identity(g, seconds)'
 )
