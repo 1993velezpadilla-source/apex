@@ -4,6 +4,7 @@
 #include "HostedPluginIsolationCore.h"
 #include "../ClipCore/Clip.h"
 #include "../PluginSafetyCore/PluginSafeLoadWrapperCore.h"
+#include "../PluginSafetyCore/PluginSehGuardCore.h"
 #include "../PluginStorageCore/PluginDescriptionPersistenceCore.h"
 #include <map>
 #include <functional>
@@ -38,6 +39,12 @@ public:
         double sampleRate = 44100.0;
         int blockSize = 512;
         std::atomic<bool> bypassed { false };   // atomic: read on the audio thread via the published snapshot
+        // Prepared on the message thread; never resize or negotiate buses in DSP.
+        juce::AudioBuffer<float> processScratch;
+        int processWidth = 0;
+        int mainInputChannels = 0;
+        int mainOutputChannels = 0;
+        std::atomic<bool> processFaulted { false };
         juce::MemoryBlock unresolvedState;      // opaque state retained when plugin is missing
     };
 
@@ -88,7 +95,14 @@ public:
                     << " sampleRate=" << sampleRate_
                     << " blockSize=" << blockSize_
                     << " calledFrom=" << __FUNCTION__);
-                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+                const auto result = safelyPrepareToPlay(entry->instance.get(), sampleRate_, blockSize_);
+                if (!result.succeeded)
+                {
+                    entry->processFaulted.store(true, std::memory_order_release);
+                    entry->bypassed.store(true, std::memory_order_release);
+                    continue;
+                }
+                configureEntryProcessBuffers(*entry);
             }
         }
     }
@@ -121,7 +135,14 @@ public:
                     << " sampleRate=" << sampleRate_
                     << " blockSize=" << blockSize_
                     << " calledFrom=" << __FUNCTION__);
-                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+                const auto result = safelyPrepareToPlay(entry->instance.get(), sampleRate_, blockSize_);
+                if (!result.succeeded)
+                {
+                    entry->processFaulted.store(true, std::memory_order_release);
+                    entry->bypassed.store(true, std::memory_order_release);
+                    continue;
+                }
+                configureEntryProcessBuffers(*entry);
             }
         }
     }
@@ -151,7 +172,14 @@ public:
                     << " sampleRate=" << sampleRate_
                     << " blockSize=" << blockSize_
                     << " calledFrom=" << __FUNCTION__);
-                entry->instance->prepareToPlay(sampleRate_, blockSize_);
+                const auto result = safelyPrepareToPlay(entry->instance.get(), sampleRate_, blockSize_);
+                if (!result.succeeded)
+                {
+                    entry->processFaulted.store(true, std::memory_order_release);
+                    entry->bypassed.store(true, std::memory_order_release);
+                    continue;
+                }
+                configureEntryProcessBuffers(*entry);
             }
         }
     }
@@ -190,13 +218,16 @@ public:
             << " ptr=0x" << juce::String::toHexString((juce::pointer_sized_int)loaded.instance.get())
             << " inputChannels=" << loaded.instance->getTotalNumInputChannels()
             << " outputChannels=" << loaded.instance->getTotalNumOutputChannels()
-            << " mainInputLayout=" << loaded.instance->getChannelLayoutOfBus(true, 0).getDescription()
-            << " mainOutputLayout=" << loaded.instance->getChannelLayoutOfBus(false, 0).getDescription());
+            << " mainInputLayout=" << (loaded.instance->getBusCount(true) > 0
+                ? loaded.instance->getChannelLayoutOfBus(true, 0).getDescription() : juce::String("none"))
+            << " mainOutputLayout=" << (loaded.instance->getBusCount(false) > 0
+                ? loaded.instance->getChannelLayoutOfBus(false, 0).getDescription() : juce::String("none")));
         DBG("[APEX-DIAG-PREPARE] plugin=" << loaded.instance->getName()
             << " sampleRate=" << sampleRate_
             << " blockSize=" << blockSize_
             << " calledFrom=" << __FUNCTION__);
-        loaded.instance->prepareToPlay(sampleRate_, blockSize_);
+        if (!safelyPrepareToPlay(loaded.instance.get(), sampleRate_, blockSize_).succeeded)
+            return { false, "Clip plugin failed during prepareToPlay.", nullptr, false };
 
         auto entry = std::make_shared<Entry>();
         entry->instanceId = makeInstanceId(clipId);
@@ -205,6 +236,7 @@ public:
         entry->sampleRate = sampleRate_;
         entry->blockSize = blockSize_;
         entry->instance = std::move(loaded.instance);
+        configureEntryProcessBuffers(*entry);
 
         auto* raw = entry.get();
         entriesByClip_[clipId].push_back(std::move(entry));
@@ -236,7 +268,9 @@ public:
         {
             if (!entry) continue;
             result.push_back({ entry->instanceId,
-                               entry->description.name + (entry->instance ? juce::String() : juce::String(" [Missing]")),
+                               entry->description.name + (entry->instance ? (entry->processFaulted.load(std::memory_order_acquire)
+                                   ? juce::String(" [DSP disabled]") : juce::String())
+                               : juce::String(" [Missing]")),
                                entry->description.manufacturerName,
                                entry->description.pluginFormatName,
                                entry->bypassed.load (std::memory_order_acquire) });
@@ -589,26 +623,88 @@ public:
         }
 
         scratchMidi_.clear();
-        for (auto& entry : it->second)
+        for (const auto& entry : it->second)
         {
-            if (!entry || !entry->instance || entry->bypassed.load (std::memory_order_acquire)) continue;
-            DBG("[ClipRegionPlugin] processing clipId=" << clipId
-                << " plugin=" << entry->description.name
-                << " numSamples=" << buffer.getNumSamples()
-                << " chans=" << buffer.getNumChannels());
-            logProcessBlockDiag(entry->instance.get(), buffer);
-            // Contract (PluginInstanceCore::processBlock): the plugin must never
-            // receive inactive storage beyond the frame count used to prepare
-            // and schedule this quantum. The host buffer is worst-case capacity
-            // (engine clipRegionPluginBuffer_), so present only the active
-            // callback range via a zero-copy view sharing the same channels.
-            juce::AudioBuffer<float> activeView(buffer.getArrayOfWritePointers(),
-                                                buffer.getNumChannels(), numSamples);
-            entry->instance->processBlock(activeView, scratchMidi_);
+            if (!entry || !entry->instance || entry->bypassed.load(std::memory_order_acquire))
+                continue;
+
+            // The clip engine supplies stereo, but hosted VST3/AU buses may be
+            // mono, asymmetric, or include enabled auxiliary inputs. Passing a
+            // fixed two-channel view directly can make the plugin read past the
+            // supplied channel-pointer array and crash on the first Play block.
+            // Present the full prepared bus width, with undriven aux buses
+            // zeroed, and only commit processed samples if DSP succeeds.
+            const int width = entry->processWidth;
+            auto& scratch = entry->processScratch;
+            if (width < 2 || numSamples > entry->blockSize
+                || scratch.getNumChannels() < width
+                || scratch.getNumSamples() < numSamples)
+            {
+                entry->processFaulted.store(true, std::memory_order_release);
+                entry->bypassed.store(true, std::memory_order_release);
+                continue; // Keep dry clip audible; never allocate in callback.
+            }
+
+            for (int ch = 0; ch < width; ++ch)
+                scratch.clear(ch, 0, numSamples);
+
+            if (entry->mainInputChannels == 1 && buffer.getNumChannels() >= 2)
+            {
+                scratch.addFrom(0, 0, buffer, 0, 0, numSamples, 0.5f);
+                scratch.addFrom(0, 0, buffer, 1, 0, numSamples, 0.5f);
+            }
+            else
+            {
+                const int mainToCopy = juce::jmin(entry->mainInputChannels,
+                                                  buffer.getNumChannels());
+                for (int ch = 0; ch < mainToCopy; ++ch)
+                    scratch.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+            }
+
+            juce::AudioBuffer<float> processView(scratch.getArrayOfWritePointers(),
+                                                   width, numSamples);
+            if (!safelyProcessBlock(entry->instance.get(), processView, scratchMidi_).succeeded)
+            {
+                entry->processFaulted.store(true, std::memory_order_release);
+                entry->bypassed.store(true, std::memory_order_release);
+                continue; // Preserve input; avoid repeating a failing callback.
+            }
+
+            const int mainOut = entry->mainOutputChannels;
+            if (mainOut == 1)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    buffer.copyFrom(ch, 0, scratch, 0, 0, numSamples);
+            }
+            else if (mainOut >= 2)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    buffer.copyFrom(ch, 0, scratch, juce::jmin(ch, mainOut - 1),
+                                    0, numSamples);
+            }
+            // No output bus (MIDI-only processor): retain incoming clip audio.
         }
     }
 
 private:
+    static void configureEntryProcessBuffers(Entry& entry)
+    {
+        if (entry.instance == nullptr)
+            return;
+        auto& plugin = *entry.instance;
+        // getTotalNumInputChannels includes enabled sidechain/auxiliary buses.
+        // Reserve all channels before publication, not from processClipBlock().
+        entry.processWidth = juce::jmax(2, juce::jmax(plugin.getTotalNumInputChannels(),
+                                                     plugin.getTotalNumOutputChannels()));
+        entry.mainInputChannels = plugin.getBusCount(true) > 0
+            ? plugin.getChannelLayoutOfBus(true, 0).size() : 0;
+        entry.mainOutputChannels = plugin.getBusCount(false) > 0
+            ? plugin.getChannelLayoutOfBus(false, 0).size() : 0;
+        entry.processScratch.setSize(entry.processWidth, juce::jmax(1, entry.blockSize));
+        entry.processScratch.clear();
+        entry.processFaulted.store(false, std::memory_order_release);
+    }
+
     PluginPlayheadInfoCore* playheadInfo_ = nullptr;
     double sampleRate_ = 0.0;
     int blockSize_ = 0;
