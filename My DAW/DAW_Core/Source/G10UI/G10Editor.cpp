@@ -46,6 +46,7 @@ G10Editor::G10Editor (G10Processor& processor)
       content_ (std::make_unique<Content> (*this))
 {
     addAndMakeVisible (content_.get());
+    addAndMakeVisible (eyeStamp_);
 
     // Host resize participation: the OUTER editor is host-resizable within
     // sensible min/max limits and accepts ANY host-negotiated aspect ratio —
@@ -56,6 +57,7 @@ G10Editor::G10Editor (G10Processor& processor)
     // the complete background with the G10 shell, so leftover letterbox space
     // belongs to G10, never to the host.
     setSize (G10Layout::kWidth, G10Layout::kHeight);
+    eyeStamp_.placeInCorner (*this);
     setResizable (true, false);
     setResizeLimits (kMinEditorW, kMinEditorH, kMaxEditorW, kMaxEditorH);
 
@@ -520,6 +522,7 @@ void G10Editor::resized()
     contentScale_ = scale;
     // Responsive analyzer axis-label density (reduced set at small scales).
     analyzer_.setScaleHint (scale);
+    eyeStamp_.placeInCorner (*this);
 }
 
 } // namespace G10
