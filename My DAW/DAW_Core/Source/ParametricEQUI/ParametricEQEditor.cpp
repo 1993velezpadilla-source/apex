@@ -1327,6 +1327,10 @@ public:
     }
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
+    float analyzerYForTesting (float db) const noexcept
+    {
+        return spectrumY (db, static_cast<float> (getHeight()));
+    }
     juce::TextButton& getSketchButtonForTesting() noexcept { return sketchButton_; }
     juce::TextButton& getGrabButtonForTesting() noexcept { return grabButton_; }
     juce::TextButton& getCopyButtonForTesting() noexcept { return copyButton_; }
@@ -3063,6 +3067,16 @@ juce::TextButton& ParametricEQEditor::getAuditionButtonForTesting()
 juce::TextButton& ParametricEQEditor::getPhaseButtonForTesting()
 {
     return topBar_->getPhaseButtonForTesting();
+}
+
+void ParametricEQEditor::applyPresetForTesting (int presetId)
+{
+    topBar_->applyPresetForTesting (presetId);
+}
+
+float ParametricEQEditor::analyzerYForTesting (float db) const
+{
+    return graph_->analyzerYForTesting (db);
 }
 
 juce::TextButton& ParametricEQEditor::getSketchButtonForTesting()
