@@ -259,6 +259,11 @@ private:
         const float beat = 0.74f + 0.26f * std::sin(sec * 2.8f);
         glow(g, P(600, 304), 224, 168, 236, 8, 51, 20.0f * beat);
         glow(g, P(600, 304), 170, 157, 255, 13, 61, 12.0f * beat);
+        // Magenta-violet rim and scarlet plasma move at independent phases:
+        // the reference is an electrical *eye*, not a circular LED display.
+        glow(g, P(726, 283), 158, 125, 151, 10, 236, 12.0f * beat);
+        glow(g, P(478, 336), 156, 101, 255, 31, 105, 10.0f * beat);
+        glow(g, P(596, 428), 250, 53, 249, 36, 130, 8.0f * beat);
 
         // Radial iris fibers / electrical veins: individually Bezier-rendered.
         // Rotational movement and phase are true procedural animation.
@@ -279,6 +284,47 @@ private:
             const BYTE alpha = static_cast<BYTE>(78 + (i % 7) * 19);
             curve(g, C(alpha, 255, static_cast<BYTE>(25 + i % 4 * 18), 97),
                   (i % 9 == 0) ? 2.7f : 1.1f, a, b, c, d);
+        }
+
+        // Fractal-looking arc discharges, authored as moving polylines from
+        // deterministic oscillators rather than noise textures or sprites.
+        // They are clipped to the physical curved eye aperture.
+        for (int i = 0; i < 65; ++i)
+        {
+            const float angle = i * 2.39996323f;
+            const float wobble = sec * (0.11f + (i % 6) * 0.013f);
+            P filament[9];
+            for (int node = 0; node < 9; ++node)
+            {
+                const float t = node / 8.0f;
+                const float radius = 38.0f + t * (168.0f + 17.0f * (i % 5));
+                const float crooked = std::sin(i * 5.37f + node * 2.74f + sec * 1.55f)
+                                     * (2.7f + 8.3f * t);
+                const float curl = angle + wobble + 0.19f * t;
+                filament[node] = P(600.0f + std::cos(curl) * radius
+                                            - std::sin(angle) * crooked,
+                                   304.0f + std::sin(curl) * radius * 0.77f
+                                            + std::cos(angle) * crooked * 0.77f);
+            }
+            Gdiplus::GraphicsPath electrical;
+            electrical.AddLines(filament, 9);
+            const BYTE alpha = static_cast<BYTE>(85 + (i % 7) * 20);
+            Gdiplus::Pen vapor(C(55, 255, 25, 139), 5.0f);
+            Gdiplus::Pen spark(
+                (i % 4 == 0) ? C(alpha, 255, 146, 208)
+                             : C(alpha, 255, 28, 116),
+                (i % 6 == 0) ? 1.8f : 0.85f);
+            g.DrawPath(&vapor, &electrical);
+            g.DrawPath(&spark, &electrical);
+
+            if (i % 3 == 0)
+            {
+                const P fork = filament[5];
+                const P tip = filament[7];
+                line(g, C(119, 255, 105, 186), 1.0f,
+                     fork, P(tip.X + std::sin(i * 2.0f + sec) * 13.0f,
+                             tip.Y - 8.0f + std::cos(i + sec) * 10.0f));
+            }
         }
 
         // Luminescent iris ring and internal specular layer.
@@ -498,50 +544,89 @@ private:
         line(g, C(137, 255, 42, 102), 1.6f, P(804,446), P(641,457));
     }
 
+    // Slender, bespoke APEX letterforms designed as actual C++ glyph
+    // strokes (not an ordinary heavy Segoe UI font and never a bitmap).
     static void identity(G& g, float sec)
     {
         using namespace Gdiplus;
-        FontFamily brandFamily(L"Segoe UI");
-        StringFormat format;
-        format.SetAlignment(StringAlignmentCenter);
-        format.SetLineAlignment(StringAlignmentCenter);
+        GraphicsPath brand;
+        brand.StartFigure();
+        brand.AddLine(P(435, 615), P(474, 559));  // A left diagonal
+        brand.AddLine(P(474, 559), P(515, 615));  // A right diagonal
+        brand.StartFigure();
+        brand.AddLine(P(451, 599), P(498, 599));  // fine A crosspiece
 
-        // Wordmark is an outlined font PATH with layered metallic fills,
-        // NOT text printed into a JPEG. Crisp at any HiDPI scale.
-        GraphicsPath textPath;
-        textPath.AddString(L"APEX", -1, &brandFamily, FontStyleBold, 102.0f,
-                           P(418, 530), &format);
-        RectF bounds;
-        textPath.GetBounds(&bounds);
-        // Center using the actual vector outlines, not assumed font metrics.
-        Matrix m;
-        m.Translate(600.0f - (bounds.X + bounds.Width * 0.5f), 0.0f);
-        textPath.Transform(&m);
-        textPath.GetBounds(&bounds);
-        LinearGradientBrush metal(
-            R(bounds.X, bounds.Y, juce::jmax(1.0f, bounds.Width),
-              juce::jmax(1.0f, bounds.Height)),
-            C(255, 246, 249, 255), C(255, 57, 61, 78),
-            LinearGradientModeVertical);
-        Pen darkEdge(C(245, 7, 7, 13), 4.3f);
-        g.DrawPath(&darkEdge, &textPath);
-        g.FillPath(&metal, &textPath);
-        Pen redEdge(C(177, 255, 19, 81), 1.7f);
-        g.DrawPath(&redEdge, &textPath);
-        // A central energy beam ties mechanical eye and wordmark together.
-        line(g, C(110, 255, 22, 91), 1.0f, P(600, 516), P(600, 539));
+        brand.StartFigure();
+        brand.AddLine(P(540, 618), P(540, 561));  // P stem
+        brand.AddLine(P(540, 561), P(576, 561));
+        brand.AddBezier(P(576, 561), P(613, 561),
+                        P(609, 591), P(579, 591));
+        brand.AddLine(P(579, 591), P(541, 591));
 
-        Font subtitle(&brandFamily, 19.0f, FontStyleRegular, UnitPixel);
-        SolidBrush subtitleBrush(C(255, 214, 215, 229));
-        const wchar_t* caption = L"AUDIO PRODUCTION ENGINEERING";
-        g.DrawString(caption, -1, &subtitle, R(270, 627, 660, 35),
-                     &format, &subtitleBrush);
+        // E: horizontally cut bars like the original cybernetic wordmark.
+        brand.StartFigure();
+        brand.AddLine(P(624, 563), P(686, 563));
+        brand.StartFigure();
+        brand.AddLine(P(624, 590), P(677, 590));
+        brand.StartFigure();
+        brand.AddLine(P(624, 617), P(686, 617));
+
+        brand.StartFigure();
+        brand.AddLine(P(708, 560), P(785, 618));  // X top-left to bottom-right
+        brand.StartFigure();
+        brand.AddLine(P(785, 560), P(708, 618));  // X top-right to bottom-left
+
+        // Five layered light passes create dark steel, beveled rim and
+        // thin silver core; metallic gradients are rendered by GDI+ paths.
+        Pen outerGlow(C(48, 255, 10, 74), 20.0f);
+        Pen shadow(C(255, 1, 1, 9), 12.0f);
+        Pen redBevel(C(222, 230, 15, 67), 9.0f);
+        LinearGradientBrush silver(R(400, 546, 410, 89),
+                                    C(255, 230, 234, 252),
+                                    C(255, 46, 48, 65),
+                                    LinearGradientModeVertical);
+        Pen alloy(&silver, 6.1f);
+        Pen specular(C(164, 252, 243, 255), 1.15f);
+        outerGlow.SetLineJoin(LineJoinRound);
+        shadow.SetLineJoin(LineJoinRound);
+        redBevel.SetLineJoin(LineJoinRound);
+        alloy.SetLineJoin(LineJoinRound);
+        specular.SetLineJoin(LineJoinRound);
+        g.DrawPath(&outerGlow, &brand);
+        g.DrawPath(&shadow, &brand);
+        g.DrawPath(&redBevel, &brand);
+        g.DrawPath(&alloy, &brand);
+        g.DrawPath(&specular, &brand);
+
+        // Red laser seam joins the Eye's lower dagger to its brand mark.
+        line(g, C(172, 255, 33, 117), 1.35f, P(600, 506), P(600, 545));
+        glow(g, P(600, 544), 15, 15, 255, 44, 112, 6.1f);
+
+        // Explicit letter tracking gives the thin, widely spaced lettering
+        // shown in the reference, without baking any glyphs into a PNG.
+        FontFamily family(L"Segoe UI");
+        Font captionFont(&family, 17.0f, FontStyleRegular, UnitPixel);
+        SolidBrush captionColor(C(239, 208, 208, 226));
+        StringFormat centered;
+        centered.SetAlignment(StringAlignmentCenter);
+        centered.SetLineAlignment(StringAlignmentCenter);
+        const wchar_t* title = L"AUDIO PRODUCTION ENGINEERING";
+        constexpr int kLetterCount = 28;
+        const float startX = 377.0f, spacing = 16.52f;
+        for (int index = 0; index < kLetterCount; ++index)
+        {
+            wchar_t character[2] = { title[index], 0 };
+            if (character[0] != L' ')
+                g.DrawString(character, 1, &captionFont,
+                             R(startX + index * spacing, 637, 28, 30),
+                             &centered, &captionColor);
+        }
 
         const float power = 0.5f + 0.5f * std::sin(sec * 2.8f);
-        line(g, C(110, 168, 20, 60), 1.0f, P(365, 688), P(835, 688));
+        line(g, C(110, 168, 20, 60), 1.0f, P(365, 690), P(835, 690));
         line(g, C(static_cast<BYTE>(120 + power * 130.0f), 255, 29, 96),
-             3.2f, P(468, 688), P(600 + 93.0f * power, 688));
-        polygon(g, {P(600,675), P(610,688), P(600,701), P(590,688)},
+             3.2f, P(467, 690), P(598.0f + 94.0f * power, 690));
+        polygon(g, {P(600,679), P(608,690), P(600,701), P(592,690)},
                 C(255, 255, 97, 141), C(255, 161, 3, 57));
     }
 
