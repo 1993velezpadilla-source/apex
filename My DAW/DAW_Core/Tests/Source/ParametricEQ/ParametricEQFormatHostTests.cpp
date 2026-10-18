@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one unified APEX Native format discovers all four natives");
+        beginTest ("one unified APEX Native format discovers all five natives");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 4,
-                      "G10/C4/Parametric EQ ordering stays stable; Opto 2A appends once");
-        if (descriptions.size() == 4)
+        expectEquals (descriptions.size(), 5,
+                      "G10/C4/EQ order unchanged; Opto 2A and Bubblegum Delay appended");
+        if (descriptions.size() == 5)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -111,6 +111,8 @@ private:
                           juce::String (Processor::kFileOrIdentifier));
             expectEquals (descriptions[3]->fileOrIdentifier,
                           juce::String ("APEX::Opto2A"));
+            expectEquals (descriptions[4]->fileOrIdentifier,
+                          juce::String ("APEX::BubblegumDelay"));
         }
 
         juce::String error;
