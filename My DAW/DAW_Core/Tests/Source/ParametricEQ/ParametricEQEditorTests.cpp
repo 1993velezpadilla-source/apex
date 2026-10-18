@@ -350,11 +350,17 @@ private:
                 expect (bounds.getX() >= 0 && bounds.getY() >= 0,
                         "placement non-negative");
             }
-            for (std::size_t first = 0; first < placements.size(); ++first)
-                for (std::size_t second = first + 1; second < placements.size(); ++second)
-                    expect (! placements[first]->getBounds().intersects (
-                                placements[second]->getBounds()),
-                            "placement buttons must not overlap");
+            for (const auto& button : placements)
+                expect (! button->isVisible(),
+                    "five legacy channel buttons must not clutter the HUD");
+            auto& channel = editor->getPlacementComboForTesting();
+            expect (channel.isVisible(), "single channel dropdown is visible");
+            expectEquals (channel.getNumItems(), 5,
+                          "Stereo/Left/Right/Mid/Side all remain available");
+            expectEquals (channel.getSelectedId(), 1,
+                          "per-band channel defaults to Stereo");
+            expect (channel.getWidth() >= 44 && channel.getHeight() >= 40,
+                    "channel selector stays touch accessible");
 
             const auto audition = editor->getAuditionButtonForTesting().getBounds();
             expect (editor->getAuditionButtonForTesting().isEnabled(),
@@ -369,6 +375,7 @@ private:
                     "audition disabled without selection");
             for (const auto& button : placements)
                 expect (! button->isEnabled(), "placement disabled without selection");
+            expect (! channel.isEnabled(), "channel selector disabled without band");
         }
     }
 
@@ -544,7 +551,7 @@ private:
 
     void testPlacementButtonsAreTouchAccessibleAndFunctional()
     {
-        beginTest ("placement segmented control switches the stable parameter");
+        beginTest ("single Channel dropdown drives the stable placement parameter");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         enableBell (processor, 0, 1000.0f, 6.0f, 2.0f);
@@ -565,16 +572,27 @@ private:
             juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
         };
 
+        auto& channel = editor->getPlacementComboForTesting();
+        expectEquals (channel.getSelectedId(), 1, "Stereo is the default");
         for (int choice = 0; choice < kChannelPlacementCount; ++choice)
         {
-            press (*placements[static_cast<std::size_t> (choice)]);
+            channel.setSelectedId (choice + 1, juce::sendNotificationSync);
             expectEquals (processor.getParametricEQParameter (
                               placementParameterIndex (0))->getChoiceIndex(),
-                          choice);
-            expectEquals (juce::String (channelPlacementName (
+                          choice, "dropdown changes canonical hosted parameter");
+            expectEquals (channel.getText(), juce::String (channelPlacementName (
                               static_cast<ChannelPlacement> (choice))),
-                          placements[static_cast<std::size_t> (choice)]->getButtonText());
+                          "dropdown displays active placement");
         }
+        // Old API is preserved for backwards-compatible programmatic use,
+        // but its five buttons never appear in the on-screen inspector.
+        for (const auto& button : placements)
+            expect (! button->isVisible(), "no duplicate channel buttons");
+        press (*placements[0]);
+        expectEquals (processor.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 0);
+        editor->setSelectedBandForTesting (0);
+        expectEquals (channel.getSelectedId(), 1);
     }
 
     void testAuditionHoldGestureLifecycle()
@@ -1138,8 +1156,8 @@ private:
                       restoredEditor->getPhaseButtonForTesting().getButtonText(),
                       "restored editor shows the restored phase mode");
 
-        // The control must remain visible, inside the top bar, and touch-safe
-        // at every responsive breakpoint.
+        // The hosted Phase control lives in Utility instead of adding a
+        // sixth permanent footer button; hidden click path is still tested.
         for (const auto& sizeCase : kSizes)
         {
             restoredEditor->setSize (sizeCase.width, sizeCase.height);
