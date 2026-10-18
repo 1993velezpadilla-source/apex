@@ -102,6 +102,39 @@ public:
                           juce::Justification::centred, 1, 0.65f);
     }
 
+    void drawComboBox (juce::Graphics& g, int width, int height,
+                       bool isButtonDown, int buttonX, int buttonY,
+                       int buttonW, int buttonH,
+                       juce::ComboBox& combo) override
+    {
+        // Rounded glass selector used for Filter Shape and the ONE
+        // Stereo/Left/Right/Mid/Side dropdown in the approved design.
+        auto box = juce::Rectangle<float> (0.0f, 0.0f,
+            static_cast<float> (width), static_cast<float> (height))
+            .reduced (1.2f);
+        if (box.isEmpty())
+            return;
+        g.setGradientFill (juce::ColourGradient (
+            Palette::surfaceHover().darker (0.12f), box.getTopLeft(),
+            Palette::surface(), box.getBottomLeft(), false));
+        g.fillRoundedRectangle (box, 7.0f);
+        g.setColour ((isButtonDown ? Palette::accent() : Palette::border())
+                         .withAlpha (combo.isEnabled() ? 0.89f : 0.38f));
+        g.drawRoundedRectangle (box, 7.0f, 1.0f);
+        const float cx = static_cast<float> (buttonX)
+                       + static_cast<float> (buttonW) * 0.5f;
+        const float cy = static_cast<float> (buttonY)
+                       + static_cast<float> (buttonH) * 0.5f;
+        juce::Path chevron;
+        chevron.startNewSubPath (cx - 5.0f, cy - 2.0f);
+        chevron.lineTo (cx, cy + 3.0f);
+        chevron.lineTo (cx + 5.0f, cy - 2.0f);
+        g.setColour (Palette::textSecondary());
+        g.strokePath (chevron, juce::PathStrokeType (1.7f,
+            juce::PathStrokeType::curved,
+            juce::PathStrokeType::rounded));
+    }
+
     void drawRotarySlider (juce::Graphics& g, int x, int y,
                            int width, int height, float proportion,
                            float startAngle, float endAngle,
@@ -577,8 +610,44 @@ public:
             const auto area = i == 4 ? row : row.removeFromLeft (cell);
             g.setColour (Palette::textSecondary().withAlpha (0.92f));
             g.drawFittedText (captions[static_cast<std::size_t> (i)],
-                area.withHeight (20).translated (11, 5),
+                area.withHeight (20).translated (53, 5),
                 juce::Justification::centredLeft, 1);
+            const float cx = static_cast<float> (area.getX() + 27);
+            const float cy = static_cast<float> (getHeight()) * 0.55f;
+            g.setColour (Palette::accent().withAlpha (0.12f));
+            g.fillEllipse (cx - 21.0f, cy - 21.0f, 42.0f, 42.0f);
+            g.setColour (Palette::border().withAlpha (0.78f));
+            g.drawEllipse (cx - 21.0f, cy - 21.0f, 42.0f, 42.0f, 1.0f);
+            g.setColour (Palette::accent().brighter (0.37f));
+            if (i == 0)
+            {
+                g.drawEllipse (cx - 11.0f, cy - 6.0f, 22.0f, 12.0f, 1.3f);
+                g.fillEllipse (cx - 3.0f, cy - 3.0f, 6.0f, 6.0f);
+            }
+            else if (i == 1)
+            {
+                for (int n = 0; n < 4; ++n)
+                    g.fillRoundedRectangle (cx - 10.0f + n * 6.0f,
+                        cy + 9.0f - 4.0f * n, 3.0f, 4.0f + 4.0f * n, 1.0f);
+            }
+            else if (i == 2)
+            {
+                g.drawEllipse (cx - 12.0f, cy - 8.0f, 17.0f, 17.0f, 1.3f);
+                g.drawEllipse (cx - 3.0f, cy - 8.0f, 17.0f, 17.0f, 1.3f);
+            }
+            else if (i == 3)
+            {
+                g.drawRoundedRectangle (cx - 11.0f, cy - 7.0f,
+                    22.0f, 15.0f, 2.0f, 1.4f);
+                g.drawLine (cx - 8.0f, cy - 11.0f,
+                            cx + 1.0f, cy - 11.0f, 1.4f);
+            }
+            else
+            {
+                for (int n = -1; n <= 1; ++n)
+                    g.fillEllipse (cx + n * 8.0f - 2.0f,
+                                   cy - 2.0f, 4.0f, 4.0f);
+            }
             if (i < 4)
             {
                 g.setColour (Palette::border().withAlpha (0.42f));
@@ -604,6 +673,8 @@ public:
             auto area = i == 4 ? row : row.removeFromLeft (cell);
             area = area.reduced (4, 0);
             area.removeFromTop (captionHeight);
+            if (labels)
+                area.removeFromLeft (46); // vector icon circle
             primary[static_cast<std::size_t> (i)]->setBounds (area);
         }
         // Hidden secondary controls retain real handlers for host/state
@@ -3202,7 +3273,7 @@ void ParametricEQEditor::applyLayout()
     // One quiet, touch-safe command dock at ALL viewports. Old 320px mode
     // burned 104px on an 8-button grid; six grouped controls now fit 44px.
     const int dockHeight = (width < 650 || height < 500)
-        ? 52 : std::clamp (height / 10, 66, 78);
+        ? 52 : std::clamp (height / 8, 72, 110);
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
     // Narrow devices AND short plugin windows use a scrollable touch sheet
