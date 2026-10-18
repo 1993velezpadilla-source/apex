@@ -960,13 +960,13 @@ public:
             DAW::HostedPluginIsolationCore::commandLineRequestsIsolation(
                 getCommandLineParameterArray()));
 
-        // Evo Eye artwork is an RCDATA resource inside the executable.
-        // No runtime filesystem dependency or sidecar image. The splash runs
-        // on a Win32 render thread while MainComponent is being constructed.
+        // Evo Eye is DRAWN FROM C++ PATHS, shaders/gradients and live effects.
+        // No runtime bitmap, bundled JPEG/PNG or sidecar image. The splash
+        // renders on an independent Win32 thread while JUCE initializes.
         splashScreen_ = DAWSplashScreen::launch();
         juce::Logger::writeToLog(splashScreen_ != nullptr
-            ? "[EVO EYE] Embedded startup eye launched"
-            : "[EVO EYE] Embedded artwork unavailable; existing StartupPanel still opens");
+            ? "[EVO EYE] Procedural C++ startup eye launched"
+            : "[EVO EYE] Procedural renderer unavailable; existing StartupPanel still opens");
 
         mainWindow.reset (new MainWindow (getApplicationName()));
         DAW::ApexProcessModeStateCore::markNormalGuiCreated();
