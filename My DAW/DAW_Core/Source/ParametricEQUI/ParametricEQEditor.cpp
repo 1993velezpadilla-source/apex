@@ -3225,8 +3225,10 @@ ParametricEQEditor::ParametricEQEditor (Processor& processor)
     addAndMakeVisible (topBar_.get());
     addAndMakeVisible (graph_.get());
     addAndMakeVisible (inspector_.get());
+    addAndMakeVisible (eyeStamp_);
     setSize (900, 620);
     applyLayout();
+    eyeStamp_.placeInCorner (*this);
 }
 
 ParametricEQEditor::~ParametricEQEditor()
@@ -3248,6 +3250,7 @@ void ParametricEQEditor::paint (juce::Graphics& g)
 void ParametricEQEditor::resized()
 {
     applyLayout();
+    eyeStamp_.placeInCorner (*this);
 }
 
 void ParametricEQEditor::applyLayout()
