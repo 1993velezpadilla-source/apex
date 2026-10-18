@@ -35,7 +35,7 @@ public:
         cache_.loadFromFile(cacheFile);
         failureStore_.loadFromFile(failureFile);
         seedNativeG10Entry();
-        seedNativeC4Entry();
+        hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativeBubblegumDelayEntry();
@@ -270,7 +270,7 @@ private:
         // entries must exist before the scan's done-callback rebuilds the
         // browser feed).
         seedNativeG10Entry();
-        seedNativeC4Entry();
+        hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativeBubblegumDelayEntry();
@@ -308,12 +308,12 @@ private:
         cache_.cacheFromDescription(g10Desc);
     }
 
-    /** Seed the intrinsic APEX C4 plugin into the cache (same contract as
-        seedNativeG10Entry). */
-    void seedNativeC4Entry()
+    /** C4 is parked for future work. Remove its browser entry, including
+        installations with an older persisted plugin cache. Keep the native
+        processor and format-manager restoration path intact for old songs. */
+    void hideUnfinishedC4FromBrowser()
     {
-        auto c4Desc = APEX::C4::C4NativePluginFormat::createC4Description();
-        cache_.cacheFromDescription(c4Desc);
+        cache_.remove("APEX::C4");
     }
 
     /** Seed the intrinsic APEX Parametric EQ plugin into the cache. */
