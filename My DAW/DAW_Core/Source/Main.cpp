@@ -996,6 +996,23 @@ public:
                                                .getChildFile("1000166327(2).png");
                 if (oldLogo.existsAsFile())
                     image = oldLogo;
+                else
+                {
+                    // Preserve the legacy source-tree fallback from Main.cpp.
+                    // Existing development layouts must not lose their splash.
+                    auto parent = executable.getParentDirectory();
+                    for (int depth = 0; depth < 12 && image == juce::File(); ++depth)
+                    {
+                        const auto legacy = parent.getChildFile("logo")
+                                                  .getChildFile("1000166327(2).png");
+                        if (legacy.existsAsFile())
+                            image = legacy;
+                        const auto next = parent.getParentDirectory();
+                        if (next == parent)
+                            break;
+                        parent = next;
+                    }
+                }
             }
 
             if (image.existsAsFile())
