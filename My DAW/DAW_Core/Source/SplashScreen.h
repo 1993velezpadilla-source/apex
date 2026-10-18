@@ -197,6 +197,24 @@ private:
                                         Gdiplus::LinearGradientModeVertical);
         g.FillRectangle(&bg, R(0.0f, 0.0f, 1200.0f, 750.0f));
         glow(g, P(600.0f, 315.0f), 545.0f, 310.0f, 125, 8, 38, 7.0f);
+        // Thin time-shifting smoke ribbons. These are cheap translucent Bezier
+        // arcs, NOT a procedural noise bitmap or background photograph.
+        for (int i = 0; i < 32; ++i)
+        {
+            const float j = i * 1.97f;
+            const float turn = time * (0.22f + (i % 5) * 0.036f);
+            const float side = i % 2 ? -1.0f : 1.0f;
+            const float spread = 170.0f + (i % 13) * 18.0f;
+            const float bx = 600.0f + side * spread;
+            const float by = 260.0f + std::sin(j) * 155.0f + std::sin(turn + j) * 15.0f;
+            curve(g,
+                  i % 3 == 0 ? C(20, 212, 24, 95) : C(13, 165, 56, 111),
+                  3.0f + i % 7 * 2.3f,
+                  P(bx - 65.0f, by + 35.0f),
+                  P(bx - 10.0f, by - 70.0f - std::sin(turn) * 23.0f),
+                  P(bx + 75.0f, by + 48.0f),
+                  P(bx + 170.0f, by - 52.0f));
+        }
 
         const C ring(50, 200, 18, 62);
         oval(g, ring, 1.2f, R(255, 40, 690, 570));
@@ -503,10 +521,6 @@ private:
                 C(222, 249, 91, 120));
         line(g, C(220, 255, 25, 105), 2.7f, P(600,82), P(600,211));
 
-        // The four sculpted mirrored shells are filled with real metallic
-        // gradients, edge bevels, grooves and chrome scratches.
-        sculptedArmour(g);
-
         // Lower crystal armor / fangs.
         polygon(g, {P(228,315), P(308,388), P(421,432), P(538,436),
                     P(493,467), P(352,449), P(288,417)},
@@ -516,6 +530,10 @@ private:
                 C(255, 46, 52, 65), C(255, 5, 7, 14), edge);
         polygon(g, {P(565,437), P(600,520), P(635,437), P(604,468)},
                 C(255, 126, 131, 150), C(255, 11, 11, 21), hot);
+
+        // Layer deep curved brushed steel ON TOP of the faceted subframe.
+        // Distinct mirror-symmetric Bezier blade families with raised bevels.
+        sculptedArmour(g);
 
         // A moving, material metallic eyelid: the red inner contour converges
         // into a real slit on blink while outer armor stays fixed.
