@@ -3791,6 +3791,9 @@ MainComponent::MainComponent()
 
     // Startup panel — shown after first scan
     startupPanel_ = std::make_unique<DAW::StartupPanel>();
+    // Closing the start page is an explicit choice. An in-flight plugin scan
+    // must never resurrect it over an active user session.
+    startupPanel_->onDismissed = [this] { startupPanelMayBeShown_ = false; };
     startupPanel_->onNewProject = [this]
     {
         startupPanel_->dismiss();
@@ -8943,28 +8946,32 @@ void MainComponent::startPluginScanIfNeeded()
     if (scanStarted_ || scanDialog_ == nullptr)
         return;
 
-    // Only auto-scan when there is no cached plugin data yet.
-    // If cache exists, keep startup fast and rely on the persisted list.
+    // Startup is a navigation decision, NOT a plugin-scan completion event.
+    // Present the existing New/Open/Recent/Rescan page on every normal launch,
+    // including an empty or damaged plugin cache and a slow/hung third-party scan.
+    if (startupPanel_ && startupPanelMayBeShown_)
+    {
+        startupPanel_->setProjectName("APEX");
+        startupPanel_->setPluginInfo(
+            appCore_.getPluginScanner().getKnownPlugins().getNumTypes(),
+            appCore_.getPluginScanner().getFailureStore().getCount());
+        startupPanel_->addRecentFile(appCore_.getProjectManager().getProjectFile());
+        startupPanel_->setBounds(getLocalBounds());
+        startupPanel_->setVisible(true);
+        startupPanel_->toFront(false);
+    }
+
     auto& scanner = appCore_.getPluginScanner();
     const bool hasCachedPlugins = scanner.getCache().getCount() > 0
         || scanner.getKnownPlugins().getNumTypes() > 0;
+    scanStarted_ = true;
     if (hasCachedPlugins)
-    {
-        scanStarted_ = true;
-        // Show scan dialog briefly with cached status, then proceed to startup panel
-        scanDialog_->setBounds(getLocalBounds());
-        scanDialog_->setVisible(true);
-        scanDialog_->toFront(true);
-        scanDialog_->showCachedLoadAndAutoClose();
-        return;
-    }
+        return; // Persisted registry is ready; manual Rescan stays available.
 
     appendMainStartupTrace("startPluginScanIfNeeded.begin");
-    scanStarted_ = true;
-    scanDialog_->setBounds(getLocalBounds());
-    scanDialog_->setVisible(true);
-    scanDialog_->toFront(true);
-    scanDialog_->startScan();
+    // First-run discovery must not cover or gate the start page. The existing
+    // scan dialog still owns progress/completion and is shown for MANUAL rescans.
+    scanDialog_->startScan(false, false);
     appendMainStartupTrace("startPluginScanIfNeeded.after-startScan");
 }
 

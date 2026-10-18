@@ -1063,6 +1063,42 @@ public:
         }
 
 
+        // ── Real startup page smoke (normal EXE, not APEXTests) ──────────
+        // A valid window is insufficient: New/Open/Recent/Rescan must be
+        // on-screen and hit-testable even while first-run discovery runs.
+        if (processArguments.contains ("--apex-ci-startup-panel"))
+        {
+            juce::Timer::callAfterDelay (4000, [this]
+            {
+                bool presented = false;
+                if (mainWindow != nullptr && mainWindow->getPeer() != nullptr)
+                {
+                    if (auto* component = mainWindow->getMainComponent())
+                    {
+                        for (int i = 0; i < component->getNumChildComponents(); ++i)
+                        {
+                            if (auto* panel = dynamic_cast<DAW::StartupPanel*> (
+                                    component->getChildComponent(i)))
+                            {
+                                auto* hit = component->getComponentAt (
+                                    panel->getBounds().getCentre());
+                                presented = panel->isShowing()
+                                    && panel->getWidth() > 0 && panel->getHeight() > 0
+                                    && (hit == panel || panel->isParentOf(hit));
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                juce::Logger::writeToLog (presented
+                    ? "[APEX CI STARTUP PANEL] PASS: visible and topmost on real DAW startup"
+                    : "[APEX CI STARTUP PANEL] FAIL: missing, hidden or covered startup page");
+                setApplicationReturnValue (presented ? 0 : 1);
+                quit();
+            });
+        }
+
         // ── Production MixerStrip automation UI action/persistence smoke ──
         // This executes the real UICore/MixerPanel.h MixerStrip lifecycle
         // inside the actual DAW executable, rather than testing only the
