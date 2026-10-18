@@ -29,6 +29,7 @@ ApexTuneEditorComponent::ApexTuneEditorComponent()
     addAndMakeVisible (*toolbar_);
     addAndMakeVisible (*pianoGrid_);
     addAndMakeVisible (*pitchTrace_);
+    addAndMakeVisible (eyeStamp_);
 
     wireToolbar();
 
@@ -49,6 +50,7 @@ ApexTuneEditorComponent::ApexTuneEditorComponent()
     };
 
     setSize (960, 480);
+    eyeStamp_.placeInCorner (*this);
     startTimerHz (30);
 }
 
@@ -402,6 +404,7 @@ void ApexTuneEditorComponent::resized()
 
     if (pitchTrace_ != nullptr)
         pitchTrace_->setBounds (area);
+    eyeStamp_.placeInCorner (*this);
 }
 
 }} // namespace apex::vocaltune
