@@ -584,15 +584,15 @@ private:
         makeEyeContour(fullEye, 1.0f);
         makeEyeContour(slit, openness);
 
-        Gdiplus::Region covered(&fullEye);
         Gdiplus::Region aperture(&slit);
-        covered.Exclude(&aperture);
 
         // Separate top and bottom material using a subtle two-plane lighting
         // scheme. At full closure opacity tends to ZERO: no cheap steel oval.
-        Gdiplus::Region upper(covered);
+        Gdiplus::Region upper(&fullEye);
+        upper.Exclude(&aperture);
         upper.Intersect(R(205.0f, 110.0f, 790.0f, 208.0f));
-        Gdiplus::Region lower(covered);
+        Gdiplus::Region lower(&fullEye);
+        lower.Exclude(&aperture);
         lower.Intersect(R(205.0f, 318.0f, 790.0f, 166.0f));
 
         const auto a = static_cast<BYTE>(210.0f * strength);
