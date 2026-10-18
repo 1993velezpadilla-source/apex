@@ -982,12 +982,15 @@ public:
         // Evo Eye is DRAWN FROM C++ PATHS, shaders/gradients and live effects.
         // No runtime bitmap, bundled JPEG/PNG or sidecar image. The splash
         // renders on an independent Win32 thread while JUCE initializes.
+        DAW::StartupProgressCore::reset();
         splashScreen_ = DAWSplashScreen::launch();
+        DAW::StartupProgressCore::reach(4);
         juce::Logger::writeToLog(splashScreen_ != nullptr
             ? "[EVO EYE] Procedural C++ startup eye launched"
             : "[EVO EYE] Procedural renderer unavailable; existing StartupPanel still opens");
 
         mainWindow.reset (new MainWindow (getApplicationName()));
+        DAW::StartupProgressCore::reach(88);
         DAW::ApexProcessModeStateCore::markNormalGuiCreated();
 
         // Register the main window with the presentation clock so the
@@ -1024,6 +1027,7 @@ public:
                 mainWindow->setVisible(true);
                #endif
 
+                DAW::StartupProgressCore::reach(92);
                 // The existing StartupPanel is presented asynchronously.
                 // Keep Evo Eye moving until its actual UI has appeared.
                 splashWaitStartedAt_ = juce::Time::getMillisecondCounter();
@@ -2084,6 +2088,7 @@ private:
             return;
         }
 
+        DAW::StartupProgressCore::reach(100);
         stopTimer();
         juce::Logger::writeToLog(
             "[EVO EYE] StartupPanel visible; ending repeating eye animation");
