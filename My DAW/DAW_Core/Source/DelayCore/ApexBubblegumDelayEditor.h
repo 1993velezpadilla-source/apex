@@ -2,6 +2,7 @@
 // Original APEX Bubblegum GUI: dark glass + magenta/teal; no Waves assets.
 #include <JuceHeader.h>
 #include "ApexBubblegumDelayProcessor.h"
+#include "../UICore/ApexEvoEyeStamp.h"
 #include <array>
 #include <cmath>
 
@@ -103,7 +104,9 @@ public:
         addAndMakeVisible(readout_);
         setResizable(true,true);
         setResizeLimits(760,400,1560,750);
+        addAndMakeVisible (eyeStamp_);
         setSize(1060,510);
+        eyeStamp_.placeInCorner (*this);
         syncFromParameters();
         startTimerHz(30);
     }
@@ -175,6 +178,7 @@ public:
     }
     void resized() override
     {
+        eyeStamp_.placeInCorner (*this);
         auto r=[this](int x,int y,int w,int h)
         {
             const float sx=getWidth()/1060.0f,sy=getHeight()/510.0f;
@@ -342,6 +346,7 @@ private:
             readout_.setText({},juce::dontSendNotification);
         repaint();
     }
+    APEX::UI::EvoEyeStamp eyeStamp_;
     Processor& processor_;
     DelayLookAndFeel skin_;
     std::array<juce::Slider,9> knobs_;
