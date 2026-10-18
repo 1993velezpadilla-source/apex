@@ -180,24 +180,24 @@ private:
         }
     }
 
-    static Gdiplus::GraphicsPath eyeContour(float open)
+    static void makeEyeContour(Gdiplus::GraphicsPath& p, float open)
     {
         // The eye is physically modeled in code, and its interior CLIP follows
         // the eyelids. It is NOT an image with an artificial dark overlay.
         const float top = 304.0f - 176.0f * open;
         const float bottom = 304.0f + 161.0f * open;
-        Gdiplus::GraphicsPath p;
+        p.Reset();
         p.StartFigure();
         p.AddBezier(P(213, 304), P(365, top), P(835, top), P(987, 304));
         p.AddBezier(P(987, 304), P(826, bottom), P(374, bottom), P(213, 304));
         p.CloseFigure();
-        return p;
     }
 
     static void iris(G& g, float sec, float openness)
     {
         if (openness < 0.006f) return;
-        Gdiplus::GraphicsPath aperture = eyeContour(openness);
+        Gdiplus::GraphicsPath aperture;
+        makeEyeContour(aperture, openness);
         const auto saved = g.Save();
         g.SetClip(&aperture, Gdiplus::CombineModeIntersect);
 
