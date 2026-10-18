@@ -812,6 +812,15 @@ public:
         addAndMakeVisible (matchButton_);
         addAndMakeVisible (matchSaveButton_);
         addAndMakeVisible (matchLoadButton_);
+        addAndMakeVisible (toolsButton_);
+        // Advanced toolbar actions remain callable, but the graph no longer
+        // has seven chunky always-on buttons obscuring the actual EQ.
+        copyButton_.setVisible (false);
+        pasteButton_.setVisible (false);
+        matchSaveButton_.setVisible (false);
+        matchLoadButton_.setVisible (false);
+        toolsButton_.setTitle ("Band clipboard and reference utilities");
+        toolsButton_.onClick = [this] { openToolsMenu(); };
         sketchButton_.setTitle ("Draw an EQ curve and convert it to APEX bands");
         sketchButton_.setClickingTogglesState (true);
         sketchButton_.setColour (juce::TextButton::buttonColourId,
@@ -863,8 +872,8 @@ public:
             if (grabArmed_)
                 resetMatchCapture();
             matchButton_.setVisible (! grabArmed_);
-            matchSaveButton_.setVisible (! grabArmed_);
-            matchLoadButton_.setVisible (! grabArmed_);
+            matchSaveButton_.setVisible (false);
+            matchLoadButton_.setVisible (false);
             grabButton_.setButtonText (grabArmed_ ? "GRAB ON" : "NO PEAKS");
             grabButton_.setColour (juce::TextButton::buttonColourId,
                 grabArmed_ ? Palette::accentActive() : Palette::surfaceHover());
@@ -941,38 +950,37 @@ public:
     void resized() override
     {
         curveDirty_ = true;
-        // A single touch-safe tool ribbon replaces the previous two rows
-        // that covered ~100 px of a 142 px graph on 320px phones. Every
-        // action remains accessible; 7 * 44 + 2 * 6 == 320 exactly.
+        // Four 44px+ touch targets instead of seven graph-obscuring tabs.
+        // Clipboard/reference controls are still accessible in TOOLS.
         constexpr int padding = 6;
         const int width = std::max (1, getWidth());
         const int cell = std::clamp (
-            (width - 2 * padding) / 7,
+            (width - 2 * padding) / 4,
             ParametricEQEditor::kTouchTarget, 110);
-        std::array<juce::TextButton*, 7> actions {{
-            &sketchButton_, &grabButton_, &copyButton_, &pasteButton_,
-            &matchButton_, &matchSaveButton_, &matchLoadButton_
+        std::array<juce::TextButton*, 4> primary {{
+            &sketchButton_, &grabButton_, &matchButton_, &toolsButton_
         }};
-        // Seven controls fit exactly at 320px, but long captions become
-        // unreadable when JUCE shrinks the font. Shorten only the idle tool
-        // captions on compact widths; active EQ Match / Save state labels
-        // are preserved so resize cannot erase the current workflow.
-        const bool compact = width <= 430;
         if (matchButton_.getButtonText() == "EQ MATCH"
             || matchButton_.getButtonText() == "MATCH")
-            matchButton_.setButtonText (compact ? "MATCH" : "EQ MATCH");
-        if (matchSaveButton_.getButtonText() == "REF SAVE"
-            || matchSaveButton_.getButtonText() == "SAVE")
-            matchSaveButton_.setButtonText (compact ? "SAVE" : "REF SAVE");
-        if (matchLoadButton_.getButtonText() == "REF LOAD"
-            || matchLoadButton_.getButtonText() == "LOAD")
-            matchLoadButton_.setButtonText (compact ? "LOAD" : "REF LOAD");
+            matchButton_.setButtonText (width <= 430 ? "MATCH" : "EQ MATCH");
         int x = padding;
-        for (auto* action : actions)
+        for (auto* action : primary)
         {
             action->setBounds (x, 8, cell, ParametricEQEditor::kTouchTarget);
             x += cell;
         }
+        // Hidden native buttons remain live for existing action handlers,
+        // tests and host-param semantics; they intercept no pointer events.
+        for (auto* hidden : { &copyButton_, &pasteButton_,
+                              &matchSaveButton_, &matchLoadButton_ })
+            hidden->setBounds (0, 0, ParametricEQEditor::kTouchTarget,
+                                    ParametricEQEditor::kTouchTarget);
+        if (matchSaveButton_.getButtonText() == "REF SAVE"
+            || matchSaveButton_.getButtonText() == "SAVE")
+            matchSaveButton_.setButtonText (width <= 430 ? "SAVE" : "REF SAVE");
+        if (matchLoadButton_.getButtonText() == "REF LOAD"
+            || matchLoadButton_.getButtonText() == "LOAD")
+            matchLoadButton_.setButtonText (width <= 430 ? "LOAD" : "REF LOAD");
     }
 
     void paint (juce::Graphics& g) override
@@ -1336,6 +1344,7 @@ public:
     juce::TextButton& getCopyButtonForTesting() noexcept { return copyButton_; }
     juce::TextButton& getPasteButtonForTesting() noexcept { return pasteButton_; }
     juce::TextButton& getMatchButtonForTesting() noexcept { return matchButton_; }
+    juce::TextButton& getToolsButtonForTesting() noexcept { return toolsButton_; }
     juce::TextButton& getMatchSaveButtonForTesting() noexcept
     {
         return matchSaveButton_;
@@ -1364,6 +1373,36 @@ public:
     }
 
 private:
+    void openToolsMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("BAND");
+        menu.addItem (1, "Copy selected band", owner_.getSelectedBandForTesting() >= 0);
+        menu.addItem (2, "Paste as new band", nativeBandClipboard().valid);
+        menu.addSeparator();
+        menu.addSectionHeader ("EQ MATCH REFERENCE");
+        menu.addItem (3, "Save reference", matchReference_.ready() && ! grabArmed_);
+        menu.addItem (4, "Load shared reference",
+                      sharedMatchReference().valid && ! grabArmed_);
+        juce::Component::SafePointer<EqGraphComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&toolsButton_),
+            [safe] (int id)
+            {
+                if (auto* graph = safe.getComponent())
+                {
+                    switch (id)
+                    {
+                        case 1: graph->copyButton_.onClick(); break;
+                        case 2: graph->pasteButton_.onClick(); break;
+                        case 3: graph->matchSaveButton_.onClick(); break;
+                        case 4: graph->matchLoadButton_.onClick(); break;
+                        default: break;
+                    }
+                }
+            });
+    }
+
     void timerCallback() override
     {
         ResponseFrame frame;
@@ -1664,8 +1703,8 @@ private:
     {
         grabArmed_ = false;
         matchButton_.setVisible (true);
-        matchSaveButton_.setVisible (true);
-        matchLoadButton_.setVisible (true);
+        matchSaveButton_.setVisible (false);
+        matchLoadButton_.setVisible (false);
         grabPlan_ = {};
         grabButton_.setButtonText ("GRAB");
         grabButton_.setColour (juce::TextButton::buttonColourId,
@@ -2211,6 +2250,7 @@ private:
     juce::TextButton matchButton_ { "EQ MATCH" };
     juce::TextButton matchSaveButton_ { "REF SAVE" };
     juce::TextButton matchLoadButton_ { "REF LOAD" };
+    juce::TextButton toolsButton_ { "TOOLS" };
     MatchCapture matchReference_;
     MatchCapture matchInput_;
     MatchStage matchStage_ = MatchStage::Idle;
@@ -3102,6 +3142,11 @@ juce::TextButton& ParametricEQEditor::getPasteButtonForTesting()
 juce::TextButton& ParametricEQEditor::getMatchButtonForTesting()
 {
     return graph_->getMatchButtonForTesting();
+}
+
+juce::TextButton& ParametricEQEditor::getToolsButtonForTesting()
+{
+    return graph_->getToolsButtonForTesting();
 }
 
 juce::TextButton& ParametricEQEditor::getMatchSaveButtonForTesting()
