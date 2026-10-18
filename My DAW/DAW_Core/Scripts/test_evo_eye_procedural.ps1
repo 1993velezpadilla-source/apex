@@ -38,7 +38,10 @@ $features = @(
     @{ Name = 'Live rendered eye'; Expression = 'static void iris' },
     @{ Name = 'Real frame-by-frame blink'; Expression = 'static float blink' },
     @{ Name = 'Electric iris strands'; Expression = 'for \(int i = 0; i < 78;' },
-    @{ Name = 'APEX vector wordmark'; Expression = 'textPath.AddString\(L"APEX"' },
+    @{ Name = 'Handcrafted APEX letterforms'; Expression = 'brand.AddLine\(P\(435, 615\)' },
+    @{ Name = 'Curved layered steel ornaments'; Expression = 'static void sculptedArmour' },
+    @{ Name = 'Code-drawn metallic bevels'; Expression = 'static void sculptedPlate' },
+    @{ Name = 'Electric arc strands'; Expression = 'filament\[9\]' },
     @{ Name = 'Exact official tagline'; Expression = 'L"AUDIO PRODUCTION ENGINEERING"' },
     @{ Name = 'Live fade to StartupPanel'; Expression = 'WaitForSingleObject\(stop_, 0\)' },
     @{ Name = 'Independent Win32 render loop'; Expression = 'static DWORD WINAPI runThread' }
@@ -87,4 +90,4 @@ if ([ApexProceduralEyeResourceAudit]::HasObsoleteEyeJpeg($exe)) {
     throw 'Built DAW_Core.exe still contains the obsolete JPEG in RCDATA 27182.'
 }
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-Write-Host "[PASS] EVO EYE $Configuration source-rendered C++ GUI verified: 9 features; no JPEG/PNG, no RCDATA 27182. SHA-256 $hash"
+Write-Host "[PASS] EVO EYE $Configuration source-rendered C++ GUI verified: $($features.Count) features; no JPEG/PNG, no RCDATA 27182. SHA-256 $hash"
