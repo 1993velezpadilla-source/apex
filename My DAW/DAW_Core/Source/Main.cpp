@@ -959,25 +959,59 @@ public:
             DAW::HostedPluginIsolationCore::commandLineRequestsIsolation(
                 getCommandLineParameterArray()));
 
-        // Win32 layered window splash — paints at OS level, independent of
-        // JUCE message loop, so it shows instantly even while MainComponent
-        // blocks the thread during heavy initialization.
-        //
-        // Packaging note: installation must place logo/1000166327(2).png
-        // beside the executable for the installed-logo path to resolve.
+        // EVO EYE: real animated Win32 splash runs on an independent thread.
+        // Prefer the supplied concept artwork beside the installed EXE;
+        // also find it from a source checkout while developing in Visual Studio.
+        // Keep the legacy splash as fallback if an installer predates Evo Eye.
         {
-            const auto executable = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
-            const auto installedLogo = executable.getSiblingFile("logo").getChildFile("1000166327(2).png");
-            const auto repositoryLogo = executable.getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getChildFile("logo")
-                                              .getChildFile("1000166327(2).png");
-            const auto logoFile = installedLogo.existsAsFile() ? installedLogo : repositoryLogo;
-            splashScreen_ = logoFile.existsAsFile() ? DAWSplashScreen::launch(logoFile) : nullptr;
+            const auto executable = juce::File::getSpecialLocation(
+                juce::File::currentExecutableFile);
+            juce::File image;
+            const auto installed = executable.getSiblingFile("Assets")
+                                             .getChildFile("EvoEye")
+                                             .getChildFile("evo_eye.jpg");
+            if (installed.existsAsFile())
+                image = installed;
+            else
+            {
+                auto ancestor = executable.getParentDirectory();
+                for (int depth = 0; depth < 12 && image == juce::File(); ++depth)
+                {
+                    const auto devAsset = ancestor.getChildFile("My DAW")
+                        .getChildFile("DAW_Core")
+                        .getChildFile("Source")
+                        .getChildFile("Resources")
+                        .getChildFile("EvoEye")
+                        .getChildFile("evo_eye.jpg");
+                    if (devAsset.existsAsFile())
+                        image = devAsset;
+                    const auto next = ancestor.getParentDirectory();
+                    if (next == ancestor)
+                        break;
+                    ancestor = next;
+                }
+            }
+
+            if (! image.existsAsFile())
+            {
+                const auto oldLogo = executable.getSiblingFile("logo")
+                                               .getChildFile("1000166327(2).png");
+                if (oldLogo.existsAsFile())
+                    image = oldLogo;
+            }
+
+            if (image.existsAsFile())
+            {
+                splashScreen_ = DAWSplashScreen::launch(image);
+                juce::Logger::writeToLog("[EVO EYE] splash asset: "
+                    + image.getFullPathName()
+                    + (splashScreen_ != nullptr ? " [animated]" : " [launch failed]"));
+            }
+            else
+            {
+                juce::Logger::writeToLog(
+                    "[EVO EYE] artwork missing; launching startup panel without splash");
+            }
         }
 
         mainWindow.reset (new MainWindow (getApplicationName()));
@@ -1622,6 +1656,14 @@ public:
         // Add your application's shutdown code here..
 
         juce::Logger::writeToLog("[SESSION] DAW_Core clean shutdown");
+
+        // Also release splash if initialization or a smoke-mode exit happened
+        // before the normal asynchronous startup-panel transition.
+        if (splashScreen_ != nullptr)
+        {
+            splashScreen_->finish();
+            splashScreen_ = nullptr;
+        }
 
         // Unregister main window from presentation clock before destruction.
         // This is the explicit lifecycle cleanup; componentBeingDeleted
