@@ -60,6 +60,8 @@ public:
     juce::Rectangle<int> getNodeBoundsForTesting (int band) const;
     juce::TextButton& getAuditionButtonForTesting();
     juce::TextButton& getPhaseButtonForTesting();
+    void applyPresetForTesting (int presetId);
+    float analyzerYForTesting (float db) const;
     juce::TextButton& getSketchButtonForTesting();
     juce::TextButton& getGrabButtonForTesting();
     juce::TextButton& getCopyButtonForTesting();
