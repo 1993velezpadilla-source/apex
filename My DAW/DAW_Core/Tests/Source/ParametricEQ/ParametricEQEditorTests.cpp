@@ -177,17 +177,25 @@ private:
             const auto topBar = editor->getTopBarBoundsForTesting();
             const auto graph = editor->getGraphBoundsForTesting();
             const auto inspector = editor->getInspectorBoundsForTesting();
-            // Even when the host forces a narrow or unusually short editor,
-            // the seven graph tools must remain independently tappable.
-            const std::array<juce::TextButton*, 7> tools {{
+            // Premium graph has four visible 44px+ actions; remaining
+            // clipboard/reference features live in the contextual menu.
+            const std::array<juce::TextButton*, 4> tools {{
                 &editor->getSketchButtonForTesting(),
                 &editor->getGrabButtonForTesting(),
-                &editor->getCopyButtonForTesting(),
-                &editor->getPasteButtonForTesting(),
                 &editor->getMatchButtonForTesting(),
-                &editor->getMatchSaveButtonForTesting(),
-                &editor->getMatchLoadButtonForTesting()
+                &editor->getToolsButtonForTesting()
             }};
+            for (auto* hidden : { &editor->getCopyButtonForTesting(),
+                                   &editor->getPasteButtonForTesting(),
+                                   &editor->getMatchSaveButtonForTesting(),
+                                   &editor->getMatchLoadButtonForTesting() })
+            {
+                expect (! hidden->isVisible(),
+                    "contextual features must not crowd the EQ graph");
+                expect (hidden->getWidth() >= 44
+                    && hidden->getHeight() >= 44,
+                    "hidden action handlers remain accessible and testable");
+            }
             for (std::size_t tool = 0; tool < tools.size(); ++tool)
             {
                 const auto b = tools[tool]->getBounds();
