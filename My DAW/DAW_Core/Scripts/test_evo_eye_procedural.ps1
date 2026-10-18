@@ -72,7 +72,7 @@ foreach ($feature in $features) {
 # arches. Never revive two upper sculptedPlate layers or reopen the oval.
 if ($header -match 'P\(583,244\)' -or $header -match 'P\(573,254\)' -or
     $header -notmatch 'drawScowlingBrow\(g, right\)' -or
-    $header -notmatch 'plating\(g\);\s*\}\s*else') {
+    $header -notmatch 'g\.Restore\(guard\);\s*\}\s*else') {
     throw 'Old M-shaped brow or full-eye closed aperture regression.'
 }
 
