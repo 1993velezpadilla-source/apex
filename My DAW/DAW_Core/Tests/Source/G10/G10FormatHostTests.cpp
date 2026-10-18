@@ -228,13 +228,15 @@ public:
                     "scanner seeded Parametric EQ into the cache");
             expect (scanner.getCache().hasCachedEntry ("APEX::Opto2A"),
                     "scanner seeded Opto 2A into the cache/browser");
+            expect (scanner.getCache().hasCachedEntry ("APEX::ReverieReverb"),
+                    "scanner seeded Reverie into the cache/browser");
             int apexNativeCount = 0;
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 4,
-                          "exactly four APEX Native entries after startup");
-            expect (scanner.getCache().getCount() >= 4, "existing cache entries preserved");
+            expectEquals (apexNativeCount, 5,
+                          "exactly five APEX Native entries after startup");
+            expect (scanner.getCache().getCount() >= 5, "existing cache entries preserved");
         }
     }
 
