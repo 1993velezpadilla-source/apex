@@ -157,4 +157,9 @@ public:
         }
     }
 };
-static ReverieNativeHostTests reverieNativeHostTests;
+// Explicit anchor so MSVC /GL + /LTCG cannot silently omit this suite.
+void registerApexReverieNativeHostTests()
+{
+    static ReverieNativeHostTests test;
+    juce::ignoreUnused(test);
+}

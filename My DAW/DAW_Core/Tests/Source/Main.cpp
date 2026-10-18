@@ -7,6 +7,7 @@
 // Force-link the Opto host suite even when MSVC Release enables LTCG.
 // Without this anchor, --category=APEX.Compressor may report zero tests.
 void registerApexOptoNativeHostTests();
+void registerApexReverieNativeHostTests();
 
 //==============================================================================
 #define APEX_STRINGIFY_IMPL(x) #x
@@ -74,6 +75,7 @@ int main (int argc, char** argv)
      // Register before category listing/filtering so a Release build cannot
      // silently drop the compressor suite when it optimises translation units.
      registerApexOptoNativeHostTests();
+     registerApexReverieNativeHostTests();
 
     #if JUCE_WINDOWS
      ApexTestDiagnostics::install();
