@@ -183,6 +183,7 @@ public:
         };
         addAndMakeVisible(tap_);
         readout_.setName("ACTIVE CONTROL VALUE");
+        readout_.setVisible(false);
         readout_.setJustificationType(juce::Justification::centred);
         readout_.setInterceptsMouseClicks(false,false);
         readout_.setColour(juce::Label::textColourId,juce::Colour(0xfffbdaf5));
@@ -192,94 +193,151 @@ public:
         setResizeLimits(760,400,1560,750);
         setSize(1060,510);
         syncFromParameters();
-        startTimerHz(30);
+        startTimerHz(20);
     }
     ~Editor() override { stopTimer(); setLookAndFeel(nullptr); }
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xff101522));
+        // Draw at the fixed design grid and scale it with the live JUCE
+        // controls. No flattened screenshot: every dial remains interactive.
+        g.fillAll(juce::Colour(0xff050c19));
         g.addTransform(juce::AffineTransform::scale(
             getWidth()/1060.0f,getHeight()/510.0f));
-        const auto background=juce::Colour(0xff151b2b);
-        const auto accent=juce::Colour(0xffff53ae);
-        const auto teal=juce::Colour(0xff56eade);
-        g.setColour(background);
-        g.fillRoundedRectangle(16,12,1028,483,18);
-        g.setColour(juce::Colour(0xff303c54));
-        g.drawRoundedRectangle(16,12,1028,483,18,1.5f);
-        g.setColour(accent);g.fillRoundedRectangle(29,24,7,52,3);
-        g.setFont(juce::Font(juce::FontOptions(28.0f,juce::Font::bold)));
-        g.drawText("APEX",49,23,100,37,juce::Justification::centredLeft);
-        g.setColour(juce::Colour(0xffe7e8f2));
+
+        const auto pink=juce::Colour(0xffff5abf);
+        const auto cyan=juce::Colour(0xff35f1f3);
+        const auto ivory=juce::Colour(0xffeaf1fb);
+        const auto muted=juce::Colour(0xffa3b5ce);
+
+        // The reference's continuous rounded dark-blue shell and inner card.
+        g.setGradientFill(juce::ColourGradient(
+            juce::Colour(0xff152039),0,0,juce::Colour(0xff050e1c),1050,505,false));
+        g.fillRoundedRectangle(12.0f,10.0f,1036.0f,488.0f,20.0f);
+        g.setColour(juce::Colour(0xff44749b));
+        g.drawRoundedRectangle(12.0f,10.0f,1036.0f,488.0f,20.0f,0.9f);
+        g.setColour(juce::Colour(0xff192a43));
+        g.drawRoundedRectangle(20.0f,77.0f,1020.0f,413.0f,13.0f,1.0f);
+
+        // APEX neon brand, deliberately anchored to the reference.
+        g.setColour(pink.withAlpha(0.24f));
+        g.fillRoundedRectangle(25.0f,23.0f,9.0f,55.0f,5.0f);
+        g.setColour(pink);
+        g.fillRoundedRectangle(27.0f,24.0f,5.0f,52.0f,3.0f);
+        g.setColour(pink.withAlpha(0.18f));
+        g.setFont(juce::Font(juce::FontOptions(31.0f,juce::Font::bold)));
+        g.drawText("APEX",45,22,139,43,juce::Justification::centredLeft);
+        g.setColour(juce::Colour(0xffff7fcf));
+        g.drawText("APEX",44,21,139,43,juce::Justification::centredLeft);
+        g.setColour(ivory);
         g.setFont(juce::Font(juce::FontOptions(21.0f)));
-        g.drawText("BUBBLEGUM DELAY",150,26,380,32,juce::Justification::centredLeft);
-        g.setColour(teal);
-        g.setFont(juce::Font(juce::FontOptions(12.0f)));
-        g.drawText("ORIGINAL NATIVE DSP  •  STEREO  •  ZERO PDC",620,29,394,32,
-                   juce::Justification::centredRight);
-        g.setColour(juce::Colour(0xff222e40));
-        g.fillRoundedRectangle(325,123,403,180,15);
-        g.setColour(juce::Colour(0xff364d62));
-        g.drawRoundedRectangle(325,123,403,180,15,1.4f);
-        g.setColour(juce::Colour(0xffb1bccd));
-        g.setFont(juce::Font(juce::FontOptions(12.0f,juce::Font::bold)));
-        g.drawText("TEMPO / DELAY",341,135,367,18,juce::Justification::centred);
-        const auto sync=static_cast<int>(processor_.getParameterAt(SyncMode).getUnits());
-        const auto note=static_cast<int>(processor_.getParameterAt(Note).getUnits());
-        const auto ms=processor_.getParameterAt(TimeMs).getUnits();
-        const auto bpm=processor_.getParameterAt(ManualBpm).getUnits();
-        const auto activeBpm=sync==2?bpm:processor_.getHostTempoForDisplay();
-        const auto beats=Engine::kNoteBeats[static_cast<std::size_t>(juce::jlimit(0,12,note))];
-        juce::String shown=sync==0?juce::String(ms,1)+" ms"
-            :juce::String(static_cast<int>(std::lround(juce::jlimit(
-                          1.0,3500.0,60000.0*beats/juce::jmax(1.0,activeBpm)))))+" ms";
-        g.setColour(teal);
-        g.setFont(juce::Font(juce::FontOptions(43.0f,juce::Font::bold)));
-        g.drawText(shown,345,157,363,53,juce::Justification::centred);
-        g.setColour(juce::Colour(0xff9eabbf));
+        g.drawText("BUBBLEGUM DELAY",188,25,385,37,
+                   juce::Justification::centredLeft);
+        g.setColour(cyan);
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText(sync==1?"Host tempo drives timing"
-                 :sync==2?"Manual BPM drives timing":"Free-running millisecond timing",
-                   346,207,360,16,juce::Justification::centred);
-        const char* captions[]={"DELAY","FEEDBACK","MOD DEPTH","MOD RATE",
-                                 "HIGH PASS","LOW PASS","DRY / WET","OUTPUT","BPM"};
-        const float cx[]={165,891,90,207,328,449,577,697,891};
-        const float cy[]={127,127,313,313,313,313,313,313,313};
-        for(int k=0;k<9;++k)
-        {
-            g.setColour(k<2?accent:juce::Colour(0xffaeb8cb));
-            g.setFont(juce::Font(juce::FontOptions(k<2?16.0f:12.0f,juce::Font::bold)));
-            g.drawText(captions[k],cx[k]-(k<2?89:55),cy[k]-22,
-                k<2?178:110,22,juce::Justification::centred);
-        }
-        g.setColour(juce::Colour(0xff293649));
-        g.drawLine(30,436,1030,436,1);
-        g.setColour(juce::Colour(0xff7687a5));
-        g.setFont(juce::Font(juce::FontOptions(12.0f)));
-        g.drawText("BUBBLEGUM ENGINE • PARAMETERS AUTOMATABLE • LIVE VALUES ON TOUCH",
-                   32,468,996,20,juce::Justification::centred);
+        g.drawText("ORIGINAL NATIVE DSP  •  STEREO  •  ZERO PDC",
+                   710,27,306,31,juce::Justification::centredRight);
+
+        // Dark central tempo glass; thin cyan edge, no obstruction of the
+        // combo boxes, touch regions or popup lists.
+        auto panel=juce::Rectangle<float>(314,93,433,171);
+        g.setGradientFill(juce::ColourGradient(
+            juce::Colour(0xff1a324c),panel.getX(),panel.getY(),
+            juce::Colour(0xff08162a),panel.getRight(),panel.getBottom(),false));
+        g.fillRoundedRectangle(panel,12.0f);
+        g.setColour(juce::Colour(0xff3b789f));
+        g.drawRoundedRectangle(panel,12.0f,1.4f);
+        g.setColour(cyan.withAlpha(0.11f));
+        g.drawRoundedRectangle(panel.reduced(2),11.0f,1.0f);
+        g.setColour(cyan.withAlpha(0.05f));
+        for(int iy=0;iy<6;++iy)
+            for(int ix=0;ix<25;++ix)
+                g.fillEllipse(339.0f+ix*15.2f,110.0f+iy*9.0f,1.0f,1.0f);
+        g.setColour(muted);
+        g.setFont(juce::Font(juce::FontOptions(13.0f,juce::Font::bold)));
+        g.drawText("TEMPO / DELAY",335,102,392,22,juce::Justification::centred);
+
+        const auto sync=static_cast<int>(processor_.getParameterAt(SyncMode).getUnits());
+        const auto note=juce::jlimit(0,12,static_cast<int>(
+            processor_.getParameterAt(Note).getUnits()));
+        const double ms=processor_.getEffectiveDelayMsForDisplay();
+        const juce::String shown=sync==0?juce::String(ms,1)+" ms"
+                                              :juce::String(juce::roundToInt(ms))+" ms";
+        g.setColour(cyan.withAlpha(0.13f));
+        g.setFont(juce::Font(juce::FontOptions(51.0f,juce::Font::bold)));
+        g.drawText(shown,337,126,387,55,juce::Justification::centred);
+        g.setColour(cyan);
+        g.drawText(shown,335,124,387,55,juce::Justification::centred);
+        g.setColour(muted);
+        g.setFont(juce::Font(juce::FontOptions(11.5f)));
+        const auto hostBpm=processor_.getHostTempoForDisplay();
+        juce::String tempoSub=sync==0?"Free-running millisecond timing"
+            :sync==2?"Manual tempo: "+juce::String(
+                processor_.getParameterAt(ManualBpm).getUnits(),1)+" BPM"
+            :processor_.hasHostTempo()?"Host tempo drives timing • "
+                +juce::String(hostBpm,1)+" BPM"
+            :"Host sync: awaiting project tempo (120 BPM fallback)";
+        g.drawText(tempoSub,338,183,387,18,juce::Justification::centred);
+
+        // Left/right hero knobs.
+        g.setColour(pink);
+        g.setFont(juce::Font(juce::FontOptions(16.0f,juce::Font::bold)));
+        g.drawText("DELAY",75,100,178,25,juce::Justification::centred);
+        g.drawText("FEEDBACK",807,100,178,25,juce::Justification::centred);
+
+        // Clearly separate the lower parameter band. Labels are ONLY 6 px
+        // above their associated rotary surfaces, not inside the hero row.
+        g.setColour(juce::Colour(0xff346080));
+        g.drawLine(31.0f,278.0f,1029.0f,278.0f,0.85f);
+        g.setGradientFill(juce::ColourGradient(
+            juce::Colour(0x132e5675),28,288,
+            juce::Colour(0x00071122),28,424,false));
+        g.fillRoundedRectangle(28.0f,284.0f,1004.0f,140.0f,6.0f);
+        const char* captions[]={"MOD DEPTH","MOD RATE","HIGH PASS","LOW PASS",
+                                 "DRY / WET","OUTPUT","BPM"};
+        const int centers[]={99,234,369,503,638,773,957};
+        g.setColour(ivory);
+        g.setFont(juce::Font(juce::FontOptions(12.2f,juce::Font::bold)));
+        for(int i=0;i<7;++i)
+            g.drawText(captions[i],centers[i]-66,288,132,22,
+                       juce::Justification::centred);
+        g.setColour(juce::Colour(0xff3d6b8c));
+        g.drawLine(861.0f,294.0f,861.0f,416.0f,1.0f);
+
+        // Touch-safe footer; no text drawn underneath its actual buttons.
+        g.setColour(juce::Colour(0xff325c7a));
+        g.drawLine(31.0f,425.0f,1029.0f,425.0f,1.0f);
+        g.setColour(juce::Colour(0x330d1a30));
+        g.fillRoundedRectangle(24.0f,434.0f,1012.0f,55.0f,8.0f);
     }
     void resized() override
     {
-        auto r=[this](int x,int y,int w,int h)
+        const float sx=getWidth()/1060.0f,sy=getHeight()/510.0f;
+        auto r=[sx,sy](int x,int y,int w,int h)
         {
-            const float sx=getWidth()/1060.0f,sy=getHeight()/510.0f;
             return juce::Rectangle<int>(juce::roundToInt(x*sx),
-                juce::roundToInt(y*sy),juce::roundToInt(w*sx),juce::roundToInt(h*sy));
+                juce::roundToInt(y*sy),juce::roundToInt(w*sx),
+                juce::roundToInt(h*sy));
         };
-        knobs_[0].setBounds(r(92,149,150,148));
-        knobs_[1].setBounds(r(816,149,150,148));
-        const int x[]={40,158,279,400,522,642,840};
-        for(int i=2;i<9;++i) knobs_[i].setBounds(r(x[i-2],341,104,89));
-        sync_.setBounds(r(344,243,109,36));
-        note_.setBounds(r(466,243,115,36));
-        colour_.setBounds(r(594,243,115,36));
-        tap_.setBounds(r(45,445,121,40));
-        const int tx[]={197,349,487,624,761};
-        for(int i=0;i<5;++i) toggles_[i].setBounds(r(tx[i],443,130,43));
-        readout_.setBounds(r(370,74,324,42));
+        // Exactly two larger dials; readouts remain inside slider bounds.
+        knobs_[0].setBounds(r(92,128,138,138));
+        knobs_[1].setBounds(r(829,128,138,138));
+        // Layout taken from approved APEX GUI reference, not from a bitmap.
+        constexpr int x[]={47,182,317,451,586,721,905};
+        for(int i=2;i<9;++i)
+            knobs_[i].setBounds(r(x[i-2],307,104,111));
+
+        sync_.setBounds(r(333,210,119,40));
+        note_.setBounds(r(465,210,120,40));
+        colour_.setBounds(r(598,210,121,40));
+        tap_.setBounds(r(31,437,161,48));
+        constexpr int tx[]={210,378,538,703,868};
+        constexpr int tw[]={157,151,154,155,162};
+        for(int i=0;i<5;++i) toggles_[i].setBounds(r(tx[i],437,tw[i],48));
+        // A value popup only during interaction; unobstructed default GUI.
+        readout_.setBounds(r(360,71,340,26));
     }
+
 private:
     void makeKnob(int slot,int parameter,double low,double high,double initial,
                   double step,const char* unit)
@@ -288,6 +346,10 @@ private:
         s.setName(p.getName(128));
         s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         s.setTextBoxStyle(juce::Slider::TextBoxBelow,false,100,24);
+        s.setColour(juce::Slider::textBoxTextColourId,juce::Colour(0xffedf6ff));
+        s.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff0a1526));
+        s.setColour(juce::Slider::textBoxOutlineColourId,juce::Colour(0xff467fac));
+        s.setColour(juce::Slider::textBoxHighlightColourId,juce::Colour(0xff315d78));
         s.setRange(low,high,step);
         s.setValue(initial,juce::dontSendNotification);
         s.setTextValueSuffix(unit);
@@ -360,6 +422,7 @@ private:
         const auto value=index==Note
             ? divisionName(static_cast<int>(std::lround(p.getUnits())))
             : p.getText(p.getValue(),128);
+        readout_.setVisible(true);
         readout_.setText(p.getName(128).toUpperCase()+": "+value,
                          juce::dontSendNotification);
         hideReadoutAfter_=juce::Time::getMillisecondCounterHiRes()+1600.0;
@@ -426,7 +489,10 @@ private:
     {
         syncFromParameters();
         if(juce::Time::getMillisecondCounterHiRes()>hideReadoutAfter_)
+        {
             readout_.setText({},juce::dontSendNotification);
+            readout_.setVisible(false);
+        }
         repaint();
     }
     Processor& processor_;
