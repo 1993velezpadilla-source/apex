@@ -104,6 +104,23 @@ public:
             expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),300.0,0.05,
                                       "tempo changes automatically retime HOST delay");
 
+            // Two bars at 120 BPM are 4000 ms; at 30 BPM they are 16000 ms.
+            // Both MUST follow transport tempo instead of the 3500ms MS cap.
+            tempoDelay.getParameterAt(Note).setValue(
+                tempoDelay.getParameterAt(Note).toNormalised(12.0f));
+            clockSnapshot.bpm=120.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            scratch.clear();
+            tempoDelay.processBlock(scratch,empty);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),4000.0,0.1);
+            clockSnapshot.bpm=30.0;
+            hostClock.updateSnapshot(clockSnapshot);
+            scratch.clear();
+            tempoDelay.processBlock(scratch,empty);
+            expectWithinAbsoluteError(tempoDelay.getEffectiveDelayMsForDisplay(),16000.0,0.1);
+            tempoDelay.getParameterAt(Note).setValue(
+                tempoDelay.getParameterAt(Note).toNormalised(5.0f));
+
             tempoDelay.getParameterAt(SyncMode).setValue(
                 tempoDelay.getParameterAt(SyncMode).toNormalised(2.0f));
             tempoDelay.getParameterAt(ManualBpm).setValue(
