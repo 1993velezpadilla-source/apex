@@ -967,8 +967,7 @@ public:
             const auto executable = juce::File::getSpecialLocation(
                 juce::File::currentExecutableFile);
             juce::File image;
-            const auto installed = executable.getSiblingFile("Assets")
-                                             .getChildFile("EvoEye")
+            const auto installed = executable.getSiblingFile("EvoEye")
                                              .getChildFile("evo_eye.jpg");
             if (installed.existsAsFile())
                 image = installed;
@@ -979,8 +978,7 @@ public:
                 {
                     const auto devAsset = ancestor.getChildFile("My DAW")
                         .getChildFile("DAW_Core")
-                        .getChildFile("Source")
-                        .getChildFile("Resources")
+                        .getChildFile("Assets")
                         .getChildFile("EvoEye")
                         .getChildFile("evo_eye.jpg");
                     if (devAsset.existsAsFile())
