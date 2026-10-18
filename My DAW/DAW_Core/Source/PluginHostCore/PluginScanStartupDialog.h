@@ -61,16 +61,19 @@ public:
         setVisible(true);
     }
 
-void startScan(bool forceFull = false)
+void startScan(bool forceFull = false, bool showDialog = true)
     {
         // If a scan is already running, its progress + completion callbacks are
         // already wired to this dialog. Do NOT wipe shared scan state mid-scan or
         // strand the UI; just make sure the dialog is visible and repainting.
         if (scanner_.isScanning())
         {
-            cachedAutoCloseDeadlineMs_ = 0.0;
-            startTimerHz(15);
-            setVisible(true);
+            if (showDialog)
+            {
+                cachedAutoCloseDeadlineMs_ = 0.0;
+                startTimerHz(15);
+                setVisible(true);
+            }
             return;
         }
 
@@ -80,8 +83,16 @@ void startScan(bool forceFull = false)
         visiblePluginCount_ = scanner_.getKnownPlugins().getNumTypes();
         visibleFailureCount_ = scanner_.getFailureStore().getCount();
         visibleCacheCount_ = scanner_.getCache().getCount();
-        startTimerHz(15);
-        setVisible(true);
+        if (showDialog)
+        {
+            startTimerHz(15);
+            setVisible(true);
+        }
+        else
+        {
+            stopTimer();
+            setVisible(false);
+        }
 
         scanner_.addDefaultSearchPaths();
         auto shouldRunCleanRescan = forceFull
