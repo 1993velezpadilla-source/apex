@@ -1,0 +1,46 @@
+name: Evo Eye focused visual preview
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/evo-eye-animated-boot-20261017
+    paths:
+      - 'My DAW/DAW_Core/Source/SplashScreen.h'
+      - 'My DAW/DAW_Core/Scripts/EvoEyePreview/**'
+      - '.github/workflows/evo-eye-quick-preview.yml'
+
+jobs:
+  preview:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact procedural C++ splash renderer (no DAW suites)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'MSVC not available' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $preview = 'My DAW\DAW_Core\Scripts\EvoEyePreview'
+          $compiler = 'call "' + $vcvars + '" && cl /nologo /std:c++17 /EHsc /DUNICODE /D_UNICODE /I"' + $preview + '" "' + $preview + '\main.cpp" /Fe:preview.exe /link gdiplus.lib'
+          cmd.exe /d /s /c $compiler
+          if ($LASTEXITCODE -ne 0) { throw 'C++ splash standalone compilation failed' }
+      - name: Assert seven repeating blink cycles and capture real C++ frames
+        shell: pwsh
+        run: |
+          & .\preview.exe "My DAW\DAW_Core\evidence\EvoEyeFocus"
+          if ($LASTEXITCODE -ne 0) { throw 'C++ screenshot capture failed' }
+          foreach ($f in @('open.png','closed.png','blink_after_5_cycles.png')) {
+            $p = "My DAW\DAW_Core\evidence\EvoEyeFocus\$f"
+            if (-not (Test-Path $p) -or (Get-Item $p).Length -lt 1000) {
+              throw "C++ render missing/empty: $p"
+            }
+          }
+      - name: Publish exact rendered screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: EvoEye-ActualCpp-OpenClosed-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/EvoEyeFocus/*.png
+          if-no-files-found: error
+          retention-days: 30

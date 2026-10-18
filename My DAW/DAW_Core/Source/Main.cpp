@@ -820,7 +820,8 @@ private:
 }
 
 //==============================================================================
-class DAW_CoreApplication  : public juce::JUCEApplication
+class DAW_CoreApplication  : public juce::JUCEApplication,
+                              private juce::Timer
 {
 public:
     //==============================================================================
@@ -862,6 +863,25 @@ public:
         if (processMode_ == DAW::ApexProcessMode::PluginSandboxSelfTest)
         {
             setApplicationReturnValue(DAW::PluginSandboxSelfTestCore::run(processArguments));
+            quit();
+            return;
+        }
+
+        // Deterministic QA snapshot of THE ACTUAL PROCEDURAL BOOT DRAWER.
+        // Independent of plugin scans/project/audio, so screenshot comparison
+        // never changes production boot timing or requires an existing GUI.
+        if (processArguments.contains("--apex-ci-evo-eye-frames"))
+        {
+            const auto outputDir = juce::File::getSpecialLocation(
+                juce::File::tempDirectory).getChildFile("apex-evo-eye-procedural");
+            const bool folderReady = outputDir.createDirectory().wasOk();
+            const bool open = folderReady && DAWSplashScreen::renderDiagnosticFrame(
+                outputDir.getChildFile("open.png").getFullPathName().toWideCharPointer(),
+                0.0f);
+            const bool closed = folderReady && DAWSplashScreen::renderDiagnosticFrame(
+                outputDir.getChildFile("closed.png").getFullPathName().toWideCharPointer(),
+                0.69f);
+            setApplicationReturnValue(open && closed ? 0 : 1);
             quit();
             return;
         }
@@ -959,26 +979,13 @@ public:
             DAW::HostedPluginIsolationCore::commandLineRequestsIsolation(
                 getCommandLineParameterArray()));
 
-        // Win32 layered window splash — paints at OS level, independent of
-        // JUCE message loop, so it shows instantly even while MainComponent
-        // blocks the thread during heavy initialization.
-        //
-        // Packaging note: installation must place logo/1000166327(2).png
-        // beside the executable for the installed-logo path to resolve.
-        {
-            const auto executable = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
-            const auto installedLogo = executable.getSiblingFile("logo").getChildFile("1000166327(2).png");
-            const auto repositoryLogo = executable.getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getParentDirectory()
-                                              .getChildFile("logo")
-                                              .getChildFile("1000166327(2).png");
-            const auto logoFile = installedLogo.existsAsFile() ? installedLogo : repositoryLogo;
-            splashScreen_ = logoFile.existsAsFile() ? DAWSplashScreen::launch(logoFile) : nullptr;
-        }
+        // Evo Eye is DRAWN FROM C++ PATHS, shaders/gradients and live effects.
+        // No runtime bitmap, bundled JPEG/PNG or sidecar image. The splash
+        // renders on an independent Win32 thread while JUCE initializes.
+        splashScreen_ = DAWSplashScreen::launch();
+        juce::Logger::writeToLog(splashScreen_ != nullptr
+            ? "[EVO EYE] Procedural C++ startup eye launched"
+            : "[EVO EYE] Procedural renderer unavailable; existing StartupPanel still opens");
 
         mainWindow.reset (new MainWindow (getApplicationName()));
         DAW::ApexProcessModeStateCore::markNormalGuiCreated();
@@ -1017,8 +1024,11 @@ public:
                 mainWindow->setVisible(true);
                #endif
 
-                splashScreen_->finish();
-                splashScreen_ = nullptr;
+                // The existing StartupPanel is presented asynchronously.
+                // Keep Evo Eye moving until its actual UI has appeared.
+                splashWaitStartedAt_ = juce::Time::getMillisecondCounter();
+                splashSlowStartupLogged_ = false;
+                startTimerHz(30);
             });
         }
 
@@ -1616,12 +1626,21 @@ public:
 
     void shutdown() override
     {
+        stopTimer();
         if (processMode_ != DAW::ApexProcessMode::NormalApex)
             return;
 
         // Add your application's shutdown code here..
 
         juce::Logger::writeToLog("[SESSION] DAW_Core clean shutdown");
+
+        // Also release splash if initialization or a smoke-mode exit happened
+        // before the normal asynchronous startup-panel transition.
+        if (splashScreen_ != nullptr)
+        {
+            splashScreen_->finish();
+            splashScreen_ = nullptr;
+        }
 
         // Unregister main window from presentation clock before destruction.
         // This is the explicit lifecycle cleanup; componentBeingDeleted
@@ -2024,6 +2043,56 @@ public:
     };
 
 private:
+    void timerCallback() override
+    {
+        if (mainWindow == nullptr || splashScreen_ == nullptr)
+        {
+            stopTimer();
+            return;
+        }
+
+        bool startupReady = false;
+        if (auto* component = mainWindow->getMainComponent())
+        {
+            for (int i = 0; i < component->getNumChildComponents(); ++i)
+            {
+                if (auto* panel = dynamic_cast<DAW::StartupPanel*>(
+                        component->getChildComponent(i)))
+                {
+                    startupReady = panel->isShowing()
+                        && panel->getWidth() > 0 && panel->getHeight() > 0;
+                    break;
+                }
+            }
+        }
+
+        // NOT a timer-based splash: continuous blinking must stay active until
+        // the actual StartupPanel is visible. Slow plugin scans can take well
+        // over 12 seconds; removing the previous timeout avoids abruptly
+        // replacing the eye with a blank/unfinished startup screen.
+        if (! startupReady)
+        {
+            if (! splashSlowStartupLogged_
+                && juce::Time::getMillisecondCounter()
+                        - splashWaitStartedAt_ >= 12000u)
+            {
+                splashSlowStartupLogged_ = true;
+                juce::Logger::writeToLog(
+                    "[EVO EYE] StartupPanel still initializing after 12s; "
+                    "continuing periodic eye blinks until panel appears");
+            }
+            return;
+        }
+
+        stopTimer();
+        juce::Logger::writeToLog(
+            "[EVO EYE] StartupPanel visible; ending repeating eye animation");
+        splashScreen_->finish();
+        splashScreen_ = nullptr;
+    }
+
+    juce::uint32 splashWaitStartedAt_ = 0;
+    bool splashSlowStartupLogged_ = false;
     std::unique_ptr<MainWindow> mainWindow;
     DAWSplashScreen* splashScreen_ = nullptr;
     std::unique_ptr<DAW::MessageBoxSuppressorCore> msgBoxSuppressor_;

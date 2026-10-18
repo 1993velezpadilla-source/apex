@@ -143,6 +143,9 @@ if ($signtool) {
     Write-Warning "  signtool.exe not found. Install Windows SDK for signing."
 }
 
+# Evo Eye is rendered natively by C++ GUI code in SplashScreen.h.
+# No artwork exists to package or check: the owner's photo is a reference only.
+
 # ── Step 4: Install to Program Files ──────────────────────────────────────────
 Write-Host ""
 Write-Host "[4/5] Installing to $InstallDir ..." -ForegroundColor Yellow
@@ -162,8 +165,13 @@ Write-Host "  Unblocked all files (removed download zone marks)" -ForegroundColo
 # Copy any required assets/resources if present
 $assetsDir = "$RepoRoot\Assets"
 if (Test-Path $assetsDir) {
-    Copy-Item "$assetsDir\*" "$InstallDir\" -Recurse -Force
-    Write-Host "  Copied Assets" -ForegroundColor Gray
+    # Never ship the old EvoEye picture; splash is drawn at runtime by C++.
+    Get-ChildItem -LiteralPath $assetsDir -Force |
+        Where-Object { $_.Name -ne "EvoEye" } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+        }
+    Write-Host "  Copied runtime assets (Evo Eye is fully procedural C++)" -ForegroundColor Gray
 }
 
 Write-Host "  Installed to $InstallDir" -ForegroundColor Green

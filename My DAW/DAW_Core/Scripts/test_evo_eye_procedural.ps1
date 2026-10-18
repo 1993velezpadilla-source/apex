@@ -1,0 +1,200 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('Debug', 'Release')]
+    [string] $Configuration
+)
+
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'apex_build_tools.ps1')
+$tools = Get-ApexBuildTools
+$exe = $tools.OutputPaths[$Configuration].Exe
+$root = Split-Path -Parent $PSScriptRoot
+$headerPath = Join-Path $root 'Source\SplashScreen.h'
+$mainPath = Join-Path $root 'Source\Main.cpp'
+$rcPath = Join-Path $root 'Builds\VisualStudio2026\resources.rc'
+$projectPath = Join-Path $root 'Builds\VisualStudio2026\DAW_Core_App.vcxproj'
+$header = Get-Content -LiteralPath $headerPath -Raw
+$mainCpp = Get-Content -LiteralPath $mainPath -Raw
+$resource = Get-Content -LiteralPath $rcPath -Raw
+$project = Get-Content -LiteralPath $projectPath -Raw
+
+if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw "APEX $Configuration executable missing: $exe"
+}
+# The reference picture must NOT be compiled in or loaded from disk.
+if (Test-Path -LiteralPath (Join-Path $root 'Assets\EvoEye\evo_eye.jpg')) {
+    throw 'Obsolete eye JPEG exists in the source tree.'
+}
+if ($header -match 'TranslateTransform\(0\.0f,\s*-32\.0f\)' -or
+    $header -match 'Gdiplus::Region upper\(covered\)') {
+    throw 'Reintroduced translated surprised eyebrow or opaque closed oval shutter.'
+}
+if ($header -match 'Bitmap::From(File|Stream)|FindResourceW|SHCreateMemStream|\.png|\.jpe?g') {
+    throw 'APEX splash still loads a raster image instead of drawing its own GUI.'
+}
+if ($resource -match '27182\s+RCDATA|APEX_EVO_EYE_EMBEDDED_ART' -or
+    $project -match 'APEX_EVO_EYE_EMBEDDED_ART') {
+    throw 'Windows build still embeds the old bootup picture.'
+}
+
+$features = @(
+    @{ Name = 'Procedural eyelid graphics'; Expression = 'makeEyeContour' },
+    @{ Name = 'Vector metal plating'; Expression = 'static void plating' },
+    @{ Name = 'Live rendered eye'; Expression = 'static void iris' },
+    @{ Name = 'Real frame-by-frame blink'; Expression = 'static float blink' },
+    @{ Name = 'Eyebrow safely excluded from full iris opening'; Expression = 'g\.SetClip\(&fullEye, Gdiplus::CombineModeExclude\)' },
+    @{ Name = 'Independent upper/lower closure shutters'; Expression = 'static void drawShutters' },
+    @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
+    @{ Name = 'Single-sweep angry brow visor'; Expression = 'static void drawScowlingBrow' },
+    @{ Name = 'Full brow overlay independent of ocular clip'; Expression = 'static void drawBrowPair' },
+    @{ Name = 'Dynamic brow clearance when eye opens'; Expression = '16\.0f \* ease\(openness\)' },
+    @{ Name = 'Mirrored transform includes drop'; Expression = 'Gdiplus::Matrix transform' },
+    @{ Name = 'Angled monotonic blade silhouette'; Expression = 'P\(91, 136\)' },
+    @{ Name = 'Closed shadow-black steel visor'; Expression = 'static void drawClosedVisor' },
+    @{ Name = 'No closed oval cut-out'; Expression = 'if \(openness > 0\.035f\)' },
+    @{ Name = 'Twin frowning upper-lid curves'; Expression = 'static void appendUpperLid' },
+    @{ Name = 'Matched lower-lid curves'; Expression = 'static void appendLowerLid' },
+    @{ Name = 'A single closed chevron seam'; Expression = 'if \(openness < 0\.035f\)' },
+    @{ Name = 'No solid closed eye oval'; Expression = 'if \(strength < 0\.003f\)' },
+    @{ Name = 'Chamber fades to background on blink'; Expression = '242\.0f \* material' },
+    @{ Name = 'Electric iris strands'; Expression = 'for \(int i = 0; i < 78;' },
+    @{ Name = 'Handcrafted APEX letterforms'; Expression = 'brand.AddLine\(P\(435, 615\)' },
+    @{ Name = 'Curved layered steel ornaments'; Expression = 'static void sculptedArmour' },
+    @{ Name = 'Code-drawn metallic bevels'; Expression = 'static void sculptedPlate' },
+    @{ Name = 'Electric arc strands'; Expression = 'filament\[9\]' },
+    @{ Name = 'Exact official tagline'; Expression = 'L"AUDIO PRODUCTION ENGINEERING"' },
+    @{ Name = 'Live fade to StartupPanel'; Expression = 'WaitForSingleObject\(stop_, 0\)' },
+    @{ Name = 'Independent Win32 render loop'; Expression = 'static DWORD WINAPI runThread' }
+)
+foreach ($feature in $features) {
+    if ($header -notmatch $feature.Expression) {
+        throw "Procedural boot GUI feature missing: $($feature.Name)"
+    }
+}
+
+# Regression: the eyebrow must be one sweep, not two bulbous circular
+# arches. Never revive two upper sculptedPlate layers or reopen the oval.
+if ($header -match 'P\(583,244\)' -or $header -match 'P\(573,254\)' -or
+    $header -notmatch 'drawScowlingBrow\(g, false, openness\)' -or
+    $header -notmatch 'drawScowlingBrow\(g, true, openness\)' -or
+    $header -notmatch 'g\.Restore\(guard\);\s*\}\s*else') {
+    throw 'Old M-shaped brow or full-eye closed aperture regression.'
+}
+
+# Startup handoff contract: the boot loop must not end after a fixed
+# number of seconds. Multiple blinks occur naturally until StartupPanel
+# becomes visible and the JUCE application explicitly calls finish().
+$readinessBegin = $mainCpp.IndexOf('bool startupReady = false;')
+$readinessEnd = $mainCpp.IndexOf('juce::uint32 splashWaitStartedAt_', $readinessBegin)
+if ($readinessBegin -lt 0 -or $readinessEnd -le $readinessBegin) {
+    throw 'Missing SplashScreen-to-StartupPanel handoff check.'
+}
+$handoff = $mainCpp.Substring($readinessBegin, $readinessEnd - $readinessBegin)
+if ($handoff -notmatch 'if \(! startupReady\)\s*\{' -or
+    $handoff -notmatch 'return;\s*\}\s*stopTimer\(\);' -or
+    $handoff -match 'if \(! startupReady && waited' -or
+    $handoff -match 'timeout; unblocking application') {
+    throw 'Regression: Evo Eye exits by a timer rather than continuing until StartupPanel appears.'
+}
+if ($header -notmatch 'std::fmod\(sec \+ 2\.2, kBlinkPeriodSeconds\)' -or
+    $header -notmatch 'static float diagnosticBlinkAmount\(double elapsedSeconds\)' -or
+    $header -notmatch 'drawFrame\(g, static_cast<float>\(\(now - start\) / 1000\.0\)\)') {
+    throw 'Regression: startup eye animation lost periodic clock-driven blinking.'
+}
+
+# Prevent the old regression: drawing upper armour AFTER the iris
+# occludes the opening, and merging the two draws gives a red horizontal bar
+# with overlapping static eyebrows in the blinked-shut frame.
+$renderStart = $header.IndexOf('static void drawFrame(G& g, float seconds)')
+$renderEnd = $header.IndexOf('DWORD run()', $renderStart)
+if ($renderStart -lt 0 -or $renderEnd -lt $renderStart) {
+    throw 'Cannot inspect drawFrame z-order'
+}
+$frameBody = $header.Substring($renderStart, $renderEnd - $renderStart)
+$requiredOrder = @(
+    'g.SetClip(&fullEye, Gdiplus::CombineModeExclude)',
+    'plating(g)',
+    'g.FillPath(&chamber, &fullEye)',
+    'drawShutters(g, openness)',
+    'iris(g, seconds, openness)',
+    'drawClosedVisor(g, openness)',
+    'drawLidRims(g, openness)',
+    'drawBrowPair(g, openness)',
+    'identity(g, seconds)'
+)
+$position = -1
+foreach ($call in $requiredOrder) {
+    $found = $frameBody.IndexOf($call, $position + 1, [StringComparison]::Ordinal)
+    if ($found -lt 0) {
+        throw "Evo Eye z-order violated at: $call"
+    }
+    $position = $found
+}
+
+# Prevent a second "McDonald's" outline when OPEN by demanding a
+# smooth open-only drop across the entire brow, including the under-ridge.
+if ($header -notmatch 'drawScowlingBrow\(G& g, bool right, float openness\)' -or
+    $header -notmatch 'blade\.Transform\(&transform\)' -or
+    $header -notmatch 'underside\.Transform\(&transform\)' -or
+    $header -match 'drawBrowPair\(g\);') {
+    throw 'Regression: fixed/open eyebrow positioning no longer covers the upper arc.'
+}
+
+# Brow shape MUST NOT be rasterized/cut alongside secondary plates, and
+# must be drawn precisely once per frame at a common z-order for all states.
+$armourStart = $header.IndexOf('static void sculptedArmour(G& g)')
+$platingStart = $header.IndexOf('static void plating(G& g)', $armourStart)
+if ($armourStart -lt 0 -or $platingStart -lt $armourStart) {
+    throw 'Cannot inspect side armour placement'
+}
+$armourBody = $header.Substring($armourStart, $platingStart - $armourStart)
+if ($armourBody -match 'drawScowlingBrow\(') {
+    throw 'Regression: the eyebrow moved back into clipped secondary armor.'
+}
+if ([regex]::Matches($frameBody, 'drawBrowPair\(g, openness\)').Count -ne 1) {
+    throw 'Regression: angry eyebrow pair must be composited exactly once in drawFrame.'
+}
+if ($frameBody -notmatch '(?s)drawLidRims\(g, openness\);.*?drawBrowPair\(g, openness\);.*?identity\(g, seconds\);') {
+    throw 'Regression: brows must be drawn AFTER moving eyelids and before identity.'
+}
+
+if (-not ('ApexProceduralEyeResourceAudit' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class ApexProceduralEyeResourceAudit
+{
+    [DllImport("kernel32.dll", EntryPoint="LoadLibraryExW", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr LoadLibraryEx(string name, IntPtr reserved, uint flags);
+
+    [DllImport("kernel32.dll", EntryPoint="FindResourceW", SetLastError=true)]
+    static extern IntPtr FindResource(IntPtr module, IntPtr name, IntPtr type);
+
+    [DllImport("kernel32.dll")]
+    static extern bool FreeLibrary(IntPtr module);
+
+    public static bool HasObsoleteEyeJpeg(string exe)
+    {
+        const uint LOAD_LIBRARY_AS_DATAFILE = 0x00000002;
+        const uint LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x00000020;
+        IntPtr module = LoadLibraryEx(exe, IntPtr.Zero,
+                                      LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+        if (module == IntPtr.Zero)
+            throw new InvalidOperationException("Cannot inspect built EXE: " + Marshal.GetLastWin32Error());
+        try
+        {
+            // The old raster image lived at Win32 RCDATA id 27182.
+            return FindResource(module, new IntPtr(27182), new IntPtr(10)) != IntPtr.Zero;
+        }
+        finally { FreeLibrary(module); }
+    }
+}
+'@
+}
+if ([ApexProceduralEyeResourceAudit]::HasObsoleteEyeJpeg($exe)) {
+    throw 'Built DAW_Core.exe still contains the obsolete JPEG in RCDATA 27182.'
+}
+$hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+Write-Host "[PASS] EVO EYE $Configuration source-rendered C++ GUI verified: $($features.Count) features; no JPEG/PNG, no RCDATA 27182. SHA-256 $hash"
