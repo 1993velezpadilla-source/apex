@@ -6,6 +6,7 @@
 #include "PluginScanCore/PluginScanAuditLogCore.h"
 #include "PluginHostCore/PluginHostingProductPolicyCore.h"
 #include "PluginSafetyCore/PluginCrashGuardCore.h"
+#include "PluginSafetyCore/PluginSehGuardCore.h"
 #include "Bubblegum/BubblegumAppearanceSettings.h"
 #include "Bubblegum/BubblegumFolderProjectionCore.h"
 #include "ThemeCore/Theme.h"
@@ -2358,16 +2359,21 @@ MainComponent::MainComponent()
                 return;
             }
 
-            if (!instance.hasEditor())
+            // hasEditor() can create/destroy a native VST3 view, then
+            // createEditor() immediately creates another one. Several hosted
+            // plugins cannot survive this double view lifecycle, and unguarded
+            // editor creation can terminate the DAW during Clip Properties.
+            // The shared host wrapper makes exactly one guarded call.
+            juce::AudioProcessorEditor* rawEditor = nullptr;
+            const auto editorResult = DAW::safelyCreateEditor(&instance, rawEditor);
+            auto editor = std::unique_ptr<juce::AudioProcessorEditor>(rawEditor);
+            if (!editorResult.succeeded || editor == nullptr)
             {
                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
-                    "No Plugin Editor", title + " loaded for this clip but does not provide an editor.", "OK");
+                    "Clip Plugin Editor Unavailable",
+                    title + " loaded, but its editor could not be opened safely.", "OK");
                 return;
             }
-
-            auto editor = std::unique_ptr<juce::AudioProcessorEditor>(instance.createEditor());
-            if (editor == nullptr)
-                return;
 
             auto window = std::make_unique<ClipRegionPluginWindow>(
                 title, appCore_.getTransport(), getTopLevelComponent());
