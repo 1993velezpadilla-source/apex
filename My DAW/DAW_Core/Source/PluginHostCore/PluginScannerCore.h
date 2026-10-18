@@ -12,6 +12,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
 
 namespace DAW {
@@ -35,9 +36,10 @@ public:
         cache_.loadFromFile(cacheFile);
         failureStore_.loadFromFile(failureFile);
         seedNativeG10Entry();
-        seedNativeC4Entry();
+        hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
 
@@ -270,9 +272,10 @@ private:
         // entries must exist before the scan's done-callback rebuilds the
         // browser feed).
         seedNativeG10Entry();
-        seedNativeC4Entry();
+        hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
 
         coordinator_.startScan(
@@ -308,12 +311,12 @@ private:
         cache_.cacheFromDescription(g10Desc);
     }
 
-    /** Seed the intrinsic APEX C4 plugin into the cache (same contract as
-        seedNativeG10Entry). */
-    void seedNativeC4Entry()
+    /** C4 is parked for future work. Remove its browser entry, including
+        installations with an older persisted plugin cache. Keep the native
+        processor and format-manager restoration path intact for old songs. */
+    void hideUnfinishedC4FromBrowser()
     {
-        auto c4Desc = APEX::C4::C4NativePluginFormat::createC4Description();
-        cache_.cacheFromDescription(c4Desc);
+        cache_.remove("APEX::C4");
     }
 
     /** Seed the intrinsic APEX Parametric EQ plugin into the cache. */
@@ -335,7 +338,17 @@ private:
         cache_.cacheFromDescription(description);
     }
 
-    /** Cache the intrinsic APEX Reverie identity for cold starts and rescans. */
+    /** Native Bubblegum Delay is not a disk plugin: seed its stable identity
+        before every browser rebuild, including clean and forced rescans. */
+    void seedNativeBubblegumDelayEntry()
+    {
+        APEX::Delay::Processor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Embedded Reverie persists through startup and forced rescans. */
     void seedNativeReverieEntry()
     {
         APEX::Reverie::Processor prototype;

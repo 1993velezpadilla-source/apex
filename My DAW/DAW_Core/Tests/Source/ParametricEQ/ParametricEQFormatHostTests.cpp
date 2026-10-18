@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one unified APEX Native format discovers all five natives");
+        beginTest ("one native format discovers five visible processors");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -100,17 +100,17 @@ private:
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
         expectEquals (descriptions.size(), 5,
-                      "historic identities stay ordered; Opto 2A and Reverie each append once");
+                      "G10/EQ/Opto/Delay/Reverie visible, unfinished C4 hidden");
         if (descriptions.size() == 5)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
             expectEquals (descriptions[1]->fileOrIdentifier,
-                          juce::String ("APEX::C4"));
-            expectEquals (descriptions[2]->fileOrIdentifier,
                           juce::String (Processor::kFileOrIdentifier));
-            expectEquals (descriptions[3]->fileOrIdentifier,
+            expectEquals (descriptions[2]->fileOrIdentifier,
                           juce::String ("APEX::Opto2A"));
+            expectEquals (descriptions[3]->fileOrIdentifier,
+                          juce::String ("APEX::BubblegumDelay"));
             expectEquals (descriptions[4]->fileOrIdentifier,
                           juce::String ("APEX::ReverieReverb"));
         }

@@ -196,21 +196,21 @@ private:
         }
 
         // The existing first three family identities keep their ordering.
-        // Opto 2A is the fourth native; Reverie is the fifth. Neither may make
-        // C4's original discovery regression fail or shift historic IDs.
+        // Hidden C4 remains restorable, while Reverie appends after Bubblegum Delay.
+        // Existing visible native identities must retain their ordering.
         {
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
             expectEquals (found.size(), 5,
-                          "discover G10, C4, Parametric EQ, Opto 2A and Reverie");
+                          "discover G10, Parametric EQ, Opto 2A, Bubblegum Delay and Reverie");
             if (found.size() == 5)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
-                expectEquals (found[1]->fileOrIdentifier, juce::String ("APEX::C4"));
-                expectEquals (found[2]->fileOrIdentifier, juce::String (
+                expectEquals (found[1]->fileOrIdentifier, juce::String (
                     APEX::ParametricEQ::Processor::kFileOrIdentifier));
-                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[2]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
                 expectEquals (found[4]->fileOrIdentifier, juce::String ("APEX::ReverieReverb"));
             }
         }

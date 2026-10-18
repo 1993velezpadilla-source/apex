@@ -5085,6 +5085,12 @@
     <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQAuditionCore.h">
       <Filter>DAW_Core\Source\ParametricEQCore</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQCharacterCore.h">
+      <Filter>DAW_Core\Source\ParametricEQCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ParametricEQCore\ParametricEQSketchCore.h">
+      <Filter>DAW_Core\Source\ParametricEQCore</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\ParametricEQUI\ParametricEQEditor.h">
       <Filter>DAW_Core\Source\ParametricEQUI</Filter>
     </ClInclude>

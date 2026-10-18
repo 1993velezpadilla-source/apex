@@ -1,0 +1,166 @@
+name: APEX EQ Windows Focused Compile
+
+on:
+  workflow_dispatch:
+  push:
+    # PR branches already run on pull_request; do not double-build them.
+    branches: [main]
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/ThemeCore/**'
+      - 'My DAW/DAW_Core/Tests/Source/ParametricEQ/**'
+      - 'My DAW/DAW_Core/Tests/Builds/VisualStudio2026/APEXTests_ConsoleApp.vcxproj'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/DAW_Core_App.vcxproj'
+      - '.github/workflows/apex-eq-focused-msvc.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/ParametricEQCore/**'
+      - 'My DAW/DAW_Core/Source/ParametricEQUI/**'
+      - 'My DAW/DAW_Core/Source/ThemeCore/**'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/DAW_Core_App.vcxproj'
+      - '.github/workflows/apex-eq-focused-msvc.yml'
+
+# Drop obsolete GUI CI runs when a newer commit arrives on the same PR.
+# Native Windows app builds are expensive and previous push+PR duplication
+# generated a large backlog of stale jobs with no additional QA value.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  eq-real-juce-syntax:
+    name: MSVC JUCE 8 EQ Processor + Editor + Theme
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout APEX
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Materialize pinned and patched JUCE 8.0.12
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'My DAW\DAW_Core'
+          $contract = Get-Content (Join-Path $root 'Dependencies\apex-windows-dependencies.json') -Raw | ConvertFrom-Json
+          $juce = [IO.Path]::GetFullPath((Join-Path $root ([string] $contract.juce.rootRelativeToRepository)))
+          New-Item -ItemType Directory -Force -Path (Split-Path $juce -Parent) | Out-Null
+          git init $juce
+          git -C $juce remote add origin https://github.com/juce-framework/JUCE.git
+          git -C $juce fetch --depth=1 origin ([string] $contract.juce.upstreamCommit)
+          if ($LASTEXITCODE -ne 0) { throw 'JUCE fetch failed' }
+          git -C $juce checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'JUCE checkout failed' }
+          foreach ($name in @(
+            '0001-apex-asio4all-compatibility.patch',
+            '0002-apex-vst3-null-editcontroller-guard.patch',
+            '0003-apex-string-null-holder-guard.patch'
+          )) {
+            $patch = Join-Path $root "Dependencies\patches\juce-8.0.12\$name"
+            git -C $juce apply --check -p2 $patch
+            if ($LASTEXITCODE -ne 0) { throw "Patch check failed: $name" }
+            git -C $juce apply -p2 $patch
+            if ($LASTEXITCODE -ne 0) { throw "Patch apply failed: $name" }
+          }
+          "APEX_JUCE_ROOT=$juce" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Compile real JUCE 8 EQ translation units without linking whole DAW
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath).Trim()
+          if (-not $vs) { throw 'Visual Studio MSVC not found' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "MSVC environment not found: $vcvars" }
+
+          # Inherit the exact hosted preprocessor ABI from the real APEX .vcxproj;
+          # never invent JUCE or VST3 feature flags for this focused gate.
+          [xml] $xml = Get-Content 'Builds\VisualStudio2026\DAW_Core_App.vcxproj'
+          $debugGroup = @($xml.Project.ItemDefinitionGroup | Where-Object {
+            $_.Condition -match 'Debug\|x64'
+          })[0]
+          if ($null -eq $debugGroup) { throw 'Debug project settings missing' }
+          $rawDefs = [string] $debugGroup.ClCompile.PreprocessorDefinitions
+          $defines = @($rawDefs -split ';' | Where-Object {
+            $_ -and $_ -notmatch '^%\('
+          })
+          # Follow the actual mainline app definitions. The source project
+          # intentionally does not declare NOMINMAX; do not fabricate it.
+
+          $juceModuleRoot = Join-Path $env:APEX_JUCE_ROOT 'modules'
+          $vstSdk = Join-Path $juceModuleRoot 'juce_audio_processors_headless\format_types\VST3_SDK'
+          $includeFolders = @('JuceLibraryCode', $juceModuleRoot,
+                              'Source\ThirdParty',
+                              'Source\ThirdParty\signalsmith-stretch',
+                              $vstSdk)
+          $sources = @(
+            'Source\ParametricEQCore\ParametricEQProcessor.cpp',
+            'Source\ParametricEQUI\ParametricEQEditor.cpp',
+            'Source\ThemeCore\Theme.cpp'
+          )
+          $arguments = @('/nologo', '/std:c++17', '/Zs', '/EHsc',
+                         '/W3', '/utf-8', '/bigobj', '/DWIN32_LEAN_AND_MEAN')
+          foreach ($path in $includeFolders) {
+            $arguments += ('/I"' + $path + '"')
+          }
+          foreach ($name in $defines) {
+            $arguments += ('/D' + $name)
+          }
+          foreach ($source in $sources) {
+            if (-not (Test-Path $source)) { throw "Missing $source" }
+            $arguments += ('"' + $source + '"')
+          }
+          $arguments | Set-Content -Path '.\eq-msvc-arguments.rsp' -Encoding ascii
+          $command = 'call "' + $vcvars + '" >nul && cl @"eq-msvc-arguments.rsp"'
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Compile real APEX EQ unit-test translation units against JUCE
+        working-directory: My DAW/DAW_Core
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath).Trim()
+          if (-not $vs) { throw 'MSVC missing' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          [xml] $xml = Get-Content 'Tests\Builds\VisualStudio2026\APEXTests_ConsoleApp.vcxproj'
+          $debugGroup = @($xml.Project.ItemDefinitionGroup | Where-Object {
+            $_.Condition -match 'Debug\|x64'
+          })[0]
+          if ($null -eq $debugGroup) { throw 'APEXTests Debug settings missing' }
+          $rawDefs = [string] $debugGroup.ClCompile.PreprocessorDefinitions
+          $definitions = @($rawDefs -split ';' | ForEach-Object {
+            $_.Trim()
+          } | Where-Object { $_ -and $_ -notmatch '^%\(' })
+          # Keep the focused syntax probe consistent with the canonical
+          # APEXTests project instead of requiring branch-specific defines.
+          $juceModules = Join-Path $env:APEX_JUCE_ROOT 'modules'
+          $vstSdk = Join-Path $juceModules 'juce_audio_processors_headless\format_types\VST3_SDK'
+          $args = @('/nologo', '/std:c++17', '/Zs', '/EHsc', '/W3', '/utf-8',
+                    '/bigobj', '/DWIN32_LEAN_AND_MEAN')
+          foreach ($include in @('Tests\JuceLibraryCode', 'Source', $juceModules,
+            'Source\ThirdParty', 'Source\ThirdParty\signalsmith-stretch', $vstSdk)) {
+            $args += ('/I"' + $include + '"')
+          }
+          foreach ($definition in $definitions) { $args += ('/D' + $definition) }
+          foreach ($source in @(
+            'Tests\Source\ParametricEQ\ParametricEQProcessorTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQStateTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQEditorTests.cpp',
+            'Tests\Source\ParametricEQ\ParametricEQLinearPhaseTests.cpp')) {
+            if (-not (Test-Path $source)) { throw "Missing unit test: $source" }
+            $args += ('"' + $source + '"')
+          }
+          $args | Set-Content -Path 'eq-test-msvc-arguments.rsp' -Encoding ascii
+          $command = 'call "' + $vcvars + '" >nul && cl @"eq-test-msvc-arguments.rsp"'
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

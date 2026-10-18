@@ -14,6 +14,7 @@ public:
     std::function<void(const juce::File&)> onOpenRecent;
     std::function<void()> onRescanPlugins;
     std::function<void()> onUpgradeProject;
+    std::function<void()> onDismissed;
 
     StartupPanel()
     {
@@ -104,7 +105,10 @@ public:
 
     void dismiss()
     {
+        const bool wasVisible = isVisible();
         setVisible(false);
+        if (wasVisible && onDismissed)
+            onDismissed();
     }
 
     void paint(juce::Graphics& g) override
