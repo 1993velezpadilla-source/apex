@@ -76,7 +76,9 @@ private:
     // mechanical flashing pattern. Starts fully open on the first frame.
     static float blinkAmount(double seconds)
     {
-        const double phase = std::fmod(seconds, 3.8);
+        // First blink occurs ~0.6s into launch; later blinks stay natural.
+        // If APEX initializes in under a second, never delay the StartupPanel.
+        const double phase = std::fmod(seconds + 2.20, 3.8);
         if (phase < 2.76 || phase > 3.08)
             return 0.0f;
         if (phase < 2.88)
