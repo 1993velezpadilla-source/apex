@@ -1080,14 +1080,15 @@ public:
         const int width = std::max (1, getWidth());
         const int cell = std::clamp (
             (width - 2 * padding) / 4,
-            ParametricEQEditor::kTouchTarget, 110);
+            ParametricEQEditor::kTouchTarget, 132);
         std::array<juce::TextButton*, 4> primary {{
             &sketchButton_, &grabButton_, &matchButton_, &toolsButton_
         }};
         if (matchButton_.getButtonText() == "EQ MATCH"
             || matchButton_.getButtonText() == "MATCH")
             matchButton_.setButtonText (width <= 430 ? "MATCH" : "EQ MATCH");
-        int x = padding;
+        const bool brandedHeader = width >= 880 && getHeight() >= 235;
+        int x = brandedHeader ? 278 : padding;
         for (auto* action : primary)
         {
             action->setBounds (x, 8, cell, ParametricEQEditor::kTouchTarget);
@@ -1123,9 +1124,11 @@ public:
             rebuildCurves (bounds);
             curveDirty_ = false;
         }
-        if (spectrumActive_)
+        if (spectrumActive_ && viewMode_ != 1)
             drawSpectrum (g, bounds);
 
+        if (viewMode_ != 2)
+        {
         if (! mainCurve_.isEmpty())
         {
             juce::Path fill (mainCurve_);
@@ -1174,6 +1177,7 @@ public:
                 juce::PathStrokeType::rounded));
         }
         drawNodes (g, bounds);
+        }
         // APEX's own compact value readout follows the chosen frequency
         // node without additional controls or stealing graph pointer input.
         // The value pill must fit entirely inside the *graph*. At short
@@ -1230,16 +1234,30 @@ public:
         // The decorative engine caption is not a graph control. Hide it
         // when the response is shallow: at 640x400 and 900x300 it collided
         // with frequency labels and even active EQ nodes.
-        if (getWidth() >= 560 && getHeight() >= 260)
+        // Approved screenshot places PRISM branding and tool ribbon ABOVE
+        // the plot, not a stack of anonymous controls on the response curve.
+        // Paint the vector header after graph content but before child buttons.
+        if (getWidth() >= 880 && getHeight() >= 235)
         {
+            const auto bar = juce::Rectangle<float> (
+                0.0f, 0.0f, bounds.getWidth(), 66.0f);
+            g.setGradientFill (juce::ColourGradient (
+                juce::Colour (0xff142442), bar.getTopLeft(),
+                juce::Colour (0xff0b142a), bar.getBottomLeft(), false));
+            g.fillRect (bar);
+            g.setColour (Palette::border().withAlpha (0.50f));
+            g.drawHorizontalLine (65, 0.0f, bounds.getWidth());
             g.setFont (juce::Font (juce::FontOptions (
-                10.5f, juce::Font::bold)));
-            g.setColour (Palette::textSecondary().withAlpha (0.88f));
-            g.drawFittedText ("APEX  /  24-BAND PRECISION ENGINE",
-                juce::Rectangle<int> (std::max (330, getWidth() - 264),
-                                       std::max (12, getHeight() - 54),
-                                       std::min (250, getWidth() - 340), 24),
-                juce::Justification::centredRight, 1);
+                21.0f, juce::Font::bold)));
+            g.setColour (Palette::text());
+            g.drawFittedText ("APEX /",  juce::Rectangle<int> (22, 12, 100, 39),
+                              juce::Justification::centredLeft, 1);
+            g.setColour (Palette::accent().brighter (0.22f));
+            g.drawFittedText ("PRISM", juce::Rectangle<int> (119, 12, 90, 39),
+                              juce::Justification::centredLeft, 1);
+            g.setColour (Palette::curve());
+            g.drawFittedText ("EQ", juce::Rectangle<int> (207, 12, 47, 39),
+                              juce::Justification::centredLeft, 1);
         }
     }
 
@@ -1459,6 +1477,12 @@ public:
     }
 
     bool isMixedPlacementFrame() const noexcept { return mixedPlacements_; }
+    void setViewMode (int mode) noexcept
+    {
+        viewMode_ = std::clamp (mode, 0, 2);
+        repaint();
+    }
+    int getViewMode() const noexcept { return viewMode_; }
     float analyzerYForTesting (float db) const noexcept
     {
         return spectrumY (db, static_cast<float> (getHeight()));
@@ -2359,6 +2383,7 @@ private:
     juce::Path mainCurve_, midCurve_, sideCurve_;
     bool curveDirty_ = true;
     bool mixedPlacements_ = false;
+    int viewMode_ = 0;
     ResponseFrame latestFrame_;
     int lastSpectrumIndex_ = -1;
     bool spectrumActive_ = false;
@@ -3264,6 +3289,11 @@ void ParametricEQEditor::applyLayout()
     inspector_->setBounds (best);
     inspector_->setVisible (true);
     inspector_->toFront (false); // overlay stays interactive, graph stays huge
+}
+
+void ParametricEQEditor::setViewMode (int mode)
+{
+    graph_->setViewMode (mode);
 }
 
 void ParametricEQEditor::selectBand (int band)
