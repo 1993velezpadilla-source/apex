@@ -3439,6 +3439,11 @@ double ParametricEQEditor::getDisplayedDynamicGainDbForTesting (int band) const
     return graph_->displayedDynamicGainDb (band);
 }
 
+juce::ComboBox& ParametricEQEditor::getPlacementComboForTesting()
+{
+    return inspector_->getPlacementComboForTesting();
+}
+
 const std::vector<std::unique_ptr<juce::TextButton>>&
     ParametricEQEditor::getPlacementButtonsForTesting() const
 {
