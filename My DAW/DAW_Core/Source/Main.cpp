@@ -867,6 +867,25 @@ public:
             return;
         }
 
+        // Deterministic QA snapshot of THE ACTUAL PROCEDURAL BOOT DRAWER.
+        // Independent of plugin scans/project/audio, so screenshot comparison
+        // never changes production boot timing or requires an existing GUI.
+        if (processArguments.contains("--apex-ci-evo-eye-frames"))
+        {
+            const auto outputDir = juce::File::getSpecialLocation(
+                juce::File::tempDirectory).getChildFile("apex-evo-eye-procedural");
+            const bool folderReady = outputDir.createDirectory().wasOk();
+            const bool open = folderReady && DAWSplashScreen::renderDiagnosticFrame(
+                outputDir.getChildFile("open.png").getFullPathName().toWideCharPointer(),
+                0.0f);
+            const bool closed = folderReady && DAWSplashScreen::renderDiagnosticFrame(
+                outputDir.getChildFile("closed.png").getFullPathName().toWideCharPointer(),
+                0.69f);
+            setApplicationReturnValue(open && closed ? 0 : 1);
+            quit();
+            return;
+        }
+
         DAW::PluginScanAuditLogCore::appendStartupTrace(
             "DAW_CoreApplication::initialise",
             commandLine.contains(DAW::PluginScanIpcProtocolCore::kWorkerFlag) ? "worker-process" : "main-process",
