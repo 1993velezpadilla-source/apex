@@ -207,10 +207,10 @@ private:
             if (found.size() == 4)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
-                expectEquals (found[1]->fileOrIdentifier, juce::String ("APEX::C4"));
-                expectEquals (found[2]->fileOrIdentifier, juce::String (
+                expectEquals (found[1]->fileOrIdentifier, juce::String (
                     APEX::ParametricEQ::Processor::kFileOrIdentifier));
-                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[2]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
+                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
             }
         }
 
