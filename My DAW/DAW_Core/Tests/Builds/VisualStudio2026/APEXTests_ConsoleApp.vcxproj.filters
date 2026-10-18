@@ -29,6 +29,12 @@
     <Filter Include="APEXTests\Source\EngineDeps">
       <UniqueIdentifier>{B2118293-6358-AF0A-A5C0-776B4CC7139F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="APEXTests\Source\Compressor">
+      <UniqueIdentifier>{A3DCD57D-9EC7-4931-8344-0E5B77F7CE0D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="APEXTests\Source\Reverie">
+      <UniqueIdentifier>{012D29BE-B133-466C-A64A-73DF9B519C2E}</UniqueIdentifier>
+    </Filter>
     <Filter Include="APEXTests\Source\G10">
       <UniqueIdentifier>{17DC99E0-46FC-2B85-E428-DD1E12861C7C}</UniqueIdentifier>
     </Filter>
@@ -975,6 +981,12 @@
     </ClCompile>
     <ClCompile Include="..\..\Source\G10\G10FormatHostTests.cpp">
       <Filter>APEXTests\Source\G10</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Compressor\OptoNativeHostTests.cpp">
+      <Filter>APEXTests\Source\Compressor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Reverie\ReverieNativeHostTests.cpp">
+      <Filter>APEXTests\Source\Reverie</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\G10\G10RtAllocationTests.cpp">
       <Filter>APEXTests\Source\G10</Filter>
