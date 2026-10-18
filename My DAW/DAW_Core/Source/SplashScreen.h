@@ -4,6 +4,9 @@
 
 #if JUCE_WINDOWS
 #include <windows.h>
+// Plugin editors include this renderer in translation units which may not
+// have pulled in COM IStream declarations before the Windows GDI+ headers.
+#include <objidl.h>
 #include <gdiplus.h>
 #include <atomic>
 #include <cmath>
