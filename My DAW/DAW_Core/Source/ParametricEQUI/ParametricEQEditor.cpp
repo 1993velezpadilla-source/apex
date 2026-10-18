@@ -349,6 +349,8 @@ public:
         addAndMakeVisible (characterButton_);
         addAndMakeVisible (presetButton_);
         addAndMakeVisible (utilityButton_);
+        addAndMakeVisible (viewButton_);
+        addAndMakeVisible (stereoButton_);
         addAndMakeVisible (title_);
         // Secondary hosted controls remain LIVE but move to one popover.
         // Reduces eight permanently visible bottom buttons to five controls
@@ -357,6 +359,12 @@ public:
         keyButton_.setVisible (false);
         linkButton_.setVisible (false);
         characterButton_.setVisible (false);
+        designButton_.setVisible (false);
+        bypassButton_.setVisible (false);
+        phaseButton_.setVisible (false);
+        title_.setVisible (false); // logo belongs in screenshot's upper ribbon
+        viewButton_.setTitle ("Show EQ curve, spectrum or both");
+        stereoButton_.setTitle ("Selected band's channel placement");
         presetButton_.setTitle ("APEX Prism curated EQ presets");
         utilityButton_.setTitle (
             "Detector, external sidechain, stereo link and character");
@@ -409,15 +417,7 @@ public:
                              phase->getValue() >= 0.5f ? 0.0f : 1.0f);
             refresh();
         };
-        analyzerButton_.onClick = [this]
-        {
-            autoAnalyzerStarted_ = false;
-            auto mode = processor_.getAnalyzerMode();
-            mode = static_cast<APEX::Analysis::SpectrumTapMode> (
-                (static_cast<int> (mode) + 1) % 4);
-            processor_.setAnalyzerMode (mode);
-            refresh();
-        };
+        analyzerButton_.onClick = [this] { openAnalyzerMenu(); };
         detectorButton_.onClick = [this]
         {
             const auto mode = processor_.getParametricEQParameter (
@@ -454,6 +454,8 @@ public:
         };
         presetButton_.onClick = [this] { openPresetMenu(); };
         utilityButton_.onClick = [this] { openUtilityMenu(); };
+        viewButton_.onClick = [this] { openViewMenu(); };
+        stereoButton_.onClick = [this] { openStereoMenu(); };
         // Automatically show the real analyzer when the EQ window opens.
         // The audio processor's closed/dormant default is preserved when no
         // UI exists; the scope-owned subscription is released on close unless
@@ -501,10 +503,15 @@ public:
         phaseButton_.setColour (juce::TextButton::buttonColourId,
                                 linear ? Palette::accentActive()
                                        : Palette::surfaceHover());
-        static const char* modeNames[] = { "Analyzer Off", "Analyzer In",
-                                           "Analyzer Out", "Analyzer Both" };
-        analyzerButton_.setButtonText (modeNames[static_cast<int> (
-            processor_.getAnalyzerMode())]);
+        const bool compact = getWidth() < 700;
+        static const char* modesWide[] = {
+            "Off", "Pre", "Post", "Pre + Post" };
+        static const char* modesCompact[] = {
+            "OFF", "PRE", "POST", "BOTH" };
+        const int analyzer = std::clamp (
+            static_cast<int> (processor_.getAnalyzerMode()), 0, 3);
+        analyzerButton_.setButtonText (
+            compact ? modesCompact[analyzer] : modesWide[analyzer]);
         detectorButton_.setButtonText (processor_.getParametricEQParameter (
             kDynamicDetectorParameter)->getBool() ? "Detector RMS" : "Detector Peak");
         keyButton_.setButtonText (processor_.getParametricEQParameter (
@@ -520,6 +527,20 @@ public:
             juce::TextButton::buttonColourId,
             character == CharacterMode::Pure ? Palette::surfaceHover()
                                              : Palette::accentActive());
+        const int band = owner_.getSelectedBandForTesting();
+        const int placement = band >= 0 && band < kMaxBands
+            ? processor_.getParametricEQParameter (
+                placementParameterIndex (band))->getChoiceIndex() : 0;
+        const auto selected = static_cast<ChannelPlacement> (
+            std::clamp (placement, 0, kChannelPlacementCount - 1));
+        stereoButton_.setButtonText (
+            compact ? (placement == 0 ? "ST" : juce::String (
+                channelPlacementName (selected)).substring (0, 2))
+                : channelPlacementName (selected));
+        viewButton_.setButtonText (compact
+            ? (viewMode_ == 0 ? "BOTH" : viewMode_ == 1 ? "EQ" : "FFT")
+            : (viewMode_ == 0 ? "Analyzer + EQ"
+                 : viewMode_ == 1 ? "EQ Only" : "Analyzer Only"));
         // Keep the footer quiet until needed; selected/danger states
         // remain legible, but the row is not a wall of purple buttons.
         analyzerButton_.setColour (juce::TextButton::buttonColourId,
@@ -534,51 +555,64 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto area = getLocalBounds().toFloat();
+        // Five quiet, aligned modules, exactly as in the approved image.
+        auto bounds = getLocalBounds().toFloat().reduced (1.0f, 0.5f);
         g.setGradientFill (juce::ColourGradient (
-            Palette::surfaceHover().darker (0.28f), area.getTopLeft(),
-            Palette::background(), area.getBottomLeft(), false));
-        g.fillRect (area);
-        g.setColour (Palette::accent().withAlpha (0.9f));
-        g.fillRect (0.0f, 0.0f, std::min (4.0f, area.getWidth()),
-                    area.getHeight());
-        g.setColour (Palette::border().withAlpha (0.70f));
-        g.drawLine (0.0f, area.getBottom() - 0.5f,
-                    area.getRight(), area.getBottom() - 0.5f);
+            juce::Colour (0xff182847), bounds.getTopLeft(),
+            Palette::background(), bounds.getBottomLeft(), false));
+        g.fillRoundedRectangle (bounds, 11.0f);
+        g.setColour (Palette::border().withAlpha (0.75f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 11.0f, 0.9f);
+        if (getWidth() < 700 || getHeight() < 66)
+            return;
+        const std::array<const char*, 5> captions {{
+            "VIEW", "ANALYZER", "STEREO", "PRESET", "UTILITY"
+        }};
+        auto row = getLocalBounds().reduced (7, 0);
+        const int cell = row.getWidth() / 5;
+        g.setFont (juce::Font (juce::FontOptions (10.5f,
+                                                juce::Font::bold)));
+        for (int i = 0; i < 5; ++i)
+        {
+            const auto area = i == 4 ? row : row.removeFromLeft (cell);
+            g.setColour (Palette::textSecondary().withAlpha (0.92f));
+            g.drawFittedText (captions[static_cast<std::size_t> (i)],
+                area.withHeight (20).translated (11, 5),
+                juce::Justification::centredLeft, 1);
+            if (i < 4)
+            {
+                g.setColour (Palette::border().withAlpha (0.42f));
+                g.drawVerticalLine (area.getRight() - 1,
+                    14.0f, static_cast<float> (getHeight() - 12));
+            }
+        }
     }
 
     void resized() override
     {
-        auto row = getLocalBounds().reduced (4, 4);
-        const bool compact = getWidth() < 650;
-        title_.setVisible (! compact);
-        if (! compact)
-        {
-            // Brand is quietly set off from functional navigation.
-            const int titleWidth = std::min (225,
-                std::max (158, row.getWidth() / 4));
-            title_.setText (titleWidth > 195 ? "APEX / PRISM EQ"
-                                              : "PRISM EQ",
-                            juce::dontSendNotification);
-            title_.setBounds (row.removeFromLeft (titleWidth));
-        }
-        std::array<juce::TextButton*, 6> visible {{
-            &presetButton_, &designButton_, &bypassButton_,
-            &phaseButton_, &analyzerButton_, &utilityButton_
+        title_.setVisible (false);
+        auto row = getLocalBounds().reduced (7, 5);
+        const bool labels = getWidth() >= 700 && getHeight() >= 66;
+        const int captionHeight = labels ? 18 : 0;
+        const int cell = row.getWidth() / 5;
+        std::array<juce::TextButton*, 5> primary {{
+            &viewButton_, &analyzerButton_, &stereoButton_,
+            &presetButton_, &utilityButton_
         }};
-        const int cell = std::max (ParametricEQEditor::kTouchTarget,
-                                   row.getWidth() / 6);
-        for (int i = 0; i < 6; ++i)
-            visible[static_cast<std::size_t> (i)]->setBounds (
-                i == 5 ? row : row.removeFromLeft (cell));
-
-        // Hidden controls still have real 44px+ bounds and callbacks for
-        // native testing / automation; they cannot intercept mouse input.
+        for (int i = 0; i < 5; ++i)
+        {
+            auto area = i == 4 ? row : row.removeFromLeft (cell);
+            area = area.reduced (4, 0);
+            area.removeFromTop (captionHeight);
+            primary[static_cast<std::size_t> (i)]->setBounds (area);
+        }
+        // Hidden secondary controls retain real handlers for host/state
+        // regression tests and reappear ONLY inside the Utility menu.
         const juce::Rectangle<int> safe (0, 0, 44, 44);
-        detectorButton_.setBounds (safe);
-        keyButton_.setBounds (safe);
-        linkButton_.setBounds (safe);
-        characterButton_.setBounds (safe);
+        for (auto* secondary : { &designButton_, &bypassButton_,
+                                 &phaseButton_, &detectorButton_, &keyButton_,
+                                 &linkButton_, &characterButton_ })
+            secondary->setBounds (safe);
     }
 
     void setBandUnits (int band, BandParameterOffset offset, float units)
@@ -726,6 +760,85 @@ public:
             });
     }
 
+    void openViewMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("DISPLAY");
+        menu.addItem (1, "Analyzer + EQ", true, viewMode_ == 0);
+        menu.addItem (2, "EQ Only", true, viewMode_ == 1);
+        menu.addItem (3, "Analyzer Only", true, viewMode_ == 2);
+        juce::Component::SafePointer<TopBarComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&viewButton_), [safe] (int id)
+            {
+                if (auto* bar = safe.getComponent())
+                {
+                    if (id < 1 || id > 3)
+                        return;
+                    bar->viewMode_ = id - 1;
+                    bar->owner_.setViewMode (id - 1);
+                    bar->refresh();
+                }
+            });
+    }
+
+    void openAnalyzerMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("REAL-TIME FFT");
+        const int mode = static_cast<int> (processor_.getAnalyzerMode());
+        menu.addItem (1, "Off", true, mode == 0);
+        menu.addItem (2, "Pre EQ", true, mode == 1);
+        menu.addItem (3, "Post EQ", true, mode == 2);
+        menu.addItem (4, "Pre + Post", true, mode == 3);
+        juce::Component::SafePointer<TopBarComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&analyzerButton_), [safe] (int id)
+            {
+                if (auto* bar = safe.getComponent())
+                {
+                    if (id < 1 || id > 4)
+                        return;
+                    bar->autoAnalyzerStarted_ = false;
+                    bar->processor_.setAnalyzerMode (
+                        static_cast<APEX::Analysis::SpectrumTapMode> (id - 1));
+                    bar->refresh();
+                }
+            });
+    }
+
+    void openStereoMenu()
+    {
+        const int band = owner_.getSelectedBandForTesting();
+        if (band < 0 || band >= kMaxBands)
+            return; // No selected band: Stereo remains the visual default.
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("BAND CHANNEL");
+        const int current = processor_.getParametricEQParameter (
+            placementParameterIndex (band))->getChoiceIndex();
+        for (int placement = 0; placement < kChannelPlacementCount; ++placement)
+            menu.addItem (placement + 1, channelPlacementName (
+                static_cast<ChannelPlacement> (placement)), true,
+                current == placement);
+        juce::Component::SafePointer<TopBarComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&stereoButton_), [safe] (int id)
+            {
+                if (auto* bar = safe.getComponent())
+                {
+                    const int band = bar->owner_.getSelectedBandForTesting();
+                    if (band < 0 || band >= kMaxBands
+                        || id < 1 || id > kChannelPlacementCount)
+                        return;
+                    const int index = placementParameterIndex (band);
+                    auto* parameter = bar->processor_.getParametricEQParameter (index);
+                    notifyParameter (bar->processor_, index,
+                        parameter->toNormalised (static_cast<float> (id - 1)));
+                    bar->refresh();
+                }
+            });
+    }
+
     void openUtilityMenu()
     {
         juce::PopupMenu menu;
@@ -734,6 +847,11 @@ public:
         menu.addItem (2, keyButton_.getButtonText());
         menu.addItem (3, linkButton_.getButtonText());
         menu.addItem (4, characterButton_.getButtonText());
+        menu.addSeparator();
+        menu.addSectionHeader ("FILTER / MASTER");
+        menu.addItem (5, designButton_.getButtonText());
+        menu.addItem (6, bypassButton_.getButtonText());
+        menu.addItem (7, phaseButton_.getButtonText());
         menu.addSeparator();
         menu.addSectionHeader ("Analyzer capture");
         const int current = static_cast<int> (processor_.getAnalyzerMode());
@@ -753,6 +871,9 @@ public:
                         case 2: bar->keyButton_.onClick(); break;
                         case 3: bar->linkButton_.onClick(); break;
                         case 4: bar->characterButton_.onClick(); break;
+                        case 5: bar->designButton_.onClick(); break;
+                        case 6: bar->bypassButton_.onClick(); break;
+                        case 7: bar->phaseButton_.onClick(); break;
                         default:
                             if (id >= 10 && id <= 13)
                             {
@@ -787,6 +908,9 @@ private:
     juce::TextButton characterButton_ { "CHAR Pure" };
     juce::TextButton presetButton_ { "PRESETS" };
     juce::TextButton utilityButton_ { "UTILITY" };
+    juce::TextButton viewButton_ { "Analyzer + EQ" };
+    juce::TextButton stereoButton_ { "Stereo" };
+    int viewMode_ = 0;
     std::array<std::array<float, 7>, kMaxBands> oldBands_ {};
     std::array<float, kMaxBands> oldPlacements_ {};
     std::array<float, kMaxBands> oldDynamics_ {};
@@ -3052,7 +3176,8 @@ void ParametricEQEditor::applyLayout()
     auto workspace = getLocalBounds();
     // One quiet, touch-safe command dock at ALL viewports. Old 320px mode
     // burned 104px on an 8-button grid; six grouped controls now fit 44px.
-    const int dockHeight = std::min (56, std::max (52, height / 10));
+    const int dockHeight = (width < 650 || height < 500)
+        ? 52 : std::clamp (height / 10, 66, 78);
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
     // Narrow devices AND short plugin windows use a scrollable touch sheet
