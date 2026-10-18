@@ -2329,6 +2329,7 @@ public:
         content_.addAndMakeVisible (qSlider_);
         content_.addAndMakeVisible (slopeSlider_);
         content_.addAndMakeVisible (placementLabel_);
+        content_.addAndMakeVisible (placementCombo_);
         content_.addAndMakeVisible (dynLabel_);
         content_.addAndMakeVisible (dynEnableButton_);
         content_.addAndMakeVisible (dynFilterButton_);
@@ -2377,6 +2378,24 @@ public:
                                    Palette::textSecondary());
         placementLabel_.setText ("Placement", juce::dontSendNotification);
         placementLabel_.setInterceptsMouseClicks (false, false);
+        // Approved GUI: ONE Channel dropdown, Stereo is the canonical default.
+        placementCombo_.setTitle ("Channel placement for selected band");
+        for (int placement = 0; placement < kChannelPlacementCount; ++placement)
+            placementCombo_.addItem (channelPlacementName (
+                static_cast<ChannelPlacement> (placement)), placement + 1);
+        placementCombo_.setSelectedId (1, juce::dontSendNotification);
+        placementCombo_.onChange = [this]
+        {
+            const int band = owner_.getSelectedBandForTesting();
+            if (band < 0 || band >= kMaxBands
+                || placementCombo_.getSelectedId() <= 0)
+                return;
+            const int index = placementParameterIndex (band);
+            auto* parameter = processor_.getParametricEQParameter (index);
+            notifyParameter (processor_, index, parameter->toNormalised (
+                static_cast<float> (placementCombo_.getSelectedId() - 1)));
+            refresh();
+        };
         for (int placement = 0; placement < kChannelPlacementCount; ++placement)
         {
             auto button = std::make_unique<juce::TextButton> (
@@ -2400,6 +2419,9 @@ public:
                 refresh();
             };
             content_.addAndMakeVisible (button.get());
+            // Legacy test handles stay callable but cannot visually crowd
+            // the floating HUD or intercept clicks underneath a dropdown.
+            button->setVisible (false);
             placementButtons_.push_back (std::move (button));
         }
 
@@ -2538,9 +2560,51 @@ public:
             slider->setTextBoxStyle (juce::Slider::TextBoxBelow,
                 false, floating ? 96 : 86, 22);
         }
-        const int placementColumns = viewport_.getWidth() >= 340 ? 5 : 3;
-        const int placementRows = (kChannelPlacementCount + placementColumns - 1)
-                                / placementColumns;
+        constexpr int placementRows = 1;
+        // Approved floating inspector design: one header row, three true
+        // hosted rotary dials, slope, and a single Channel selector.
+        // Dynamic/spectral options are still available by scrolling lower.
+        if (floating)
+        {
+            constexpr int inset = 14;
+            content_.setBounds (0, 0, std::max (1, viewport_.getWidth()), 1220);
+            auto frame = content_.getLocalBounds().reduced (inset, 12);
+            auto header = frame.removeFromTop (48);
+            enableButton_.setBounds (header.removeFromLeft (48).reduced (2, 2));
+            bandLabel_.setBounds (header.removeFromLeft (108));
+            closeButton_.setBounds (header.removeFromRight (44).reduced (2, 2));
+            shapeCombo_.setBounds (header.reduced (2, 2));
+            frame.removeFromTop (10);
+            auto dials = frame.removeFromTop (172);
+            const int dialWidth = dials.getWidth() / 3;
+            frequencySlider_.setBounds (dials.removeFromLeft (dialWidth).reduced (3, 3));
+            gainSlider_.setBounds (dials.removeFromLeft (dialWidth).reduced (3, 3));
+            qSlider_.setBounds (dials.reduced (3, 3));
+            frame.removeFromTop (6);
+            slopeSlider_.setBounds (frame.removeFromTop (50).reduced (2, 2));
+            frame.removeFromTop (10);
+            placementLabel_.setBounds (frame.removeFromTop (20));
+            placementCombo_.setBounds (frame.removeFromTop (45).reduced (2, 0));
+            // Secondary editing never disappears; scrolling exposes it.
+            frame.removeFromTop (28);
+            bypassButton_.setBounds (frame.removeFromTop (48));
+            dynLabel_.setBounds (frame.removeFromTop (24));
+            dynEnableButton_.setBounds (frame.removeFromTop (48));
+            dynFilterButton_.setBounds (frame.removeFromTop (48));
+            dynThresholdSlider_.setBounds (frame.removeFromTop (48));
+            dynRangeSlider_.setBounds (frame.removeFromTop (48));
+            dynAttackSlider_.setBounds (frame.removeFromTop (48));
+            dynReleaseSlider_.setBounds (frame.removeFromTop (48));
+            spectralLabel_.setBounds (frame.removeFromTop (24));
+            spectralArmButton_.setBounds (frame.removeFromTop (48));
+            spectralBandButton_.setBounds (frame.removeFromTop (48));
+            spectralDensitySlider_.setBounds (frame.removeFromTop (48));
+            spectralTiltButton_.setBounds (frame.removeFromTop (48));
+            auditionButton_->setBounds (frame.removeFromTop (48));
+            for (auto& hidden : placementButtons_)
+                hidden->setBounds (0, 0, 44, 44);
+            return;
+        }
         constexpr int labelHeight = 18;
         constexpr int auditionHeight = 48;
         constexpr int contentMargin = 16; // reduced (8, 8)
@@ -2612,19 +2676,9 @@ public:
         slopeSlider_.setBounds (bounds.removeFromTop (row));
 
         placementLabel_.setBounds (bounds.removeFromTop (labelHeight));
-        for (int rowIndex = 0; rowIndex < placementRows; ++rowIndex)
-        {
-            auto rowBounds = bounds.removeFromTop (row);
-            const int count = std::min (placementColumns,
-                kChannelPlacementCount - rowIndex * placementColumns);
-            const int columnWidth = rowBounds.getWidth() / count;
-            for (int column = 0; column < count; ++column)
-            {
-                const int index = rowIndex * placementColumns + column;
-                placementButtons_[static_cast<std::size_t> (index)]->setBounds (
-                    rowBounds.removeFromLeft (columnWidth).reduced (2, 2));
-            }
-        }
+        placementCombo_.setBounds (bounds.removeFromTop (row).reduced (2, 2));
+        for (auto& hidden : placementButtons_)
+            hidden->setBounds (0, 0, 44, 44);
 
         dynLabel_.setBounds (bounds.removeFromTop (labelHeight));
         dynEnableButton_.setBounds (bounds.removeFromTop (row));
@@ -2686,6 +2740,7 @@ public:
         syncSlider (spectralDensitySlider_, kSpectralDensityParameter);
         for (auto& button : placementButtons_)
             button->setEnabled (valid);
+        placementCombo_.setEnabled (valid);
 
         if (valid)
         {
@@ -2713,6 +2768,8 @@ public:
                 juce::dontSendNotification);
             const int placement = processor_.getParametricEQParameter (
                 placementParameterIndex (band))->getChoiceIndex();
+            placementCombo_.setSelectedId (placement + 1,
+                                           juce::dontSendNotification);
             for (int index = 0; index < kChannelPlacementCount; ++index)
                 placementButtons_[static_cast<std::size_t> (index)]->setToggleState (
                     index == placement, juce::dontSendNotification);
@@ -2797,6 +2854,10 @@ public:
     juce::TextButton& getAuditionButtonForTesting() { return *auditionButton_; }
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const { return placementButtons_; }
+    juce::ComboBox& getPlacementComboForTesting() noexcept
+    {
+        return placementCombo_;
+    }
 
 private:
     void configureSlider (juce::Slider& slider, const juce::String& title)
@@ -2910,6 +2971,7 @@ private:
     juce::Slider qSlider_;
     juce::Slider slopeSlider_;
     juce::Label placementLabel_;
+    juce::ComboBox placementCombo_;
     std::unique_ptr<HoldButton> auditionButton_;
     std::vector<std::unique_ptr<juce::TextButton>> placementButtons_;
 
@@ -3026,11 +3088,11 @@ void ParametricEQEditor::applyLayout()
 
     const int graphWidth = graph_->getWidth();
     const int graphHeight = graph_->getHeight();
-    const int cardWidth = std::min (std::max (340, graphWidth / 3), 414);
+    const int cardWidth = std::min (std::max (340, graphWidth / 3), 480);
     // At short floating plugin heights, a hard 230px minimum could
     // push the card over the graph and into the bottom dock. Let the
     // internal viewport scroll instead of letting the overlay escape.
-    const int cardHeight = std::min (398, std::max (1, graphHeight - 94));
+    const int cardHeight = std::min (410, std::max (1, graphHeight - 94));
     const auto node = graph_->nodeBounds (selectedBand_).getCentre();
 
     // Choose a nearby HUD position which obscures as few OTHER EQ nodes as
