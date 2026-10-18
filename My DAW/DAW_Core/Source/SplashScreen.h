@@ -4,11 +4,13 @@
 #if JUCE_WINDOWS
 #include <windows.h>
 #include <gdiplus.h>
+#include <shlwapi.h>
 #include <atomic>
 #include <cmath>
 #include <memory>
 #include <string>
 #pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 // The splash has its OWN Win32 message/render thread. A JUCE Timer cannot
 // animate during MainComponent construction (the JUCE message thread is busy).
@@ -16,13 +18,10 @@
 class DAWSplashScreen final
 {
 public:
-    static DAWSplashScreen* launch(const juce::File& imageFile)
+    // Embedded Win32 RCDATA only: the installed EXE never opens a logo file.
+    static DAWSplashScreen* launch()
     {
-        if (! imageFile.existsAsFile())
-            return nullptr;
-
-        std::unique_ptr<DAWSplashScreen> splash(
-            new DAWSplashScreen(imageFile.getFullPathName().toWideCharPointer()));
+        std::unique_ptr<DAWSplashScreen> splash(new DAWSplashScreen());
 
         splash->ready_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         splash->stop_  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -64,7 +63,9 @@ public:
     }
 
 private:
-    explicit DAWSplashScreen(std::wstring file) : imagePath_(std::move(file)) {}
+    DAWSplashScreen() = default;
+
+    static constexpr int kEvoEyeResourceId = 27182;
 
     static DWORD WINAPI runThread(void* context)
     {
@@ -142,7 +143,7 @@ private:
         StringFormat align;
         align.SetAlignment(StringAlignmentCenter);
         align.SetLineAlignment(StringAlignmentCenter);
-        const wchar_t* caption = L"MUSIC PRODUCTION ENGINEER";
+        const wchar_t* caption = L"AUDIO PRODUCTION ENGINEERING";
         g.DrawString(caption, -1, &font,
                      RectF(w * 0.24f, h * 0.795f, w * 0.52f, h * 0.036f),
                      &align, &text);
@@ -152,20 +153,56 @@ private:
     {
         using namespace Gdiplus;
         GdiplusStartupInput input;
-        ULONG_PTR token = 0;
-        if (GdiplusStartup(&token, &input, nullptr) != Ok)
+        // Keep GDI+ alive until all bitmaps and the IStream have been freed.
+        struct GdiSession
+        {
+            ULONG_PTR token = 0;
+            ~GdiSession() { if (token != 0) GdiplusShutdown(token); }
+        } gdip;
+        if (GdiplusStartup(&gdip.token, &input, nullptr) != Ok)
         {
             SetEvent(ready_);
             return 1;
         }
 
-        std::unique_ptr<Bitmap> photo(Bitmap::FromFile(imagePath_.c_str()));
+        // Win32 resource 27182 is linked INTO DAW_Core.exe at build time.
+        // SHCreateMemStream exposes it without touching the filesystem.
+        const HMODULE module = GetModuleHandleW(nullptr);
+        const HRSRC resource = FindResourceW(
+            module, MAKEINTRESOURCEW(kEvoEyeResourceId), RT_RCDATA);
+        if (resource == nullptr)
+        {
+            SetEvent(ready_);
+            return 2;
+        }
+        const DWORD size = SizeofResource(module, resource);
+        const HGLOBAL loaded = LoadResource(module, resource);
+        const void* bytes = loaded != nullptr ? LockResource(loaded) : nullptr;
+        if (bytes == nullptr || size == 0)
+        {
+            SetEvent(ready_);
+            return 3;
+        }
+        struct StreamRelease
+        {
+            void operator()(IStream* stream) const noexcept
+            {
+                if (stream != nullptr) stream->Release();
+            }
+        };
+        std::unique_ptr<IStream, StreamRelease> stream(
+            SHCreateMemStream(static_cast<const BYTE*>(bytes), size));
+        if (! stream)
+        {
+            SetEvent(ready_);
+            return 4;
+        }
+        std::unique_ptr<Bitmap> photo(Bitmap::FromStream(stream.get(), FALSE));
         if (! photo || photo->GetLastStatus() != Ok ||
             photo->GetWidth() == 0 || photo->GetHeight() == 0)
         {
             SetEvent(ready_);
-            GdiplusShutdown(token);
-            return 2;
+            return 5;
         }
 
         const int screenW = GetSystemMetrics(SM_CXSCREEN);
@@ -192,8 +229,7 @@ private:
         if (hwnd == nullptr)
         {
             SetEvent(ready_);
-            GdiplusShutdown(token);
-            return 3;
+            return 6;
         }
 
         HDC desktop = GetDC(nullptr);
@@ -215,8 +251,7 @@ private:
             if (desktop) ReleaseDC(nullptr, desktop);
             DestroyWindow(hwnd);
             SetEvent(ready_);
-            GdiplusShutdown(token);
-            return 4;
+            return 7;
         }
 
         HGDIOBJ old = SelectObject(memoryDC, dib);
@@ -284,12 +319,10 @@ private:
         DeleteDC(memoryDC);
         ReleaseDC(nullptr, desktop);
         DestroyWindow(hwnd);
-        GdiplusShutdown(token);
         return 0;
     }
 
-    std::wstring imagePath_;
-    HANDLE ready_ = nullptr;
+     HANDLE ready_ = nullptr;
     HANDLE stop_ = nullptr;
     HANDLE thread_ = nullptr;
     std::atomic<bool> valid_ { false };
@@ -299,7 +332,7 @@ private:
 class DAWSplashScreen
 {
 public:
-    static DAWSplashScreen* launch(const juce::File&) { return nullptr; }
+    static DAWSplashScreen* launch() { return nullptr; }
     void finish() { delete this; }
 };
 #endif
