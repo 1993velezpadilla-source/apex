@@ -68,6 +68,7 @@ public:
     void runTest() override
     {
         testResponsiveLayoutMatrix();
+        testStaticEvoEyeStamp();
         testPurpleAnalyzerAndPresetRestore();
         testPrismOffscreenRenderAndSnapshots();
         testDoubleClickCreatesNativeBandAndWheelEditsQ();
@@ -84,6 +85,53 @@ public:
     }
 
 private:
+    void testStaticEvoEyeStamp()
+    {
+        beginTest ("APEX native plugin stamp is static, text-free, noninteractive "
+                   "and remains small across desktop/mobile sizes");
+        APEX::UI::EvoEyeStamp eye;
+        juce::Component window;
+        for (const auto& dimensions : std::array<juce::Point<int>, 3> {{
+                 {320, 568}, {900, 620}, {1920, 1080}
+             }})
+        {
+            window.setSize (dimensions.x, dimensions.y);
+            eye.placeInCorner (window);
+            const auto bounds = eye.getBounds();
+            expect (window.getLocalBounds().contains (bounds),
+                    "decorative stamp must remain inside plugin");
+            expect (bounds.getWidth() <= APEX::UI::EvoEyeStamp::kWidth
+                    && bounds.getHeight() <= APEX::UI::EvoEyeStamp::kHeight,
+                    "no huge boot-up logo inside plugins");
+            expect (bounds.getWidth() >= 28 && bounds.getHeight() >= 16,
+                    "tiny stamp stays legible");
+            expect (! eye.getInterceptsMouseClicks(),
+                    "eye cannot steal a slider, knob or node gesture");
+        }
+        eye.setSize (APEX::UI::EvoEyeStamp::kWidth,
+                     APEX::UI::EvoEyeStamp::kHeight);
+        juce::Image image (juce::Image::ARGB, eye.getWidth(), eye.getHeight(), true);
+        {
+            juce::Graphics graphics (image);
+            eye.paint (graphics);
+        }
+        int coloredPixels = 0;
+        for (int y = 0; y < image.getHeight(); ++y)
+            for (int x = 0; x < image.getWidth(); ++x)
+                if (image.getPixelAt (x, y).getAlpha() > 80)
+                    ++coloredPixels;
+        expect (coloredPixels > 80,
+                "the eye, brows and pupil must actually render as JUCE paths");
+        beginTest ("plugin brand stamp does not introduce state or frames");
+        const int once = coloredPixels;
+        {
+            juce::Graphics graphics (image);
+            eye.paint (graphics);
+        }
+        expectEquals (coloredPixels, once,
+                      "static eye repaint preserves the same path footprint");
+    }
+
     void testPurpleAnalyzerAndPresetRestore()
     {
         beginTest ("editor-on analyzer shows normal dBFS material full-height "
