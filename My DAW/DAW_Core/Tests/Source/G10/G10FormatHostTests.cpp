@@ -223,7 +223,7 @@ public:
         {
             DAW::PluginScannerCore scanner;
             expect (scanner.getCache().hasCachedEntry ("APEX::G10"), "scanner seeded G10 into the cache");
-            expect (scanner.getCache().hasCachedEntry ("APEX::C4"), "scanner seeded C4 into the cache");
+            expect (! scanner.getCache().hasCachedEntry ("APEX::C4"), "unfinished C4 hidden even from legacy cached browser data");
             expect (scanner.getCache().hasCachedEntry ("APEX::ParametricEQ"),
                     "scanner seeded Parametric EQ into the cache");
             expect (scanner.getCache().hasCachedEntry ("APEX::Opto2A"),
@@ -234,9 +234,9 @@ public:
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 5,
-                          "exactly five APEX Native entries after startup");
-            expect (scanner.getCache().getCount() >= 5, "existing cache entries preserved");
+            expectEquals (apexNativeCount, 4,
+                          "four visible native effects: G10/EQ/Opto/Delay");
+            expect (scanner.getCache().getCount() >= 4, "other cached entries preserved");
         }
     }
 
