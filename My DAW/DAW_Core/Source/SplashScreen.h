@@ -247,17 +247,35 @@ private:
         }
     }
 
-    static void makeEyeContour(Gdiplus::GraphicsPath& p, float open)
+    // SHARED eyelid anatomy: both the aperture CLIP and metallic lip stroke
+    // use exactly these four Beziers. The inner brow is pulled downward to a
+    // pointed glabella while the outer third is raised -> ANGRY expression.
+    // At a full blink both edges converge to one subtle chevron-shaped seam.
+    static void appendUpperLid(Gdiplus::GraphicsPath& path, float open)
     {
-        // The eye is physically modeled in code, and its interior CLIP follows
-        // the eyelids. It is NOT an image with an artificial dark overlay.
-        const float top = 304.0f - 176.0f * open;
-        const float bottom = 304.0f + 161.0f * open;
-        p.Reset();
-        p.StartFigure();
-        p.AddBezier(P(213, 304), P(365, top), P(835, top), P(987, 304));
-        p.AddBezier(P(987, 304), P(826, bottom), P(374, bottom), P(213, 304));
-        p.CloseFigure();
+        const float frownY = 317.0f - 91.0f * open;
+        path.AddBezier(P(213,304), P(331,304 - 179*open),
+                       P(468,304 - 143*open), P(600,frownY));
+        path.AddBezier(P(600,frownY), P(732,304 - 143*open),
+                       P(869,304 - 179*open), P(987,304));
+    }
+
+    static void appendLowerLid(Gdiplus::GraphicsPath& path, float open)
+    {
+        const float innerY = 317.0f + 125.0f * open;
+        path.AddBezier(P(987,304), P(868,304 + 155*open),
+                       P(734,304 + 142*open), P(600,innerY));
+        path.AddBezier(P(600,innerY), P(466,304 + 142*open),
+                       P(332,304 + 155*open), P(213,304));
+    }
+
+    static void makeEyeContour(Gdiplus::GraphicsPath& path, float openness)
+    {
+        path.Reset();
+        path.StartFigure();
+        appendUpperLid(path, openness);
+        appendLowerLid(path, openness);
+        path.CloseFigure();
     }
 
     static void iris(G& g, float sec, float openness)
@@ -446,34 +464,32 @@ private:
 
     static void sculptedArmour(G& g)
     {
+        // No transform-driven lifted "surprised" arch. The upper shells
+        // themselves are sculpted as paired, inward-pointed scowling wedges.
+        // Those are static armor and never travel with the closing eyelid.
         for (bool right : { false, true })
         {
-            // The eyebrow is a FIXED outer guard, not the moving upper lid.
-            // Lift the two upper shell families away from the eye opening.
-            const auto eyebrowTransform = g.Save();
-            g.TranslateTransform(0.0f, -32.0f);
             sculptedPlate(g, right, {
-                P(585,216), P(490,143), P(379,108), P(292,164),
-                P(243,207), P(170,237), P(92,165),
-                P(129,263), P(165,281), P(255,271),
-                P(391,225), P(465,207), P(584,245)
+                P(583,244), P(502,211), P(323,149), P(160,159),
+                P(132,153), P(108,142), P(89,124),
+                P(151,219), P(218,232), P(300,207),
+                P(403,193), P(496,244), P(583,274)
             }, 0);
 
             sculptedPlate(g, right, {
-                P(583,240), P(455,176), P(359,177), P(282,229),
-                P(248,248), P(200,264), P(172,240),
-                P(238,310), P(323,262), P(430,246),
-                P(483,223), P(522,245), P(583,259)
+                P(573,254), P(467,219), P(333,206), P(219,221),
+                P(196,224), P(168,224), P(143,193),
+                P(204,274), P(339,246), P(463,252),
+                P(508,262), P(541,276), P(573,286)
             }, 1);
-            g.Restore(eyebrowTransform);
 
+            // Crown and side cheek hardware remain fixed while blinking.
             sculptedPlate(g, right, {
                 P(217,317), P(274,370), P(383,439), P(547,430),
                 P(490,488), P(365,468), P(285,414),
                 P(248,389), P(213,370), P(180,326),
                 P(190,348), P(201,328), P(217,317)
             }, 2);
-
             sculptedPlate(g, right, {
                 P(216,307), P(167,269), P(108,304), P(53,260),
                 P(98,343), P(130,375), P(157,426),
@@ -481,20 +497,24 @@ private:
                 P(241,318), P(229,312), P(216,307)
             }, 3);
         }
-        // Forged strakes and red-light leakage between overlapping shells.
+
+        // Chrome crest now sweeps DOWN toward the glabella, not UP
+        // in a happy/cartoony arch, with a sharp metallic inward frown.
         for (int side = 0; side < 2; ++side)
         {
             auto m = [side](float x, float y) {
                 return P(side ? 1200.0f - x : x, y);
             };
-            curve(g, C(202, 230, 233, 246), 1.9f, m(115,178),
-                  m(228,278), m(360,143), m(535,220));
-            curve(g, C(127, 250, 18, 98), 1.65f, m(141,258),
-                  m(250,301), m(364,196), m(520,241));
-            curve(g, C(177, 210, 203, 231), 1.25f, m(186,350),
-                  m(291,423), m(390,463), m(518,450));
-            curve(g, C(126, 255, 20, 89), 2.0f, m(198,366),
-                  m(308,455), m(420,482), m(524,444));
+            curve(g, C(210, 227, 234, 246), 1.9f,
+                  m(114,153), m(288,140), m(440,220), m(568,255));
+            curve(g, C(197, 255, 21, 103), 1.7f,
+                  m(145,210), m(279,227), m(439,234), m(567,274));
+            line(g, C(220, 255, 57, 105), 2.4f,
+                 m(526,250), m(582,273));
+            curve(g, C(177, 210, 203, 231), 1.25f,
+                  m(186,350), m(291,423), m(390,463), m(518,450));
+            curve(g, C(126, 255, 20, 89), 2.0f,
+                  m(198,366), m(308,455), m(420,482), m(524,444));
         }
     }
 
@@ -549,59 +569,80 @@ private:
         line(g, C(137, 255, 42, 102), 1.6f, P(804,446), P(641,457));
     }
 
-    // Upper and lower interior shutters are independent of the metal eyebrow.
-    // Their fill ALWAYS stays inside the maximum eye chamber; when fully
-    // closed there is no exposed glowing red background or eyebrow crossing.
+    // During closure we DO NOT paint a big gradient-filled eye oval.
+    // Instead only the part hidden by the eyelid receives a thin, fading
+    // graphite cover. A complete blink blends back into the black surrounding
+    // socket, leaving two precise, inward-notched steel blade edges.
     static void drawShutters(G& g, float openness)
     {
         openness = juce::jlimit(0.0f, 1.0f, openness);
-        const float movingTop = 304.0f - 176.0f * openness;
-        const float movingBottom = 304.0f + 161.0f * openness;
+        const float strength = ease(juce::jmin(1.0f, openness * 3.0f));
+        if (strength < 0.003f)
+            return;
 
-        Gdiplus::GraphicsPath upper;
-        upper.StartFigure();
-        upper.AddBezier(P(213,304), P(365,128), P(835,128), P(987,304));
-        upper.AddBezier(P(987,304), P(835,movingTop), P(365,movingTop),
-                        P(213,304));
-        upper.CloseFigure();
+        Gdiplus::GraphicsPath fullEye, slit;
+        makeEyeContour(fullEye, 1.0f);
+        makeEyeContour(slit, openness);
 
-        Gdiplus::GraphicsPath lower;
-        lower.StartFigure();
-        lower.AddBezier(P(987,304), P(826,465), P(374,465), P(213,304));
-        lower.AddBezier(P(213,304), P(374,movingBottom),
-                        P(826,movingBottom), P(987,304));
-        lower.CloseFigure();
+        Gdiplus::Region covered(&fullEye);
+        Gdiplus::Region aperture(&slit);
+        covered.Exclude(&aperture);
 
-        Gdiplus::LinearGradientBrush upperSteel(
-            R(208.0f, 145.0f, 784.0f, 160.0f),
-            C(255, 69, 74, 92), C(255, 8, 9, 19),
+        // Separate top and bottom material using a subtle two-plane lighting
+        // scheme. At full closure opacity tends to ZERO: no cheap steel oval.
+        Gdiplus::Region upper(covered);
+        upper.Intersect(R(205.0f, 110.0f, 790.0f, 208.0f));
+        Gdiplus::Region lower(covered);
+        lower.Intersect(R(205.0f, 318.0f, 790.0f, 166.0f));
+
+        const auto a = static_cast<BYTE>(210.0f * strength);
+        Gdiplus::LinearGradientBrush topSteel(
+            R(205.0f, 133.0f, 790.0f, 180.0f),
+            C(a, 62, 68, 87), C(a, 8, 9, 18),
             Gdiplus::LinearGradientModeVertical);
-        Gdiplus::LinearGradientBrush lowerSteel(
-            R(208.0f, 304.0f, 784.0f, 142.0f),
-            C(255, 8, 9, 19), C(255, 49, 54, 72),
+        Gdiplus::LinearGradientBrush bottomSteel(
+            R(205.0f, 318.0f, 790.0f, 170.0f),
+            C(a, 8, 9, 18), C(a, 43, 47, 63),
             Gdiplus::LinearGradientModeVertical);
-        g.FillPath(&upperSteel, &upper);
-        g.FillPath(&lowerSteel, &lower);
+        g.FillRegion(&topSteel, &upper);
+        g.FillRegion(&bottomSteel, &lower);
     }
 
-    // A dynamic stroke belongs to the ACTUAL closing eyelid, while the
-    // sculpted eyebrow and static plates remain at their original positions.
-    static void drawLidRims(G& g, float open)
+    static void drawLidRims(G& g, float openness)
     {
-        const float top = 304.0f - 176.0f * open;
-        const float bottom = 304.0f + 161.0f * open;
-        const BYTE red = static_cast<BYTE>(25.0f + 196.0f * open);
-        const C edge(red, 255, 27, 94);
+        openness = juce::jlimit(0.0f, 1.0f, openness);
+        Gdiplus::GraphicsPath upper, lower;
+        appendUpperLid(upper, openness);
+        appendLowerLid(lower, openness);
 
-        // Low-intensity seam when closed; never a thick neon-red bar.
-        curve(g, C(245, 39, 44, 58), 5.7f,
-              P(213,304), P(365,top), P(835,top), P(987,304));
-        curve(g, edge, 1.6f,
-              P(213,304), P(365,top), P(835,top), P(987,304));
-        curve(g, C(245, 34, 37, 52), 5.7f,
-              P(987,304), P(826,bottom), P(374,bottom), P(213,304));
-        curve(g, edge, 1.6f,
-              P(987,304), P(826,bottom), P(374,bottom), P(213,304));
+        // At closed, both lids converge to ONE narrow angled seam.
+        // Do not double-render bright red horizontal lines.
+        if (openness < 0.035f)
+        {
+            Gdiplus::Pen under(C(235, 5, 6, 14), 7.0f);
+            Gdiplus::Pen bevel(C(222, 72, 77, 99), 2.9f);
+            Gdiplus::Pen incision(C(159, 221, 17, 77), 1.1f);
+            g.DrawPath(&under, &upper);
+            g.DrawPath(&bevel, &upper);
+            g.DrawPath(&incision, &upper);
+            // Angled inward scowl creases add tension to the closed posture.
+            line(g, C(119, 244, 24, 76), 1.8f,
+                 P(512,307), P(594,317));
+            line(g, C(119, 244, 24, 76), 1.8f,
+                 P(688,307), P(606,317));
+            return;
+        }
+
+        const BYTE seamAlpha = static_cast<BYTE>(62.0f + 177.0f * openness);
+        Gdiplus::Pen shadow(C(240, 7, 8, 17), 8.0f);
+        Gdiplus::Pen chrome(C(220, 69, 76, 93), 4.0f);
+        Gdiplus::Pen crimson(C(seamAlpha, 255, 30, 97), 1.75f);
+        g.DrawPath(&shadow, &upper);
+        g.DrawPath(&shadow, &lower);
+        g.DrawPath(&chrome, &upper);
+        g.DrawPath(&chrome, &lower);
+        g.DrawPath(&crimson, &upper);
+        g.DrawPath(&crimson, &lower);
     }
 
     // Slender, bespoke APEX letterforms designed as actual C++ glyph
@@ -703,7 +744,7 @@ private:
         // Z ORDER CONTRACT:
         // 1. Fixed eyebrow, horns and side armor can NEVER enter the full
         //    anatomical eye region, irrespective of blink state.
-        // 2. Eye chamber and shutters cover all exposure on close.
+        // 2. Iris socket and shutters dissolve into scene at complete close.
         // 3. Iris is visible only through the changing aperture.
         // 4. Only the fine animated eyelid SEAM is drawn on top of the eye.
         Gdiplus::GraphicsPath fullEye;
@@ -714,8 +755,13 @@ private:
             plating(g);
             g.Restore(guard);
         }
-        Gdiplus::SolidBrush chamber(C(255, 3, 2, 10));
-        g.FillPath(&chamber, &fullEye);
+        // Blend the deep iris socket away BEFORE total closure; otherwise
+        // the static complete-eye shape remains as a huge black oval.
+        const float material = ease(juce::jmin(1.0f, openness * 3.0f));
+        Gdiplus::SolidBrush chamber(C(static_cast<BYTE>(242.0f * material),
+                                      3, 2, 10));
+        if (material > 0.003f)
+            g.FillPath(&chamber, &fullEye);
         drawShutters(g, openness);
         iris(g, seconds, openness);
         drawLidRims(g, openness);
