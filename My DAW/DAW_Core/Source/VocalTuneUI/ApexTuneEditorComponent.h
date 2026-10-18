@@ -16,6 +16,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../UICore/ApexEvoEyeStamp.h"
 #include "../VocalTuneCore/ApexTuneTypes.h"
 #include "ApexTuneToolBarComponent.h"
 #include "ApexTunePianoGridComponent.h"
@@ -58,6 +59,7 @@ public:
     bool keyPressed (const juce::KeyPress& key) override;
 
 private:
+    APEX::UI::EvoEyeStamp eyeStamp_;
     ApexTuneClipState* state_ = nullptr;
 
     std::unique_ptr<ApexTuneToolBarComponent>    toolbar_;
