@@ -31,6 +31,8 @@ struct Palette
     static juce::Colour accent() { return juce::Colour (0xff9b71f7); }
     static juce::Colour accentActive() { return juce::Colour (0xff7544db); }
     static juce::Colour curve() { return juce::Colour (0xff55dff4); }
+    static juce::Colour spectrum() { return juce::Colour (0xffb46bea); }
+    static juce::Colour spectrumTrace() { return juce::Colour (0xffedb9ff); }
     static juce::Colour curveMid() { return juce::Colour (0xffffc777); }
     static juce::Colour curveSide() { return juce::Colour (0xff48e1b4); }
     static juce::Colour selected() { return juce::Colour (0xffffd68e); }
@@ -693,6 +695,7 @@ public:
                                     Palette::positive());
             repaint();
         };
+        spectrumPeakHold_.fill (-120.0f);
         startTimerHz (25);
     }
 
@@ -1168,15 +1171,33 @@ private:
                 }
                 const float* source = snapshot.postActive() ? snapshot.postDb()
                                                             : snapshot.preDb();
-                std::memcpy (spectrumCopy_.data(), source,
-                             spectrumCopy_.size() * sizeof (float));
-                spectrumActive_ = true;
-                changed = true;
+                if (source != nullptr && std::isfinite (snapshot.binHz())
+                    && snapshot.binHz() > 0.0)
+                {
+                    std::memcpy (spectrumCopy_.data(), source,
+                                 spectrumCopy_.size() * sizeof (float));
+                    spectrumBinHz_ = static_cast<float> (snapshot.binHz());
+                    // GUI-only hold: real FFT data, finite-sanitized and
+                    // decaying by ~18 dB/second at the 25 Hz refresh cadence.
+                    // Neither the analysis worker nor audio callback is touched.
+                    for (std::size_t bin = 0; bin < spectrumCopy_.size(); ++bin)
+                    {
+                        const float value = std::isfinite (spectrumCopy_[bin])
+                            ? std::clamp (spectrumCopy_[bin], -120.0f, 18.0f)
+                            : -120.0f;
+                        spectrumCopy_[bin] = value;
+                        spectrumPeakHold_[bin] = std::max (value,
+                            spectrumPeakHold_[bin] - 0.72f);
+                    }
+                    spectrumActive_ = true;
+                    changed = true;
+                }
             }
         }
         else if (spectrumActive_)
         {
             spectrumActive_ = false;
+            spectrumPeakHold_.fill (-120.0f);
             changed = true;
         }
 
@@ -1522,28 +1543,143 @@ private:
         }
     }
 
+    // Decibel spectrum is NOT mapped through the +/-18 dB EQ GAIN axis.
+    // Previously it was clamped into the bottom few pixels, invisible for
+    // normal -60..-20 dBFS program material. An independent -96..-6 dBFS
+    // display range gives a Pro-Q-style full-height live spectrum.
+    float spectrumY (float db, float height) const noexcept
+    {
+        const float top = std::min (64.0f, height * 0.19f);
+        const float bottom = std::max (top + 1.0f, height - 23.0f);
+        const float fraction = std::clamp ((db + 96.0f) / 90.0f,
+                                            0.0f, 1.0f);
+        return bottom - fraction * (bottom - top);
+    }
+
+    float spectrumAt (const std::array<float,
+                      APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>& data,
+                      double hz) const noexcept
+    {
+        const float index = static_cast<float> (hz)
+                          / std::max (1.0f, spectrumBinHz_);
+        const float clamped = std::clamp (index, 0.0f,
+            static_cast<float> (data.size() - 1));
+        const auto lo = static_cast<std::size_t> (clamped);
+        const auto hi = std::min (lo + 1, data.size() - 1);
+        return data[lo] + (data[hi] - data[lo])
+            * (clamped - static_cast<float> (lo));
+    }
+
     void drawSpectrum (juce::Graphics& g, juce::Rectangle<float> bounds)
     {
-        const float binHz = spectrumCopy_.size() > 0
-                          ? static_cast<float> (latestFrame_.sampleRate)
-                                / static_cast<float> (2 * (spectrumCopy_.size() - 1))
-                          : 11.72f;
-        g.setColour (Palette::curveSide().withAlpha (0.30f));
         const int width = std::max (1, getWidth());
-        const auto baseline = static_cast<float> (yForGain (-60.0,
-                                                            bounds.getHeight()));
+        const float h = bounds.getHeight();
+        const float bottom = std::max (1.0f, h - 23.0f);
+        juce::Path live, peakHold, fill;
+        // Fixed-size winners: prominent actual FFT peaks, not fabricated
+        // resonance data. Spacing keeps labels from colliding.
+        std::array<float, 4> loudest {{ -120.0f, -120.0f,
+                                         -120.0f, -120.0f }};
+        std::array<int, 4> locations {{ -1, -1, -1, -1 }};
+        const int separation = std::max (40, width / 10);
         for (int x = 0; x < width; ++x)
         {
             const auto frequency = frequencyForX (x, width);
-            const int bin = std::clamp (static_cast<int> (
-                std::lround (frequency / std::max (1.0f, binHz))),
-                0, static_cast<int> (spectrumCopy_.size()) - 1);
-            const auto db = spectrumCopy_[static_cast<std::size_t> (bin)];
-            const auto y = static_cast<float> (yForGain (
-                std::clamp (static_cast<double> (db), -60.0, 18.0),
-                bounds.getHeight()));
-            g.drawVerticalLine (x, std::min (y, baseline),
-                                std::max (y, baseline));
+            const float db = spectrumAt (spectrumCopy_, frequency);
+            const float y = spectrumY (db, h);
+            const float peakY = spectrumY (
+                spectrumAt (spectrumPeakHold_, frequency), h);
+            if (x == 0)
+            {
+                live.startNewSubPath (0.0f, y);
+                peakHold.startNewSubPath (0.0f, peakY);
+                fill.startNewSubPath (0.0f, bottom);
+                fill.lineTo (0.0f, y);
+            }
+            else
+            {
+                live.lineTo (static_cast<float> (x), y);
+                peakHold.lineTo (static_cast<float> (x), peakY);
+                fill.lineTo (static_cast<float> (x), y);
+            }
+            // Local maximum over adjacent logarithmic-frequency samples.
+            // Labels are limited to four loudest peaks above -67 dBFS.
+            if (x < 54 || x >= width - 50 || (x % 3) != 0 || db < -67.0f)
+                continue;
+            const float before = spectrumAt (spectrumCopy_,
+                frequencyForX (x - 5, width));
+            const float after = spectrumAt (spectrumCopy_,
+                frequencyForX (x + 5, width));
+            if (db < before || db < after)
+                continue;
+            int conflicting = -1;
+            for (int i = 0; i < 4; ++i)
+                if (locations[static_cast<std::size_t> (i)] >= 0
+                    && std::abs (x - locations[static_cast<std::size_t> (i)])
+                         < separation)
+                    conflicting = i;
+            if (conflicting >= 0)
+            {
+                if (db > loudest[static_cast<std::size_t> (conflicting)])
+                {
+                    loudest[static_cast<std::size_t> (conflicting)] = db;
+                    locations[static_cast<std::size_t> (conflicting)] = x;
+                }
+            }
+            else
+            {
+                int quietest = 0;
+                for (int i = 1; i < 4; ++i)
+                    if (loudest[static_cast<std::size_t> (i)]
+                        < loudest[static_cast<std::size_t> (quietest)])
+                        quietest = i;
+                if (db > loudest[static_cast<std::size_t> (quietest)])
+                {
+                    loudest[static_cast<std::size_t> (quietest)] = db;
+                    locations[static_cast<std::size_t> (quietest)] = x;
+                }
+            }
+        }
+        fill.lineTo (static_cast<float> (width - 1), bottom);
+        fill.closeSubPath();
+        g.setGradientFill (juce::ColourGradient (
+            Palette::spectrum().withAlpha (0.52f), 0.0f,
+            h * 0.22f, Palette::spectrum().withAlpha (0.045f),
+            0.0f, bottom, false));
+        g.fillPath (fill);
+        g.setColour (Palette::spectrum().withAlpha (0.19f));
+        g.strokePath (live, juce::PathStrokeType (4.0f));
+        g.setColour (Palette::spectrumTrace().withAlpha (0.93f));
+        g.strokePath (live, juce::PathStrokeType (1.45f));
+        g.setColour (Palette::spectrum().withAlpha (0.32f));
+        g.strokePath (peakHold, juce::PathStrokeType (0.9f));
+
+        if (width < 440 || h < 250)
+            return; // retain touch hit targets and short-landscape plot
+        g.setFont (juce::Font (juce::FontOptions (11.0f,
+                                                juce::Font::bold)));
+        for (int i = 0; i < 4; ++i)
+        {
+            const int x = locations[static_cast<std::size_t> (i)];
+            if (x < 0)
+                continue;
+            const float y = spectrumY (loudest[static_cast<std::size_t> (i)], h);
+            const float bubbleY = y > 102.0f ? y - 30.0f : y + 12.0f;
+            const auto hz = frequencyForX (x, width);
+            const juce::String caption = hz < 1000.0
+                ? juce::String (juce::roundToInt (hz)) + " Hz"
+                : juce::String (hz / 1000.0, 1) + " kHz";
+            juce::Rectangle<float> box (static_cast<float> (x - 32),
+                                         bubbleY, 64.0f, 21.0f);
+            g.setColour (Palette::surface().withAlpha (0.88f));
+            g.fillRoundedRectangle (box, 6.0f);
+            g.setColour (Palette::spectrumTrace().withAlpha (0.72f));
+            g.drawRoundedRectangle (box, 6.0f, 0.8f);
+            g.fillEllipse (static_cast<float> (x) - 2.5f,
+                           y - 2.5f, 5.0f, 5.0f);
+            g.setColour (Palette::text());
+            g.drawFittedText (caption, box.toNearestInt(),
+                              juce::Justification::centred, 1);
         }
     }
 
@@ -1832,8 +1968,11 @@ private:
     ResponseFrame latestFrame_;
     int lastSpectrumIndex_ = -1;
     bool spectrumActive_ = false;
+    float spectrumBinHz_ = 11.71875f;
     std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
         spectrumCopy_ {};
+    std::array<float, APEX::Analysis::SpectrumAnalyzerCore::kSpectrumBins>
+        spectrumPeakHold_ {};
     juce::TextButton sketchButton_ { "SKETCH" };
     juce::TextButton grabButton_ { "GRAB" };
     juce::TextButton copyButton_ { "COPY" };
