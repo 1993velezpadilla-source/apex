@@ -314,8 +314,11 @@ bool ProjectManager::loadFromFile(const juce::File& file)
     projectFile_ = file;
     projectName_ = file.getFileNameWithoutExtension();
     dirty_ = false;
-    reportLoadProgress("Finalizing project", 1.0, file.getFileName(), 1, 1);
+    // Project-loaded listeners rebuild windows/UI and can do expensive work.
+    // 100% must NOT be published until all listeners have returned.
+    reportLoadProgress("Finalizing project", 0.99, file.getFileName(), 0, 1);
     listeners_.call([](Listener& l) { l.projectLoaded(); });
+    reportLoadProgress("Project ready", 1.0, file.getFileName(), 1, 1);
     return true;
 }
 
@@ -473,7 +476,7 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
 
     if (subs_.appCore)
     {
-        reportLoadProgress("Clearing previous plugin state", 0.12, {}, 1, 16, false);
+        reportLoadProgress("Clearing previous plugin state", 0.12, {}, 1, 16);
         try
         {
             // Old Bubblegum listeners refer to the previous project's
@@ -756,7 +759,7 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
 
     if (subs_.appCore)
     {
-        reportLoadProgress("Restoring plugins", 0.62, {}, 10, 16, false);
+        reportLoadProgress("Restoring plugins", 0.62, {}, 10, 16);
         try {
             auto cv = state.getChildWithName("ClickState");
             subs_.appCore->restoreClickStateTree(cv);
@@ -972,7 +975,7 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
         {
             // AudioFileManager is callback-visible. Replace its cache before
             // releasing the whole-project callback-admission gate.
-            reportLoadProgress("Loading project audio", 0.82, {}, 0, 0, false);
+            reportLoadProgress("Loading project audio", 0.82, {}, 0, 0);
             subs_.appCore->reloadAudioFiles([this](int completed, int total, const juce::String& fileName)
             {
                 const double local = total > 0 ? (double) completed / (double) total : 1.0;

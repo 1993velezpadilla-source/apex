@@ -2,6 +2,10 @@
 #include <JuceHeader.h>
 #include "../ThemeCore/Theme.h"
 #include "../ThemeCore/ApexPrimitives.h"
+#if JUCE_WINDOWS
+ #include <windows.h>
+ #include <cstring>
+#endif
 
 namespace DAW {
 
@@ -27,7 +31,7 @@ public:
         stage_ = "Preparing project";
         currentItem_.clear();
         progress_ = 0.0;
-        determinate_ = false;
+        determinate_ = true;
         setVisible(true);
         toFront(false);
         startTimerHz(6);
@@ -42,9 +46,33 @@ public:
     {
         stage_ = stage;
         currentItem_ = currentItem;
-        progress_ = juce::jlimit(0.0, 1.0, progress);
+        // Progress callbacks can arrive at overlapping stage boundaries.
+        // The existing left-to-right fill is monotonic throughout a load.
+        progress_ = juce::jmax(progress_, juce::jlimit(0.0, 1.0, progress));
         determinate_ = determinate;
         repaint();
+        paintExistingOverlayNow();
+    }
+
+    // A full bar means that the ACTUAL project loader succeeded, including
+    // synchronous listener/UI rebuild. Failure never paints as completion.
+    void markLoadResult(bool succeeded, const juce::String& error = {})
+    {
+        if (activeGeneration_ == 0) return;
+        if (succeeded)
+        {
+            progress_ = 1.0;
+            stage_ = "Project ready";
+            currentItem_.clear();
+        }
+        else
+        {
+            progress_ = juce::jmin(0.99, progress_);
+            stage_ = "Project load failed";
+            currentItem_ = error;
+        }
+        repaint();
+        paintExistingOverlayNow();
     }
 
     void dismissAfterMinimumVisible(Generation generation,
@@ -110,23 +138,13 @@ public:
         auto bar = inner.removeFromTop(14.0f);
         g.setColour(a.color.deepestB);
         g.fillRoundedRectangle(bar, 7.0f);
-        float fillFraction = (float) progress_;
-        if (!determinate_)
-        {
-            const auto phase = (float) ((juce::Time::getMillisecondCounter() % 1200) / 1200.0);
-            fillFraction = 0.18f;
-            auto moving = bar.withWidth(bar.getWidth() * fillFraction)
-                             .translated((bar.getWidth() - bar.getWidth() * fillFraction) * phase, 0.0f);
-            juce::ColourGradient flow(a.color.magenta, moving.getX(), moving.getCentreY(),
-                                      a.color.cyan, moving.getRight(), moving.getCentreY(), false);
-            g.setGradientFill(flow);
-            g.fillRoundedRectangle(moving, 7.0f);
-        }
-        else if (fillFraction > 0.0f)
+        // No fake looping marquee: fill always represents completed load work.
+        const float fillFraction = (float) progress_;
+        if (fillFraction > 0.0f)
         {
             auto fill = bar.withWidth(bar.getWidth() * fillFraction);
             juce::ColourGradient flow(a.color.magenta, fill.getX(), fill.getCentreY(),
-                                      a.color.cyan, fill.getRight(), fill.getCentreY(), false);
+                                      a.color.cyan, bar.getRight(), fill.getCentreY(), false);
             g.setGradientFill(flow);
             g.fillRoundedRectangle(fill, 7.0f);
         }
@@ -147,12 +165,76 @@ private:
     juce::String stage_;
     juce::String currentItem_;
     double progress_ = 0.0;
-    bool determinate_ = false;
+    bool determinate_ = true;
     std::vector<juce::Path> slashFlow_;
     static constexpr double kMinimumVisibleMs = 500.0;
     Generation nextGeneration_ = 0;
     Generation activeGeneration_ = 0;
     double shownAtMs_ = 0.0;
+
+    // SINGLE loading surface: repaint the EXISTING JUCE ProjectLoadingOverlay
+    // in place even while ProjectManager synchronously restores plugin state.
+    // Normal Component::repaint() posts a paint message that cannot run until
+    // the blocking restore ends, making the pre-existing progress bar appear
+    // stuck. Rendering ONLY this component's already-existing 480x190 panel
+    // to the current window DC avoids pumping nested JUCE messages and avoids
+    // painting an inconsistent, half-restored DAW model. No second window,
+    // modal progress component, popup, or new loading bar is created.
+    void paintExistingOverlayNow()
+    {
+       #if JUCE_WINDOWS
+        jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+        if (!isShowing() || getWidth() <= 0 || getHeight() <= 0)
+            return;
+        auto* peer = getPeer();
+        if (peer == nullptr)
+            return;
+        HWND hwnd = static_cast<HWND>(peer->getNativeHandle());
+        if (hwnd == nullptr)
+            return;
+
+        const auto panel = getLocalBounds().withSizeKeepingCentre(480, 190);
+        const auto snapshot = createComponentSnapshot(panel, false);
+        if (snapshot.isNull() || snapshot.getFormat() != juce::Image::ARGB)
+            return;
+
+        const juce::Image::BitmapData bitmap(snapshot, juce::Image::BitmapData::readOnly);
+        if (bitmap.pixelStride != 4)
+            return;
+        // BitmapData::lineStride may exceed width*4; copy row by row to
+        // preserve pixels on all JUCE image backends, never assume pitch.
+        std::vector<juce::uint8> rows((size_t) snapshot.getWidth()
+                                     * (size_t) snapshot.getHeight() * 4u);
+        const size_t rowBytes = (size_t) snapshot.getWidth() * 4u;
+        for (int y = 0; y < snapshot.getHeight(); ++y)
+            std::memcpy(rows.data() + (size_t) y * rowBytes,
+                        bitmap.getLinePointer(y), rowBytes);
+
+        const auto local = peer->getComponent().getLocalPoint(this, panel.getTopLeft());
+        const double scale = peer->getPlatformScaleFactor();
+        const int x = juce::roundToInt(local.x * scale);
+        const int y = juce::roundToInt(local.y * scale);
+        const int w = juce::roundToInt(panel.getWidth() * scale);
+        const int h = juce::roundToInt(panel.getHeight() * scale);
+        if (w <= 0 || h <= 0)
+            return;
+
+        BITMAPINFO info {};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = snapshot.getWidth();
+        info.bmiHeader.biHeight = -snapshot.getHeight(); // top-to-bottom
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        if (auto dc = GetDC(hwnd))
+        {
+            StretchDIBits(dc, x, y, w, h, 0, 0,
+                          snapshot.getWidth(), snapshot.getHeight(),
+                          rows.data(), &info, DIB_RGB_COLORS, SRCCOPY);
+            ReleaseDC(hwnd, dc);
+        }
+       #endif
+    }
 
     void timerCallback()
     {
