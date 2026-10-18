@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../ThemeCore/Theme.h"
 #include "../ThemeCore/ApexPrimitives.h"
+#include "NativeProjectLoadingWindow.h"
 
 namespace DAW {
 
@@ -27,7 +28,8 @@ public:
         stage_ = "Preparing project";
         currentItem_.clear();
         progress_ = 0.0;
-        determinate_ = false;
+        determinate_ = true;
+        native_.show(projectName);
         setVisible(true);
         toFront(false);
         startTimerHz(6);
@@ -44,6 +46,28 @@ public:
         currentItem_ = currentItem;
         progress_ = juce::jlimit(0.0, 1.0, progress);
         determinate_ = determinate;
+        native_.update(stage, currentItem, progress_);
+        repaint();
+    }
+
+    // A full bar means that the ACTUAL project loader succeeded, including
+    // synchronous listener/UI rebuild. Failure never paints as completion.
+    void markLoadResult(bool succeeded, const juce::String& error = {})
+    {
+        if (activeGeneration_ == 0) return;
+        if (succeeded)
+        {
+            progress_ = 1.0;
+            stage_ = "Project ready";
+            currentItem_.clear();
+        }
+        else
+        {
+            progress_ = juce::jmin(0.99, progress_);
+            stage_ = "Project load failed";
+            currentItem_ = error;
+        }
+        native_.finish(succeeded, error);
         repaint();
     }
 
@@ -64,6 +88,7 @@ public:
                 if (generation != self->activeGeneration_)
                     return;
                 self->activeGeneration_ = 0;
+                self->native_.dismiss();
                 self->setVisible(false);
                 self->stopTimer();
                 if (completion)
@@ -110,23 +135,13 @@ public:
         auto bar = inner.removeFromTop(14.0f);
         g.setColour(a.color.deepestB);
         g.fillRoundedRectangle(bar, 7.0f);
-        float fillFraction = (float) progress_;
-        if (!determinate_)
-        {
-            const auto phase = (float) ((juce::Time::getMillisecondCounter() % 1200) / 1200.0);
-            fillFraction = 0.18f;
-            auto moving = bar.withWidth(bar.getWidth() * fillFraction)
-                             .translated((bar.getWidth() - bar.getWidth() * fillFraction) * phase, 0.0f);
-            juce::ColourGradient flow(a.color.magenta, moving.getX(), moving.getCentreY(),
-                                      a.color.cyan, moving.getRight(), moving.getCentreY(), false);
-            g.setGradientFill(flow);
-            g.fillRoundedRectangle(moving, 7.0f);
-        }
-        else if (fillFraction > 0.0f)
+        // No fake looping marquee: fill always represents completed load work.
+        const float fillFraction = (float) progress_;
+        if (fillFraction > 0.0f)
         {
             auto fill = bar.withWidth(bar.getWidth() * fillFraction);
             juce::ColourGradient flow(a.color.magenta, fill.getX(), fill.getCentreY(),
-                                      a.color.cyan, fill.getRight(), fill.getCentreY(), false);
+                                      a.color.cyan, bar.getRight(), fill.getCentreY(), false);
             g.setGradientFill(flow);
             g.fillRoundedRectangle(fill, 7.0f);
         }
@@ -147,7 +162,8 @@ private:
     juce::String stage_;
     juce::String currentItem_;
     double progress_ = 0.0;
-    bool determinate_ = false;
+    bool determinate_ = true;
+    NativeProjectLoadingWindow native_;
     std::vector<juce::Path> slashFlow_;
     static constexpr double kMinimumVisibleMs = 500.0;
     Generation nextGeneration_ = 0;
