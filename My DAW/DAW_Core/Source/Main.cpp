@@ -820,7 +820,8 @@ private:
 }
 
 //==============================================================================
-class DAW_CoreApplication  : public juce::JUCEApplication
+class DAW_CoreApplication  : public juce::JUCEApplication,
+                              private juce::Timer
 {
 public:
     //==============================================================================
@@ -1004,8 +1005,10 @@ public:
                 mainWindow->setVisible(true);
                #endif
 
-                splashScreen_->finish();
-                splashScreen_ = nullptr;
+                // The existing StartupPanel is presented asynchronously.
+                // Keep Evo Eye moving until its actual UI has appeared.
+                splashWaitStartedAt_ = juce::Time::getMillisecondCounter();
+                startTimerHz(30);
             });
         }
 
@@ -1603,6 +1606,7 @@ public:
 
     void shutdown() override
     {
+        stopTimer();
         if (processMode_ != DAW::ApexProcessMode::NormalApex)
             return;
 
@@ -2019,6 +2023,42 @@ public:
     };
 
 private:
+    void timerCallback() override
+    {
+        if (mainWindow == nullptr || splashScreen_ == nullptr)
+        {
+            stopTimer();
+            return;
+        }
+
+        bool startupReady = false;
+        if (auto* component = mainWindow->getMainComponent())
+        {
+            for (int i = 0; i < component->getNumChildComponents(); ++i)
+            {
+                if (auto* panel = dynamic_cast<DAW::StartupPanel*>(
+                        component->getChildComponent(i)))
+                {
+                    startupReady = panel->isShowing()
+                        && panel->getWidth() > 0 && panel->getHeight() > 0;
+                    break;
+                }
+            }
+        }
+
+        const auto waited = juce::Time::getMillisecondCounter() - splashWaitStartedAt_;
+        if (! startupReady && waited < 12000u)
+            return;
+
+        stopTimer();
+        juce::Logger::writeToLog(startupReady
+            ? "[EVO EYE] StartupPanel visible; fading boot eye"
+            : "[EVO EYE] StartupPanel readiness timeout; unblocking application");
+        splashScreen_->finish();
+        splashScreen_ = nullptr;
+    }
+
+    juce::uint32 splashWaitStartedAt_ = 0;
     std::unique_ptr<MainWindow> mainWindow;
     DAWSplashScreen* splashScreen_ = nullptr;
     std::unique_ptr<DAW::MessageBoxSuppressorCore> msgBoxSuppressor_;
