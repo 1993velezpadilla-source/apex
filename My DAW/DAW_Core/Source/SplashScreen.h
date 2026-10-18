@@ -4,140 +4,298 @@
 #if JUCE_WINDOWS
 #include <windows.h>
 #include <gdiplus.h>
+#include <atomic>
+#include <cmath>
+#include <memory>
+#include <string>
 #pragma comment(lib, "gdiplus.lib")
 
-/**
- * True OS-level splash screen using a Win32 WS_EX_LAYERED popup window
- * drawn via GDI+ and UpdateLayeredWindow. This paints synchronously at
- * the OS level — completely independent of JUCE's message loop, so the
- * logo appears instantly even while MainComponent blocks the thread.
- */
-class DAWSplashScreen
+// The splash has its OWN Win32 message/render thread. A JUCE Timer cannot
+// animate during MainComponent construction (the JUCE message thread is busy).
+// No audio/DSP thread ever calls into the splash.
+class DAWSplashScreen final
 {
 public:
     static DAWSplashScreen* launch(const juce::File& imageFile)
     {
-        auto* s = new DAWSplashScreen(imageFile);
-        if (!s->valid_) { delete s; return nullptr; }
-        return s;
+        if (! imageFile.existsAsFile())
+            return nullptr;
+
+        std::unique_ptr<DAWSplashScreen> splash(
+            new DAWSplashScreen(imageFile.getFullPathName().toWideCharPointer()));
+
+        splash->ready_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        splash->stop_  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (splash->ready_ == nullptr || splash->stop_ == nullptr)
+            return nullptr;
+
+        splash->thread_ = CreateThread(nullptr, 0, &DAWSplashScreen::runThread,
+                                       splash.get(), 0, nullptr);
+        if (splash->thread_ == nullptr)
+            return nullptr;
+
+        // Give Win32 enough time to create and paint the first splash frame.
+        // If startup fails, the destructor closes and joins the worker.
+        const auto wait = WaitForSingleObject(splash->ready_, 4000);
+        if (wait != WAIT_OBJECT_0 || ! splash->valid_.load())
+            return nullptr;
+
+        return splash.release();
     }
 
-    // Called once the DAW is ready — destroy the splash immediately.
+    // Called once APEX's real startup panel is ready behind the splash.
+    // The worker performs a 220 ms fade and owns destruction of its HWND.
     void finish()
     {
-        destroyWindow();
         delete this;
     }
 
-    ~DAWSplashScreen() { destroyWindow(); }
+    ~DAWSplashScreen()
+    {
+        if (stop_ != nullptr)
+            SetEvent(stop_);
+        if (thread_ != nullptr)
+        {
+            WaitForSingleObject(thread_, INFINITE);
+            CloseHandle(thread_);
+        }
+        if (ready_ != nullptr) CloseHandle(ready_);
+        if (stop_  != nullptr) CloseHandle(stop_);
+    }
 
 private:
-    HWND       hwnd_         = nullptr;
-    ULONG_PTR  gdiplusToken_ = 0;
-    bool       valid_        = false;
+    explicit DAWSplashScreen(std::wstring file) : imagePath_(std::move(file)) {}
 
-    explicit DAWSplashScreen(const juce::File& imageFile)
+    static DWORD WINAPI runThread(void* context)
     {
-        Gdiplus::GdiplusStartupInput input;
-        Gdiplus::GdiplusStartup(&gdiplusToken_, &input, nullptr);
+        return static_cast<DAWSplashScreen*>(context)->run();
+    }
 
-        // Load PNG via GDI+ (preserves alpha channel)
-        Gdiplus::Bitmap* bmp = Gdiplus::Bitmap::FromFile(imageFile.getFullPathName().toWideCharPointer());
-        if (!bmp || bmp->GetLastStatus() != Gdiplus::Ok) { delete bmp; return; }
+    // Smooth close-and-open at ~3.8 second intervals, not a repetitive
+    // mechanical flashing pattern. Starts fully open on the first frame.
+    static float blinkAmount(double seconds)
+    {
+        const double phase = std::fmod(seconds, 3.8);
+        if (phase < 2.76 || phase > 3.08)
+            return 0.0f;
+        if (phase < 2.88)
+        {
+            const float t = static_cast<float>((phase - 2.76) / 0.12);
+            return t * t * (3.0f - 2.0f * t);
+        }
+        const float t = static_cast<float>((phase - 2.88) / 0.20);
+        const float smooth = t * t * (3.0f - 2.0f * t);
+        return 1.0f - smooth;
+    }
 
-        // Scale to fit 55 % of the screen, max 700 x 500
+    static void drawBlink(Gdiplus::Graphics& g, int w, int h, float closure)
+    {
+        if (closure <= 0.001f)
+            return;
+
+        // The photo's external spiked armor remains fixed. Two soft curved,
+        // obsidian lids mask only the luminous eye interior.
+        using namespace Gdiplus;
+        const float x0 = w * 0.257f, x1 = w * 0.743f;
+        const float centre = h * 0.405f;
+        const float top = h * 0.277f;
+        const float bottom = h * 0.532f;
+        const float lidTop = top + (centre - top) * closure;
+        const float lidBottom = bottom - (bottom - centre) * closure;
+        const float arc = h * 0.022f;
+
+        SolidBrush obsidian(Color(248, 6, 4, 12));
+        Pen edge(Color(235, 243, 35, 102), juce::jmax(1.0f, w * 0.0015f));
+
+        GraphicsPath upper;
+        upper.AddLine(x0, top, x1, top);
+        upper.AddBezier(x1, top, x1 - w * 0.10f, lidTop - arc,
+                        x0 + w * 0.10f, lidTop - arc, x0, lidTop);
+        upper.CloseFigure();
+        g.FillPath(&obsidian, &upper);
+        g.DrawBezier(&edge, x1, lidTop, x1 - w * 0.10f, lidTop - arc,
+                     x0 + w * 0.10f, lidTop - arc, x0, lidTop);
+
+        GraphicsPath lower;
+        lower.AddLine(x0, bottom, x1, bottom);
+        lower.AddBezier(x1, bottom, x1 - w * 0.10f, lidBottom + arc,
+                        x0 + w * 0.10f, lidBottom + arc, x0, lidBottom);
+        lower.CloseFigure();
+        g.FillPath(&obsidian, &lower);
+        g.DrawBezier(&edge, x1, lidBottom, x1 - w * 0.10f, lidBottom + arc,
+                     x0 + w * 0.10f, lidBottom + arc, x0, lidBottom);
+    }
+
+    static void drawSubtitle(Gdiplus::Graphics& g, int w, int h)
+    {
+        using namespace Gdiplus;
+        // Replace the baked-in artwork caption; never ship the old wording.
+        // This affects just the bottom subtitle, not the original Evo Eye art.
+        SolidBrush wipe(Color(244, 7, 5, 12));
+        g.FillRectangle(&wipe, RectF(w * 0.300f, h * 0.795f,
+                                    w * 0.400f, h * 0.036f));
+
+        FontFamily family(L"Segoe UI");
+        Font font(&family, juce::jmax(10.0f, w * 0.0115f),
+                  FontStyleRegular, UnitPixel);
+        SolidBrush text(Color(238, 218, 204, 217));
+        StringFormat align;
+        align.SetAlignment(StringAlignmentCenter);
+        align.SetLineAlignment(StringAlignmentCenter);
+        const wchar_t* caption = L"MUSIC PRODUCTION ENGINEER";
+        g.DrawString(caption, -1, &font,
+                     RectF(w * 0.24f, h * 0.795f, w * 0.52f, h * 0.036f),
+                     &align, &text);
+    }
+
+    DWORD run()
+    {
+        using namespace Gdiplus;
+        GdiplusStartupInput input;
+        ULONG_PTR token = 0;
+        if (GdiplusStartup(&token, &input, nullptr) != Ok)
+        {
+            SetEvent(ready_);
+            return 1;
+        }
+
+        std::unique_ptr<Bitmap> photo(Bitmap::FromFile(imagePath_.c_str()));
+        if (! photo || photo->GetLastStatus() != Ok ||
+            photo->GetWidth() == 0 || photo->GetHeight() == 0)
+        {
+            SetEvent(ready_);
+            GdiplusShutdown(token);
+            return 2;
+        }
+
         const int screenW = GetSystemMetrics(SM_CXSCREEN);
         const int screenH = GetSystemMetrics(SM_CYSCREEN);
-        const int maxW = juce::jmin(700, (int)(screenW * 0.55f));
-        const int maxH = juce::jmin(500, (int)(screenH * 0.55f));
-        const float scale = juce::jmin((float)maxW / (float)juce::jmax(1u, bmp->GetWidth()),
-                                        (float)maxH / (float)juce::jmax(1u, bmp->GetHeight()));
-        const int w = juce::roundToInt((float)bmp->GetWidth()  * scale);
-        const int h = juce::roundToInt((float)bmp->GetHeight() * scale);
-        const int x = (screenW - w) / 2;
-        const int y = (screenH - h) / 2;
+        const float scale = juce::jmin(1100.0f / photo->GetWidth(),
+                               juce::jmin(640.0f / photo->GetHeight(),
+                               juce::jmin(screenW * 0.84f / photo->GetWidth(),
+                                          screenH * 0.78f / photo->GetHeight())));
+        const int w = juce::jmax(1, juce::roundToInt(photo->GetWidth() * scale));
+        const int h = juce::jmax(1, juce::roundToInt(photo->GetHeight() * scale));
+        const int x = (screenW - w) / 2, y = (screenH - h) / 2;
 
-        // Register minimal window class
         WNDCLASSEXW wc = {};
-        wc.cbSize        = sizeof(wc);
-        wc.lpfnWndProc   = DefWindowProcW;
-        wc.hInstance     = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"DAW_SplashWnd";
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"APEX_EvoEye_Splash";
         RegisterClassExW(&wc);
 
-        // Popup + layered + topmost = borderless with per-pixel alpha
-        hwnd_ = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-            L"DAW_SplashWnd", L"",
-            WS_POPUP,
-            x, y, w, h,
-            nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-
-        if (!hwnd_) { delete bmp; return; }
-
-        // Create a 32-bit memory DC and draw the logo into it with GDI+
-        HDC screenDC = GetDC(nullptr);
-        HDC memDC    = CreateCompatibleDC(screenDC);
-
-        BITMAPINFOHEADER bmh = {};
-        bmh.biSize        = sizeof(bmh);
-        bmh.biWidth       = w;
-        bmh.biHeight      = -h;   // top-down
-        bmh.biPlanes      = 1;
-        bmh.biBitCount    = 32;
-        bmh.biCompression = BI_RGB;
-        BITMAPINFO bmi    = {};
-        bmi.bmiHeader     = bmh;
-
-        void*   bits    = nullptr;
-        HBITMAP hBmp    = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-        HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
-
+        HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+                                      | WS_EX_NOACTIVATE,
+                                    wc.lpszClassName, L"", WS_POPUP,
+                                    x, y, w, h, nullptr, nullptr, wc.hInstance, nullptr);
+        if (hwnd == nullptr)
         {
-            Gdiplus::Graphics gfx(memDC);
-            gfx.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-            gfx.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-            gfx.DrawImage(bmp, 0, 0, w, h);
+            SetEvent(ready_);
+            GdiplusShutdown(token);
+            return 3;
         }
-        delete bmp;
 
-        // Push the pixels to the layered window — true per-pixel alpha
-        BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        POINT ptDst = { x, y };
-        SIZE  sz    = { w, h };
-        POINT ptSrc = { 0, 0 };
-        UpdateLayeredWindow(hwnd_, screenDC, &ptDst, &sz, memDC, &ptSrc, 0, &blend, ULW_ALPHA);
-
-        SelectObject(memDC, hOldBmp);
-        DeleteObject(hBmp);
-        DeleteDC(memDC);
-        ReleaseDC(nullptr, screenDC);
-
-        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-        valid_ = true;
-    }
-
-    void fadeAndDestroy()
-    {
-        // Quick alpha fade: 255 → 0 in ~300 ms using a simple loop
-        for (int alpha = 255; alpha >= 0; alpha -= 15)
+        HDC desktop = GetDC(nullptr);
+        HDC memoryDC = CreateCompatibleDC(desktop);
+        BITMAPINFO info = {};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = w;
+        info.bmiHeader.biHeight = -h;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void* pixels = nullptr;
+        HBITMAP dib = memoryDC != nullptr
+            ? CreateDIBSection(memoryDC, &info, DIB_RGB_COLORS, &pixels, nullptr, 0)
+            : nullptr;
+        if (dib == nullptr)
         {
-            SetLayeredWindowAttributes(hwnd_, 0, (BYTE)juce::jmax(0, alpha), LWA_ALPHA);
-            Sleep(12);
+            if (memoryDC) DeleteDC(memoryDC);
+            if (desktop) ReleaseDC(nullptr, desktop);
+            DestroyWindow(hwnd);
+            SetEvent(ready_);
+            GdiplusShutdown(token);
+            return 4;
         }
-        destroyWindow();
-        delete this; // self-managed
+
+        HGDIOBJ old = SelectObject(memoryDC, dib);
+        const ULONGLONG startedAt = GetTickCount64();
+        ULONGLONG finishAt = 0;
+        bool publishedReady = false;
+
+        for (;;)
+        {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            const auto now = GetTickCount64();
+            if (finishAt == 0 && WaitForSingleObject(stop_, 0) == WAIT_OBJECT_0)
+                finishAt = now;
+            const float fade = finishAt == 0 ? 1.0f
+                : juce::jlimit(0.0f, 1.0f, 1.0f - (now - finishAt) / 220.0f);
+            if (fade <= 0.0f)
+                break;
+
+            {
+                Graphics g(memoryDC);
+                g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+                g.SetSmoothingMode(SmoothingModeAntiAlias);
+                g.Clear(Color(255, 0, 0, 0));
+                g.DrawImage(photo.get(), Rect(0, 0, w, h));
+                const double elapsed = (now - startedAt) / 1000.0;
+                drawBlink(g, w, h, blinkAmount(elapsed));
+                drawSubtitle(g, w, h);
+
+                // A soft alive/energy pulse along the image's existing
+                // loading line. Not a fake percentage of plugin scanning.
+                const float power = static_cast<float>(
+                    0.55 + 0.45 * std::sin(elapsed * 3.0));
+                Pen pulse(Color(static_cast<BYTE>(90 + 110 * power), 255, 35, 112),
+                          juce::jmax(1.0f, h * 0.003f));
+                g.DrawLine(&pulse, w * 0.40f, h * 0.854f,
+                                  w * (0.49f + 0.06f * power), h * 0.854f);
+            }
+
+            POINT pos = { x, y }, origin = { 0, 0 };
+            SIZE dimensions = { w, h };
+            BLENDFUNCTION blend = { AC_SRC_OVER, 0,
+                                    static_cast<BYTE>(255.0f * fade), AC_SRC_ALPHA };
+            UpdateLayeredWindow(hwnd, desktop, &pos, &dimensions, memoryDC,
+                                &origin, 0, &blend, ULW_ALPHA);
+            if (! publishedReady)
+            {
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                valid_.store(true);
+                SetEvent(ready_);
+                publishedReady = true;
+            }
+            Sleep(33); // 30 fps on a lightweight splash-only Win32 worker
+        }
+
+        if (! publishedReady)
+            SetEvent(ready_);
+        SelectObject(memoryDC, old);
+        DeleteObject(dib);
+        DeleteDC(memoryDC);
+        ReleaseDC(nullptr, desktop);
+        DestroyWindow(hwnd);
+        GdiplusShutdown(token);
+        return 0;
     }
 
-    void destroyWindow()
-    {
-        if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
-        if (gdiplusToken_) { Gdiplus::GdiplusShutdown(gdiplusToken_); gdiplusToken_ = 0; }
-    }
+    std::wstring imagePath_;
+    HANDLE ready_ = nullptr;
+    HANDLE stop_ = nullptr;
+    HANDLE thread_ = nullptr;
+    std::atomic<bool> valid_ { false };
 };
 
 #else
-// Non-Windows stub
 class DAWSplashScreen
 {
 public:
@@ -145,4 +303,3 @@ public:
     void finish() { delete this; }
 };
 #endif
-
