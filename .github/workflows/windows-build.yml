@@ -38,6 +38,25 @@ jobs:
         run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
       - name: Verify procedural Evo Eye boot GUI and absence of raster assets
         run: .\Scripts\test_evo_eye_procedural.ps1 -Configuration ${{ matrix.configuration }}
+      - name: Capture real vector-animated Evo Eye open and closed frames
+        run: |
+          $exe = ".\\Builds\\VisualStudio2026\\x64\\${{ matrix.configuration }}\\App\\DAW_Core.exe"
+          $proc = Start-Process -FilePath $exe -ArgumentList '--apex-ci-evo-eye-frames' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Evo Eye frame capture failed ($($proc.ExitCode))" }
+          $source = Join-Path $env:TEMP 'apex-evo-eye-procedural'
+          $dest = Join-Path $PWD 'evidence\\boot'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          foreach ($frame in @('open.png', 'closed.png')) {
+            $from = Join-Path $source $frame
+            if (-not (Test-Path -LiteralPath $from -PathType Leaf)) { throw "Missing Evo Eye screenshot: $from" }
+            Copy-Item -LiteralPath $from -Destination (Join-Path $dest $frame) -Force
+          }
+      - name: Publish rendered Evo Eye C++ GUI previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apex-EvoEye-Frames-${{ matrix.configuration }}-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/boot/*.png
+          if-no-files-found: error
       - name: Run complete test suite
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
       - name: Smoke real APEX GUI and project automation persistence
