@@ -68,6 +68,7 @@ public:
     void runTest() override
     {
         testResponsiveLayoutMatrix();
+        testPurpleAnalyzerAndPresetRestore();
         testPrismOffscreenRenderAndSnapshots();
         testDoubleClickCreatesNativeBandAndWheelEditsQ();
         testNodeDragUpdatesParametersThroughRealHierarchy();
@@ -83,6 +84,78 @@ public:
     }
 
 private:
+    void testPurpleAnalyzerAndPresetRestore()
+    {
+        beginTest ("editor-on analyzer shows normal dBFS material full-height "
+                   "and releases its worker when closed");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 512);
+        expect (processor->getAnalyzerMode()
+            == APEX::Analysis::SpectrumTapMode::Closed);
+        {
+            auto editor = std::make_unique<ParametricEQEditor> (*processor);
+            editor->setSize (1280, 720);
+            expect (processor->getAnalyzerMode()
+                == APEX::Analysis::SpectrumTapMode::Both,
+                "GUI opens the actual pre/post FFT without changing no-GUI default");
+            const float upper = editor->analyzerYForTesting (-6.0f);
+            const float mid = editor->analyzerYForTesting (-38.0f);
+            const float lower = editor->analyzerYForTesting (-96.0f);
+            expect (upper < mid && mid < lower);
+            expect (lower - mid > editor->getGraphBoundsForTesting()
+                          .getHeight() * 0.3f,
+                    "ordinary -38 dBFS analyzer peaks are no longer squashed "
+                    "onto the graph baseline");
+
+            beginTest ("phone effect uses real hosted low/high cuts and preset "
+                       "undo restores 24-band identity");
+            enableBell (*processor, 7, 1880.0f, -3.5f, 2.6f);
+            setUnits (*processor, placementParameterIndex (7), 3.0f);
+            std::array<std::array<float, 7>, kMaxBands> before {};
+            for (int band = 0; band < kMaxBands; ++band)
+                for (int off = 0; off < 7; ++off)
+                    before[static_cast<std::size_t> (band)]
+                          [static_cast<std::size_t> (off)] =
+                        processor->getParametricEQParameter (parameterIndex (
+                            band, static_cast<BandParameterOffset> (off)))->getValue();
+            editor->applyPresetForTesting (2);
+            const auto enabled = [&] (int band)
+            {
+                return processor->getParametricEQParameter (parameterIndex (
+                    band, BandParameterOffset::Enabled))->getBool();
+            };
+            expect (enabled (0) && enabled (1) && enabled (2));
+            expect (! enabled (7), "old bands are disabled not destructively removed");
+            expectEquals (processor->getParametricEQParameter (parameterIndex (
+                0, BandParameterOffset::Shape))->getChoiceIndex(),
+                static_cast<int> (FilterShape::LowCut));
+            expectEquals (processor->getParametricEQParameter (parameterIndex (
+                1, BandParameterOffset::Shape))->getChoiceIndex(),
+                static_cast<int> (FilterShape::HighCut));
+            expectWithinAbsoluteError (
+                processor->getParametricEQParameter (parameterIndex (
+                    0, BandParameterOffset::Frequency))->getUnitsValue(),
+                340.0f, 2.0f);
+            editor->applyPresetForTesting (7);
+            for (int band = 0; band < kMaxBands; ++band)
+                for (int off = 0; off < 7; ++off)
+                    expectWithinAbsoluteError (
+                        processor->getParametricEQParameter (parameterIndex (
+                            band, static_cast<BandParameterOffset> (off)))
+                            ->getValue(),
+                        before[static_cast<std::size_t> (band)]
+                              [static_cast<std::size_t> (off)], 1.0e-6f,
+                        "preset undo preserves stored hosted band IDs");
+            expectWithinAbsoluteError (
+                processor->getParametricEQParameter (
+                    placementParameterIndex (7))->getUnitsValue(),
+                3.0f, 0.01f, "undo restores original Mid placement");
+        }
+        expect (processor->getAnalyzerMode()
+            == APEX::Analysis::SpectrumTapMode::Closed,
+            "closing editor restores dormant analyzer unless changed by user");
+    }
+
     void testResponsiveLayoutMatrix()
     {
         beginTest ("responsive layout at phone, tablet and desktop sizes");
