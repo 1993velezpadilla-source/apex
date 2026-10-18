@@ -13,8 +13,7 @@ $exe = $tools.OutputPaths[$Configuration].Exe
 $jpeg = Join-Path (Split-Path -Parent $PSScriptRoot) 'Assets\EvoEye\evo_eye.jpg'
 
 if (-not (Test-Path -LiteralPath $jpeg -PathType Leaf)) {
-    Write-Warning "[EVO EYE] Official JPEG source not committed yet. Resource test deferred on this draft branch."
-    return
+    throw "[EVO EYE] Official source artwork missing. Refusing to certify or publish an EXE without embedded Evo Eye RCDATA 27182."
 }
 
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
