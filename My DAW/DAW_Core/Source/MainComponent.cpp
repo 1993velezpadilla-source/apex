@@ -4996,13 +4996,15 @@ void MainComponent::openProjectFileWithOverlay(const juce::File& file,
             return;
 
         const bool loaded = self->appCore_.getProjectManager().loadFromFile(file);
+        const auto loadError = self->appCore_.getProjectManager().getLastLoadError();
         if (!loaded)
-        {
-            juce::Logger::writeToLog("[PROJECT] " + failureContext + " failed: "
-                + self->appCore_.getProjectManager().getLastLoadError());
-        }
+            juce::Logger::writeToLog("[PROJECT] " + failureContext + " failed: " + loadError);
+        // Do not advertise 100% until restoreFromState, audio decode, plugin
+        // rehydration and projectLoaded() listeners have actually completed.
+        if (self->loadingOverlay_ && generation != 0)
+            self->loadingOverlay_->markLoadResult(loaded, loadError);
 
-        auto completeVisibility = [safeThis, loaded, onComplete]
+        auto completeVisibility = [safeThis, loaded, loadError, onComplete]
         {
             if (auto* owner = safeThis.getComponent())
             {
@@ -5020,6 +5022,12 @@ void MainComponent::openProjectFileWithOverlay(const juce::File& file,
                         owner->startupPanel_->setVisible(true);
                         owner->startupPanel_->toFront(false);
                     }
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::WarningIcon,
+                        "APEX — Project Not Loaded",
+                        loadError.isNotEmpty() ? loadError
+                                              : juce::String("Could not restore the project. "
+                                                             "Your current project was not opened."));
                 }
             }
 
