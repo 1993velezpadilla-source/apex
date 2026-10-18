@@ -105,7 +105,9 @@ private:
                     "no huge boot-up logo inside plugins");
             expect (bounds.getWidth() >= 28 && bounds.getHeight() >= 16,
                     "tiny stamp stays legible");
-            expect (! eye.getInterceptsMouseClicks(),
+            bool capturesSelf = true, capturesChildren = true;
+            eye.getInterceptsMouseClicks (capturesSelf, capturesChildren);
+            expect (! capturesSelf && ! capturesChildren,
                     "eye cannot steal a slider, knob or node gesture");
         }
         eye.setSize (APEX::UI::EvoEyeStamp::kWidth,
