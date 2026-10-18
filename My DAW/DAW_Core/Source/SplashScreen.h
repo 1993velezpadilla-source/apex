@@ -448,6 +448,10 @@ private:
     {
         for (bool right : { false, true })
         {
+            // The eyebrow is a FIXED outer guard, not the moving upper lid.
+            // Lift the two upper shell families away from the eye opening.
+            const auto eyebrowTransform = g.Save();
+            g.TranslateTransform(0.0f, -32.0f);
             sculptedPlate(g, right, {
                 P(585,216), P(490,143), P(379,108), P(292,164),
                 P(243,207), P(170,237), P(92,165),
@@ -461,6 +465,7 @@ private:
                 P(238,310), P(323,262), P(430,246),
                 P(483,223), P(522,245), P(583,259)
             }, 1);
+            g.Restore(eyebrowTransform);
 
             sculptedPlate(g, right, {
                 P(217,317), P(274,370), P(383,439), P(547,430),
@@ -493,7 +498,7 @@ private:
         }
     }
 
-    static void plating(G& g, float open)
+    static void plating(G& g)
     {
         const C graphiteTop(255, 81, 88, 105);
         const C graphiteBottom(255, 9, 11, 19);
@@ -535,24 +540,6 @@ private:
         // Distinct mirror-symmetric Bezier blade families with raised bevels.
         sculptedArmour(g);
 
-        // A moving, material metallic eyelid: the red inner contour converges
-        // into a real slit on blink while outer armor stays fixed.
-        const float top = 304.0f - 176.0f * open;
-        const float bottom = 304.0f + 161.0f * open;
-        curve(g, C(64, 255, 15, 71), 17.0f,
-              P(213, 304), P(365, top), P(835, top), P(987, 304));
-        curve(g, C(245, 92, 100, 117), 10.0f,
-              P(213, 304), P(365, top), P(835, top), P(987, 304));
-        curve(g, hot, 2.3f,
-              P(213, 304), P(365, top), P(835, top), P(987, 304));
-
-        curve(g, C(64, 255, 15, 71), 17.0f,
-              P(987, 304), P(826, bottom), P(374, bottom), P(213, 304));
-        curve(g, C(240, 40, 42, 62), 10.0f,
-              P(987, 304), P(826, bottom), P(374, bottom), P(213, 304));
-        curve(g, hot, 2.2f,
-              P(987, 304), P(826, bottom), P(374, bottom), P(213, 304));
-
         // Brushed-metal side strakes and facets.
         line(g, C(199, 211, 217, 230), 1.5f, P(114,192), P(241,319));
         line(g, C(199, 211, 217, 230), 1.5f, P(1086,192), P(959,319));
@@ -560,6 +547,61 @@ private:
         line(g, C(175, 248, 36, 104), 2.2f, P(1044,359), P(965,316));
         line(g, C(137, 255, 42, 102), 1.6f, P(396,446), P(559,457));
         line(g, C(137, 255, 42, 102), 1.6f, P(804,446), P(641,457));
+    }
+
+    // Upper and lower interior shutters are independent of the metal eyebrow.
+    // Their fill ALWAYS stays inside the maximum eye chamber; when fully
+    // closed there is no exposed glowing red background or eyebrow crossing.
+    static void drawShutters(G& g, float openness)
+    {
+        openness = juce::jlimit(0.0f, 1.0f, openness);
+        const float movingTop = 304.0f - 176.0f * openness;
+        const float movingBottom = 304.0f + 161.0f * openness;
+
+        Gdiplus::GraphicsPath upper;
+        upper.StartFigure();
+        upper.AddBezier(P(213,304), P(365,128), P(835,128), P(987,304));
+        upper.AddBezier(P(987,304), P(835,movingTop), P(365,movingTop),
+                        P(213,304));
+        upper.CloseFigure();
+
+        Gdiplus::GraphicsPath lower;
+        lower.StartFigure();
+        lower.AddBezier(P(987,304), P(826,465), P(374,465), P(213,304));
+        lower.AddBezier(P(213,304), P(374,movingBottom),
+                        P(826,movingBottom), P(987,304));
+        lower.CloseFigure();
+
+        Gdiplus::LinearGradientBrush upperSteel(
+            R(208.0f, 145.0f, 784.0f, 160.0f),
+            C(255, 69, 74, 92), C(255, 8, 9, 19),
+            Gdiplus::LinearGradientModeVertical);
+        Gdiplus::LinearGradientBrush lowerSteel(
+            R(208.0f, 304.0f, 784.0f, 142.0f),
+            C(255, 8, 9, 19), C(255, 49, 54, 72),
+            Gdiplus::LinearGradientModeVertical);
+        g.FillPath(&upperSteel, &upper);
+        g.FillPath(&lowerSteel, &lower);
+    }
+
+    // A dynamic stroke belongs to the ACTUAL closing eyelid, while the
+    // sculpted eyebrow and static plates remain at their original positions.
+    static void drawLidRims(G& g, float open)
+    {
+        const float top = 304.0f - 176.0f * open;
+        const float bottom = 304.0f + 161.0f * open;
+        const BYTE red = static_cast<BYTE>(25.0f + 196.0f * open);
+        const C edge(red, 255, 27, 94);
+
+        // Low-intensity seam when closed; never a thick neon-red bar.
+        curve(g, C(245, 39, 44, 58), 5.7f,
+              P(213,304), P(365,top), P(835,top), P(987,304));
+        curve(g, edge, 1.6f,
+              P(213,304), P(365,top), P(835,top), P(987,304));
+        curve(g, C(245, 34, 37, 52), 5.7f,
+              P(987,304), P(826,bottom), P(374,bottom), P(213,304));
+        curve(g, edge, 1.6f,
+              P(987,304), P(826,bottom), P(374,bottom), P(213,304));
     }
 
     // Slender, bespoke APEX letterforms designed as actual C++ glyph
@@ -656,9 +698,27 @@ private:
         const auto oldTransform = g.Save();
 
         background(g, seconds);
-        const float closed = blink(seconds);
-        iris(g, seconds, 1.0f - closed);
-        plating(g, 1.0f - closed);
+        const float openness = 1.0f - blink(seconds);
+
+        // Z ORDER CONTRACT:
+        // 1. Fixed eyebrow, horns and side armor can NEVER enter the full
+        //    anatomical eye region, irrespective of blink state.
+        // 2. Eye chamber and shutters cover all exposure on close.
+        // 3. Iris is visible only through the changing aperture.
+        // 4. Only the fine animated eyelid SEAM is drawn on top of the eye.
+        Gdiplus::GraphicsPath fullEye;
+        makeEyeContour(fullEye, 1.0f);
+        {
+            const auto guard = g.Save();
+            g.SetClip(&fullEye, Gdiplus::CombineModeExclude);
+            plating(g);
+            g.Restore(guard);
+        }
+        Gdiplus::SolidBrush chamber(C(255, 3, 2, 10));
+        g.FillPath(&chamber, &fullEye);
+        drawShutters(g, openness);
+        iris(g, seconds, openness);
+        drawLidRims(g, openness);
         identity(g, seconds);
 
         g.Restore(oldTransform);
