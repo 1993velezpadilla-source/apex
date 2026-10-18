@@ -1,6 +1,7 @@
 #include "G10Editor.h"
 #include "G10LookAndFeel.h"
 #include "../G10Core/G10Processor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 namespace APEX {
 namespace G10 {
@@ -477,8 +478,9 @@ void G10Editor::paintContent (juce::Graphics& g)
         g.setFont (G10Fonts::micro());
         g.setColour (G10Colors::textDim());
         g.drawText ("10-BAND ANALOG-STYLE EQ  |  POST-EQ ANALYZER",
-                    juce::Rectangle<float> (kLogicalWidth - 320.0f, 30.0f, 300.0f, 12.0f),
+                    juce::Rectangle<float> (600.0f, 38.0f, 248.0f, 12.0f),
                     juce::Justification::centredRight);
+        APEX::Branding::EvoEyeStamp::paint(g, {860.0f, 9.0f, 127.0f, 46.0f});
     }
 
     // Panel separators.

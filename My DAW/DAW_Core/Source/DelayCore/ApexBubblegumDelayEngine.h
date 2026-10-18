@@ -53,6 +53,9 @@ class Engine final
 {
 public:
     static constexpr int kNoteCount=13;
+    // Musical divisions can exceed the 3500ms free-time dial: two bars
+    // at the minimum 30 BPM requires 16 seconds of history.
+    static constexpr double kMaxSyncedMs=16000.0;
     // Number of quarter-note beats, including straight, triplet and dotted options.
     static constexpr std::array<float,kNoteCount> kNoteBeats {{
         1.0f/12.0f, 0.125f, 1.0f/6.0f, 0.25f, 1.0f/3.0f, 0.75f,
@@ -62,7 +65,7 @@ public:
     {
         rate_=(std::isfinite(sampleRate) && sampleRate>=8000.0)
             ? sampleRate : 48000.0;
-        const auto count=static_cast<std::size_t>(std::ceil(rate_*3.55))+8u;
+        const auto count=static_cast<std::size_t>(std::ceil(rate_*16.025))+8u;
         for (auto& channel : ring_) channel.assign(count,0.0f);
         smoothCoeff_=std::exp(-1.0/(rate_*0.008));
         timeCoeff_=std::exp(-1.0/(rate_*0.018));
@@ -221,7 +224,8 @@ private:
         const double bpm=settings_.sync==2?settings_.manualBpm:hostBpm_;
         const double ms=settings_.sync==0?settings_.timeMs:
             60000.0*static_cast<double>(kNoteBeats[static_cast<std::size_t>(settings_.note)])/bpm;
-        return std::clamp(ms*rate_/1000.0,rate_/1000.0,3.5*rate_);
+        return std::clamp(ms*rate_/1000.0,rate_/1000.0,
+                          (settings_.sync==0?3.5:16.0)*rate_);
     }
     static constexpr double twoPi=6.2831853071795864769;
     Settings settings_ {};
