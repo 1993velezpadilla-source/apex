@@ -315,6 +315,120 @@ private:
         g.Restore(saved);
     }
 
+
+    // Hand-sculpted curved graphite/obsidian metal shells. Coordinates are
+    // mirrored geometrically, not via PNG mirroring or prerendered sprites.
+    // The reference uses MANY overlapping forged steel claws; these 4 shell
+    // families replace the simplistic flat triangular silhouette.
+    static void sculptedPlate(G& g, bool mirrored,
+                             std::initializer_list<P> bezierNodes,
+                             int layer)
+    {
+        std::vector<P> v(bezierNodes);
+        if (v.size() < 4 || ((v.size() - 1) % 3) != 0) return;
+        if (mirrored)
+            for (auto& p : v) p.X = 1200.0f - p.X;
+
+        Gdiplus::GraphicsPath shell;
+        shell.StartFigure();
+        shell.AddBeziers(v.data(), static_cast<INT>(v.size()));
+        shell.CloseFigure();
+
+        R bounds;
+        shell.GetBounds(&bounds);
+        const C high = layer == 0 ? C(255, 139, 146, 166)
+                   : layer == 1 ? C(255, 96, 98, 116)
+                   : layer == 2 ? C(255, 112, 116, 139)
+                                : C(255, 77, 82, 99);
+        Gdiplus::LinearGradientBrush steel(
+            R(bounds.X, bounds.Y, juce::jmax(1.0f, bounds.Width),
+              juce::jmax(1.0f, bounds.Height)),
+            high, C(255, 4, 5, 13), Gdiplus::LinearGradientModeVertical);
+
+        // Inward crimson underglow establishes layered depth, while
+        // the graphite bevel has two nonuniform specular edge strokes.
+        Gdiplus::Pen aura(C(74, 255, 17, 73), 16.0f);
+        g.DrawPath(&aura, &shell);
+        Gdiplus::Pen blackContour(C(255, 0, 0, 7), 5.0f);
+        g.DrawPath(&blackContour, &shell);
+        g.FillPath(&steel, &shell);
+        Gdiplus::Pen graphite(C(229, 168, 174, 197), 1.35f);
+        g.DrawPath(&graphite, &shell);
+        Gdiplus::Pen chrome(C(170, 229, 233, 250), layer == 0 ? 2.2f : 1.2f);
+        g.DrawBezier(&chrome, v[0], v[1], v[2], v[3]);
+
+        Gdiplus::Pen internalGlow(C(123, 255, 21, 95), 1.15f);
+        const P a = v[0], tail = v.back();
+        g.DrawLine(&internalGlow, a, tail);
+
+        // Refined etched highlights: intermittent, short silver scratches
+        // simulate brushed/gouged forged metal, computed in C++ each frame.
+        for (int n = 0; n < 13; ++n)
+        {
+            const float frac = (n + 0.35f) / 13.0f;
+            const float bx = bounds.X + bounds.Width * frac;
+            const float by = bounds.Y + bounds.Height * (0.23f + 0.08f *
+                                                        std::sin(n * 2.73f));
+            // Only scratch inside this plate. No texture is ever loaded.
+            if (shell.IsVisible(bx, by))
+            {
+                const BYTE alpha = static_cast<BYTE>(38 + n % 5 * 13);
+                line(g, C(alpha, 236, 221, 246), n % 4 == 0 ? 1.4f : 0.65f,
+                     P(bx, by), P(bx + (mirrored ? -1.0f : 1.0f) *
+                                    (6.0f + n % 8), by - (n % 3 + 1) * 1.7f));
+            }
+        }
+    }
+
+    static void sculptedArmour(G& g)
+    {
+        for (bool right : { false, true })
+        {
+            sculptedPlate(g, right, {
+                P(585,216), P(490,143), P(379,108), P(292,164),
+                P(243,207), P(170,237), P(92,165),
+                P(129,263), P(165,281), P(255,271),
+                P(391,225), P(465,207), P(584,245)
+            }, 0);
+
+            sculptedPlate(g, right, {
+                P(583,240), P(455,176), P(359,177), P(282,229),
+                P(248,248), P(200,264), P(172,240),
+                P(238,310), P(323,262), P(430,246),
+                P(483,223), P(522,245), P(583,259)
+            }, 1);
+
+            sculptedPlate(g, right, {
+                P(217,317), P(274,370), P(383,439), P(547,430),
+                P(490,488), P(365,468), P(285,414),
+                P(248,389), P(213,370), P(180,326),
+                P(190,348), P(201,328), P(217,317)
+            }, 2);
+
+            sculptedPlate(g, right, {
+                P(216,307), P(167,269), P(108,304), P(53,260),
+                P(98,343), P(130,375), P(157,426),
+                P(185,383), P(188,345), P(256,331),
+                P(241,318), P(229,312), P(216,307)
+            }, 3);
+        }
+        // Forged strakes and red-light leakage between overlapping shells.
+        for (int side = 0; side < 2; ++side)
+        {
+            auto m = [side](float x, float y) {
+                return P(side ? 1200.0f - x : x, y);
+            };
+            curve(g, C(202, 230, 233, 246), 1.9f, m(115,178),
+                  m(228,278), m(360,143), m(535,220));
+            curve(g, C(127, 250, 18, 98), 1.65f, m(141,258),
+                  m(250,301), m(364,196), m(520,241));
+            curve(g, C(177, 210, 203, 231), 1.25f, m(186,350),
+                  m(291,423), m(390,463), m(518,450));
+            curve(g, C(126, 255, 20, 89), 2.0f, m(198,366),
+                  m(308,455), m(420,482), m(524,444));
+        }
+    }
+
     static void plating(G& g, float open)
     {
         const C graphiteTop(255, 81, 88, 105);
@@ -342,6 +456,10 @@ private:
                 C(255, 138, 146, 157), C(255, 15, 16, 28),
                 C(222, 249, 91, 120));
         line(g, C(220, 255, 25, 105), 2.7f, P(600,82), P(600,211));
+
+        // The four sculpted mirrored shells are filled with real metallic
+        // gradients, edge bevels, grooves and chrome scratches.
+        sculptedArmour(g);
 
         // Lower crystal armor / fangs.
         polygon(g, {P(228,315), P(308,388), P(421,432), P(538,436),
