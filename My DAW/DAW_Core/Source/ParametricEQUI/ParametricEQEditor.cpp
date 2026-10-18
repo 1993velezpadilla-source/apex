@@ -411,6 +411,7 @@ public:
         };
         analyzerButton_.onClick = [this]
         {
+            autoAnalyzerStarted_ = false;
             auto mode = processor_.getAnalyzerMode();
             mode = static_cast<APEX::Analysis::SpectrumTapMode> (
                 (static_cast<int> (mode) + 1) % 4);
@@ -453,6 +454,15 @@ public:
         };
         presetButton_.onClick = [this] { openPresetMenu(); };
         utilityButton_.onClick = [this] { openUtilityMenu(); };
+        // Automatically show the real analyzer when the EQ window opens.
+        // The audio processor's closed/dormant default is preserved when no
+        // UI exists; the scope-owned subscription is released on close unless
+        // the user explicitly selected a different tap state.
+        if (processor_.getAnalyzerMode() == APEX::Analysis::SpectrumTapMode::Closed)
+        {
+            processor_.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Both);
+            autoAnalyzerStarted_ = true;
+        }
         // Host/state changes to peq.phase must reach the top bar even when
         // they were not initiated by this button; a low-rate timer refresh
         // matches the existing inspector/graph synchronization pattern.
@@ -460,7 +470,16 @@ public:
         refresh();
     }
 
+    ~TopBarComponent() override
+    {
+        if (autoAnalyzerStarted_
+            && processor_.getAnalyzerMode()
+                == APEX::Analysis::SpectrumTapMode::Both)
+            processor_.setAnalyzerMode (APEX::Analysis::SpectrumTapMode::Closed);
+    }
+
     juce::TextButton& getPhaseButtonForTesting() noexcept { return phaseButton_; }
+    void applyPresetForTesting (int id) { applyPreset (id); }
 
     void refresh()
     {
@@ -730,15 +749,18 @@ public:
                 {
                     switch (id)
                     {
-                        case 1: bar->detectorButton_.triggerClick(); break;
-                        case 2: bar->keyButton_.triggerClick(); break;
-                        case 3: bar->linkButton_.triggerClick(); break;
-                        case 4: bar->characterButton_.triggerClick(); break;
+                        case 1: bar->detectorButton_.onClick(); break;
+                        case 2: bar->keyButton_.onClick(); break;
+                        case 3: bar->linkButton_.onClick(); break;
+                        case 4: bar->characterButton_.onClick(); break;
                         default:
                             if (id >= 10 && id <= 13)
+                            {
+                                bar->autoAnalyzerStarted_ = false;
                                 bar->processor_.setAnalyzerMode (
                                     static_cast<APEX::Analysis::SpectrumTapMode>(
                                         id - 10));
+                            }
                             break;
                     }
                     bar->refresh();
@@ -771,6 +793,7 @@ private:
     std::array<float, kMaxBands> oldDynFilters_ {};
     std::array<float, kMaxBands> oldSpectral_ {};
     bool undoAvailable_ = false;
+    bool autoAnalyzerStarted_ = false;
 };
 
 //==============================================================================
