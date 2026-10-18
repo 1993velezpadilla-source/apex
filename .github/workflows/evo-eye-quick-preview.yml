@@ -26,12 +26,12 @@ jobs:
           $compiler = 'call "' + $vcvars + '" && cl /nologo /std:c++17 /EHsc /DUNICODE /D_UNICODE /I"' + $preview + '" "' + $preview + '\main.cpp" /Fe:preview.exe /link gdiplus.lib'
           cmd.exe /d /s /c $compiler
           if ($LASTEXITCODE -ne 0) { throw 'C++ splash standalone compilation failed' }
-      - name: Render real C++ open and closed frames
+      - name: Assert seven repeating blink cycles and capture real C++ frames
         shell: pwsh
         run: |
           & .\preview.exe "My DAW\DAW_Core\evidence\EvoEyeFocus"
           if ($LASTEXITCODE -ne 0) { throw 'C++ screenshot capture failed' }
-          foreach ($f in @('open.png','closed.png')) {
+          foreach ($f in @('open.png','closed.png','blink_after_5_cycles.png')) {
             $p = "My DAW\DAW_Core\evidence\EvoEyeFocus\$f"
             if (-not (Test-Path $p) -or (Get-Item $p).Length -lt 1000) {
               throw "C++ render missing/empty: $p"
