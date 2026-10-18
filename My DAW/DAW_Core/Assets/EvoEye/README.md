@@ -1,48 +1,28 @@
-# APEX Evo Eye — boot splash resource
+# APEX — EVO EYE, self-contained Windows executable
 
-**Source of truth:** the original APEX eye artwork provided by the project owner,
-not a new AI rendering. Preserve the full 1536 × 864, 16:9 visual and its
-APEX wordmark.
+The boot artwork is the owner's ORIGINAL supplied photograph (do not regenerate).
+Its exact official caption is **AUDIO PRODUCTION ENGINEERING**.
 
-## Asset contract
+## Packaging / deployment
 
-Commit the supplied image with these exact paths and names:
+- The photo at `My DAW/DAW_Core/Assets/EvoEye/evo_eye.jpg` is **source-build input only**.
+- MSVC's resource compiler embeds JPEG bytes as Win32 RCDATA numeric resource **27182** into `DAW_Core.exe`.
+- `Source/SplashScreen.h` retrieves resource 27182 using `FindResourceW/LoadResource/LockResource` and opens it as a GDI+ in-memory bitmap using `SHCreateMemStream`.
+- The renderer blinks/pulses on its own Win32 thread, independent of the JUCE message loop, until the actual StartupPanel is ready.
+- The installer explicitly **EXCLUDES** `EvoEye/` from files copied alongside the EXE. An installed APEX does not read an external boot JPEG/PNG or require any image path.
+- Missing resource fails open: normal APEX and its StartupPanel still start. The installer intentionally blocks packaging until source artwork is present so an official release cannot silently omit its logo.
 
-- Source checkout: \`My DAW/DAW_Core/Assets/EvoEye/evo_eye.jpg\`
-- Installed alongside EXE: \`EvoEye/evo_eye.jpg\`
+## Source-image acceptance
 
-The supplied attachment called \`1000244033.png\` is actually JPEG data.
-Rename/copy those **same bytes** to \`evo_eye.jpg\`; do not transcode the original
-or regenerate it. The runtime overlays the revised wording
-**MUSIC PRODUCTION ENGINEER** over the source's old caption so the entire eye,
-spiked metal, smoke, reflections and APEX emblem stay unchanged.
+Use the exact provided artwork (1536 x 864, JPEG bytes, originally attached as `1000244033.png`, which has a JPEG signature). Rename its source copy `evo_eye.jpg`. The C++ renderer obscures the baked-in old caption and draws the **AUDIO PRODUCTION ENGINEERING** caption dynamically. Do NOT regenerate the artwork.
 
-The normal Windows installer already copies \`Assets/*\` alongside the EXE;
-the startup code resolves that installed path and a source-checkout path for
-development builds. A missing image never stops APEX from showing its existing
-startup panel; this is a fail-open UI path, not an audio-engine dependency.
+The GitHub connector cannot copy the photo's binary from the chat into a repository. The JPEG source asset is still **pending commit** in this PR, even though the resource compilation and runtime loader are implemented.
 
-## Lifecycle
+## Acceptance gates
 
-1. Resolve process role. Never show splash in plugin scanner/worker mode.
-2. Create Evo Eye Win32 layered window on its own render thread.
-3. Render the actual supplied image at aspect-correct size with blink, energy
-   pulse, and replacement caption. No fake scan percentage.
-4. Construct the real DAW window and existing StartupPanel.
-5. Show the DAW/StartupPanel; fade Evo Eye (~220 ms); destroy splash HWND.
-6. Never display the splash again over an open project. On early shutdown,
-   stop and join the splash render thread.
-
-## Acceptance criteria
-
-- **Block release/merge until the actual JPEG has been committed.**
-- Run Windows x64 Debug **and** Release builds.
-- Launch real EXE: eye visibly blinks while DAW is initializing, no white/gray
-  flash, no frozen eye if JUCE constructor blocks.
-- Confirm exact text: MUSIC PRODUCTION ENGINEER.
-- Confirm New Project / Open Project / Recent Projects / Rescan Plugins are
-  visible and actionable after the splash (PR #135 startup-panel fix).
-- Repeat with empty plugin cache, warm cache, plugin scan running, and
-  --apex-ci-startup-panel. Plugin workers must show no splash.
-- Confirm all splash handles and GDI+ objects are released after transition.
-- Do not claim 100%/GREEN from source review alone.
+1. Commit the user's original JPEG as `My DAW/DAW_Core/Assets/EvoEye/evo_eye.jpg` before release.
+2. Windows Debug + Release compile and verify resource ID 27182 is actually present in both application EXEs (not merely source compilation).
+3. Launch the real EXE with the source-build Assets directory hidden/removed: the animated eye still appears. Verify blink, exact slogan, and fade-to-StartupPanel.
+4. Verify New Project / Open Project / Recent Projects / Rescan Plugins from PR #135.
+5. Install EXE alone and verify no EvoEye image is required in `Program Files`.
+6. Worker/subprocess modes must never display the splash.
