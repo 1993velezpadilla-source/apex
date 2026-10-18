@@ -24,6 +24,10 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
 if (Test-Path -LiteralPath (Join-Path $root 'Assets\EvoEye\evo_eye.jpg')) {
     throw 'Obsolete eye JPEG exists in the source tree.'
 }
+if ($header -match 'TranslateTransform\(0\.0f,\s*-32\.0f\)' -or
+    $header -match 'Gdiplus::Region upper\(covered\)') {
+    throw 'Reintroduced translated surprised eyebrow or opaque closed oval shutter.'
+}
 if ($header -match 'Bitmap::From(File|Stream)|FindResourceW|SHCreateMemStream|\.png|\.jpe?g') {
     throw 'APEX splash still loads a raster image instead of drawing its own GUI.'
 }
@@ -40,7 +44,12 @@ $features = @(
     @{ Name = 'Eyebrow safely excluded from full iris opening'; Expression = 'g\.SetClip\(&fullEye, Gdiplus::CombineModeExclude\)' },
     @{ Name = 'Independent upper/lower closure shutters'; Expression = 'static void drawShutters' },
     @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
-    @{ Name = 'Eyebrow lifted to anatomical clearance'; Expression = 'g\.TranslateTransform\(0\.0f, -32\.0f\)' },
+    @{ Name = 'Angular angry inner glabella'; Expression = 'P\(583,244\)' },
+    @{ Name = 'Twin frowning upper-lid curves'; Expression = 'static void appendUpperLid' },
+    @{ Name = 'Matched lower-lid curves'; Expression = 'static void appendLowerLid' },
+    @{ Name = 'A single closed chevron seam'; Expression = 'if \(openness < 0\.035f\)' },
+    @{ Name = 'No solid closed eye oval'; Expression = 'if \(strength < 0\.003f\)' },
+    @{ Name = 'Chamber fades to background on blink'; Expression = '242\.0f \* material' },
     @{ Name = 'Electric iris strands'; Expression = 'for \(int i = 0; i < 78;' },
     @{ Name = 'Handcrafted APEX letterforms'; Expression = 'brand.AddLine\(P\(435, 615\)' },
     @{ Name = 'Curved layered steel ornaments'; Expression = 'static void sculptedArmour' },
