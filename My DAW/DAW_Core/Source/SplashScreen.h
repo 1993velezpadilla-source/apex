@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "StartupProgressCore.h"
 
 #if JUCE_WINDOWS
 #include <windows.h>
@@ -860,11 +861,21 @@ private:
                              &centered, &captionColor);
         }
 
-        const float power = 0.5f + 0.5f * std::sin(sec * 2.8f);
-        line(g, C(110, 168, 20, 60), 1.0f, P(365, 690), P(835, 690));
-        line(g, C(static_cast<BYTE>(120 + power * 130.0f), 255, 29, 96),
-             3.2f, P(467, 690), P(598.0f + 94.0f * power, 690));
-        polygon(g, {P(600,679), P(608,690), P(600,701), P(592,690)},
+        // Real startup progress: only completed construction checkpoints move
+        // the fill. A blinking glow can animate, but the filled AREA never
+        // advances on a clock. 100% is reserved for the visible StartupPanel.
+        const float fraction = DAW::StartupProgressCore::fraction();
+        constexpr float left = 365.0f, right = 835.0f, y = 690.0f;
+        line(g, C(138, 168, 20, 60), 5.0f, P(left, y), P(right, y));
+        const float x = left + (right - left) * fraction;
+        if (fraction > 0.0f)
+        {
+            const float glowPulse = 0.7f + 0.3f * std::sin(sec * 4.0f);
+            line(g, C(static_cast<BYTE>(195.0f + 40.0f * glowPulse), 255, 27, 94),
+                 4.0f, P(left, y), P(x, y));
+            glow(g, P(x, y), 7.0f, 7.0f, 255, 47, 110, 2.0f);
+        }
+        polygon(g, {P(x,680), P(x + 7,690), P(x,700), P(x - 7,690)},
                 C(255, 255, 97, 141), C(255, 161, 3, 57));
     }
 
