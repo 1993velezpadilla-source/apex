@@ -75,6 +75,7 @@ public:
     juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const;
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
+    juce::ComboBox& getPlacementComboForTesting();
     juce::TextButton& getDynEnableButtonForTesting();
     juce::TextButton& getDynFilterButtonForTesting();
     juce::TextButton& getSpectralArmButtonForTesting();
@@ -102,6 +103,7 @@ public:
 
 private:
     void selectBand (int band);
+    void setViewMode (int mode);
     void applyLayout();
     bool isCompactLayout() const noexcept;
 
