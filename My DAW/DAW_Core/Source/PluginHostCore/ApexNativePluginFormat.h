@@ -40,8 +40,8 @@ public:
     {
         results.add (new juce::PluginDescription (
             APEX::G10::G10NativePluginFormat::createG10Description()));
-        results.add (new juce::PluginDescription (
-            APEX::C4::C4NativePluginFormat::createC4Description()));
+        // C4 remains implemented for legacy project recall but is not
+        // published to the plugin browser while its redesign is pending.
         results.add (new juce::PluginDescription (
             APEX::ParametricEQ::NativePluginFormat::createDescription()));
         juce::PluginDescription opto;
