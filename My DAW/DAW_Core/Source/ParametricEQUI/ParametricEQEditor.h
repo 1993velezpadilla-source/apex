@@ -67,6 +67,7 @@ public:
     juce::TextButton& getCopyButtonForTesting();
     juce::TextButton& getPasteButtonForTesting();
     juce::TextButton& getMatchButtonForTesting();
+    juce::TextButton& getToolsButtonForTesting();
     juce::TextButton& getMatchSaveButtonForTesting();
     juce::TextButton& getMatchLoadButtonForTesting();
     void feedMatchSpectrumForTesting (const float* db, int bins, double binHz);
