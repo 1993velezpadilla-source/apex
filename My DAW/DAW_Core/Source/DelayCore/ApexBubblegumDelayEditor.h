@@ -356,6 +356,15 @@ private:
         s.setTooltip(p.getName(128));
         s.onDragStart=[this,slot,parameter]
         {
+            // H-Delay-style workflow: while HOST sync is active, the BPM
+            // dial displays project BPM. Touching it takes control and
+            // switches to manual BPM, never silently edits an inaudible value.
+            if(slot==8 && syncModeForKnob_==1)
+            {
+                setChoice(ManualBpm,static_cast<float>(
+                    juce::jlimit(30.0,300.0,processor_.getHostTempoForDisplay())));
+                setChoice(SyncMode,2.0f);
+            }
             dragging_[slot]=true;
             const int target=(slot==0 && syncModeForKnob_!=0)?Note:parameter;
             dragTarget_[slot]=target;
@@ -371,6 +380,8 @@ private:
         s.onValueChange=[this,slot,parameter]
         {
             if(updating_) return;
+            if(slot==8 && processor_.getParameterAt(SyncMode).getUnits()==1.0f)
+                setChoice(SyncMode,2.0f);
             // The large delay dial must actually change the audible delay in
             // factory HOST mode: control rhythmic division while synced and
             // exact milliseconds only in MS mode. Gesture ID is stable for
@@ -469,9 +480,16 @@ private:
                                Mix,OutputDb,ManualBpm};
         for(int i=0;i<9;++i)
             if(!dragging_[i])
-                knobs_[i].setValue(processor_.getParameterAt(
-                    i==0 && selectedSync!=0?Note:which[i]).getUnits(),
-                    juce::dontSendNotification);
+            {
+                const double display=(i==8 && selectedSync==1)
+                    ?juce::jlimit(30.0,300.0,processor_.getHostTempoForDisplay())
+                    :processor_.getParameterAt(
+                        i==0 && selectedSync!=0?Note:which[i]).getUnits();
+                knobs_[i].setValue(display,juce::dontSendNotification);
+            }
+        knobs_[8].setTooltip(selectedSync==1
+            ?"Project BPM (auto-synced); move to switch to manual BPM"
+            :"Manual BPM for custom tempo");
         sync_.setSelectedId(static_cast<int>(processor_.getParameterAt(SyncMode).getUnits())+1,
                             juce::dontSendNotification);
         note_.setSelectedId(static_cast<int>(processor_.getParameterAt(Note).getUnits())+1,
