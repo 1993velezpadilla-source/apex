@@ -468,14 +468,13 @@ private:
     // hump or McDonald's-M silhouette.
     static void drawScowlingBrow(G& g, bool right)
     {
-        const auto saved = g.Save();
-        if (right)
-        {
-            // Mirror about design center, keeping the pointed inner tip.
-            g.TranslateTransform(1200.0f, 0.0f);
-            g.ScaleTransform(-1.0f, 1.0f);
-        }
-
+        // Transform PATH vertices, not the Graphics world matrix: our
+        // renderer is already HiDPI-scaled and an extra mirrored graphics
+        // transform would also flip gradient / stroke calculations.
+        const auto mirrored = [right](float x, float y) {
+            return P(right ? 1200.0f - x : x, y);
+        };
+        Gdiplus::Matrix flip(-1.0f, 0.0f, 0.0f, 1.0f, 1200.0f, 0.0f);
         Gdiplus::GraphicsPath blade;
         blade.StartFigure();
         blade.AddBezier(P(91, 136), P(211, 139), P(464, 191), P(585, 237));
@@ -483,6 +482,7 @@ private:
         blade.AddBezier(P(439, 225), P(278, 190), P(172, 210));
         blade.AddBezier(P(131, 208), P(106, 179), P(91, 136));
         blade.CloseFigure();
+        if (right) blade.Transform(&flip);
 
         R bounds;
         blade.GetBounds(&bounds);
@@ -500,9 +500,11 @@ private:
         g.DrawPath(&bright, &blade);
 
         curve(g, C(167, 247, 246, 255), 1.9f,
-              P(98, 147), P(238, 145), P(467, 197), P(580, 244));
+              mirrored(98, 147), mirrored(238, 145),
+              mirrored(467, 197), mirrored(580, 244));
         curve(g, C(195, 247, 27, 94), 1.8f,
-              P(147, 204), P(279, 184), P(457, 225), P(570, 255));
+              mirrored(147, 204), mirrored(279, 184),
+              mirrored(457, 225), mirrored(570, 255));
 
         // A smaller under-ridge stays outside the actual open iris opening.
         Gdiplus::GraphicsPath underside;
@@ -512,13 +514,18 @@ private:
         underside.AddBezier(P(562, 265), P(475, 251),
                             P(306, 223), P(165, 240));
         underside.CloseFigure();
+        if (right) underside.Transform(&flip);
+        R underBounds;
+        underside.GetBounds(&underBounds);
         Gdiplus::LinearGradientBrush secondary(
-            R(165, 199, 405, 70), C(255, 65, 71, 90),
+            R(underBounds.X, underBounds.Y,
+              juce::jmax(1.0f, underBounds.Width),
+              juce::jmax(1.0f, underBounds.Height)),
+            C(255, 65, 71, 90),
             C(255, 9, 10, 20), Gdiplus::LinearGradientModeVertical);
         g.FillPath(&secondary, &underside);
         Gdiplus::Pen ridge(C(164, 126, 134, 161), 1.25f);
         g.DrawPath(&ridge, &underside);
-        g.Restore(saved);
     }
 
     static void sculptedArmour(G& g)
