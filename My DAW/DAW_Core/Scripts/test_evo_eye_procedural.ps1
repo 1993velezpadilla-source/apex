@@ -46,6 +46,8 @@ $features = @(
     @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
     @{ Name = 'Single-sweep angry brow visor'; Expression = 'static void drawScowlingBrow' },
     @{ Name = 'Full brow overlay independent of ocular clip'; Expression = 'static void drawBrowPair' },
+    @{ Name = 'Dynamic brow clearance when eye opens'; Expression = '16\.0f \* ease\(openness\)' },
+    @{ Name = 'Mirrored transform includes drop'; Expression = 'Gdiplus::Matrix transform' },
     @{ Name = 'Angled monotonic blade silhouette'; Expression = 'P\(91, 136\)' },
     @{ Name = 'Closed shadow-black steel visor'; Expression = 'static void drawClosedVisor' },
     @{ Name = 'No closed oval cut-out'; Expression = 'if \(openness > 0\.035f\)' },
@@ -72,8 +74,8 @@ foreach ($feature in $features) {
 # Regression: the eyebrow must be one sweep, not two bulbous circular
 # arches. Never revive two upper sculptedPlate layers or reopen the oval.
 if ($header -match 'P\(583,244\)' -or $header -match 'P\(573,254\)' -or
-    $header -notmatch 'drawScowlingBrow\(g, false\)' -or
-    $header -notmatch 'drawScowlingBrow\(g, true\)' -or
+    $header -notmatch 'drawScowlingBrow\(g, false, openness\)' -or
+    $header -notmatch 'drawScowlingBrow\(g, true, openness\)' -or
     $header -notmatch 'g\.Restore\(guard\);\s*\}\s*else') {
     throw 'Old M-shaped brow or full-eye closed aperture regression.'
 }
@@ -95,7 +97,7 @@ $requiredOrder = @(
     'iris(g, seconds, openness)',
     'drawClosedVisor(g, openness)',
     'drawLidRims(g, openness)',
-    'drawBrowPair(g)',
+    'drawBrowPair(g, openness)',
     'identity(g, seconds)'
 )
 $position = -1
@@ -105,6 +107,15 @@ foreach ($call in $requiredOrder) {
         throw "Evo Eye z-order violated at: $call"
     }
     $position = $found
+}
+
+# Prevent a second "McDonald's" outline when OPEN by demanding a
+# smooth open-only drop across the entire brow, including the under-ridge.
+if ($header -notmatch 'drawScowlingBrow\(G& g, bool right, float openness\)' -or
+    $header -notmatch 'blade\.Transform\(&transform\)' -or
+    $header -notmatch 'underside\.Transform\(&transform\)' -or
+    $header -match 'drawBrowPair\(g\);') {
+    throw 'Regression: fixed/open eyebrow positioning no longer covers the upper arc.'
 }
 
 # Brow shape MUST NOT be rasterized/cut alongside secondary plates, and
@@ -118,10 +129,10 @@ $armourBody = $header.Substring($armourStart, $platingStart - $armourStart)
 if ($armourBody -match 'drawScowlingBrow\(') {
     throw 'Regression: the eyebrow moved back into clipped secondary armor.'
 }
-if ([regex]::Matches($frameBody, 'drawBrowPair\(g\)').Count -ne 1) {
+if ([regex]::Matches($frameBody, 'drawBrowPair\(g, openness\)').Count -ne 1) {
     throw 'Regression: angry eyebrow pair must be composited exactly once in drawFrame.'
 }
-if ($frameBody -notmatch '(?s)drawLidRims\(g, openness\);.*?drawBrowPair\(g\);.*?identity\(g, seconds\);') {
+if ($frameBody -notmatch '(?s)drawLidRims\(g, openness\);.*?drawBrowPair\(g, openness\);.*?identity\(g, seconds\);') {
     throw 'Regression: brows must be drawn AFTER moving eyelids and before identity.'
 }
 
