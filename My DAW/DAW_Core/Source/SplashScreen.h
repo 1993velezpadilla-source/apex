@@ -478,9 +478,9 @@ private:
         Gdiplus::GraphicsPath blade;
         blade.StartFigure();
         blade.AddBezier(P(91, 136), P(211, 139), P(464, 191), P(585, 237));
-        blade.AddLine(P(570, 257));
-        blade.AddBezier(P(439, 225), P(278, 190), P(172, 210));
-        blade.AddBezier(P(131, 208), P(106, 179), P(91, 136));
+        blade.AddLine(P(585, 237), P(570, 257));
+        blade.AddBezier(P(570, 257), P(439, 225), P(278, 190), P(172, 210));
+        blade.AddBezier(P(172, 210), P(131, 208), P(106, 179), P(91, 136));
         blade.CloseFigure();
         if (right) blade.Transform(&flip);
 
