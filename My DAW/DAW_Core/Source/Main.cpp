@@ -959,75 +959,13 @@ public:
             DAW::HostedPluginIsolationCore::commandLineRequestsIsolation(
                 getCommandLineParameterArray()));
 
-        // EVO EYE: real animated Win32 splash runs on an independent thread.
-        // Prefer the supplied concept artwork beside the installed EXE;
-        // also find it from a source checkout while developing in Visual Studio.
-        // Keep the legacy splash as fallback if an installer predates Evo Eye.
-        {
-            const auto executable = juce::File::getSpecialLocation(
-                juce::File::currentExecutableFile);
-            juce::File image;
-            const auto installed = executable.getSiblingFile("EvoEye")
-                                             .getChildFile("evo_eye.jpg");
-            if (installed.existsAsFile())
-                image = installed;
-            else
-            {
-                auto ancestor = executable.getParentDirectory();
-                for (int depth = 0; depth < 12 && image == juce::File(); ++depth)
-                {
-                    const auto devAsset = ancestor.getChildFile("My DAW")
-                        .getChildFile("DAW_Core")
-                        .getChildFile("Assets")
-                        .getChildFile("EvoEye")
-                        .getChildFile("evo_eye.jpg");
-                    if (devAsset.existsAsFile())
-                        image = devAsset;
-                    const auto next = ancestor.getParentDirectory();
-                    if (next == ancestor)
-                        break;
-                    ancestor = next;
-                }
-            }
-
-            if (! image.existsAsFile())
-            {
-                const auto oldLogo = executable.getSiblingFile("logo")
-                                               .getChildFile("1000166327(2).png");
-                if (oldLogo.existsAsFile())
-                    image = oldLogo;
-                else
-                {
-                    // Preserve the legacy source-tree fallback from Main.cpp.
-                    // Existing development layouts must not lose their splash.
-                    auto parent = executable.getParentDirectory();
-                    for (int depth = 0; depth < 12 && image == juce::File(); ++depth)
-                    {
-                        const auto legacy = parent.getChildFile("logo")
-                                                  .getChildFile("1000166327(2).png");
-                        if (legacy.existsAsFile())
-                            image = legacy;
-                        const auto next = parent.getParentDirectory();
-                        if (next == parent)
-                            break;
-                        parent = next;
-                    }
-                }
-            }
-
-            if (image.existsAsFile())
-            {
-                splashScreen_ = DAWSplashScreen::launch(image);
-                juce::Logger::writeToLog("[EVO EYE] splash asset: "
-                    + image.getFullPathName()
-                    + (splashScreen_ != nullptr ? " [animated]" : " [launch failed]"));
-            }
-            else
-            {
-                juce::Logger::writeToLog(
-                    "[EVO EYE] artwork missing; launching startup panel without splash");
-            }
-        }
+        // Evo Eye artwork is an RCDATA resource inside the executable.
+        // No runtime filesystem dependency or sidecar image. The splash runs
+        // on a Win32 render thread while MainComponent is being constructed.
+        splashScreen_ = DAWSplashScreen::launch();
+        juce::Logger::writeToLog(splashScreen_ != nullptr
+            ? "[EVO EYE] Embedded startup eye launched"
+            : "[EVO EYE] Embedded artwork unavailable; existing StartupPanel still opens");
 
         mainWindow.reset (new MainWindow (getApplicationName()));
         DAW::ApexProcessModeStateCore::markNormalGuiCreated();
