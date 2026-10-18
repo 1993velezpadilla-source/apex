@@ -39,7 +39,9 @@ public:
         g.setColour(juce::Colour(0xff7793ae));
         g.drawEllipse(cx-r+1,cy-r+1,2*r-2,2*r-2,1.25f);
         g.setColour(pink.withAlpha(0.45f));
-        g.drawArc(cx-r+3,cy-r+3,2*r-6,2*r-6,0.28f,1.95f,1.0f);
+        juce::Path rimShine;
+        rimShine.addCentredArc(cx,cy,r-3,r-3,0,0.28f,1.95f,true);
+        g.strokePath(rimShine,juce::PathStrokeType(1.0f));
         const float vx=std::sin(angle), vy=-std::cos(angle);
         g.setColour(cyan.withAlpha(0.2f));
         g.drawLine(cx+vx*r*0.30f,cy+vy*r*0.30f,
@@ -183,12 +185,12 @@ public:
         };
         addAndMakeVisible(tap_);
         readout_.setName("ACTIVE CONTROL VALUE");
-        readout_.setVisible(false);
         readout_.setJustificationType(juce::Justification::centred);
         readout_.setInterceptsMouseClicks(false,false);
         readout_.setColour(juce::Label::textColourId,juce::Colour(0xfffbdaf5));
         readout_.setFont(juce::Font(juce::FontOptions(19.0f,juce::Font::bold)));
         addAndMakeVisible(readout_);
+        readout_.setVisible(false);
         setResizable(true,true);
         setResizeLimits(760,400,1560,750);
         setSize(1060,510);
@@ -258,8 +260,6 @@ public:
         g.drawText("TEMPO / DELAY",335,102,392,22,juce::Justification::centred);
 
         const auto sync=static_cast<int>(processor_.getParameterAt(SyncMode).getUnits());
-        const auto note=juce::jlimit(0,12,static_cast<int>(
-            processor_.getParameterAt(Note).getUnits()));
         const double ms=processor_.getEffectiveDelayMsForDisplay();
         const juce::String shown=sync==0?juce::String(ms,1)+" ms"
                                               :juce::String(juce::roundToInt(ms))+" ms";
