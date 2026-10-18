@@ -1027,6 +1027,7 @@ public:
                 // The existing StartupPanel is presented asynchronously.
                 // Keep Evo Eye moving until its actual UI has appeared.
                 splashWaitStartedAt_ = juce::Time::getMillisecondCounter();
+                splashSlowStartupLogged_ = false;
                 startTimerHz(30);
             });
         }
@@ -2065,19 +2066,33 @@ private:
             }
         }
 
-        const auto waited = juce::Time::getMillisecondCounter() - splashWaitStartedAt_;
-        if (! startupReady && waited < 12000u)
+        // NOT a timer-based splash: continuous blinking must stay active until
+        // the actual StartupPanel is visible. Slow plugin scans can take well
+        // over 12 seconds; removing the previous timeout avoids abruptly
+        // replacing the eye with a blank/unfinished startup screen.
+        if (! startupReady)
+        {
+            if (! splashSlowStartupLogged_
+                && juce::Time::getMillisecondCounter()
+                        - splashWaitStartedAt_ >= 12000u)
+            {
+                splashSlowStartupLogged_ = true;
+                juce::Logger::writeToLog(
+                    "[EVO EYE] StartupPanel still initializing after 12s; "
+                    "continuing periodic eye blinks until panel appears");
+            }
             return;
+        }
 
         stopTimer();
-        juce::Logger::writeToLog(startupReady
-            ? "[EVO EYE] StartupPanel visible; fading boot eye"
-            : "[EVO EYE] StartupPanel readiness timeout; unblocking application");
+        juce::Logger::writeToLog(
+            "[EVO EYE] StartupPanel visible; ending repeating eye animation");
         splashScreen_->finish();
         splashScreen_ = nullptr;
     }
 
     juce::uint32 splashWaitStartedAt_ = 0;
+    bool splashSlowStartupLogged_ = false;
     std::unique_ptr<MainWindow> mainWindow;
     DAWSplashScreen* splashScreen_ = nullptr;
     std::unique_ptr<DAW::MessageBoxSuppressorCore> msgBoxSuppressor_;
