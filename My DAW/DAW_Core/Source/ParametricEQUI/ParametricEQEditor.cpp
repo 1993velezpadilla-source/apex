@@ -3319,21 +3319,24 @@ void ParametricEQEditor::applyLayout()
     const int cardHeight = std::min (410, std::max (1, graphHeight - 94));
     const auto node = graph_->nodeBounds (selectedBand_).getCentre();
 
-    // Choose a nearby HUD position which obscures as few OTHER EQ nodes as
-    // possible. A fixed right-side panel hid high-frequency nodes behind
-    // the inspector whenever a low-frequency band was selected. Comparing
-    // six legal card positions is cheap, GUI-only, and allocation-free.
+    // A wider premium inspector cannot always fit next to the selected
+    // node (e.g. 900x620, where two active EQ nodes are only ~200px apart).
+    // Add both canvas edges as fallbacks, then rank by unobstructed nodes
+    // BEFORE distance to the selected node. This keeps every EQ handle
+    // accessible when switching bands; no DSP or parameter changes.
     const int maxX = std::max (12, graphWidth - cardWidth - 12);
     const int maxY = std::max (0, graphHeight - cardHeight - 12);
     const int minY = std::min (64, maxY);
-    const std::array<int, 2> xCandidates {{
+    const std::array<int, 4> xCandidates {{
         std::clamp (node.x + 42, 12, maxX),
-        std::clamp (node.x - cardWidth - 42, 12, maxX)
+        std::clamp (node.x - cardWidth - 42, 12, maxX),
+        12, maxX
     }};
-    const std::array<int, 3> yCandidates {{
+    const std::array<int, 4> yCandidates {{
         std::clamp (node.y + 32, minY, maxY),
         std::clamp (node.y - cardHeight - 32, minY, maxY),
-        std::clamp (node.y - cardHeight / 2, minY, maxY)
+        std::clamp (node.y - cardHeight / 2, minY, maxY),
+        minY
     }};
     juce::Rectangle<int> best;
     int bestScore = std::numeric_limits<int>::max();
@@ -3342,7 +3345,10 @@ void ParametricEQEditor::applyLayout()
         {
             const juce::Rectangle<int> candidate (x, y,
                                                    cardWidth, cardHeight);
-            int score = std::abs (y - (node.y + 32)) / 12;
+            // Node occlusion is unacceptable: geometric proximity only
+            // breaks ties after the number of hidden active bands.
+            int score = std::abs (y - (node.y + 32)) / 12
+                      + std::min (300, std::abs (x - node.x) / 12);
             for (int band = 0; band < kMaxBands; ++band)
             {
                 const auto* enabled = processor_.getParametricEQParameter (
