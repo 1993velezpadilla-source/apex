@@ -965,8 +965,9 @@ private:
         auto& load = editor->getMatchLoadButtonForTesting();
         expect (save.getBounds().getHeight() >= 44
             && load.getBounds().getHeight() >= 44);
-        expect (! match.getBounds().intersects (save.getBounds()));
-        expect (! save.getBounds().intersects (load.getBounds()));
+        expect (! save.isVisible() && ! load.isVisible(),
+            "reference actions remain reachable via TOOLS without adding "
+            "overlapping visible graph buttons");
         save.triggerClick();
         juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
         expectEquals (juce::String ("SAVED"), save.getButtonText());
