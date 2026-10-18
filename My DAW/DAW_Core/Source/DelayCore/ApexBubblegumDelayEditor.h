@@ -2,6 +2,7 @@
 // Original APEX Bubblegum GUI: dark glass + magenta/teal; no Waves assets.
 #include <JuceHeader.h>
 #include "ApexBubblegumDelayProcessor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include <array>
 #include <cmath>
 
@@ -239,6 +240,8 @@ public:
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("ORIGINAL NATIVE DSP  •  STEREO  •  ZERO PDC",
                    710,27,306,31,juce::Justification::centredRight);
+        APEX::Branding::EvoEyeStamp::paint(g,
+            {908.0f,65.0f,122.0f,38.0f});
 
         // Dark central tempo glass; thin cyan edge, no obstruction of the
         // combo boxes, touch regions or popup lists.

@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 
 #include "../C4Core/C4Processor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include "../C4Core/C4ResponseCurveCore.h"
 
 namespace APEX {
@@ -888,8 +889,11 @@ public:
                     juce::Justification::centredLeft, false);
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (C4Colors::textSecondary());
-        g.drawText ("CONSOLE CHARACTER EQ", juce::Rectangle<int> (220, 6, 300, 20),
+        g.drawText ("CONSOLE CHARACTER EQ", juce::Rectangle<int> (220, 6, 236, 20),
                     juce::Justification::centredLeft, false);
+        // Parked C4 retains its brand stamp for future reactivation.
+        APEX::Branding::EvoEyeStamp::paint(g,
+            {(float)getWidth()-107.0f, 2.0f, 94.0f, 25.0f});
     }
 
     void resized() override

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 #include "../ParametricEQCore/ParametricEQProcessor.h"
 
@@ -24,6 +25,7 @@ public:
 
     void resized() override;
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
 
     enum class LayoutMode
     {

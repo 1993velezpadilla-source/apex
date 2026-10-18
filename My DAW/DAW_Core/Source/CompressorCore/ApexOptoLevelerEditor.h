@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include "ApexOptoLevelerProcessor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 namespace APEX::Compressor
 {
@@ -166,6 +167,8 @@ public:
         drawChassis(g);
         drawMeter(g);
         drawBubblegumStrip(g);
+        // Static brand stamp: the exact open boot eye, NOT the VU meter.
+        APEX::Branding::EvoEyeStamp::paint(g, {852.0f, 48.0f, 130.0f, 45.0f});
         g.restoreState();
     }
 

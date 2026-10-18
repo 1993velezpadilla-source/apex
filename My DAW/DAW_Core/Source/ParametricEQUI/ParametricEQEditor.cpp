@@ -2548,6 +2548,15 @@ void ParametricEQEditor::paint (juce::Graphics& g)
     g.fillAll (Palette::background());
 }
 
+// Only a small, mouse-transparent corner overlay. Graph and automation
+// controls keep their existing bounds, hit tests, and responsive layout.
+void ParametricEQEditor::paintOverChildren (juce::Graphics& g)
+{
+    const float w=(float) juce::jmin(118,juce::jmax(58,getWidth()/7));
+    APEX::Branding::EvoEyeStamp::paint(g,
+        {(float)getWidth()-w-9.0f,6.0f,w,w*0.37f});
+}
+
 void ParametricEQEditor::resized()
 {
     applyLayout();

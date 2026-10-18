@@ -45,6 +45,64 @@ public:
         return blink(elapsedSeconds);
     }
 
+
+    // Canonical open-eye stamp for APEX native plugins. Reuses the same
+    // PROCEDURAL GDI+ paths, scowling brows, plate stack and electric iris as
+    // the boot splash; no separately generated/flattened eye artwork.
+    // The raster is a short-lived *in-memory* bridge into JUCE Graphics.
+    static juce::Image renderOpenEyeStamp()
+    {
+        using namespace Gdiplus;
+        GdiplusStartupInput startup;
+        ULONG_PTR token = 0;
+        if (GdiplusStartup(&token, &startup, nullptr) != Ok)
+            return {};
+
+        constexpr int width = 600, height = 220;
+        juce::Image result(juce::Image::ARGB, width, height, true);
+        {
+            Bitmap bitmap(width, height, PixelFormat32bppARGB);
+            if (bitmap.GetLastStatus() == Ok)
+            {
+                {
+                    Graphics g(&bitmap);
+                    g.Clear(Color(0, 0, 0, 0));
+                    g.SetSmoothingMode(SmoothingModeAntiAlias);
+                    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+                    Matrix crop(0.52f, 0.0f, 0.0f, 0.52f, -12.0f, -55.0f);
+                    g.SetTransform(&crop);
+
+                    GraphicsPath fullEye;
+                    makeEyeContour(fullEye, 1.0f);
+                    const auto guard = g.Save();
+                    g.SetClip(&fullEye, CombineModeExclude);
+                    plating(g);
+                    g.Restore(guard);
+                    SolidBrush chamber(Color(242, 3, 2, 10));
+                    g.FillPath(&chamber, &fullEye);
+                    drawShutters(g, 1.0f);
+                    iris(g, 0.0f, 1.0f);
+                    drawLidRims(g, 1.0f);
+                    // Keep EXACT boot z-order: complete upper brows LAST.
+                    drawBrowPair(g, 1.0f);
+                }
+
+                // Convert to JUCE only once per process; never touch any
+                // audio-thread state, disk, embedded image resource or network.
+                for (int y = 0; y < height; ++y)
+                    for (int x = 0; x < width; ++x)
+                    {
+                        Color px;
+                        if (bitmap.GetPixel(x, y, &px) == Ok && px.GetA() != 0)
+                            result.setPixelAt(x, y, juce::Colour::fromRGBA(
+                                px.GetR(), px.GetG(), px.GetB(), px.GetA()));
+                    }
+            }
+        }
+        GdiplusShutdown(token);
+        return result;
+    }
+
     // CI/QA preview is exported FROM THE EXACT LIVE C++ RENDERER, not
     // generated art. Kept separate from the production boot animation.
     static bool renderDiagnosticFrame(const wchar_t* pngFile, float seconds)

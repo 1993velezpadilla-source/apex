@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include "ApexReverieProcessor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 
 namespace APEX::Reverie
 {
@@ -158,6 +159,8 @@ public:
         g.setFont(juce::Font(juce::FontOptions(12.0f)));
         g.drawText("PLATE FIRST  /  VINTAGE DIGITAL  /  MODERN SPACES",
                    50,68,getWidth()-100,22,juce::Justification::centredLeft);
+        APEX::Branding::EvoEyeStamp::paint(g,
+            {(float)getWidth()-148.0f, 26.0f, 120.0f, 44.0f});
         const float mid=static_cast<float>(getHeight())*0.545f;
         g.setColour(juce::Colour(0xff20384a));
         g.drawLine(30.0f,mid,static_cast<float>(getWidth())-30.0f,mid,1.0f);
