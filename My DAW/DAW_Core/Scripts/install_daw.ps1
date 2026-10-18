@@ -143,6 +143,13 @@ if ($signtool) {
     Write-Warning "  signtool.exe not found. Install Windows SDK for signing."
 }
 
+# Evo Eye is a release asset, not a development-only loose image.
+# Do not silently ship a blank boot splash because the JPEG was not bundled.
+$EvoEyeArtwork = Join-Path $RepoRoot "Assets\EvoEye\evo_eye.jpg"
+if (-not (Test-Path -LiteralPath $EvoEyeArtwork -PathType Leaf)) {
+    throw "Evo Eye release artwork missing: $EvoEyeArtwork. Add the exact supplied 1536x864 JPEG before installing."
+}
+
 # ── Step 4: Install to Program Files ──────────────────────────────────────────
 Write-Host ""
 Write-Host "[4/5] Installing to $InstallDir ..." -ForegroundColor Yellow
