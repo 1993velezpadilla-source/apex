@@ -462,6 +462,65 @@ private:
         }
     }
 
+    // APEX V4 angry brow: ONE continuous tapered forged blade per side.
+    // Each surface descends monotonically toward the inner glabella.
+    // In contrast to the older twin arches there is NO rounded mid-span
+    // hump or McDonald's-M silhouette.
+    static void drawScowlingBrow(G& g, bool right)
+    {
+        const auto saved = g.Save();
+        if (right)
+        {
+            // Mirror about design center, keeping the pointed inner tip.
+            g.TranslateTransform(1200.0f, 0.0f);
+            g.ScaleTransform(-1.0f, 1.0f);
+        }
+
+        Gdiplus::GraphicsPath blade;
+        blade.StartFigure();
+        blade.AddBezier(P(91, 136), P(211, 139), P(464, 191), P(585, 237));
+        blade.AddLine(P(570, 257));
+        blade.AddBezier(P(439, 225), P(278, 190), P(172, 210));
+        blade.AddBezier(P(131, 208), P(106, 179), P(91, 136));
+        blade.CloseFigure();
+
+        R bounds;
+        blade.GetBounds(&bounds);
+        Gdiplus::LinearGradientBrush gunmetal(
+            R(bounds.X, bounds.Y, juce::jmax(1.0f, bounds.Width),
+              juce::jmax(1.0f, bounds.Height)),
+            C(255, 116, 125, 145), C(255, 12, 15, 28),
+            Gdiplus::LinearGradientModeVertical);
+        Gdiplus::Pen aura(C(58, 240, 22, 87), 10.0f);
+        Gdiplus::Pen silhouette(C(247, 5, 6, 13), 5.4f);
+        Gdiplus::Pen bright(C(206, 214, 217, 240), 1.7f);
+        g.DrawPath(&aura, &blade);
+        g.DrawPath(&silhouette, &blade);
+        g.FillPath(&gunmetal, &blade);
+        g.DrawPath(&bright, &blade);
+
+        curve(g, C(167, 247, 246, 255), 1.9f,
+              P(98, 147), P(238, 145), P(467, 197), P(580, 244));
+        curve(g, C(195, 247, 27, 94), 1.8f,
+              P(147, 204), P(279, 184), P(457, 225), P(570, 255));
+
+        // A smaller under-ridge stays outside the actual open iris opening.
+        Gdiplus::GraphicsPath underside;
+        underside.StartFigure();
+        underside.AddBezier(P(165, 219), P(323, 202),
+                            P(472, 226), P(562, 265));
+        underside.AddBezier(P(562, 265), P(475, 251),
+                            P(306, 223), P(165, 240));
+        underside.CloseFigure();
+        Gdiplus::LinearGradientBrush secondary(
+            R(165, 199, 405, 70), C(255, 65, 71, 90),
+            C(255, 9, 10, 20), Gdiplus::LinearGradientModeVertical);
+        g.FillPath(&secondary, &underside);
+        Gdiplus::Pen ridge(C(164, 126, 134, 161), 1.25f);
+        g.DrawPath(&ridge, &underside);
+        g.Restore(saved);
+    }
+
     static void sculptedArmour(G& g)
     {
         // No transform-driven lifted "surprised" arch. The upper shells
@@ -469,19 +528,8 @@ private:
         // Those are static armor and never travel with the closing eyelid.
         for (bool right : { false, true })
         {
-            sculptedPlate(g, right, {
-                P(583,244), P(502,211), P(323,149), P(160,159),
-                P(132,153), P(108,142), P(89,124),
-                P(151,219), P(218,232), P(300,207),
-                P(403,193), P(496,244), P(583,274)
-            }, 0);
-
-            sculptedPlate(g, right, {
-                P(573,254), P(467,219), P(333,206), P(219,221),
-                P(196,224), P(168,224), P(143,193),
-                P(204,274), P(339,246), P(463,252),
-                P(508,262), P(541,276), P(573,286)
-            }, 1);
+            // Angled outer-to-inner steel blades, not two circular eyebrows.
+            drawScowlingBrow(g, right);
 
             // Crown and side cheek hardware remain fixed while blinking.
             sculptedPlate(g, right, {
@@ -505,12 +553,10 @@ private:
             auto m = [side](float x, float y) {
                 return P(side ? 1200.0f - x : x, y);
             };
-            curve(g, C(210, 227, 234, 246), 1.9f,
-                  m(114,153), m(288,140), m(440,220), m(568,255));
-            curve(g, C(197, 255, 21, 103), 1.7f,
-                  m(145,210), m(279,227), m(439,234), m(567,274));
-            line(g, C(220, 255, 57, 105), 2.4f,
-                 m(526,250), m(582,273));
+            // The chrome edge belongs to the blade itself above; do not
+            // redraw duplicate swooping chrome arches over the eyeball.
+            line(g, C(194, 255, 31, 104), 1.7f,
+                 m(530,250), m(572,266));
             curve(g, C(177, 210, 203, 231), 1.25f,
                   m(186,350), m(291,423), m(390,463), m(518,450));
             curve(g, C(126, 255, 20, 89), 2.0f,
@@ -573,6 +619,54 @@ private:
     // Instead only the part hidden by the eyelid receives a thin, fading
     // graphite cover. A complete blink blends back into the black surrounding
     // socket, leaving two precise, inward-notched steel blade edges.
+    // Closed-state ONLY: a slender, faceted, shadow-black guillotine visor.
+    // Never fills the entire eye contour; the two plates meet in a narrow
+    // anisotropic seam and remain visible against the crimson atmosphere.
+    // The outer metal brow is fixed while the shutter becomes this slit.
+    static void drawClosedVisor(G& g, float openness)
+    {
+        const float closed = 1.0f - ease(openness / 0.18f);
+        if (closed <= 0.001f)
+            return;
+        const BYTE alpha = static_cast<BYTE>(250.0f * closed);
+
+        Gdiplus::GraphicsPath top;
+        top.StartFigure();
+        top.AddBezier(P(210,301), P(344,275), P(472,293), P(600,313));
+        top.AddBezier(P(600,313), P(728,293), P(856,275), P(990,301));
+        top.AddBezier(P(990,301), P(831,313), P(716,328), P(600,326));
+        top.AddBezier(P(600,326), P(484,328), P(369,313), P(210,301));
+        top.CloseFigure();
+        Gdiplus::LinearGradientBrush darkSteel(
+            R(210,272,780,58), C(alpha, 50, 57, 75),
+            C(alpha, 3, 5, 13), Gdiplus::LinearGradientModeVertical);
+        g.FillPath(&darkSteel, &top);
+
+        Gdiplus::GraphicsPath bottom;
+        bottom.StartFigure();
+        bottom.AddBezier(P(210,305), P(363,327), P(490,332), P(600,326));
+        bottom.AddBezier(P(600,326), P(710,332), P(837,327), P(990,305));
+        bottom.AddBezier(P(990,305), P(852,344), P(731,358), P(600,354));
+        bottom.AddBezier(P(600,354), P(469,358), P(348,344), P(210,305));
+        bottom.CloseFigure();
+        Gdiplus::LinearGradientBrush bevel(
+            R(210,305,780,53), C(alpha, 4, 5, 14),
+            C(alpha, 35, 39, 55), Gdiplus::LinearGradientModeVertical);
+        g.FillPath(&bevel, &bottom);
+
+        const BYTE edgeAlpha = static_cast<BYTE>(180.0f * closed);
+        Gdiplus::Pen gleam(C(edgeAlpha, 140, 154, 181), 1.65f);
+        Gdiplus::Pen ink(C(static_cast<BYTE>(230.0f * closed), 2, 2, 8), 5.0f);
+        g.DrawPath(&ink, &top);
+        g.DrawPath(&gleam, &top);
+        g.DrawPath(&gleam, &bottom);
+        // Magenta laser incision is thin and localized, NOT a red slab.
+        curve(g, C(static_cast<BYTE>(116.0f * closed), 246, 26, 98), 1.1f,
+              P(251,310), P(441,324), P(525,334), P(600,326));
+        curve(g, C(static_cast<BYTE>(116.0f * closed), 246, 26, 98), 1.1f,
+              P(600,326), P(675,334), P(759,324), P(949,310));
+    }
+
     static void drawShutters(G& g, float openness)
     {
         openness = juce::jlimit(0.0f, 1.0f, openness);
@@ -749,11 +843,21 @@ private:
         // 4. Only the fine animated eyelid SEAM is drawn on top of the eye.
         Gdiplus::GraphicsPath fullEye;
         makeEyeContour(fullEye, 1.0f);
+        if (openness > 0.035f)
         {
+            // During open and transitional frames armour is excluded from
+            // the real ocular aperture; at closed the armour is allowed to
+            // cover the (otherwise visible) entire hole.
             const auto guard = g.Save();
             g.SetClip(&fullEye, Gdiplus::CombineModeExclude);
             plating(g);
             g.Restore(guard);
+        }
+        else
+        {
+            // Full eyelid closure: NO static red oval-shaped socket is left.
+            // Reveal the actual forged armor over the empty iris region.
+            plating(g);
         }
         // Blend the deep iris socket away BEFORE total closure; otherwise
         // the static complete-eye shape remains as a huge black oval.
@@ -764,6 +868,9 @@ private:
             g.FillPath(&chamber, &fullEye);
         drawShutters(g, openness);
         iris(g, seconds, openness);
+        // Draw the high-contrast black steel slit only while shut, above
+        // the tiny final seam (not over the opened iris).
+        drawClosedVisor(g, openness);
         drawLidRims(g, openness);
         identity(g, seconds);
 
