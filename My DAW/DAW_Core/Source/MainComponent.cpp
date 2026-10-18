@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "StartupProgressCore.h"
 #include "KeyBindingCore/GlobalTransportSpaceHook.h"
 #include "AutomationSequence/AutomationSequenceDialogComponent.h"
 #include "Automation/AutomationSystemCore.h"
@@ -980,6 +981,7 @@ void MainComponent::syncBubblegumSourceSelection(const DAW::TrackID& trackId)
 MainComponent::MainComponent()
 {
     appendMainStartupTrace("ctor.begin");
+    DAW::StartupProgressCore::reach(8);
     // Global spacebar -> transport authority. Installed here (message thread)
     // so space toggles play/stop no matter which window has focus — including
     // native plugin editor HWNDs whose keys never reach JUCE's keyPressed
@@ -1000,6 +1002,7 @@ MainComponent::MainComponent()
 
     appCore_.initialize();
     appendMainStartupTrace("ctor.after-appCore-initialize");
+    DAW::StartupProgressCore::reach(30);
 
     // ?? Wire autosave status callbacks into UI ????????????????????????????????
     appCore_.getAutosaveManager().onAutosaveSucceeded = [this](const juce::String& timeStr)
@@ -1063,6 +1066,7 @@ MainComponent::MainComponent()
     // Ensure master track exists before any UI is built
     appCore_.getTrackManager().createMasterTrack();
     appendMainStartupTrace("ctor.after-master-track");
+    DAW::StartupProgressCore::reach(38);
 
     inputTrimPanelManager_ = std::make_unique<DAW::InputTrimPanelManager>(appCore_.getTrackManager(), this);
 
@@ -3867,6 +3871,7 @@ MainComponent::MainComponent()
             });
     };
     addChildComponent(startupPanel_.get());
+    DAW::StartupProgressCore::reach(65);
     startupPanel_->onRescanPlugins = [this]
     {
         // Don't dismiss startup panel — let user see it close via X or after scan.
@@ -3913,6 +3918,7 @@ MainComponent::MainComponent()
     addAndMakeVisible(fpsOverlay_);
    #endif
     appendMainStartupTrace("ctor.audio-init-deferred");
+    DAW::StartupProgressCore::reach(72);
 
     // Bubble taskbar - shows minimized floating windows (not mixer)
     bubbleTaskbar_ = std::make_unique<DAW::BubbleTaskbar>();
@@ -4890,7 +4896,11 @@ MainComponent::MainComponent()
     });
 
     juce::Component::SafePointer<MainComponent> safeForAudioInit(this);
-    juce::MessageManager::callAsync([safeForAudioInit]
+    // The first paint of StartupPanel must not wait behind potentially slow
+    // ASIO device enumeration/initialization. Give the message pump one frame
+    // to present navigation; then initialize the device on the control thread.
+    // Never initialize the JUCE AudioDeviceManager on a worker thread.
+    juce::Timer::callAfterDelay(150, [safeForAudioInit]
     {
         if (auto* self = safeForAudioInit.getComponent())
         {
@@ -4901,6 +4911,7 @@ MainComponent::MainComponent()
     });
 
     appendMainStartupTrace("ctor.complete");
+    DAW::StartupProgressCore::reach(82);
 }
 
 //==============================================================================
