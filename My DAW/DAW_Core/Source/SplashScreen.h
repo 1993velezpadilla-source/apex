@@ -171,7 +171,7 @@ private:
         // SHCreateMemStream exposes it without touching the filesystem.
         const HMODULE module = GetModuleHandleW(nullptr);
         const HRSRC resource = FindResourceW(
-            module, MAKEINTRESOURCEW(kEvoEyeResourceId), RT_RCDATA);
+            module, MAKEINTRESOURCEW(kEvoEyeResourceId), MAKEINTRESOURCEW(10));
         if (resource == nullptr)
         {
             SetEvent(ready_);
