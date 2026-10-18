@@ -11,9 +11,11 @@ $tools = Get-ApexBuildTools
 $exe = $tools.OutputPaths[$Configuration].Exe
 $root = Split-Path -Parent $PSScriptRoot
 $headerPath = Join-Path $root 'Source\SplashScreen.h'
+$mainPath = Join-Path $root 'Source\Main.cpp'
 $rcPath = Join-Path $root 'Builds\VisualStudio2026\resources.rc'
 $projectPath = Join-Path $root 'Builds\VisualStudio2026\DAW_Core_App.vcxproj'
 $header = Get-Content -LiteralPath $headerPath -Raw
+$mainCpp = Get-Content -LiteralPath $mainPath -Raw
 $resource = Get-Content -LiteralPath $rcPath -Raw
 $project = Get-Content -LiteralPath $projectPath -Raw
 
@@ -78,6 +80,27 @@ if ($header -match 'P\(583,244\)' -or $header -match 'P\(573,254\)' -or
     $header -notmatch 'drawScowlingBrow\(g, true, openness\)' -or
     $header -notmatch 'g\.Restore\(guard\);\s*\}\s*else') {
     throw 'Old M-shaped brow or full-eye closed aperture regression.'
+}
+
+# Startup handoff contract: the boot loop must not end after a fixed
+# number of seconds. Multiple blinks occur naturally until StartupPanel
+# becomes visible and the JUCE application explicitly calls finish().
+$readinessBegin = $mainCpp.IndexOf('bool startupReady = false;')
+$readinessEnd = $mainCpp.IndexOf('juce::uint32 splashWaitStartedAt_', $readinessBegin)
+if ($readinessBegin -lt 0 -or $readinessEnd -le $readinessBegin) {
+    throw 'Missing SplashScreen-to-StartupPanel handoff check.'
+}
+$handoff = $mainCpp.Substring($readinessBegin, $readinessEnd - $readinessBegin)
+if ($handoff -notmatch 'if \(! startupReady\)\s*\{' -or
+    $handoff -notmatch 'return;\s*\}\s*stopTimer\(\);' -or
+    $handoff -match 'if \(! startupReady && waited' -or
+    $handoff -match 'timeout; unblocking application') {
+    throw 'Regression: Evo Eye exits by a timer rather than continuing until StartupPanel appears.'
+}
+if ($header -notmatch 'std::fmod\(sec \+ 2\.2, kBlinkPeriodSeconds\)' -or
+    $header -notmatch 'static float diagnosticBlinkAmount\(double elapsedSeconds\)' -or
+    $header -notmatch 'drawFrame\(g, static_cast<float>\(\(now - start\) / 1000\.0\)\)') {
+    throw 'Regression: startup eye animation lost periodic clock-driven blinking.'
 }
 
 # Prevent the old regression: drawing upper armour AFTER the iris
