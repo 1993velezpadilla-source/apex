@@ -51,8 +51,12 @@ public:
             Bitmap bitmap(1200, 750, PixelFormat32bppARGB);
             if (bitmap.GetLastStatus() == Ok)
             {
-                Graphics g(&bitmap);
-                drawFrame(g, seconds);
+                // Release the drawing context before Bitmap::Save;
+                // otherwise GDI+ may return ObjectBusy for the bitmap.
+                {
+                    Graphics g(&bitmap);
+                    drawFrame(g, seconds);
+                }
 
                 UINT count = 0, bytes = 0;
                 if (GetImageEncodersSize(&count, &bytes) == Ok && count > 0
