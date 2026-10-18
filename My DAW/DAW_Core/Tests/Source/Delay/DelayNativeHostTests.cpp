@@ -18,7 +18,7 @@ public:
     void runTest() override
     {
         using namespace APEX::Delay;
-        beginTest("One registered APEX Native host format; five distinct families");
+        beginTest("One APEX Native format; unfinished C4 hidden, legacy recall intact");
         DAW::PluginScanFormatsCore registered;
         int nativeCount=0;
         for(const auto& name:registered.getRegisteredFormatNames())
@@ -27,7 +27,9 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expect(results.size()>=5,"G10, C4, Parametric EQ, Opto, Bubblegum Delay");
+        expectEquals(results.size(),4,"G10, Parametric EQ, Opto and Bubblegum Delay visible");
+        for(const auto* item:results)
+            expect(item->fileOrIdentifier!="APEX::C4","unfinished C4 is not advertised");
         juce::PluginDescription description;
         int matches=0;
         for(const auto* item:results)
