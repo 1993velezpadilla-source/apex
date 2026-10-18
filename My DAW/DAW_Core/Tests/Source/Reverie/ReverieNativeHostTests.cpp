@@ -151,7 +151,7 @@ public:
                 if (actualGUI.isValid())
                 {
                     auto target = juce::File(destination);
-                    expect(target.getParentDirectory().createDirectory(),
+                    expect(target.getParentDirectory().createDirectory().wasOk(),
                            "Could not create screenshot artifact folder");
                     juce::FileOutputStream stream(target);
                     juce::PNGImageFormat format;
