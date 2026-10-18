@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include <initializer_list>
+#include <cwchar>
 #pragma comment(lib, "gdiplus.lib")
 
 // APEX Evo Eye / Bubblegum Engine.
@@ -34,6 +35,50 @@ public:
             || ! splash->valid_.load())
             return nullptr;
         return splash.release();
+    }
+
+    // CI/QA preview is exported FROM THE EXACT LIVE C++ RENDERER, not
+    // generated art. Kept separate from the production boot animation.
+    static bool renderDiagnosticFrame(const wchar_t* pngFile, float seconds)
+    {
+        using namespace Gdiplus;
+        GdiplusStartupInput input;
+        ULONG_PTR token = 0;
+        if (GdiplusStartup(&token, &input, nullptr) != Ok)
+            return false;
+        bool succeeded = false;
+        {
+            Bitmap bitmap(1200, 750, PixelFormat32bppARGB);
+            if (bitmap.GetLastStatus() == Ok)
+            {
+                Graphics g(&bitmap);
+                drawFrame(g, seconds);
+
+                UINT count = 0, bytes = 0;
+                if (GetImageEncodersSize(&count, &bytes) == Ok && count > 0
+                    && bytes > 0)
+                {
+                    std::vector<BYTE> storage(bytes);
+                    auto* codecs = reinterpret_cast<ImageCodecInfo*>(storage.data());
+                    if (GetImageEncoders(count, bytes, codecs) == Ok)
+                    {
+                        for (UINT i = 0; i < count; ++i)
+                        {
+                            // Image encoder is a DIAGNOSTIC OUTPUT only.
+                            if (codecs[i].MimeType
+                                && std::wcscmp(codecs[i].MimeType, L"image/png") == 0)
+                            {
+                                succeeded = bitmap.Save(pngFile,
+                                                   &codecs[i].Clsid, nullptr) == Ok;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        GdiplusShutdown(token);
+        return succeeded;
     }
 
     // Hide only AFTER the real StartupPanel is visible. No fixed splash delay.
@@ -519,6 +564,7 @@ class DAWSplashScreen
 {
 public:
     static DAWSplashScreen* launch() { return nullptr; }
+    static bool renderDiagnosticFrame(const wchar_t*, float) { return false; }
     void finish() { delete this; }
 };
 #endif
