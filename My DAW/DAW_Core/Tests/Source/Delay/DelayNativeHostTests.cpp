@@ -27,7 +27,7 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expectEquals(results.size(),4,"G10, Parametric EQ, Opto and Bubblegum Delay visible");
+        expectEquals(results.size(),5,"G10, Parametric EQ, Opto, Bubblegum Delay and Reverie visible");
         for(const auto* item:results)
             expect(item->fileOrIdentifier!="APEX::C4","unfinished C4 is not advertised");
         juce::PluginDescription description;
