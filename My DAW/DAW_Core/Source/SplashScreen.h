@@ -3,11 +3,22 @@
 #include "StartupProgressCore.h"
 
 #if JUCE_WINDOWS
+// This header is now consumed by JUCE DSP/GUI translation units. Win32's
+// min/max macros must NEVER leak into std::min/std::max in audio processors.
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
 #include <windows.h>
 // Plugin editors include this renderer in translation units which may not
 // have pulled in COM IStream declarations before the Windows GDI+ headers.
 #include <objidl.h>
 #include <gdiplus.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 #include <atomic>
 #include <cmath>
 #include <memory>
