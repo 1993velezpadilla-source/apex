@@ -192,7 +192,7 @@ public:
             static_cast<int>(std::lround(getParameterAt(Note).getUnits())));
         const double bpm=sync==2?getParameterAt(ManualBpm).getUnits()
                                  :getHostTempoForDisplay();
-        return juce::jlimit(1.0,3500.0,60000.0
+        return juce::jlimit(1.0,Engine::kMaxSyncedMs,60000.0
             *Engine::kNoteBeats[static_cast<std::size_t>(note)]/juce::jmax(1.0,bpm));
     }
     BubblegumDelayParameter& getParameterAt(int i) noexcept {return *parameters_[i];}
