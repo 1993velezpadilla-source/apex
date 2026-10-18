@@ -2088,8 +2088,8 @@ private:
             return;
         }
 
-        DAW::StartupProgressCore::reach(100);
         stopTimer();
+        DAW::StartupProgressCore::reach(100);
         juce::Logger::writeToLog(
             "[EVO EYE] StartupPanel visible; ending repeating eye animation");
         splashScreen_->finish();
