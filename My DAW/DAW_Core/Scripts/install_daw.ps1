@@ -147,7 +147,7 @@ if ($signtool) {
 # Do not silently ship a blank boot splash because the JPEG was not bundled.
 $EvoEyeArtwork = Join-Path $RepoRoot "Assets\EvoEye\evo_eye.jpg"
 if (-not (Test-Path -LiteralPath $EvoEyeArtwork -PathType Leaf)) {
-    throw "Evo Eye release artwork missing: $EvoEyeArtwork. Add the exact supplied 1536x864 JPEG before installing."
+    throw "Evo Eye build input missing: $EvoEyeArtwork. The embedded EXE must contain the exact supplied photo before installing."
 }
 
 # ── Step 4: Install to Program Files ──────────────────────────────────────────
@@ -169,8 +169,14 @@ Write-Host "  Unblocked all files (removed download zone marks)" -ForegroundColo
 # Copy any required assets/resources if present
 $assetsDir = "$RepoRoot\Assets"
 if (Test-Path $assetsDir) {
-    Copy-Item "$assetsDir\*" "$InstallDir\" -Recurse -Force
-    Write-Host "  Copied Assets" -ForegroundColor Gray
+    # The Evo Eye is linked directly into DAW_Core.exe as RCDATA. Never ship
+    # a separately readable EvoEye image or ask the application to load one.
+    Get-ChildItem -LiteralPath $assetsDir -Force |
+        Where-Object { $_.Name -ne "EvoEye" } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+        }
+    Write-Host "  Copied runtime assets (Evo Eye is embedded in the EXE)" -ForegroundColor Gray
 }
 
 Write-Host "  Installed to $InstallDir" -ForegroundColor Green
