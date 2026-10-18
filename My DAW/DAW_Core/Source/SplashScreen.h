@@ -528,16 +528,21 @@ private:
         g.DrawPath(&ridge, &underside);
     }
 
+    // The full eyebrows have their own render layer. They MUST NOT be drawn
+    // inside the eye cutout, nor before the iris/chamber covers that cutout.
+    // This same function is called for open, mid-blink and fully shut frames.
+    static void drawBrowPair(G& g)
+    {
+        drawScowlingBrow(g, false);
+        drawScowlingBrow(g, true);
+    }
+
     static void sculptedArmour(G& g)
     {
-        // No transform-driven lifted "surprised" arch. The upper shells
-        // themselves are sculpted as paired, inward-pointed scowling wedges.
-        // Those are static armor and never travel with the closing eyelid.
+        // Secondary cheek/side armor only. Eyebrow blades are independent and
+        // are composited after the ocular layers without any fullEye clip.
         for (bool right : { false, true })
         {
-            // Angled outer-to-inner steel blades, not two circular eyebrows.
-            drawScowlingBrow(g, right);
-
             // Crown and side cheek hardware remain fixed while blinking.
             sculptedPlate(g, right, {
                 P(217,317), P(274,370), P(383,439), P(547,430),
@@ -843,11 +848,11 @@ private:
         const float openness = 1.0f - blink(seconds);
 
         // Z ORDER CONTRACT:
-        // 1. Fixed eyebrow, horns and side armor can NEVER enter the full
-        //    anatomical eye region, irrespective of blink state.
-        // 2. Iris socket and shutters dissolve into scene at complete close.
-        // 3. Iris is visible only through the changing aperture.
-        // 4. Only the fine animated eyelid SEAM is drawn on top of the eye.
+        // 1. ONLY secondary metal/cheeks are clipped away from the eye.
+        // 2. Eye socket, shutters and iris use the true animated aperture.
+        // 3. Closed metal visor and eyelid seam follow the eye.
+        // 4. Full fixed angry brow pair is drawn LAST, UNCLIPPED, so the
+        //    same complete forged eyebrow is visible open AND closed.
         Gdiplus::GraphicsPath fullEye;
         makeEyeContour(fullEye, 1.0f);
         if (openness > 0.035f)
@@ -879,6 +884,9 @@ private:
         // the tiny final seam (not over the opened iris).
         drawClosedVisor(g, openness);
         drawLidRims(g, openness);
+        // Always draw the complete eyebrow AFTER iris and lid masks.
+        // No Graphics::SetClip active here: never trim the brow in OPEN.
+        drawBrowPair(g);
         identity(g, seconds);
 
         g.Restore(oldTransform);
