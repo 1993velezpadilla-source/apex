@@ -36,8 +36,8 @@ jobs:
         run: .\Scripts\prepare_ci.ps1
       - name: Build application without signing
         run: .\Scripts\build_apex.ps1 -Configuration ${{ matrix.configuration }} -Rebuild -Unsigned
-      - name: Verify PE-embedded Evo Eye artwork
-        run: .\Scripts\test_evo_eye_embedding.ps1 -Configuration ${{ matrix.configuration }}
+      - name: Verify procedural Evo Eye boot GUI and absence of raster assets
+        run: .\Scripts\test_evo_eye_procedural.ps1 -Configuration ${{ matrix.configuration }}
       - name: Run complete test suite
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
       - name: Smoke real APEX GUI and project automation persistence
