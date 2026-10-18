@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include "ApexReverieProcessor.h"
+#include "../UICore/ApexEvoEyeStamp.h"
 
 namespace APEX::Reverie
 {
@@ -133,7 +134,9 @@ public:
                            juce::dontSendNotification);
         bypass_.setToggleState(processor_.bypassParameter().get(),
                                juce::dontSendNotification);
+        addAndMakeVisible (eyeStamp_);
         setSize(980,540);
+        eyeStamp_.placeInCorner (*this);
         startTimerHz(20);
     }
     ~Editor() override { stopTimer(); setLookAndFeel(nullptr); }
@@ -172,6 +175,7 @@ public:
 
     void resized() override
     {
+        eyeStamp_.placeInCorner (*this);
         const int pad=30, gap=10;
         const int usable=getWidth()-pad*2;
         const int cell=usable/5;
@@ -207,6 +211,7 @@ private:
         bypass_.setToggleState(processor_.bypassParameter().get(),
                                juce::dontSendNotification);
     }
+    APEX::UI::EvoEyeStamp eyeStamp_;
     Processor& processor_;
     ReverieLookAndFeel look_;
     juce::ComboBox mode_,era_;
