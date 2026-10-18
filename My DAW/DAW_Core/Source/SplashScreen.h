@@ -253,11 +253,14 @@ private:
     // At a full blink both edges converge to one subtle chevron-shaped seam.
     static void appendUpperLid(Gdiplus::GraphicsPath& path, float open)
     {
-        const float frownY = 317.0f - 91.0f * open;
-        path.AddBezier(P(213,304), P(331,304 - 179*open),
-                       P(468,304 - 143*open), P(600,frownY));
-        path.AddBezier(P(600,frownY), P(732,304 - 143*open),
-                       P(869,304 - 179*open), P(987,304));
+        // Squinted, threatening upper lash follows UNDER the forged brow.
+        // Previous controls (y=125/161) protruded above the metal as two
+        // rounded "McDonald's" arcs in OPEN. Keep the closed geometry exact.
+        const float frownY = 317.0f - 34.0f * open;
+        path.AddBezier(P(213,304), P(331,304 - 94*open),
+                       P(468,304 - 60*open), P(600,frownY));
+        path.AddBezier(P(600,frownY), P(732,304 - 60*open),
+                       P(869,304 - 94*open), P(987,304));
     }
 
     static void appendLowerLid(Gdiplus::GraphicsPath& path, float open)
@@ -745,11 +748,26 @@ private:
         Gdiplus::Pen shadow(C(240, 7, 8, 17), 8.0f);
         Gdiplus::Pen chrome(C(220, 69, 76, 93), 4.0f);
         Gdiplus::Pen crimson(C(seamAlpha, 255, 30, 97), 1.75f);
-        g.DrawPath(&shadow, &upper);
+
+        // The upper rim is part of the mechanical brow when fully OPEN,
+        // NOT a second floating arch above it. Fade its strokes smoothly
+        // during the last phase of opening; lower metal rim stays intact.
+        const float upperVisible = 1.0f -
+            ease((openness - 0.55f) / 0.40f);
+        if (upperVisible > 0.001f)
+        {
+            Gdiplus::Pen upperShadow(
+                C(static_cast<BYTE>(240.0f * upperVisible), 7, 8, 17), 8.0f);
+            Gdiplus::Pen upperChrome(
+                C(static_cast<BYTE>(220.0f * upperVisible), 69, 76, 93), 4.0f);
+            Gdiplus::Pen upperCrimson(
+                C(static_cast<BYTE>(seamAlpha * upperVisible), 255, 30, 97), 1.75f);
+            g.DrawPath(&upperShadow, &upper);
+            g.DrawPath(&upperChrome, &upper);
+            g.DrawPath(&upperCrimson, &upper);
+        }
         g.DrawPath(&shadow, &lower);
-        g.DrawPath(&chrome, &upper);
         g.DrawPath(&chrome, &lower);
-        g.DrawPath(&crimson, &upper);
         g.DrawPath(&crimson, &lower);
     }
 
