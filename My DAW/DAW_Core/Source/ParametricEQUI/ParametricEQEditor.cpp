@@ -347,7 +347,19 @@ public:
         addAndMakeVisible (keyButton_);
         addAndMakeVisible (linkButton_);
         addAndMakeVisible (characterButton_);
+        addAndMakeVisible (presetButton_);
+        addAndMakeVisible (utilityButton_);
         addAndMakeVisible (title_);
+        // Secondary hosted controls remain LIVE but move to one popover.
+        // Reduces eight permanently visible bottom buttons to five controls
+        // plus a searchable preset entry, without removing any parameter.
+        detectorButton_.setVisible (false);
+        keyButton_.setVisible (false);
+        linkButton_.setVisible (false);
+        characterButton_.setVisible (false);
+        presetButton_.setTitle ("APEX Prism curated EQ presets");
+        utilityButton_.setTitle (
+            "Detector, external sidechain, stereo link and character");
 
         designButton_.setTitle ("Switch filter design mode");
         bypassButton_.setTitle ("Toggle global bypass");
@@ -439,6 +451,8 @@ public:
                              character->toNormalised (static_cast<float> (next)));
             refresh();
         };
+        presetButton_.onClick = [this] { openPresetMenu(); };
+        utilityButton_.onClick = [this] { openUtilityMenu(); };
         // Host/state changes to peq.phase must reach the top bar even when
         // they were not initiated by this button; a low-rate timer refresh
         // matches the existing inspector/graph synchronization pattern.
@@ -487,6 +501,15 @@ public:
             juce::TextButton::buttonColourId,
             character == CharacterMode::Pure ? Palette::surfaceHover()
                                              : Palette::accentActive());
+        // Keep the footer quiet until needed; selected/danger states
+        // remain legible, but the row is not a wall of purple buttons.
+        analyzerButton_.setColour (juce::TextButton::buttonColourId,
+            processor_.getAnalyzerMode() == APEX::Analysis::SpectrumTapMode::Closed
+                ? Palette::surfaceHover() : Palette::accent().darker (0.55f));
+        utilityButton_.setColour (juce::TextButton::buttonColourId,
+                                 Palette::surface());
+        presetButton_.setColour (juce::TextButton::buttonColourId,
+                                Palette::surface());
         repaint();
     }
 
@@ -507,47 +530,220 @@ public:
 
     void resized() override
     {
-        auto bounds = getLocalBounds().reduced (4, 4);
-        if (getWidth() < 650)
+        auto row = getLocalBounds().reduced (4, 4);
+        const bool compact = getWidth() < 650;
+        title_.setVisible (! compact);
+        if (! compact)
         {
-            // Phone/small-tablet contract: two rows of four controls, each at
-            // least 44 logical pixels tall.  The title yields its space to
-            // controls instead of shrinking touch targets.
-            title_.setVisible (false);
-            auto row1 = bounds.removeFromTop (bounds.getHeight() / 2);
-            auto row2 = bounds;
-            auto placeFour = [] (juce::Rectangle<int> row,
-                                 juce::Component& a, juce::Component& b,
-                                 juce::Component& d, juce::Component& e)
+            // Brand is quietly set off from functional navigation.
+            const int titleWidth = std::min (225,
+                std::max (158, row.getWidth() / 4));
+            title_.setText (titleWidth > 195 ? "APEX / PRISM EQ"
+                                              : "PRISM EQ",
+                            juce::dontSendNotification);
+            title_.setBounds (row.removeFromLeft (titleWidth));
+        }
+        std::array<juce::TextButton*, 6> visible {{
+            &presetButton_, &designButton_, &bypassButton_,
+            &phaseButton_, &analyzerButton_, &utilityButton_
+        }};
+        const int cell = std::max (ParametricEQEditor::kTouchTarget,
+                                   row.getWidth() / 6);
+        for (int i = 0; i < 6; ++i)
+            visible[static_cast<std::size_t> (i)]->setBounds (
+                i == 5 ? row : row.removeFromLeft (cell));
+
+        // Hidden controls still have real 44px+ bounds and callbacks for
+        // native testing / automation; they cannot intercept mouse input.
+        const juce::Rectangle<int> safe (0, 0, 44, 44);
+        detectorButton_.setBounds (safe);
+        keyButton_.setBounds (safe);
+        linkButton_.setBounds (safe);
+        characterButton_.setBounds (safe);
+    }
+
+    void setBandUnits (int band, BandParameterOffset offset, float units)
+    {
+        const int index = parameterIndex (band, offset);
+        auto* parameter = processor_.getParametricEQParameter (index);
+        notifyParameter (processor_, index, parameter->toNormalised (units));
+    }
+
+    void applyPreset (int preset)
+    {
+        if (preset == 7 && undoAvailable_)
+        {
+            // Snapshot is a single user-initiated preset undo, not a
+            // competing automation engine. Only parameters touched by
+            // presets are restored; global settings are left intact.
+            for (int band = 0; band < kMaxBands; ++band)
             {
-                const int w = std::max (44, row.getWidth() / 4);
-                a.setBounds (row.removeFromLeft (w));
-                b.setBounds (row.removeFromLeft (w));
-                d.setBounds (row.removeFromLeft (w));
-                e.setBounds (row);
-            };
-            placeFour (row1, designButton_, bypassButton_, phaseButton_,
-                       analyzerButton_);
-            placeFour (row2, detectorButton_, keyButton_, linkButton_,
-                       characterButton_);
+                for (int offset = 0; offset < 7; ++offset)
+                    notifyParameter (processor_, parameterIndex (band,
+                        static_cast<BandParameterOffset> (offset)),
+                        oldBands_[static_cast<std::size_t> (band)]
+                                 [static_cast<std::size_t> (offset)]);
+                notifyParameter (processor_, placementParameterIndex (band),
+                    oldPlacements_[static_cast<std::size_t> (band)]);
+                notifyParameter (processor_, dynamicParameterIndex (
+                    band, DynamicBandOffset::Enable),
+                    oldDynamics_[static_cast<std::size_t> (band)]);
+                notifyParameter (processor_, dynamicFilterParameterIndex (band),
+                    oldDynFilters_[static_cast<std::size_t> (band)]);
+                notifyParameter (processor_, spectralBandParameterIndex (band),
+                    oldSpectral_[static_cast<std::size_t> (band)]);
+            }
+            undoAvailable_ = false;
+            presetButton_.setButtonText ("PRESETS");
+            owner_.resized();
             return;
         }
+        if (preset < 1 || preset > 6)
+            return;
+        // Pre-change hosted state is retained for Restore Previous EQ.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            for (int offset = 0; offset < 7; ++offset)
+                oldBands_[static_cast<std::size_t> (band)]
+                         [static_cast<std::size_t> (offset)] =
+                    processor_.getParametricEQParameter (parameterIndex (
+                        band, static_cast<BandParameterOffset> (offset)))->getValue();
+            oldPlacements_[static_cast<std::size_t> (band)] =
+                processor_.getParametricEQParameter (
+                    placementParameterIndex (band))->getValue();
+            oldDynamics_[static_cast<std::size_t> (band)] =
+                processor_.getParametricEQParameter (dynamicParameterIndex (
+                    band, DynamicBandOffset::Enable))->getValue();
+            oldDynFilters_[static_cast<std::size_t> (band)] =
+                processor_.getParametricEQParameter (
+                    dynamicFilterParameterIndex (band))->getValue();
+            oldSpectral_[static_cast<std::size_t> (band)] =
+                processor_.getParametricEQParameter (
+                    spectralBandParameterIndex (band))->getValue();
+            notifyParameter (processor_, parameterIndex (
+                band, BandParameterOffset::Enabled), 0.0f);
+        }
+        undoAvailable_ = true;
 
-        title_.setVisible (true);
-        const int buttonWidth = std::max (44, bounds.getWidth() / 10);
-        const int titleWidth = std::max (0, bounds.getWidth() - 8 * buttonWidth);
-        title_.setText (titleWidth >= 210 ? "APEX / PRISM EQ"
-                                          : "APEX / EQ",
-                        juce::dontSendNotification);
-        title_.setBounds (bounds.removeFromLeft (titleWidth));
-        designButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        bypassButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        phaseButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        analyzerButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        detectorButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        keyButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        linkButton_.setBounds (bounds.removeFromLeft (buttonWidth));
-        characterButton_.setBounds (bounds);
+        // These are ORIGINAL APEX starting-point recipes, not third-party
+        // factory presets. They remain fully editable 24-band host parameters.
+        struct Recipe { FilterShape shape; float hz; float db; float q; };
+        std::array<Recipe, 3> recipes {};
+        int count = 0;
+        juce::String name = "FLAT";
+        if (preset == 2) // narrow telephone band, clear voice intelligibility
+        {
+            name = "PHONE";
+            recipes[0] = { FilterShape::LowCut, 340.0f, 0.0f, 0.71f };
+            recipes[1] = { FilterShape::HighCut, 3400.0f, 0.0f, 0.71f };
+            recipes[2] = { FilterShape::Bell, 1400.0f, 1.8f, 0.95f };
+            count = 3;
+        }
+        else if (preset == 3)
+        {
+            name = "VOCAL AIR";
+            recipes[0] = { FilterShape::LowCut, 85.0f, 0.0f, 0.71f };
+            recipes[1] = { FilterShape::Bell, 320.0f, -1.7f, 1.1f };
+            recipes[2] = { FilterShape::HighShelf, 10500.0f, 2.0f, 0.65f };
+            count = 3;
+        }
+        else if (preset == 4)
+        {
+            name = "BASS";
+            recipes[0] = { FilterShape::LowCut, 28.0f, 0.0f, 0.71f };
+            recipes[1] = { FilterShape::Bell, 78.0f, 2.3f, 0.90f };
+            recipes[2] = { FilterShape::Bell, 280.0f, -2.0f, 1.25f };
+            count = 3;
+        }
+        else if (preset == 5)
+        {
+            name = "MIX CLEAN";
+            recipes[0] = { FilterShape::LowCut, 32.0f, 0.0f, 0.71f };
+            recipes[1] = { FilterShape::Bell, 310.0f, -1.6f, 1.2f };
+            recipes[2] = { FilterShape::Bell, 2800.0f, -0.8f, 1.0f };
+            count = 3;
+        }
+        else if (preset == 6)
+        {
+            name = "MASTER SHINE";
+            recipes[0] = { FilterShape::LowShelf, 105.0f, 1.2f, 0.65f };
+            recipes[1] = { FilterShape::Bell, 290.0f, -0.7f, 0.9f };
+            recipes[2] = { FilterShape::HighShelf, 12000.0f, 1.6f, 0.65f };
+            count = 3;
+        }
+        for (int band = 0; band < count; ++band)
+        {
+            const auto& recipe = recipes[static_cast<std::size_t> (band)];
+            resetCreatedBand (processor_, band);
+            setBandUnits (band, BandParameterOffset::Shape,
+                          static_cast<float> (recipe.shape));
+            setBandUnits (band, BandParameterOffset::Frequency, recipe.hz);
+            setBandUnits (band, BandParameterOffset::Gain, recipe.db);
+            setBandUnits (band, BandParameterOffset::Q, recipe.q);
+            setBandUnits (band, BandParameterOffset::Enabled, 1.0f);
+        }
+        presetButton_.setButtonText (name);
+        owner_.resized();
+    }
+
+    void openPresetMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("APEX PRISM  /  FACTORY STARTING POINTS");
+        menu.addItem (1, "Flat / Reset");
+        menu.addItem (2, "Phone Effect  /  telephone bandwidth");
+        menu.addItem (3, "Vocal Air  /  modern vocals");
+        menu.addItem (4, "Bass Tighten  /  low end");
+        menu.addItem (5, "Mix Cleanup  /  clarity");
+        menu.addItem (6, "Master Shine  /  finishing touch");
+        menu.addSeparator();
+        menu.addItem (7, "Restore previous EQ", undoAvailable_);
+        juce::Component::SafePointer<TopBarComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&presetButton_),
+            [safe] (int id) {
+                if (auto* bar = safe.getComponent())
+                    bar->applyPreset (id);
+            });
+    }
+
+    void openUtilityMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("APEX PRISM  /  UTILITY");
+        menu.addItem (1, detectorButton_.getButtonText());
+        menu.addItem (2, keyButton_.getButtonText());
+        menu.addItem (3, linkButton_.getButtonText());
+        menu.addItem (4, characterButton_.getButtonText());
+        menu.addSeparator();
+        menu.addSectionHeader ("Analyzer capture");
+        const int current = static_cast<int> (processor_.getAnalyzerMode());
+        menu.addItem (10, "Off", true, current == 0);
+        menu.addItem (11, "Pre EQ", true, current == 1);
+        menu.addItem (12, "Post EQ", true, current == 2);
+        menu.addItem (13, "Pre + Post", true, current == 3);
+        juce::Component::SafePointer<TopBarComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&utilityButton_),
+            [safe] (int id) {
+                if (auto* bar = safe.getComponent())
+                {
+                    switch (id)
+                    {
+                        case 1: bar->detectorButton_.triggerClick(); break;
+                        case 2: bar->keyButton_.triggerClick(); break;
+                        case 3: bar->linkButton_.triggerClick(); break;
+                        case 4: bar->characterButton_.triggerClick(); break;
+                        default:
+                            if (id >= 10 && id <= 13)
+                                bar->processor_.setAnalyzerMode (
+                                    static_cast<APEX::Analysis::SpectrumTapMode>(
+                                        id - 10));
+                            break;
+                    }
+                    bar->refresh();
+                }
+            });
     }
 
     void timerCallback() override
@@ -567,6 +763,14 @@ private:
     juce::TextButton keyButton_ { "Key Internal" };
     juce::TextButton linkButton_ { "Link On" };
     juce::TextButton characterButton_ { "CHAR Pure" };
+    juce::TextButton presetButton_ { "PRESETS" };
+    juce::TextButton utilityButton_ { "UTILITY" };
+    std::array<std::array<float, 7>, kMaxBands> oldBands_ {};
+    std::array<float, kMaxBands> oldPlacements_ {};
+    std::array<float, kMaxBands> oldDynamics_ {};
+    std::array<float, kMaxBands> oldDynFilters_ {};
+    std::array<float, kMaxBands> oldSpectral_ {};
+    bool undoAvailable_ = false;
 };
 
 //==============================================================================
@@ -2712,8 +2916,9 @@ void ParametricEQEditor::applyLayout()
     // but entirely native APEX visuals. A bottom command dock never steals
     // horizontal space from the response display.
     auto workspace = getLocalBounds();
-    const int dockHeight = width < 650 ? 104
-                          : std::min (56, std::max (44, height / 12));
+    // One quiet, touch-safe command dock at ALL viewports. Old 320px mode
+    // burned 104px on an 8-button grid; six grouped controls now fit 44px.
+    const int dockHeight = std::min (56, std::max (52, height / 10));
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
     // Narrow devices AND short plugin windows use a scrollable touch sheet
