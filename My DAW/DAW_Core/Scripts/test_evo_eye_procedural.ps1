@@ -45,6 +45,7 @@ $features = @(
     @{ Name = 'Independent upper/lower closure shutters'; Expression = 'static void drawShutters' },
     @{ Name = 'Moving eyelid seam separate from eyebrow'; Expression = 'static void drawLidRims' },
     @{ Name = 'Single-sweep angry brow visor'; Expression = 'static void drawScowlingBrow' },
+    @{ Name = 'Full brow overlay independent of ocular clip'; Expression = 'static void drawBrowPair' },
     @{ Name = 'Angled monotonic blade silhouette'; Expression = 'P\(91, 136\)' },
     @{ Name = 'Closed shadow-black steel visor'; Expression = 'static void drawClosedVisor' },
     @{ Name = 'No closed oval cut-out'; Expression = 'if \(openness > 0\.035f\)' },
@@ -93,6 +94,7 @@ $requiredOrder = @(
     'iris(g, seconds, openness)',
     'drawClosedVisor(g, openness)',
     'drawLidRims(g, openness)',
+    'drawBrowPair(g)',
     'identity(g, seconds)'
 )
 $position = -1
@@ -102,6 +104,24 @@ foreach ($call in $requiredOrder) {
         throw "Evo Eye z-order violated at: $call"
     }
     $position = $found
+}
+
+# Brow shape MUST NOT be rasterized/cut alongside secondary plates, and
+# must be drawn precisely once per frame at a common z-order for all states.
+$armourStart = $header.IndexOf('static void sculptedArmour(G& g)')
+$platingStart = $header.IndexOf('static void plating(G& g)', $armourStart)
+if ($armourStart -lt 0 -or $platingStart -lt $armourStart) {
+    throw 'Cannot inspect side armour placement'
+}
+$armourBody = $header.Substring($armourStart, $platingStart - $armourStart)
+if ($armourBody -match 'drawScowlingBrow\(') {
+    throw 'Regression: the eyebrow moved back into clipped secondary armor.'
+}
+if ([regex]::Matches($frameBody, 'drawBrowPair\(g\)').Count -ne 1) {
+    throw 'Regression: angry eyebrow pair must be composited exactly once in drawFrame.'
+}
+if ($frameBody -notmatch '(?s)drawLidRims\(g, openness\);.*?drawBrowPair\(g\);.*?identity\(g, seconds\);') {
+    throw 'Regression: brows must be drawn AFTER moving eyelids and before identity.'
 }
 
 if (-not ('ApexProceduralEyeResourceAudit' -as [type])) {
