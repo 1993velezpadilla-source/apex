@@ -4710,7 +4710,10 @@
     <None Include="..\..\..\Sdk setups\juce-8.0.12-windows\JUCE\modules\juce_graphics\unicode\sheenbidi\JUCE_CHANGES.txt"/>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include=".\resources.rc"/>
+    <ResourceCompile Include=".\resources.rc">
+      <!-- Embed the ORIGINAL APEX eye within the PE image when source artwork is present. -->
+      <PreprocessorDefinitions Condition="Exists('$(MSBuildProjectDirectory)\..\..\Assets\EvoEye\evo_eye.jpg')">APEX_EVO_EYE_EMBEDDED_ART;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
 </Project>
