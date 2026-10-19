@@ -684,6 +684,10 @@ public:
                                  &phaseButton_, &detectorButton_, &keyButton_,
                                  &linkButton_, &characterButton_ })
             secondary->setBounds (safe);
+        // A freshly constructed bar has no width when its labels are first
+        // refreshed. Re-sync AFTER the host determines the real breakpoint,
+        // otherwise desktop incorrectly displays mobile-only BOTH / ST.
+        refresh();
     }
 
     void setBandUnits (int band, BandParameterOffset offset, float units)
@@ -2596,7 +2600,7 @@ public:
         placementLabel_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         placementLabel_.setColour (juce::Label::textColourId,
                                    Palette::textSecondary());
-        placementLabel_.setText ("Placement", juce::dontSendNotification);
+        placementLabel_.setText ("Channel", juce::dontSendNotification);
         placementLabel_.setInterceptsMouseClicks (false, false);
         // Approved GUI: ONE Channel dropdown, Stereo is the canonical default.
         placementCombo_.setTitle ("Channel placement for selected band");
@@ -3248,11 +3252,17 @@ void ParametricEQEditor::paint (juce::Graphics& g)
 // Exact open-eye renderer shared with the boot splash.
 void ParametricEQEditor::paintOverChildren (juce::Graphics& g)
 {
-    const float w = static_cast<float> (
-        juce::jmin (92, juce::jmax (54, getWidth() / 10)));
+    const bool mobile = getWidth() < 700;
+    const float w = static_cast<float> (mobile
+        ? juce::jmin (56, juce::jmax (44, getWidth() / 7))
+        : juce::jmin (92, juce::jmax (54, getWidth() / 10)));
+    // Responsive: on a narrow host all four toolbar controls occupy the
+    // upper-right corner. Put the mouse-transparent eye stamp on the empty
+    // upper-left response margin instead; it must NEVER mask Tools.
+    const float x = mobile ? 8.0f : static_cast<float> (getWidth()) - w - 9.0f;
+    const float y = mobile ? 62.0f : 6.0f;
     APEX::Branding::EvoEyeStamp::paint (
-        g, { static_cast<float> (getWidth()) - w - 9.0f,
-             6.0f, w, w * 0.37f });
+        g, { x, y, w, w * 0.37f });
 }
 
 void ParametricEQEditor::resized()
