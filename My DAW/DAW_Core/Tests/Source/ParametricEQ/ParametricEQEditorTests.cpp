@@ -68,6 +68,7 @@ public:
     void runTest() override
     {
         testResponsiveLayoutMatrix();
+        testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
         testPurpleAnalyzerAndPresetRestore();
         testPrismOffscreenRenderAndSnapshots();
@@ -194,6 +195,70 @@ private:
         expect (processor->getAnalyzerMode()
             == APEX::Analysis::SpectrumTapMode::Closed,
             "closing editor restores dormant analyzer unless changed by user");
+    }
+
+    // Master Orchestrator / Adversarial Critic gate: one deterministic
+    // regression probe in the EXISTING Gauntlet. No extra CI jobs, retries,
+    // external LLM dependency or unbounded test loops.
+    void testAdversarialCriticBandSwitches()
+    {
+        beginTest ("adversarial critic: changing selected bands preserves "
+                   "node access and isolates hosted channel state");
+        auto processor = std::make_unique<Processor>();
+        enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+        enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        auto& channel = editor->getPlacementComboForTesting();
+
+        // Regression from the larger approved floating panel: changing
+        // the focus must not strand either EQ point under the HUD.
+        // The small case uses an intentionally separate touch sheet.
+        for (const auto size : std::array<juce::Point<int>, 4> {{
+                {320, 568}, {900, 620}, {1280, 720}, {1920, 1080}
+             }})
+        {
+            editor->setSize (size.x, size.y);
+            for (int attempt = 0; attempt < 6; ++attempt)
+            {
+                const int selected = attempt % 2;
+                const int choice = (attempt + selected) % kChannelPlacementCount;
+                editor->setSelectedBandForTesting (selected);
+                expectEquals (channel.getSelectedId(),
+                    processor->getParametricEQParameter (
+                        placementParameterIndex (selected))->getChoiceIndex() + 1,
+                    "dropdown follows SELECTED band's canonical placement");
+                channel.setSelectedId (choice + 1, juce::sendNotificationSync);
+                expectEquals (processor->getParametricEQParameter (
+                    placementParameterIndex (selected))->getChoiceIndex(),
+                    choice, "dropdown persists its choice to the selected band");
+                const int otherBand = 1 - selected;
+                const int previousOther = processor->getParametricEQParameter (
+                    placementParameterIndex (otherBand))->getChoiceIndex();
+                // Selecting the next band without editing it may not carry
+                // the previous band's Left/Right/Mid/Side choice over.
+                editor->setSelectedBandForTesting (otherBand);
+                expectEquals (channel.getSelectedId(), previousOther + 1,
+                    "changing bands never leaks another band's channel mode");
+
+                const auto graph = editor->getGraphBoundsForTesting();
+                const auto inspector = editor->getInspectorBoundsForTesting();
+                expect (editor->getLocalBounds().contains (inspector),
+                    "inspector stays on screen under rapid band switching");
+                expect (! inspector.intersects (editor->getTopBarBoundsForTesting()),
+                    "inspector never obscures the footer");
+                if (size.x >= 900 && size.y >= 500)
+                {
+                    expect (graph.contains (inspector),
+                        "floating inspector never escapes the frequency graph");
+                    for (int band = 0; band < 2; ++band)
+                        expect (! inspector.intersects (
+                            editor->getNodeBoundsForTesting (band).translated (
+                                graph.getX(), graph.getY())),
+                            "active EQ handles remain available while switching");
+                }
+            }
+        }
     }
 
     void testResponsiveLayoutMatrix()
