@@ -95,8 +95,11 @@ private:
                 {320, 568}, {900, 620}, {1920, 1080} }})
         {
             editor->setSize (dimensions.x, dimensions.y);
-            expectEquals (editor->getNumChildComponents(), 3,
-                "brand eye must not add any clickable child component");
+            // AudioProcessorEditor adds JUCE's built-in resize-corner
+            // child as the fourth entry. The eye is PAINTED by the existing
+            // editor; it must not create a fifth interactive component.
+            expectEquals (editor->getNumChildComponents(), 4,
+                "only three EQ panels plus JUCE resize-corner; no eye widget");
             juce::Image rendered (juce::Image::RGB,
                 dimensions.x, dimensions.y, true);
             {
