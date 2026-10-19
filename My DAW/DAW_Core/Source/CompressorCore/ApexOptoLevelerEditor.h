@@ -147,8 +147,11 @@ public:
 
         setOpaque(true);
         setResizable(true,true);
-        setResizeLimits(700,285,1560,570);
-        setSize(1040,380);
+        // The approved rack presentation is 4:3. Keep the analogue controls
+        // in their native proportions instead of stretching the faceplate.
+        getConstrainer()->setFixedAspectRatio(4.0 / 3.0);
+        setResizeLimits(700,525,1560,1170);
+        setSize(1040,780);
         startTimerHz(30);
     }
 
@@ -160,46 +163,61 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const float sx=getWidth()/1040.0f, sy=getHeight()/380.0f;
         g.fillAll(juce::Colour(0xff111923));
         g.saveState();
-        g.addTransform(juce::AffineTransform::scale(sx,sy));
+        const auto scale=faceScale();
+        g.addTransform(juce::AffineTransform::scale(scale).translated(
+            (getWidth()-kFaceWidth*scale)*0.5f,
+            (getHeight()-kFaceHeight*scale)*0.5f));
         drawChassis(g);
         drawMeter(g);
         drawBubblegumStrip(g);
-        // Static brand stamp: the exact open boot eye, NOT the VU meter.
-        APEX::Branding::EvoEyeStamp::paint(g, {852.0f, 48.0f, 130.0f, 45.0f});
+        // Canonical open boot-eye: a SMALL, STATIC branding stamp directly
+        // right of the APEX wordmark in the bottom-left strip. It never
+        // intersects the GR/+4/+10 VU selector or any analogue controls.
+        APEX::Branding::EvoEyeStamp::paint(g, {143.0f, 292.0f, 128.0f, 38.0f});
         g.restoreState();
     }
 
     void resized() override
     {
-        const auto fit=[this](float x,float y,float w,float h)
-        {
-            return juce::Rectangle<int>(
-              juce::roundToInt(x*getWidth()/1040.0f),
-              juce::roundToInt(y*getHeight()/380.0f),
-              std::max(10,juce::roundToInt(w*getWidth()/1040.0f)),
-              std::max(10,juce::roundToInt(h*getHeight()/380.0f)));
-        };
-        // Dominant analogue gain knobs: left vs right of central VU.
-        gain_.setBounds(fit(243,101,119,119));
-        peak_.setBounds(fit(684,101,119,119));
-        limit_.setBounds(fit(106,158,71,69));
-        power_.setBounds(fit(876,164,71,69));
-        meterMode_.setBounds(fit(883,65,75,75));
-        voice_.setBounds(fit(322,303,144,31));
+        // Match every JUCE hit target to the same uniform transform used by
+        // paint(); visual positions, gestures and labels remain aligned.
+        gain_.setBounds(faceRect(243,101,119,119));
+        peak_.setBounds(faceRect(684,101,119,119));
+        limit_.setBounds(faceRect(106,158,71,69));
+        power_.setBounds(faceRect(876,164,71,69));
+        meterMode_.setBounds(faceRect(883,65,75,75));
+        voice_.setBounds(faceRect(322,303,144,31));
 
-        // Accessible touch strip keeps the original face unobstructed.
-        mix_.setBounds(fit(499,310,66,55));
-        emphasis_.setBounds(fit(663,310,66,55));
-        drive_.setBounds(fit(822,310,66,55));
-        color_.setBounds(fit(907,300,77,68));
+        mix_.setBounds(faceRect(499,310,66,55));
+        emphasis_.setBounds(faceRect(663,310,66,55));
+        drive_.setBounds(faceRect(822,310,66,55));
+        color_.setBounds(faceRect(907,300,77,68));
         if(valueReadout_.isVisible() && activeValueControl_!=nullptr)
             positionValueReadout(*activeValueControl_);
     }
 
 private:
+    static constexpr float kFaceWidth=1040.0f;
+    static constexpr float kFaceHeight=380.0f;
+
+    float faceScale() const noexcept
+    {
+        return juce::jmin(getWidth()/kFaceWidth,getHeight()/kFaceHeight);
+    }
+
+    juce::Rectangle<int> faceRect(float x,float y,float width,float height) const
+    {
+        const auto scale=faceScale();
+        const auto offsetX=(getWidth()-kFaceWidth*scale)*0.5f;
+        const auto offsetY=(getHeight()-kFaceHeight*scale)*0.5f;
+        return {juce::roundToInt(offsetX+x*scale),
+                juce::roundToInt(offsetY+y*scale),
+                juce::jmax(10,juce::roundToInt(width*scale)),
+                juce::jmax(10,juce::roundToInt(height*scale))};
+    }
+
     static void label(juce::Graphics& g,const juce::String& t,float x,float y,float w,
                       float h,float size,juce::Colour color,bool bold=false,
                       juce::Justification alignment=juce::Justification::centred)
@@ -512,14 +530,8 @@ private:
             target=juce::jlimit(0.0f,1.0f,(vu+20.0f)/23.0f);
         }
         needle_+=(target-needle_)*0.18f;
-        repaint(juce::Rectangle<int>(juce::roundToInt(392*getWidth()/1040.0f),
-                                      juce::roundToInt(31*getHeight()/380.0f),
-                                      juce::roundToInt(258*getWidth()/1040.0f),
-                                      juce::roundToInt(189*getHeight()/380.0f)));
-        repaint(juce::Rectangle<int>(juce::roundToInt(948*getWidth()/1040.0f),
-                                      juce::roundToInt(192*getHeight()/380.0f),
-                                      juce::roundToInt(34*getWidth()/1040.0f),
-                                      juce::roundToInt(40*getHeight()/380.0f)));
+        repaint(faceRect(392,31,258,189));
+        repaint(faceRect(948,192,34,40));
     }
 
     OptoProcessor& processor_;
