@@ -194,6 +194,19 @@ juce::ValueTree Track::getState() const
     state.setProperty("inputFirstChannel", inputFirstChannel_.load(std::memory_order_relaxed), nullptr);
     state.setProperty("inputMono", inputMono_.load(std::memory_order_relaxed), nullptr);
 
+    // Names, target and main lane survive closing/reopening the project.
+    juce::ValueTree playlists("TrackPlaylists");
+    playlists.setProperty("main", mainPlaylistId_, nullptr);
+    playlists.setProperty("target", targetPlaylistId_, nullptr);
+    for (const auto& p : playlists_)
+    {
+        juce::ValueTree lane("Playlist");
+        lane.setProperty("id", p.id, nullptr);
+        lane.setProperty("name", p.name, nullptr);
+        playlists.addChild(lane, -1, nullptr);
+    }
+    state.addChild(playlists, -1, nullptr);
+
     // Save plugin chain if present (forward declaration is ok, actual save is in ApplicationCore)
     state.setProperty("hasPlugins", pluginChain_ != nullptr, nullptr);
 
@@ -203,6 +216,27 @@ juce::ValueTree Track::getState() const
 void Track::restoreState(const juce::ValueTree& state)
 {
     name_ = state.getProperty(IDs::NAME, "Untitled Track");
+    playlists_ = { { "main", "Main" } };
+    mainPlaylistId_ = targetPlaylistId_ = "main";
+    auditionPlaylistId_.clear();
+    if (auto stored = state.getChildWithName("TrackPlaylists"); stored.isValid())
+    {
+        juce::StringArray known { "main" };
+        for (int i = 0; i < stored.getNumChildren(); ++i)
+        {
+            auto p = stored.getChild(i);
+            auto id = p.getProperty("id").toString();
+            if (!p.hasType("Playlist") || id.isEmpty() || known.contains(id))
+                continue;
+            playlists_.push_back({ id, p.getProperty("name", id).toString() });
+            known.add(id);
+        }
+        auto requestedMain = stored.getProperty("main", "main").toString();
+        auto requestedTarget = stored.getProperty("target", "main").toString();
+        mainPlaylistId_ = known.contains(requestedMain) ? requestedMain : juce::String("main");
+        targetPlaylistId_ = known.contains(requestedTarget) ? requestedTarget : mainPlaylistId_;
+    }
+
     muted_.store((bool)state.getProperty(IDs::MUTED, false), std::memory_order_relaxed);
     soloed_.store((bool)state.getProperty(IDs::SOLOED, false), std::memory_order_relaxed);
     polarityInverted_.store((bool)state.getProperty("polarityInverted", false), std::memory_order_relaxed);
