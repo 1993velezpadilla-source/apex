@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ProjectCore/ProjectResetMixCore.h"
 #include "StartupProgressCore.h"
 #include "KeyBindingCore/GlobalTransportSpaceHook.h"
 #include "AutomationSequence/AutomationSequenceDialogComponent.h"
@@ -1255,6 +1256,10 @@ MainComponent::MainComponent()
     menuBar_->setMenuAction("Settings", "Preferences...", [this]
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::ViewToggleSettings);
+    });
+    menuBar_->setMenuAction("Settings", "Project Settings", [this]
+    {
+        confirmResetProjectMix();
     });
     menuBar_->setMenuAction("Settings", "Upgrade Project...", [this]
     {
@@ -5105,6 +5110,147 @@ void MainComponent::upgradeProjectFile(const juce::File& file)
                       : juce::MessageBoxIconType::WarningIcon,
                 "Upgrade Project", message);
         });
+}
+
+void MainComponent::confirmResetProjectMix()
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    auto* dialog = new juce::AlertWindow(
+        "Reset Project — Keep Recordings",
+        "Return this project to an unprocessed mix?\n\n"
+        "This removes ALL track/master plugins, clip FX, Vocal Tune, "
+        "automation (including Tape Stop), sends/sidechains and presets. "
+        "Mixer faders return to 0 dB; pan and clip properties return to defaults.\n\n"
+        "Recorded audio files, clips, their timeline positions, trims, names, "
+        "tracks, folders, tempo and main output routing are PRESERVED.\n\n"
+        "APEX saves a separate recovery .dawproj BEFORE resetting. "
+        "The current project file is NOT overwritten until you explicitly save.",
+        juce::MessageBoxIconType::WarningIcon);
+
+    dialog->addButton("Reset Project", 1);
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    const juce::Component::SafePointer<MainComponent> safeThis(this);
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis](int answer)
+        {
+            if (answer == 1)
+                if (auto* owner = safeThis.getComponent())
+                    owner->resetProjectMix();
+        }), true);
+}
+
+void MainComponent::resetProjectMix()
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    auto& project = appCore_.getProjectManager();
+
+    // Capture the real complete project including opaque plugin states.
+    // If any plugin refuses serialization, fail closed: never erase it.
+    juce::ValueTree before;
+    juce::String error;
+    if (!project.isProjectStateUsable() || !project.buildState(before, error))
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon, "Reset Project",
+            "Could not make a recoverable project snapshot. Nothing was changed.\n" + error);
+        return;
+    }
+
+    juce::ValueTree after;
+    DAW::ProjectResetMixCore::Counts counts;
+    if (!DAW::ProjectResetMixCore::prepare(before, after, counts, error))
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon, "Reset Project", error);
+        return;
+    }
+
+    // Recovery file uses the same full ValueTree XML format as .dawproj.
+    // NEVER point ProjectManager::saveToFile() at the backup: doing so would
+    // change the active project identity. Publication is verified before
+    // mutating anything live, and the original .dawproj stays untouched.
+    const auto activeFile = project.getProjectFile();
+    const auto baseDir = activeFile.getFullPathName().isNotEmpty()
+        ? activeFile.getParentDirectory()
+        : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    const auto backupDir = baseDir.getChildFile("APEX_Reset_Backups");
+    if ((!backupDir.isDirectory() && !backupDir.createDirectory())
+        || !backupDir.isDirectory())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon, "Reset Project",
+            "Cannot create recovery-backup directory. No changes were made.\n"
+            + backupDir.getFullPathName());
+        return;
+    }
+
+    const auto safeName = juce::File::createLegalFileName(
+        project.getProjectName().isEmpty() ? "APEX" : project.getProjectName());
+    const auto backup = backupDir.getNonexistentChildFile(
+        safeName + "-before-reset-" + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S"),
+        ".dawproj", false);
+    auto xml = before.createXml();
+    if (!xml)
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Reset Project", "Recovery snapshot XML could not be created. Nothing changed.");
+        return;
+    }
+    juce::TemporaryFile temporary(backup, juce::TemporaryFile::useHiddenFile);
+    bool written = false;
+    {
+        juce::FileOutputStream out(temporary.getFile());
+        if (out.openedOk())
+        {
+            xml->writeTo(out);
+            out.flush();
+            written = out.getStatus().wasOk();
+        }
+    }
+    juce::String publishError;
+    if (!written || juce::XmlDocument::parse(temporary.getFile()) == nullptr
+        || !DAW::publishFileTransactionally(temporary.getFile(), backup, publishError))
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Reset Project", "Recovery backup could not be verified/published. "
+            "Nothing was reset.\n" + publishError);
+        return;
+    }
+
+    // Delegate full plugin lifetime, routing graph and realtime audio cache
+    // changes to the EXISTING project-restore gate. Never clear a live plugin
+    // chain or automation buffer directly on the audio callback.
+    if (!project.restoreFromState(after))
+    {
+        const juce::String resetError = project.getLastLoadError();
+        const bool recovered = project.restoreFromState(before);
+        if (recovered)
+            projectLoaded();
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon, "Reset Project — Not Completed",
+            (recovered ? "Reset failed; the original project was restored.\n"
+                       : "Reset failed; automatic restore could not complete. "
+                         "Do not save this project. Reopen the recovery backup.\n")
+            + resetError + "\nRecovery file:\n" + backup.getFullPathName());
+        return;
+    }
+
+    // Rebind all visible mixer/clip/plugin UI and invalidate stale global
+    // Undo references to plugin instances that were destroyed on restore.
+    projectLoaded();
+    project.markDirty();
+    appCore_.markProjectDirty("reset_project_mix");
+    resized();
+    repaint();
+
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::InfoIcon, "Reset Project — Complete",
+        "The recordings and arrangement were preserved. "
+        "Plugin chains, clip effects, automation, sends and mix settings "
+        "were reset.\n\nRecovery backup:\n"
+        + backup.getFullPathName()
+        + "\n\nUse Save Project when you are happy with the reset.");
 }
 
 void MainComponent::projectLoaded()
