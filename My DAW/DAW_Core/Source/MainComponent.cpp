@@ -1256,6 +1256,10 @@ MainComponent::MainComponent()
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::ViewToggleSettings);
     });
+    menuBar_->setMenuAction("Settings", "Reset Project...", [this]
+    {
+        resetCurrentProjectToRawMix();
+    });
     menuBar_->setMenuAction("Settings", "Upgrade Project...", [this]
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);
