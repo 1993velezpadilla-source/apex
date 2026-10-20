@@ -59,7 +59,8 @@ public:
                              {"---"},
                              {"Keybinding Profile", nullptr},
                              {"---"},
-                             {"Preferences...", nullptr} } }
+                             {"Preferences...", nullptr},
+                             {"Project Settings", nullptr} } }
         };
     }
 
@@ -501,6 +502,18 @@ private:
                     pi.isEnabled = true;
                     pi.action = item.action;
                     pm.addItem(pi);
+                    continue;
+                }
+                if (item.label == "Project Settings")
+                {
+                    // User requested Settings > Project Settings > Reset Project.
+                    // Keep this destructive action out of the crowded top row.
+                    juce::PopupMenu projectMenu;
+                    juce::PopupMenu::Item resetItem("Reset Project...");
+                    resetItem.isEnabled = item.action != nullptr;
+                    resetItem.action = item.action;
+                    projectMenu.addItem(resetItem);
+                    pm.addSubMenu("Project Settings", projectMenu, true);
                     continue;
                 }
                 if (item.label == "Keybinding Profile")
