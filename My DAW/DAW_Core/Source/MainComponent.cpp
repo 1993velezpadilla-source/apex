@@ -5218,6 +5218,11 @@ void MainComponent::resetProjectMix()
         return;
     }
 
+    // Preserve the user's folder visibility layout across this mix-only
+    // reset. Full restore re-creates track objects; the previous loaded-file
+    // collapsed list belongs to an older project-load event.
+    const auto savedCollapsedFolders = collapsedFolderTrackIds_;
+
     // Delegate full plugin lifetime, routing graph and realtime audio cache
     // changes to the EXISTING project-restore gate. Never clear a live plugin
     // chain or automation buffer directly on the audio callback.
@@ -5226,7 +5231,11 @@ void MainComponent::resetProjectMix()
         const juce::String resetError = project.getLastLoadError();
         const bool recovered = project.restoreFromState(before);
         if (recovered)
+        {
             projectLoaded();
+            collapsedFolderTrackIds_ = savedCollapsedFolders;
+            syncFolderCollapseState();
+        }
         juce::AlertWindow::showMessageBoxAsync(
             juce::MessageBoxIconType::WarningIcon, "Reset Project — Not Completed",
             (recovered ? "Reset failed; the original project was restored.\n"
@@ -5239,6 +5248,8 @@ void MainComponent::resetProjectMix()
     // Rebind all visible mixer/clip/plugin UI and invalidate stale global
     // Undo references to plugin instances that were destroyed on restore.
     projectLoaded();
+    collapsedFolderTrackIds_ = savedCollapsedFolders;
+    syncFolderCollapseState();
     project.markDirty();
     appCore_.markProjectDirty("reset_project_mix");
     resized();
