@@ -40,6 +40,68 @@ public:
     Track(const TrackID& id, const juce::String& name);
     virtual ~Track();
     
+    // Pro-Tools-style persistent playlist versions on ONE audio track/FX chain.
+    struct Playlist { juce::String id, name; };
+    const std::vector<Playlist>& getPlaylists() const noexcept { return playlists_; }
+    const juce::String& getMainPlaylistId() const noexcept { return mainPlaylistId_; }
+    const juce::String& getTargetPlaylistId() const noexcept { return targetPlaylistId_; }
+    const juce::String& getAuditionPlaylistId() const noexcept { return auditionPlaylistId_; }
+    juce::String getPlaybackPlaylistId() const
+    {
+        return auditionPlaylistId_.isNotEmpty() ? auditionPlaylistId_ : mainPlaylistId_;
+    }
+    juce::String createPlaylist()
+    {
+        const auto id = juce::Uuid().toString();
+        playlists_.push_back({ id, getName() + "." + juce::String((int)playlists_.size()).paddedLeft('0', 2) });
+        mainPlaylistId_ = targetPlaylistId_ = id;
+        auditionPlaylistId_.clear();
+        notifyPropertyChanged();
+        return id;
+    }
+    bool showPlaylistAsMain(const juce::String& id)
+    {
+        for (const auto& p : playlists_)
+            if (p.id == id)
+            {
+                mainPlaylistId_ = id;
+                auditionPlaylistId_.clear();
+                notifyPropertyChanged();
+                return true;
+            }
+        return false;
+    }
+    bool setTargetPlaylist(const juce::String& id)
+    {
+        for (const auto& p : playlists_)
+            if (p.id == id)
+            {
+                targetPlaylistId_ = id;
+                notifyPropertyChanged();
+                return true;
+            }
+        return false;
+    }
+    bool soloPlaylistLane(const juce::String& id)
+    {
+        if (id.isEmpty()) { auditionPlaylistId_.clear(); notifyPropertyChanged(); return true; }
+        for (const auto& p : playlists_)
+            if (p.id == id)
+            {
+                auditionPlaylistId_ = auditionPlaylistId_ == id ? juce::String() : id;
+                notifyPropertyChanged();
+                return true;
+            }
+        return false;
+    }
+    bool renamePlaylist(const juce::String& id, const juce::String& name)
+    {
+        if (name.trim().isEmpty()) return false;
+        for (auto& p : playlists_)
+            if (p.id == id) { p.name = name.trim(); notifyPropertyChanged(); return true; }
+        return false;
+    }
+
     // Identity
     TrackID getID() const { return id_; }
     juce::String getName() const { return name_; }
@@ -301,6 +363,10 @@ private:
                                                      std::memory_order_relaxed)) {}
     }
 
+    std::vector<Playlist> playlists_ { { "main", "Main" } };
+    juce::String mainPlaylistId_ { "main" };
+    juce::String targetPlaylistId_ { "main" };
+    juce::String auditionPlaylistId_;
     TrackID id_;
     juce::String name_;
     std::atomic<bool> muted_{false};
