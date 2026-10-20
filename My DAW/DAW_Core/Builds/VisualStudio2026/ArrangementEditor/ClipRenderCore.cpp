@@ -409,6 +409,15 @@ namespace ArrangementEditor
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
             return;
 
+        // Right-click must reach the parent context menu without selecting,
+        // trimming, muting or disturbing an existing multi-selection.
+        if (e.mods.isRightButtonDown())
+        {
+            if (auto* parent = getParentComponent())
+                parent->mouseDown(e.getEventRelativeTo(parent));
+            return;
+        }
+
         const Zone z = hitTestZone(e.getPosition());
 
         // Preset curve toggle: the pitch/stretch/mode badges in the name bar
@@ -441,7 +450,7 @@ namespace ArrangementEditor
         // scrolling can never displace a clip.
         if (! m_selected)
         {
-            if (onClick) onClick();          // select it
+            if (onClick) onClick(e.mods);   // selection honors Ctrl even on the first tap
             m_activeZone = Zone::VolumeBtn;  // marks the gesture as consumed
             return;
         }
@@ -455,6 +464,7 @@ namespace ArrangementEditor
         {
             m_activeZone        = z;
             m_dragStartX        = e.getScreenPosition().x;
+            m_lastEditDeltaSeconds = 0.0;
             m_dragStartLength   = m_model->length;
             m_dragStartFadeIn   = m_model->fadeInLength;
             m_dragStartFadeOut  = m_model->fadeOutLength;
@@ -505,6 +515,7 @@ namespace ArrangementEditor
         // immune to the component being repositioned mid-drag.
         const double dxPx    = (double)e.getScreenPosition().x - m_dragStartX;
         const double dxSecs  = dxPx / pps;
+        m_lastEditDeltaSeconds = dxSecs;
 
         m_showTrimTooltip = false;
         m_trimTooltipText = {};
