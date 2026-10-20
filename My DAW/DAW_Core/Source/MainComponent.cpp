@@ -1398,7 +1398,7 @@ MainComponent::MainComponent()
     {
         // Waveform is a view switch, not a playlist mutation. Switching back
         // closes the take-lane workspace without altering takes or audio.
-        if (arrangement_ && arrangement_->isInlinePlaylistPanelActive())
+        if (arrangement_)
             arrangement_->setInlinePlaylistPanel(nullptr, {});
         if (playlistPanel_) playlistPanel_->setVisible(false);
         if (arrangement_) arrangement_->requestClipRemirror();

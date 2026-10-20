@@ -126,6 +126,7 @@ public:
             const auto& p = playlists[(size_t)i];
             if (inlineMode_ && p.id == track->getMainPlaylistId())
                 continue; // Main is the owning track's normal clip row
+            if (inlineMode_ && alternateRow >= 128) break;
             const int y = inlineMode_ ? alternateRow++ * 66
                                       : 81 + i * 66 - scrollY_;
             if (y + 66 < (inlineMode_ ? 0 : 76)

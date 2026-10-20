@@ -4149,7 +4149,8 @@ namespace ArrangementEditor
         const int newAnchorY = m_drag.currentMouse.y - m_drag.mouseOffsetY;
         const int dx = newAnchorX - m_drag.anchorOriginalBounds.getX();
         const int dy = newAnchorY - m_drag.anchorOriginalBounds.getY();
-        const int trackDelta = (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH;
+        const int trackDelta = (getInlineExpandedLaneIndex() >= 0 ? 0
+            : (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH);
         const int snappedDy = trackDelta * trackH;
 
         juce::Point<int> first;
@@ -4226,7 +4227,8 @@ namespace ArrangementEditor
             const int newAnchorY = m_drag.currentMouse.y - m_drag.mouseOffsetY;
             dx = newAnchorX - m_drag.anchorOriginalBounds.getX();
             dy = newAnchorY - m_drag.anchorOriginalBounds.getY();
-            trackDelta = (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH;
+            trackDelta = (getInlineExpandedLaneIndex() >= 0 ? 0
+            : (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH);
             snappedDy = trackDelta * trackH;
         }
         lines.add("m_drag.active=" + juce::String(m_drag.active ? "true" : "false"));
@@ -5451,7 +5453,8 @@ namespace ArrangementEditor
             const int dy = newAnchorY - m_drag.anchorOriginalBounds.getY();
 
             const int trackH    = (int)m_zoom.getTrackHeightPx();
-            const int trackDelta = (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH;
+            const int trackDelta = (getInlineExpandedLaneIndex() >= 0 ? 0
+            : (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH);
             const int snappedDy  = trackDelta * trackH;
 
             for (const auto& item : m_drag.items)
@@ -5490,7 +5493,8 @@ namespace ArrangementEditor
 
         const int trackH     = (int)m_zoom.getTrackHeightPx();
         const int contentTop = arrangementContentTop();
-        const int trackDelta  = (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH;
+        const int trackDelta  = (getInlineExpandedLaneIndex() >= 0 ? 0
+            : (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH);
         const int snappedDy   = trackDelta * trackH;
         std::vector<juce::Uuid> committedIds;
 
@@ -5663,7 +5667,8 @@ namespace ArrangementEditor
         const int trackCount = getArrangementTrackCount();
 
         // Snap dy to nearest track lane increment
-        const int trackDelta  = (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH;
+        const int trackDelta  = (getInlineExpandedLaneIndex() >= 0 ? 0
+            : (dy + (dy >= 0 ? trackH / 2 : -(trackH / 2))) / trackH);
         const int snappedDy   = trackDelta * trackH;
 
         appendDebugLog("[drawGhost] active=" + juce::String(m_drag.active ? "true" : "false")
@@ -5672,9 +5677,9 @@ namespace ArrangementEditor
 
         // One-time draw of the drop-lane highlight for the anchor clip
         {
-            const int destTrack = clampTrackIndex(
-                (m_drag.anchorOriginalBounds.getY() + snappedDy - contentTop) / trackH);
-            const int laneY = contentTop + destTrack * trackH;
+            const int destTrack = clampTrackIndex(getLaneIndexForY(
+                m_drag.anchorOriginalBounds.getY() + snappedDy));
+            const int laneY = getLaneTopForIndex(destTrack);
             const auto* anchorClip = m_clipState.findClip(m_drag.clipId);
             if (anchorClip)
             {
@@ -5687,7 +5692,7 @@ namespace ArrangementEditor
         const int snapLineX = newAnchorX;
         g.setColour(juce::Colours::white.withAlpha(0.55f));
         g.drawVerticalLine(snapLineX, (float)contentTop,
-                           (float)(contentTop + trackCount * trackH));
+                           (float)getLaneTopForIndex(trackCount));
 
         // Draw ghost for every clip captured at drag start.
         juce::String ghostLogSignature;
@@ -5701,7 +5706,7 @@ namespace ArrangementEditor
             // Use the captured renderer Y so ghosts follow the exact visual rows
             // where the selected clips started, including cross-track selections.
             const int ghostY = item.bounds.getY() + snappedDy;
-            const int destTrack = clampTrackIndex((ghostY - contentTop) / trackH);
+            const int destTrack = clampTrackIndex(getLaneIndexForY(ghostY));
             const int ghostX = origX + dx;
 
             const juce::Rectangle<float> ghostRect((float)ghostX,
@@ -5848,7 +5853,7 @@ namespace ArrangementEditor
             for (const auto& item : m_drag.items)
             {
                 const int ghostY = item.bounds.getY() + snappedDy;
-                const int destTrack = clampTrackIndex((ghostY - contentTop) / trackH);
+                const int destTrack = clampTrackIndex(getLaneIndexForY(ghostY));
                 const int ghostX = item.bounds.getX() + dx;
                 const juce::Rectangle<int> ghostRect(ghostX, ghostY + 1,
                     juce::jmax(4, item.bounds.getWidth()), juce::jmax(8, item.bounds.getHeight()) - 3);
