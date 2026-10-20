@@ -388,6 +388,9 @@ namespace ArrangementEditor
         // -----------------------------------------------------------------------
         ArrangementClipStateCore m_clipState;
         ArrangementSelectionCore m_selection;
+        // Plain click on an already-selected member of a group collapses it
+        // only on mouse release. A real drag must preserve the whole group.
+        juce::Uuid m_pendingExclusiveOnRelease;
         ArrangementZoomCore      m_zoom;
         ArrangementUndoCore      m_undo;
         EditorToolState          m_toolState;
