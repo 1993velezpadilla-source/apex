@@ -4555,7 +4555,7 @@ namespace ArrangementEditor
             juce::MessageManager::callAsync([weakOwner, items, error]()
             {
                 if (weakOwner == nullptr) return;
-                auto& view = *weakOwner;
+                auto& view = *weakOwner.getComponent();
                 view.m_voiceCleanerBusy = false;
                 if (error.isNotEmpty())
                 {
@@ -4621,7 +4621,7 @@ namespace ArrangementEditor
                 auto apply = [weakOwner, changes](bool processed)
                 {
                     if (weakOwner == nullptr) return;
-                    auto& v = *weakOwner;
+                    auto& v = *weakOwner.getComponent();
                     if (v.m_engineAudioFiles == nullptr || v.m_engineClipManager == nullptr)
                         return;
 
