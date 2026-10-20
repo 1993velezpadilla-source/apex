@@ -1382,6 +1382,29 @@ MainComponent::MainComponent()
             }
         }
     };
+    // One-click WAV selector in TrackRow. All lanes share the existing track
+    // plugins/fader/routing; only clip playlist membership changes.
+    trackList_->onOpenPlaylistViewRequested = [this](const DAW::TrackID& trackId)
+    {
+        if (!playlistPanel_) return;
+        playlistPanel_->showForTrack(trackId, appCore_.getCurrentSampleRate());
+        playlistPanel_->setVisible(true);
+        playlistPanel_->toFront(true);
+        resized();
+    };
+    trackList_->onCreatePlaylistRequested = [this](const DAW::TrackID& trackId, bool duplicate)
+    {
+        if (!playlistPanel_) return;
+        playlistPanel_->createForTrack(trackId, duplicate, appCore_.getCurrentSampleRate());
+    };
+    trackList_->onPlaylistStateChangedRequested = [this](const DAW::TrackID&)
+    {
+        DAW::TrackPlaylistCompCore::publishPlaybackVisibility(
+            appCore_.getTrackManager(), appCore_.getClipManager());
+        if (arrangement_) arrangement_->requestClipRemirror();
+        appCore_.getProjectManager().markDirty();
+        if (trackList_) trackList_->repaint();
+    };
     trackList_->onOpenInputTrimRequested = [this](const DAW::TrackID& id)
     {
         if (inputTrimPanelManager_)
@@ -2014,6 +2037,26 @@ MainComponent::MainComponent()
          &appCore_.getAutomationManager(),
          &appCore_.getClipRegionPluginCore(),
          &appCore_.getPluginScanner().getFormatManager());
+
+    playlistPanel_ = std::make_unique<DAW::TrackPlaylistPanel>(
+        appCore_.getTrackManager(), appCore_.getClipManager(),
+        appCore_.getAudioFileManager());
+    playlistPanel_->canModify = [this]
+    {
+        return !appCore_.getRecordingEngine().isRecording()
+            && !appCore_.getTransport().isRecording();
+    };
+    playlistPanel_->onChanged = [this]
+    {
+        if (arrangement_) arrangement_->requestClipRemirror();
+        appCore_.getProjectManager().markDirty();
+        if (trackList_) trackList_->repaint();
+    };
+    playlistPanel_->onClose = [this]
+    {
+        if (playlistPanel_) playlistPanel_->setVisible(false);
+    };
+    addChildComponent(playlistPanel_.get());
 
     // ========================================================================
     // PHASE 3: INTEGRATE AUTOMATION SYSTEM
@@ -5147,6 +5190,8 @@ void MainComponent::resetCurrentProjectToRawMix()
 
 void MainComponent::projectLoaded()
 {
+    // A playlist panel may refer to clips/tracks from the previous session.
+    if (playlistPanel_) playlistPanel_->setVisible(false);
     // Restore/New Project starts a new autosave recovery session. Completions
     // from the previous project must not clear this session's pending edits.
     appCore_.getAutosaveManager().onProjectLoaded();
@@ -8595,6 +8640,14 @@ void MainComponent::resized()
             // window freely (the viewport scrolls horizontally for the rest).
             setDefaultMixerWindowBounds();
         }
+    }
+
+    if (playlistPanel_)
+    {
+        const int pw = juce::jmin(920, juce::jmax(430, getWidth() - 70));
+        const int ph = juce::jmin(560, juce::jmax(240, getHeight() - 150));
+        playlistPanel_->setBounds(juce::jmax(0, (getWidth() - pw) / 2),
+                                  kMenuH + kTransportH + 18, pw, ph);
     }
 
     if (pianoRollWindow_ && pianoRollWindow_->getBounds().isEmpty())
