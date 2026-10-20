@@ -128,13 +128,16 @@ public:
             }
             const auto path = juce::File(old.getProperty("sourceFile").toString());
             const double sourceRate = readSourceRate(path);
+            // Keep the original ID on at least one surviving side so clip
+            // plugins and their editors do not lose their owner when comping.
+            bool originalRetained = false;
             if (a < start_)
             {
                 auto left = TrackPlaylistCompCore::sliceAudioClip(old, a, start_, rate_, sourceRate);
                 if (left.isValid())
                 {
-                    left.setProperty("id", "COMP_" + juce::Uuid().toString(), nullptr);
-                    after_.push_back(left);
+                    after_.push_back(left); // preserve original stable clip ID
+                    originalRetained = true;
                 }
             }
             if (b > end_)
@@ -142,7 +145,9 @@ public:
                 auto right = TrackPlaylistCompCore::sliceAudioClip(old, end_, b, rate_, sourceRate);
                 if (right.isValid())
                 {
-                    right.setProperty("id", "COMP_" + juce::Uuid().toString(), nullptr);
+                    if (originalRetained)
+                        right.setProperty("id", "COMP_" + juce::Uuid().toString(), nullptr);
+                    // Otherwise preserve the original ID on the right side.
                     after_.push_back(right);
                 }
             }
@@ -184,16 +189,23 @@ private:
     }
     void apply(const std::vector<juce::ValueTree>& replacement)
     {
-        // Keep other tracks and every source playlist entirely untouched.
-        // Delete ONLY the pieces managed by this promotion. Unrelated target
-        // clips (and their clip FX, automation, editors) remain untouched.
-        juce::StringArray deleteIds;
+        // Stable IDs are crucial: replacing even an UNCHANGED target clip
+        // destroys its Vocal Tune and clip-FX state on clipRemoved(). Keep
+        // original owners alive when only their bounds changed.
+        juce::StringArray managedIds, nextIds;
         for (const auto& state : before_)
-            deleteIds.addIfNotAlreadyThere(state.getProperty("id").toString());
+            managedIds.addIfNotAlreadyThere(state.getProperty("id").toString());
         for (const auto& state : after_)
-            deleteIds.addIfNotAlreadyThere(state.getProperty("id").toString());
-        for (const auto& id : deleteIds)
+            managedIds.addIfNotAlreadyThere(state.getProperty("id").toString());
+        for (const auto& state : replacement)
+            nextIds.addIfNotAlreadyThere(state.getProperty("id").toString());
+
+        // Delete only actual outgoing pieces. The complete original WAV
+        // survives on disk and the source take's playlist is never touched.
+        for (const auto& id : managedIds)
         {
+            if (nextIds.contains(id))
+                continue;
             if (auto* clip = clips_.getClip(id))
                 if (clip->getTrackID() == trackId_ && clip->getPlaylistId() == targetId_)
                     clips_.deleteClip(id);
@@ -202,6 +214,16 @@ private:
         for (const auto& state : replacement)
         {
             const auto id = state.getProperty("id").toString();
+            if (auto* existing = clips_.getClip(id))
+            {
+                if (existing->getTrackID() == trackId_
+                    && existing->getPlaylistId() == targetId_)
+                {
+                    existing->restoreState(state);
+                    existing->notifyStateRestored();
+                }
+                continue;
+            }
             auto* clip = clips_.recreateClipFromStateWithId(state, id);
             if (auto* audio = dynamic_cast<AudioClip*>(clip))
                 if (audio->getSourceFile().existsAsFile())
