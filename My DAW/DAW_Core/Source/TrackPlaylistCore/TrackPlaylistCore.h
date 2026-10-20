@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <map>
+#include <algorithm>
 #include <vector>
 #include "../ClipCore/Clip.h"
 #include "../AudioEngineCore/AudioFileManager.h"
@@ -57,7 +58,8 @@ public:
     // Returns displaced snapshots for Undo, which reconstitutes the old pass.
     std::vector<juce::ValueTree> archiveForRecordedPass(
         const TrackID& trackId, const juce::String& trackName,
-        SamplePosition start, SamplePosition length, ClipManager& clips)
+        SamplePosition start, SamplePosition length, ClipManager& clips,
+        const ClipID& justRecordedClip = {})
     {
         std::vector<juce::ValueTree> displaced;
         if (trackId.isEmpty() || length <= 0)
@@ -73,7 +75,7 @@ public:
         for (auto* clip : all)
         {
             auto* audio = dynamic_cast<AudioClip*>(clip);
-            if (audio == nullptr) continue;
+            if (audio == nullptr || audio->getID() == justRecordedClip) continue;
             const auto end = start + length;
             if (audio->getStartPosition() < end && audio->getEndPosition() > start)
                 displaced.push_back(audio->getState().createCopy());
@@ -86,6 +88,11 @@ public:
         previous.name = nextName(owner, trackName);
         // A complete prior arrangement is available for instant A/B.
         previous.clips = captureTrack(trackId, clips);
+        previous.clips.erase(std::remove_if(previous.clips.begin(), previous.clips.end(),
+            [&justRecordedClip](const juce::ValueTree& clip)
+            {
+                return clip.getProperty("id").toString() == justRecordedClip;
+            }), previous.clips.end());
         owner.alternates.push_back(std::move(previous));
         for (const auto& saved : displaced)
             clips.deleteClip(saved.getProperty("id").toString());
