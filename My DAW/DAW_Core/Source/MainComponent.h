@@ -344,6 +344,7 @@ private:
     void trackOrderChanged() override;
 
     void registerActions();
+    void resetCurrentProjectToRawMix();
     void openProjectFileWithOverlay(const juce::File& file, const juce::String& failureContext,
                                     std::function<void(bool)> onComplete = {});
 

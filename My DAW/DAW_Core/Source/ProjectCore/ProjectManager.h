@@ -210,6 +210,11 @@ public:
     /** Reset to a fresh empty project. */
     bool newProject();
 
+    /** Reset processing to raw recordings, retaining tracks/clips/timeline.
+        Always publishes a recoverable, complete pre-reset .dawproj backup
+        before touching live project state. Never overwrites user audio. */
+    bool resetToRawMix(juce::File& backupFile, juce::String& error);
+
     // ── State building (for external use, e.g., portable packages) ────────────
 
     /** Build a complete ValueTree snapshot of the project. */

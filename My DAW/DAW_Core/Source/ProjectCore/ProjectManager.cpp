@@ -5,6 +5,7 @@
 #include "../VocalTuneCore/ApexTuneIntegrationCore.h"
 #include "../VocalTuneCore/ApexTuneProjectStateCore.h"
 #include "ProjectSampleRateReconcileCore.h"
+#include "ProjectResetStateCore.h"
 
 namespace DAW {
 
@@ -404,6 +405,119 @@ bool ProjectManager::newProject()
     }
 
     listeners_.call([](Listener& l) { l.projectLoaded(); });
+    return true;
+}
+
+bool ProjectManager::resetToRawMix(juce::File& backupFile, juce::String& error)
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    backupFile = {};
+    error.clear();
+    if (!projectStateUsable_ || subs_.appCore == nullptr)
+    {
+        error = "No usable project is currently loaded.";
+        return false;
+    }
+
+    // Capture all opaque VST3, clip-FX, routing, automation and take state
+    // BEFORE any mutation. Never reset with a partial/incomplete snapshot.
+    juce::ValueTree before;
+    if (!buildState(before, error) || !before.isValid())
+    {
+        if (error.isEmpty()) error = "Could not capture complete project state.";
+        return false;
+    }
+    const auto resetState = ProjectResetStateCore::makeRawMix(before);
+    if (!resetState.isValid())
+    {
+        error = "Could not construct raw-mix project snapshot.";
+        return false;
+    }
+
+    // Mandatory user-recoverable backup with the same .dawproj format as
+    // normal Save/Open. This does NOT change projectFile_, projectName_ or
+    // the user's last manually saved version.
+    const juce::File directory = projectFile_ != juce::File()
+        ? projectFile_.getParentDirectory().getChildFile("APEX Pre-Reset Backups")
+        : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+            .getChildFile("APEX Pre-Reset Backups");
+    const auto directoryStatus = directory.createDirectory();
+    if (directoryStatus.failed())
+    {
+        error = "Cannot create backup directory: " + directoryStatus.getErrorMessage();
+        return false;
+    }
+    const juce::String base = projectFile_ != juce::File()
+        ? projectFile_.getFileNameWithoutExtension() : juce::String("UnsavedProject");
+    const auto unique = juce::Uuid().toString().substring(0, 8);
+    backupFile = directory.getChildFile(base + "_BeforeReset_"
+        + juce::Time::getCurrentTime().formatted("%Y%m%d_%H%M%S")
+        + "_" + unique + ".dawproj");
+    const auto xml = before.createXml();
+    if (xml == nullptr)
+    {
+        error = "Could not serialize pre-reset project backup.";
+        backupFile = {};
+        return false;
+    }
+
+    juce::TemporaryFile temporary(backupFile, juce::TemporaryFile::useHiddenFile);
+    bool ready = false;
+    {
+        juce::FileOutputStream output(temporary.getFile());
+        if (output.openedOk())
+        {
+            xml->writeTo(output);
+            output.flush();
+            ready = output.getStatus().wasOk();
+        }
+    }
+    if (!ready || juce::XmlDocument::parse(temporary.getFile()) == nullptr)
+    {
+        error = "Pre-reset backup did not pass write/parse verification.";
+        backupFile = {};
+        return false;
+    }
+    juce::String publicationError;
+    if (!DAW::publishFileTransactionally(temporary.getFile(), backupFile, publicationError))
+    {
+        error = "Pre-reset backup publication failed: " + publicationError;
+        backupFile = {};
+        return false;
+    }
+
+    // Use the SAME complete playback-suppressed and editor-safe restore
+    // path as Open Project; hand-editing live processors in place risks a
+    // dangling editor pointer, stale audio snapshot or VST3 sidechain crash.
+    if (!restoreFromState(resetState))
+    {
+        const auto resetError = lastLoadError_;
+        // The admission gate rejected the operation BEFORE any source,
+        // routing or clip mutation. Never attempt a second restore while
+        // recording/exports are active; the live project is unchanged.
+        if (resetError.startsWith("Project restore rejected while"))
+        {
+            error = resetError + ". Original project left untouched.";
+            return false;
+        }
+
+        // A stage failed after mutation started. Recover from the exact
+        // pre-reset snapshot; the disk backup remains the last-resort copy.
+        if (restoreFromState(before))
+        {
+            error = "Reset failed; previous mix recovered. " + resetError;
+            listeners_.call([](Listener& listener) { listener.projectLoaded(); });
+        }
+        else
+            error = "Reset failed and runtime recovery failed. Reopen the "
+                    "protected pre-reset .dawproj backup. " + resetError;
+        return false;
+    }
+
+    // This is still the SAME project, not New Project / Save As.
+    dirty_ = true;
+    juce::Logger::writeToLog("[PROJECT RESET] Complete raw-mix reset; backup: "
+                             + backupFile.getFullPathName());
     return true;
 }
 

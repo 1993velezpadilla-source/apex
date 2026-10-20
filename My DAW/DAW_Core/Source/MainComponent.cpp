@@ -1256,6 +1256,10 @@ MainComponent::MainComponent()
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::ViewToggleSettings);
     });
+    menuBar_->setMenuAction("Settings", "Reset Project...", [this]
+    {
+        resetCurrentProjectToRawMix();
+    });
     menuBar_->setMenuAction("Settings", "Upgrade Project...", [this]
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);
@@ -5105,6 +5109,40 @@ void MainComponent::upgradeProjectFile(const juce::File& file)
                       : juce::MessageBoxIconType::WarningIcon,
                 "Upgrade Project", message);
         });
+}
+
+void MainComponent::resetCurrentProjectToRawMix()
+{
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Reset Project")
+        .withMessage("Keep tracks, audio recordings, clip positions and trims, tempo and routing. Reset all plugins, mixer levels, pan, clip processing, Vocal Tune, fades, automation and tape stop. A full backup is required and created before changes. The current project is not saved automatically. Open the backup to restore the previous mix.")
+        .withButton("Reset Project")
+        .withButton("Cancel")
+        .withAssociatedComponent(this);
+    juce::AlertWindow::showAsync(options, [safeThis](int result)
+    {
+        if (result != 1 || safeThis == nullptr) return;
+        auto& main = *safeThis.getComponent();
+        juce::File backup;
+        juce::String error;
+        if (!main.appCore_.getProjectManager().resetToRawMix(backup, error))
+        {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Reset Project Failed",
+                error + (backup.existsAsFile()
+                    ? "\n\nBackup: " + backup.getFullPathName() : juce::String()));
+            return;
+        }
+
+        main.projectLoaded();
+        main.appCore_.getProjectManager().markDirty();
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::InfoIcon, "APEX Project Reset",
+            "Project restored to clean audio clips. Previous mix backup:\n"
+                + backup.getFullPathName());
+    });
 }
 
 void MainComponent::projectLoaded()
