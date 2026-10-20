@@ -13,6 +13,8 @@
 #include "ClipTimePitchBridgeCore.h"
 #include "TimePitchPresetsCore.h"
 #include "TimePitchUndoActions.h"
+#include "VoiceCleanerOfflineCore.h"
+#include <thread>
 #include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 #include <set>
 #include "../Source/ClipCore/Clip.h"
@@ -4436,6 +4438,11 @@ namespace ArrangementEditor
             return m_engineAudioFiles->isPeakNormalized(mapped->second);
         };
 
+        cb.voiceCleaner = !m_voiceCleanerBusy
+            ? std::function<void(ArrangementClipModel*)>(
+                [this](ArrangementClipModel* c) { onClipVoiceCleaner(c); })
+            : std::function<void(ArrangementClipModel*)>{};
+
         ClipContextMenuCore::show(clip, screenPos, cb, fs);
     }
 
@@ -4449,6 +4456,212 @@ namespace ArrangementEditor
         cb.pasteClip  = [this](double t, int tr) { onClipPaste(t, tr); };
 
         ClipContextMenuCore::showOnEmptyTrack(screenPos, cb);
+    }
+
+    void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
+    {
+        if (clip == nullptr || m_voiceCleanerBusy || m_engineClipManager == nullptr
+            || m_engineAudioFiles == nullptr)
+            return;
+
+        // A right-click NEVER changes the multi-selection. Capture the exact
+        // selection at Apply time and keep stable IDs across background work.
+        // A click on an unselected clip applies to that clip only.
+        struct CleanItem
+        {
+            juce::Uuid id;
+            juce::String engineId;
+            juce::File original;
+            juce::File rendered;
+            DAW::AudioFileManager::CachedAudioHandle originalCache;
+            VoiceCleanerOfflineCore::RenderResult result;
+        };
+        auto items = std::make_shared<std::vector<CleanItem>>();
+        auto add = [this, &items](const juce::Uuid& id)
+        {
+            auto* model = m_clipState.findClip(id);
+            if (!model || model->sourcePath.empty())
+                return;
+            const auto mapped = m_uuidToEngineId.find(id);
+            if (mapped == m_uuidToEngineId.end())
+                return;
+            auto* engineClip = dynamic_cast<DAW::AudioClip*>(
+                m_engineClipManager->getClip(mapped->second));
+            if (engineClip == nullptr)
+                return;
+            auto originalCache = m_engineAudioFiles->getCachedAudioSnapshot(mapped->second);
+            if (!originalCache)
+                return;
+            const juce::File original(juce::String(model->sourcePath));
+            if (!original.existsAsFile()) return;
+
+            const auto dir = original.getParentDirectory().getChildFile("_APEX_Processed");
+            const auto output = dir.getChildFile(original.getFileNameWithoutExtension()
+                + "_VoiceCleaner_" + juce::Uuid().toString() + ".wav");
+            items->push_back({ id, mapped->second, original, output,
+                               std::move(originalCache), {} });
+        };
+        if (m_selection.isSelected(clip->id))
+            for (const auto& id : m_selection.getSelectedIds())
+                add(id);
+        else
+            add(clip->id);
+
+        if (items->empty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                "APEX Voice Cleaner", "Select at least one loaded audio clip.");
+            return;
+        }
+
+        // Guard against reentrant click/undo while worker prepares the batch.
+        // No blocking file I/O, FFT or allocations enter the audio callback.
+        m_voiceCleanerBusy = true;
+        appendDebugLog("[VoiceCleaner] rendering " + juce::String((int)items->size())
+            + " audio clip(s), sources untouched");
+
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        std::thread([weakOwner, items]()
+        {
+            juce::String error;
+            try
+            {
+                for (auto& item : *items)
+                {
+                    item.result = VoiceCleanerOfflineCore::render(item.original,
+                                                                    item.rendered);
+                    if (!item.result.success)
+                    {
+                        error = item.original.getFileName() + ": " + item.result.error;
+                        break;
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                error = juce::String("DSP failed: ") + juce::String(e.what());
+            }
+            catch (...)
+            {
+                error = "Unexpected offline render failure.";
+            }
+
+            // No partial batch publish. Remove only this operation's unique
+            // generated files on failure, never delete source recordings.
+            if (error.isNotEmpty())
+                for (const auto& item : *items)
+                    item.rendered.deleteFile();
+
+            juce::MessageManager::callAsync([weakOwner, items, error]()
+            {
+                if (weakOwner == nullptr) return;
+                auto& view = *weakOwner;
+                view.m_voiceCleanerBusy = false;
+                if (error.isNotEmpty())
+                {
+                    view.appendDebugLog("[VoiceCleaner] failed: " + error);
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::AlertWindow::WarningIcon, "APEX Voice Cleaner", error);
+                    return;
+                }
+
+                // Abort if any target was removed, remapped or edited since
+                // dispatch; never apply stale processed audio over a new take.
+                for (const auto& item : *items)
+                {
+                    auto* current = view.m_clipState.findClip(item.id);
+                    const auto mapped = view.m_uuidToEngineId.find(item.id);
+                    if (current == nullptr || mapped == view.m_uuidToEngineId.end()
+                        || mapped->second != item.engineId
+                        || juce::String(current->sourcePath) != item.original.getFullPathName()
+                        || !item.result.success
+                        || item.result.prepared.decodedSource == nullptr)
+                    {
+                        view.appendDebugLog("[VoiceCleaner] discarded stale batch");
+                        for (const auto& stale : *items) stale.rendered.deleteFile();
+                        return;
+                    }
+                }
+
+                struct AppliedClean
+                {
+                    juce::Uuid id;
+                    juce::String engineId;
+                    juce::File beforeFile;
+                    juce::File afterFile;
+                    DAW::AudioFileManager::CachedAudioHandle before;
+                    DAW::AudioFileManager::CachedAudioHandle after;
+                };
+                std::vector<AppliedClean> changes;
+                changes.reserve(items->size());
+                for (auto& item : *items)
+                {
+                    const auto loaded = view.m_engineAudioFiles->publishPreparedForClip(
+                        item.engineId, item.result.prepared);
+                    if (!loaded.success)
+                    {
+                        for (const auto& changed : changes)
+                            view.m_engineAudioFiles->shareSnapshotForClip(changed.before,
+                                                                           changed.engineId);
+                        for (const auto& failure : *items) failure.rendered.deleteFile();
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::AlertWindow::WarningIcon, "APEX Voice Cleaner",
+                            "Could not publish processed audio. Original clips preserved.");
+                        return;
+                    }
+                    changes.push_back({ item.id, item.engineId,
+                                        item.original, item.rendered,
+                                        item.originalCache,
+                                        view.m_engineAudioFiles->getCachedAudioSnapshot(item.engineId) });
+                }
+
+                // The originals and per-generation WAVs stay untouched,
+                // allowing Ctrl+Z/Redo to walk 5, 50 or more applications
+                // within APEX's existing global history depth (10,000).
+                auto apply = [weakOwner, changes](bool processed)
+                {
+                    if (weakOwner == nullptr) return;
+                    auto& v = *weakOwner;
+                    if (v.m_engineAudioFiles == nullptr || v.m_engineClipManager == nullptr)
+                        return;
+
+                    juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
+                    for (const auto& item : changes)
+                    {
+                        auto* model = v.m_clipState.findClip(item.id);
+                        const auto mapped = v.m_uuidToEngineId.find(item.id);
+                        if (model == nullptr || mapped == v.m_uuidToEngineId.end()
+                            || mapped->second != item.engineId)
+                            continue;
+                        auto* ec = dynamic_cast<DAW::AudioClip*>(
+                            v.m_engineClipManager->getClip(item.engineId));
+                        if (ec == nullptr) continue;
+
+                        v.m_engineAudioFiles->shareSnapshotForClip(
+                            processed ? item.after : item.before, item.engineId);
+                        const auto file = processed ? item.afterFile : item.beforeFile;
+                        model->sourcePath = file.getFullPathName().toStdString();
+                        model->bumpWaveformVisualVersion();
+                        model->bumpProcessedWaveformVersion();
+                        ec->setSourceFile(file);
+                        v.m_clipState.updateClip(*model);
+                        v.syncClipToEngine(*model);
+                        v.upsertClipRenderer(item.id);
+                    }
+                };
+
+                // Caches are staged but no engine paths were changed yet.
+                // Commit once now, then enter ONE unified Undo/Redo command.
+                apply(true);
+                view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
+                    changes.size() > 1 ? "Voice Cleaner Selected Clips" : "Voice Cleaner",
+                    [apply]() { apply(true); },
+                    [apply]() { apply(false); },
+                    true));
+                view.appendDebugLog("[VoiceCleaner] committed " +
+                    juce::String((int)changes.size()) + " audio clip(s) to global undo");
+            });
+        }).detach();
     }
 
     void ArrangementViewCore::onClipBounce(ArrangementClipModel* clip)
