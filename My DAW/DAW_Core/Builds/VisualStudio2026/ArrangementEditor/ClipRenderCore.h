@@ -161,6 +161,7 @@ namespace ArrangementEditor
         }
         double getEditDeltaSeconds() const noexcept { return m_lastEditDeltaSeconds; }
         bool isStretchEdgeEdit() const noexcept { return m_dragStretchMode; }
+        juce::String getEditInfoText() const { return m_trimTooltipText; }
 
         // Waveform loading state — for batch loading optimization
         bool needsWaveformUpdate() const { return m_waveformNeedsUpdate; }
