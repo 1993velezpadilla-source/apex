@@ -479,6 +479,7 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
+    void syncPlaylistTimeline();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();
      *  used to gate playhead-driven extent growth so the viewport bounds are

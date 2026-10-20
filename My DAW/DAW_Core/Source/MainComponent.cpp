@@ -1400,6 +1400,7 @@ MainComponent::MainComponent()
             playlistPanel_->setVisible(false);
         if (arrangement_)
             arrangement_->requestClipRemirror();
+        resized();
     };
     trackList_->onCreatePlaylistRequested = [this](const DAW::TrackID& trackId, bool duplicate)
     {
@@ -2075,10 +2076,29 @@ MainComponent::MainComponent()
         if (arrangement_) arrangement_->requestClipRemirror();
         appCore_.getProjectManager().markDirty();
         if (trackList_) trackList_->repaint();
+        syncPlaylistTimeline();
     };
     playlistPanel_->onClose = [this]
     {
         if (playlistPanel_) playlistPanel_->setVisible(false);
+        resized();
+    };
+    playlistPanel_->onTimelineZoom = [this](bool zoomIn)
+    {
+        applyTimelineZoom(false, zoomIn);
+        syncPlaylistTimeline();
+    };
+    playlistPanel_->onTimelinePan = [this](float delta)
+    {
+        if (timelineViewport_ == nullptr || arrangement_ == nullptr) return;
+        const int x = timelineViewport_->getViewPositionX();
+        const int y = timelineViewport_->getViewPositionY();
+        const int maxX = juce::jmax(0,
+            arrangement_->getWidth() - timelineViewport_->getViewWidth());
+        const int step = juce::roundToInt(
+            -(double)delta * (double)timelineViewport_->getViewWidth() * 0.3);
+        timelineViewport_->setViewPosition(juce::jlimit(0, maxX, x + step), y);
+        syncPlaylistTimeline();
     };
     addChildComponent(playlistPanel_.get());
 
@@ -6886,6 +6906,7 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
             arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
         if (trackList_)
             trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
+        syncPlaylistTimeline();
         return;
     }
 
@@ -8644,6 +8665,19 @@ void MainComponent::resized()
         mixerPanel_->setSize(mixerPanel_->getWidth(), mixerArea.getHeight());
     }
 
+    // Dedicated PLAYLISTS work area occupies real workspace height instead
+    // of covering existing tracks in a floating modal-ish rectangle.
+    juce::Rectangle<int> playlistDock;
+    if (playlistPanel_ && playlistPanel_->isVisible()
+        && timelineWindow_ && timelineWindow_->isVisible()
+        && content.getHeight() >= 380)
+    {
+        const int desired = juce::jlimit(160, 460,
+            juce::roundToInt((double)content.getHeight() * 0.45));
+        const int dockHeight = juce::jmin(desired, content.getHeight() - 200);
+        playlistDock = content.removeFromBottom(dockHeight);
+    }
+
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
         trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
 
@@ -8668,10 +8702,29 @@ void MainComponent::resized()
 
     if (playlistPanel_)
     {
-        const int pw = juce::jmin(920, juce::jmax(430, getWidth() - 70));
-        const int ph = juce::jmin(560, juce::jmax(240, getHeight() - 150));
-        playlistPanel_->setBounds(juce::jmax(0, (getWidth() - pw) / 2),
-                                  kMenuH + kTransportH + 18, pw, ph);
+        if (!playlistDock.isEmpty())
+        {
+            // In the normal left-TrackList arrangement, take labels occupy
+            // 161px of its space; the take waveform plot starts exactly at
+            // the native arranger's x=0 in screen coordinates.
+            const int left = trackListWindow_ && trackListWindow_->isVisible()
+                && trackListW_ >= 161 && !trackListWindow_->isMaximized()
+                    ? juce::jmax(0, content.getX() - 161)
+                    : playlistDock.getX();
+            playlistPanel_->setBounds(left, playlistDock.getY(),
+                                      juce::jmax(0, playlistDock.getRight() - left),
+                                      playlistDock.getHeight());
+        }
+        else
+        {
+            // Keep access on exceptionally short windows without corrupting
+            // existing timeline layout or taking negative viewport height.
+            const int pw = juce::jmin(920, juce::jmax(430, getWidth() - 70));
+            const int ph = juce::jmin(560, juce::jmax(240, getHeight() - 150));
+            playlistPanel_->setBounds(juce::jmax(0, (getWidth() - pw) / 2),
+                                      kMenuH + kTransportH + 18, pw, ph);
+        }
+        syncPlaylistTimeline();
     }
 
     if (pianoRollWindow_ && pianoRollWindow_->getBounds().isEmpty())
@@ -8725,6 +8778,18 @@ void MainComponent::setDefaultMixerWindowBounds()
 
     mixerWindow_->setBounds(80, windowY, windowW, 320);
     mixerWindowPlaced_ = true;
+}
+
+void MainComponent::syncPlaylistTimeline()
+{
+    if (!playlistPanel_ || !playlistPanel_->isVisible()
+        || !timelineViewport_ || !arrangement_)
+        return;
+    const double pps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
+    const double projectRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    const double firstVisibleSample =
+        (double)timelineViewport_->getViewPositionX() / pps * projectRate;
+    playlistPanel_->followArrangementTimeline(firstVisibleSample, pps);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()
@@ -8794,6 +8859,7 @@ void MainComponent::updateTimelineViewportContentBounds()
 
     if (trackList_)
         trackList_->setScrollOffset(timelineViewport_ != nullptr ? timelineViewport_->getViewPosition().y : 0);
+    syncPlaylistTimeline();
 }
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)

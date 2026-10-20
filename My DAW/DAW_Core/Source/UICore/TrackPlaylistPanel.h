@@ -9,8 +9,9 @@ namespace DAW
 {
 // APEX Playlist View: one selected track, expandable take lanes underneath the
 // active main/target strip. Selection drag + arrow promotes by sample location.
-// A separate compact panel avoids mutating the established arranger's track-
-// height/scroll authority while sharing the same canonical ClipManager.
+// Docked beneath the native arranger, with the same project-sample timeline.
+// A dedicated take workspace preserves existing track-drag/layout authority
+// until true per-track expandable lanes are implemented in ArrangementCore.
 class TrackPlaylistPanel final : public juce::Component
 {
 public:
@@ -46,6 +47,8 @@ public:
     std::function<bool()> canModify;
     std::function<void()> onChanged;
     std::function<void()> onClose;
+    std::function<void(bool)> onTimelineZoom;
+    std::function<void(float)> onTimelinePan;
 
     void showForTrack(const TrackID& id, double engineRate)
     {
@@ -57,6 +60,25 @@ public:
         thumbnailSampleRates_.clear();
         recalculateView();
         preflightThumbnails();
+        repaint();
+    }
+
+    // View origin is the arranger's first visible project sample.
+    // x=161 is the plot origin; below it are playlist name/solo controls.
+    // Pixel scaling MUST follow the arranger (no independent timebase).
+    void followArrangementTimeline(double firstVisibleSample, double pixelsPerSecond)
+    {
+        if (pixelsPerSecond <= 0.0 || sampleRate_ <= 0.0)
+            return;
+        followingArrangement_ = true;
+        const double start = juce::jmax(0.0, firstVisibleSample);
+        const double end = start + (double)juce::jmax(40, getWidth() - 222)
+                           * sampleRate_ / pixelsPerSecond;
+        if (std::abs(viewStart_ - start) < 0.5 && std::abs(viewEnd_ - end) < 0.5)
+            return;
+        viewStart_ = start;
+        viewEnd_ = end;
+        viewMaxEnd_ = juce::jmax(viewMaxEnd_, end);
         repaint();
     }
 
@@ -295,6 +317,11 @@ public:
         // the pointer, Shift+wheel pans, plain wheel scrolls take lanes.
         if (event.mods.isCtrlDown() || event.mods.isCommandDown())
         {
+            if (followingArrangement_ && onTimelineZoom)
+            {
+                onTimelineZoom(w.deltaY > 0.0f);
+                return;
+            }
             const double previousSpan = juce::jmax(1.0, viewEnd_ - viewStart_);
             const double span = juce::jlimit(
                 juce::jmax(64.0, sampleRate_ * 0.05), viewMaxEnd_,
@@ -308,6 +335,11 @@ public:
         }
         else if (event.mods.isShiftDown())
         {
+            if (followingArrangement_ && onTimelinePan)
+            {
+                onTimelinePan(w.deltaY);
+                return;
+            }
             const double span = viewEnd_ - viewStart_;
             viewStart_ = juce::jlimit(0.0, juce::jmax(0.0, viewMaxEnd_ - span),
                                       viewStart_ - (double)w.deltaY * span * 0.3);
@@ -533,6 +565,7 @@ private:
     juce::String selectedPlaylist_;
     int64_t selectionStart_ = -1, selectionEnd_ = -1, dragAnchor_ = -1;
     bool selectionDragging_ = false;
+    bool followingArrangement_ = false;
     int scrollY_ = 0;
     juce::TextButton newButton_, duplicateButton_, closeButton_;
     juce::TextEditor renameEditor_;
