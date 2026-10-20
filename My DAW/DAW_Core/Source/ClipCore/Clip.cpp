@@ -120,6 +120,7 @@ juce::ValueTree Clip::getState() const
     state.setProperty(IDs::COLOR, color_.toString(), nullptr);
     state.setProperty(IDs::SELECTED, selected_, nullptr);
     state.setProperty(IDs::MUTED, muted_, nullptr);
+    state.setProperty("playlistId", playlistId_, nullptr);
     state.setProperty(IDs::SOURCE_OFFSET, (int64_t)sourceOffset_, nullptr);
     return state;
 }
@@ -134,6 +135,9 @@ void Clip::restoreState(const juce::ValueTree& state)
     color_ = juce::Colour::fromString(state.getProperty(IDs::COLOR, "ff808080").toString());
     selected_ = state.getProperty(IDs::SELECTED, false);
     muted_ = state.getProperty(IDs::MUTED, false);
+    playlistId_ = state.getProperty("playlistId", "main").toString();
+    if (playlistId_.isEmpty()) playlistId_ = "main";
+    playlistAudible_.store(true, std::memory_order_release);
     sourceOffset_ = (SamplePosition)(int64_t)state.getProperty(IDs::SOURCE_OFFSET, 0);
 }
 
@@ -252,6 +256,7 @@ juce::ValueTree AudioClip::getState() const
     state.setProperty(IDs::COLOR, getColor().toString(), nullptr);
     state.setProperty(IDs::SELECTED, isSelected(), nullptr);
     state.setProperty(IDs::MUTED, isMuted(), nullptr);
+    state.setProperty("playlistId", getPlaylistId(), nullptr);
     state.setProperty(IDs::SOURCE_OFFSET, (int64_t)getSourceOffset(), nullptr);
 
     // Add audio clip specific properties
