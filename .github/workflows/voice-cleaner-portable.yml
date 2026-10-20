@@ -1,0 +1,20 @@
+name: Voice Cleaner Portable DSP
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/VoiceCleanerDspCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/VoiceCleanerPortableTests.cpp'
+      - '.github/workflows/voice-cleaner-portable.yml'
+  workflow_dispatch:
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run deterministic denoise quality guard
+        shell: bash
+        run: |
+          cd "My DAW/DAW_Core"
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/VoiceCleanerPortableTests.cpp -o /tmp/apex_voice_cleaner_test
+          /tmp/apex_voice_cleaner_test

@@ -81,6 +81,9 @@ struct ClipContextCallbacks
     // Returns true if Vocal Tune is currently bypassed for the clip.
     std::function<bool(ArrangementClipModel*)> isVocalTuneBypassed;
 
+    // Offline denoise on the clicked clip or the current multi-selection.
+    std::function<void(ArrangementClipModel*)> voiceCleaner;
+
     // Toggle normalize on a clip (calls normalizePeak / revert).
     std::function<void(ArrangementClipModel*)> normalizeClip;
 
@@ -159,6 +162,8 @@ public:
             normItem.isTicked  = normalized;
             menu.addItem(normItem);
         }
+        menu.addItem(kIdVoiceCleaner, "Voice Cleaner  |  Noise Reduction",
+                     cb.voiceCleaner != nullptr && !clip->sourcePath.empty());
         menu.addSeparator();
 
         // ── Automation ────────────────────────────────────────────────────
@@ -227,6 +232,7 @@ private:
         kIdVocalTune        = 21,
         kIdVocalTuneBypass  = 22,
         kIdNormalize        = 23,
+        kIdVoiceCleaner     = 24,
         kIdAutomationBase   = 300,
         // Presets: 100-106
         kIdPresetBase       = 100,
@@ -390,6 +396,10 @@ private:
         else if (result == kIdVocalTuneBypass)
         {
             if (cb.toggleVocalTuneBypass) cb.toggleVocalTuneBypass(clip);
+        }
+        else if (result == kIdVoiceCleaner)
+        {
+            if (cb.voiceCleaner) cb.voiceCleaner(clip);
         }
         else if (result == kIdNormalize)
         {

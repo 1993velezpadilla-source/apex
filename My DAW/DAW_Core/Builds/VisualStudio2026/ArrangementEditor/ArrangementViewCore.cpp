@@ -13,6 +13,8 @@
 #include "ClipTimePitchBridgeCore.h"
 #include "TimePitchPresetsCore.h"
 #include "TimePitchUndoActions.h"
+#include "VoiceCleanerOfflineCore.h"
+#include <thread>
 #include "../../../Source/PluginHostCore/ClipRegionPluginCore.h"
 #include <set>
 #include "../Source/ClipCore/Clip.h"
@@ -1610,6 +1612,34 @@ namespace ArrangementEditor
             g.fillEllipse(m_holdLocalPos.x - 11.0f, m_holdLocalPos.y - 11.0f, 22.0f, 22.0f);
         }
 
+        // Full-value trim/fade feedback lives in the PINNED RULER, never
+        // inside a clip: the waveform remains completely unobstructed, even
+        // during a multi-clip left/right edge gesture.
+        const juce::String rulerEditReadout = m_activeClipEditInfo.isNotEmpty()
+            ? m_activeClipEditInfo : m_voiceCleanerStatus;
+        if (rulerEditReadout.isNotEmpty())
+        {
+            const auto rulerBounds = m_ruler.getBounds();
+            if (rulerBounds.getWidth() >= 90)
+            {
+                const juce::Font font("Consolas", 11.f, juce::Font::plain);
+                g.setFont(font);
+                const int maxWidth = juce::jmax(36, rulerBounds.getWidth() - 16);
+                const int width = juce::jmin(maxWidth,
+                    g.getCurrentFont().getStringWidth(rulerEditReadout) + 20);
+                const juce::Rectangle<int> pill(
+                    rulerBounds.getRight() - width - 8, rulerBounds.getY() + 5,
+                    width, juce::jmin(22, rulerBounds.getHeight() - 8));
+                g.setColour(juce::Colour(0xFF070B16).withAlpha(0.96f));
+                g.fillRoundedRectangle(pill.toFloat(), 4.0f);
+                g.setColour(juce::Colour(0xFF419BFF));
+                g.drawRoundedRectangle(pill.toFloat().reduced(0.5f), 4.0f, 1.0f);
+                g.setColour(juce::Colours::white);
+                g.drawFittedText(rulerEditReadout, pill.reduced(9, 1),
+                                 juce::Justification::centred, 1, 0.8f);
+            }
+        }
+
         // The opaque HeaderClipGuard child covers the header, so the lock
         // button must be drawn here (above all children) to be visible.
         drawLockButton(g);
@@ -1982,15 +2012,27 @@ namespace ArrangementEditor
         auto* rendererPtr = renderer.get();
 
         // Snapshot of the clip when an edit begins — used to build the undo command.
-        auto preEdit = std::make_shared<std::optional<ArrangementClipModel>>();
+        auto preEdit = std::make_shared<std::vector<ArrangementClipModel>>();
 
         rendererPtr->onEditBegin = [this, clipUuid, preEdit]()
         {
+            preEdit->clear();
             if (auto* c = m_clipState.findClip(clipUuid))
-                *preEdit = *c;
+            {
+                preEdit->push_back(*c);
+                if (m_selection.isSelected(clipUuid))
+                {
+                    for (const auto& id : m_selection.getSelectedIds())
+                    {
+                        if (id == clipUuid) continue;
+                        if (auto* other = m_clipState.findClip(id))
+                            preEdit->push_back(*other);
+                    }
+                }
+            }
         };
 
-        rendererPtr->onEditLive = [this, clipUuid]()
+        rendererPtr->onEditLive = [this, clipUuid, preEdit]()
         {
             // Realtime feedback during drag: refresh model timestamps + engine sync
             // so the playback engine reflects the new length/fade/trim immediately.
@@ -2027,6 +2069,47 @@ namespace ArrangementEditor
 
                 refreshAutoCrossfadesForTrack(c->trackIndex);
 
+                if (auto* editedRenderer = findClipRendererFor(clipUuid))
+                {
+                    m_activeClipEditInfo = editedRenderer->getEditInfoText();
+                    if (m_activeClipEditInfo.isNotEmpty() && preEdit->size() > 1)
+                        m_activeClipEditInfo = juce::String((int)preEdit->size())
+                            + " CLIPS  |  " + m_activeClipEditInfo;
+                    repaint(m_ruler.getBounds());
+                }
+
+                // Apply the same raw mouse displacement to EVERY clip in the
+                // selection, against each clip's own drag-start geometry.
+                // Each source has independent trim bounds and source offsets.
+                if (preEdit->size() > 1)
+                {
+                    if (auto* anchor = findClipRendererFor(clipUuid))
+                    {
+                        const auto kind = anchor->getActiveGroupEditKind();
+                        const double dx = anchor->getEditDeltaSeconds();
+                        const bool stretch = anchor->isStretchEdgeEdit();
+                        if (kind != ClipGroupEditCore::Kind::None)
+                        {
+                            for (size_t i = 1; i < preEdit->size(); ++i)
+                            {
+                                const auto& original = (*preEdit)[i];
+                                if (auto* other = m_clipState.findClip(original.id))
+                                {
+                                    auto changed = ClipGroupEditCore::apply(original, kind, dx, stretch);
+                                    changed.bumpWaveformVisualVersion();
+                                    {
+                                        juce::ScopedValueSetter<bool> syncGuard(m_syncingArrangementToEngine, true);
+                                        m_clipState.updateClip(changed);
+                                        syncClipToEngine(changed);
+                                    }
+                                    refreshAutoCrossfadesForTrack(changed.trackIndex);
+                                    upsertClipRenderer(changed.id);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Re-position the renderer so trim/resize visually shrinks the
                 // clip box in realtime (matches Pro Tools / Logic / Live behavior).
                 upsertClipRenderer(clipUuid);
@@ -2035,68 +2118,75 @@ namespace ArrangementEditor
 
         rendererPtr->onVolumeButtonClicked = [this, clipUuid]()
         {
-            // Pro-DAW-style quick-access volume popup (CallOutBox).
-            // The full properties window is reserved for the (...) menu /
-            // double-click — this button just exposes the gain knob inline.
-            auto* anchorRenderer = findClipRendererFor(clipUuid);
-            if (anchorRenderer == nullptr) return;
+            auto* anchor = findClipRendererFor(clipUuid);
+            if (!anchor) return;
 
+            // Gain popup is a single gesture: selected clips receive the same
+            // dB change, preserving relative levels and one undo/redo step.
             class QuickGainPopup : public juce::Component, public juce::Slider::Listener
             {
             public:
-                QuickGainPopup(ArrangementViewCore& v, const juce::Uuid& id) : view(v), uuid(id)
+                QuickGainPopup(ArrangementViewCore& v, juce::Uuid anchorId)
+                    : view(v), uuid(anchorId)
                 {
                     setSize(120, 130);
                     knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
                     knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
                     knob.setRange(-60.0, 12.0, 0.0);
-                    knob.textFromValueFunction = [](double v) {
-                        return juce::String(v, 1) + " dB";
-                    };
+                    knob.textFromValueFunction = [](double v) { return juce::String(v, 1) + " dB"; };
                     if (auto* c = view.m_clipState.findClip(uuid))
-                        knob.setValue(juce::Decibels::gainToDecibels(c->gain, -60.f),
-                                       juce::dontSendNotification);
+                    {
+                        initialDb = juce::Decibels::gainToDecibels(c->gain, -60.f);
+                        knob.setValue(initialDb, juce::dontSendNotification);
+                        before.push_back({ uuid, c->gain });
+                        if (view.m_selection.isSelected(uuid))
+                            for (const auto& id : view.m_selection.getSelectedIds())
+                            {
+                                if (id == uuid) continue;
+                                if (auto* other = view.m_clipState.findClip(id))
+                                    before.push_back({ id, other->gain });
+                            }
+                    }
                     knob.addListener(this);
-                    // Double-click resets to 0 dB (unity), matching pro DAW behavior.
                     knob.setDoubleClickReturnValue(true, 0.0);
                     addAndMakeVisible(knob);
-
                     title.setText("Volume", juce::dontSendNotification);
                     title.setJustificationType(juce::Justification::centred);
                     title.setFont(juce::Font(11.f, juce::Font::bold));
                     addAndMakeVisible(title);
-
-                    // Snapshot for undo on close
-                    if (auto* c = view.m_clipState.findClip(uuid))
-                        beforeGain = c->gain;
                 }
                 ~QuickGainPopup() override
                 {
-                    if (auto* c = view.m_clipState.findClip(uuid))
+                    if (before.empty()) return;
+                    std::vector<std::pair<juce::Uuid, float>> after;
+                    bool changed = false;
+                    for (const auto& entry : before)
                     {
-                        const float afterGain = c->gain;
-                        if (std::abs(afterGain - beforeGain) > 1.0e-5f)
+                        if (auto* c = view.m_clipState.findClip(entry.first))
                         {
-                            const float b = beforeGain, a = afterGain;
-                            auto& view_ref = view;
-                            auto id = uuid;
-                            auto apply = [&view_ref, id](float g)
-                            {
-                                if (auto* cc = view_ref.m_clipState.findClip(id))
-                                {
-                                    cc->gain = g;
-                                    cc->bumpWaveformVisualVersion();
-                                    view_ref.m_clipState.updateClip(*cc);
-                                    view_ref.syncClipToEngine(*cc);
-                                }
-                            };
-                            view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                                "Edit Clip Gain",
-                                [apply, a]() { apply(a); },
-                                [apply, b]() { apply(b); },
-                                /*alreadyApplied*/ true));
+                            after.push_back({entry.first, c->gain});
+                            changed = changed || std::abs(c->gain - entry.second) > 1.0e-5f;
                         }
+                        else return;
                     }
+                    if (!changed) return;
+                    auto apply = [&v = view](const std::vector<std::pair<juce::Uuid, float>>& values)
+                    {
+                        juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
+                        for (const auto& [id, gain] : values)
+                            if (auto* c = v.m_clipState.findClip(id))
+                            {
+                                c->gain = gain;
+                                c->bumpWaveformVisualVersion();
+                                v.m_clipState.updateClip(*c);
+                                v.syncClipToEngine(*c);
+                            }
+                    };
+                    view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
+                        before.size() > 1 ? "Change Selected Clip Gains" : "Change Clip Gain",
+                        [apply, after]() { apply(after); },
+                        [apply, values = before]() { apply(values); },
+                        true));
                 }
                 void resized() override
                 {
@@ -2107,52 +2197,64 @@ namespace ArrangementEditor
                 void sliderValueChanged(juce::Slider* s) override
                 {
                     if (s != &knob) return;
-                    if (auto* c = view.m_clipState.findClip(uuid))
-                    {
-                        c->gain = juce::Decibels::decibelsToGain((float)knob.getValue(), -60.f);
-                        c->bumpWaveformVisualVersion();
-                        view.m_clipState.updateClip(*c);
-                        view.syncClipToEngine(*c);
-                    }
+                    const float deltaDb = (float)knob.getValue() - initialDb;
+                    const float multiplier = juce::Decibels::decibelsToGain(deltaDb);
+                    juce::ScopedValueSetter<bool> guard(view.m_syncingArrangementToEngine, true);
+                    for (const auto& [id, initialGain] : before)
+                        if (auto* c = view.m_clipState.findClip(id))
+                        {
+                            c->gain = juce::jlimit(0.f, 4.f, initialGain * multiplier);
+                            c->bumpWaveformVisualVersion();
+                            view.m_clipState.updateClip(*c);
+                            view.syncClipToEngine(*c);
+                        }
                 }
             private:
                 ArrangementViewCore& view;
                 juce::Uuid uuid;
                 juce::Slider knob;
                 juce::Label title;
-                float beforeGain = 1.0f;
+                float initialDb = 0.f;
+                std::vector<std::pair<juce::Uuid, float>> before;
             };
 
             auto popup = std::make_unique<QuickGainPopup>(*this, clipUuid);
-            const auto screenArea = anchorRenderer->getScreenBounds();
-            juce::CallOutBox::launchAsynchronously(std::move(popup), screenArea, nullptr);
+            juce::CallOutBox::launchAsynchronously(std::move(popup), anchor->getScreenBounds(), nullptr);
         };
 
         rendererPtr->onMuteButtonClicked = [this, clipUuid]()
         {
-            auto* c = m_clipState.findClip(clipUuid);
-            if (c == nullptr) return;
-
-            const bool before = c->muted;
-            const bool after  = !before;
-
-            auto apply = [this, clipUuid](bool m)
-            {
-                if (auto* cc = m_clipState.findClip(clipUuid))
+            auto* anchor = m_clipState.findClip(clipUuid);
+            if (!anchor) return;
+            const bool targetMute = !anchor->muted;
+            std::vector<std::pair<juce::Uuid, bool>> before;
+            before.push_back({ clipUuid, anchor->muted });
+            if (m_selection.isSelected(clipUuid))
+                for (const auto& id : m_selection.getSelectedIds())
                 {
-                    cc->muted = m;
-                    cc->bumpWaveformVisualVersion();
-                    m_clipState.updateClip(*cc);
-                    syncClipToEngine(*cc);
+                    if (id == clipUuid) continue;
+                    if (auto* other = m_clipState.findClip(id))
+                        before.push_back({ id, other->muted });
                 }
+            auto apply = [this](const std::vector<std::pair<juce::Uuid, bool>>& states)
+            {
+                juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
+                for (const auto& [id, muted] : states)
+                    if (auto* c = m_clipState.findClip(id))
+                    {
+                        c->muted = muted;
+                        c->bumpWaveformVisualVersion();
+                        m_clipState.updateClip(*c);
+                        syncClipToEngine(*c);
+                    }
             };
+            auto after = before;
+            for (auto& entry : after) entry.second = targetMute;
             apply(after);
-
             m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                after ? "Mute Clip" : "Unmute Clip",
-                [apply, after]()  { apply(after);  },
-                [apply, before]() { apply(before); },
-                /*alreadyApplied*/ true));
+                before.size() > 1 ? "Mute Selected Clips" : "Mute Clip",
+                [apply, after]() { apply(after); },
+                [apply, before]() { apply(before); }, true));
         };
 
         rendererPtr->onPianoRollClick = [this, clipUuid]()
@@ -2182,93 +2284,75 @@ namespace ArrangementEditor
                 togglePresetCurveVisibility(clip);
         };
 
-        rendererPtr->onClick = [this, clipUuid]()
+        rendererPtr->onClick = [this, clipUuid](juce::ModifierKeys mods)
         {
-            // Click = select. The renderer consumes the press for unselected
-            // clips (anti-accidental move), so the selection MUST happen here.
-            // onClick was never wired, which left every clip unclickable until
-            // the renderers stopped intercepting (i.e. the exact inverse of
-            // Free View Mode).
-            m_selection.selectClip(clipUuid);
+            // Ctrl adds/removes; plain click is ALWAYS an exclusive selection.
+            // Renderer consumes first tap for touch-safe anti-accidental edit.
+            if (mods.isCtrlDown())
+                m_selection.toggleClip(clipUuid);
+            else
+                m_selection.setSelection({clipUuid});
             for (auto& r : m_clipRenderers)
                 if (r != nullptr)
                     r->setSelected(m_selection.isSelected(r->getClipId()));
             repaint();
         };
 
-        rendererPtr->onEditCommit = [this, clipUuid, preEdit]()
+        rendererPtr->onEditCommit = [this, preEdit]()
         {
-            if (!preEdit->has_value()) return;
-            auto* c = m_clipState.findClip(clipUuid);
-            if (c == nullptr) return;
+            m_activeClipEditInfo.clear();
+            repaint(m_ruler.getBounds());
+            if (preEdit->empty()) return;
+            const std::vector<ArrangementClipModel> before = *preEdit;
+            preEdit->clear();
 
-            const ArrangementClipModel before = preEdit->value();
-            const ArrangementClipModel after  = *c;
-            preEdit->reset();
-
-            // Skip recording if nothing actually changed
-            if (before.length        == after.length &&
-                before.startTime     == after.startTime &&
-                before.sourceOffset  == after.sourceOffset &&
-                before.sourceStartSample == after.sourceStartSample &&
-                before.sourceEndSample   == after.sourceEndSample &&
-                before.timePitch.stretchRatio == after.timePitch.stretchRatio &&
-                before.fadeInLength  == after.fadeInLength &&
-                before.fadeOutLength == after.fadeOutLength &&
-                before.fadeInCurve   == after.fadeInCurve &&
-                before.fadeOutCurve  == after.fadeOutCurve)
+            std::vector<ArrangementClipModel> after;
+            after.reserve(before.size());
+            bool anyChanged = false;
+            for (const auto& old : before)
             {
-                return;
+                auto* current = m_clipState.findClip(old.id);
+                if (current == nullptr) return; // no partial transaction
+                after.push_back(*current);
+                const auto& now = after.back();
+                anyChanged = anyChanged ||
+                    old.startTime != now.startTime || old.length != now.length ||
+                    old.sourceOffset != now.sourceOffset ||
+                    old.sourceStartSample != now.sourceStartSample ||
+                    old.sourceEndSample != now.sourceEndSample ||
+                    old.timePitch.stretchRatio != now.timePitch.stretchRatio ||
+                    old.fadeInLength != now.fadeInLength ||
+                    old.fadeOutLength != now.fadeOutLength ||
+                    old.fadeInCurve != now.fadeInCurve ||
+                    old.fadeOutCurve != now.fadeOutCurve;
             }
+            if (!anyChanged) return;
 
-            // Automatic overlap crossfades are derived prepared state, not
-            // manual fade edits.  The old FadePatch path mutated neighbouring
-            // fade lengths here, which caused the same overlap to be applied
-            // once as a normal fade and again as the equal-power relationship.
-            // Keep the persisted/user-configured fade fields untouched and
-            // republish only the geometry-derived crossfade plan.
-            const ArrangementClipModel afterFinal = after;
-            refreshAutoCrossfadesForTrack(afterFinal.trackIndex);
-
-            auto applyState = [this, clipUuid](const ArrangementClipModel& s)
+            // One atomic entry in APEX's global history for the whole group.
+            // Playback, waveform and crossfades are restored on undo AND redo.
+            auto apply = [this](const std::vector<ArrangementClipModel>& states)
             {
-                if (auto* cc = m_clipState.findClip(clipUuid))
+                std::set<int> tracks;
                 {
-                    cc->startTime         = s.startTime;
-                    cc->length            = s.length;
-                    cc->sourceOffset      = s.sourceOffset;
-                    cc->sourceStartSample = s.sourceStartSample;
-                    cc->sourceEndSample   = s.sourceEndSample;
-                    cc->timePitch.stretchRatio = s.timePitch.stretchRatio;
-                    cc->fadeInLength      = s.fadeInLength;
-                    cc->fadeOutLength     = s.fadeOutLength;
-                    cc->fadeInCurve       = s.fadeInCurve;
-                    cc->fadeOutCurve      = s.fadeOutCurve;
-                    cc->bumpWaveformVisualVersion();
-                    // Guard the engine push so the re-entrant
-                    // mirrorEngineClipIntoArrangement() (fired by the engine
-                    // setters) cannot clobber the just-applied trim/stretch
-                    // state with a stale source window — same hazard as the
-                    // live-edit path.
                     juce::ScopedValueSetter<bool> syncGuard(m_syncingArrangementToEngine, true);
-                    m_clipState.updateClip(*cc);
-                    syncClipToEngine(*cc);
+                    for (const auto& original : states)
+                        if (auto* c = m_clipState.findClip(original.id))
+                        {
+                            *c = original;
+                            c->bumpWaveformVisualVersion();
+                            m_clipState.updateClip(*c);
+                            syncClipToEngine(*c);
+                            tracks.insert(c->trackIndex);
+                        }
                 }
-            };
-
-            const auto refreshAfter = [this, trackIndex = afterFinal.trackIndex]()
-            {
-                refreshAutoCrossfadesForTrack(trackIndex);
-            };
-            const auto refreshBefore = [this, trackIndex = before.trackIndex]()
-            {
-                refreshAutoCrossfadesForTrack(trackIndex);
+                for (int track : tracks) refreshAutoCrossfadesForTrack(track);
+                for (const auto& original : states) upsertClipRenderer(original.id);
             };
 
             m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                "Edit Clip",
-                [applyState, refreshAfter, afterFinal]() { applyState(afterFinal); refreshAfter(); },
-                [applyState, refreshBefore, before]()     { applyState(before);     refreshBefore(); },
+                before.size() > 1 ? "Edit Selected Clips" : "Edit Clip",
+                [apply, after]() { apply(after); },
+                [apply, before]() { apply(before); },
                 /*alreadyApplied*/ true));
         };
 
@@ -2750,6 +2834,7 @@ namespace ArrangementEditor
             m_rubberBand.endDrag();
 
         // Commit clip drag
+        const bool didMoveClips = m_drag.active;
         if (m_drag.active)
         {
             if (!e.mods.isRightButtonDown())
@@ -2763,6 +2848,13 @@ namespace ArrangementEditor
             m_drag.clipIds.clear();
             m_drag.items.clear();
             m_drag.clipId = {};
+        }
+
+        if (m_pendingExclusiveOnRelease.has_value())
+        {
+            if (!didMoveClips && !e.mods.isRightButtonDown())
+                m_selection.setSelection({*m_pendingExclusiveOnRelease});
+            m_pendingExclusiveOnRelease.reset();
         }
 
         // Right-click → clip context menu or empty track menu
@@ -2787,6 +2879,7 @@ namespace ArrangementEditor
         }
         if (m_drag.active)
             cancelClipDrag();
+        m_pendingExclusiveOnRelease.reset();
         if (m_rubberBand.isVisible())
             m_rubberBand.endDrag();
     }
@@ -3073,15 +3166,23 @@ namespace ArrangementEditor
             }
             else if (e.mods.isCtrlDown())
             {
+                // Ctrl toggles individual selection; it does not initiate a move.
+                m_pendingExclusiveOnRelease.reset();
                 m_selection.toggleClip(clip->id);
+                return;
             }
-            else if (!m_selection.isSelected(clip->id))
+            else if (m_selection.isSelected(clip->id) && m_selection.getSelectionCount() > 1)
             {
-                m_selection.deselectAll();
-                m_selection.selectClip(clip->id);
+                // Keep group while resolving click vs drag.
+                m_pendingExclusiveOnRelease = clip->id;
+            }
+            else
+            {
+                m_pendingExclusiveOnRelease.reset();
+                m_selection.setSelection({clip->id});
             }
 
-            // Begin drag — only on left button
+            // Allow moving selected clips together without holding Ctrl.
             if (!e.mods.isRightButtonDown())
                 startClipDrag(clip, e.getPosition(), e.mods);
 
@@ -4339,6 +4440,18 @@ namespace ArrangementEditor
             return m_engineAudioFiles->isPeakNormalized(mapped->second);
         };
 
+        // PopupMenu is asynchronous; never dereference its retained raw clip
+        // pointer after the menu has been displayed.
+        const auto voiceCleanerClipId = clip->id;
+        cb.voiceCleaner = !m_voiceCleanerBusy
+            ? std::function<void(ArrangementClipModel*)>(
+                [this, voiceCleanerClipId](ArrangementClipModel*)
+                {
+                    if (auto* stillPresent = m_clipState.findClip(voiceCleanerClipId))
+                        onClipVoiceCleaner(stillPresent);
+                })
+            : std::function<void(ArrangementClipModel*)>{};
+
         ClipContextMenuCore::show(clip, screenPos, cb, fs);
     }
 
@@ -4352,6 +4465,229 @@ namespace ArrangementEditor
         cb.pasteClip  = [this](double t, int tr) { onClipPaste(t, tr); };
 
         ClipContextMenuCore::showOnEmptyTrack(screenPos, cb);
+    }
+
+    void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
+    {
+        if (clip == nullptr || m_voiceCleanerBusy || m_engineClipManager == nullptr
+            || m_engineAudioFiles == nullptr)
+            return;
+
+        // A right-click NEVER changes the multi-selection. Capture the exact
+        // selection at Apply time and keep stable IDs across background work.
+        // A click on an unselected clip applies to that clip only.
+        struct CleanItem
+        {
+            juce::Uuid id;
+            juce::String engineId;
+            juce::File original;
+            juce::File rendered;
+            DAW::AudioFileManager::CachedAudioHandle originalCache;
+            VoiceCleanerOfflineCore::RenderResult result;
+        };
+        auto items = std::make_shared<std::vector<CleanItem>>();
+        auto add = [this, &items](const juce::Uuid& id)
+        {
+            auto* model = m_clipState.findClip(id);
+            if (!model || model->sourcePath.empty())
+                return;
+            const auto mapped = m_uuidToEngineId.find(id);
+            if (mapped == m_uuidToEngineId.end())
+                return;
+            auto* engineClip = dynamic_cast<DAW::AudioClip*>(
+                m_engineClipManager->getClip(mapped->second));
+            if (engineClip == nullptr)
+                return;
+            auto originalCache = m_engineAudioFiles->getCachedAudioSnapshot(mapped->second);
+            if (!originalCache)
+                return;
+            const juce::File original(juce::String(model->sourcePath));
+            if (!original.existsAsFile()) return;
+
+            const auto parent = original.getParentDirectory();
+            const auto dir = parent.getFileName() == "_APEX_Processed"
+                ? parent : parent.getChildFile("_APEX_Processed");
+            const auto output = dir.getChildFile(original.getFileNameWithoutExtension()
+                + "_VoiceCleaner_" + juce::Uuid().toString() + ".wav");
+            items->push_back({ id, mapped->second, original, output,
+                               std::move(originalCache), {} });
+        };
+        if (m_selection.isSelected(clip->id))
+            for (const auto& id : m_selection.getSelectedIds())
+                add(id);
+        else
+            add(clip->id);
+
+        if (items->empty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                "APEX Voice Cleaner", "Select at least one loaded audio clip.");
+            return;
+        }
+
+        // Guard against reentrant click/undo while worker prepares the batch.
+        // No blocking file I/O, FFT or allocations enter the audio callback.
+        m_voiceCleanerBusy = true;
+        m_voiceCleanerStatus = "VOICE CLEANER  |  Processing "
+            + juce::String((int)items->size()) + " clip(s)";
+        repaint(m_ruler.getBounds());
+        appendDebugLog("[VoiceCleaner] rendering " + juce::String((int)items->size())
+            + " audio clip(s), sources untouched");
+
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        std::thread([weakOwner, items]()
+        {
+            juce::String error;
+            try
+            {
+                int rendered = 0;
+                for (auto& item : *items)
+                {
+                    item.result = VoiceCleanerOfflineCore::render(item.original,
+                                                                    item.rendered);
+                    if (!item.result.success)
+                    {
+                        error = item.original.getFileName() + ": " + item.result.error;
+                        break;
+                    }
+                    const int done = ++rendered;
+                    const int total = (int)items->size();
+                    juce::MessageManager::callAsync([weakOwner, done, total]()
+                    {
+                        if (weakOwner == nullptr || !weakOwner->m_voiceCleanerBusy) return;
+                        weakOwner->m_voiceCleanerStatus = "VOICE CLEANER  |  Processed "
+                            + juce::String(done) + " / " + juce::String(total);
+                        weakOwner->repaint(weakOwner->m_ruler.getBounds());
+                    });
+                }
+            }
+            catch (const std::exception& e)
+            {
+                error = juce::String("DSP failed: ") + juce::String(e.what());
+            }
+            catch (...)
+            {
+                error = "Unexpected offline render failure.";
+            }
+
+            // No partial batch publish. Remove only this operation's unique
+            // generated files on failure, never delete source recordings.
+            if (error.isNotEmpty())
+                for (const auto& item : *items)
+                    item.rendered.deleteFile();
+
+            juce::MessageManager::callAsync([weakOwner, items, error]()
+            {
+                if (weakOwner == nullptr) return;
+                auto& view = *weakOwner.getComponent();
+                view.m_voiceCleanerBusy = false;
+                view.m_voiceCleanerStatus.clear();
+                view.repaint(view.m_ruler.getBounds());
+                if (error.isNotEmpty())
+                {
+                    view.appendDebugLog("[VoiceCleaner] failed: " + error);
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::AlertWindow::WarningIcon, "APEX Voice Cleaner", error);
+                    return;
+                }
+
+                // Abort if any target was removed, remapped or edited since
+                // dispatch; never apply stale processed audio over a new take.
+                for (const auto& item : *items)
+                {
+                    auto* current = view.m_clipState.findClip(item.id);
+                    const auto mapped = view.m_uuidToEngineId.find(item.id);
+                    if (current == nullptr || mapped == view.m_uuidToEngineId.end()
+                        || mapped->second != item.engineId
+                        || juce::String(current->sourcePath) != item.original.getFullPathName()
+                        || !item.result.success
+                        || item.result.prepared.decodedSource == nullptr)
+                    {
+                        view.appendDebugLog("[VoiceCleaner] discarded stale batch");
+                        for (const auto& stale : *items) stale.rendered.deleteFile();
+                        return;
+                    }
+                }
+
+                struct AppliedClean
+                {
+                    juce::Uuid id;
+                    juce::String engineId;
+                    juce::File beforeFile;
+                    juce::File afterFile;
+                    DAW::AudioFileManager::CachedAudioHandle before;
+                    DAW::AudioFileManager::CachedAudioHandle after;
+                };
+                std::vector<AppliedClean> changes;
+                changes.reserve(items->size());
+                for (auto& item : *items)
+                {
+                    const auto loaded = view.m_engineAudioFiles->publishPreparedForClip(
+                        item.engineId, item.result.prepared);
+                    if (!loaded.success)
+                    {
+                        for (const auto& changed : changes)
+                            view.m_engineAudioFiles->shareSnapshotForClip(changed.before,
+                                                                           changed.engineId);
+                        for (const auto& failure : *items) failure.rendered.deleteFile();
+                        juce::AlertWindow::showMessageBoxAsync(
+                            juce::AlertWindow::WarningIcon, "APEX Voice Cleaner",
+                            "Could not publish processed audio. Original clips preserved.");
+                        return;
+                    }
+                    changes.push_back({ item.id, item.engineId,
+                                        item.original, item.rendered,
+                                        item.originalCache,
+                                        view.m_engineAudioFiles->getCachedAudioSnapshot(item.engineId) });
+                }
+
+                // The originals and per-generation WAVs stay untouched,
+                // allowing Ctrl+Z/Redo to walk 5, 50 or more applications
+                // within APEX's existing global history depth (10,000).
+                auto apply = [weakOwner, changes](bool processed)
+                {
+                    if (weakOwner == nullptr) return;
+                    auto& v = *weakOwner.getComponent();
+                    if (v.m_engineAudioFiles == nullptr || v.m_engineClipManager == nullptr)
+                        return;
+
+                    juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
+                    for (const auto& item : changes)
+                    {
+                        auto* model = v.m_clipState.findClip(item.id);
+                        const auto mapped = v.m_uuidToEngineId.find(item.id);
+                        if (model == nullptr || mapped == v.m_uuidToEngineId.end()
+                            || mapped->second != item.engineId)
+                            continue;
+                        auto* ec = dynamic_cast<DAW::AudioClip*>(
+                            v.m_engineClipManager->getClip(item.engineId));
+                        if (ec == nullptr) continue;
+
+                        v.m_engineAudioFiles->shareSnapshotForClip(
+                            processed ? item.after : item.before, item.engineId);
+                        const auto file = processed ? item.afterFile : item.beforeFile;
+                        model->sourcePath = file.getFullPathName().toStdString();
+                        model->bumpWaveformVisualVersion();
+                        model->bumpProcessedWaveformVersion();
+                        ec->setSourceFile(file);
+                        v.m_clipState.updateClip(*model);
+                        v.syncClipToEngine(*model);
+                        v.upsertClipRenderer(item.id);
+                    }
+                };
+
+                // Caches are staged but no engine paths were changed yet.
+                // Commit once now, then enter ONE unified Undo/Redo command.
+                apply(true);
+                view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
+                    changes.size() > 1 ? "Voice Cleaner Selected Clips" : "Voice Cleaner",
+                    [apply]() { apply(true); },
+                    [apply]() { apply(false); },
+                    true));
+                view.appendDebugLog("[VoiceCleaner] committed " +
+                    juce::String((int)changes.size()) + " audio clip(s) to global undo");
+            });
+        }).detach();
     }
 
     void ArrangementViewCore::onClipBounce(ArrangementClipModel* clip)
