@@ -76,6 +76,11 @@ public:
         state.setProperty("name", req.outputFile.getFileNameWithoutExtension(), nullptr);
         state.setProperty("type", (int) ClipType::Audio, nullptr);
         state.setProperty("trackID", req.trackId, nullptr);
+        // Recording always writes to the displayed Main playlist; earlier
+        // takes remain in their lanes and in the persisted ClipManager.
+        if (req.trackManager != nullptr)
+            if (auto* track = req.trackManager->getTrack(req.trackId))
+                state.setProperty("playlistId", track->getMainPlaylistId(), nullptr);
         state.setProperty("startPosition", (juce::int64) req.startPosition, nullptr);
         state.setProperty("length", (juce::int64) clipLen, nullptr);
         state.setProperty("sourceOffset", (juce::int64) 0, nullptr);
