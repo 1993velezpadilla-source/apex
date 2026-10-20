@@ -390,7 +390,8 @@ namespace ArrangementEditor
         ArrangementClipStateCore m_clipState;
         ArrangementSelectionCore m_selection;
         juce::String m_activeClipEditInfo;
-        bool m_voiceCleanerBusy = false; // message thread only; suppress overlapping batch renders // Pinned ruler readout, never on waveform
+        bool m_voiceCleanerBusy = false; // message thread only; suppress overlapping batch renders
+        juce::String m_voiceCleanerStatus; // pinned progress readout; never masks clips // Pinned ruler readout, never on waveform
         // Plain click on an already-selected member of a group collapses it
         // only on mouse release. A real drag must preserve the whole group.
         std::optional<juce::Uuid> m_pendingExclusiveOnRelease;
