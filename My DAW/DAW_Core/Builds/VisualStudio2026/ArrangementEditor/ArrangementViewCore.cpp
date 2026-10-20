@@ -2079,68 +2079,75 @@ namespace ArrangementEditor
 
         rendererPtr->onVolumeButtonClicked = [this, clipUuid]()
         {
-            // Pro-DAW-style quick-access volume popup (CallOutBox).
-            // The full properties window is reserved for the (...) menu /
-            // double-click — this button just exposes the gain knob inline.
-            auto* anchorRenderer = findClipRendererFor(clipUuid);
-            if (anchorRenderer == nullptr) return;
+            auto* anchor = findClipRendererFor(clipUuid);
+            if (!anchor) return;
 
+            // Gain popup is a single gesture: selected clips receive the same
+            // dB change, preserving relative levels and one undo/redo step.
             class QuickGainPopup : public juce::Component, public juce::Slider::Listener
             {
             public:
-                QuickGainPopup(ArrangementViewCore& v, const juce::Uuid& id) : view(v), uuid(id)
+                QuickGainPopup(ArrangementViewCore& v, juce::Uuid anchorId)
+                    : view(v), uuid(anchorId)
                 {
                     setSize(120, 130);
                     knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
                     knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
                     knob.setRange(-60.0, 12.0, 0.0);
-                    knob.textFromValueFunction = [](double v) {
-                        return juce::String(v, 1) + " dB";
-                    };
+                    knob.textFromValueFunction = [](double v) { return juce::String(v, 1) + " dB"; };
                     if (auto* c = view.m_clipState.findClip(uuid))
-                        knob.setValue(juce::Decibels::gainToDecibels(c->gain, -60.f),
-                                       juce::dontSendNotification);
+                    {
+                        initialDb = juce::Decibels::gainToDecibels(c->gain, -60.f);
+                        knob.setValue(initialDb, juce::dontSendNotification);
+                        before.push_back({ uuid, c->gain });
+                        if (view.m_selection.isSelected(uuid))
+                            for (const auto& id : view.m_selection.getSelectedIds())
+                            {
+                                if (id == uuid) continue;
+                                if (auto* other = view.m_clipState.findClip(id))
+                                    before.push_back({ id, other->gain });
+                            }
+                    }
                     knob.addListener(this);
-                    // Double-click resets to 0 dB (unity), matching pro DAW behavior.
                     knob.setDoubleClickReturnValue(true, 0.0);
                     addAndMakeVisible(knob);
-
                     title.setText("Volume", juce::dontSendNotification);
                     title.setJustificationType(juce::Justification::centred);
                     title.setFont(juce::Font(11.f, juce::Font::bold));
                     addAndMakeVisible(title);
-
-                    // Snapshot for undo on close
-                    if (auto* c = view.m_clipState.findClip(uuid))
-                        beforeGain = c->gain;
                 }
                 ~QuickGainPopup() override
                 {
-                    if (auto* c = view.m_clipState.findClip(uuid))
+                    if (before.empty()) return;
+                    std::vector<std::pair<juce::Uuid, float>> after;
+                    bool changed = false;
+                    for (const auto& entry : before)
                     {
-                        const float afterGain = c->gain;
-                        if (std::abs(afterGain - beforeGain) > 1.0e-5f)
+                        if (auto* c = view.m_clipState.findClip(entry.first))
                         {
-                            const float b = beforeGain, a = afterGain;
-                            auto& view_ref = view;
-                            auto id = uuid;
-                            auto apply = [&view_ref, id](float g)
-                            {
-                                if (auto* cc = view_ref.m_clipState.findClip(id))
-                                {
-                                    cc->gain = g;
-                                    cc->bumpWaveformVisualVersion();
-                                    view_ref.m_clipState.updateClip(*cc);
-                                    view_ref.syncClipToEngine(*cc);
-                                }
-                            };
-                            view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                                "Edit Clip Gain",
-                                [apply, a]() { apply(a); },
-                                [apply, b]() { apply(b); },
-                                /*alreadyApplied*/ true));
+                            after.push_back({entry.first, c->gain});
+                            changed = changed || std::abs(c->gain - entry.second) > 1.0e-5f;
                         }
+                        else return;
                     }
+                    if (!changed) return;
+                    auto apply = [&v = view](const std::vector<std::pair<juce::Uuid, float>>& values)
+                    {
+                        juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
+                        for (const auto& [id, gain] : values)
+                            if (auto* c = v.m_clipState.findClip(id))
+                            {
+                                c->gain = gain;
+                                c->bumpWaveformVisualVersion();
+                                v.m_clipState.updateClip(*c);
+                                v.syncClipToEngine(*c);
+                            }
+                    };
+                    view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
+                        before.size() > 1 ? "Change Selected Clip Gains" : "Change Clip Gain",
+                        [apply, after]() { apply(after); },
+                        [apply, values = before]() { apply(values); },
+                        true));
                 }
                 void resized() override
                 {
@@ -2151,52 +2158,64 @@ namespace ArrangementEditor
                 void sliderValueChanged(juce::Slider* s) override
                 {
                     if (s != &knob) return;
-                    if (auto* c = view.m_clipState.findClip(uuid))
-                    {
-                        c->gain = juce::Decibels::decibelsToGain((float)knob.getValue(), -60.f);
-                        c->bumpWaveformVisualVersion();
-                        view.m_clipState.updateClip(*c);
-                        view.syncClipToEngine(*c);
-                    }
+                    const float deltaDb = (float)knob.getValue() - initialDb;
+                    const float multiplier = juce::Decibels::decibelsToGain(deltaDb);
+                    juce::ScopedValueSetter<bool> guard(view.m_syncingArrangementToEngine, true);
+                    for (const auto& [id, initialGain] : before)
+                        if (auto* c = view.m_clipState.findClip(id))
+                        {
+                            c->gain = juce::jlimit(0.f, 4.f, initialGain * multiplier);
+                            c->bumpWaveformVisualVersion();
+                            view.m_clipState.updateClip(*c);
+                            view.syncClipToEngine(*c);
+                        }
                 }
             private:
                 ArrangementViewCore& view;
                 juce::Uuid uuid;
                 juce::Slider knob;
                 juce::Label title;
-                float beforeGain = 1.0f;
+                float initialDb = 0.f;
+                std::vector<std::pair<juce::Uuid, float>> before;
             };
 
             auto popup = std::make_unique<QuickGainPopup>(*this, clipUuid);
-            const auto screenArea = anchorRenderer->getScreenBounds();
-            juce::CallOutBox::launchAsynchronously(std::move(popup), screenArea, nullptr);
+            juce::CallOutBox::launchAsynchronously(std::move(popup), anchor->getScreenBounds(), nullptr);
         };
 
         rendererPtr->onMuteButtonClicked = [this, clipUuid]()
         {
-            auto* c = m_clipState.findClip(clipUuid);
-            if (c == nullptr) return;
-
-            const bool before = c->muted;
-            const bool after  = !before;
-
-            auto apply = [this, clipUuid](bool m)
-            {
-                if (auto* cc = m_clipState.findClip(clipUuid))
+            auto* anchor = m_clipState.findClip(clipUuid);
+            if (!anchor) return;
+            const bool targetMute = !anchor->muted;
+            std::vector<std::pair<juce::Uuid, bool>> before;
+            before.push_back({ clipUuid, anchor->muted });
+            if (m_selection.isSelected(clipUuid))
+                for (const auto& id : m_selection.getSelectedIds())
                 {
-                    cc->muted = m;
-                    cc->bumpWaveformVisualVersion();
-                    m_clipState.updateClip(*cc);
-                    syncClipToEngine(*cc);
+                    if (id == clipUuid) continue;
+                    if (auto* other = m_clipState.findClip(id))
+                        before.push_back({ id, other->muted });
                 }
+            auto apply = [this](const std::vector<std::pair<juce::Uuid, bool>>& states)
+            {
+                juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
+                for (const auto& [id, muted] : states)
+                    if (auto* c = m_clipState.findClip(id))
+                    {
+                        c->muted = muted;
+                        c->bumpWaveformVisualVersion();
+                        m_clipState.updateClip(*c);
+                        syncClipToEngine(*c);
+                    }
             };
+            auto after = before;
+            for (auto& entry : after) entry.second = targetMute;
             apply(after);
-
             m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                after ? "Mute Clip" : "Unmute Clip",
-                [apply, after]()  { apply(after);  },
-                [apply, before]() { apply(before); },
-                /*alreadyApplied*/ true));
+                before.size() > 1 ? "Mute Selected Clips" : "Mute Clip",
+                [apply, after]() { apply(after); },
+                [apply, before]() { apply(before); }, true));
         };
 
         rendererPtr->onPianoRollClick = [this, clipUuid]()
