@@ -4438,9 +4438,16 @@ namespace ArrangementEditor
             return m_engineAudioFiles->isPeakNormalized(mapped->second);
         };
 
+        // PopupMenu is asynchronous; never dereference its retained raw clip
+        // pointer after the menu has been displayed.
+        const auto voiceCleanerClipId = clip->id;
         cb.voiceCleaner = !m_voiceCleanerBusy
             ? std::function<void(ArrangementClipModel*)>(
-                [this](ArrangementClipModel* c) { onClipVoiceCleaner(c); })
+                [this, voiceCleanerClipId](ArrangementClipModel*)
+                {
+                    if (auto* stillPresent = m_clipState.findClip(voiceCleanerClipId))
+                        onClipVoiceCleaner(stillPresent);
+                })
             : std::function<void(ArrangementClipModel*)>{};
 
         ClipContextMenuCore::show(clip, screenPos, cb, fs);
@@ -4495,7 +4502,9 @@ namespace ArrangementEditor
             const juce::File original(juce::String(model->sourcePath));
             if (!original.existsAsFile()) return;
 
-            const auto dir = original.getParentDirectory().getChildFile("_APEX_Processed");
+            const auto parent = original.getParentDirectory();
+            const auto dir = parent.getFileName() == "_APEX_Processed"
+                ? parent : parent.getChildFile("_APEX_Processed");
             const auto output = dir.getChildFile(original.getFileNameWithoutExtension()
                 + "_VoiceCleaner_" + juce::Uuid().toString() + ".wav");
             items->push_back({ id, mapped->second, original, output,
