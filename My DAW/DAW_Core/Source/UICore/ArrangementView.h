@@ -1323,6 +1323,13 @@ void trackPropertyChanged(Track* track) override
         if (clip == nullptr || core_ == nullptr)
             return;
 
+        // A clip recreated by Undo/Redo defaults to visible before the host
+        // has republished its lane gate. Resolve the owning track here so the
+        // very first arrangement mirror and RT flag agree, no ghost waveforms.
+        if (auto* track = trackManager_.getTrack(clip->getTrackID()))
+            clip->setPlaylistAudible(clip->getPlaylistId()
+                                   == track->getPlaybackPlaylistId());
+
         // Inactive playlist clips stay in the canonical ClipManager/project
         // (and keep their WAV references), but must NOT become editable or
         // visible clips on the active Main arranger lane.
