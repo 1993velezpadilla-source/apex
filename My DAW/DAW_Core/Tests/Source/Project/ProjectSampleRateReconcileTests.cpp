@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "../../../Source/ProjectCore/ProjectSampleRateReconcileCore.h"
 #include "../../../Source/MidiCore/MidiClip.h"
+#include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
 #include <cmath>
 
 namespace R = DAW::ProjectSampleRateReconcile;
@@ -200,3 +201,74 @@ public:
 };
 
 static ProjectSampleRateReconcileTests projectSampleRateReconcileTests;
+
+class ApexTrackPlaylistCoreTests final : public juce::UnitTest
+{
+public:
+    ApexTrackPlaylistCoreTests()
+        : juce::UnitTest("track-playlists-comp-and-persistence.v1", "APEX.Project") {}
+
+    void runTest() override
+    {
+        beginTest("legacy track has one main playlist; new take never destroys original");
+        {
+            DAW::TrackManager tracks;
+            auto* vocal = tracks.createTrack("Lead");
+            DAW::ClipManager clips;
+            auto* first = clips.createAudioClip("take one", {});
+            first->setTrackID(vocal->getID());
+            first->setStartPosition(48000);
+            first->setLength(96000);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+
+            const auto secondId = DAW::TrackPlaylistCompCore::createEmptyPlaylist(*vocal, tracks, clips);
+            expect(!first->isPlaylistAudible());
+            expectEquals(vocal->getMainPlaylistId(), secondId);
+            auto* second = clips.createAudioClip("take two", {});
+            second->setTrackID(vocal->getID());
+            second->setPlaylistId(secondId);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(second->isPlaylistAudible());
+            expect(!first->isPlaylistAudible());
+            expect(vocal->showPlaylistAsMain("main"));
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+            expect(!second->isPlaylistAudible());
+
+            auto trackState = vocal->getState();
+            auto clipState = second->getState();
+            expectEquals(clipState.getProperty("playlistId").toString(), secondId);
+            expectEquals(trackState.getChildWithName("TrackPlaylists").getNumChildren(), 2);
+            DAW::Track copy(vocal->getID(), "Copy");
+            copy.restoreState(trackState);
+            expectEquals(copy.getMainPlaylistId(), vocal->getMainPlaylistId());
+            expectEquals(copy.getPlaylists().size(), vocal->getPlaylists().size());
+            expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
+        }
+
+        beginTest("comp slice preserves selected timeline and source offsets at 48k to 44.1k");
+        {
+            juce::ValueTree input("AudioClip");
+            input.setProperty("startPosition", (juce::int64)48000, nullptr);
+            input.setProperty("length", (juce::int64)96000, nullptr);
+            input.setProperty("sourceOffset", (juce::int64)0, nullptr);
+            input.setProperty("sourceStartSample", (juce::int64)0, nullptr);
+            input.setProperty("sourceEndSample", (juce::int64)88200, nullptr);
+            input.setProperty("fadeInLength", (juce::int64)480, nullptr);
+            input.setProperty("fadeOutLength", (juce::int64)480, nullptr);
+
+            auto excerpt = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 72000, 96000, 48000.0, 44100.0);
+            expect(excerpt.isValid());
+            expectEquals((juce::int64)excerpt.getProperty("startPosition"), (juce::int64)72000);
+            expectEquals((juce::int64)excerpt.getProperty("length"), (juce::int64)24000);
+            expectEquals((juce::int64)excerpt.getProperty("sourceOffset"), (juce::int64)22050);
+            expectEquals((juce::int64)excerpt.getProperty("sourceStartSample"), (juce::int64)22050);
+            expectEquals((juce::int64)excerpt.getProperty("sourceEndSample"), (juce::int64)44100);
+            expect(!DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 47000, 96000, 48000.0, 44100.0).isValid());
+        }
+    }
+};
+static ApexTrackPlaylistCoreTests apexTrackPlaylistCoreTests;
