@@ -1610,6 +1610,32 @@ namespace ArrangementEditor
             g.fillEllipse(m_holdLocalPos.x - 11.0f, m_holdLocalPos.y - 11.0f, 22.0f, 22.0f);
         }
 
+        // Full-value trim/fade feedback lives in the PINNED RULER, never
+        // inside a clip: the waveform remains completely unobstructed, even
+        // during a multi-clip left/right edge gesture.
+        if (m_activeClipEditInfo.isNotEmpty())
+        {
+            const auto rulerBounds = m_ruler.getBounds();
+            if (rulerBounds.getWidth() >= 90)
+            {
+                const juce::Font font("Consolas", 11.f, juce::Font::plain);
+                g.setFont(font);
+                const int maxWidth = juce::jmax(36, rulerBounds.getWidth() - 16);
+                const int width = juce::jmin(maxWidth,
+                    g.getCurrentFont().getStringWidth(m_activeClipEditInfo) + 20);
+                const juce::Rectangle<int> pill(
+                    rulerBounds.getRight() - width - 8, rulerBounds.getY() + 5,
+                    width, juce::jmin(22, rulerBounds.getHeight() - 8));
+                g.setColour(juce::Colour(0xFF070B16).withAlpha(0.96f));
+                g.fillRoundedRectangle(pill.toFloat(), 4.0f);
+                g.setColour(juce::Colour(0xFF419BFF));
+                g.drawRoundedRectangle(pill.toFloat().reduced(0.5f), 4.0f, 1.0f);
+                g.setColour(juce::Colours::white);
+                g.drawFittedText(m_activeClipEditInfo, pill.reduced(9, 1),
+                                 juce::Justification::centred, 1, 0.8f);
+            }
+        }
+
         // The opaque HeaderClipGuard child covers the header, so the lock
         // button must be drawn here (above all children) to be visible.
         drawLockButton(g);
@@ -2039,6 +2065,15 @@ namespace ArrangementEditor
 
                 refreshAutoCrossfadesForTrack(c->trackIndex);
 
+                if (auto* editedRenderer = findClipRendererFor(clipUuid))
+                {
+                    m_activeClipEditInfo = editedRenderer->getEditInfoText();
+                    if (m_activeClipEditInfo.isNotEmpty() && preEdit->size() > 1)
+                        m_activeClipEditInfo = juce::String((int)preEdit->size())
+                            + " CLIPS  |  " + m_activeClipEditInfo;
+                    repaint(m_ruler.getBounds());
+                }
+
                 // Apply the same raw mouse displacement to EVERY clip in the
                 // selection, against each clip's own drag-start geometry.
                 // Each source has independent trim bounds and source offsets.
@@ -2261,6 +2296,8 @@ namespace ArrangementEditor
 
         rendererPtr->onEditCommit = [this, preEdit]()
         {
+            m_activeClipEditInfo.clear();
+            repaint(m_ruler.getBounds());
             if (preEdit->empty()) return;
             const std::vector<ArrangementClipModel> before = *preEdit;
             preEdit->clear();
