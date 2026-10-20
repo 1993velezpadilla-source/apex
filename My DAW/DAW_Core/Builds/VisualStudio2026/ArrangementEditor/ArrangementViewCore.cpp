@@ -2793,6 +2793,7 @@ namespace ArrangementEditor
             m_rubberBand.endDrag();
 
         // Commit clip drag
+        const bool didMoveClips = m_drag.active;
         if (m_drag.active)
         {
             if (!e.mods.isRightButtonDown())
@@ -2806,6 +2807,13 @@ namespace ArrangementEditor
             m_drag.clipIds.clear();
             m_drag.items.clear();
             m_drag.clipId = {};
+        }
+
+        if (m_pendingExclusiveOnRelease.has_value())
+        {
+            if (!didMoveClips && !e.mods.isRightButtonDown())
+                m_selection.setSelection({*m_pendingExclusiveOnRelease});
+            m_pendingExclusiveOnRelease.reset();
         }
 
         // Right-click → clip context menu or empty track menu
@@ -2830,6 +2838,7 @@ namespace ArrangementEditor
         }
         if (m_drag.active)
             cancelClipDrag();
+        m_pendingExclusiveOnRelease.reset();
         if (m_rubberBand.isVisible())
             m_rubberBand.endDrag();
     }
@@ -3116,16 +3125,23 @@ namespace ArrangementEditor
             }
             else if (e.mods.isCtrlDown())
             {
+                // Ctrl toggles individual selection; it does not initiate a move.
+                m_pendingExclusiveOnRelease.reset();
                 m_selection.toggleClip(clip->id);
+                return;
+            }
+            else if (m_selection.isSelected(clip->id) && m_selection.getSelectionCount() > 1)
+            {
+                // Keep group while resolving click vs drag.
+                m_pendingExclusiveOnRelease = clip->id;
             }
             else
             {
-                // Plain click NEVER accumulates selection, even if this clip
-                // was already one member of the previous selected group.
-                m_selection.setSelection({ clip->id });
+                m_pendingExclusiveOnRelease.reset();
+                m_selection.setSelection({clip->id});
             }
 
-            // Begin drag — only on left button
+            // Allow moving selected clips together without holding Ctrl.
             if (!e.mods.isRightButtonDown())
                 startClipDrag(clip, e.getPosition(), e.mods);
 
