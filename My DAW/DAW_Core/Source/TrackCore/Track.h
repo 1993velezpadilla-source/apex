@@ -43,6 +43,10 @@ public:
     // Pro-Tools-style persistent playlist versions on ONE audio track/FX chain.
     struct Playlist { juce::String id, name; };
     const std::vector<Playlist>& getPlaylists() const noexcept { return playlists_; }
+    // Playlist-only snapshots: record Undo/Redo must never replace inserts,
+    // routing, faders, native automation, or track identity.
+    juce::ValueTree getPlaylistState() const;
+    void restorePlaylistState(const juce::ValueTree& state, bool notify = true);
     const juce::String& getMainPlaylistId() const noexcept { return mainPlaylistId_; }
     const juce::String& getTargetPlaylistId() const noexcept { return targetPlaylistId_; }
     const juce::String& getAuditionPlaylistId() const noexcept { return auditionPlaylistId_; }

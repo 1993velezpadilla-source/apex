@@ -4,6 +4,7 @@
 #include "Command.h"
 #include "../ClipCore/Clip.h"
 #include "../AudioEngineCore/AudioFileManager.h"
+#include "../TrackCore/TrackPlaylistCompCore.h"
 
 namespace DAW {
 
@@ -31,9 +32,18 @@ public:
 		ClipID          currentId;  // live clip id — updated across redo cycles
 	};
 
-	RecordAudioTakeCommand(ClipManager& clips, AudioFileManager* audioFiles,
-						   std::vector<Take> takes)
-		: clips_(clips), audioFiles_(audioFiles), takes_(std::move(takes)) {}
+    struct PlaylistChange
+    {
+        TrackID trackId;
+        juce::ValueTree before, after;
+    };
+
+    RecordAudioTakeCommand(ClipManager& clips, AudioFileManager* audioFiles,
+                           std::vector<Take> takes,
+                           TrackManager* tracks = nullptr,
+                           std::vector<PlaylistChange> playlistChanges = {})
+        : clips_(clips), audioFiles_(audioFiles), takes_(std::move(takes)),
+          tracks_(tracks), playlistChanges_(std::move(playlistChanges)) {}
 
 	juce::String getDescription() const override
 	{
@@ -41,40 +51,58 @@ public:
 	}
 	juce::String getCategory() const override { return "Record"; }
 
-	void execute() override
-	{
-		// Clips are already live when the command is pushed (recording just
-		// finished) — only re-apply on redo.
-		if (!hasExecuted_) { hasExecuted_ = true; return; }
+    void execute() override
+    {
+        // Finalizer already created the clips when first posted to history.
+        if (!hasExecuted_) { hasExecuted_ = true; return; }
+        restorePlaylists(true);
+        for (auto& t : takes_)
+        {
+            auto* clip = clips_.recreateClipFromState(t.state);
+            if (clip == nullptr) continue;
+            t.currentId = clip->getID();
+            // Gate BEFORE publishing restored state, not a frame later.
+            if (tracks_ != nullptr)
+                if (auto* track = tracks_->getTrack(clip->getTrackID()))
+                    clip->setPlaylistAudible(
+                        clip->getPlaylistId() == track->getPlaybackPlaylistId());
+            if (audioFiles_ != nullptr && t.sourceFile.existsAsFile())
+                audioFiles_->loadForClip(clip->getID(), t.sourceFile);
+            clip->notifyStateRestored();
+        }
+        publishVisibility();
+    }
 
-		for (auto& t : takes_)
-		{
-			auto* clip = clips_.recreateClipFromState(t.state);
-			if (clip == nullptr)
-				continue;
-
-			t.currentId = clip->getID();
-
-			if (audioFiles_ != nullptr && t.sourceFile.existsAsFile())
-				audioFiles_->loadForClip(clip->getID(), t.sourceFile);
-
-			// Refresh UI mirrors now that audio is loaded (waveform etc.).
-			clip->notifyStateRestored();
-		}
-	}
-
-	void undo() override
-	{
-		// Non-destructive: timeline clips go away, WAV stays on disk.
-		for (auto& t : takes_)
-			clips_.deleteClip(t.currentId);
-	}
+    void undo() override
+    {
+        // Keep the recorded WAV file. Only remove the timeline references.
+        for (auto& t : takes_)
+            clips_.deleteClip(t.currentId);
+        restorePlaylists(false);
+        publishVisibility();
+    }
 
 private:
-	ClipManager&      clips_;
-	AudioFileManager* audioFiles_;
-	std::vector<Take> takes_;
-	bool              hasExecuted_ = false;
+    void restorePlaylists(bool redo)
+    {
+        if (tracks_ == nullptr) return;
+        for (const auto& change : playlistChanges_)
+            if (auto* track = tracks_->getTrack(change.trackId))
+                track->restorePlaylistState(redo ? change.after : change.before);
+    }
+
+    void publishVisibility()
+    {
+        if (tracks_ != nullptr)
+            TrackPlaylistCompCore::publishPlaybackVisibility(*tracks_, clips_);
+    }
+
+    ClipManager& clips_;
+    AudioFileManager* audioFiles_;
+    std::vector<Take> takes_;
+    TrackManager* tracks_ = nullptr;
+    std::vector<PlaylistChange> playlistChanges_;
+    bool hasExecuted_ = false;
 };
 
 /**

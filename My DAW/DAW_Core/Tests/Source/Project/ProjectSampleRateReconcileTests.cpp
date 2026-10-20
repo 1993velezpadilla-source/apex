@@ -3,6 +3,7 @@
 #include "../../../Source/MidiCore/MidiClip.h"
 #include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
 #include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
+#include "../../../Source/CommandCore/RecordCommands.h"
 #include <cmath>
 
 namespace R = DAW::ProjectSampleRateReconcile;
@@ -296,6 +297,42 @@ public:
                 60000, 48000, 96000, 36000, true).empty());
             expect(DAW::LoopPlaylistTakePlanCore::make(
                 60000, 48000, 96000, 0, true).empty());
+        }
+
+        beginTest("loop-record Undo/Redo restores take lanes but never the mixer");
+        {
+            DAW::TrackManager tracks;
+            auto* vocal = tracks.createTrack("Lead Vocal");
+            DAW::ClipManager clips;
+            vocal->setVolume(0.42f);
+            const auto before = vocal->getPlaylistState().createCopy();
+            const auto newLane = vocal->createPlaylist();
+            const auto after = vocal->getPlaylistState().createCopy();
+            auto* take = clips.createAudioClip("take 2", {});
+            take->setTrackID(vocal->getID());
+            take->setPlaylistId(newLane);
+            const DAW::RecordAudioTakeCommand::Take recorded {
+                take->getState().createCopy(), juce::File(), take->getID() };
+            const DAW::RecordAudioTakeCommand::PlaylistChange laneChange {
+                vocal->getID(), before, after };
+            DAW::RecordAudioTakeCommand cmd(
+                clips, nullptr, { recorded }, &tracks, { laneChange });
+            cmd.execute(); // first execution is a no-op (already finalized)
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            cmd.undo();
+            expectEquals((int)vocal->getPlaylists().size(), 1);
+            expectEquals(vocal->getMainPlaylistId(), juce::String("main"));
+            expectEquals((int)clips.getClipsOnTrack(vocal->getID()).size(), 0);
+            expectWithinAbsoluteError((double)vocal->getVolume(), 0.42, 0.00001);
+            cmd.execute(); // redo
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            expectEquals(vocal->getMainPlaylistId(), newLane);
+            expectEquals((int)clips.getClipsOnTrack(vocal->getID()).size(), 1);
+            auto* restored = clips.getClipsOnTrack(vocal->getID())[0];
+            expect(restored != nullptr && restored->isPlaylistAudible());
+            expectWithinAbsoluteError((double)vocal->getVolume(), 0.42, 0.00001);
+            cmd.undo();
+            expectEquals((int)vocal->getPlaylists().size(), 1);
         }
 
         beginTest("renamed legacy Main playlist name survives save and reopen");

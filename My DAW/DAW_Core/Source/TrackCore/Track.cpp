@@ -194,18 +194,8 @@ juce::ValueTree Track::getState() const
     state.setProperty("inputFirstChannel", inputFirstChannel_.load(std::memory_order_relaxed), nullptr);
     state.setProperty("inputMono", inputMono_.load(std::memory_order_relaxed), nullptr);
 
-    // Names, target and main lane survive closing/reopening the project.
-    juce::ValueTree playlists("TrackPlaylists");
-    playlists.setProperty("main", mainPlaylistId_, nullptr);
-    playlists.setProperty("target", targetPlaylistId_, nullptr);
-    for (const auto& p : playlists_)
-    {
-        juce::ValueTree lane("Playlist");
-        lane.setProperty("id", p.id, nullptr);
-        lane.setProperty("name", p.name, nullptr);
-        playlists.addChild(lane, -1, nullptr);
-    }
-    state.addChild(playlists, -1, nullptr);
+    // Same schema for project persistence and record-pass Undo/Redo.
+    state.addChild(getPlaylistState(), -1, nullptr);
 
     // Save plugin chain if present (forward declaration is ok, actual save is in ApplicationCore)
     state.setProperty("hasPlugins", pluginChain_ != nullptr, nullptr);
@@ -213,13 +203,27 @@ juce::ValueTree Track::getState() const
     return state;
 }
 
-void Track::restoreState(const juce::ValueTree& state)
+juce::ValueTree Track::getPlaylistState() const
 {
-    name_ = state.getProperty(IDs::NAME, "Untitled Track");
+    juce::ValueTree stored("TrackPlaylists");
+    stored.setProperty("main", mainPlaylistId_, nullptr);
+    stored.setProperty("target", targetPlaylistId_, nullptr);
+    for (const auto& p : playlists_)
+    {
+        juce::ValueTree lane("Playlist");
+        lane.setProperty("id", p.id, nullptr);
+        lane.setProperty("name", p.name, nullptr);
+        stored.addChild(lane, -1, nullptr);
+    }
+    return stored;
+}
+
+void Track::restorePlaylistState(const juce::ValueTree& stored, bool notify)
+{
     playlists_ = { { "main", "Main" } };
     mainPlaylistId_ = targetPlaylistId_ = "main";
     auditionPlaylistId_.clear();
-    if (auto stored = state.getChildWithName("TrackPlaylists"); stored.isValid())
+    if (stored.hasType("TrackPlaylists"))
     {
         juce::StringArray known { "main" };
         for (int i = 0; i < stored.getNumChildren(); ++i)
@@ -246,7 +250,13 @@ void Track::restoreState(const juce::ValueTree& state)
         mainPlaylistId_ = known.contains(requestedMain) ? requestedMain : juce::String("main");
         targetPlaylistId_ = known.contains(requestedTarget) ? requestedTarget : mainPlaylistId_;
     }
+    if (notify) notifyPropertyChanged();
+}
 
+void Track::restoreState(const juce::ValueTree& state)
+{
+    name_ = state.getProperty(IDs::NAME, "Untitled Track");
+    restorePlaylistState(state.getChildWithName("TrackPlaylists"), false);
     muted_.store((bool)state.getProperty(IDs::MUTED, false), std::memory_order_relaxed);
     soloed_.store((bool)state.getProperty(IDs::SOLOED, false), std::memory_order_relaxed);
     polarityInverted_.store((bool)state.getProperty("polarityInverted", false), std::memory_order_relaxed);

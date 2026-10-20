@@ -787,6 +787,24 @@ private:
             // lands on the unified undo history as ONE step.
             std::vector<RecordAudioTakeCommand::Take> takes;
             takes.reserve(requestsForMessageThread->size());
+            // Undo must remove the generated lane metadata as well as clips,
+            // without reverting ANY other Track state (plugins/fader/routing).
+            std::vector<RecordAudioTakeCommand::PlaylistChange> playlistChanges;
+            if (tracks_ != nullptr)
+                for (const auto& req : *requestsForMessageThread)
+                {
+                    if (LoopPlaylistTakePlanCore::make(
+                            req.startPosition, req.loopStart, req.loopEnd,
+                            req.samplesWritten, req.autoLoopPlaylists).empty())
+                        continue;
+                    bool alreadyCaptured = false;
+                    for (const auto& change : playlistChanges)
+                        alreadyCaptured |= change.trackId == req.trackId;
+                    if (alreadyCaptured) continue;
+                    if (auto* track = tracks_->getTrack(req.trackId))
+                        playlistChanges.push_back({
+                            req.trackId, track->getPlaylistState().createCopy(), {} });
+                }
 
             for (const auto& req : *requestsForMessageThread)
             {
@@ -835,12 +853,18 @@ private:
                     registerTake(clip);
                 }
             }
+            if (tracks_ != nullptr)
+                for (auto& change : playlistChanges)
+                    if (auto* track = tracks_->getTrack(change.trackId))
+                        change.after = track->getPlaylistState().createCopy();
             if (tracks_ != nullptr && clips_ != nullptr)
                 TrackPlaylistCompCore::publishPlaybackVisibility(*tracks_, *clips_);
 
             if (!takes.empty() && clips_ != nullptr)
                 CommandManager::getInstance().execute(
-                    std::make_unique<RecordAudioTakeCommand>(*clips_, audioFiles_, std::move(takes)));
+                    std::make_unique<RecordAudioTakeCommand>(
+                        *clips_, audioFiles_, std::move(takes), tracks_,
+                        std::move(playlistChanges)));
 
             finalizing_.store(false, std::memory_order_release);
 
