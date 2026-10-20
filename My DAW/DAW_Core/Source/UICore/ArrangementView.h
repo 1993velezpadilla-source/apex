@@ -1310,6 +1310,28 @@ void trackPropertyChanged(Track* track) override
             lastSyncedTrackColours_[trackId] = colour;
         }
 
+        // Loop recording may create many playlist identities in a single
+        // finalization. Coalesce native lane reflow onto one UI iteration;
+        // never rebuild clip renderers once PER recorded take.
+        if (core_ != nullptr && trackId == inlinePlaylistTrackId_
+            && !inlineRefreshScheduled_ && !trackManager_.isRestoringState())
+        {
+            const int index = trackManager_.getTrackIndex(trackId)
+                + (trackManager_.hasMasterTrack() ? 1 : 0);
+            const int required = juce::jmin(128, juce::jmax(0,
+                (int)track->getPlaylists().size() - 1)) * 66;
+            if (core_->getInlinePlaylistExtraForLane(index) != required)
+            {
+                inlineRefreshScheduled_ = true;
+                juce::Component::SafePointer<ArrangementView> safeThis(this);
+                juce::MessageManager::callAsync([safeThis]
+                {
+                    if (!safeThis) return;
+                    safeThis->inlineRefreshScheduled_ = false;
+                    safeThis->refreshInlinePlaylistLayout();
+                });
+            }
+        }
         requestAutomationSync();
         repaint();
     }
@@ -1626,6 +1648,7 @@ void trackPropertyChanged(Track* track) override
     std::unique_ptr<ArrangementEditor::ArrangementViewCore> core_;
     TrackPlaylistPanel* inlinePlaylistPanel_ = nullptr; // owned by MainComponent
     TrackID inlinePlaylistTrackId_;
+    bool inlineRefreshScheduled_ = false;
     ImportOverlayComponent importOverlay_;
     std::function<PluginChainCore*(const TrackID&)> pluginChainProvider_;
     std::function<RoutingGraph*()> routingGraphProvider_;

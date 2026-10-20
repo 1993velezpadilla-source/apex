@@ -864,6 +864,29 @@ public:
                                 if (weak->onPlaylistStateChanged)
                                     weak->onPlaylistStateChanged(weak->track_.getID());
                         });
+                    menu.addSeparator();
+                    menu.addItem("Rename Playlist...", true, false, [weak, id]
+                    {
+                        if (!weak) return;
+                        juce::String originalName = id;
+                        for (const auto& pl : weak->track_.getPlaylists())
+                            if (pl.id == id) { originalName = pl.name; break; }
+                        auto* prompt = new juce::AlertWindow(
+                            "Rename Playlist", "Enter a new name for this take.",
+                            juce::MessageBoxIconType::QuestionIcon);
+                        prompt->addTextEditor("name", originalName, "Playlist name:");
+                        prompt->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+                        prompt->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                        prompt->enterModalState(true, juce::ModalCallbackFunction::create(
+                            [weak, prompt, id](int result)
+                            {
+                                if (result == 1 && weak)
+                                    if (weak->track_.renamePlaylist(
+                                            id, prompt->getTextEditorContents("name").trim()))
+                                        if (weak->onPlaylistStateChanged)
+                                            weak->onPlaylistStateChanged(weak->track_.getID());
+                            }), true);
+                    });
                     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
                 }
                 else if (e.x >= getWidth() - 48)
