@@ -59,7 +59,7 @@ struct TrackPlaylistCompCore final
 
         result.setProperty("startPosition", (juce::int64)begin, nullptr);
         result.setProperty("length", (juce::int64)(end - begin), nullptr);
-        result.setProperty("sourceOffset", (juce::int64)(sourceOffset + delta), nullptr);
+        result.setProperty("sourceOffset", (juce::int64)(sourceOffset + sourceDelta), nullptr);
         if (sourceEnd > sourceStart)
         {
             const int64_t first = sourceStart + sourceDelta;
@@ -109,7 +109,9 @@ public:
             if (!clip || clip->getType() != ClipType::Audio) continue;
             auto* audio = dynamic_cast<AudioClip*>(clip);
             if (!audio) continue;
-            if (clip->getPlaylistId() == targetId_)
+            if (clip->getPlaylistId() == targetId_
+                && clip->getStartPosition() < end_
+                && clip->getEndPosition() > start_)
                 before_.push_back(clip->getState());
         }
         after_ = before_;
@@ -183,13 +185,19 @@ private:
     void apply(const std::vector<juce::ValueTree>& replacement)
     {
         // Keep other tracks and every source playlist entirely untouched.
-        auto old = clips_.getClipsOnTrack(trackId_);
+        // Delete ONLY the pieces managed by this promotion. Unrelated target
+        // clips (and their clip FX, automation, editors) remain untouched.
         juce::StringArray deleteIds;
-        for (auto* clip : old)
-            if (clip && clip->getPlaylistId() == targetId_)
-                deleteIds.add(clip->getID());
+        for (const auto& state : before_)
+            deleteIds.addIfNotAlreadyThere(state.getProperty("id").toString());
+        for (const auto& state : after_)
+            deleteIds.addIfNotAlreadyThere(state.getProperty("id").toString());
         for (const auto& id : deleteIds)
-            clips_.deleteClip(id);
+        {
+            if (auto* clip = clips_.getClip(id))
+                if (clip->getTrackID() == trackId_ && clip->getPlaylistId() == targetId_)
+                    clips_.deleteClip(id);
+        }
 
         for (const auto& state : replacement)
         {
