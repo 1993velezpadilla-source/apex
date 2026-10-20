@@ -38,6 +38,16 @@ public:
         closeButton_.onClick = [this] { if (onClose) onClose(); };
     }
 
+    void setInlineMode(bool inlineMode)
+    {
+        inlineMode_ = inlineMode;
+        newButton_.setVisible(!inlineMode_);
+        duplicateButton_.setVisible(!inlineMode_);
+        closeButton_.setVisible(!inlineMode_);
+        scrollY_ = 0;
+        repaint();
+    }
+
     void createForTrack(const TrackID& id, bool duplicate, double engineRate)
     {
         showForTrack(id, engineRate);
@@ -49,6 +59,7 @@ public:
     std::function<void()> onClose;
     std::function<void(bool)> onTimelineZoom;
     std::function<void(float)> onTimelinePan;
+    std::function<void(float)> onTimelineVerticalScroll;
 
     void showForTrack(const TrackID& id, double engineRate)
     {
@@ -85,26 +96,40 @@ public:
     void paint(juce::Graphics& g) override
     {
         g.fillAll(juce::Colour(0xff110f1d));
-        g.setColour(juce::Colour(0xffb98bff));
-        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 10.f, 1.5f);
+        if (!inlineMode_)
+        {
+            g.setColour(juce::Colour(0xffb98bff));
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 10.f, 1.5f);
+        }
         auto* track = tracks_.getTrack(trackId_);
-        g.setColour(juce::Colours::white);
-        g.setFont(juce::Font(16.f, juce::Font::bold));
-        g.drawText(track ? track->getName() + "  /  PLAYLISTS" : juce::String("PLAYLISTS"),
-                   18, 6, juce::jmax(0, getWidth() - 335), 37, juce::Justification::centredLeft);
-        g.setFont(juce::Font(11.f));
-        g.setColour(juce::Colour(0xffa9a1be));
-        g.drawText("Drag a phrase in a take lane; press the up arrow to copy it to the target.",
-                   18, 43, juce::jmax(0, getWidth() - 40), 23, juce::Justification::centredLeft);
+        if (!inlineMode_)
+        {
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(16.f, juce::Font::bold));
+            g.drawText(track ? track->getName() + "  /  PLAYLISTS" : juce::String("PLAYLISTS"),
+                       18, 6, juce::jmax(0, getWidth() - 335), 37, juce::Justification::centredLeft);
+            g.setFont(juce::Font(11.f));
+            g.setColour(juce::Colour(0xffa9a1be));
+            g.drawText("Drag a phrase in a take lane; press the up arrow to copy it to the target.",
+                       18, 43, juce::jmax(0, getWidth() - 40), 23, juce::Justification::centredLeft);
+        }
         if (!track) return;
         const auto& playlists = track->getPlaylists();
-        g.setColour(juce::Colour(0xff5f5974));
-        g.fillRect(10, 74, getWidth() - 20, 1);
+        if (!inlineMode_)
+        {
+            g.setColour(juce::Colour(0xff5f5974));
+            g.fillRect(10, 74, getWidth() - 20, 1);
+        }
+        int alternateRow = 0;
         for (int i = 0; i < (int)playlists.size(); ++i)
         {
             const auto& p = playlists[(size_t)i];
-            const int y = 81 + i * 66 - scrollY_;
-            if (y + 66 < 76 || y >= getHeight() - 22) continue;
+            if (inlineMode_ && p.id == track->getMainPlaylistId())
+                continue; // Main is the owning track's normal clip row
+            const int y = inlineMode_ ? alternateRow++ * 66
+                                      : 81 + i * 66 - scrollY_;
+            if (y + 66 < (inlineMode_ ? 0 : 76)
+                || y >= getHeight() - (inlineMode_ ? 0 : 22)) continue;
             const bool main = p.id == track->getMainPlaylistId();
             const bool target = p.id == track->getTargetPlaylistId();
             const bool solo = p.id == track->getAuditionPlaylistId();
@@ -188,10 +213,13 @@ public:
             g.setFont(juce::Font(17.f, juce::Font::bold));
             g.drawText(juce::CharPointer_UTF8("↑"), arrow, juce::Justification::centred);
         }
-        g.setColour(juce::Colour(0xff87829c));
-        g.setFont(juce::Font(10.f));
-        g.drawText("Source WAVs and alternate takes are preserved when the project closes.",
-                   18, getHeight() - 22, getWidth() - 30, 19, juce::Justification::centredLeft);
+        if (!inlineMode_)
+        {
+            g.setColour(juce::Colour(0xff87829c));
+            g.setFont(juce::Font(10.f));
+            g.drawText("Source WAVs and alternate takes are preserved when the project closes.",
+                       18, getHeight() - 22, getWidth() - 30, 19, juce::Justification::centredLeft);
+        }
     }
 
     void resized() override
@@ -245,26 +273,44 @@ public:
         return false;
     }
 
+    const Track::Playlist* playlistAtY(int y, int& rowTop) const
+    {
+        auto* track = tracks_.getTrack(trackId_);
+        if (!track) return nullptr;
+        const int firstY = inlineMode_ ? 0 : 81;
+        const int contentY = y + (inlineMode_ ? 0 : scrollY_) - firstY;
+        if (contentY < 0) return nullptr;
+        int targetRow = contentY / 66;
+        for (const auto& p : track->getPlaylists())
+        {
+            if (inlineMode_ && p.id == track->getMainPlaylistId())
+                continue;
+            if (targetRow-- == 0)
+            {
+                rowTop = firstY + contentY / 66 * 66
+                         - (inlineMode_ ? 0 : scrollY_);
+                return &p;
+            }
+        }
+        return nullptr;
+    }
+
     void mouseDoubleClick(const juce::MouseEvent& e) override
     {
-        if (e.x < 12 || e.x > 126 || e.y < 81) return;
-        auto* track = tracks_.getTrack(trackId_);
-        if (!track) return;
-        const int i = (e.y + scrollY_ - 81) / 66;
-        if (i < 0 || i >= (int)track->getPlaylists().size()) return;
-        beginRename(track->getPlaylists()[(size_t)i].id,
-                    track->getPlaylists()[(size_t)i].name,
-                    81 + i * 66 - scrollY_);
+        if (e.x < 12 || e.x > 126) return;
+        int y = 0;
+        if (const auto* playlist = playlistAtY(e.y, y))
+            beginRename(playlist->id, playlist->name, y);
     }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
         auto* track = tracks_.getTrack(trackId_);
-        if (!track || e.y < 81) return;
-        const int i = (e.y + scrollY_ - 81) / 66;
-        if (i < 0 || i >= (int)track->getPlaylists().size()) return;
-        const auto playlistId = track->getPlaylists()[(size_t)i].id;
-        const int y = 81 + i * 66 - scrollY_;
+        if (!track) return;
+        int y = 0;
+        const auto* playlist = playlistAtY(e.y, y);
+        if (!playlist) return;
+        const auto playlistId = playlist->id;
         if (e.mods.isPopupMenu())
         {
             openPlaylistMenu(playlistId);
@@ -345,11 +391,16 @@ public:
                                       viewStart_ - (double)w.deltaY * span * 0.3);
             viewEnd_ = viewStart_ + span;
         }
-        else
+        else if (!inlineMode_)
         {
             const int available = juce::jmax(0, (int)track->getPlaylists().size() * 66
                                                  - (getHeight() - 105));
             scrollY_ = juce::jlimit(0, available, scrollY_ - juce::roundToInt(w.deltaY * 120.f));
+        }
+        else if (onTimelineVerticalScroll)
+        {
+            onTimelineVerticalScroll(w.deltaY);
+            return;
         }
         repaint();
     }
@@ -566,6 +617,7 @@ private:
     int64_t selectionStart_ = -1, selectionEnd_ = -1, dragAnchor_ = -1;
     bool selectionDragging_ = false;
     bool followingArrangement_ = false;
+    bool inlineMode_ = false;
     int scrollY_ = 0;
     juce::TextButton newButton_, duplicateButton_, closeButton_;
     juce::TextEditor renameEditor_;
