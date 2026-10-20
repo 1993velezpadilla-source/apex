@@ -109,6 +109,14 @@ public:
         auto* clip = dynamic_cast<AudioClip*>(req.clipManager->recreateClipFromState(state));
         if (clip == nullptr) return nullptr;
 
+        // During an audition, the currently SOLOED alternate (not Main) is
+        // the only playlist that may play. A freshly finalized recording
+        // must never leak into the graph because Clip::restoreState defaults
+        // its presentation gate to true for legacy project compatibility.
+        if (req.trackManager != nullptr)
+            if (auto* track = req.trackManager->getTrack(req.trackId))
+                clip->setPlaylistAudible(clip->getPlaylistId() == track->getPlaybackPlaylistId());
+
         logAlways("[APEX-DIAG-CRASH] finalize pre-loadForClip clipId=" + clip->getID()
             + " file=" + req.outputFile.getFullPathName());
         req.audioFiles->loadForClip(clip->getID(), req.outputFile);
