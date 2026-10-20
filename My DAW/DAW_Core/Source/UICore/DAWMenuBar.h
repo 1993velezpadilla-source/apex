@@ -59,7 +59,10 @@ public:
                              {"---"},
                              {"Keybinding Profile", nullptr},
                              {"---"},
-                             {"Preferences...", nullptr} } }
+                             {"Preferences...", nullptr},
+                             {"---"},
+                             {"Project Settings", nullptr},
+                             {"Reset Project...", nullptr} } }
         };
     }
 
@@ -485,6 +488,22 @@ private:
             // Settings menu — special handling for depth mode ticks + profile submenu
             if (isSettings)
             {
+                // Settings > Project Settings > Reset Project...
+                // Reuse the existing action registry; this menu is not a
+                // second, unconnected settings panel or an editable mockup.
+                if (item.label == "Project Settings")
+                {
+                    juce::PopupMenu projectSettings;
+                    for (const auto& nested : m.items)
+                        if (nested.label == "Reset Project...")
+                            projectSettings.addItem("Reset Project...",
+                                nested.action != nullptr, false, nested.action);
+                    pm.addSubMenu("Project Settings", projectSettings, true);
+                    continue;
+                }
+                if (item.label == "Reset Project...")
+                    continue;
+
                 if (item.label == "Interface: Standard")
                 {
                     juce::PopupMenu::Item pi("Interface: Standard");
