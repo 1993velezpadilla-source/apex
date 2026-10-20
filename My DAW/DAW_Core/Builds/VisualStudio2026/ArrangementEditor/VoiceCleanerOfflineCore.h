@@ -38,6 +38,16 @@ public:
         const int length = (int)reader->lengthInSamples;
         const int channels = (int)reader->numChannels;
         const double sampleRate = reader->sampleRate;
+        // Avoid unbounded offline buffer allocations for hour-long recordings.
+        // The user gets a clear error instead of a memory exhaustion crash.
+        // Work on bounced, shorter regions until chunked rendering is added.
+        if (channels > 2 || sampleRate <= 0.0
+            || (double)length > sampleRate * 300.0)
+        {
+            result.error = "Voice Cleaner currently supports mono/stereo sources up to 5 minutes. "
+                           "Bounce or split longer recordings into shorter files.";
+            return result;
+        }
         juce::AudioBuffer<float> original(channels, length);
         if (!reader->read(&original, 0, length, 0, true, true))
         {
@@ -65,6 +75,13 @@ public:
         // Only publish completely closed WAV files; a failing write never
         // changes the original or leaves a half-written referenced clip.
         const auto temp = destination.withFileExtension(".part");
+        // A unique operation id is assigned by the caller, so the target
+        // should not already exist. Never overwrite an existing recording.
+        if (destination.existsAsFile() || temp.existsAsFile())
+        {
+            result.error = "Voice Cleaner output already exists; refusing to overwrite.";
+            return result;
+        }
         auto stream = std::unique_ptr<juce::OutputStream>(temp.createOutputStream());
         if (stream == nullptr)
         {
