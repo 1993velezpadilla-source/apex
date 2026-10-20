@@ -87,6 +87,9 @@ public:
     std::function<void(const TrackID&, bool)> onSetMonitoring;
     std::function<void(const TrackID&, const juce::String&)> onRenameTrack;
     std::function<void(const TrackID&)> onOpenPianoRoll;
+    std::function<void(const TrackID&)> onOpenPlaylistView;
+    std::function<void(const TrackID&, bool)> onCreatePlaylist;
+    std::function<void(const TrackID&)> onPlaylistStateChanged;
     std::function<void(const TrackID&)> onPreFaderToggleRequested;
     std::function<void(const TrackID&)> onOpenInputTrim;
     std::function<void(const TrackID&)> onConvertFolderToTrack;
@@ -569,7 +572,19 @@ public:
             nameBounds.removeFromLeft(16.f);
         nameBounds = nameBounds.reduced(8, 0);
         nameBounds = nameBounds.removeFromTop(nameBounds.getHeight() * 0.5f);
+        if (!master) nameBounds.removeFromRight(67);
         g.drawText(track_.getName(), nameBounds, juce::Justification::centredLeft);
+        if (!master)
+        {
+            playlistBounds_ = { (float)getWidth() - 71.f, 7.f, 64.f, 21.f };
+            g.setColour(juce::Colour(0xff2f2944));
+            g.fillRoundedRectangle(playlistBounds_, 4.f);
+            g.setColour(juce::Colour(0xffa895df));
+            g.drawRoundedRectangle(playlistBounds_, 4.f, 1.f);
+            g.setFont(t.fonts.small);
+            g.setColour(juce::Colours::white);
+            g.drawText("WAV v", playlistBounds_.toNearestInt(), juce::Justification::centred);
+        }
 
         // M / S / Monitor / R / A / Trim / Target — bottom half
         drawMSRButton(g, muteBounds_, "M", track_.isMuted(), muteHover_, t.colors.warning);
@@ -763,6 +778,11 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (!track_.isMaster() && playlistBounds_.contains(e.position))
+        {
+            showPlaylistSelectorMenu();
+            return;
+        }
         if (!track_.isMaster() && automationBounds_.contains(e.position))
         {
             if (e.mods.isPopupMenu())
@@ -1129,6 +1149,51 @@ private:
             onSelectedWithModifiers(this, mods);
         else if (onSelected)
             onSelected(this);
+    }
+
+    void showPlaylistSelectorMenu()
+    {
+        juce::PopupMenu menu;
+        juce::Component::SafePointer<TrackRow> weakThis(this);
+        menu.addSectionHeader("Track View");
+        menu.addItem("Waveform", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onPlaylistStateChanged)
+                weakThis->onPlaylistStateChanged(weakThis->track_.getID());
+        });
+        menu.addItem("Playlists - Show Takes", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onOpenPlaylistView)
+                weakThis->onOpenPlaylistView(weakThis->track_.getID());
+        });
+        menu.addSeparator();
+        menu.addItem("+ New Playlist", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onCreatePlaylist)
+                weakThis->onCreatePlaylist(weakThis->track_.getID(), false);
+        });
+        menu.addItem("Duplicate Main Playlist", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onCreatePlaylist)
+                weakThis->onCreatePlaylist(weakThis->track_.getID(), true);
+        });
+        menu.addSeparator();
+        menu.addSectionHeader("Main Playlist");
+        for (const auto& playlist : track_.getPlaylists())
+        {
+            juce::PopupMenu::Item item(playlist.name);
+            item.isTicked = playlist.id == track_.getMainPlaylistId();
+            item.action = [weakThis, id = playlist.id]
+            {
+                if (weakThis && weakThis->track_.showPlaylistAsMain(id))
+                    if (weakThis->onPlaylistStateChanged)
+                        weakThis->onPlaylistStateChanged(weakThis->track_.getID());
+            };
+            menu.addItem(item);
+        }
+        menu.showMenuAsync(juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withTargetScreenArea(localAreaToGlobal(playlistBounds_.toNearestInt())));
     }
 
     void showContextMenu()
@@ -1589,6 +1654,7 @@ public:
     juce::Rectangle<float> automationTargetBounds_;
     float autoPulsePhase_ = 0.f;
     mutable juce::Rectangle<float> colorStripBounds_;
+    mutable juce::Rectangle<float> playlistBounds_;
 
     void drawMSRButton(juce::Graphics& g, const juce::Rectangle<float>& bounds,
                        const juce::String& text, bool isOn, bool hovered, juce::Colour color)
@@ -2555,6 +2621,9 @@ public:
     std::function<void(const TrackID&)>          onExclusiveMuteRequested;
     std::function<void(const TrackID&)>          onConvertFolderToTrackRequested;
     std::function<void(const TrackID&)>          onOpenPianoRollRequested;
+    std::function<void(const TrackID&)> onOpenPlaylistViewRequested;
+    std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
+    std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
     std::function<void(const TrackID&)>          onPreFaderToggleRequested;
     std::function<void(const TrackID&)>          onOpenInputTrimRequested;
     /** Returns the active hardware input channel names for per-track input selectors. */
@@ -3210,6 +3279,9 @@ private:
                 row->onToggleMute = [this](const TrackID& id) { if (onToggleMuteRequested) onToggleMuteRequested(id); };
                 row->onExclusiveMute = [this](const TrackID& id) { if (onExclusiveMuteRequested) onExclusiveMuteRequested(id); };
                 row->onOpenPianoRoll = [this](const TrackID& id) { if (onOpenPianoRollRequested) onOpenPianoRollRequested(id); };
+                row->onOpenPlaylistView = [this](const TrackID& id) { if (onOpenPlaylistViewRequested) onOpenPlaylistViewRequested(id); };
+                row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
+                row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
                 row->onPreFaderToggleRequested = [this](const TrackID& id) { if (onPreFaderToggleRequested) onPreFaderToggleRequested(id); };
                 row->onOpenInputTrim = [this](const TrackID& id) { if (onOpenInputTrimRequested) onOpenInputTrimRequested(id); };
                 row->onGetHardwareInputNames = [this]() -> juce::StringArray
