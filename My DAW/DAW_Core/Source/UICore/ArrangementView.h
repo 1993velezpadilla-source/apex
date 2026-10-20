@@ -1330,10 +1330,13 @@ void trackPropertyChanged(Track* track) override
             clip->setPlaylistAudible(clip->getPlaylistId()
                                    == track->getPlaybackPlaylistId());
 
-        // Inactive playlist clips stay in the canonical ClipManager/project
-        // (and keep their WAV references), but must NOT become editable or
-        // visible clips on the active Main arranger lane.
-        if (!clip->isPlaylistAudible())
+        // Pro Tools semantics: SOLO an alternate lane changes AUDIO only.
+        // The main arranger waveform must remain the selected Main playlist,
+        // never disappear or switch to the soloed alternate take.
+        const auto* owningTrack = trackManager_.getTrack(clip->getTrackID());
+        const bool belongsToDisplayedMain = owningTrack == nullptr
+            || clip->getPlaylistId() == owningTrack->getMainPlaylistId();
+        if (!belongsToDisplayedMain)
         {
             const auto it = engineClipIdsToArrangementIds_.find(clip->getID());
             if (it != engineClipIdsToArrangementIds_.end())
