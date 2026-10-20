@@ -1982,15 +1982,27 @@ namespace ArrangementEditor
         auto* rendererPtr = renderer.get();
 
         // Snapshot of the clip when an edit begins — used to build the undo command.
-        auto preEdit = std::make_shared<std::optional<ArrangementClipModel>>();
+        auto preEdit = std::make_shared<std::vector<ArrangementClipModel>>();
 
         rendererPtr->onEditBegin = [this, clipUuid, preEdit]()
         {
+            preEdit->clear();
             if (auto* c = m_clipState.findClip(clipUuid))
-                *preEdit = *c;
+            {
+                preEdit->push_back(*c);
+                if (m_selection.isSelected(clipUuid))
+                {
+                    for (const auto& id : m_selection.getSelectedIds())
+                    {
+                        if (id == clipUuid) continue;
+                        if (auto* other = m_clipState.findClip(id))
+                            preEdit->push_back(*other);
+                    }
+                }
+            }
         };
 
-        rendererPtr->onEditLive = [this, clipUuid]()
+        rendererPtr->onEditLive = [this, clipUuid, preEdit]()
         {
             // Realtime feedback during drag: refresh model timestamps + engine sync
             // so the playback engine reflects the new length/fade/trim immediately.
@@ -2026,6 +2038,38 @@ namespace ArrangementEditor
                 }
 
                 refreshAutoCrossfadesForTrack(c->trackIndex);
+
+                // Apply the same raw mouse displacement to EVERY clip in the
+                // selection, against each clip's own drag-start geometry.
+                // Each source has independent trim bounds and source offsets.
+                if (preEdit->size() > 1)
+                {
+                    if (auto* anchor = findClipRendererFor(clipUuid))
+                    {
+                        const auto kind = anchor->getActiveGroupEditKind();
+                        const double dx = anchor->getEditDeltaSeconds();
+                        const bool stretch = anchor->isStretchEdgeEdit();
+                        if (kind != ClipGroupEditCore::Kind::None)
+                        {
+                            for (size_t i = 1; i < preEdit->size(); ++i)
+                            {
+                                const auto& original = (*preEdit)[i];
+                                if (auto* other = m_clipState.findClip(original.id))
+                                {
+                                    auto changed = ClipGroupEditCore::apply(original, kind, dx, stretch);
+                                    changed.bumpWaveformVisualVersion();
+                                    {
+                                        juce::ScopedValueSetter<bool> syncGuard(m_syncingArrangementToEngine, true);
+                                        m_clipState.updateClip(changed);
+                                        syncClipToEngine(changed);
+                                    }
+                                    refreshAutoCrossfadesForTrack(changed.trackIndex);
+                                    upsertClipRenderer(changed.id);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Re-position the renderer so trim/resize visually shrinks the
                 // clip box in realtime (matches Pro Tools / Logic / Live behavior).
@@ -2182,93 +2226,73 @@ namespace ArrangementEditor
                 togglePresetCurveVisibility(clip);
         };
 
-        rendererPtr->onClick = [this, clipUuid]()
+        rendererPtr->onClick = [this, clipUuid](juce::ModifierKeys mods)
         {
-            // Click = select. The renderer consumes the press for unselected
-            // clips (anti-accidental move), so the selection MUST happen here.
-            // onClick was never wired, which left every clip unclickable until
-            // the renderers stopped intercepting (i.e. the exact inverse of
-            // Free View Mode).
-            m_selection.selectClip(clipUuid);
+            // Ctrl adds/removes; plain click is ALWAYS an exclusive selection.
+            // Renderer consumes first tap for touch-safe anti-accidental edit.
+            if (mods.isCtrlDown())
+                m_selection.toggleClip(clipUuid);
+            else
+                m_selection.setSelection({clipUuid});
             for (auto& r : m_clipRenderers)
                 if (r != nullptr)
                     r->setSelected(m_selection.isSelected(r->getClipId()));
             repaint();
         };
 
-        rendererPtr->onEditCommit = [this, clipUuid, preEdit]()
+        rendererPtr->onEditCommit = [this, preEdit]()
         {
-            if (!preEdit->has_value()) return;
-            auto* c = m_clipState.findClip(clipUuid);
-            if (c == nullptr) return;
+            if (preEdit->empty()) return;
+            const std::vector<ArrangementClipModel> before = *preEdit;
+            preEdit->clear();
 
-            const ArrangementClipModel before = preEdit->value();
-            const ArrangementClipModel after  = *c;
-            preEdit->reset();
-
-            // Skip recording if nothing actually changed
-            if (before.length        == after.length &&
-                before.startTime     == after.startTime &&
-                before.sourceOffset  == after.sourceOffset &&
-                before.sourceStartSample == after.sourceStartSample &&
-                before.sourceEndSample   == after.sourceEndSample &&
-                before.timePitch.stretchRatio == after.timePitch.stretchRatio &&
-                before.fadeInLength  == after.fadeInLength &&
-                before.fadeOutLength == after.fadeOutLength &&
-                before.fadeInCurve   == after.fadeInCurve &&
-                before.fadeOutCurve  == after.fadeOutCurve)
+            std::vector<ArrangementClipModel> after;
+            after.reserve(before.size());
+            bool anyChanged = false;
+            for (const auto& old : before)
             {
-                return;
+                auto* current = m_clipState.findClip(old.id);
+                if (current == nullptr) return; // no partial transaction
+                after.push_back(*current);
+                const auto& now = after.back();
+                anyChanged = anyChanged ||
+                    old.startTime != now.startTime || old.length != now.length ||
+                    old.sourceOffset != now.sourceOffset ||
+                    old.sourceStartSample != now.sourceStartSample ||
+                    old.sourceEndSample != now.sourceEndSample ||
+                    old.timePitch.stretchRatio != now.timePitch.stretchRatio ||
+                    old.fadeInLength != now.fadeInLength ||
+                    old.fadeOutLength != now.fadeOutLength ||
+                    old.fadeInCurve != now.fadeInCurve ||
+                    old.fadeOutCurve != now.fadeOutCurve;
             }
+            if (!anyChanged) return;
 
-            // Automatic overlap crossfades are derived prepared state, not
-            // manual fade edits.  The old FadePatch path mutated neighbouring
-            // fade lengths here, which caused the same overlap to be applied
-            // once as a normal fade and again as the equal-power relationship.
-            // Keep the persisted/user-configured fade fields untouched and
-            // republish only the geometry-derived crossfade plan.
-            const ArrangementClipModel afterFinal = after;
-            refreshAutoCrossfadesForTrack(afterFinal.trackIndex);
-
-            auto applyState = [this, clipUuid](const ArrangementClipModel& s)
+            // One atomic entry in APEX's global history for the whole group.
+            // Playback, waveform and crossfades are restored on undo AND redo.
+            auto apply = [this](const std::vector<ArrangementClipModel>& states)
             {
-                if (auto* cc = m_clipState.findClip(clipUuid))
+                std::set<int> tracks;
                 {
-                    cc->startTime         = s.startTime;
-                    cc->length            = s.length;
-                    cc->sourceOffset      = s.sourceOffset;
-                    cc->sourceStartSample = s.sourceStartSample;
-                    cc->sourceEndSample   = s.sourceEndSample;
-                    cc->timePitch.stretchRatio = s.timePitch.stretchRatio;
-                    cc->fadeInLength      = s.fadeInLength;
-                    cc->fadeOutLength     = s.fadeOutLength;
-                    cc->fadeInCurve       = s.fadeInCurve;
-                    cc->fadeOutCurve      = s.fadeOutCurve;
-                    cc->bumpWaveformVisualVersion();
-                    // Guard the engine push so the re-entrant
-                    // mirrorEngineClipIntoArrangement() (fired by the engine
-                    // setters) cannot clobber the just-applied trim/stretch
-                    // state with a stale source window — same hazard as the
-                    // live-edit path.
                     juce::ScopedValueSetter<bool> syncGuard(m_syncingArrangementToEngine, true);
-                    m_clipState.updateClip(*cc);
-                    syncClipToEngine(*cc);
+                    for (const auto& original : states)
+                        if (auto* c = m_clipState.findClip(original.id))
+                        {
+                            *c = original;
+                            c->bumpWaveformVisualVersion();
+                            m_clipState.updateClip(*c);
+                            syncClipToEngine(*c);
+                            tracks.insert(c->trackIndex);
+                        }
                 }
-            };
-
-            const auto refreshAfter = [this, trackIndex = afterFinal.trackIndex]()
-            {
-                refreshAutoCrossfadesForTrack(trackIndex);
-            };
-            const auto refreshBefore = [this, trackIndex = before.trackIndex]()
-            {
-                refreshAutoCrossfadesForTrack(trackIndex);
+                for (int track : tracks) refreshAutoCrossfadesForTrack(track);
+                for (const auto& original : states) upsertClipRenderer(original.id);
             };
 
             m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
-                "Edit Clip",
-                [applyState, refreshAfter, afterFinal]() { applyState(afterFinal); refreshAfter(); },
-                [applyState, refreshBefore, before]()     { applyState(before);     refreshBefore(); },
+                before.size() > 1 ? "Edit Selected Clips" : "Edit Clip",
+                [apply, after]() { apply(after); },
+                [apply, before]() { apply(before); },
                 /*alreadyApplied*/ true));
         };
 
@@ -3075,10 +3099,11 @@ namespace ArrangementEditor
             {
                 m_selection.toggleClip(clip->id);
             }
-            else if (!m_selection.isSelected(clip->id))
+            else
             {
-                m_selection.deselectAll();
-                m_selection.selectClip(clip->id);
+                // Plain click NEVER accumulates selection, even if this clip
+                // was already one member of the previous selected group.
+                m_selection.setSelection({ clip->id });
             }
 
             // Begin drag — only on left button
