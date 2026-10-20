@@ -182,6 +182,23 @@ public:
     bool keyPressed(const juce::KeyPress& key) override
     {
         const auto mods = key.getModifiers();
+        if (key.getKeyCode() == juce::KeyPress::escapeKey)
+        {
+            if (selectionDragging_)
+                selectionDragging_ = false;
+            if (auto* track = tracks_.getTrack(trackId_))
+            {
+                if (track->getAuditionPlaylistId().isNotEmpty())
+                {
+                    track->soloPlaylistLane({});
+                    notifyMutation();
+                    return true;
+                }
+            }
+            // Escape leaves the clip and playlist metadata untouched.
+            if (onClose) onClose();
+            return true;
+        }
         if (mods.isShiftDown() && mods.isAltDown()
             && key.getKeyCode() == juce::KeyPress::upKey)
         {

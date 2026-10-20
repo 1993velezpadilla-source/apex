@@ -266,9 +266,36 @@ public:
             expect(DAW::LoopPlaylistTakePlanCore::make(
                 47999, 48000, 96000, 120000, true).empty());
             expect(DAW::LoopPlaylistTakePlanCore::make(
+                96000, 48000, 96000, 120000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
                 48000, 48000, 96000, 120000, false).empty());
             expect(DAW::LoopPlaylistTakePlanCore::make(
                 48000, 48000, 96000, 48000, true).empty());
+        }
+
+        beginTest("loop starts mid-cycle: first partial take stays in its correct position");
+        {
+            // Record starts at 1.25s of a [1s,2s) loop. First capture
+            // window is 0.75s at 1.25s, later passes restart at 1s.
+            const auto passes = DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 96000, true);
+            expectEquals((int)passes.size(), 3);
+            if (passes.size() == 3)
+            {
+                expectEquals((juce::int64)passes[0].timelineStart, (juce::int64)60000);
+                expectEquals((juce::int64)passes[0].sourceStart, (juce::int64)0);
+                expectEquals((juce::int64)passes[0].length, (juce::int64)36000);
+                expectEquals((juce::int64)passes[1].timelineStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[1].sourceStart, (juce::int64)36000);
+                expectEquals((juce::int64)passes[1].length, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].timelineStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].sourceStart, (juce::int64)84000);
+                expectEquals((juce::int64)passes[2].length, (juce::int64)12000);
+            }
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 36000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 0, true).empty());
         }
 
         beginTest("renamed legacy Main playlist name survives save and reopen");

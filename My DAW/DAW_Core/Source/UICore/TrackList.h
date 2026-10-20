@@ -88,6 +88,7 @@ public:
     std::function<void(const TrackID&, const juce::String&)> onRenameTrack;
     std::function<void(const TrackID&)> onOpenPianoRoll;
     std::function<void(const TrackID&)> onOpenPlaylistView;
+    std::function<void(const TrackID&)> onShowWaveformView;
     std::function<void(const TrackID&, bool)> onCreatePlaylist;
     std::function<void(const TrackID&)> onPlaylistStateChanged;
     std::function<bool()> onGetAutoLoopPlaylists;
@@ -1160,8 +1161,8 @@ private:
         menu.addSectionHeader("Track View");
         menu.addItem("Waveform", true, false, [weakThis]
         {
-            if (weakThis && weakThis->onPlaylistStateChanged)
-                weakThis->onPlaylistStateChanged(weakThis->track_.getID());
+            if (weakThis && weakThis->onShowWaveformView)
+                weakThis->onShowWaveformView(weakThis->track_.getID());
         });
         menu.addItem("Playlists - Show Takes", true, false, [weakThis]
         {
@@ -2632,6 +2633,7 @@ public:
     std::function<void(const TrackID&)>          onConvertFolderToTrackRequested;
     std::function<void(const TrackID&)>          onOpenPianoRollRequested;
     std::function<void(const TrackID&)> onOpenPlaylistViewRequested;
+    std::function<void(const TrackID&)> onShowWaveformViewRequested;
     std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
     std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
     std::function<bool()> onGetAutoLoopPlaylistsRequested;
@@ -3292,6 +3294,7 @@ private:
                 row->onExclusiveMute = [this](const TrackID& id) { if (onExclusiveMuteRequested) onExclusiveMuteRequested(id); };
                 row->onOpenPianoRoll = [this](const TrackID& id) { if (onOpenPianoRollRequested) onOpenPianoRollRequested(id); };
                 row->onOpenPlaylistView = [this](const TrackID& id) { if (onOpenPlaylistViewRequested) onOpenPlaylistViewRequested(id); };
+                row->onShowWaveformView = [this](const TrackID& id) { if (onShowWaveformViewRequested) onShowWaveformViewRequested(id); };
                 row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
                 row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
                 row->onGetAutoLoopPlaylists = [this] { return onGetAutoLoopPlaylistsRequested && onGetAutoLoopPlaylistsRequested(); };

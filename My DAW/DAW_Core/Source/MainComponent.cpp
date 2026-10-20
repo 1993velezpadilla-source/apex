@@ -1392,10 +1392,25 @@ MainComponent::MainComponent()
         playlistPanel_->toFront(true);
         resized();
     };
+    trackList_->onShowWaveformViewRequested = [this](const DAW::TrackID&)
+    {
+        // Waveform is a view switch, not a playlist mutation. Switching back
+        // closes the take-lane workspace without altering takes or audio.
+        if (playlistPanel_)
+            playlistPanel_->setVisible(false);
+        if (arrangement_)
+            arrangement_->requestClipRemirror();
+    };
     trackList_->onCreatePlaylistRequested = [this](const DAW::TrackID& trackId, bool duplicate)
     {
         if (!playlistPanel_) return;
+        if (appCore_.getRecordingEngine().isRecording()
+            || appCore_.getTransport().isRecording())
+            return;
         playlistPanel_->createForTrack(trackId, duplicate, appCore_.getCurrentSampleRate());
+        playlistPanel_->setVisible(true);
+        playlistPanel_->toFront(true);
+        resized();
     };
     trackList_->onGetAutoLoopPlaylistsRequested = [this]
     {

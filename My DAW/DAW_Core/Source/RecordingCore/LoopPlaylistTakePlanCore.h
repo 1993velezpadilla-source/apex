@@ -6,8 +6,9 @@ namespace DAW
 {
 // Computes clip-only references into ONE immutable recording WAV. Every pass
 // shares the original file: no rendering, deleting or overwriting media.
-// Deliberately refuses ambiguous pre-roll / punch positions rather than
-// silently slicing at the wrong sample boundary.
+// Accept starts anywhere INSIDE the loop, preserving the initial partial
+// pass at its original timeline offset. Refuse outside-loop pre-roll/punch
+// positions rather than silently mapping those samples to the wrong take.
 struct LoopPlaylistTakePlanCore final
 {
     struct Pass
@@ -23,23 +24,28 @@ struct LoopPlaylistTakePlanCore final
     {
         std::vector<Pass> passes;
         if (!automatic || loopStart < 0 || loopEnd <= loopStart
-            || recordTimelineStart != loopStart || capturedSamples <= 0)
+            || recordTimelineStart < loopStart
+            || recordTimelineStart >= loopEnd || capturedSamples <= 0)
             return passes;
         const int64_t loopLength = loopEnd - loopStart;
+        const int64_t firstPassLength = loopEnd - recordTimelineStart;
         // A solitary pass should behave exactly like a standard recording.
-        if (capturedSamples <= loopLength)
+        // Once a wrap occurs, the first take can be shorter than loopLength.
+        if (capturedSamples <= firstPassLength)
             return passes;
-        const int64_t count = (capturedSamples / loopLength)
-            + ((capturedSamples % loopLength) != 0 ? 1 : 0);
-        // A corrupt clock or nonsensical loop range must not allocate
-        // unbounded playlist state during project finalization.
-        if (count > 1024)
+        const int64_t remaining = capturedSamples - firstPassLength;
+        const int64_t additional = (remaining / loopLength)
+            + ((remaining % loopLength) != 0 ? 1 : 0);
+        // Limit clip and playlist allocation even on corrupted transport data.
+        if (additional >= 1024)
             return passes;
-        passes.reserve((size_t)count);
-        for (int64_t offset = 0; offset < capturedSamples; offset += loopLength)
+        passes.reserve((size_t)(1 + additional));
+        passes.push_back({ 0, firstPassLength, recordTimelineStart });
+        for (int64_t offset = firstPassLength; offset < capturedSamples;)
         {
-            passes.push_back({ offset, juce::jmin(loopLength, capturedSamples - offset),
-                               loopStart });
+            const int64_t length = juce::jmin(loopLength, capturedSamples - offset);
+            passes.push_back({ offset, length, loopStart });
+            offset += length;
         }
         return passes;
     }
