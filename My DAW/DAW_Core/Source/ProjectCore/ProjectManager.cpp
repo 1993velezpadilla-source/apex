@@ -492,15 +492,25 @@ bool ProjectManager::resetToRawMix(juce::File& backupFile, juce::String& error)
     if (!restoreFromState(resetState))
     {
         const auto resetError = lastLoadError_;
-        // Best effort to recover the exact captured state if one of the
-        // restore stages failed. The backup is still available on disk.
+        // The admission gate rejected the operation BEFORE any source,
+        // routing or clip mutation. Never attempt a second restore while
+        // recording/exports are active; the live project is unchanged.
+        if (resetError.startsWith("Project restore rejected while"))
+        {
+            error = resetError + ". Original project left untouched.";
+            return false;
+        }
+
+        // A stage failed after mutation started. Recover from the exact
+        // pre-reset snapshot; the disk backup remains the last-resort copy.
         if (restoreFromState(before))
-            error = "Reset could not be completed; original mix restored. "
-                    + resetError;
+        {
+            error = "Reset failed; previous mix recovered. " + resetError;
+            listeners_.call([](Listener& listener) { listener.projectLoaded(); });
+        }
         else
-            error = "Reset failed and runtime restoration was unsuccessful. "
-                    "Reopen the protected backup file before continuing. "
-                    + resetError;
+            error = "Reset failed and runtime recovery failed. Reopen the "
+                    "protected pre-reset .dawproj backup. " + resetError;
         return false;
     }
 
