@@ -247,6 +247,17 @@ public:
             expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
         }
 
+        beginTest("renamed legacy Main playlist name survives save and reopen");
+        {
+            DAW::Track original("lead-rename", "Lead");
+            expect(original.renamePlaylist("main", "Lead - original take"));
+            const auto serialized = original.getState();
+            DAW::Track restored("lead-rename", "Restored");
+            restored.restoreState(serialized);
+            expectEquals(restored.getPlaylists().front().id, juce::String("main"));
+            expectEquals(restored.getPlaylists().front().name, juce::String("Lead - original take"));
+        }
+
         beginTest("comp slice preserves selected timeline and source offsets at 48k to 44.1k");
         {
             juce::ValueTree input("AudioClip");
@@ -268,6 +279,23 @@ public:
             expectEquals((juce::int64)excerpt.getProperty("sourceEndSample"), (juce::int64)44100);
             expect(!DAW::TrackPlaylistCompCore::sliceAudioClip(
                 input, 47000, 96000, 48000.0, 44100.0).isValid());
+
+            // When slicing the middle of a take, an unrelated old edge fade
+            // must not appear on the newly promoted phrase.
+            expectEquals((juce::int64)excerpt.getProperty("fadeInLength"), (juce::int64)0);
+            expectEquals((juce::int64)excerpt.getProperty("fadeOutLength"), (juce::int64)0);
+            auto left = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 48000, 72000, 48000.0, 44100.0);
+            expectEquals((juce::int64)left.getProperty("fadeInLength"), (juce::int64)480);
+            expectEquals((juce::int64)left.getProperty("fadeOutLength"), (juce::int64)0);
+            auto right = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 96000, 144000, 48000.0, 44100.0);
+            expectEquals((juce::int64)right.getProperty("fadeInLength"), (juce::int64)0);
+            expectEquals((juce::int64)right.getProperty("fadeOutLength"), (juce::int64)480);
+            auto whole = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 48000, 144000, 48000.0, 44100.0);
+            expectEquals((juce::int64)whole.getProperty("fadeInLength"), (juce::int64)480);
+            expectEquals((juce::int64)whole.getProperty("fadeOutLength"), (juce::int64)480);
         }
     }
 };

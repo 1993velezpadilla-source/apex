@@ -405,34 +405,48 @@ private:
         auto* track = tracks_.getTrack(trackId_);
         if (!track) return;
         juce::PopupMenu menu;
+        // PopupMenu callbacks run asynchronously, and the user can close the
+        // project (destroying the panel) while a menu is still open.
+        juce::Component::SafePointer<TrackPlaylistPanel> weakThis(this);
         const bool isMain = id == track->getMainPlaylistId();
         const bool isTarget = id == track->getTargetPlaylistId();
-        menu.addItem("Show as Main", true, isMain, [this, id]
+        menu.addItem("Show as Main", true, isMain, [weakThis, id]
         {
-            if (auto* t = tracks_.getTrack(trackId_))
-                if (modificationAllowed() && t->showPlaylistAsMain(id)) notifyMutation();
+            if (!weakThis) return;
+            if (auto* t = weakThis->tracks_.getTrack(weakThis->trackId_))
+                if (weakThis->modificationAllowed() && t->showPlaylistAsMain(id))
+                    weakThis->notifyMutation();
         });
-        menu.addItem("Set as Comp Target", true, isTarget, [this, id]
+        menu.addItem("Set as Comp Target", true, isTarget, [weakThis, id]
         {
-            if (auto* t = tracks_.getTrack(trackId_))
-                if (modificationAllowed() && t->setTargetPlaylist(id)) notifyMutation();
+            if (!weakThis) return;
+            if (auto* t = weakThis->tracks_.getTrack(weakThis->trackId_))
+                if (weakThis->modificationAllowed() && t->setTargetPlaylist(id))
+                    weakThis->notifyMutation();
         });
-        menu.addItem("Solo / Audition", true, false, [this, id]
+        menu.addItem("Solo / Audition", true, false, [weakThis, id]
         {
-            if (auto* t = tracks_.getTrack(trackId_))
-                if (t->soloPlaylistLane(id)) notifyMutation();
+            if (!weakThis) return;
+            if (auto* t = weakThis->tracks_.getTrack(weakThis->trackId_))
+                if (t->soloPlaylistLane(id)) weakThis->notifyMutation();
         });
         menu.addSeparator();
         menu.addItem("Promote Highlight to Target", id != track->getTargetPlaylistId()
             && selectedPlaylist_ == id && selectionEnd_ > selectionStart_,
-            false, [this, id]
+            false, [weakThis, id]
             {
-                selectedPlaylist_ = id;
-                promote();
+                if (!weakThis) return;
+                weakThis->selectedPlaylist_ = id;
+                weakThis->promote();
             });
-        menu.addItem("New Playlist", true, false, [this] { createNew(false); });
-        menu.addItem("Duplicate Main", true, false, [this] { createNew(true); });
-        juce::Component::SafePointer<TrackPlaylistPanel> weakThis(this);
+        menu.addItem("New Playlist", true, false, [weakThis]
+        {
+            if (weakThis) weakThis->createNew(false);
+        });
+        menu.addItem("Duplicate Main", true, false, [weakThis]
+        {
+            if (weakThis) weakThis->createNew(true);
+        });
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
             [weakThis](int) { juce::ignoreUnused(weakThis); });
     }

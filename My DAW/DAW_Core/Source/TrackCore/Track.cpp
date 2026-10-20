@@ -226,7 +226,17 @@ void Track::restoreState(const juce::ValueTree& state)
         {
             auto p = stored.getChild(i);
             auto id = p.getProperty("id").toString();
-            if (!p.hasType("Playlist") || id.isEmpty() || known.contains(id))
+            if (!p.hasType("Playlist") || id.isEmpty())
+                continue;
+            // "main" is pre-seeded for legacy sessions, but its user-visible
+            // name still needs to round-trip through a modern project save.
+            if (id == "main")
+            {
+                const auto storedName = p.getProperty("name", "Main").toString().trim();
+                playlists_.front().name = storedName.isNotEmpty() ? storedName : juce::String("Main");
+                continue;
+            }
+            if (known.contains(id))
                 continue;
             playlists_.push_back({ id, p.getProperty("name", id).toString() });
             known.add(id);

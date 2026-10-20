@@ -67,12 +67,18 @@ struct TrackPlaylistCompCore final
             result.setProperty("sourceEndSample",
                                (juce::int64)juce::jmin(sourceEnd, first + sourceLength), nullptr);
         }
-        result.setProperty("fadeInLength",
-            (juce::int64)juce::jmin((int64_t)original.getProperty("fadeInLength", (juce::int64)0),
-                                   (int64_t)(end - begin)), nullptr);
-        result.setProperty("fadeOutLength",
-            (juce::int64)juce::jmin((int64_t)original.getProperty("fadeOutLength", (juce::int64)0),
-                                   (int64_t)(end - begin)), nullptr);
+        // Fades belong to the original *clip edges*, not every new cut.
+        // Reapplying the original fade-in/out to interior promoted phrases
+        // audibly ducks the start/end of each comp fragment.
+        const int64_t keptLength = end - begin;
+        const int64_t fadeIn = begin == base
+            ? juce::jmin(keptLength, juce::jmax<int64_t>(0,
+                (int64_t)original.getProperty("fadeInLength", (juce::int64)0))) : 0;
+        const int64_t fadeOut = end == base + length
+            ? juce::jmin(keptLength, juce::jmax<int64_t>(0,
+                (int64_t)original.getProperty("fadeOutLength", (juce::int64)0))) : 0;
+        result.setProperty("fadeInLength", (juce::int64)fadeIn, nullptr);
+        result.setProperty("fadeOutLength", (juce::int64)fadeOut, nullptr);
         return result;
     }
 };
@@ -114,9 +120,7 @@ public:
                 && clip->getEndPosition() > start_)
                 before_.push_back(clip->getState());
         }
-        after_ = before_;
         // Remove only selected target interval; preserve unselected parts.
-        after_.clear();
         for (const auto& old : before_)
         {
             const auto a = (int64_t)old.getProperty("startPosition", (juce::int64)0);
