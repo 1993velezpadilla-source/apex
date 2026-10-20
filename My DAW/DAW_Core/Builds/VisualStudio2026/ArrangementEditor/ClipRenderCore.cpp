@@ -215,8 +215,8 @@ namespace ArrangementEditor
         drawClipHandles(g);
         drawVolumeButton(g);
         drawMuteButton(g);
-        if (m_showTrimTooltip)
-            drawTrimTooltip(g);
+        // Drag status is now painted in the pinned ruler by ArrangementViewCore.
+        // Never cover waveform pixels with the opaque trim/fade information.
 
         // Layer 12: Automation-active dim overlay
         if (m_automationActive)
