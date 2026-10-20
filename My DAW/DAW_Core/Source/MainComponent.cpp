@@ -1386,32 +1386,34 @@ MainComponent::MainComponent()
     // plugins/fader/routing; only clip playlist membership changes.
     trackList_->onOpenPlaylistViewRequested = [this](const DAW::TrackID& trackId)
     {
-        if (!playlistPanel_) return;
+        if (!playlistPanel_ || !arrangement_) return;
+        // A Pro Tools-style unfolded take view lives UNDER its parent track
+        // in the SAME scrolling arranger, not a detached floating panel.
         playlistPanel_->showForTrack(trackId, appCore_.getCurrentSampleRate());
-        playlistPanel_->setVisible(true);
-        playlistPanel_->toFront(true);
+        arrangement_->setInlinePlaylistPanel(playlistPanel_.get(), trackId);
         resized();
+        syncPlaylistTimeline();
     };
     trackList_->onShowWaveformViewRequested = [this](const DAW::TrackID&)
     {
         // Waveform is a view switch, not a playlist mutation. Switching back
         // closes the take-lane workspace without altering takes or audio.
-        if (playlistPanel_)
-            playlistPanel_->setVisible(false);
-        if (arrangement_)
-            arrangement_->requestClipRemirror();
+        if (arrangement_ && arrangement_->isInlinePlaylistPanelActive())
+            arrangement_->setInlinePlaylistPanel(nullptr, {});
+        if (playlistPanel_) playlistPanel_->setVisible(false);
+        if (arrangement_) arrangement_->requestClipRemirror();
         resized();
     };
     trackList_->onCreatePlaylistRequested = [this](const DAW::TrackID& trackId, bool duplicate)
     {
-        if (!playlistPanel_) return;
+        if (!playlistPanel_ || !arrangement_) return;
         if (appCore_.getRecordingEngine().isRecording()
             || appCore_.getTransport().isRecording())
             return;
         playlistPanel_->createForTrack(trackId, duplicate, appCore_.getCurrentSampleRate());
-        playlistPanel_->setVisible(true);
-        playlistPanel_->toFront(true);
+        arrangement_->setInlinePlaylistPanel(playlistPanel_.get(), trackId);
         resized();
+        syncPlaylistTimeline();
     };
     trackList_->onGetAutoLoopPlaylistsRequested = [this]
     {
@@ -2073,13 +2075,19 @@ MainComponent::MainComponent()
     };
     playlistPanel_->onChanged = [this]
     {
-        if (arrangement_) arrangement_->requestClipRemirror();
+        if (arrangement_)
+        {
+            arrangement_->requestClipRemirror();
+            if (arrangement_->isInlinePlaylistPanelActive())
+                arrangement_->refreshInlinePlaylistLayout();
+        }
         appCore_.getProjectManager().markDirty();
         if (trackList_) trackList_->repaint();
         syncPlaylistTimeline();
     };
     playlistPanel_->onClose = [this]
     {
+        if (arrangement_) arrangement_->setInlinePlaylistPanel(nullptr, {});
         if (playlistPanel_) playlistPanel_->setVisible(false);
         resized();
     };
@@ -2087,6 +2095,17 @@ MainComponent::MainComponent()
     {
         applyTimelineZoom(false, zoomIn);
         syncPlaylistTimeline();
+    };
+    playlistPanel_->onTimelineVerticalScroll = [this](float delta)
+    {
+        if (!timelineViewport_ || !arrangement_) return;
+        const auto pos = timelineViewport_->getViewPosition();
+        const int maxY = juce::jmax(0,
+            arrangement_->getHeight() - timelineViewport_->getViewHeight());
+        const int y = juce::jlimit(0, maxY,
+            pos.y - juce::roundToInt(delta * 120.f));
+        timelineViewport_->setViewPosition(pos.x, y);
+        if (trackList_) trackList_->setScrollOffset(y);
     };
     playlistPanel_->onTimelinePan = [this](float delta)
     {
@@ -2220,7 +2239,12 @@ MainComponent::MainComponent()
 
         auto n = juce::jmin(trackList_->getNumRows(), arrangement_->getNumLanes() - masterOffset);
         for (int i = 0; i < n; ++i)
+        {
             trackList_->setRowHeight(i, arrangement_->getLaneHeight(i + masterOffset));
+            if (auto* row = trackList_->getRow(i))
+                row->setPlaylistExtraHeight(
+                    arrangement_->getInlinePlaylistExtraForLane(i + masterOffset));
+        }
         trackList_->resized();
         trackList_->repaint();
     };
@@ -5235,6 +5259,7 @@ void MainComponent::resetCurrentProjectToRawMix()
 void MainComponent::projectLoaded()
 {
     // A playlist panel may refer to clips/tracks from the previous session.
+    if (arrangement_) arrangement_->setInlinePlaylistPanel(nullptr, {});
     if (playlistPanel_) playlistPanel_->setVisible(false);
     // Restore/New Project starts a new autosave recovery session. Completions
     // from the previous project must not clear this session's pending edits.
@@ -8669,6 +8694,7 @@ void MainComponent::resized()
     // of covering existing tracks in a floating modal-ish rectangle.
     juce::Rectangle<int> playlistDock;
     if (playlistPanel_ && playlistPanel_->isVisible()
+        && playlistPanel_->getParentComponent() == this
         && timelineWindow_ && timelineWindow_->isVisible()
         && content.getHeight() >= 380)
     {
@@ -8700,7 +8726,7 @@ void MainComponent::resized()
         }
     }
 
-    if (playlistPanel_)
+    if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
     {
         if (!playlistDock.isEmpty())
         {
