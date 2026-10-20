@@ -35,10 +35,14 @@ struct ProjectResetStateCore
                 child.setProperty("soloed", false, nullptr);
                 child.setProperty("armed", false, nullptr);
                 child.setProperty("monitoring", false, nullptr);
+                child.setProperty("recordMode", 0, nullptr);
                 child.setProperty("polarityInverted", false, nullptr);
                 child.setProperty("inputTrimDb", 0.0f, nullptr);
                 child.setProperty("automationVisible", false, nullptr);
                 child.setProperty("automationMuted", false, nullptr);
+                child.setProperty("automationSnapToGrid", true, nullptr);
+                child.setProperty("automationParameterOrder",
+                                  "track.volume|track.pan|track.tape_stop", nullptr);
                 child.setProperty("automationActiveParameter", "track.volume", nullptr);
                 child.setProperty("hasPlugins", false, nullptr);
             }
@@ -73,6 +77,7 @@ struct ProjectResetStateCore
                     // The default user mode is derived from existing project
                     // defaults at runtime; 0 (Resample) with 0 pitch is unity.
                     clip.setProperty("timePitchMode", 0, nullptr);
+                    clip.removeProperty("timePitchQuality", nullptr);
 
                     // Clip Vocal Tune plugin and preset state is not a raw take.
                     for (int j = clip.getNumChildren(); --j >= 0;)
@@ -101,6 +106,18 @@ struct ProjectResetStateCore
             project.removeChild(apex, nullptr);
         project.addChild(juce::ValueTree("Automation"), -1, nullptr);
 
+        // Remove effect sends and orphaned plugin sidechain cables without
+        // disturbing direct bus/folder/master routes or track topology.
+        if (auto routing = project.getChildWithName("RoutingGraph"); routing.isValid())
+            if (auto connections = routing.getChildWithName("Connections"); connections.isValid())
+                for (int i = connections.getNumChildren(); --i >= 0;)
+                {
+                    auto connection = connections.getChild(i);
+                    const int type = (int)connection.getProperty("type", 0);
+                    if (type == 1 || type == 2 || type == 3) // Send, PreSend, Sidechain
+                        connections.removeChild(i, nullptr);
+                }
+
         // Default master processing: no limiting/makeup adjustment.
         if (auto master = project.getChildWithName("MasterPhaseD"); master.isValid())
         {
@@ -117,9 +134,9 @@ struct ProjectResetStateCore
             transport.setProperty("looping", false, nullptr);
         }
 
-        // Preserve routing graph, track hierarchy, source paths, device
-        // configuration, markers and project key. These form the session's
-        // skeleton; deleting them could disconnect raw vocals from master.
+        // Preserve primary direct and folder routing, track hierarchy,
+        // source paths, device configuration, markers and project key.
+        // Only effect sends/sidechains are removed for a truly dry session.
         return project;
     }
 };
