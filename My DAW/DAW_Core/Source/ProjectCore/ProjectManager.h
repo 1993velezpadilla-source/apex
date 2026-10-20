@@ -9,6 +9,7 @@
 #include "../StateCore/ApplicationState.h"
 #include "FilePublicationCore.h"
 #include "ProjectUpgradeReport.h"
+#include "../TrackPlaylistCore/TrackPlaylistCore.h"
 
 // Forward declarations
 namespace DAW {
@@ -66,6 +67,8 @@ public:
     bool         isDirty() const               { return dirty_; }
     bool         isUserDirty() const noexcept  { return dirty_; }
     void         markDirty()                   { dirty_ = true; }
+    TrackPlaylistCore& getTrackPlaylists() noexcept { return playlists_; }
+    const TrackPlaylistCore& getTrackPlaylists() const noexcept { return playlists_; }
 
     /** Optional message-thread-only augmentation for one manual-save snapshot.
      *  The callback runs after the complete state is built and before XML is
@@ -329,6 +332,7 @@ public:
 
 private:
     Subsystems   subs_;
+    TrackPlaylistCore playlists_;
     juce::File   projectFile_;
     ProjectUpgradeReport lastUpgradeReport_;
     juce::String projectName_       = "Untitled";
