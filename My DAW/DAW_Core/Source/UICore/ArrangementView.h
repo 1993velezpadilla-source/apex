@@ -19,6 +19,7 @@
 #include "../PluginHostCore/PluginChainCore.h"
 #include "../RoutingCore/RoutingGraph.h"
 #include "../RecordingCore/RecordingOverlayStateCore.h"
+#include "TrackPlaylistPanel.h"
 #include "../../Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h"
 
 namespace DAW {
@@ -171,6 +172,7 @@ public:
             defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
             if (core_ != nullptr)
                 core_->resized();
+            updateInlinePlaylistBounds();
             if (onLaneLayoutChanged)
                 onLaneLayoutChanged();
             repaint();
@@ -302,17 +304,70 @@ trackManager_.addListener(this);
         mirrorAllEngineClipsIntoArrangement();
     }
 
+    void setInlinePlaylistPanel(TrackPlaylistPanel* panel, const TrackID& trackId)
+    {
+        if (panel == nullptr || trackId.isEmpty())
+        {
+            if (inlinePlaylistPanel_ != nullptr)
+                inlinePlaylistPanel_->setVisible(false);
+            inlinePlaylistPanel_ = nullptr;
+            inlinePlaylistTrackId_.clear();
+            if (core_ != nullptr)
+                core_->setInlinePlaylistExpansion({}, 0);
+            if (onLaneLayoutChanged) onLaneLayoutChanged();
+            return;
+        }
+        if (trackManager_.getTrack(trackId) == nullptr)
+            return;
+        inlinePlaylistPanel_ = panel;
+        inlinePlaylistTrackId_ = trackId;
+        panel->setInlineMode(true);
+        // Transfer the existing editor rather than duplicating its waveform
+        // caches or the authoritative comp-command implementations.
+        addAndMakeVisible(panel);
+        refreshInlinePlaylistLayout();
+    }
+
+    void refreshInlinePlaylistLayout()
+    {
+        if (!inlinePlaylistPanel_ || inlinePlaylistTrackId_.isEmpty() || !core_)
+            return;
+        auto* track = trackManager_.getTrack(inlinePlaylistTrackId_);
+        if (!track)
+        {
+            setInlinePlaylistPanel(nullptr, {});
+            return;
+        }
+        // One native main band + N alternate take bands in this SAME track.
+        const int extras = juce::jmin(128, juce::jmax(0,
+            (int)track->getPlaylists().size() - 1)) * 66;
+        core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
+        updateInlinePlaylistBounds();
+        if (onLaneLayoutChanged) onLaneLayoutChanged();
+    }
+
+    bool isInlinePlaylistPanelActive() const noexcept
+    {
+        return inlinePlaylistPanel_ != nullptr && inlinePlaylistPanel_->isVisible();
+    }
+
+    int getInlinePlaylistExtraForLane(int index) const noexcept
+    {
+        return core_ ? core_->getInlinePlaylistExtraForLane(index) : 0;
+    }
+
     int getNumLanes() const noexcept
     {
         return trackManager_.getNumTracks() + (trackManager_.hasMasterTrack() ? 1 : 0);
     }
 
-    int getLaneHeight(int /*index*/) const
+    int getLaneHeight(int index) const
     {
-        // ArrangementViewCore is the single source of truth for lane height.
-        // All lanes share one track height so headers and timeline always agree.
+        // Keep physical track/automation band height uniform while allowing
+        // an unfolded track to own additional virtual playlist rows.
         if (core_ != nullptr)
-            return juce::jmax(24, (int)core_->getZoom().getTrackHeightPx());
+            return juce::jmax(24, (int)core_->getZoom().getTrackHeightPx())
+                   + core_->getInlinePlaylistExtraForLane(index);
         return defaultLaneHeight_;
     }
 
@@ -725,6 +780,7 @@ trackManager_.addListener(this);
     {
         if (core_ != nullptr)
             core_->setBounds(getLocalBounds());
+        updateInlinePlaylistBounds();
         updateImportOverlayBounds();
     }
 
@@ -754,6 +810,29 @@ std::function<void()> onQuickAccessSidePanel;
                        SamplePosition)> onPreparedAudioImport;
 
 private:
+    void updateInlinePlaylistBounds()
+    {
+        if (!inlinePlaylistPanel_ || !core_ || inlinePlaylistTrackId_.isEmpty())
+            return;
+        const auto owningBand = core_->getTrackLaneBounds(inlinePlaylistTrackId_);
+        const int laneIndex = trackManager_.getTrackIndex(inlinePlaylistTrackId_)
+            + (trackManager_.hasMasterTrack() ? 1 : 0);
+        const int extras = core_->getInlinePlaylistExtraForLane(laneIndex);
+        if (owningBand.isEmpty() || extras <= 0)
+        {
+            inlinePlaylistPanel_->setVisible(false);
+            return;
+        }
+        // Panel plot begins at x=161, with its parent at x=-161: clip
+        // boundaries line up pixel-for-pixel with the main track waveform.
+        inlinePlaylistPanel_->setBounds(-161, owningBand.getBottom(),
+                                        getWidth() + 161, extras);
+        inlinePlaylistPanel_->setVisible(true);
+        inlinePlaylistPanel_->toFront(false);
+        if (importOverlay_.isVisible())
+            importOverlay_.toFront(false);
+    }
+
     bool isSupportedAudioFileForDrop(const juce::File& file) const
     {
         if (!file.existsAsFile())
@@ -1545,6 +1624,8 @@ void trackPropertyChanged(Track* track) override
     AutomationManagerCore* automation_ = nullptr;
 
     std::unique_ptr<ArrangementEditor::ArrangementViewCore> core_;
+    TrackPlaylistPanel* inlinePlaylistPanel_ = nullptr; // owned by MainComponent
+    TrackID inlinePlaylistTrackId_;
     ImportOverlayComponent importOverlay_;
     std::function<PluginChainCore*(const TrackID&)> pluginChainProvider_;
     std::function<RoutingGraph*()> routingGraphProvider_;
