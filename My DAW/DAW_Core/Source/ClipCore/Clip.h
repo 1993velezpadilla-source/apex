@@ -108,6 +108,23 @@ public:
     SamplePosition getSourceOffset() const { return sourceOffset_; }
     void setSourceOffset(SamplePosition offset);
     
+    // Playlist assignment survives sessions. RT only reads the atomic visibility
+    // flag, never a mutable String or a project-structure lock.
+    juce::String getPlaylistId() const { return playlistId_; }
+    void setPlaylistId(const juce::String& id)
+    {
+        playlistId_ = id.isEmpty() ? juce::String("main") : id;
+        notifyPropertyChanged();
+    }
+    bool isPlaylistAudible() const noexcept
+    {
+        return playlistAudible_.load(std::memory_order_acquire);
+    }
+    void setPlaylistAudible(bool visible) noexcept
+    {
+        playlistAudible_.store(visible, std::memory_order_release);
+    }
+
     // Serialization
     virtual juce::ValueTree getState() const;
     virtual void restoreState(const juce::ValueTree& state);
@@ -142,6 +159,8 @@ private:
     juce::Colour color_;
     bool selected_{false};
     bool muted_{false};
+    juce::String playlistId_ { "main" };
+    std::atomic<bool> playlistAudible_ { true };
     SamplePosition sourceOffset_{0};
     
     juce::ListenerList<Listener> listeners_;
