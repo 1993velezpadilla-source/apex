@@ -23,6 +23,11 @@ public:
         addAndMakeVisible(newButton_);
         addAndMakeVisible(duplicateButton_);
         addAndMakeVisible(closeButton_);
+        addChildComponent(renameEditor_);
+        renameEditor_.setSelectAllWhenFocused(true);
+        renameEditor_.onReturnKey = [this] { commitRename(); };
+        renameEditor_.onEscapeKey = [this] { renamePlaylistId_.clear(); renameEditor_.setVisible(false); };
+        renameEditor_.onFocusLost = [this] { commitRename(); };
         newButton_.setButtonText("+ New Playlist");
         duplicateButton_.setButtonText("Duplicate Main");
         closeButton_.setButtonText("Close");
@@ -164,6 +169,45 @@ public:
         newButton_.setBounds(getWidth() - 367, 12, 125, 28);
     }
 
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        const auto mods = key.getModifiers();
+        if (mods.isShiftDown() && mods.isAltDown()
+            && key.getKeyCode() == juce::KeyPress::upKey)
+        {
+            promote(); // Windows Pro Tools comp-promotion shortcut
+            return true;
+        }
+        if (mods.isShiftDown() && !mods.isAltDown()
+            && key.getKeyCode() == 'S' && selectedPlaylist_.isNotEmpty())
+        {
+            if (auto* track = tracks_.getTrack(trackId_))
+                if (track->soloPlaylistLane(selectedPlaylist_))
+                    notifyMutation();
+            return true;
+        }
+        if (mods.isShiftDown() && key.getKeyCode() == juce::KeyPress::rightKey)
+        {
+            if (auto* track = tracks_.getTrack(trackId_))
+                if (track->showPlaylistAsMain(track->getTargetPlaylistId()))
+                    notifyMutation();
+            return true;
+        }
+        return false;
+    }
+
+    void mouseDoubleClick(const juce::MouseEvent& e) override
+    {
+        if (e.x < 12 || e.x > 126 || e.y < 81) return;
+        auto* track = tracks_.getTrack(trackId_);
+        if (!track) return;
+        const int i = (e.y + scrollY_ - 81) / 66;
+        if (i < 0 || i >= (int)track->getPlaylists().size()) return;
+        beginRename(track->getPlaylists()[(size_t)i].id,
+                    track->getPlaylists()[(size_t)i].name,
+                    81 + i * 66 - scrollY_);
+    }
+
     void mouseDown(const juce::MouseEvent& e) override
     {
         auto* track = tracks_.getTrack(trackId_);
@@ -226,6 +270,28 @@ public:
     }
 
 private:
+    void beginRename(const juce::String& id, const juce::String& name, int y)
+    {
+        if (!modificationAllowed()) return;
+        renamePlaylistId_ = id;
+        renameEditor_.setText(name, false);
+        renameEditor_.setBounds(18, y + 4, 106, 28);
+        renameEditor_.setVisible(true);
+        renameEditor_.toFront(true);
+        renameEditor_.grabKeyboardFocus();
+        renameEditor_.selectAll();
+    }
+    void commitRename()
+    {
+        if (renamePlaylistId_.isEmpty()) return;
+        const auto id = renamePlaylistId_;
+        renamePlaylistId_.clear();
+        const auto text = renameEditor_.getText().trim();
+        renameEditor_.setVisible(false);
+        if (auto* track = tracks_.getTrack(trackId_))
+            if (track->renamePlaylist(id, text))
+                notifyMutation();
+    }
     void recalculateView()
     {
         viewStart_ = 0;
@@ -381,6 +447,8 @@ private:
     bool selectionDragging_ = false;
     int scrollY_ = 0;
     juce::TextButton newButton_, duplicateButton_, closeButton_;
+    juce::TextEditor renameEditor_;
+    juce::String renamePlaylistId_;
     juce::AudioFormatManager formats_;
     juce::AudioThumbnailCache thumbnailCache_ { 128 };
     std::map<juce::String, std::unique_ptr<juce::AudioThumbnail>> thumbs_;
