@@ -9,6 +9,7 @@
 #include "ArrangementClipModel.h"
 #include "ClipWaveformCacheCore.h"
 #include "ClipFadeRenderCore.h"
+#include "ClipGroupEditCore.h"
 #include "ArrangementZoomCore.h"
 #include "PianoRollButtonCore.h"
 #include <memory>
@@ -104,7 +105,7 @@ namespace ArrangementEditor
         void mouseDoubleClick(const juce::MouseEvent& e) override;
 
         // Callbacks
-    std::function<void()> onClick;
+    std::function<void(juce::ModifierKeys)> onClick;
     std::function<void()> onDoubleClick;
     std::function<void()> onPianoRollClick;
     // Clicking the pitch/stretch/mode badges toggles the preset curve
@@ -147,6 +148,20 @@ namespace ArrangementEditor
         // the mouse, even if its bounds temporarily leave the viewport.
         bool isEditGestureActive() const noexcept { return m_activeZone != Zone::None; }
 
+        ClipGroupEditCore::Kind getActiveGroupEditKind() const noexcept
+        {
+            switch (m_activeZone)
+            {
+                case Zone::FadeIn:     return ClipGroupEditCore::Kind::FadeIn;
+                case Zone::FadeOut:    return ClipGroupEditCore::Kind::FadeOut;
+                case Zone::ResizeLeft: return ClipGroupEditCore::Kind::TrimLeft;
+                case Zone::ResizeRight:return ClipGroupEditCore::Kind::TrimRight;
+                default:               return ClipGroupEditCore::Kind::None;
+            }
+        }
+        double getEditDeltaSeconds() const noexcept { return m_lastEditDeltaSeconds; }
+        bool isStretchEdgeEdit() const noexcept { return m_dragStretchMode; }
+
         // Waveform loading state — for batch loading optimization
         bool needsWaveformUpdate() const { return m_waveformNeedsUpdate; }
         void markWaveformUpdateComplete() { m_waveformNeedsUpdate = false; }
@@ -183,6 +198,7 @@ namespace ArrangementEditor
         juce::Rectangle<int> presetBadgeHitArea_;
 
         // Drag state for handle interaction
+        double  m_lastEditDeltaSeconds = 0.0;
         double  m_dragStartX        = 0.0; // mouse SCREEN x at mouseDown (frame-stable)
         double  m_dragStartLength   = 0.0;
         double  m_dragStartFadeIn   = 0.0;
