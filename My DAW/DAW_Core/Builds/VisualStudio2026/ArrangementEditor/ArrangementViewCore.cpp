@@ -1615,7 +1615,9 @@ namespace ArrangementEditor
         // Full-value trim/fade feedback lives in the PINNED RULER, never
         // inside a clip: the waveform remains completely unobstructed, even
         // during a multi-clip left/right edge gesture.
-        if (m_activeClipEditInfo.isNotEmpty())
+        const juce::String rulerEditReadout = m_activeClipEditInfo.isNotEmpty()
+            ? m_activeClipEditInfo : m_voiceCleanerStatus;
+        if (rulerEditReadout.isNotEmpty())
         {
             const auto rulerBounds = m_ruler.getBounds();
             if (rulerBounds.getWidth() >= 90)
@@ -1624,7 +1626,7 @@ namespace ArrangementEditor
                 g.setFont(font);
                 const int maxWidth = juce::jmax(36, rulerBounds.getWidth() - 16);
                 const int width = juce::jmin(maxWidth,
-                    g.getCurrentFont().getStringWidth(m_activeClipEditInfo) + 20);
+                    g.getCurrentFont().getStringWidth(rulerEditReadout) + 20);
                 const juce::Rectangle<int> pill(
                     rulerBounds.getRight() - width - 8, rulerBounds.getY() + 5,
                     width, juce::jmin(22, rulerBounds.getHeight() - 8));
@@ -1633,7 +1635,7 @@ namespace ArrangementEditor
                 g.setColour(juce::Colour(0xFF419BFF));
                 g.drawRoundedRectangle(pill.toFloat().reduced(0.5f), 4.0f, 1.0f);
                 g.setColour(juce::Colours::white);
-                g.drawFittedText(m_activeClipEditInfo, pill.reduced(9, 1),
+                g.drawFittedText(rulerEditReadout, pill.reduced(9, 1),
                                  juce::Justification::centred, 1, 0.8f);
             }
         }
@@ -4526,6 +4528,9 @@ namespace ArrangementEditor
         // Guard against reentrant click/undo while worker prepares the batch.
         // No blocking file I/O, FFT or allocations enter the audio callback.
         m_voiceCleanerBusy = true;
+        m_voiceCleanerStatus = "VOICE CLEANER  |  Processing "
+            + juce::String((int)items->size()) + " clip(s)";
+        repaint(m_ruler.getBounds());
         appendDebugLog("[VoiceCleaner] rendering " + juce::String((int)items->size())
             + " audio clip(s), sources untouched");
 
@@ -4535,6 +4540,7 @@ namespace ArrangementEditor
             juce::String error;
             try
             {
+                int rendered = 0;
                 for (auto& item : *items)
                 {
                     item.result = VoiceCleanerOfflineCore::render(item.original,
@@ -4544,6 +4550,15 @@ namespace ArrangementEditor
                         error = item.original.getFileName() + ": " + item.result.error;
                         break;
                     }
+                    const int done = ++rendered;
+                    const int total = (int)items->size();
+                    juce::MessageManager::callAsync([weakOwner, done, total]()
+                    {
+                        if (weakOwner == nullptr || !weakOwner->m_voiceCleanerBusy) return;
+                        weakOwner->m_voiceCleanerStatus = "VOICE CLEANER  |  Processed "
+                            + juce::String(done) + " / " + juce::String(total);
+                        weakOwner->repaint(weakOwner->m_ruler.getBounds());
+                    });
                 }
             }
             catch (const std::exception& e)
@@ -4566,6 +4581,8 @@ namespace ArrangementEditor
                 if (weakOwner == nullptr) return;
                 auto& view = *weakOwner.getComponent();
                 view.m_voiceCleanerBusy = false;
+                view.m_voiceCleanerStatus.clear();
+                view.repaint(view.m_ruler.getBounds());
                 if (error.isNotEmpty())
                 {
                     view.appendDebugLog("[VoiceCleaner] failed: " + error);
