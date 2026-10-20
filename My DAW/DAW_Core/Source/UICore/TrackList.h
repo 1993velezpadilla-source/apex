@@ -129,6 +129,19 @@ public:
 
     int getDesiredHeight() const { return height_; }
     void setDesiredHeight(int h) { height_ = h; }
+    void setPlaylistExtraHeight(int extra)
+    {
+        const int safe = juce::jmax(0, extra);
+        if (playlistExtraHeight_ == safe) return;
+        playlistExtraHeight_ = safe;
+        resized();
+        repaint();
+    }
+    int getPlaylistExtraHeight() const noexcept { return playlistExtraHeight_; }
+    int getPrimaryHeight() const noexcept
+    {
+        return juce::jmax(24, getHeight() - playlistExtraHeight_);
+    }
 
     void setSelected(bool s)
     {
@@ -321,9 +334,13 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const int primaryHeight = getPrimaryHeight();
+        // Real mixer/track controls cannot extend over virtual take rows.
+        g.saveState();
+        g.reduceClipRegion(0, 0, getWidth(), primaryHeight);
         auto& t = Theme::getInstance();
         auto& a = t.apex;
-        auto bounds = getLocalBounds().toFloat();
+        auto bounds = getLocalBounds().toFloat().withHeight((float)primaryHeight);
         const bool master = track_.isMaster();
 
         // Background — tracks stay dark; identity comes from thin accents.
@@ -616,10 +633,45 @@ public:
 
         // Row frame so headers read as their own panel — restrained hairline.
         {
-            auto r = getLocalBounds().toFloat().reduced(1.5f);
+            auto r = bounds.reduced(1.5f);
             g.setColour(master ? a.color.magenta.withAlpha(0.38f)
                                : a.color.borderSoftA.withAlpha(0.55f));
             g.drawRect(r, master ? 1.5f : 1.0f);
+        }
+        g.restoreState();
+        if (playlistExtraHeight_ > 0 && !master)
+        {
+            int takeIndex = 0;
+            for (const auto& lane : track_.getPlaylists())
+            {
+                if (lane.id == track_.getMainPlaylistId()) continue;
+                const int y = primaryHeight + takeIndex++ * 66;
+                if (y >= getHeight()) break;
+                const bool audition = lane.id == track_.getAuditionPlaylistId();
+                const bool target = lane.id == track_.getTargetPlaylistId();
+                g.setColour(juce::Colour(target ? 0xff221c34 : 0xff171723));
+                g.fillRect(0, y, getWidth(), 66);
+                g.setColour(juce::Colour(target ? 0xffb985ff : 0xff3c374e));
+                g.drawHorizontalLine(y + 65, 0.f, (float)getWidth());
+                g.setFont(juce::Font(12.f, juce::Font::bold));
+                g.setColour(juce::Colours::white);
+                g.drawFittedText(lane.name, 18, y + 8,
+                    juce::jmax(40, getWidth() - 70), 23,
+                    juce::Justification::centredLeft, 1);
+                g.setColour(target ? juce::Colour(0xffb985ff)
+                                   : juce::Colour(0xff8b85ab));
+                g.setFont(juce::Font(10.f));
+                g.drawText(target ? "COMP TARGET" : "TAKE",
+                    18, y + 34, juce::jmax(0, getWidth() - 70), 18,
+                    juce::Justification::centredLeft);
+                const auto solo = juce::Rectangle<int>(getWidth() - 42, y + 19, 29, 25);
+                g.setColour(audition ? juce::Colour(0xff33db9a)
+                                     : juce::Colour(0xff423959));
+                g.fillRoundedRectangle(solo.toFloat(), 4.f);
+                g.setColour(audition ? juce::Colours::black : juce::Colours::white);
+                g.setFont(juce::Font(12.f, juce::Font::bold));
+                g.drawText("S", solo, juce::Justification::centred);
+            }
         }
     }
 
@@ -654,7 +706,7 @@ public:
     
     void resized() override
     {
-        auto bounds = getLocalBounds().toFloat();
+        auto bounds = getLocalBounds().toFloat().withHeight((float)getPrimaryHeight());
         if (indentLevel_ > 0 && !track_.isMaster())
             bounds.removeFromLeft((float)(indentLevel_ * kIndentStepPx));
         bounds.removeFromLeft(6.0f); // colour strip
@@ -781,6 +833,48 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (!track_.isMaster() && playlistExtraHeight_ > 0
+            && e.y >= getPrimaryHeight() && e.y < getHeight())
+        {
+            int alt = (e.y - getPrimaryHeight()) / 66;
+            for (const auto& lane : track_.getPlaylists())
+            {
+                if (lane.id == track_.getMainPlaylistId()) continue;
+                if (alt-- != 0) continue;
+                const auto id = lane.id;
+                if (e.mods.isPopupMenu())
+                {
+                    juce::PopupMenu menu;
+                    juce::Component::SafePointer<TrackRow> weak(this);
+                    menu.addItem("Show as Main", true, id == track_.getMainPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.showPlaylistAsMain(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.addItem("Set Comp Target", true, id == track_.getTargetPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.setTargetPlaylist(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.addItem("Audition / Solo", true, id == track_.getAuditionPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.soloPlaylistLane(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+                }
+                else if (e.x >= getWidth() - 48)
+                {
+                    if (track_.soloPlaylistLane(id) && onPlaylistStateChanged)
+                        onPlaylistStateChanged(track_.getID());
+                }
+                return; // virtual takes have no track reorder/resize
+            }
+            return;
+        }
         if (!track_.isMaster() && playlistBounds_.contains(e.position))
         {
             showPlaylistSelectorMenu();
@@ -1007,6 +1101,7 @@ public:
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
     {
+        if (e.y >= getPrimaryHeight()) return;
         // Double-click on name area — always renames this single track only.
         // Multi-track bulk rename is in the right-click context menu.
         auto nameArea = getLocalBounds().toFloat();
@@ -1602,6 +1697,7 @@ public:
     enum class DragMode { None, Resize, PendingReorder, Reorder };
     DragMode dragMode_ = DragMode::None;
     int  height_      = 72;
+    int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
     bool selected_    = false;
     bool resizeHover_ = false;
@@ -3243,7 +3339,8 @@ private:
                 {
                     r->setDesiredHeight(r->getDesiredHeight() + delta);
                     if (onRowHeightChanged)
-                        onRowHeightChanged(visibleRowIndex, r->getDesiredHeight());
+                        onRowHeightChanged(visibleRowIndex,
+                            r->getDesiredHeight() - r->getPlaylistExtraHeight());
                     resized();
                 };
                 row->onFolderToggled = [this](const TrackID& fid, bool expanded)
