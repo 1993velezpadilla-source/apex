@@ -49,6 +49,7 @@ public:
         selectionStart_ = selectionEnd_ = -1;
         thumbs_.clear();
         recalculateView();
+        preflightThumbnails();
         repaint();
     }
 
@@ -254,17 +255,27 @@ private:
             (double)(x - region.getX()) / juce::jmax(1, region.getWidth()));
         return (int64_t)std::llround(viewStart_ + (viewEnd_ - viewStart_) * fraction);
     }
-    juce::AudioThumbnail* getThumbnail(const juce::File& source)
+    // Building thumbnails can open WAV files. Only call it on the message
+    // thread when the visible lane set changes, never from paint().
+    void preflightThumbnails()
     {
-        if (!source.existsAsFile()) return nullptr;
-        const auto key = source.getFullPathName();
-        auto it = thumbs_.find(key);
-        if (it != thumbs_.end()) return it->second.get();
-        auto thumbnail = std::make_unique<juce::AudioThumbnail>(512, formats_, thumbnailCache_);
-        thumbnail->setSource(new juce::FileInputSource(source));
-        auto* result = thumbnail.get();
-        thumbs_.emplace(key, std::move(thumbnail));
-        return result;
+        for (auto* clip : clips_.getClipsOnTrack(trackId_))
+        {
+            auto* audio = dynamic_cast<AudioClip*>(clip);
+            if (!audio) continue;
+            const auto source = audio->getSourceFile();
+            const auto key = source.getFullPathName();
+            if (!source.existsAsFile() || thumbs_.find(key) != thumbs_.end())
+                continue;
+            auto thumbnail = std::make_unique<juce::AudioThumbnail>(512, formats_, thumbnailCache_);
+            thumbnail->setSource(new juce::FileInputSource(source));
+            thumbs_.emplace(key, std::move(thumbnail));
+        }
+    }
+    juce::AudioThumbnail* getThumbnail(const juce::File& source) const
+    {
+        auto it = thumbs_.find(source.getFullPathName());
+        return it == thumbs_.end() ? nullptr : it->second.get();
     }
     bool modificationAllowed()
     {
@@ -278,6 +289,7 @@ private:
     {
         TrackPlaylistCompCore::publishPlaybackVisibility(tracks_, clips_);
         recalculateView();
+        preflightThumbnails();
         if (onChanged) onChanged();
         repaint();
     }
