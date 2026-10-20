@@ -250,9 +250,14 @@ public:
 
         recordStartPos_ = transport_->getPosition();
         const auto currentLoop = transport_->getLoopRange();
+        // Allow capture anywhere inside the loop. The pass planner places
+        // the initial partial take at the actual start, with subsequent
+        // complete passes aligned to loopStart. Starts outside the loop are
+        // intentionally excluded (punch-in/preroll needs a separate plan).
         const bool canSplitLoop = autoLoopPlaylists_ && transport_->isLooping()
-            && recordStartPos_ == currentLoop.first
-            && currentLoop.second > currentLoop.first;
+            && currentLoop.second > currentLoop.first
+            && recordStartPos_ >= currentLoop.first
+            && recordStartPos_ < currentLoop.second;
         recordLoopStart_ = canSplitLoop ? currentLoop.first : 0;
         recordLoopEnd_ = canSplitLoop ? currentLoop.second : 0;
         recordLoopAuto_ = canSplitLoop;
