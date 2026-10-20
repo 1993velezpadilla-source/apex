@@ -105,14 +105,16 @@ public:
             if(editor)
             {
                 expectEquals(editor->getWidth(),1040);
-                expectEquals(editor->getHeight(),380);
+                expectEquals(editor->getHeight(),780);
+                expectEquals(editor->getWidth()*3,editor->getHeight()*4,
+                             "Opto 2A initial editor is 4:3");
                 expect(editor->getNumChildComponents()>=10,
                        "Gain/Peak/VU selector/Limit/Power/parallel/key/color controls");
                 // JUCE 8 defaults to GPU-backed Direct2D native images on Windows.
                 // Headless GitHub runner has no render peer; queued GPU draw
-                // commands produced a fully transparent 1040x380 PNG.
+                // commands produced a fully transparent 1040x780 PNG.
                 // Force CPU-backed image for deterministic screenshot tests.
-                juce::Image screenshot(juce::Image::ARGB,1040,380,true,
+                juce::Image screenshot(juce::Image::ARGB,1040,780,true,
                                         juce::SoftwareImageType{});
                 juce::Graphics graphics(screenshot);
                 // This editor is deliberately NOT attached to a desktop
@@ -135,17 +137,37 @@ public:
                         static_cast<float>(area.getX()), static_cast<float>(area.getY())));
                     child->paint(graphics);
                 }
-                const auto metal=screenshot.getPixelAt(195,148);
-                const auto lcd=screenshot.getPixelAt(512,110);
-                const auto strip=screenshot.getPixelAt(25,344);
+                // The original 1040x380 analogue face is centred (200 px
+                // top offset), never nonuniformly stretched to fill 4:3.
+                const auto metal=screenshot.getPixelAt(195,348);
+                const auto lcd=screenshot.getPixelAt(512,310);
+                const auto strip=screenshot.getPixelAt(25,544);
                 expect(metal.getBrightness()>0.32f,"rack must have silver metal chassis");
                 expect(lcd.getRed()>lcd.getBlue(),"VU meter must have amber glass");
                 expect(strip.getBrightness()<0.30f,"APEX extra controls remain separate");
+                const auto countEyePink=[&screenshot](juce::Rectangle<int> bounds)
+                {
+                    int pixels=0;
+                    for (int y=bounds.getY();y<bounds.getBottom();++y)
+                        for (int x=bounds.getX();x<bounds.getRight();++x)
+                        {
+                            const auto c=screenshot.getPixelAt(x,y);
+                            if (c.getRed()>90
+                                && c.getRed()>c.getGreen()*1.4f
+                                && c.getBlue()>c.getGreen()*1.1f)
+                                ++pixels;
+                        }
+                    return pixels;
+                };
+                expect(countEyePink({143,492,128,38})>15,
+                       "canonical magenta eye visible beside bottom APEX wordmark");
+                expectEquals(countEyePink({852,248,130,45}),0,
+                             "VU selector's former eye-overlay area stays clean");
                 const auto screenshots=juce::File::getCurrentWorkingDirectory()
                     .getChildFile("evidence").getChildFile("opto2a_gui");
                 if(screenshots.createDirectory().wasOk())
                 {
-                    const auto name=screenshots.getChildFile("apex_opto2a_reference_face_1040x380.png");
+                    const auto name=screenshots.getChildFile("apex_opto2a_reference_face_1040x780_eye_footer.png");
                     auto stream=name.createOutputStream();
                     if(stream!=nullptr)
                     {
@@ -155,8 +177,9 @@ public:
                         stream->flush();
                     }
                 }
-                editor->setSize(780,330);
+                editor->setSize(780,585);
                 expectEquals(editor->getWidth(),780);
+                expectEquals(editor->getHeight(),585);
                 expect(editor->getNumChildComponents()>=10,"responsive resize keeps real controls");
 
                 beginTest("Six touch-friendly rotary knobs expose live values while dragging");
@@ -207,7 +230,7 @@ public:
                         expect(readout->isVisible(),
                                "keep last value visible briefly after finger release");
                     }
-                    editor->setSize(700,285);
+                    editor->setSize(700,525);
                     juce::Slider* gain=nullptr;
                     for(int n=0;n<editor->getNumChildComponents();++n)
                     {
