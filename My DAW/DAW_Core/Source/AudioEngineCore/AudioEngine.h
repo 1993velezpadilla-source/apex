@@ -2651,7 +2651,7 @@ private:
                 clips_->getClipsOnTrack(track->getID(), clipsOnTrackScratch);
                 for (auto* clip : clipsOnTrackScratch)
                 {
-                    if (clip->isMuted()) continue;
+                    if (clip->isMuted() || !clip->isPlaylistAudible()) continue;
                     if (isPlaying)
                         renderClip(clip, position, numSamples, automationSnap);
                 }
@@ -2734,7 +2734,7 @@ private:
                     clips_->getClipsOnTrack(track->getID(), patternClipScratch);
                     for (auto* clip : patternClipScratch)
                     {
-                        if (clip->isMuted()) continue;
+                        if (clip->isMuted() || !clip->isPlaylistAudible()) continue;
                         if (clip->getType() != ClipType::Pattern) continue;
 
                         auto* patternClip = static_cast<DAW::PatternClip*>(clip);
@@ -3366,7 +3366,7 @@ private:
                     clips_->getClipsOnTrack(track->getID(), clipsOnTrackScratch);
                     for (auto* clip : clipsOnTrackScratch)
                     {
-                        if (clip->isMuted()) continue;
+                        if (clip->isMuted() || !clip->isPlaylistAudible()) continue;
                         if (isPlaying) renderClip(clip, position, numSamples);
                     }
                 }
