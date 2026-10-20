@@ -350,6 +350,8 @@ private:
     /** Opens an old project, runs the full repair chain, saves it back with a
      *  timestamped backup and shows exactly what was upgraded. */
     void upgradeProjectFile(const juce::File& file);
+    void confirmResetProjectMix();
+    void resetProjectMix();
     int getEnabledAudioInputChannelCount() const;
     bool ensureInputChannelsActive(const char* stage);
     void inputWatchdogTick();
