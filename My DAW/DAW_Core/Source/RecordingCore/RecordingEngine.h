@@ -6,6 +6,8 @@
 #include "../AudioEngineCore/AudioFileManager.h"
 #include "RecordingDiskWriterCore.h"
 #include "RecordingClipFinalizerCore.h"
+#include "LoopPlaylistTakePlanCore.h"
+#include "../TrackCore/TrackPlaylistCompCore.h"
 #include "RecordingInputValidityCore.h"
 #include "RecordingLifecycleStateCore.h"
 #include "RecordingWriterStateCore.h"
@@ -164,6 +166,11 @@ public:
 
     int getRecordingBitDepth() const noexcept { return recordingBitDepth_; }
 
+    // Pro Tools-style Operation > Recording preference. Only the message
+    // thread changes this; each recording freezes its own setting/range.
+    bool getAutoLoopPlaylists() const noexcept { return autoLoopPlaylists_; }
+    void setAutoLoopPlaylists(bool enabled) noexcept { autoLoopPlaylists_ = enabled; }
+
     void setRecordingFinalizedCallback(std::function<void()> callback)
     {
         recordingFinalizedCallback_ = std::move(callback);
@@ -242,6 +249,13 @@ public:
         }
 
         recordStartPos_ = transport_->getPosition();
+        const auto currentLoop = transport_->getLoopRange();
+        const bool canSplitLoop = autoLoopPlaylists_ && transport_->isLooping()
+            && recordStartPos_ == currentLoop.first
+            && currentLoop.second > currentLoop.first;
+        recordLoopStart_ = canSplitLoop ? currentLoop.first : 0;
+        recordLoopEnd_ = canSplitLoop ? currentLoop.second : 0;
+        recordLoopAuto_ = canSplitLoop;
 
         auto recordDir = projectDir_.exists()
             ? projectDir_.getChildFile("Recordings")
@@ -694,6 +708,9 @@ private:
             req.trackManager   = tracks_;
             req.audioFiles     = audioFiles_;
             req.sampleRate     = sampleRate_;
+            req.loopStart      = recordLoopStart_;
+            req.loopEnd        = recordLoopEnd_;
+            req.autoLoopPlaylists = recordLoopAuto_;
             finalizeRequests.push_back(req);
         }
 
@@ -768,15 +785,53 @@ private:
 
             for (const auto& req : *requestsForMessageThread)
             {
-                if (auto* clip = RecordingClipFinalizerCore::finalize(req))
+                const auto passPlan = LoopPlaylistTakePlanCore::make(
+                    req.startPosition, req.loopStart, req.loopEnd,
+                    req.samplesWritten, req.autoLoopPlaylists);
+                auto registerTake = [&takes, &req](AudioClip* clip)
                 {
+                    if (!clip) return;
                     RecordAudioTakeCommand::Take take;
                     take.state      = clip->getState();
                     take.sourceFile = req.outputFile;
                     take.currentId  = clip->getID();
                     takes.push_back(std::move(take));
+                };
+                if (passPlan.empty() || tracks_ == nullptr)
+                {
+                    registerTake(RecordingClipFinalizerCore::finalize(req));
+                    continue;
+                }
+
+                // No destructive overwrite: every loop iteration owns a
+                // distinct playlist, with the last pass shown as Main.
+                // Segment start/end are SOURCE sample coordinates into the
+                // full WAV while their placement is the SAME loop timeline.
+                auto* track = tracks_->getTrack(req.trackId);
+                if (!track)
+                {
+                    registerTake(RecordingClipFinalizerCore::finalize(req));
+                    continue;
+                }
+                ClipID firstSourceId;
+                for (const auto& pass : passPlan)
+                {
+                    auto part = req;
+                    part.startPosition = pass.timelineStart;
+                    part.samplesWritten = (int)pass.length;
+                    part.sourceWindowEnabled = true;
+                    part.sourceStartSample = pass.sourceStart;
+                    part.sourceEndSample = pass.sourceStart + pass.length;
+                    part.playlistId = track->createPlaylist();
+                    part.shareExistingAudioClipId = firstSourceId;
+                    auto* clip = RecordingClipFinalizerCore::finalize(part);
+                    if (clip != nullptr && firstSourceId.isEmpty())
+                        firstSourceId = clip->getID();
+                    registerTake(clip);
                 }
             }
+            if (tracks_ != nullptr && clips_ != nullptr)
+                TrackPlaylistCompCore::publishPlaybackVisibility(*tracks_, *clips_);
 
             if (!takes.empty() && clips_ != nullptr)
                 CommandManager::getInstance().execute(
@@ -1013,6 +1068,9 @@ private:
 
     std::vector<std::unique_ptr<TrackRecording>> activeRecordings_;
     SamplePosition recordStartPos_ = 0;
+    bool autoLoopPlaylists_ = true;
+    bool recordLoopAuto_ = false;
+    SamplePosition recordLoopStart_ = 0, recordLoopEnd_ = 0;
     juce::AudioBuffer<float> printBuffer_;   // scratch for printing track FX (audio thread)
     std::atomic<bool> recording_{false};
     std::atomic<bool> stopping_{false};

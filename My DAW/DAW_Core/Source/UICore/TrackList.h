@@ -90,6 +90,8 @@ public:
     std::function<void(const TrackID&)> onOpenPlaylistView;
     std::function<void(const TrackID&, bool)> onCreatePlaylist;
     std::function<void(const TrackID&)> onPlaylistStateChanged;
+    std::function<bool()> onGetAutoLoopPlaylists;
+    std::function<void(bool)> onSetAutoLoopPlaylists;
     std::function<void(const TrackID&)> onPreFaderToggleRequested;
     std::function<void(const TrackID&)> onOpenInputTrim;
     std::function<void(const TrackID&)> onConvertFolderToTrack;
@@ -1177,6 +1179,14 @@ private:
             if (weakThis && weakThis->onCreatePlaylist)
                 weakThis->onCreatePlaylist(weakThis->track_.getID(), true);
         });
+        menu.addSeparator();
+        const bool autoLoop = onGetAutoLoopPlaylists && onGetAutoLoopPlaylists();
+        menu.addItem("Auto-create Playlists on Loop Record", true, autoLoop,
+            [weakThis, autoLoop]
+            {
+                if (weakThis && weakThis->onSetAutoLoopPlaylists)
+                    weakThis->onSetAutoLoopPlaylists(!autoLoop);
+            });
         menu.addSeparator();
         menu.addSectionHeader("Main Playlist");
         for (const auto& playlist : track_.getPlaylists())
@@ -2624,6 +2634,8 @@ public:
     std::function<void(const TrackID&)> onOpenPlaylistViewRequested;
     std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
     std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
+    std::function<bool()> onGetAutoLoopPlaylistsRequested;
+    std::function<void(bool)> onSetAutoLoopPlaylistsRequested;
     std::function<void(const TrackID&)>          onPreFaderToggleRequested;
     std::function<void(const TrackID&)>          onOpenInputTrimRequested;
     /** Returns the active hardware input channel names for per-track input selectors. */
@@ -3282,6 +3294,8 @@ private:
                 row->onOpenPlaylistView = [this](const TrackID& id) { if (onOpenPlaylistViewRequested) onOpenPlaylistViewRequested(id); };
                 row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
                 row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
+                row->onGetAutoLoopPlaylists = [this] { return onGetAutoLoopPlaylistsRequested && onGetAutoLoopPlaylistsRequested(); };
+                row->onSetAutoLoopPlaylists = [this](bool enabled) { if (onSetAutoLoopPlaylistsRequested) onSetAutoLoopPlaylistsRequested(enabled); };
                 row->onPreFaderToggleRequested = [this](const TrackID& id) { if (onPreFaderToggleRequested) onPreFaderToggleRequested(id); };
                 row->onOpenInputTrim = [this](const TrackID& id) { if (onOpenInputTrimRequested) onOpenInputTrimRequested(id); };
                 row->onGetHardwareInputNames = [this]() -> juce::StringArray

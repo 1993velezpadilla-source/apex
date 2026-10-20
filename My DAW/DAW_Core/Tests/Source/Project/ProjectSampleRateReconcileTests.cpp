@@ -2,6 +2,7 @@
 #include "../../../Source/ProjectCore/ProjectSampleRateReconcileCore.h"
 #include "../../../Source/MidiCore/MidiClip.h"
 #include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
+#include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
 #include <cmath>
 
 namespace R = DAW::ProjectSampleRateReconcile;
@@ -245,6 +246,29 @@ public:
             expectEquals(copy.getMainPlaylistId(), vocal->getMainPlaylistId());
             expectEquals(copy.getPlaylists().size(), vocal->getPlaylists().size());
             expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
+        }
+
+        beginTest("loop pass planner splits one recorded WAV into aligned lanes");
+        {
+            auto passes = DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 120000, true);
+            expectEquals((int)passes.size(), 3);
+            if (passes.size() == 3)
+            {
+                expectEquals((juce::int64)passes[0].sourceStart, (juce::int64)0);
+                expectEquals((juce::int64)passes[0].length, (juce::int64)48000);
+                expectEquals((juce::int64)passes[1].sourceStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].sourceStart, (juce::int64)96000);
+                expectEquals((juce::int64)passes[2].length, (juce::int64)24000);
+                for (const auto& pass : passes)
+                    expectEquals((juce::int64)pass.timelineStart, (juce::int64)48000);
+            }
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                47999, 48000, 96000, 120000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 120000, false).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 48000, true).empty());
         }
 
         beginTest("renamed legacy Main playlist name survives save and reopen");

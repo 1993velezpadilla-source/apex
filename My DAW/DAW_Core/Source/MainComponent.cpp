@@ -1397,6 +1397,15 @@ MainComponent::MainComponent()
         if (!playlistPanel_) return;
         playlistPanel_->createForTrack(trackId, duplicate, appCore_.getCurrentSampleRate());
     };
+    trackList_->onGetAutoLoopPlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoLoopPlaylists();
+    };
+    trackList_->onSetAutoLoopPlaylistsRequested = [this](bool enabled)
+    {
+        if (!appCore_.getRecordingEngine().isRecording())
+            appCore_.getRecordingEngine().setAutoLoopPlaylists(enabled);
+    };
     trackList_->onPlaylistStateChangedRequested = [this](const DAW::TrackID&)
     {
         DAW::TrackPlaylistCompCore::publishPlaybackVisibility(
