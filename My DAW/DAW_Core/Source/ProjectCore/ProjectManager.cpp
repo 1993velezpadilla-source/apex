@@ -179,6 +179,7 @@ bool ProjectManager::buildState(juce::ValueTree& state,
         state.addChild(clipsState, -1, nullptr);
     }
     if (subs_.markers)    state.addChild(subs_.markers->getState().createCopy(), -1, nullptr);
+    state.addChild(playlists_.getState(), -1, nullptr);
     if (subs_.routing)    state.addChild(subs_.routing->getState().createCopy(), -1, nullptr);
     if (subs_.faderRange) state.addChild(subs_.faderRange->toValueTree().createCopy(), -1, nullptr);
     if (subs_.appState)   state.addChild(subs_.appState->getState().createCopy(), -1, nullptr);
@@ -347,6 +348,7 @@ bool ProjectManager::newProject()
         projectStateUsable_ = false;
         try
         {
+            playlists_.clear();
             if (subs_.folderBus) subs_.folderBus->clear();
             if (subs_.tracks)    subs_.tracks->deleteAllTracks();
             if (subs_.clips)     subs_.clips->deleteAllClips();
@@ -665,6 +667,9 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
             recordFailure("Clips", "unknown exception");
         }
     }
+    // Takes are restored before the UI receives projectLoaded(). Inactive
+    // takes do not create audio graph clips or extra mixer strips.
+    playlists_.restoreState(state.getChildWithName("TrackPlaylists"));
     if (subs_.markers)
     {
         try {
