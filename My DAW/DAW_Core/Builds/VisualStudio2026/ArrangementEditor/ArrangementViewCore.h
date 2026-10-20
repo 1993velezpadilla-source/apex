@@ -11,6 +11,7 @@
 #include "ArrangementSelectionCore.h"
 #include "ArrangementZoomCore.h"
 #include "ArrangementUndoCore.h"
+#include <optional>
 #include "EditorToolCore.h"
 #include "EditorToolSelectorCore.h"
 #include "ArrangementToolbarCore.h"
@@ -390,7 +391,7 @@ namespace ArrangementEditor
         ArrangementSelectionCore m_selection;
         // Plain click on an already-selected member of a group collapses it
         // only on mouse release. A real drag must preserve the whole group.
-        juce::Uuid m_pendingExclusiveOnRelease;
+        std::optional<juce::Uuid> m_pendingExclusiveOnRelease;
         ArrangementZoomCore      m_zoom;
         ArrangementUndoCore      m_undo;
         EditorToolState          m_toolState;
