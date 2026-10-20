@@ -5144,6 +5144,13 @@ void MainComponent::resetProjectMix()
 {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     auto& project = appCore_.getProjectManager();
+    if (appCore_.getTransport().isRecording())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::WarningIcon, "Reset Project",
+            "Stop recording before resetting project effects. Nothing changed.");
+        return;
+    }
 
     // Capture the real complete project including opaque plugin states.
     // If any plugin refuses serialization, fail closed: never erase it.
@@ -5229,6 +5236,17 @@ void MainComponent::resetProjectMix()
     if (!project.restoreFromState(after))
     {
         const juce::String resetError = project.getLastLoadError();
+        // The realtime gate can reject before the first mutation (e.g.
+        // finalizing a recording or export). Do not reload the old project in
+        // that case: the user's live session has not changed.
+        if (project.isProjectStateUsable())
+        {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Reset Project — Not Started",
+                resetError + "\\nNo mix settings were changed. Backup:\\n"
+                + backup.getFullPathName());
+            return;
+        }
         const bool recovered = project.restoreFromState(before);
         if (recovered)
         {
