@@ -96,6 +96,7 @@ public:
         auto writer = wav.createWriterFor(stream, options);
         if (writer == nullptr)
         {
+            stream.reset();
             temp.deleteFile();
             result.error = "Cannot initialize processed WAV encoder.";
             return result;
