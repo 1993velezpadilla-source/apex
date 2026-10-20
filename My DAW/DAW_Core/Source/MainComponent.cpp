@@ -5156,7 +5156,11 @@ void MainComponent::resetProjectMix()
     // If any plugin refuses serialization, fail closed: never erase it.
     juce::ValueTree before;
     juce::String error;
-    if (!project.isProjectStateUsable() || !project.buildState(before, error))
+    // Include the same editor-scoped folder metadata as a normal manual save.
+    // A reset recovery file must restore the *whole* session, not merely the
+    // engine's partial autosave snapshot.
+    if (!project.isProjectStateUsable() || !project.buildState(before, error)
+        || !augmentProjectStateForSave(before, error))
     {
         juce::AlertWindow::showMessageBoxAsync(
             juce::MessageBoxIconType::WarningIcon, "Reset Project",
