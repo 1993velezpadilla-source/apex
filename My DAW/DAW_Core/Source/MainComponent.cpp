@@ -5210,7 +5210,7 @@ void MainComponent::resetProjectMix()
     }
     juce::String publishError;
     if (!written || juce::XmlDocument::parse(temporary.getFile()) == nullptr
-        || !DAW::publishFileTransactionally(temporary.getFile(), backup, publishError))
+        || !DAW::FilePublicationCore::publishFileTransactionally(temporary.getFile(), backup, publishError))
     {
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
             "Reset Project", "Recovery backup could not be verified/published. "
