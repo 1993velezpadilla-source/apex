@@ -3,6 +3,7 @@
 #include "../../../Source/MidiCore/MidiClip.h"
 #include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
 #include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
+#include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/CommandCore/RecordCommands.h"
 #include <cmath>
 
@@ -297,6 +298,26 @@ public:
                 60000, 48000, 96000, 36000, true).empty());
             expect(DAW::LoopPlaylistTakePlanCore::make(
                 60000, 48000, 96000, 0, true).empty());
+        }
+
+        beginTest("inline playlist expansion moves real tracks without changing track identity");
+        {
+            using Layout = DAW::TrackPlaylistInlineLayoutCore;
+            const int h = 80;
+            const int expanded = 1;
+            const int takePixels = 3 * 66;
+            expectEquals(Layout::topOfLane(0, h, expanded, takePixels), 80);
+            expectEquals(Layout::topOfLane(1, h, expanded, takePixels), 160);
+            expectEquals(Layout::takeY(expanded, h), 240);
+            expectEquals(Layout::topOfLane(2, h, expanded, takePixels), 438);
+            expectEquals(Layout::topOfLane(3, h, expanded, takePixels), 518);
+            expectEquals(Layout::laneAtY(200, h, expanded, takePixels), 1);
+            expectEquals(Layout::laneAtY(240, h, expanded, takePixels), -1);
+            expectEquals(Layout::laneAtY(437, h, expanded, takePixels), -1);
+            expectEquals(Layout::laneAtY(438, h, expanded, takePixels), 2);
+            expectEquals(Layout::laneAtY(518, h, expanded, takePixels), 3);
+            expectEquals(Layout::laneAtY(240, h, -1, 0), 2);
+            expectEquals(Layout::laneAtY(79, h, expanded, takePixels), -1);
         }
 
         beginTest("loop-record Undo/Redo restores take lanes but never the mixer");

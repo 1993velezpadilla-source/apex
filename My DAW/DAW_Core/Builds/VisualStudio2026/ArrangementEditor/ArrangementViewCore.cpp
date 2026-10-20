@@ -2,6 +2,7 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
+#include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
@@ -796,11 +797,15 @@ namespace ArrangementEditor
         const int trackCount = getArrangementTrackCount();
         const int contentTop = arrangementContentTop();
         const auto visibleBounds = getViewportVisibleBounds();
+        // The unfolded take bands consume real vertical content height. Do
+        // not cull the physical tracks below using uniform-height division.
         const int firstVisibleTrack = juce::jlimit(0, trackCount,
-            (int)std::floor((double)(visibleBounds.getY() - contentTop) / (double)juce::jmax(1, trackH)));
+            juce::jmax(0, getLaneIndexForY(visibleBounds.getY()) < 0
+                ? (getInlineExpandedLaneIndex() >= 0
+                    ? getInlineExpandedLaneIndex() : 0)
+                : getLaneIndexForY(visibleBounds.getY())));
         const int lastVisibleTrack = juce::jlimit(firstVisibleTrack, trackCount,
-            (int)std::ceil((double)(visibleBounds.getBottom() - contentTop) / (double)juce::jmax(1, trackH)));
-        int y = contentTop + firstVisibleTrack * trackH;
+            juce::jmax(firstVisibleTrack + 1, getLaneIndexForY(visibleBounds.getBottom() - 1) + 2));
         const int visibleTrackCount = juce::jmax(0, lastVisibleTrack - firstVisibleTrack);
 
         // These counters are only incremented when metrics are active,
@@ -816,14 +821,12 @@ namespace ArrangementEditor
 
         for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i)
         {
+            const int y = getLaneTopForIndex(i);
             g.setColour(fromU32(i % 2 == 0 ? Col::trackBg : Col::bg));
             g.fillRect(0, y, getWidth(), trackH);
-
-                g.setColour(fromU32(Col::trackLine));
-                    g.drawHorizontalLine(y + trackH - 1, 0.f, (float)getWidth());
-
-                    y += trackH;
-                }
+            g.setColour(fromU32(Col::trackLine));
+            g.drawHorizontalLine(y + trackH - 1, 0.f, (float)getWidth());
+        }
 
         // ── Beat/bar grid across lanes ──────────────────────────────────────
         // Restrained cool tones: bars read above beats, grid never competes
@@ -895,9 +898,9 @@ namespace ArrangementEditor
             // tracks sit at lane = engineIndex + masterOffset (mirrors the
             // automation-lane mapping used elsewhere in this file).
             const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
-            int laneY = contentTop + firstVisibleTrack * trackH;
-            for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i, laneY += trackH)
+            for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i)
             {
+                const int laneY = getLaneTopForIndex(i);
                 if (i < masterOffset)
                 {
                     // MASTER lane identity — subtle magenta edge, coherent
@@ -1397,7 +1400,7 @@ namespace ArrangementEditor
                 continue;
 
             const int masterOffset = (m_engineTrackManager->hasMasterTrack() ? 1 : 0);
-            const float yTop = (float)(top + (i + masterOffset) * trackH);
+            const float yTop = (float)getLaneTopForIndex(i + masterOffset);
             const float laneHeight = (float)getAutomationLaneVisualHeight(trackH);
             const auto laneBounds = juce::Rectangle<float>(0.0f,
                                                            yTop + (float)trackH - laneHeight - 2.0f,
@@ -1951,7 +1954,7 @@ namespace ArrangementEditor
         int x = timeToScreenX(clip->startTime);
         int w = (int)(clip->visualLength() * m_zoom.getPixelsPerSecond());
         w = juce::jmax(4, w);
-        int y = toolbarH + rulerH + clip->trackIndex * trackH;
+        int y = getLaneTopForIndex(clip->trackIndex);
         int h = trackH - 2;
 
         // Collapsed folder: keep the renderer alive but park it offscreen so
@@ -2425,7 +2428,7 @@ namespace ArrangementEditor
         if (m_engineTrackManager == nullptr)
             return false;
 
-        const int laneIndex = (pos.y - arrangementContentTop()) / juce::jmax(1, (int)m_zoom.getTrackHeightPx());
+        const int laneIndex = getLaneIndexForY(pos.y);
         if (laneIndex < 0)
             return false;
 
@@ -2634,7 +2637,7 @@ namespace ArrangementEditor
                 return;
 
             const int trackH = juce::jmax(1, (int)m_zoom.getTrackHeightPx());
-            const int trackIndex = (e.y - arrangementContentTop()) / trackH;
+            const int trackIndex = getLaneIndexForY(e.y);
             const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
             const int engineTrackIndex = trackIndex - masterOffset;
 
@@ -4059,7 +4062,7 @@ namespace ArrangementEditor
     {
         const int trackHeight = juce::jmax(1, (int)m_zoom.getTrackHeightPx());
         return juce::jlimit(0, juce::jmax(0, getArrangementTrackCount() - 1),
-                            (pos.y - arrangementContentTop()) / trackHeight);
+                            getLaneIndexForY(pos.y));
     }
 
     int ArrangementViewCore::getArrangementTrackCount() const
@@ -6885,6 +6888,49 @@ void ArrangementViewCore::changeListenerCallback(juce::ChangeBroadcaster* source
     repaint();
 }
 
+int ArrangementViewCore::getInlineExpandedLaneIndex() const noexcept
+{
+    if (m_inlinePlaylistExtraPixels <= 0 || m_inlinePlaylistTrackId.isEmpty()
+        || m_engineTrackManager == nullptr)
+        return -1;
+    const int index = m_engineTrackManager->getTrackIndex(m_inlinePlaylistTrackId);
+    return index < 0 ? -1 : index + (m_engineTrackManager->hasMasterTrack() ? 1 : 0);
+}
+
+int ArrangementViewCore::getInlinePlaylistExtraForLane(int laneIndex) const noexcept
+{
+    return laneIndex == getInlineExpandedLaneIndex() ? m_inlinePlaylistExtraPixels : 0;
+}
+
+int ArrangementViewCore::getLaneTopForIndex(int laneIndex) const noexcept
+{
+    return DAW::TrackPlaylistInlineLayoutCore::topOfLane(
+        laneIndex, juce::jmax(1, (int)m_zoom.getTrackHeightPx()),
+        getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels);
+}
+
+int ArrangementViewCore::getLaneIndexForY(int y) const noexcept
+{
+    return DAW::TrackPlaylistInlineLayoutCore::laneAtY(
+        y, juce::jmax(1, (int)m_zoom.getTrackHeightPx()),
+        getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels);
+}
+
+void ArrangementViewCore::setInlinePlaylistExpansion(
+    const DAW::TrackID& trackId, int extraPixels)
+{
+    const int clamped = juce::jlimit(0, 128 * 66, extraPixels);
+    if (m_inlinePlaylistTrackId == trackId && m_inlinePlaylistExtraPixels == clamped)
+        return;
+    m_inlinePlaylistTrackId = trackId;
+    m_inlinePlaylistExtraPixels = clamped;
+    // Structural UI layout only; clips are never recreated and audio stays on
+    // the existing track. This updates renderer Y and automation containers.
+    rebuildClipRenderers();
+    updateAutomationLayout();
+    repaint();
+}
+
 int ArrangementViewCore::getYForTrackId(const DAW::TrackID& trackId) const
 {
     const auto bounds = getTrackLaneBounds(trackId);
@@ -6930,7 +6976,7 @@ juce::Rectangle<int> ArrangementViewCore::getTrackLaneBounds(const DAW::TrackID&
     if (laneIndex < 0)
         return {};
 
-    return { 0, arrangementContentTop() + laneIndex * trackH, getWidth(), trackH };
+    return { 0, getLaneTopForIndex(laneIndex), getWidth(), trackH };
 }
 
 juce::Rectangle<int> ArrangementViewCore::getClipBounds(const juce::Uuid& clipId) const
@@ -6945,7 +6991,7 @@ DAW::TrackID ArrangementViewCore::getTrackAtY(int y) const
     if (m_engineTrackManager == nullptr)
         return {};
 
-    const int laneIndex = (y - arrangementContentTop()) / juce::jmax(1, (int)m_zoom.getTrackHeightPx());
+    const int laneIndex = getLaneIndexForY(y);
     if (laneIndex < 0)
         return {};
 
