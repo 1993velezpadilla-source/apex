@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <map>
+#include <cmath>
 #include "../TrackCore/TrackPlaylistCompCore.h"
 #include "../CommandCore/CommandManager.h"
 
@@ -53,6 +54,7 @@ public:
         selectedPlaylist_.clear();
         selectionStart_ = selectionEnd_ = -1;
         thumbs_.clear();
+        thumbnailSampleRates_.clear();
         recalculateView();
         preflightThumbnails();
         repaint();
@@ -123,15 +125,23 @@ public:
                 g.fillRoundedRectangle(body.toFloat(), 3.f);
                 if (auto* thumb = getThumbnail(audio->getSourceFile()))
                 {
-                    const double sr = thumb->getNumChannels() > 0 && thumb->getTotalLength() > 0
-                        ? thumb->getTotalLength() /
-                            juce::jmax(1.0, (double)audio->getSourceEndSample())
-                        : 1.0 / sampleRate_;
-                    const double sec = (double)audio->getSourceStartSample() * sr;
-                    const double duration = (end - start) / sampleRate_;
+                    // The file's duration / clip's sourceEndSample is NOT a
+                    // sample-rate conversion: cropped takes have a sourceEnd
+                    // before EOF, which shifts and stretches their waveform.
+                    const auto rateIt = thumbnailSampleRates_.find(
+                        audio->getSourceFile().getFullPathName());
+                    const double fileRate = rateIt != thumbnailSampleRates_.end()
+                        ? rateIt->second : sampleRate_;
+                    const double beginSample = juce::jmax<int64_t>(
+                        0, audio->getSourceStartSample());
+                    const double endSample = audio->getSourceEndSample() > beginSample
+                        ? (double)audio->getSourceEndSample()
+                        : beginSample + (end - start) * fileRate / sampleRate_;
+                    const double sec = beginSample / juce::jmax(1.0, fileRate);
+                    const double secEnd = endSample / juce::jmax(1.0, fileRate);
                     g.setColour(juce::Colour(0xff99e8ff).withAlpha(0.85f));
                     thumb->drawChannels(g, body.reduced(1), sec,
-                                         sec + juce::jmax(0.001, duration), 0.82f);
+                                        juce::jmax(sec + 0.001, secEnd), 0.82f);
                 }
             }
             if (selected && selectionStart_ >= 0 && selectionEnd_ > selectionStart_)
@@ -259,13 +269,39 @@ public:
         repaint();
     }
     void mouseUp(const juce::MouseEvent&) override { selectionDragging_ = false; }
-    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& w) override
     {
         auto* track = tracks_.getTrack(trackId_);
         if (!track) return;
-        const int available = juce::jmax(0, (int)track->getPlaylists().size() * 66
-                                             - (getHeight() - 105));
-        scrollY_ = juce::jlimit(0, available, scrollY_ - juce::roundToInt(w.deltaY * 120.f));
+        // The entire song cannot be a single fixed-width timeline: phrases
+        // become only a few pixels in a long session. Ctrl+wheel zooms at
+        // the pointer, Shift+wheel pans, plain wheel scrolls take lanes.
+        if (event.mods.isCtrlDown() || event.mods.isCommandDown())
+        {
+            const double previousSpan = juce::jmax(1.0, viewEnd_ - viewStart_);
+            const double span = juce::jlimit(
+                juce::jmax(64.0, sampleRate_ * 0.05), viewMaxEnd_,
+                previousSpan * std::pow(1.5, -(double)w.deltaY * 3.0));
+            const double fraction = juce::jlimit(0.0, 1.0,
+                ((double)event.x - 161.0) / (double)juce::jmax(40, getWidth() - 222));
+            const double sampleUnderPointer = viewStart_ + previousSpan * fraction;
+            viewStart_ = juce::jlimit(0.0, juce::jmax(0.0, viewMaxEnd_ - span),
+                                      sampleUnderPointer - fraction * span);
+            viewEnd_ = viewStart_ + span;
+        }
+        else if (event.mods.isShiftDown())
+        {
+            const double span = viewEnd_ - viewStart_;
+            viewStart_ = juce::jlimit(0.0, juce::jmax(0.0, viewMaxEnd_ - span),
+                                      viewStart_ - (double)w.deltaY * span * 0.3);
+            viewEnd_ = viewStart_ + span;
+        }
+        else
+        {
+            const int available = juce::jmax(0, (int)track->getPlaylists().size() * 66
+                                                 - (getHeight() - 105));
+            scrollY_ = juce::jlimit(0, available, scrollY_ - juce::roundToInt(w.deltaY * 120.f));
+        }
         repaint();
     }
 
@@ -292,14 +328,28 @@ private:
             if (track->renamePlaylist(id, text))
                 notifyMutation();
     }
-    void recalculateView()
+    void recalculateView(bool resetViewport = true)
     {
-        viewStart_ = 0;
-        viewEnd_ = sampleRate_ * 12.0;
+        double fullExtent = sampleRate_ * 12.0;
         for (auto* clip : clips_.getClipsOnTrack(trackId_))
             if (clip)
-                viewEnd_ = juce::jmax(viewEnd_, (double)clip->getEndPosition() + sampleRate_ * 0.5);
-        scrollY_ = 0;
+                fullExtent = juce::jmax(fullExtent,
+                    (double)clip->getEndPosition() + sampleRate_ * 0.5);
+        viewMaxEnd_ = fullExtent;
+        if (resetViewport)
+        {
+            viewStart_ = 0.0;
+            viewEnd_ = fullExtent;
+            scrollY_ = 0;
+        }
+        else
+        {
+            // Promoting or renaming a take must not destroy the current
+            // zoom/scroll position just as the user checks the comp boundary.
+            const double span = juce::jlimit(1.0, viewMaxEnd_, viewEnd_ - viewStart_);
+            viewStart_ = juce::jlimit(0.0, juce::jmax(0.0, viewMaxEnd_ - span), viewStart_);
+            viewEnd_ = viewStart_ + span;
+        }
     }
     juce::Rectangle<int> getTimelineBounds(int y) const
     {
@@ -333,6 +383,12 @@ private:
             const auto key = source.getFullPathName();
             if (!source.existsAsFile() || thumbs_.find(key) != thumbs_.end())
                 continue;
+            // Cache the WAV's *actual* sample rate on the UI thread. Paint()
+            // must never open a reader or derive a rate from a cropped clip.
+            auto reader = std::unique_ptr<juce::AudioFormatReader>(
+                formats_.createReaderFor(source));
+            thumbnailSampleRates_[key] = reader && reader->sampleRate > 0.0
+                ? reader->sampleRate : sampleRate_;
             auto thumbnail = std::make_unique<juce::AudioThumbnail>(512, formats_, thumbnailCache_);
             thumbnail->setSource(new juce::FileInputSource(source));
             thumbs_.emplace(key, std::move(thumbnail));
@@ -354,7 +410,7 @@ private:
     void notifyMutation()
     {
         TrackPlaylistCompCore::publishPlaybackVisibility(tracks_, clips_);
-        recalculateView();
+        recalculateView(false);
         preflightThumbnails();
         if (onChanged) onChanged();
         repaint();
@@ -456,6 +512,7 @@ private:
     AudioFileManager& audioFiles_;
     TrackID trackId_;
     double sampleRate_ = 44100.0, viewStart_ = 0.0, viewEnd_ = 44100.0 * 12.0;
+    double viewMaxEnd_ = 44100.0 * 12.0;
     juce::String selectedPlaylist_;
     int64_t selectionStart_ = -1, selectionEnd_ = -1, dragAnchor_ = -1;
     bool selectionDragging_ = false;
@@ -466,5 +523,6 @@ private:
     juce::AudioFormatManager formats_;
     juce::AudioThumbnailCache thumbnailCache_ { 128 };
     std::map<juce::String, std::unique_ptr<juce::AudioThumbnail>> thumbs_;
+    std::map<juce::String, double> thumbnailSampleRates_;
 };
 } // namespace DAW
