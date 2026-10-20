@@ -31,6 +31,12 @@ public:
         closeButton_.onClick = [this] { if (onClose) onClose(); };
     }
 
+    void createForTrack(const TrackID& id, bool duplicate, double engineRate)
+    {
+        showForTrack(id, engineRate);
+        createNew(duplicate);
+    }
+
     std::function<bool()> canModify;
     std::function<void()> onChanged;
     std::function<void()> onClose;
@@ -191,7 +197,8 @@ public:
         if (getTimelineBounds(y).contains(e.getPosition()))
         {
             selectedPlaylist_ = playlistId;
-            selectionStart_ = selectionEnd_ = sampleForX(e.x);
+            dragAnchor_ = sampleForX(e.x);
+            selectionStart_ = selectionEnd_ = dragAnchor_;
             selectionDragging_ = true;
             grabKeyboardFocus();
             repaint();
@@ -201,9 +208,9 @@ public:
     void mouseDrag(const juce::MouseEvent& e) override
     {
         if (!selectionDragging_) return;
-        selectionEnd_ = sampleForX(e.x);
-        if (selectionEnd_ < selectionStart_)
-            std::swap(selectionStart_, selectionEnd_);
+        const auto current = sampleForX(e.x);
+        selectionStart_ = juce::jmin(dragAnchor_, current);
+        selectionEnd_ = juce::jmax(dragAnchor_, current);
         repaint();
     }
     void mouseUp(const juce::MouseEvent&) override { selectionDragging_ = false; }
@@ -358,7 +365,7 @@ private:
     TrackID trackId_;
     double sampleRate_ = 44100.0, viewStart_ = 0.0, viewEnd_ = 44100.0 * 12.0;
     juce::String selectedPlaylist_;
-    int64_t selectionStart_ = -1, selectionEnd_ = -1;
+    int64_t selectionStart_ = -1, selectionEnd_ = -1, dragAnchor_ = -1;
     bool selectionDragging_ = false;
     int scrollY_ = 0;
     juce::TextButton newButton_, duplicateButton_, closeButton_;
