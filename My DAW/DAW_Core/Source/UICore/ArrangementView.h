@@ -1323,6 +1323,23 @@ void trackPropertyChanged(Track* track) override
         if (clip == nullptr || core_ == nullptr)
             return;
 
+        // Inactive playlist clips stay in the canonical ClipManager/project
+        // (and keep their WAV references), but must NOT become editable or
+        // visible clips on the active Main arranger lane.
+        if (!clip->isPlaylistAudible())
+        {
+            const auto it = engineClipIdsToArrangementIds_.find(clip->getID());
+            if (it != engineClipIdsToArrangementIds_.end())
+            {
+                const auto arrangementId = it->second;
+                core_->m_uuidToEngineId.erase(arrangementId);
+                core_->m_selection.deselectClip(arrangementId);
+                core_->m_clipState.removeClip(arrangementId);
+                engineClipIdsToArrangementIds_.erase(it);
+            }
+            return;
+        }
+
         juce::ScopedValueSetter<bool> mirrorGuard(isMirroringToArrangement_, true);
         ArrangementEditor::ArrangementClipModel model;
         auto& uuid = engineClipIdsToArrangementIds_[clip->getID()];
