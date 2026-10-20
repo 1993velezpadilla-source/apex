@@ -5243,7 +5243,7 @@ void MainComponent::resetProjectMix()
         {
             juce::AlertWindow::showMessageBoxAsync(
                 juce::MessageBoxIconType::WarningIcon, "Reset Project — Not Started",
-                resetError + "\\nNo mix settings were changed. Backup:\\n"
+                resetError + "\nNo mix settings were changed. Backup:\n"
                 + backup.getFullPathName());
             return;
         }
