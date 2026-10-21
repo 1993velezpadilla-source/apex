@@ -370,6 +370,13 @@ trackManager_.addListener(this);
         return trackManager_.getNumTracks() + (trackManager_.hasMasterTrack() ? 1 : 0);
     }
 
+    int getPhysicalTrackHeight() const noexcept
+    {
+        return core_ != nullptr
+            ? juce::jmax(24, (int)core_->getZoom().getTrackHeightPx())
+            : defaultLaneHeight_;
+    }
+
     int getLaneHeight(int index) const
     {
         // Keep physical track/automation band height uniform while allowing

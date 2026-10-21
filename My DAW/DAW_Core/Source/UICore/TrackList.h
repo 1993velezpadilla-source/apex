@@ -2779,6 +2779,18 @@ public:
         repaint();
     }
 
+    void repaintTrackRow(const TrackID& id)
+    {
+        for (auto* row : trackRows_)
+            if (row != nullptr && row->getTrackID() == id)
+            {
+                // Rows use setBufferedToImage(true); repainting only their
+                // TrackList parent does NOT refresh the cached ↑ active state.
+                row->repaint();
+                break;
+            }
+    }
+
     TrackRow* getRow(int index) const
     {
         int actual = trackManager_.hasMasterTrack() ? index + 1 : index;

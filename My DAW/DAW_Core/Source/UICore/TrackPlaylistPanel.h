@@ -73,6 +73,8 @@ public:
     // Clicking the always-visible arrow in the owning TrackList header must
     // promote only a real phrase selection from THAT take, never stale ranges
     // belonging to a different playlist.
+    const TrackID& getCurrentTrackID() const noexcept { return trackId_; }
+
     bool canPromoteForLane(const TrackID& id, const juce::String& laneId) const
     {
         if (trackId_ != id || laneId.isEmpty() || selectedPlaylist_ != laneId

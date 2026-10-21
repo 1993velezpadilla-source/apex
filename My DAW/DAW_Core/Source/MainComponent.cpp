@@ -2089,7 +2089,8 @@ MainComponent::MainComponent()
     };
     playlistPanel_->onSelectionChanged = [this]
     {
-        if (trackList_) trackList_->repaint();
+        if (trackList_ && playlistPanel_)
+            trackList_->repaintTrackRow(playlistPanel_->getCurrentTrackID());
     };
     playlistPanel_->onChanged = [this]
     {
@@ -2735,7 +2736,7 @@ MainComponent::MainComponent()
     };
     timelineViewport->getLaneHeight = [this]() -> double
     {
-        return arrangement_ ? (double)arrangement_->getLaneHeight(0) : 60.0;
+        return arrangement_ ? (double)arrangement_->getPhysicalTrackHeight() : 60.0;
     };
     // Single callback handles both horizontal and vertical edge-drag zoom
     timelineViewport->onThumbEdgeDragged = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
@@ -9114,8 +9115,10 @@ void MainComponent::applyTimelineZoom(bool isVertical, bool zoomIn)
     }
     else
     {
+        // The first arranger lane can itself be expanded if there is no
+        // Master track. Zoom the PHYSICAL strip, never strip+all take rows.
         const double oldLaneH = juce::jmax(1.0,
-                                           (double) arrangement_->getLaneHeight(0));
+                                           (double) arrangement_->getPhysicalTrackHeight());
         const double newLaneH = juce::jlimit(24.0, 240.0,
                                              zoomIn ? oldLaneH * 1.15
                                                     : oldLaneH / 1.15);
