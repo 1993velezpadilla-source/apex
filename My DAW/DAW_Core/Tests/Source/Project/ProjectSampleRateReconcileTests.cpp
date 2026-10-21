@@ -1,6 +1,12 @@
 #include <JuceHeader.h>
 #include "../../../Source/ProjectCore/ProjectSampleRateReconcileCore.h"
 #include "../../../Source/MidiCore/MidiClip.h"
+#include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
+#include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
+#include "../../../Source/RecordingCore/RecordingEngine.h"
+#include "../../../Source/TransportCore/TransportController.h"
+#include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
+#include "../../../Source/CommandCore/RecordCommands.h"
 #include <cmath>
 
 namespace R = DAW::ProjectSampleRateReconcile;
@@ -200,3 +206,492 @@ public:
 };
 
 static ProjectSampleRateReconcileTests projectSampleRateReconcileTests;
+
+class ApexTrackPlaylistCoreTests final : public juce::UnitTest
+{
+public:
+    ApexTrackPlaylistCoreTests()
+        : juce::UnitTest("track-playlists-comp-and-persistence.v1", "APEX.Project") {}
+
+    void runTest() override
+    {
+        beginTest("legacy track has one main playlist; new take never destroys original");
+        {
+            DAW::TrackManager tracks;
+            auto* vocal = tracks.createTrack("Lead");
+            DAW::ClipManager clips;
+            auto* first = clips.createAudioClip("take one", {});
+            first->setTrackID(vocal->getID());
+            first->setStartPosition(48000);
+            first->setLength(96000);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+
+            const auto secondId = DAW::TrackPlaylistCompCore::createEmptyPlaylist(*vocal, tracks, clips);
+            expect(!first->isPlaylistAudible());
+            expectEquals(vocal->getMainPlaylistId(), secondId);
+            auto* second = clips.createAudioClip("take two", {});
+            second->setTrackID(vocal->getID());
+            second->setPlaylistId(secondId);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(second->isPlaylistAudible());
+            expect(!first->isPlaylistAudible());
+            expect(vocal->showPlaylistAsMain("main"));
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+            expect(!second->isPlaylistAudible());
+
+            auto trackState = vocal->getState();
+            auto clipState = second->getState();
+            expectEquals(clipState.getProperty("playlistId").toString(), secondId);
+            expectEquals(trackState.getChildWithName("TrackPlaylists").getNumChildren(), 2);
+            DAW::Track copy(vocal->getID(), "Copy");
+            copy.restoreState(trackState);
+            expectEquals(copy.getMainPlaylistId(), vocal->getMainPlaylistId());
+            expectEquals(copy.getPlaylists().size(), vocal->getPlaylists().size());
+            expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
+        }
+
+        beginTest("AUTO PL defaults OFF and gates BOTH automatic record modes");
+        {
+            DAW::RecordingEngine recorder;
+            expect(!recorder.getAutoPlaylistsEnabled());
+            expect(!recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoPlaylistsEnabled(true);
+            expect(recorder.isAutoTakePlaylistsEffective());
+            expect(recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoLoopPlaylists(false);
+            expect(recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoPlaylistsEnabled(false);
+            expect(!recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+        }
+
+        beginTest("manual New Playlist switches Main before next record");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead Vocal");
+            auto* first = clips.createAudioClip("take one", {});
+            first->setTrackID(vocal->getID());
+            first->setStartPosition(15 * 48000);
+            first->setLength(5 * 48000);
+            const auto manualLane = DAW::TrackPlaylistCompCore::createEmptyPlaylist(
+                *vocal, tracks, clips);
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            expectEquals(vocal->getMainPlaylistId(), manualLane);
+            expect(!first->isPlaylistAudible());
+            auto* second = clips.createAudioClip("take two", {});
+            second->setTrackID(vocal->getID());
+            second->setPlaylistId(vocal->getMainPlaylistId());
+            second->setStartPosition(15 * 48000);
+            second->setLength(5 * 48000);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(second->isPlaylistAudible());
+            expect(!first->isPlaylistAudible());
+            expect(vocal->showPlaylistAsMain("main"));
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+            expect(!second->isPlaylistAudible());
+        }
+
+        beginTest("Stop at start marker saves overlapping vocal passes without a loop");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead");
+            const auto first = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(!first.createPlaylist); // first pass records on Main
+            auto* take1 = clips.createAudioClip("take 1", {});
+            take1->setTrackID(vocal->getID());
+            take1->setStartPosition(15 * 48000);
+            take1->setLength(5 * 48000);
+            const auto repeat = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(repeat.createPlaylist);
+            expect(repeat.showAsMain); // latest take can become Main
+            const auto shortPass = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 3 * 48000);
+            expect(shortPass.createPlaylist);
+            expect(!shortPass.showAsMain); // preserve unrecorded tail
+            const auto later = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 25 * 48000, 5 * 48000);
+            expect(!later.createPlaylist); // regular non-overlap clips stay Main
+            auto* intro = clips.createAudioClip("intro", {});
+            intro->setTrackID(vocal->getID());
+            intro->setStartPosition(0);
+            intro->setLength(48000);
+            const auto withIntro = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(withIntro.createPlaylist);
+            expect(!withIntro.showAsMain); // do not mute unrelated Main
+            const auto noSamples = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 0);
+            expect(!noSamples.createPlaylist);
+        }
+
+        beginTest("Stop seals take and returns to the exact user-set :15 cursor");
+        {
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto marker = (DAW::SamplePosition)(15 * 48000);
+            transport.setPosition(marker);
+            transport.setReturnToLastPosition(true);
+            transport.record();
+            expect(transport.isRecording());
+            expect(transport.isPlaying());
+            transport.setPositionFromAudioThread(marker + 5 * 48000);
+            transport.stop();
+            expect(!transport.isRecording());
+            expect(!transport.isPlaying());
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)marker);
+        }
+
+        beginTest("Pause intentionally keeps the take open until Stop, which seals it");
+        {
+            // A paused writer is NOT another completed take. This distinguishes
+            // the native Pause semantics from Stop and prevents bogus lanes.
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto marker = (DAW::SamplePosition)(15 * 48000);
+            transport.setPosition(marker);
+            transport.setReturnToLastPosition(true);
+            transport.record();
+            transport.setPositionFromAudioThread(marker + 2 * 48000);
+            transport.pause();
+            expect(transport.isRecording());
+            expect(transport.isPaused());
+            expect(!transport.isPlaying());
+            expectEquals((juce::int64)transport.getPosition(),
+                         (juce::int64)(marker + 2 * 48000));
+            transport.stop();
+            expect(!transport.isRecording());
+            expect(!transport.isPaused());
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)marker);
+        }
+
+        beginTest("Return to Last Position OFF leaves playback at recording stop");
+        {
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto start = (DAW::SamplePosition)(15 * 48000);
+            const auto finish = (DAW::SamplePosition)(22 * 48000);
+            transport.setPosition(start);
+            transport.setReturnToLastPosition(false);
+            transport.record();
+            transport.setPositionFromAudioThread(finish);
+            transport.stop();
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)finish);
+        }
+
+        beginTest("real WAV recording finalizes onto selected manual playlist with intact audio");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            DAW::AudioFileManager audioFiles;
+            auto* vocal = tracks.createTrack("Vocal");
+            const auto firstId = vocal->getMainPlaylistId();
+            const auto manualId = vocal->createPlaylist();
+            const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                .getChildFile("apex-playlists-real-wav-" + juce::Uuid().toString() + ".wav");
+
+            // Generate actual 48k/16-bit stereo PCM audio, not an empty mock:
+            // finalization must decode/cache the recorded file and preserve its
+            // timeline placement, take membership and non-destructive media.
+            juce::WavAudioFormat wav;
+            auto stream = file.createOutputStream();
+            expect(stream != nullptr);
+            if (stream != nullptr)
+            {
+                auto writer = std::unique_ptr<juce::AudioFormatWriter>(
+                    wav.createWriterFor(stream.release(), 48000.0, 2, 16, {}, 0));
+                expect(writer != nullptr);
+                if (writer != nullptr)
+                {
+                    juce::AudioBuffer<float> pcm(2, 4096);
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < pcm.getNumSamples(); ++i)
+                            pcm.setSample(ch, i,
+                                0.2f * std::sin((float)(2.0 * juce::MathConstants<double>::pi
+                                    * 440.0 * (double)i / 48000.0)));
+                    expect(writer->writeFromAudioSampleBuffer(pcm, 0, pcm.getNumSamples()));
+                }
+            }
+            DAW::RecordingClipFinalizerCore::FinalizeRequest req;
+            req.trackId = vocal->getID();
+            req.playlistId = manualId; // frozen at REC, not resolved from Main later
+            req.startPosition = 15 * 48000;
+            req.samplesWritten = 4096;
+            req.outputFile = file;
+            req.sampleRate = 48000.0;
+            req.clipManager = &clips;
+            req.trackManager = &tracks;
+            req.audioFiles = &audioFiles;
+            auto* take = DAW::RecordingClipFinalizerCore::finalize(req);
+            expect(take != nullptr);
+            if (take != nullptr)
+            {
+                expectEquals(take->getPlaylistId(), manualId);
+                expectEquals((juce::int64)take->getStartPosition(), (juce::int64)(15 * 48000));
+                expectEquals((juce::int64)take->getLength(), (juce::int64)4096);
+                expect(audioFiles.hasAudio(take->getID()));
+                if (auto cached = audioFiles.getCachedAudioSnapshot(take->getID()))
+                {
+                    expectEquals(cached->getBufferRef().getNumSamples(), 4096);
+                    expect(cached->getBufferRef().getMagnitude(0, 0, 4096) > 0.1f);
+                }
+                expect(take->isPlaylistAudible());
+                vocal->showPlaylistAsMain(firstId);
+                DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+                expect(!take->isPlaylistAudible());
+                vocal->showPlaylistAsMain(manualId);
+                DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+                expect(take->isPlaylistAudible());
+            }
+            expect(file.existsAsFile()); // source WAV is not deleted by view switches
+            expect(file.deleteFile()); // only remove this temporary test fixture
+        }
+
+        beginTest("auto take #3 recognizes archived take even when Main is empty in range");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead");
+            auto* take1 = clips.createAudioClip("archived", {});
+            take1->setTrackID(vocal->getID());
+            take1->setStartPosition(15 * 48000);
+            take1->setLength(5 * 48000);
+            // Main switches to a new empty lane, while the original recording
+            // remains alive as an alternate. Another take at :15 must not be
+            // dropped onto the same Main simply because it has no clips.
+            const auto newMain = vocal->createPlaylist();
+            expectEquals(vocal->getMainPlaylistId(), newMain);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(!take1->isPlaylistAudible());
+            const auto planned = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(planned.createPlaylist);
+            expect(planned.showAsMain);  // empty Main hides nothing
+
+            // An unrelated intro on the new Main must remain audible, while
+            // that repeat take is routed to a separate alternate playlist.
+            auto* intro = clips.createAudioClip("intro", {});
+            intro->setTrackID(vocal->getID());
+            intro->setPlaylistId(newMain);
+            intro->setStartPosition(0);
+            intro->setLength(48000);
+            const auto keepIntro = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 3 * 48000);
+            expect(keepIntro.createPlaylist);
+            expect(!keepIntro.showAsMain);
+
+            // Existing alternate material that does NOT overlap the range
+            // must not generate random new playlists.
+            const auto differentArea = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 25 * 48000, 2 * 48000);
+            expect(!differentArea.createPlaylist);
+        }
+
+        beginTest("loop pass planner splits one recorded WAV into aligned lanes");
+        {
+            auto passes = DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 120000, true);
+            expectEquals((int)passes.size(), 3);
+            if (passes.size() == 3)
+            {
+                expectEquals((juce::int64)passes[0].sourceStart, (juce::int64)0);
+                expectEquals((juce::int64)passes[0].length, (juce::int64)48000);
+                expectEquals((juce::int64)passes[1].sourceStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].sourceStart, (juce::int64)96000);
+                expectEquals((juce::int64)passes[2].length, (juce::int64)24000);
+                for (const auto& pass : passes)
+                    expectEquals((juce::int64)pass.timelineStart, (juce::int64)48000);
+            }
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                47999, 48000, 96000, 120000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                96000, 48000, 96000, 120000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 120000, false).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                48000, 48000, 96000, 48000, true).empty());
+        }
+
+        beginTest("loop starts mid-cycle: first partial take stays in its correct position");
+        {
+            // Record starts at 1.25s of a [1s,2s) loop. First capture
+            // window is 0.75s at 1.25s, later passes restart at 1s.
+            const auto passes = DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 96000, true);
+            expectEquals((int)passes.size(), 3);
+            if (passes.size() == 3)
+            {
+                expectEquals((juce::int64)passes[0].timelineStart, (juce::int64)60000);
+                expectEquals((juce::int64)passes[0].sourceStart, (juce::int64)0);
+                expectEquals((juce::int64)passes[0].length, (juce::int64)36000);
+                expectEquals((juce::int64)passes[1].timelineStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[1].sourceStart, (juce::int64)36000);
+                expectEquals((juce::int64)passes[1].length, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].timelineStart, (juce::int64)48000);
+                expectEquals((juce::int64)passes[2].sourceStart, (juce::int64)84000);
+                expectEquals((juce::int64)passes[2].length, (juce::int64)12000);
+            }
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 36000, true).empty());
+            expect(DAW::LoopPlaylistTakePlanCore::make(
+                60000, 48000, 96000, 0, true).empty());
+        }
+
+        beginTest("inline playlist expansion moves real tracks without changing track identity");
+        {
+            using Layout = DAW::TrackPlaylistInlineLayoutCore;
+            const int h = 80;
+            const int expanded = 1;
+            const int takePixels = 3 * 66;
+            expectEquals(Layout::topOfLane(0, h, expanded, takePixels), 80);
+            expectEquals(Layout::topOfLane(1, h, expanded, takePixels), 160);
+            expectEquals(Layout::takeY(expanded, h), 240);
+            expectEquals(Layout::topOfLane(2, h, expanded, takePixels), 438);
+            expectEquals(Layout::topOfLane(3, h, expanded, takePixels), 518);
+            expectEquals(Layout::laneAtY(200, h, expanded, takePixels), 1);
+            expectEquals(Layout::laneAtY(240, h, expanded, takePixels), -1);
+            expectEquals(Layout::laneAtY(437, h, expanded, takePixels), -1);
+            expectEquals(Layout::laneAtY(438, h, expanded, takePixels), 2);
+            expectEquals(Layout::laneAtY(518, h, expanded, takePixels), 3);
+            expectEquals(Layout::laneAtY(240, h, -1, 0), 2);
+            expectEquals(Layout::laneAtY(79, h, expanded, takePixels), -1);
+        }
+
+        beginTest("horizontal playlist time remains aligned after viewport scrolling");
+        {
+            // Content-space x = 0 is always sample 0. The viewport scrolls
+            // the entire arrangement AND its inline child panel together.
+            constexpr double sr = 48000.0, pps = 320.0;
+            for (const double sample : { 0.0, 24000.0, 48000.0, 96000.0 })
+            {
+                const double contentX = sample / sr * pps;
+                for (const int viewportX : { 0, 120, 600 })
+                {
+                    const double rulerScreenX = contentX - viewportX;
+                    const double takeScreenX = contentX - viewportX;
+                    expectWithinAbsoluteError(takeScreenX, rulerScreenX, 1.0e-12);
+                    // Forbidden regression: subtracting viewport offset in
+                    // BOTH sample origin and component scroll would drift.
+                    if (viewportX > 0)
+                    {
+                        const double incorrect = contentX - 2.0 * viewportX;
+                        expect(std::abs(incorrect - rulerScreenX) >= viewportX);
+                    }
+                }
+            }
+        }
+
+        beginTest("expanded take lanes follow vertical zoom and cannot intercept other tracks");
+        {
+            using Layout = DAW::TrackPlaylistInlineLayoutCore;
+            expectEquals(Layout::takeHeightForTrackHeight(80), 66);
+            expect(Layout::takeHeightForTrackHeight(50) < 66);
+            expect(Layout::takeHeightForTrackHeight(140) > 66);
+            for (const int trackH : { 50, 80, 140 })
+            {
+                const int h = Layout::takeHeightForTrackHeight(trackH);
+                const int extra = 3 * h;
+                const int nextY = Layout::topOfLane(3, trackH, 2, extra);
+                expectEquals(nextY, 80 + 3 * trackH + extra);
+                expectEquals(Layout::laneAtY(nextY - 1, trackH, 2, extra), -1);
+                expectEquals(Layout::laneAtY(nextY, trackH, 2, extra), 3);
+            }
+        }
+
+        beginTest("loop-record Undo/Redo restores take lanes but never the mixer");
+        {
+            DAW::TrackManager tracks;
+            auto* vocal = tracks.createTrack("Lead Vocal");
+            DAW::ClipManager clips;
+            vocal->setVolume(0.42f);
+            const auto before = vocal->getPlaylistState().createCopy();
+            const auto newLane = vocal->createPlaylist();
+            const auto after = vocal->getPlaylistState().createCopy();
+            auto* take = clips.createAudioClip("take 2", {});
+            take->setTrackID(vocal->getID());
+            take->setPlaylistId(newLane);
+            const DAW::RecordAudioTakeCommand::Take recorded {
+                take->getState().createCopy(), juce::File(), take->getID() };
+            const DAW::RecordAudioTakeCommand::PlaylistChange laneChange {
+                vocal->getID(), before, after };
+            DAW::RecordAudioTakeCommand cmd(
+                clips, nullptr, { recorded }, &tracks, { laneChange });
+            cmd.execute(); // first execution is a no-op (already finalized)
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            cmd.undo();
+            expectEquals((int)vocal->getPlaylists().size(), 1);
+            expectEquals(vocal->getMainPlaylistId(), juce::String("main"));
+            expectEquals((int)clips.getClipsOnTrack(vocal->getID()).size(), 0);
+            expectWithinAbsoluteError((double)vocal->getVolume(), 0.42, 0.00001);
+            cmd.execute(); // redo
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            expectEquals(vocal->getMainPlaylistId(), newLane);
+            expectEquals((int)clips.getClipsOnTrack(vocal->getID()).size(), 1);
+            auto* restored = clips.getClipsOnTrack(vocal->getID())[0];
+            expect(restored != nullptr && restored->isPlaylistAudible());
+            expectWithinAbsoluteError((double)vocal->getVolume(), 0.42, 0.00001);
+            cmd.undo();
+            expectEquals((int)vocal->getPlaylists().size(), 1);
+        }
+
+        beginTest("renamed legacy Main playlist name survives save and reopen");
+        {
+            DAW::Track original("lead-rename", "Lead");
+            expect(original.renamePlaylist("main", "Lead - original take"));
+            const auto serialized = original.getState();
+            DAW::Track restored("lead-rename", "Restored");
+            restored.restoreState(serialized);
+            expectEquals(restored.getPlaylists().front().id, juce::String("main"));
+            expectEquals(restored.getPlaylists().front().name, juce::String("Lead - original take"));
+        }
+
+        beginTest("comp slice preserves selected timeline and source offsets at 48k to 44.1k");
+        {
+            juce::ValueTree input("AudioClip");
+            input.setProperty("startPosition", (juce::int64)48000, nullptr);
+            input.setProperty("length", (juce::int64)96000, nullptr);
+            input.setProperty("sourceOffset", (juce::int64)0, nullptr);
+            input.setProperty("sourceStartSample", (juce::int64)0, nullptr);
+            input.setProperty("sourceEndSample", (juce::int64)88200, nullptr);
+            input.setProperty("fadeInLength", (juce::int64)480, nullptr);
+            input.setProperty("fadeOutLength", (juce::int64)480, nullptr);
+
+            auto excerpt = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 72000, 96000, 48000.0, 44100.0);
+            expect(excerpt.isValid());
+            expectEquals((juce::int64)excerpt.getProperty("startPosition"), (juce::int64)72000);
+            expectEquals((juce::int64)excerpt.getProperty("length"), (juce::int64)24000);
+            expectEquals((juce::int64)excerpt.getProperty("sourceOffset"), (juce::int64)22050);
+            expectEquals((juce::int64)excerpt.getProperty("sourceStartSample"), (juce::int64)22050);
+            expectEquals((juce::int64)excerpt.getProperty("sourceEndSample"), (juce::int64)44100);
+            expect(!DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 47000, 96000, 48000.0, 44100.0).isValid());
+
+            // When slicing the middle of a take, an unrelated old edge fade
+            // must not appear on the newly promoted phrase.
+            expectEquals((juce::int64)excerpt.getProperty("fadeInLength"), (juce::int64)0);
+            expectEquals((juce::int64)excerpt.getProperty("fadeOutLength"), (juce::int64)0);
+            auto left = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 48000, 72000, 48000.0, 44100.0);
+            expectEquals((juce::int64)left.getProperty("fadeInLength"), (juce::int64)480);
+            expectEquals((juce::int64)left.getProperty("fadeOutLength"), (juce::int64)0);
+            auto right = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 96000, 144000, 48000.0, 44100.0);
+            expectEquals((juce::int64)right.getProperty("fadeInLength"), (juce::int64)0);
+            expectEquals((juce::int64)right.getProperty("fadeOutLength"), (juce::int64)480);
+            auto whole = DAW::TrackPlaylistCompCore::sliceAudioClip(
+                input, 48000, 144000, 48000.0, 44100.0);
+            expectEquals((juce::int64)whole.getProperty("fadeInLength"), (juce::int64)480);
+            expectEquals((juce::int64)whole.getProperty("fadeOutLength"), (juce::int64)480);
+        }
+    }
+};
+static ApexTrackPlaylistCoreTests apexTrackPlaylistCoreTests;

@@ -19,6 +19,17 @@ public:
         SamplePosition    startPosition  = 0;
         int               samplesWritten = 0;
         double            sampleRate     = 44100.0;
+        // Optional pass window into a full loop-recording WAV.
+        bool              sourceWindowEnabled = false;
+        juce::int64       sourceStartSample = 0;
+        juce::int64       sourceEndSample = 0;
+        juce::String      playlistId;
+        ClipID            shareExistingAudioClipId;
+        bool              autoLoopPlaylists = false;
+        // Frozen at recording start so changing the menu cannot alter a take
+        // while disk flush/finalization is in progress.
+        bool              autoTakePlaylists = false;
+        SamplePosition    loopStart = 0, loopEnd = 0;
         juce::File        outputFile;
         ClipManager*      clipManager    = nullptr;
         TrackManager*     trackManager   = nullptr;
@@ -76,9 +87,24 @@ public:
         state.setProperty("name", req.outputFile.getFileNameWithoutExtension(), nullptr);
         state.setProperty("type", (int) ClipType::Audio, nullptr);
         state.setProperty("trackID", req.trackId, nullptr);
+        // Recording always writes to the displayed Main playlist; earlier
+        // takes remain in their lanes and in the persisted ClipManager.
+        if (req.playlistId.isNotEmpty())
+            state.setProperty("playlistId", req.playlistId, nullptr);
+        else if (req.trackManager != nullptr)
+            if (auto* track = req.trackManager->getTrack(req.trackId))
+                state.setProperty("playlistId", track->getMainPlaylistId(), nullptr);
         state.setProperty("startPosition", (juce::int64) req.startPosition, nullptr);
         state.setProperty("length", (juce::int64) clipLen, nullptr);
-        state.setProperty("sourceOffset", (juce::int64) 0, nullptr);
+        const auto sourceBegin = req.sourceWindowEnabled
+            ? juce::jmax<juce::int64>(0, req.sourceStartSample) : 0;
+        state.setProperty("sourceOffset", sourceBegin, nullptr);
+        if (req.sourceWindowEnabled)
+        {
+            state.setProperty("sourceStartSample", sourceBegin, nullptr);
+            state.setProperty("sourceEndSample",
+                              juce::jmax(sourceBegin + 1, req.sourceEndSample), nullptr);
+        }
         state.setProperty("sourceFile", req.outputFile.getFullPathName(), nullptr);
         state.setProperty("gain", 1.0f, nullptr);
 
@@ -104,9 +130,21 @@ public:
         auto* clip = dynamic_cast<AudioClip*>(req.clipManager->recreateClipFromState(state));
         if (clip == nullptr) return nullptr;
 
+        // During an audition, the currently SOLOED alternate (not Main) is
+        // the only playlist that may play. A freshly finalized recording
+        // must never leak into the graph because Clip::restoreState defaults
+        // its presentation gate to true for legacy project compatibility.
+        if (req.trackManager != nullptr)
+            if (auto* track = req.trackManager->getTrack(req.trackId))
+                clip->setPlaylistAudible(clip->getPlaylistId() == track->getPlaybackPlaylistId());
+
         logAlways("[APEX-DIAG-CRASH] finalize pre-loadForClip clipId=" + clip->getID()
             + " file=" + req.outputFile.getFullPathName());
-        req.audioFiles->loadForClip(clip->getID(), req.outputFile);
+        if (req.shareExistingAudioClipId.isNotEmpty()
+            && req.audioFiles->hasAudio(req.shareExistingAudioClipId))
+            req.audioFiles->shareForClip(req.shareExistingAudioClipId, clip->getID());
+        else
+            req.audioFiles->loadForClip(clip->getID(), req.outputFile);
 
         logAlways("[APEX-DIAG-CRASH] finalize RETURN clipId=" + clip->getID());
 

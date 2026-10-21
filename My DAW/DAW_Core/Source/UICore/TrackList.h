@@ -87,6 +87,20 @@ public:
     std::function<void(const TrackID&, bool)> onSetMonitoring;
     std::function<void(const TrackID&, const juce::String&)> onRenameTrack;
     std::function<void(const TrackID&)> onOpenPianoRoll;
+    std::function<void(const TrackID&)> onOpenPlaylistView;
+    std::function<void(const TrackID&)> onShowWaveformView;
+    std::function<void(const TrackID&, bool)> onCreatePlaylist;
+    std::function<void(const TrackID&)> onPlaylistStateChanged;
+    // Prevent mid-record menu edits from changing the destination lane.
+    std::function<bool()> onCanModifyPlaylists;
+    std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTake;
+    std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTake;
+    std::function<bool()> onGetAutoLoopPlaylists;
+    std::function<void(bool)> onSetAutoLoopPlaylists;
+    std::function<bool()> onGetAutoPlaylists;
+    std::function<void(bool)> onSetAutoPlaylists;
+    std::function<bool()> onGetAutoTakePlaylists;
+    std::function<void(bool)> onSetAutoTakePlaylists;
     std::function<void(const TrackID&)> onPreFaderToggleRequested;
     std::function<void(const TrackID&)> onOpenInputTrim;
     std::function<void(const TrackID&)> onConvertFolderToTrack;
@@ -123,6 +137,26 @@ public:
 
     int getDesiredHeight() const { return height_; }
     void setDesiredHeight(int h) { height_ = h; }
+    void setPlaylistExtraHeight(int extra)
+    {
+        const int safe = juce::jmax(0, extra);
+        if (playlistExtraHeight_ == safe) return;
+        playlistExtraHeight_ = safe;
+        resized();
+        repaint();
+    }
+    int getPlaylistExtraHeight() const noexcept { return playlistExtraHeight_; }
+    int getVirtualTakeHeight() const noexcept
+    {
+        const int count = juce::jmin(128, juce::jmax(0,
+            (int)track_.getPlaylists().size() - 1));
+        return count > 0 && playlistExtraHeight_ > 0
+            ? juce::jmax(1, playlistExtraHeight_ / count) : 66;
+    }
+    int getPrimaryHeight() const noexcept
+    {
+        return juce::jmax(24, getHeight() - playlistExtraHeight_);
+    }
 
     void setSelected(bool s)
     {
@@ -315,9 +349,13 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        const int primaryHeight = getPrimaryHeight();
+        // Real mixer/track controls cannot extend over virtual take rows.
+        g.saveState();
+        g.reduceClipRegion(0, 0, getWidth(), primaryHeight);
         auto& t = Theme::getInstance();
         auto& a = t.apex;
-        auto bounds = getLocalBounds().toFloat();
+        auto bounds = getLocalBounds().toFloat().withHeight((float)primaryHeight);
         const bool master = track_.isMaster();
 
         // Background — tracks stay dark; identity comes from thin accents.
@@ -569,7 +607,19 @@ public:
             nameBounds.removeFromLeft(16.f);
         nameBounds = nameBounds.reduced(8, 0);
         nameBounds = nameBounds.removeFromTop(nameBounds.getHeight() * 0.5f);
+        if (!master) nameBounds.removeFromRight(67);
         g.drawText(track_.getName(), nameBounds, juce::Justification::centredLeft);
+        if (!master)
+        {
+            playlistBounds_ = { (float)getWidth() - 71.f, 7.f, 64.f, 21.f };
+            g.setColour(juce::Colour(0xff2f2944));
+            g.fillRoundedRectangle(playlistBounds_, 4.f);
+            g.setColour(juce::Colour(0xffa895df));
+            g.drawRoundedRectangle(playlistBounds_, 4.f, 1.f);
+            g.setFont(t.fonts.small);
+            g.setColour(juce::Colours::white);
+            g.drawText("WAV v", playlistBounds_.toNearestInt(), juce::Justification::centred);
+        }
 
         // M / S / Monitor / R / A / Trim / Target — bottom half
         drawMSRButton(g, muteBounds_, "M", track_.isMuted(), muteHover_, t.colors.warning);
@@ -598,10 +648,65 @@ public:
 
         // Row frame so headers read as their own panel — restrained hairline.
         {
-            auto r = getLocalBounds().toFloat().reduced(1.5f);
+            auto r = bounds.reduced(1.5f);
             g.setColour(master ? a.color.magenta.withAlpha(0.38f)
                                : a.color.borderSoftA.withAlpha(0.55f));
             g.drawRect(r, master ? 1.5f : 1.0f);
+        }
+        g.restoreState();
+        if (playlistExtraHeight_ > 0 && !master)
+        {
+            const int takeHeight = getVirtualTakeHeight();
+            int takeIndex = 0;
+            for (const auto& lane : track_.getPlaylists())
+            {
+                if (lane.id == track_.getMainPlaylistId()) continue;
+                const int y = primaryHeight + takeIndex++ * takeHeight;
+                if (y >= getHeight()) break;
+                const bool audition = lane.id == track_.getAuditionPlaylistId();
+                const bool target = lane.id == track_.getTargetPlaylistId();
+                g.setColour(juce::Colour(target ? 0xff221c34 : 0xff171723));
+                g.fillRect(0, y, getWidth(), takeHeight);
+                g.setColour(juce::Colour(target ? 0xffb985ff : 0xff3c374e));
+                g.drawHorizontalLine(y + takeHeight - 1, 0.f, (float)getWidth());
+                g.setFont(juce::Font(12.f, juce::Font::bold));
+                g.setColour(juce::Colours::white);
+                g.drawFittedText(lane.name, 18,
+                    y + juce::jmax(3, takeHeight / 10),
+                    juce::jmax(40, getWidth() - 109),
+                    juce::jmin(23, takeHeight / 2),
+                    juce::Justification::centredLeft, 1);
+                g.setColour(target ? juce::Colour(0xffb985ff)
+                                   : juce::Colour(0xff8b85ab));
+                g.setFont(juce::Font(10.f));
+                if (takeHeight >= 54)
+                    g.drawText(target ? "COMP TARGET" : "TAKE",
+                        18, y + takeHeight - 26,
+                        juce::jmax(0, getWidth() - 70), 18,
+                        juce::Justification::centredLeft);
+                const auto solo = juce::Rectangle<int>(getWidth() - 42,
+                    y + juce::jmax(0, (takeHeight - 25) / 2), 29, 25);
+                g.setColour(audition ? juce::Colour(0xff33db9a)
+                                     : juce::Colour(0xff423959));
+                g.fillRoundedRectangle(solo.toFloat(), 4.f);
+                g.setColour(audition ? juce::Colours::black : juce::Colours::white);
+                g.setFont(juce::Font(12.f, juce::Font::bold));
+                g.drawText("S", solo, juce::Justification::centred);
+                // The inline waveform editor is a scrolled content child.
+                // Its old promotion arrow at x=getWidth()-49 is offscreen
+                // on long timelines: pin an accessible arrow to the header.
+                const auto arrow = juce::Rectangle<int>(getWidth() - 81,
+                    y + juce::jmax(0, (takeHeight - 25) / 2), 29, 25);
+                const bool canPromote = onCanPromotePlaylistTake
+                    && onCanPromotePlaylistTake(track_.getID(), lane.id);
+                g.setColour(canPromote ? juce::Colour(0xffb88cff)
+                                       : juce::Colour(0xff423959));
+                g.fillRoundedRectangle(arrow.toFloat(), 4.f);
+                g.setColour(canPromote ? juce::Colours::black
+                                       : juce::Colour(0xffa59fb6));
+                g.drawText(juce::CharPointer_UTF8("↑"), arrow,
+                    juce::Justification::centred);
+            }
         }
     }
 
@@ -636,7 +741,7 @@ public:
     
     void resized() override
     {
-        auto bounds = getLocalBounds().toFloat();
+        auto bounds = getLocalBounds().toFloat().withHeight((float)getPrimaryHeight());
         if (indentLevel_ > 0 && !track_.isMaster())
             bounds.removeFromLeft((float)(indentLevel_ * kIndentStepPx));
         bounds.removeFromLeft(6.0f); // colour strip
@@ -763,6 +868,92 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (!track_.isMaster() && playlistExtraHeight_ > 0
+            && e.y >= getPrimaryHeight() && e.y < getHeight())
+        {
+            int alt = (e.y - getPrimaryHeight()) / getVirtualTakeHeight();
+            for (const auto& lane : track_.getPlaylists())
+            {
+                if (lane.id == track_.getMainPlaylistId()) continue;
+                if (alt-- != 0) continue;
+                const auto id = lane.id;
+                if (e.mods.isPopupMenu())
+                {
+                    if (onCanModifyPlaylists && !onCanModifyPlaylists()) return;
+                    juce::PopupMenu menu;
+                    juce::Component::SafePointer<TrackRow> weak(this);
+                    menu.addItem("Show as Main", true, id == track_.getMainPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.showPlaylistAsMain(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.addItem("Set Comp Target", true, id == track_.getTargetPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.setTargetPlaylist(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.addItem("Audition / Solo", true, id == track_.getAuditionPlaylistId(),
+                        [weak, id] {
+                            if (weak && weak->track_.soloPlaylistLane(id))
+                                if (weak->onPlaylistStateChanged)
+                                    weak->onPlaylistStateChanged(weak->track_.getID());
+                        });
+                    menu.addSeparator();
+                    menu.addItem("Rename Playlist...", true, false, [weak, id]
+                    {
+                        if (!weak) return;
+                        juce::String originalName = id;
+                        for (const auto& pl : weak->track_.getPlaylists())
+                            if (pl.id == id) { originalName = pl.name; break; }
+                        auto* prompt = new juce::AlertWindow(
+                            "Rename Playlist", "Enter a new name for this take.",
+                            juce::MessageBoxIconType::QuestionIcon);
+                        prompt->addTextEditor("name", originalName, "Playlist name:");
+                        prompt->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+                        prompt->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                        prompt->enterModalState(true, juce::ModalCallbackFunction::create(
+                            [weak, prompt, id](int result)
+                            {
+                                if (result == 1 && weak)
+                                    if (weak->track_.renamePlaylist(
+                                            id, prompt->getTextEditorContents("name").trim()))
+                                        if (weak->onPlaylistStateChanged)
+                                            weak->onPlaylistStateChanged(weak->track_.getID());
+                            }), true);
+                    });
+                    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+                }
+                else
+                {
+                    if (onCanModifyPlaylists && !onCanModifyPlaylists()) return;
+                    const int takeHeight = getVirtualTakeHeight();
+                    const int buttonTop = getPrimaryHeight()
+                        + ((e.y - getPrimaryHeight()) / takeHeight) * takeHeight
+                        + juce::jmax(0, (takeHeight - 25) / 2);
+                    if (juce::Rectangle<int>(getWidth() - 42,
+                            buttonTop, 29, 25).contains(e.getPosition()))
+                    {
+                        if (track_.soloPlaylistLane(id) && onPlaylistStateChanged)
+                            onPlaylistStateChanged(track_.getID());
+                    }
+                    else if (juce::Rectangle<int>(getWidth() - 81,
+                                 buttonTop, 29, 25).contains(e.getPosition()))
+                    {
+                        if (onPromotePlaylistTake)
+                            onPromotePlaylistTake(track_.getID(), id);
+                    }
+                }
+                return; // virtual takes have no track reorder/resize
+            }
+            return;
+        }
+        if (!track_.isMaster() && playlistBounds_.contains(e.position))
+        {
+            showPlaylistSelectorMenu();
+            return;
+        }
         if (!track_.isMaster() && automationBounds_.contains(e.position))
         {
             if (e.mods.isPopupMenu())
@@ -984,6 +1175,7 @@ public:
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
     {
+        if (e.y >= getPrimaryHeight()) return;
         // Double-click on name area — always renames this single track only.
         // Multi-track bulk rename is in the right-click context menu.
         auto nameArea = getLocalBounds().toFloat();
@@ -1129,6 +1321,78 @@ private:
             onSelectedWithModifiers(this, mods);
         else if (onSelected)
             onSelected(this);
+    }
+
+    void showPlaylistSelectorMenu()
+    {
+        juce::PopupMenu menu;
+        juce::Component::SafePointer<TrackRow> weakThis(this);
+        menu.addSectionHeader("Track View");
+        menu.addItem("Waveform", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onShowWaveformView)
+                weakThis->onShowWaveformView(weakThis->track_.getID());
+        });
+        menu.addItem("Playlists - Show Takes", true, false, [weakThis]
+        {
+            if (weakThis && weakThis->onOpenPlaylistView)
+                weakThis->onOpenPlaylistView(weakThis->track_.getID());
+        });
+        menu.addSeparator();
+        menu.addItem("+ New Playlist", true, false, [weakThis]
+        {
+            if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                && weakThis->onCreatePlaylist)
+                weakThis->onCreatePlaylist(weakThis->track_.getID(), false);
+        });
+        menu.addItem("Duplicate Main Playlist", true, false, [weakThis]
+        {
+            if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                && weakThis->onCreatePlaylist)
+                weakThis->onCreatePlaylist(weakThis->track_.getID(), true);
+        });
+        menu.addSeparator();
+        const bool autoEnabled = onGetAutoPlaylists && onGetAutoPlaylists();
+        menu.addItem("Auto Playlists (top toolbar)", true, autoEnabled,
+            [weakThis, autoEnabled]
+            {
+                if (weakThis && weakThis->onSetAutoPlaylists)
+                    weakThis->onSetAutoPlaylists(!autoEnabled);
+            });
+        menu.addSectionHeader(autoEnabled ? "Automatic recording options"
+                                           : "Manual: select New before recording");
+        const bool autoLoop = onGetAutoLoopPlaylists && onGetAutoLoopPlaylists();
+        menu.addItem("Auto-create Playlists on Loop Record", autoEnabled, autoLoop,
+            [weakThis, autoLoop]
+            {
+                if (weakThis && weakThis->onSetAutoLoopPlaylists)
+                    weakThis->onSetAutoLoopPlaylists(!autoLoop);
+            });
+        const bool autoTakes = onGetAutoTakePlaylists && onGetAutoTakePlaylists();
+        menu.addItem("Auto-save Repeat Takes (No Loop Needed)", autoEnabled, autoTakes,
+            [weakThis, autoTakes]
+            {
+                if (weakThis && weakThis->onSetAutoTakePlaylists)
+                    weakThis->onSetAutoTakePlaylists(!autoTakes);
+            });
+        menu.addSeparator();
+        menu.addSectionHeader("Main Playlist");
+        for (const auto& playlist : track_.getPlaylists())
+        {
+            juce::PopupMenu::Item item(playlist.name);
+            item.isTicked = playlist.id == track_.getMainPlaylistId();
+            item.action = [weakThis, id = playlist.id]
+            {
+                if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                    && weakThis->track_.showPlaylistAsMain(id))
+                    if (weakThis->onPlaylistStateChanged)
+                        weakThis->onPlaylistStateChanged(weakThis->track_.getID());
+            };
+            menu.addItem(item);
+        }
+        menu.showMenuAsync(juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withTargetScreenArea(localAreaToGlobal(playlistBounds_.toNearestInt())));
     }
 
     void showContextMenu()
@@ -1526,6 +1790,7 @@ public:
     enum class DragMode { None, Resize, PendingReorder, Reorder };
     DragMode dragMode_ = DragMode::None;
     int  height_      = 72;
+    int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
     bool selected_    = false;
     bool resizeHover_ = false;
@@ -1589,6 +1854,7 @@ public:
     juce::Rectangle<float> automationTargetBounds_;
     float autoPulsePhase_ = 0.f;
     mutable juce::Rectangle<float> colorStripBounds_;
+    mutable juce::Rectangle<float> playlistBounds_;
 
     void drawMSRButton(juce::Graphics& g, const juce::Rectangle<float>& bounds,
                        const juce::String& text, bool isOn, bool hovered, juce::Colour color)
@@ -2540,6 +2806,18 @@ public:
         repaint();
     }
 
+    void repaintTrackRow(const TrackID& id)
+    {
+        for (auto* row : trackRows_)
+            if (row != nullptr && row->getTrackID() == id)
+            {
+                // Rows use setBufferedToImage(true); repainting only their
+                // TrackList parent does NOT refresh the cached ↑ active state.
+                row->repaint();
+                break;
+            }
+    }
+
     TrackRow* getRow(int index) const
     {
         int actual = trackManager_.hasMasterTrack() ? index + 1 : index;
@@ -2555,6 +2833,19 @@ public:
     std::function<void(const TrackID&)>          onExclusiveMuteRequested;
     std::function<void(const TrackID&)>          onConvertFolderToTrackRequested;
     std::function<void(const TrackID&)>          onOpenPianoRollRequested;
+    std::function<void(const TrackID&)> onOpenPlaylistViewRequested;
+    std::function<void(const TrackID&)> onShowWaveformViewRequested;
+    std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
+    std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
+    std::function<bool()> onCanModifyPlaylistsRequested;
+    std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTakeRequested;
+    std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTakeRequested;
+    std::function<bool()> onGetAutoLoopPlaylistsRequested;
+    std::function<void(bool)> onSetAutoLoopPlaylistsRequested;
+    std::function<bool()> onGetAutoPlaylistsRequested;
+    std::function<void(bool)> onSetAutoPlaylistsRequested;
+    std::function<bool()> onGetAutoTakePlaylistsRequested;
+    std::function<void(bool)> onSetAutoTakePlaylistsRequested;
     std::function<void(const TrackID&)>          onPreFaderToggleRequested;
     std::function<void(const TrackID&)>          onOpenInputTrimRequested;
     /** Returns the active hardware input channel names for per-track input selectors. */
@@ -3160,7 +3451,8 @@ private:
                 {
                     r->setDesiredHeight(r->getDesiredHeight() + delta);
                     if (onRowHeightChanged)
-                        onRowHeightChanged(visibleRowIndex, r->getDesiredHeight());
+                        onRowHeightChanged(visibleRowIndex,
+                            r->getDesiredHeight() - r->getPlaylistExtraHeight());
                     resized();
                 };
                 row->onFolderToggled = [this](const TrackID& fid, bool expanded)
@@ -3210,6 +3502,27 @@ private:
                 row->onToggleMute = [this](const TrackID& id) { if (onToggleMuteRequested) onToggleMuteRequested(id); };
                 row->onExclusiveMute = [this](const TrackID& id) { if (onExclusiveMuteRequested) onExclusiveMuteRequested(id); };
                 row->onOpenPianoRoll = [this](const TrackID& id) { if (onOpenPianoRollRequested) onOpenPianoRollRequested(id); };
+                row->onOpenPlaylistView = [this](const TrackID& id) { if (onOpenPlaylistViewRequested) onOpenPlaylistViewRequested(id); };
+                row->onShowWaveformView = [this](const TrackID& id) { if (onShowWaveformViewRequested) onShowWaveformViewRequested(id); };
+                row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
+                row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
+                row->onCanModifyPlaylists = [this] { return !onCanModifyPlaylistsRequested || onCanModifyPlaylistsRequested(); };
+                row->onCanPromotePlaylistTake = [this](const TrackID& id, const juce::String& laneId)
+                {
+                    return onCanPromotePlaylistTakeRequested
+                        && onCanPromotePlaylistTakeRequested(id, laneId);
+                };
+                row->onPromotePlaylistTake = [this](const TrackID& id, const juce::String& laneId)
+                {
+                    if (onPromotePlaylistTakeRequested)
+                        onPromotePlaylistTakeRequested(id, laneId);
+                };
+                row->onGetAutoLoopPlaylists = [this] { return onGetAutoLoopPlaylistsRequested && onGetAutoLoopPlaylistsRequested(); };
+                row->onSetAutoLoopPlaylists = [this](bool enabled) { if (onSetAutoLoopPlaylistsRequested) onSetAutoLoopPlaylistsRequested(enabled); };
+                row->onGetAutoPlaylists = [this] { return onGetAutoPlaylistsRequested && onGetAutoPlaylistsRequested(); };
+                row->onSetAutoPlaylists = [this](bool enabled) { if (onSetAutoPlaylistsRequested) onSetAutoPlaylistsRequested(enabled); };
+                row->onGetAutoTakePlaylists = [this] { return onGetAutoTakePlaylistsRequested && onGetAutoTakePlaylistsRequested(); };
+                row->onSetAutoTakePlaylists = [this](bool enabled) { if (onSetAutoTakePlaylistsRequested) onSetAutoTakePlaylistsRequested(enabled); };
                 row->onPreFaderToggleRequested = [this](const TrackID& id) { if (onPreFaderToggleRequested) onPreFaderToggleRequested(id); };
                 row->onOpenInputTrim = [this](const TrackID& id) { if (onOpenInputTrimRequested) onOpenInputTrimRequested(id); };
                 row->onGetHardwareInputNames = [this]() -> juce::StringArray

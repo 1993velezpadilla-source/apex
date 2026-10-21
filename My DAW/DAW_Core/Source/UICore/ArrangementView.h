@@ -19,6 +19,8 @@
 #include "../PluginHostCore/PluginChainCore.h"
 #include "../RoutingCore/RoutingGraph.h"
 #include "../RecordingCore/RecordingOverlayStateCore.h"
+#include "TrackPlaylistPanel.h"
+#include "TrackPlaylistInlineLayoutCore.h"
 #include "../../Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h"
 
 namespace DAW {
@@ -171,8 +173,14 @@ public:
             defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
             if (core_ != nullptr)
                 core_->resized();
-            if (onLaneLayoutChanged)
-                onLaneLayoutChanged();
+            // Dynamic take rows must be re-laid out on vertical zoom too.
+            if (inlinePlaylistPanel_ != nullptr)
+                refreshInlinePlaylistLayout();
+            else
+            {
+                updateInlinePlaylistBounds();
+                if (onLaneLayoutChanged) onLaneLayoutChanged();
+            }
             repaint();
         };
 
@@ -217,6 +225,22 @@ trackManager_.addListener(this);
             core_->getToolbar().setAutoArmEnabledQuery(std::move(isEnabled));
             core_->getToolbar().setAutoArmToggleAction(std::move(toggle));
         }
+    }
+
+    void setAutoPlaylistBindings(std::function<bool()> isEnabled,
+                                 std::function<void()> toggle)
+    {
+        if (core_ != nullptr)
+        {
+            core_->getToolbar().setAutoPlaylistEnabledQuery(std::move(isEnabled));
+            core_->getToolbar().setAutoPlaylistToggleAction(std::move(toggle));
+        }
+    }
+
+    void refreshAutoPlaylistButton()
+    {
+        if (core_ != nullptr)
+            core_->getToolbar().repaint();
     }
 
     void setAddTrackRequested(std::function<void()> request)
@@ -302,17 +326,80 @@ trackManager_.addListener(this);
         mirrorAllEngineClipsIntoArrangement();
     }
 
+    void setInlinePlaylistPanel(TrackPlaylistPanel* panel, const TrackID& trackId)
+    {
+        if (panel == nullptr || trackId.isEmpty())
+        {
+            if (inlinePlaylistPanel_ != nullptr)
+                inlinePlaylistPanel_->setVisible(false);
+            inlinePlaylistPanel_ = nullptr;
+            inlinePlaylistTrackId_.clear();
+            if (core_ != nullptr)
+                core_->setInlinePlaylistExpansion({}, 0);
+            if (onLaneLayoutChanged) onLaneLayoutChanged();
+            return;
+        }
+        if (trackManager_.getTrack(trackId) == nullptr)
+            return;
+        inlinePlaylistPanel_ = panel;
+        inlinePlaylistTrackId_ = trackId;
+        panel->setInlineMode(true);
+        // Transfer the existing editor rather than duplicating its waveform
+        // caches or the authoritative comp-command implementations.
+        addAndMakeVisible(panel);
+        refreshInlinePlaylistLayout();
+    }
+
+    void refreshInlinePlaylistLayout()
+    {
+        if (!inlinePlaylistPanel_ || inlinePlaylistTrackId_.isEmpty() || !core_)
+            return;
+        auto* track = trackManager_.getTrack(inlinePlaylistTrackId_);
+        if (!track)
+        {
+            setInlinePlaylistPanel(nullptr, {});
+            return;
+        }
+        // One native main band + N alternate take bands in this SAME track.
+        const int takeHeight = TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
+            (int)core_->getZoom().getTrackHeightPx());
+        const int extras = juce::jmin(128, juce::jmax(0,
+            (int)track->getPlaylists().size() - 1)) * takeHeight;
+        inlinePlaylistPanel_->setInlineTakeHeight(takeHeight);
+        core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
+        updateInlinePlaylistBounds();
+        if (onLaneLayoutChanged) onLaneLayoutChanged();
+    }
+
+    bool isInlinePlaylistPanelActive() const noexcept
+    {
+        return inlinePlaylistPanel_ != nullptr && inlinePlaylistPanel_->isVisible();
+    }
+
+    int getInlinePlaylistExtraForLane(int index) const noexcept
+    {
+        return core_ ? core_->getInlinePlaylistExtraForLane(index) : 0;
+    }
+
     int getNumLanes() const noexcept
     {
         return trackManager_.getNumTracks() + (trackManager_.hasMasterTrack() ? 1 : 0);
     }
 
-    int getLaneHeight(int /*index*/) const
+    int getPhysicalTrackHeight() const noexcept
     {
-        // ArrangementViewCore is the single source of truth for lane height.
-        // All lanes share one track height so headers and timeline always agree.
+        return core_ != nullptr
+            ? juce::jmax(24, (int)core_->getZoom().getTrackHeightPx())
+            : defaultLaneHeight_;
+    }
+
+    int getLaneHeight(int index) const
+    {
+        // Keep physical track/automation band height uniform while allowing
+        // an unfolded track to own additional virtual playlist rows.
         if (core_ != nullptr)
-            return juce::jmax(24, (int)core_->getZoom().getTrackHeightPx());
+            return juce::jmax(24, (int)core_->getZoom().getTrackHeightPx())
+                   + core_->getInlinePlaylistExtraForLane(index);
         return defaultLaneHeight_;
     }
 
@@ -636,8 +723,9 @@ trackManager_.addListener(this);
     {
         if (core_ != nullptr)
         {
-            const int trackH = getLaneHeight(0);
-            const int contentTop = 48 + 32;
+            // The first lane can have virtual take rows; its expanded
+            // height is NOT the height of a physical recording track.
+            const int trackH = getPhysicalTrackHeight();
             const double sr = juce::jmax(1.0, core_->m_engineSampleRate);
             const double pxPerSecond = core_->getZoom().getPixelsPerSecond();
             const auto currentSamples = transport_.getPosition();
@@ -669,8 +757,14 @@ trackManager_.addListener(this);
                 const float x = (float)core_->timeToScreenX((double)startSamples / sr);
                 const float endX = (float)core_->timeToScreenX((double)(startSamples + recordedSamples) / sr);
                 const float w = juce::jmax(2.0f, endX - x);
-                const int laneIndex = (trackManager_.hasMasterTrack() ? 1 : 0) + i;
-                const float y = (float)(contentTop + laneIndex * trackH);
+                // Use the same authoritative Y projection as native clip
+                // renderers. An expanded playlist above this track inserts
+                // virtual lanes, so multiplying physical index by trackH
+                // paints live recording waves on the WRONG track.
+                const auto physicalBand = core_->getTrackLaneBounds(track->getID());
+                if (physicalBand.isEmpty())
+                    continue; // collapsed folder descendants stay hidden
+                const float y = (float)physicalBand.getY();
                 juce::Rectangle<float> clipBounds(x, y, w, (float)trackH - 2.0f);
 
                 g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
@@ -725,6 +819,7 @@ trackManager_.addListener(this);
     {
         if (core_ != nullptr)
             core_->setBounds(getLocalBounds());
+        updateInlinePlaylistBounds();
         updateImportOverlayBounds();
     }
 
@@ -754,6 +849,29 @@ std::function<void()> onQuickAccessSidePanel;
                        SamplePosition)> onPreparedAudioImport;
 
 private:
+    void updateInlinePlaylistBounds()
+    {
+        if (!inlinePlaylistPanel_ || !core_ || inlinePlaylistTrackId_.isEmpty())
+            return;
+        const auto owningBand = core_->getTrackLaneBounds(inlinePlaylistTrackId_);
+        const int laneIndex = trackManager_.getTrackIndex(inlinePlaylistTrackId_)
+            + (trackManager_.hasMasterTrack() ? 1 : 0);
+        const int extras = core_->getInlinePlaylistExtraForLane(laneIndex);
+        if (owningBand.isEmpty() || extras <= 0)
+        {
+            inlinePlaylistPanel_->setVisible(false);
+            return;
+        }
+        // Panel plot begins at x=161, with its parent at x=-161: clip
+        // boundaries line up pixel-for-pixel with the main track waveform.
+        inlinePlaylistPanel_->setBounds(-161, owningBand.getBottom(),
+                                        getWidth() + 161, extras);
+        inlinePlaylistPanel_->setVisible(true);
+        inlinePlaylistPanel_->toFront(false);
+        if (importOverlay_.isVisible())
+            importOverlay_.toFront(false);
+    }
+
     bool isSupportedAudioFileForDrop(const juce::File& file) const
     {
         if (!file.existsAsFile())
@@ -1231,6 +1349,30 @@ void trackPropertyChanged(Track* track) override
             lastSyncedTrackColours_[trackId] = colour;
         }
 
+        // Loop recording may create many playlist identities in a single
+        // finalization. Coalesce native lane reflow onto one UI iteration;
+        // never rebuild clip renderers once PER recorded take.
+        if (core_ != nullptr && trackId == inlinePlaylistTrackId_
+            && !inlineRefreshScheduled_ && !trackManager_.isRestoringState())
+        {
+            const int index = trackManager_.getTrackIndex(trackId)
+                + (trackManager_.hasMasterTrack() ? 1 : 0);
+            const int required = juce::jmin(128, juce::jmax(0,
+                (int)track->getPlaylists().size() - 1))
+                * TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
+                    (int)core_->getZoom().getTrackHeightPx());
+            if (core_->getInlinePlaylistExtraForLane(index) != required)
+            {
+                inlineRefreshScheduled_ = true;
+                juce::Component::SafePointer<ArrangementView> safeThis(this);
+                juce::MessageManager::callAsync([safeThis]
+                {
+                    if (!safeThis) return;
+                    safeThis->inlineRefreshScheduled_ = false;
+                    safeThis->refreshInlinePlaylistLayout();
+                });
+            }
+        }
         requestAutomationSync();
         repaint();
     }
@@ -1322,6 +1464,33 @@ void trackPropertyChanged(Track* track) override
     {
         if (clip == nullptr || core_ == nullptr)
             return;
+
+        // A clip recreated by Undo/Redo defaults to visible before the host
+        // has republished its lane gate. Resolve the owning track here so the
+        // very first arrangement mirror and RT flag agree, no ghost waveforms.
+        if (auto* track = trackManager_.getTrack(clip->getTrackID()))
+            clip->setPlaylistAudible(clip->getPlaylistId()
+                                   == track->getPlaybackPlaylistId());
+
+        // Pro Tools semantics: SOLO an alternate lane changes AUDIO only.
+        // The main arranger waveform must remain the selected Main playlist,
+        // never disappear or switch to the soloed alternate take.
+        const auto* owningTrack = trackManager_.getTrack(clip->getTrackID());
+        const bool belongsToDisplayedMain = owningTrack == nullptr
+            || clip->getPlaylistId() == owningTrack->getMainPlaylistId();
+        if (!belongsToDisplayedMain)
+        {
+            const auto it = engineClipIdsToArrangementIds_.find(clip->getID());
+            if (it != engineClipIdsToArrangementIds_.end())
+            {
+                const auto arrangementId = it->second;
+                core_->m_uuidToEngineId.erase(arrangementId);
+                core_->m_selection.deselectClip(arrangementId);
+                core_->m_clipState.removeClip(arrangementId);
+                engineClipIdsToArrangementIds_.erase(it);
+            }
+            return;
+        }
 
         juce::ScopedValueSetter<bool> mirrorGuard(isMirroringToArrangement_, true);
         ArrangementEditor::ArrangementClipModel model;
@@ -1518,6 +1687,9 @@ void trackPropertyChanged(Track* track) override
     AutomationManagerCore* automation_ = nullptr;
 
     std::unique_ptr<ArrangementEditor::ArrangementViewCore> core_;
+    TrackPlaylistPanel* inlinePlaylistPanel_ = nullptr; // owned by MainComponent
+    TrackID inlinePlaylistTrackId_;
+    bool inlineRefreshScheduled_ = false;
     ImportOverlayComponent importOverlay_;
     std::function<PluginChainCore*(const TrackID&)> pluginChainProvider_;
     std::function<RoutingGraph*()> routingGraphProvider_;

@@ -8,6 +8,7 @@
 #include "UICore/TransportBar.h"
 #include "UICore/SettingsPanel.h"
 #include "UICore/TrackList.h"
+#include "UICore/TrackPlaylistPanel.h"
 #include "UICore/QuickSendPopup.h"
 #include "QuickTrackCore/QuickTrackBuilderCore.h"
 #include "QuickTrackCore/QuickTrackBuilderPopup.h"
@@ -175,6 +176,7 @@ private:
     std::unique_ptr<DAW::SettingsPanel>    settingsPanel_;
     std::unique_ptr<DAW::TrackList>        trackList_;
     std::unique_ptr<DAW::ArrangementView>  arrangement_;
+    std::unique_ptr<DAW::TrackPlaylistPanel> playlistPanel_;
     std::unique_ptr<DAW::MixerPanel>       mixerPanel_;
     std::unique_ptr<DAW::MonitorSectionUI>  monitorSection_;
     std::unique_ptr<DAW::AudioDeviceSettingsUI> audioDevicePanel_;
@@ -477,6 +479,7 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
+    void syncPlaylistTimeline();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();
      *  used to gate playhead-driven extent growth so the viewport bounds are

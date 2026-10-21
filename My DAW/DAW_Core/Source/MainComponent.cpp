@@ -1382,6 +1382,96 @@ MainComponent::MainComponent()
             }
         }
     };
+    // One-click WAV selector in TrackRow. All lanes share the existing track
+    // plugins/fader/routing; only clip playlist membership changes.
+    trackList_->onOpenPlaylistViewRequested = [this](const DAW::TrackID& trackId)
+    {
+        if (!playlistPanel_ || !arrangement_) return;
+        // A Pro Tools-style unfolded take view lives UNDER its parent track
+        // in the SAME scrolling arranger, not a detached floating panel.
+        playlistPanel_->showForTrack(trackId, appCore_.getCurrentSampleRate());
+        arrangement_->setInlinePlaylistPanel(playlistPanel_.get(), trackId);
+        resized();
+        syncPlaylistTimeline();
+    };
+    trackList_->onShowWaveformViewRequested = [this](const DAW::TrackID&)
+    {
+        // Waveform is a view switch, not a playlist mutation. Switching back
+        // closes the take-lane workspace without altering takes or audio.
+        if (arrangement_)
+            arrangement_->setInlinePlaylistPanel(nullptr, {});
+        if (playlistPanel_) playlistPanel_->setVisible(false);
+        if (arrangement_) arrangement_->requestClipRemirror();
+        resized();
+    };
+    trackList_->onCreatePlaylistRequested = [this](const DAW::TrackID& trackId, bool duplicate)
+    {
+        if (!playlistPanel_ || !arrangement_) return;
+        if (appCore_.getRecordingEngine().isRecording()
+            || appCore_.getTransport().isRecording())
+            return;
+        playlistPanel_->createForTrack(trackId, duplicate, appCore_.getCurrentSampleRate());
+        arrangement_->setInlinePlaylistPanel(playlistPanel_.get(), trackId);
+        resized();
+        syncPlaylistTimeline();
+    };
+    trackList_->onGetAutoLoopPlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoLoopPlaylists();
+    };
+    trackList_->onSetAutoLoopPlaylistsRequested = [this](bool enabled)
+    {
+        if (!appCore_.getRecordingEngine().isRecording())
+            appCore_.getRecordingEngine().setAutoLoopPlaylists(enabled);
+    };
+    trackList_->onGetAutoPlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoPlaylistsEnabled();
+    };
+    trackList_->onSetAutoPlaylistsRequested = [this](bool enabled)
+    {
+        auto& recorder = appCore_.getRecordingEngine();
+        if (recorder.isRecording() || appCore_.getTransport().isRecording())
+            return;
+        recorder.setAutoPlaylistsEnabled(enabled);
+        if (arrangement_) arrangement_->refreshAutoPlaylistButton();
+    };
+    trackList_->onGetAutoTakePlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoTakePlaylists();
+    };
+    trackList_->onSetAutoTakePlaylistsRequested = [this](bool enabled)
+    {
+        if (!appCore_.getRecordingEngine().isRecording())
+            appCore_.getRecordingEngine().setAutoTakePlaylists(enabled);
+    };
+    trackList_->onCanModifyPlaylistsRequested = [this]
+    {
+        return !appCore_.getRecordingEngine().isRecording()
+            && !appCore_.getTransport().isRecording();
+    };
+    trackList_->onPlaylistStateChangedRequested = [this](const DAW::TrackID&)
+    {
+        DAW::TrackPlaylistCompCore::publishPlaybackVisibility(
+            appCore_.getTrackManager(), appCore_.getClipManager());
+        if (arrangement_) arrangement_->requestClipRemirror();
+        appCore_.getProjectManager().markDirty();
+        if (trackList_) trackList_->repaint();
+    };
+    trackList_->onCanPromotePlaylistTakeRequested =
+        [this](const DAW::TrackID& trackId, const juce::String& laneId)
+    {
+        return arrangement_ && arrangement_->isInlinePlaylistPanelActive()
+            && playlistPanel_
+            && playlistPanel_->canPromoteForLane(trackId, laneId);
+    };
+    trackList_->onPromotePlaylistTakeRequested =
+        [this](const DAW::TrackID& trackId, const juce::String& laneId)
+    {
+        if (arrangement_ && arrangement_->isInlinePlaylistPanelActive()
+            && playlistPanel_)
+            playlistPanel_->promoteFromTrackHeader(trackId, laneId);
+    };
     trackList_->onOpenInputTrimRequested = [this](const DAW::TrackID& id)
     {
         if (inputTrimPanelManager_)
@@ -2015,6 +2105,67 @@ MainComponent::MainComponent()
          &appCore_.getClipRegionPluginCore(),
          &appCore_.getPluginScanner().getFormatManager());
 
+    playlistPanel_ = std::make_unique<DAW::TrackPlaylistPanel>(
+        appCore_.getTrackManager(), appCore_.getClipManager(),
+        appCore_.getAudioFileManager());
+    playlistPanel_->canModify = [this]
+    {
+        return !appCore_.getRecordingEngine().isRecording()
+            && !appCore_.getTransport().isRecording();
+    };
+    playlistPanel_->onSelectionChanged = [this]
+    {
+        if (trackList_ && playlistPanel_)
+            trackList_->repaintTrackRow(playlistPanel_->getCurrentTrackID());
+    };
+    playlistPanel_->onChanged = [this]
+    {
+        if (arrangement_)
+        {
+            arrangement_->requestClipRemirror();
+            if (arrangement_->isInlinePlaylistPanelActive())
+                arrangement_->refreshInlinePlaylistLayout();
+        }
+        appCore_.getProjectManager().markDirty();
+        if (trackList_) trackList_->repaint();
+        syncPlaylistTimeline();
+    };
+    playlistPanel_->onClose = [this]
+    {
+        if (arrangement_) arrangement_->setInlinePlaylistPanel(nullptr, {});
+        if (playlistPanel_) playlistPanel_->setVisible(false);
+        resized();
+    };
+    playlistPanel_->onTimelineZoom = [this](bool zoomIn)
+    {
+        applyTimelineZoom(false, zoomIn);
+        syncPlaylistTimeline();
+    };
+    playlistPanel_->onTimelineVerticalScroll = [this](float delta)
+    {
+        if (!timelineViewport_ || !arrangement_) return;
+        const auto pos = timelineViewport_->getViewPosition();
+        const int maxY = juce::jmax(0,
+            arrangement_->getHeight() - timelineViewport_->getViewHeight());
+        const int y = juce::jlimit(0, maxY,
+            pos.y - juce::roundToInt(delta * 120.f));
+        timelineViewport_->setViewPosition(pos.x, y);
+        if (trackList_) trackList_->setScrollOffset(y);
+    };
+    playlistPanel_->onTimelinePan = [this](float delta)
+    {
+        if (timelineViewport_ == nullptr || arrangement_ == nullptr) return;
+        const int x = timelineViewport_->getViewPositionX();
+        const int y = timelineViewport_->getViewPositionY();
+        const int maxX = juce::jmax(0,
+            arrangement_->getWidth() - timelineViewport_->getViewWidth());
+        const int step = juce::roundToInt(
+            -(double)delta * (double)timelineViewport_->getViewWidth() * 0.3);
+        timelineViewport_->setViewPosition(juce::jlimit(0, maxX, x + step), y);
+        syncPlaylistTimeline();
+    };
+    addChildComponent(playlistPanel_.get());
+
     // ========================================================================
     // PHASE 3: INTEGRATE AUTOMATION SYSTEM
     // ========================================================================
@@ -2098,6 +2249,21 @@ MainComponent::MainComponent()
             state.setRecordArmed(!state.isRecordArmed());
         });
 
+    // Top toolbar Auto PL is the master mode switch: OFF means no automatic
+    // playlist creation from either repeat takes or loop recording.
+    arrangement_->setAutoPlaylistBindings(
+        [this]() -> bool
+        {
+            return appCore_.getRecordingEngine().getAutoPlaylistsEnabled();
+        },
+        [this]()
+        {
+            auto& recorder = appCore_.getRecordingEngine();
+            if (recorder.isRecording() || appCore_.getTransport().isRecording())
+                return;
+            recorder.setAutoPlaylistsEnabled(!recorder.getAutoPlaylistsEnabled());
+        });
+
     // Wire the compact "+" add-track toolbar button to the Quick Track
     // Builder: clicking it now OPENS the builder popup (anchored to the real
     // AddTrackButton). It no longer creates a generic track immediately.
@@ -2133,7 +2299,12 @@ MainComponent::MainComponent()
 
         auto n = juce::jmin(trackList_->getNumRows(), arrangement_->getNumLanes() - masterOffset);
         for (int i = 0; i < n; ++i)
+        {
             trackList_->setRowHeight(i, arrangement_->getLaneHeight(i + masterOffset));
+            if (auto* row = trackList_->getRow(i))
+                row->setPlaylistExtraHeight(
+                    arrangement_->getInlinePlaylistExtraForLane(i + masterOffset));
+        }
         trackList_->resized();
         trackList_->repaint();
     };
@@ -2606,7 +2777,7 @@ MainComponent::MainComponent()
     };
     timelineViewport->getLaneHeight = [this]() -> double
     {
-        return arrangement_ ? (double)arrangement_->getLaneHeight(0) : 60.0;
+        return arrangement_ ? (double)arrangement_->getPhysicalTrackHeight() : 60.0;
     };
     // Single callback handles both horizontal and vertical edge-drag zoom
     timelineViewport->onThumbEdgeDragged = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
@@ -5147,6 +5318,9 @@ void MainComponent::resetCurrentProjectToRawMix()
 
 void MainComponent::projectLoaded()
 {
+    // A playlist panel may refer to clips/tracks from the previous session.
+    if (arrangement_) arrangement_->setInlinePlaylistPanel(nullptr, {});
+    if (playlistPanel_) playlistPanel_->setVisible(false);
     // Restore/New Project starts a new autosave recovery session. Completions
     // from the previous project must not clear this session's pending edits.
     appCore_.getAutosaveManager().onProjectLoaded();
@@ -6817,6 +6991,7 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
             arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
         if (trackList_)
             trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
+        syncPlaylistTimeline();
         return;
     }
 
@@ -8575,6 +8750,20 @@ void MainComponent::resized()
         mixerPanel_->setSize(mixerPanel_->getWidth(), mixerArea.getHeight());
     }
 
+    // Dedicated PLAYLISTS work area occupies real workspace height instead
+    // of covering existing tracks in a floating modal-ish rectangle.
+    juce::Rectangle<int> playlistDock;
+    if (playlistPanel_ && playlistPanel_->isVisible()
+        && playlistPanel_->getParentComponent() == this
+        && timelineWindow_ && timelineWindow_->isVisible()
+        && content.getHeight() >= 380)
+    {
+        const int desired = juce::jlimit(160, 460,
+            juce::roundToInt((double)content.getHeight() * 0.45));
+        const int dockHeight = juce::jmin(desired, content.getHeight() - 200);
+        playlistDock = content.removeFromBottom(dockHeight);
+    }
+
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
         trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
 
@@ -8595,6 +8784,33 @@ void MainComponent::resized()
             // window freely (the viewport scrolls horizontally for the rest).
             setDefaultMixerWindowBounds();
         }
+    }
+
+    if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
+    {
+        if (!playlistDock.isEmpty())
+        {
+            // In the normal left-TrackList arrangement, take labels occupy
+            // 161px of its space; the take waveform plot starts exactly at
+            // the native arranger's x=0 in screen coordinates.
+            const int left = trackListWindow_ && trackListWindow_->isVisible()
+                && trackListW_ >= 161 && !trackListWindow_->isMaximized()
+                    ? juce::jmax(0, content.getX() - 161)
+                    : playlistDock.getX();
+            playlistPanel_->setBounds(left, playlistDock.getY(),
+                                      juce::jmax(0, playlistDock.getRight() - left),
+                                      playlistDock.getHeight());
+        }
+        else
+        {
+            // Keep access on exceptionally short windows without corrupting
+            // existing timeline layout or taking negative viewport height.
+            const int pw = juce::jmin(920, juce::jmax(430, getWidth() - 70));
+            const int ph = juce::jmin(560, juce::jmax(240, getHeight() - 150));
+            playlistPanel_->setBounds(juce::jmax(0, (getWidth() - pw) / 2),
+                                      kMenuH + kTransportH + 18, pw, ph);
+        }
+        syncPlaylistTimeline();
     }
 
     if (pianoRollWindow_ && pianoRollWindow_->getBounds().isEmpty())
@@ -8648,6 +8864,20 @@ void MainComponent::setDefaultMixerWindowBounds()
 
     mixerWindow_->setBounds(80, windowY, windowW, 320);
     mixerWindowPlaced_ = true;
+}
+
+void MainComponent::syncPlaylistTimeline()
+{
+    if (!playlistPanel_ || !playlistPanel_->isVisible()
+        || !timelineViewport_ || !arrangement_)
+        return;
+    const double pps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
+    const double projectRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    // The take editor lives IN the horizontally scrolled arrangement,
+    // not in screen space. The viewport already scrolls its x=0 origin.
+    // An additional first-visible-sample offset would double-scroll clips.
+    juce::ignoreUnused(projectRate);
+    playlistPanel_->followArrangementTimeline(0.0, pps);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()
@@ -8717,6 +8947,7 @@ void MainComponent::updateTimelineViewportContentBounds()
 
     if (trackList_)
         trackList_->setScrollOffset(timelineViewport_ != nullptr ? timelineViewport_->getViewPosition().y : 0);
+    syncPlaylistTimeline();
 }
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)
@@ -8925,8 +9156,10 @@ void MainComponent::applyTimelineZoom(bool isVertical, bool zoomIn)
     }
     else
     {
+        // The first arranger lane can itself be expanded if there is no
+        // Master track. Zoom the PHYSICAL strip, never strip+all take rows.
         const double oldLaneH = juce::jmax(1.0,
-                                           (double) arrangement_->getLaneHeight(0));
+                                           (double) arrangement_->getPhysicalTrackHeight());
         const double newLaneH = juce::jlimit(24.0, 240.0,
                                              zoomIn ? oldLaneH * 1.15
                                                     : oldLaneH / 1.15);

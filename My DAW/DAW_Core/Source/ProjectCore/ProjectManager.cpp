@@ -6,6 +6,7 @@
 #include "../VocalTuneCore/ApexTuneProjectStateCore.h"
 #include "ProjectSampleRateReconcileCore.h"
 #include "ProjectResetStateCore.h"
+#include "../TrackCore/TrackPlaylistCompCore.h"
 
 namespace DAW {
 
@@ -665,6 +666,20 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
             recordFailure("Clips", "unknown exception");
         }
     }
+    // The audio callback reads only a prepared atomic take-visibility bit.
+    // Publish after Track and Clip deserialization, while the project RT
+    // callback admission gate is still CLOSED.
+    if (subs_.tracks && subs_.clips)
+    {
+        try {
+            TrackPlaylistCompCore::publishPlaybackVisibility(*subs_.tracks, *subs_.clips);
+        } catch (const std::exception& e) {
+            recordFailure("TrackPlaylists", e.what());
+        } catch (...) {
+            recordFailure("TrackPlaylists", "unknown error");
+        }
+    }
+
     if (subs_.markers)
     {
         try {

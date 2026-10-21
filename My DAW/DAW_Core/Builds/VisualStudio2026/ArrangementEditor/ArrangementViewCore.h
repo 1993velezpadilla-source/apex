@@ -224,6 +224,12 @@ namespace ArrangementEditor
         ArrangementClipStateCore& getClipState() { return m_clipState; }
         ArrangementSelectionCore& getSelection() { return m_selection; }
         ArrangementZoomCore& getZoom() { return m_zoom; }
+        // One native expanded playlist owner, with virtual take bands that
+        // do not become transport tracks. Called only on the UI thread.
+        void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
+        int getInlinePlaylistExtraForLane(int laneIndex) const noexcept;
+        int getLaneTopForIndex(int laneIndex) const noexcept;
+        int getLaneIndexForY(int y) const noexcept;
         EditorToolState& getToolState() { return m_toolState; }
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
@@ -611,6 +617,10 @@ namespace ArrangementEditor
         DAW::RoutingGraph*     m_engineRoutingGraph = nullptr;
         DAW::ClipRegionPluginCore* m_clipRegionPlugins = nullptr;
         juce::AudioPluginFormatManager* m_pluginFormatManager = nullptr;
+        DAW::TrackID m_inlinePlaylistTrackId;
+        int m_inlinePlaylistExtraPixels = 0;
+        int getInlineExpandedLaneIndex() const noexcept;
+
         double                 m_engineSampleRate   = 44100.0;
         bool                   m_engineSampleRateInitialized = false;  // true after prepareToPlay
         bool                   m_suppressEngineClipCreation = false;

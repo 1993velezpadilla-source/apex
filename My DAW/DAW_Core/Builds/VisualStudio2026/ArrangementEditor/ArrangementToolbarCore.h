@@ -89,6 +89,17 @@ namespace ArrangementEditor
         void setAutoArmEnabledQuery(std::function<bool()> q) { m_isAutoArmEnabled = std::move(q); repaint(); }
         void setAutoArmToggleAction(std::function<void()> a) { m_toggleAutoArm = std::move(a); }
 
+        // Arrangement-level master for automatic recording playlists.
+        void setAutoPlaylistEnabledQuery(std::function<bool()> q)
+        {
+            m_isAutoPlaylistEnabled = std::move(q);
+            repaint();
+        }
+        void setAutoPlaylistToggleAction(std::function<void()> a)
+        {
+            m_toggleAutoPlaylist = std::move(a);
+        }
+
     private:
         EditorToolState& m_toolState;
 
@@ -96,6 +107,8 @@ namespace ArrangementEditor
         std::function<void()> m_toggleMetronome;
         std::function<bool()> m_isAutoArmEnabled;
         std::function<void()> m_toggleAutoArm;
+        std::function<bool()> m_isAutoPlaylistEnabled;
+        std::function<void()> m_toggleAutoPlaylist;
 
         struct ToolButton
         {
@@ -110,11 +123,13 @@ namespace ArrangementEditor
         juce::Rectangle<int> m_snapButtonBounds;
         juce::Rectangle<int> m_metronomeBounds;
         juce::Rectangle<int> m_autoArmBounds;
+        juce::Rectangle<int> m_autoPlaylistBounds;
         juce::Rectangle<int> m_addTrackBounds;
         AddTrackButton m_addTrackBtn;
         bool m_metronomeHovered = false;
         bool m_snapButtonHovered = false;
         bool m_autoArmHovered = false;
+        bool m_autoPlaylistHovered = false;
         int m_selectedSnapModeIndex = 0;
         juce::String m_currentTooltip;
 

@@ -6,6 +6,8 @@
 #include "../AudioEngineCore/AudioFileManager.h"
 #include "RecordingDiskWriterCore.h"
 #include "RecordingClipFinalizerCore.h"
+#include "LoopPlaylistTakePlanCore.h"
+#include "../TrackCore/TrackPlaylistCompCore.h"
 #include "RecordingInputValidityCore.h"
 #include "RecordingLifecycleStateCore.h"
 #include "RecordingWriterStateCore.h"
@@ -164,6 +166,31 @@ public:
 
     int getRecordingBitDepth() const noexcept { return recordingBitDepth_; }
 
+    // Pro Tools-style Operation > Recording preference. Only the message
+    // thread changes this; each recording freezes its own setting/range.
+    bool getAutoLoopPlaylists() const noexcept { return autoLoopPlaylists_; }
+    void setAutoLoopPlaylists(bool enabled) noexcept { autoLoopPlaylists_ = enabled; }
+
+    // Master recording-mode switch (top arrangement toolbar). MANUAL is
+    // the safe default: ordinary takes never create a new playlist on Stop.
+    // Users can manually choose WAV > New Playlist or Duplicate Main before
+    // recording, exactly as with a Pro Tools track playlist selector.
+    bool getAutoPlaylistsEnabled() const noexcept { return autoPlaylistsEnabled_; }
+    void setAutoPlaylistsEnabled(bool enabled) noexcept { autoPlaylistsEnabled_ = enabled; }
+
+    // Fine-grained automatic policies are gated by the master switch.
+    // Capture the effective values at record start, never during finalization.
+    bool getAutoTakePlaylists() const noexcept { return autoTakePlaylists_; }
+    void setAutoTakePlaylists(bool enabled) noexcept { autoTakePlaylists_ = enabled; }
+    bool isAutoTakePlaylistsEffective() const noexcept
+    {
+        return autoPlaylistsEnabled_ && autoTakePlaylists_;
+    }
+    bool isAutoLoopPlaylistsEffective() const noexcept
+    {
+        return autoPlaylistsEnabled_ && autoLoopPlaylists_;
+    }
+
     void setRecordingFinalizedCallback(std::function<void()> callback)
     {
         recordingFinalizedCallback_ = std::move(callback);
@@ -242,6 +269,19 @@ public:
         }
 
         recordStartPos_ = transport_->getPosition();
+        recordAutoTakes_ = isAutoTakePlaylistsEffective();
+        const auto currentLoop = transport_->getLoopRange();
+        // Allow capture anywhere inside the loop. The pass planner places
+        // the initial partial take at the actual start, with subsequent
+        // complete passes aligned to loopStart. Starts outside the loop are
+        // intentionally excluded (punch-in/preroll needs a separate plan).
+        const bool canSplitLoop = isAutoLoopPlaylistsEffective() && transport_->isLooping()
+            && currentLoop.second > currentLoop.first
+            && recordStartPos_ >= currentLoop.first
+            && recordStartPos_ < currentLoop.second;
+        recordLoopStart_ = canSplitLoop ? currentLoop.first : 0;
+        recordLoopEnd_ = canSplitLoop ? currentLoop.second : 0;
+        recordLoopAuto_ = canSplitLoop;
 
         auto recordDir = projectDir_.exists()
             ? projectDir_.getChildFile("Recordings")
@@ -260,6 +300,9 @@ public:
             auto rec = std::make_unique<TrackRecording>();
             rec->trackID       = track->getID();
             rec->startPosition = recordStartPos_;
+            // Bind the manual playlist at REC time, not after disk flush.
+            // A menu/view change must never silently relocate a finished WAV.
+            rec->playlistId   = track->getMainPlaylistId();
             // Track is the source of truth for input routing (per-track input
             // selector). The legacy channel map is a fallback.
             rec->firstInputCh  = track->getInputFirstChannel() > 0
@@ -688,12 +731,17 @@ private:
             RecordingClipFinalizerCore::FinalizeRequest req;
             req.trackId        = rec->trackID;
             req.startPosition  = rec->startPosition;
+            req.playlistId     = rec->playlistId;
             req.samplesWritten = samplesWritten;
             req.outputFile     = rec->outputFile;
             req.clipManager    = clips_;
             req.trackManager   = tracks_;
             req.audioFiles     = audioFiles_;
             req.sampleRate     = sampleRate_;
+            req.loopStart      = recordLoopStart_;
+            req.loopEnd        = recordLoopEnd_;
+            req.autoLoopPlaylists = recordLoopAuto_;
+            req.autoTakePlaylists = recordAutoTakes_;
             finalizeRequests.push_back(req);
         }
 
@@ -765,22 +813,125 @@ private:
             // lands on the unified undo history as ONE step.
             std::vector<RecordAudioTakeCommand::Take> takes;
             takes.reserve(requestsForMessageThread->size());
+            // Undo must remove the generated lane metadata as well as clips,
+            // without reverting ANY other Track state (plugins/fader/routing).
+            std::vector<RecordAudioTakeCommand::PlaylistChange> playlistChanges;
+            if (tracks_ != nullptr)
+                for (const auto& req : *requestsForMessageThread)
+                {
+                    if (req.samplesWritten <= 0 || !req.outputFile.existsAsFile())
+                        continue;
+                    const bool isLoopMultiPass = !LoopPlaylistTakePlanCore::make(
+                        req.startPosition, req.loopStart, req.loopEnd,
+                        req.samplesWritten, req.autoLoopPlaylists).empty();
+                    bool needsNewLane = isLoopMultiPass;
+                    if (!needsNewLane && req.autoTakePlaylists && clips_ != nullptr)
+                        if (auto* track = tracks_->getTrack(req.trackId))
+                            needsNewLane = TrackPlaylistCompCore::planNonLoopTake(
+                                *track, *clips_, req.startPosition,
+                                req.samplesWritten).createPlaylist;
+                    if (!needsNewLane) continue;
+                    bool alreadyCaptured = false;
+                    for (const auto& change : playlistChanges)
+                        alreadyCaptured |= change.trackId == req.trackId;
+                    if (alreadyCaptured) continue;
+                    if (auto* track = tracks_->getTrack(req.trackId))
+                        playlistChanges.push_back({
+                            req.trackId, track->getPlaylistState().createCopy(), {} });
+                }
 
             for (const auto& req : *requestsForMessageThread)
             {
-                if (auto* clip = RecordingClipFinalizerCore::finalize(req))
+                const auto passPlan = LoopPlaylistTakePlanCore::make(
+                    req.startPosition, req.loopStart, req.loopEnd,
+                    req.samplesWritten, req.autoLoopPlaylists);
+                auto registerTake = [&takes, &req](AudioClip* clip)
                 {
+                    if (!clip) return;
                     RecordAudioTakeCommand::Take take;
                     take.state      = clip->getState();
                     take.sourceFile = req.outputFile;
                     take.currentId  = clip->getID();
                     takes.push_back(std::move(take));
+                };
+                if (req.samplesWritten <= 0 || !req.outputFile.existsAsFile())
+                    continue;
+                if (passPlan.empty() || tracks_ == nullptr)
+                {
+                    if (passPlan.empty() && req.autoTakePlaylists && tracks_ != nullptr)
+                    {
+                        if (auto* track = tracks_->getTrack(req.trackId))
+                        {
+                            const auto plan = TrackPlaylistCompCore::planNonLoopTake(
+                                *track, *clips_, req.startPosition,
+                                req.samplesWritten);
+                            if (plan.createPlaylist)
+                            {
+                                const auto savedState = track->getPlaylistState().createCopy();
+                                auto part = req;
+                                part.playlistId = track->createPlaylist();
+                                if (!plan.showAsMain)
+                                {
+                                    // A new take must not hide other material
+                                    // on Main outside the recorded interval.
+                                    track->showPlaylistAsMain(
+                                        savedState.getProperty("main").toString());
+                                    track->setTargetPlaylist(
+                                        savedState.getProperty("target").toString());
+                                }
+                                auto* clip = RecordingClipFinalizerCore::finalize(part);
+                                if (clip != nullptr)
+                                    registerTake(clip);
+                                else
+                                    track->restorePlaylistState(savedState);
+                                continue;
+                            }
+                        }
+                    }
+                    // First/non-overlapping take: keep the normal Main audio.
+                    registerTake(RecordingClipFinalizerCore::finalize(req));
+                    continue;
+                }
+
+                // No destructive overwrite: every loop iteration owns a
+                // distinct playlist, with the last pass shown as Main.
+                // Segment start/end are SOURCE sample coordinates into the
+                // full WAV while their placement is the SAME loop timeline.
+                auto* track = tracks_->getTrack(req.trackId);
+                if (!track)
+                {
+                    registerTake(RecordingClipFinalizerCore::finalize(req));
+                    continue;
+                }
+                ClipID firstSourceId;
+                for (const auto& pass : passPlan)
+                {
+                    auto part = req;
+                    part.startPosition = pass.timelineStart;
+                    part.samplesWritten = (int)pass.length;
+                    part.sourceWindowEnabled = true;
+                    part.sourceStartSample = pass.sourceStart;
+                    part.sourceEndSample = pass.sourceStart + pass.length;
+                    part.playlistId = track->createPlaylist();
+                    part.shareExistingAudioClipId = firstSourceId;
+                    auto* clip = RecordingClipFinalizerCore::finalize(part);
+                    if (clip != nullptr && firstSourceId.isEmpty())
+                        firstSourceId = clip->getID();
+                    registerTake(clip);
                 }
             }
+            if (tracks_ != nullptr)
+                for (auto& change : playlistChanges)
+                    if (auto* track = tracks_->getTrack(change.trackId))
+                        change.after = track->getPlaylistState().createCopy();
+            if (tracks_ != nullptr && clips_ != nullptr)
+                TrackPlaylistCompCore::publishPlaybackVisibility(*tracks_, *clips_);
 
             if (!takes.empty() && clips_ != nullptr)
                 CommandManager::getInstance().execute(
-                    std::make_unique<RecordAudioTakeCommand>(*clips_, audioFiles_, std::move(takes)));
+                    std::make_unique<RecordAudioTakeCommand>(
+                        *clips_, audioFiles_, std::move(takes), tracks_,
+                        std::move(playlistChanges)));
 
             finalizing_.store(false, std::memory_order_release);
 
@@ -922,6 +1073,7 @@ private:
     struct TrackRecording
     {
         TrackID                 trackID;
+        juce::String            playlistId;
         SamplePosition          startPosition { 0 };
         int                     firstInputCh  { 0 };
         bool                    monoInput     { false };
@@ -1013,6 +1165,12 @@ private:
 
     std::vector<std::unique_ptr<TrackRecording>> activeRecordings_;
     SamplePosition recordStartPos_ = 0;
+    bool autoPlaylistsEnabled_ = false; // no surprise playlist clutter
+    bool autoLoopPlaylists_ = true;
+    bool autoTakePlaylists_ = true;  // policy takes effect only when master ON
+    bool recordAutoTakes_ = false;
+    bool recordLoopAuto_ = false;
+    SamplePosition recordLoopStart_ = 0, recordLoopEnd_ = 0;
     juce::AudioBuffer<float> printBuffer_;   // scratch for printing track FX (audio thread)
     std::atomic<bool> recording_{false};
     std::atomic<bool> stopping_{false};
