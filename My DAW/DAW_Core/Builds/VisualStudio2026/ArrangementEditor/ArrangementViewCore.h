@@ -120,7 +120,11 @@ namespace ArrangementEditor
             void mouseDown(const juce::MouseEvent& e) override
             {
                 const auto ownerPos = e.getEventRelativeTo(&m_owner);
-                if (m_owner.m_pianoRollBtn.getBounds().contains(ownerPos.getPosition()))
+                // A hidden/disabled Piano Roll button must never swallow
+                // audio-first toolbar gestures, including pen and touch.
+                if (m_owner.m_pianoRollBtn.isShowing()
+                    && m_owner.m_pianoRollBtn.isEnabled()
+                    && m_owner.m_pianoRollBtn.getBounds().contains(ownerPos.getPosition()))
                 {
                     if (m_owner.m_pianoRollBtn.onClick)
                         m_owner.m_pianoRollBtn.onClick();
