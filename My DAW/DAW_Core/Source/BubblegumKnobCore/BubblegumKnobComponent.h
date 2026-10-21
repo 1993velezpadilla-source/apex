@@ -37,6 +37,19 @@ public:
         setBinding(std::move(binding));
     }
 
+    ~BubblegumKnobComponent() override
+    {
+        // Closing/rebuilding a plug-in panel mid-touch MUST end its automation
+        // gesture. Otherwise the parameter can remain latched in Write/Touch
+        // after the JUCE component is destroyed.
+        if (interaction_.isDragging())
+        {
+            interaction_.endDrag();
+            activePointerIndex_ = -1;
+            if (binding_.endGesture) binding_.endGesture();
+        }
+    }
+
     /** Replace the value binding. Reconfigures the scale's unity value. */
     void setBinding(BubblegumKnobValueBinding b)
     {
