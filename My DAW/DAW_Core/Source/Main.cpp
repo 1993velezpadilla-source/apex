@@ -979,6 +979,10 @@ public:
             DAW::HostedPluginIsolationCore::commandLineRequestsIsolation(
                 getCommandLineParameterArray()));
 
+        // This clock measures the entire real boot-screen-to-navigation latency,
+        // independently of Debug overhead, plugin scan and audio setup.
+        startupBootBeginMs_ = juce::Time::getMillisecondCounterHiRes();
+
         // Evo Eye is DRAWN FROM C++ PATHS, shaders/gradients and live effects.
         // No runtime bitmap, bundled JPEG/PNG or sidecar image. The splash
         // renders on an independent Win32 thread while JUCE initializes.
@@ -989,7 +993,13 @@ public:
             ? "[EVO EYE] Procedural C++ startup eye launched"
             : "[EVO EYE] Procedural renderer unavailable; existing StartupPanel still opens");
 
+        const auto beforeWindowMs = juce::Time::getMillisecondCounterHiRes();
         mainWindow.reset (new MainWindow (getApplicationName()));
+        juce::Logger::writeToLog(
+            "[APEX STARTUP PROFILE] main-window-construction="
+            + juce::String(juce::Time::getMillisecondCounterHiRes() - beforeWindowMs, 1)
+            + "ms since-boot=" + juce::String(
+                juce::Time::getMillisecondCounterHiRes() - startupBootBeginMs_, 1) + "ms");
         DAW::StartupProgressCore::reach(88);
         DAW::ApexProcessModeStateCore::markNormalGuiCreated();
 
@@ -2091,11 +2101,15 @@ private:
         stopTimer();
         DAW::StartupProgressCore::reach(100);
         juce::Logger::writeToLog(
+            "[APEX STARTUP PROFILE] startup-panel-visible since-boot="
+            + juce::String(juce::Time::getMillisecondCounterHiRes() - startupBootBeginMs_, 1) + "ms");
+        juce::Logger::writeToLog(
             "[EVO EYE] StartupPanel visible; ending repeating eye animation");
         splashScreen_->finish();
         splashScreen_ = nullptr;
     }
 
+    double startupBootBeginMs_ = 0.0;
     juce::uint32 splashWaitStartedAt_ = 0;
     bool splashSlowStartupLogged_ = false;
     std::unique_ptr<MainWindow> mainWindow;

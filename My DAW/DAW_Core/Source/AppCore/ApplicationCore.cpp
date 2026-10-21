@@ -19,13 +19,25 @@ namespace
 {
     static void appendStartupTrace(const juce::String& stage)
     {
+        // Monotonic elapsed/step timings expose whether recovery, DSP setup,
+        // automation or Bubblegum is actually holding up the startup panel.
+        // No file I/O or clocks are touched from the realtime audio callback.
+        const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+        static const double firstMs = nowMs;
+        static double previousMs = nowMs;
+        const auto elapsedMs = nowMs - firstMs;
+        const auto stepMs = nowMs - previousMs;
+        previousMs = nowMs;
+
         auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
             .getChildFile("DAW_Core");
         dir.createDirectory();
 
         auto file = dir.getChildFile("startup_trace.log");
         auto line = juce::Time::getCurrentTime().toString(true, true)
-            + " [ApplicationCore] " + stage + "\n";
+            + " [ApplicationCore] +" + juce::String(elapsedMs, 1)
+            + "ms step=" + juce::String(stepMs, 1)
+            + "ms " + stage + "\n";
         file.appendText(line, false, false, "\n");
     }
 
