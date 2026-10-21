@@ -216,8 +216,8 @@ public:
         // Return the canonical ID/action, not a forked command path.
         auto action = item->action;
         const auto id = item->itemID;
-        auto completion = completion_;
-        closeMenu();
+        auto completion = std::move(completion_);
+        closeMenu(false);
         if (action) action();
         else if (completion && id > 0) completion(id);
     }
@@ -318,9 +318,13 @@ private:
         }
         else closeMenu();
     }
-    void closeMenu()
+    void closeMenu(bool notifyDismiss = true)
     {
         stopTimer();
+        // JUCE's showMenuAsync always completes with 0 on cancellation.
+        // Preserve that contract: mixer/browser components clear their
+        // "menu open" state even when the user taps outside or presses Esc.
+        auto completion = std::move(completion_);
         if (auto* parent = getParentComponent())
             parent->removeChildComponent(this);
         juce::Component::SafePointer<ApexRadialContextMenu> safe(this);
@@ -328,6 +332,7 @@ private:
         {
             if (safe != nullptr) delete safe.getComponent();
         });
+        if (notifyDismiss && completion) completion(0);
     }
     void timerCallback() override
     {
