@@ -25,6 +25,32 @@ Preserve the APEX visual identity, transport, automation, routing and project au
   JUCE device pixels equal points). Android's standard ergonomic target is 48dp.
   Source: https://developer.apple.com/design/tips/
 
+## Follow-up implementation — clips, track menus and knobs (2026-10-21)
+
+A longer, source-linked reference catalog and Lenovo Legion Go acceptance
+checklist is in [LOGIC_IPAD_TOUCH_GESTURE_PARITY_MATRIX.md](LOGIC_IPAD_TOUCH_GESTURE_PARITY_MATRIX.md).
+It distinguishes implemented code, existing-but-untested behaviour and TODOs.
+
+- **First touch of clip** selects it and synchronizes selected clip/track to the
+  application state. First swipe over an unselected clip continues to scroll,
+  not edit.
+- **Stationary touch on already-selected clip** opens the same native context
+  menu as desktop right-click (cut/copy/duplicate/mute/delete, where available).
+  Touch-drag cancels this menu. Pinch cancels a pending tap menu using the
+  gesture epoch, so two-finger navigation does not accidentally open actions.
+- **Empty background** tap deselects; stationary hold and release accesses
+  native empty-track actions. This does not create a separate mobile editor.
+- **Track header**: tap selects, quick swipe scrolls vertically, stationary
+  hold invokes desktop-equivalent context menu, and hold then drag can reorder.
+- **BubblegumKnobComponent** captures a unique JUCE pointer source for each
+  control, allows simultaneous independent knobs, and optionally sends
+  canonical begin/end parameter gestures for callers that provide the binding.
+  No unverified claim that all plugin controls are wired to these callbacks.
+
+**Outstanding:** full Windows CI, real Lenovo Legion Go UX tests, drag/resize
+handles, dynamic/mobile layout, playlist promotion, all native/hosted plugin
+editors, MIDI touch workflows, and iPad/iPhone/Android native device coverage.
+
 ## Code audit (source, not an APK/iPad runtime test)
 
 | Area | Actual code | Observed issue | Status in this branch |
