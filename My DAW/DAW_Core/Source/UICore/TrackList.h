@@ -5,6 +5,7 @@
 #include "../ThemeCore/Theme.h"
 #include "../ThemeCore/ApexLivingSeal.h"
 #include "CursorThemeCore.h"
+#include "ApexRadialContextMenu.h"
 #include "../TrackCore/Track.h"
 #include "../TrackCore/TrackReorderCore.h"
 #include "../ControlsCore/ModernControls.h"
@@ -923,7 +924,7 @@ public:
                                             weak->onPlaylistStateChanged(weak->track_.getID());
                             }), true);
                     });
-                    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+                    ApexRadialContextMenu::show(std::move(menu), this, e.getScreenPosition());
                 }
                 else
                 {
@@ -986,6 +987,7 @@ public:
         // the existing set.
         if (e.mods.isPopupMenu())
         {
+            contextScreenPoint_ = e.getScreenPosition();
             // While Quick Send mode is active, right-click toggles the
             // sidechain to/from this track (create if missing, remove if
             // exists) — the same rule as the mixer strip. The normal context
@@ -1435,9 +1437,8 @@ private:
             };
             menu.addItem(item);
         }
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this)
-            .withTargetScreenArea(localAreaToGlobal(playlistBounds_.toNearestInt())));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(playlistBounds_.toNearestInt().getCentre()));
     }
 
     void showContextMenu()
@@ -1609,8 +1610,8 @@ private:
             menu.addItem(del);
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            contextScreenPoint_.isOrigin() ? getScreenBounds().getCentre() : contextScreenPoint_);
     }
 
     void showAutomationMenu()
@@ -1786,7 +1787,9 @@ private:
         snapItem.isEnabled = false;
         menu.addItem(snapItem);
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safeThis, order, clipInfos](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(automationBounds_.toNearestInt().getCentre()),
+            [safeThis, order, clipInfos](int result)
         {
             if (!safeThis)
                 return;
@@ -1837,6 +1840,7 @@ public:
     int  height_      = 72;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
+    juce::Point<int> contextScreenPoint_; // exact mouse/touch position for wheel
     bool touchRowCandidate_ = false;
     bool touchRowScrolling_ = false;
     juce::Point<int> touchRowDownScreen_;
@@ -2084,9 +2088,8 @@ public:
             }
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this)
-            .withTargetScreenArea(localAreaToGlobal(inputBounds_.toNearestInt())));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(inputBounds_.toNearestInt().getCentre()));
     }
 
     void drawAutomationButton(juce::Graphics& g, const juce::Rectangle<float>& bounds,
@@ -2380,7 +2383,9 @@ public:
         reorder.addItem(202, "Move Current Down", activeIndex >= 0 && activeIndex < order.size() - 1);
         menu.addSubMenu("Reorder List", reorder);
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safeThis, order, clipInfos, sendKeys, pluginParamKeys](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(automationTargetBounds_.toNearestInt().getCentre()),
+            [safeThis, order, clipInfos, sendKeys, pluginParamKeys](int result)
         {
             if (!safeThis) return;
             if (result >= 8000 && result < 8000 + (int)clipInfos.size() * 2)
