@@ -28,6 +28,7 @@
 #include "../../../Source/AutomationCore/AutomationLaneCore.h"
 #include "../../../Source/AutomationCore/AutomationQuickCreateCore.h"
 #include "ClipAutomationPanel.h"
+#include "../../../Source/UICore/ApexRadialContextMenu.h"
 #include <JuceHeader.h>
 #include <functional>
 
@@ -39,6 +40,9 @@ namespace ArrangementEditor
 // ---------------------------------------------------------------------------
 struct ClipContextCallbacks
 {
+    // Context menus are asynchronous. The clip may be deleted/replaced
+    // while a wheel is open: resolve the current model by stable UUID.
+    std::function<ArrangementClipModel*(const juce::Uuid&)> resolveClipById;
     // Standard DAW clip operations
     std::function<void(ArrangementClipModel*)>    cutClip;
     std::function<void(ArrangementClipModel*)>    copyClip;
@@ -118,7 +122,8 @@ public:
     static void show(ArrangementClipModel*       clip,
                      juce::Point<int>             screenPos,
                      const ClipContextCallbacks&  cb,
-                     const ClipFreezeState*       freezeState = nullptr)
+                     const ClipFreezeState*       freezeState = nullptr,
+                     juce::Component*             contextOwner = nullptr)
     {
         if (!clip) return;
 
@@ -184,27 +189,27 @@ public:
         }
 
         // ── Show ──────────────────────────────────────────
-        menu.showMenuAsync(
-            juce::PopupMenu::Options()
-                .withTargetScreenArea(juce::Rectangle<int>(screenPos.x,
-                                                           screenPos.y, 1, 1)),
-            [clip, cb](int result)
+        const auto stableId = clip->id;
+        DAW::ApexRadialContextMenu::show(std::move(menu), contextOwner, screenPos,
+            [stableId, cb, clip](int result)
             {
-                handleResult(result, clip, cb);
+                // APEX arrangement supplies a resolver, so an outstanding
+                // popup can NEVER dereference a deleted/rebuilt clip.
+                auto* current = cb.resolveClipById ? cb.resolveClipById(stableId) : clip;
+                if (current != nullptr) handleResult(result, current, cb);
             });
     }
 
     // showOnEmptyTrack — right-click on empty arrangement space (no clip)
     static void showOnEmptyTrack(juce::Point<int>            screenPos,
-                                 const ClipContextCallbacks& cb)
+                                 const ClipContextCallbacks& cb,
+                                 juce::Component*             contextOwner = nullptr)
     {
         juce::PopupMenu menu;
         const bool hasPaste = cb.pasteClip != nullptr && cb.canPaste && cb.canPaste();
         menu.addItem(kIdPaste, "Paste", hasPaste);
 
-        menu.showMenuAsync(
-            juce::PopupMenu::Options()
-                .withTargetScreenArea(juce::Rectangle<int>(screenPos.x, screenPos.y, 1, 1)),
+        DAW::ApexRadialContextMenu::show(std::move(menu), contextOwner, screenPos,
             [cb](int result)
             {
                 if (result == kIdPaste && cb.pasteClip)
