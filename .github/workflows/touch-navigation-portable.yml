@@ -1,0 +1,29 @@
+name: Touch Navigation Portable
+
+on:
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/TouchNavigationMathPortableTests.cpp'
+      - '.github/workflows/touch-navigation-portable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test touch navigation math with C++17
+        shell: bash
+        run: |
+          cd "My DAW/DAW_Core"
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/TouchNavigationMathPortableTests.cpp -o /tmp/apex_touch_navigation_tests
+          /tmp/apex_touch_navigation_tests
