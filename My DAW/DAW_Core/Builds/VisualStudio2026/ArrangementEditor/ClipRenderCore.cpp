@@ -2,6 +2,7 @@
 // ClipRenderCore.cpp
 // ===========================================================================
 #include "ClipRenderCore.h"
+#include "TouchNavigationMath.h"
 #include "ClipPitchCore.h"
 #include "ClipGainCore.h"
 #include "ClipWaveformColourCore.h"
@@ -515,8 +516,9 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDrag(const juce::MouseEvent& e)
     {
-        if (m_touchMenuPending
-            && e.getScreenPosition().getDistanceFrom(m_touchMenuDownScreen) > 7.0f)
+        if (m_touchMenuPending && ! TouchNavigationMath::withinTapSlop(
+                m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
+                e.getScreenPosition().x, e.getScreenPosition().y))
             m_touchMenuPending = false;
 
         if (m_touchPanFromUnselected)
@@ -740,7 +742,9 @@ namespace ArrangementEditor
     {
         const bool requestTouchMenu = m_touchMenuPending
             && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
-            && e.getScreenPosition().getDistanceFrom(m_touchMenuDownScreen) <= 7.0f
+            && TouchNavigationMath::withinTapSlop(
+                m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
+                e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
         m_touchMenuPending = false;
 
