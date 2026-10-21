@@ -1311,6 +1311,11 @@ public:
         }
         else if (!track_.isMaster())
         {
+            // Double-taps on a touchscreen must not unexpectedly switch
+            // routing modes while someone scrolls or selects a track.
+            // Keep mouse double-click Quick Send and explicit touch menus.
+            if (ApexPointerPolicy::isDirect(e))
+                return;
             // Double-click on the row body (outside the name area and all
             // controls) toggles Quick Send mode with this track as source.
             const bool overControl =
