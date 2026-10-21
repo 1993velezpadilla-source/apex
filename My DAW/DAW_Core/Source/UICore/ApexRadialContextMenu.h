@@ -28,6 +28,12 @@ public:
     using Completion = std::function<void(int)>;
     static constexpr int kPageSize = 7;
 
+    ~ApexRadialContextMenu() override
+    {
+        stopTimer();
+        detachFlickSource();
+    }
+
     static void show(juce::PopupMenu menu, juce::Component* target,
                      juce::Point<int> globalScreenPos, Completion completion = {})
     {
