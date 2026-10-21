@@ -39,6 +39,14 @@ namespace ArrangementEditor
             return std::hypot(currentX - startX, currentY - startY) <= kTouchTapSlopPx;
         }
 
+        // Logic for iPad: context menu belongs to a stationary press-and-hold
+        // on an already selected region, not a routine second short tap.
+        static bool contextHoldReady(int durationMs, double x0, double y0,
+                                     double x1, double y1) noexcept
+        {
+            return durationMs >= 500 && withinTapSlop(x0, y0, x1, y1);
+        }
+
         // Compare to the LAST APPLIED pinch distance, not the last sampled
         // distance. Tiny slow movements must accumulate rather than vanish.
         static bool pinchReady(double appliedSeparationPx, double currentSeparationPx) noexcept
