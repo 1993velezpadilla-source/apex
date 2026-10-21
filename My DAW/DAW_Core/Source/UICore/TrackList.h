@@ -7,6 +7,7 @@
 #include "CursorThemeCore.h"
 #include "ApexRadialContextMenu.h"
 #include "ApexPointerPolicy.h"
+#include "BeatMakingFeaturePolicy.h"
 #include "../TrackCore/Track.h"
 #include "../TrackCore/TrackReorderCore.h"
 #include "../ControlsCore/ModernControls.h"
@@ -752,8 +753,8 @@ public:
         bounds = bounds.reduced(6.0f, 0.0f);
 
         const bool isMaster  = track_.isMaster();
-        // DISABLED (product decision): the piano roll is a beat-making surface.
-        const bool showPiano = false;
+        // Preserve the existing widget, but omit its geometry in audio-first APEX.
+        const bool showPiano = BeatMakingFeaturePolicy::kPianoRollEnabled;
         const bool showTarget = !isMaster && track_.isAutomationVisible();
         const bool showInput  = !isMaster && track_.getRole() == TrackRole::Audio;
 
@@ -1040,7 +1041,8 @@ public:
             else track_.setMuted(!track_.isMuted());
             repaint();
         }
-        else if (pianoRollBounds_.contains(e.position))
+        else if (BeatMakingFeaturePolicy::kPianoRollEnabled
+                 && pianoRollBounds_.contains(e.position))
         {
             if (onOpenPianoRoll) onOpenPianoRoll(track_.getID());
             repaint();
