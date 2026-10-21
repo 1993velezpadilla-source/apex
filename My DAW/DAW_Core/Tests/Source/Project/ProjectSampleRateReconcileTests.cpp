@@ -3,6 +3,7 @@
 #include "../../../Source/MidiCore/MidiClip.h"
 #include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
 #include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
+#include "../../../Source/RecordingCore/RecordingEngine.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/CommandCore/RecordCommands.h"
 #include <cmath>
