@@ -2,6 +2,7 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
+#include "TouchNavigationMath.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
@@ -1081,6 +1082,15 @@ namespace ArrangementEditor
             if (! source.isDragging()
                 || source.getType() != juce::MouseInputSource::InputSourceType::touch)
                 continue;
+
+            // A fader, plug-in or popover must own its own fingers. The old
+            // desktop-global scan counted touches anywhere on the app and
+            // could unexpectedly pan/zoom the arrangement during mixing.
+            auto* hit = source.getComponentUnderMouse();
+            if (hit == nullptr || (hit != this && ! isParentOf(hit)))
+                continue;
+            if (! viewport->getScreenBounds().contains(source.getScreenPosition().toInt()))
+                continue;
             if (touchCount == 0)
             {
                 firstTouch         = source.getScreenPosition();
@@ -1095,36 +1105,80 @@ namespace ArrangementEditor
 
         if (touchCount >= 2)
         {
-            const auto firstLocal  = getLocalPoint(nullptr, firstTouch.toInt()).toFloat();
-            const auto secondLocal = getLocalPoint(nullptr, secondTouch.toInt()).toFloat();
+            // Two fingers share a single navigation owner. Switching from one
+            // finger to two must cancel its hold/fling, never inherit its anchor.
+            m_touchScrollActive = false;
+            m_smoothedTouchValid = false;
+            m_holdActive = false;
+            m_holdDragging = false;
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
 
-            // Axis-specific pinch: horizontal separation drives the time zoom,
-            // vertical separation drives the track height — each independent,
-            // in and out.
-            const double sepX = std::abs((double) firstLocal.x - (double) secondLocal.x);
-            const double sepY = std::abs((double) firstLocal.y - (double) secondLocal.y);
-
-            if (m_lastPinchSepX > 1.0 && std::abs(sepX - m_lastPinchSepX) > 6.0)
+            // SCREEN coordinates are stable across Viewport scrolling. Using
+            // content-local deltas fed scrolling back into itself (jitter).
+            const auto centreScreen = (firstTouch + secondTouch) * 0.5f;
+            const double sepX = std::abs((double) firstTouch.x - (double) secondTouch.x);
+            const double sepY = std::abs((double) firstTouch.y - (double) secondTouch.y);
+            if (! m_twoFingerGestureActive)
             {
-                const double ratio = juce::jlimit(0.85, 1.18, sepX / m_lastPinchSepX);
-                m_zoom.setPixelsPerSecond(juce::jlimit(10.0, 4000.0,
-                    m_zoom.getPixelsPerSecond() * ratio));
+                m_twoFingerGestureActive = true;
+                m_lastTwoFingerPos = centreScreen;
+                m_lastPinchSepX = sepX;
+                m_lastPinchSepY = sepY;
+                return true;
+            }
+
+            const auto delta = centreScreen - m_lastTwoFingerPos;
+            const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
+            const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
+            viewport->setViewPosition(
+                TouchNavigationMath::panPosition(viewport->getViewPositionX(), delta.x, maxX),
+                TouchNavigationMath::panPosition(viewport->getViewPositionY(), delta.y, maxY));
+
+            // Horizontal spread = time zoom. Keep the musical time under the
+            // two-finger midpoint fixed rather than zooming toward song start.
+            // Compare to LAST APPLIED separation to catch slow pinches.
+            if (TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX))
+            {
+                const double oldPps = m_zoom.getPixelsPerSecond();
+                const double newPps = juce::jlimit(2.0, 4000.0,
+                    oldPps * TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX));
+                const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
+                const double focusViewportX = focusX - viewport->getViewPositionX();
+                m_zoom.setPixelsPerSecond(newPps);
+                viewport->setViewPosition(
+                    TouchNavigationMath::zoomPosition(focusX, focusViewportX,
+                        newPps / juce::jmax(1.0, oldPps),
+                        juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                    viewport->getViewPositionY());
+                m_lastPinchSepX = sepX;
                 repaint();
             }
 
-            if (m_lastPinchSepY > 1.0 && std::abs(sepY - m_lastPinchSepY) > 6.0)
+            // Vertical spread = lane zoom; preserve the lane beneath fingers.
+            if (TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY))
             {
-                const double ratio = juce::jlimit(0.85, 1.18, sepY / m_lastPinchSepY);
-                m_zoom.setTrackHeightPx(juce::jlimit(24.0, 400.0,
-                    m_zoom.getTrackHeightPx() * ratio));
+                const double oldH = m_zoom.getTrackHeightPx();
+                const double newH = juce::jlimit(24.0, 180.0,
+                    oldH * TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY));
+                const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
+                const double focusViewportY = focusY - viewport->getViewPositionY();
+                const double contentTop = (double) arrangementContentTop();
+                m_zoom.setTrackHeightPx(newH);
+                const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
+                viewport->setViewPosition(viewport->getViewPositionX(),
+                    juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
+                        juce::roundToInt(newFocusY - focusViewportY)));
+                m_lastPinchSepY = sepY;
                 repaint();
             }
 
-            m_lastPinchSepX = sepX;
-            m_lastPinchSepY = sepY;
+            m_lastTwoFingerPos = centreScreen;
             return true;
         }
 
+        // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
+        // than jumping to the obsolete single-finger pan origin.
+        m_twoFingerGestureActive = false;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
 
@@ -1173,7 +1227,7 @@ namespace ArrangementEditor
             // Low-pass the touch position before using it: digitizers report
             // ±1 px of noise on a nearly still finger, which is what made slow
             // pans shake. The filter trades ~1 frame of lag for stability.
-            const auto localRaw = getLocalPoint(nullptr, firstTouch.toInt()).toFloat();
+            const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
             if (! m_smoothedTouchValid)
             {
                 m_smoothedTouchPos   = localRaw;
@@ -1183,7 +1237,8 @@ namespace ArrangementEditor
             {
                 m_smoothedTouchPos = m_smoothedTouchPos * 0.6f + localRaw * 0.4f;
             }
-            const auto local = m_smoothedTouchPos;
+            const auto posScreen = m_smoothedTouchPos.toInt();
+            const auto local = getLocalPoint(nullptr, posScreen).toFloat();
 
             // A new swipe is detected by the touch's OWN down time — exact, no
             // distance threshold. (The old 250 px bound missed a re-touch close
@@ -1205,9 +1260,10 @@ namespace ArrangementEditor
                 m_touchScrollActive = true;
                 m_skipSlop          = momentumWasRunning;
                 m_gestureDownPos    = local.toInt();
+                m_touchPanDownScreenPos = posScreen;
                 m_gestureStartViewX = viewport->getViewPositionX();
                 m_gestureStartViewY = viewport->getViewPositionY();
-                m_lastTouchPanPos    = local.toInt();
+                m_lastTouchPanPos    = posScreen;
                 m_lastTouchPanTimeMs = juce::Time::getMillisecondCounterHiRes();
                 m_touchPanVelocityX  = 0.0;
                 m_touchPanVelocityY  = 0.0;
@@ -1222,9 +1278,9 @@ namespace ArrangementEditor
                 return true;
             }
 
-            const auto pos = local.toInt();
-            const bool still = std::abs(pos.x - m_gestureDownPos.x) < 10
-                            && std::abs(pos.y - m_gestureDownPos.y) < 10;
+            const auto pos = posScreen;
+            const bool still = std::abs(pos.x - m_touchPanDownScreenPos.x) < 10
+                            && std::abs(pos.y - m_touchPanDownScreenPos.y) < 10;
 
             // Long press: a still finger for 500 ms lights the glow pulse under
             // it. Release at that point = right click; move = marquee.
@@ -1263,12 +1319,17 @@ namespace ArrangementEditor
             if (m_holdDragging)
             {
                 if (m_rubberBand.isVisible())
-                    m_rubberBand.updateDrag(pos);
+                    m_rubberBand.updateDrag(local.toInt());
                 return true;
             }
 
-            viewport->setViewPosition(m_gestureStartViewX - (pos.x - m_gestureDownPos.x),
-                                      m_gestureStartViewY - (pos.y - m_gestureDownPos.y));
+            viewport->setViewPosition(
+                TouchNavigationMath::panPosition(m_gestureStartViewX,
+                    pos.x - m_touchPanDownScreenPos.x,
+                    juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                TouchNavigationMath::panPosition(m_gestureStartViewY,
+                    pos.y - m_touchPanDownScreenPos.y,
+                    juce::jmax(0, getHeight() - viewport->getViewHeight())));
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
@@ -1316,8 +1377,8 @@ namespace ArrangementEditor
 
         // Momentum only after a REAL swipe. A tiny nudge used to fling on a
         // spurious velocity spike, which is what made small movements jitter.
-        const double dx = (double) (m_lastTouchPanPos.x - m_gestureDownPos.x);
-        const double dy = (double) (m_lastTouchPanPos.y - m_gestureDownPos.y);
+        const double dx = (double) (m_lastTouchPanPos.x - m_touchPanDownScreenPos.x);
+        const double dy = (double) (m_lastTouchPanPos.y - m_touchPanDownScreenPos.y);
         const bool realSwipe = std::sqrt(dx * dx + dy * dy) > 24.0;
 
         if (realSwipe
