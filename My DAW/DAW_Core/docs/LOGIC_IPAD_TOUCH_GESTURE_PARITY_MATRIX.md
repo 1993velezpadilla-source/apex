@@ -2,6 +2,14 @@
 **Audited 2026-10-21.** Applies to the native APEX JUCE Windows touchscreen
 (including Lenovo Legion Go), future iPad/iPhone ports, and Android APK.
 Goal is parity in *interaction*, not copying Apple graphics or brand assets.
+
+**Product scope — explicit decision 2026-10-21:** APEX's current release is
+**audio recording, editing, mixing, vocal production and automation**.
+No MIDI note editor, piano-roll, beat-making sequencer, instruments or touch
+features for beat production belong to this release. Those are deferred to an
+unscheduled **future update**. References to those features in Logic Pro
+are competitive background only, never current acceptance gates. Existing
+source should not be expanded or broken merely to chase beat-making parity.
 A source change is not evidence of a device pass.
 
 ## Audited Apple first-party references
@@ -109,9 +117,6 @@ assertion that the equivalent APEX editing backend is available.
 | Swipe plugin pane down | Dismiss without changing inserts | TODO |
 | Reorder plugin chain | Touch drag with activation/deadzone; no dangling host pointer | TODO |
 | Touch plug-in controls | Each parameter gets stable begin/change/end automation gesture | EXISTING partially; audit TODO |
-| Open piano roll/edit region | Single purposeful toolbar action or context item | EXISTING editor, touch parity TODO |
-| Select / move MIDI notes | Touch modes + pinch in note editor | TODO |
-| Step sequencer rows / note lengths | Touch-friendly grids and playhead-aware pop-ups | TODO |
 | External mouse or trackpad | Desktop semantics preserved (right-click, wheel, Ctrl/Shift) | EXISTING, regression required |
 | Lenovo Legion Go Windows touchscreen | Native touch + mouse/gamepad coexist; scaling; rotation | Required **first physical validation target** |
 | Android tablet / foldable | 48dp touch targets + window/safe area & density | TODO Android native build/device |
