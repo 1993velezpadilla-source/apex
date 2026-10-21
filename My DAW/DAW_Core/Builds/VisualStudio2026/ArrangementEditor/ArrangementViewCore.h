@@ -231,6 +231,9 @@ namespace ArrangementEditor
         int getLaneTopForIndex(int laneIndex) const noexcept;
         int getLaneIndexForY(int y) const noexcept;
         EditorToolState& getToolState() { return m_toolState; }
+        // Any multi-finger navigation invalidates an outstanding selected
+        // region tap. Read only from the UI/message thread.
+        std::uint64_t getTouchGestureEpoch() const noexcept { return m_touchGestureEpoch; }
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
         // ── Diagnostics / benchmark access ──────────────────────────────────
@@ -443,6 +446,7 @@ namespace ArrangementEditor
         bool m_marqueePending = false; // empty-space press waiting for the hold
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
+        std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
         double m_lastPinchDistance = 0.0; // legacy pinch scratch state
         juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
         // Gesture classification: decided once per gesture (pan by default,
