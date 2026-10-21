@@ -1069,9 +1069,11 @@ namespace ArrangementEditor
         if (viewport == nullptr)
             return false;
 
-        // Scroll/gesture LOD: every renderer paints only its background+header
-        // while this runs, which is what makes the gesture smooth.
-        ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+        // Scroll/gesture LOD must be activated only after REAL movement.
+        // Previously tapping/holding the arranger hid every waveform and
+        // rebuilding all clips on release caused a visible frame hitch.
+        // A stationary tap/hold now keeps full-detail paint and requires no
+        // unnecessary end-of-gesture renderer rebuild.
 
         // ── Live two-finger gesture, sampled at 60 Hz ──
         // Driving the pan/pinch from this timer instead of the irregular mouse
@@ -1175,6 +1177,10 @@ namespace ArrangementEditor
             }
 
             const auto delta = centreScreen - m_lastTwoFingerPos;
+            const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
+            const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
+            if (delta.getDistanceFromOrigin() >= 1.0f || zoomingX || zoomingY)
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
             const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
             const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
             viewport->setViewPosition(
@@ -1184,7 +1190,7 @@ namespace ArrangementEditor
             // Horizontal spread = time zoom. Keep the musical time under the
             // two-finger midpoint fixed rather than zooming toward song start.
             // Compare to LAST APPLIED separation to catch slow pinches.
-            if (TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX))
+            if (zoomingX)
             {
                 const double oldPps = m_zoom.getPixelsPerSecond();
                 const double newPps = juce::jlimit(2.0, 4000.0,
@@ -1202,7 +1208,7 @@ namespace ArrangementEditor
             }
 
             // Vertical spread = lane zoom; preserve the lane beneath fingers.
-            if (TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY))
+            if (zoomingY)
             {
                 const double oldH = m_zoom.getTrackHeightPx();
                 const double newH = juce::jlimit(24.0, 180.0,
@@ -1380,6 +1386,7 @@ namespace ArrangementEditor
                 return true;
             }
 
+            ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
             viewport->setViewPosition(
                 TouchNavigationMath::panPosition(m_gestureStartViewX,
                     pos.x - m_touchPanDownScreenPos.x,
@@ -1413,10 +1420,14 @@ namespace ArrangementEditor
         {
             // Gesture (and its momentum) finished: restore full detail and
             // re-lay-out the clips once, not every frame.
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
-            rebuildClipRenderers();
-            updateAutomationLayout();
-            repaint();
+            const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            if (wasLightweight)
+            {
+                rebuildClipRenderers();
+                updateAutomationLayout();
+                repaint();
+            }
             return false;
         }
 
