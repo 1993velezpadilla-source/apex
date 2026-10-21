@@ -13,6 +13,7 @@
 #include "ArrangementZoomCore.h"
 #include "PianoRollButtonCore.h"
 #include <memory>
+#include <cstdint>
 #include <mutex>
 
 namespace ArrangementEditor
@@ -197,6 +198,7 @@ namespace ArrangementEditor
         Zone m_activeZone   = Zone::None; // currently being dragged
         bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
         bool m_touchMenuPending = false; // only if selected at gesture BEGIN
+        std::uint64_t m_touchMenuGestureEpoch = 0; // multi-touch invalidates pending tap
         juce::Point<int> m_touchMenuDownScreen;
         Zone m_hoveredZone  = Zone::None; // under cursor (drives cursor + paint)
 
