@@ -45,6 +45,21 @@ foreach ($smoke in $smokes) {
         }
 
         Write-Host "[PASS] APEX $Configuration|x64: $($smoke.Label) completed cleanly."
+
+        # Surface real app start-page timings in CI logs, including timings
+        # from Debug where the compiled app has diagnostics enabled.
+        # Not an arbitrary pass/fail timing budget: cloud runners vary.
+        if ($smoke.Flag -eq '--apex-ci-startup-panel') {
+            $tracePath = Join-Path $env:APPDATA 'DAW_Core\startup_trace.log'
+            if (Test-Path -LiteralPath $tracePath -PathType Leaf) {
+                Write-Host "[startup-profile] $Configuration measured ApplicationCore/MainComponent stages:"
+                Get-Content -LiteralPath $tracePath -Tail 65 |
+                    Where-Object { $_ -match '\[(ApplicationCore|MainComponent)\]' } |
+                    ForEach-Object { Write-Host "[startup-profile] $_" }
+            } else {
+                Write-Warning "[startup-profile] No startup_trace.log produced by the application."
+            }
+        }
     }
     finally {
         if ($null -ne $process) {
