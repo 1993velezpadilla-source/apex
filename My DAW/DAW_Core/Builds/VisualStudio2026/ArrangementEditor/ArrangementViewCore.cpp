@@ -4489,6 +4489,11 @@ namespace ArrangementEditor
         if (it != m_freezeStates.end()) fs = &it->second;
 
         ClipContextCallbacks cb;
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        cb.resolveClipById = [weakOwner](const juce::Uuid& id) -> ArrangementClipModel*
+        {
+            return weakOwner != nullptr ? weakOwner->m_clipState.findClip(id) : nullptr;
+        };
         cb.clickTime  = screenXToTime(localPos.x);
         cb.clickTrack = trackIndexAt(localPos);
 
@@ -4589,7 +4594,7 @@ namespace ArrangementEditor
                 })
             : std::function<void(ArrangementClipModel*)>{};
 
-        ClipContextMenuCore::show(clip, screenPos, cb, fs);
+        ClipContextMenuCore::show(clip, screenPos, cb, fs, this);
     }
 
     void ArrangementViewCore::showEmptyTrackContextMenu(juce::Point<int> screenPos,
@@ -4601,7 +4606,7 @@ namespace ArrangementEditor
         cb.canPaste   = [this]() { return !m_clipboardClips.empty(); };
         cb.pasteClip  = [this](double t, int tr) { onClipPaste(t, tr); };
 
-        ClipContextMenuCore::showOnEmptyTrack(screenPos, cb);
+        ClipContextMenuCore::showOnEmptyTrack(screenPos, cb, this);
     }
 
     void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
