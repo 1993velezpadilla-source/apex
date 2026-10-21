@@ -40,16 +40,44 @@ jobs:
         run: .\Scripts\test_evo_eye_procedural.ps1 -Configuration ${{ matrix.configuration }}
       - name: Capture real vector-animated Evo Eye open and closed frames
         run: |
+          $ErrorActionPreference = 'Stop'
           $exe = ".\\Builds\\VisualStudio2026\\x64\\${{ matrix.configuration }}\\App\\DAW_Core.exe"
-          $proc = Start-Process -FilePath $exe -ArgumentList '--apex-ci-evo-eye-frames' -Wait -PassThru
-          if ($proc.ExitCode -ne 0) { throw "Evo Eye frame capture failed ($($proc.ExitCode))" }
           $source = Join-Path $env:TEMP 'apex-evo-eye-procedural'
           $dest = Join-Path $PWD 'evidence\\boot'
+          # Never allow stale output from an earlier run to count as success.
+          if (Test-Path -LiteralPath $source) {
+            Remove-Item -LiteralPath $source -Recurse -Force
+          }
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          foreach ($frame in @('open.png', 'closed.png')) {
-            $from = Join-Path $source $frame
-            if (-not (Test-Path -LiteralPath $from -PathType Leaf)) { throw "Missing Evo Eye screenshot: $from" }
-            Copy-Item -LiteralPath $from -Destination (Join-Path $dest $frame) -Force
+          # Start-Process -Wait waits for child processes too; Debug can leave a
+          # descendant running after the screenshot process itself has exited.
+          # Wait for the actual process only and bound it to avoid blocking the
+          # remaining Debug test suite and artifact publication for two hours.
+          Write-Host "[EVO EYE CI] Starting ${{ matrix.configuration }} process with 90s timeout."
+          $proc = Start-Process -FilePath $exe -ArgumentList '--apex-ci-evo-eye-frames' -PassThru
+          try {
+            if (-not $proc.WaitForExit(90000)) {
+              foreach ($frame in @('open.png', 'closed.png')) {
+                $from = Join-Path $source $frame
+                Write-Host "[EVO EYE CI] Timeout evidence $frame exists: $(Test-Path -LiteralPath $from -PathType Leaf)"
+              }
+              throw "Evo Eye ${{ matrix.configuration }} diagnostic process timed out after 90s (pid $($proc.Id))."
+            }
+            Write-Host "[EVO EYE CI] Process exited with code $($proc.ExitCode)."
+            if ($proc.ExitCode -ne 0) { throw "Evo Eye frame capture failed ($($proc.ExitCode))" }
+            foreach ($frame in @('open.png', 'closed.png')) {
+              $from = Join-Path $source $frame
+              if (-not (Test-Path -LiteralPath $from -PathType Leaf)) { throw "Missing Evo Eye screenshot: $from" }
+              Copy-Item -LiteralPath $from -Destination (Join-Path $dest $frame) -Force
+            }
+          }
+          finally {
+            if (-not $proc.HasExited) {
+              # Only the timed-out CI diagnostic subprocess is terminated,
+              # never the real user's splash or the normal app lifecycle.
+              & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Host
+            }
+            $proc.Dispose()
           }
       - name: Publish rendered Evo Eye C++ GUI previews
         uses: actions/upload-artifact@v4
