@@ -54,6 +54,12 @@ int main()
     assert(!TouchNavigationMath::withinTapSlop(100, 100, 112, 100));
     assert(!TouchNavigationMath::withinTapSlop(100, 100, 100, 92));
 
-    std::cout << "TouchNavigationMath: 22 deterministic assertions passed\n";
+    // Context menu must not appear on a routine second short tap or drag.
+    assert(!TouchNavigationMath::contextHoldReady(100, 100, 100, 100, 100));
+    assert(!TouchNavigationMath::contextHoldReady(499, 100, 100, 100, 100));
+    assert(TouchNavigationMath::contextHoldReady(500, 100, 100, 104, 104));
+    assert(!TouchNavigationMath::contextHoldReady(700, 100, 100, 108, 100));
+
+    std::cout << "TouchNavigationMath: 26 deterministic assertions passed\n";
     return 0;
 }
