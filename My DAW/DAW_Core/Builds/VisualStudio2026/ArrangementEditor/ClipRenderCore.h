@@ -107,6 +107,9 @@ namespace ArrangementEditor
         // Callbacks
     std::function<void(juce::ModifierKeys)> onClick;
     std::function<void()> onDoubleClick;
+    // Reuse the native desktop region context menu for touch: the second
+    // tap on a selected region exposes the same actions as right-click.
+    std::function<void(juce::Point<int>, juce::Point<int>)> onTouchContextMenu;
     std::function<void()> onPianoRollClick;
     // Clicking the pitch/stretch/mode badges toggles the preset curve
     // (clip pitch/stretch automation lane rows) visibility.
@@ -193,6 +196,8 @@ namespace ArrangementEditor
                           ResizeLeft, ResizeRight, VolumeBtn, MuteBtn };
         Zone m_activeZone   = Zone::None; // currently being dragged
         bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
+        bool m_touchMenuPending = false; // only if selected at gesture BEGIN
+        juce::Point<int> m_touchMenuDownScreen;
         Zone m_hoveredZone  = Zone::None; // under cursor (drives cursor + paint)
 
         // Drawn pitch/stretch/mode badge area (local coords), refreshed by
