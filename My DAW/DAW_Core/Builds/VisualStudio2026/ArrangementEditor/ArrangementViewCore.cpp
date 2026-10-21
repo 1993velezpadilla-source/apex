@@ -2348,6 +2348,18 @@ namespace ArrangementEditor
                 togglePresetCurveVisibility(clip);
         };
 
+        rendererPtr->onTouchContextMenu = [this, clipUuid](juce::Point<int> screenPos,
+                                                            juce::Point<int> localPos)
+        {
+            // Resolve by stable UUID, never a renderer/model pointer that
+            // might be invalidated by an edit or undo.
+            if (m_viewOnlyMode || m_toolState.getActiveTool() != EditorTool::Select)
+                return;
+            if (auto* clip = m_clipState.findClip(clipUuid))
+                if (m_selection.isSelected(clipUuid))
+                    showClipContextMenu(clip, screenPos, localPos);
+        };
+
         rendererPtr->onClick = [this, clipUuid](juce::ModifierKeys mods)
         {
             // Ctrl adds/removes; plain click is ALWAYS an exclusive selection.
@@ -2359,6 +2371,17 @@ namespace ArrangementEditor
             for (auto& r : m_clipRenderers)
                 if (r != nullptr)
                     r->setSelected(m_selection.isSelected(r->getClipId()));
+            // A first finger tap previously only changed the painted selection,
+            // without updating selected clip/track in ApplicationState. Keep
+            // plugin panels and inspectors synchronized with the real clip.
+            if (m_selection.isSelected(clipUuid)
+                && m_engineClipManager != nullptr && onEngineClipSelected)
+            {
+                const auto mapped = m_uuidToEngineId.find(clipUuid);
+                if (mapped != m_uuidToEngineId.end())
+                    if (auto* engineClip = m_engineClipManager->getClip(mapped->second))
+                        onEngineClipSelected(*engineClip);
+            }
             repaint();
         };
 
