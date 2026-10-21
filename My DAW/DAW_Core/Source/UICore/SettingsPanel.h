@@ -1152,7 +1152,7 @@ private:
             contextMenuStyleLabel_->setBounds(insetX, y, insetW, 25);
             y += 26;
             contextMenuStyleCombo_->setVisible(true);
-            contextMenuStyleCombo_->setBounds(insetX, y, insetW, 36);
+            contextMenuStyleCombo_->setBounds(insetX, y, insetW, 48); // 48dp touch-safe
             y += 12;
             }
             y = endCard(y);
