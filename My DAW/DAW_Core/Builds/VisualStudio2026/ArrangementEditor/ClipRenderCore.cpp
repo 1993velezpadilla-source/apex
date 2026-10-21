@@ -478,11 +478,10 @@ namespace ArrangementEditor
             return;
         }
 
-        // In Select mode, a tap on an ALREADY selected region is the
-        // touch equivalent of desktop right-click. Do not show immediately:
-        // the user may be starting an intentional drag. Open on release only
-        // if the finger remained within tap slop. Handles and tool actions
-        // keep their normal owner.
+        // In Select mode, a STATIONARY HOLD on a selected region invokes
+        // right-click. A normal tap keeps selection and a drag can move the
+        // region without an unwanted menu. The 500 ms hold threshold is
+        // checked on release, outside any audio callback.
         if (z == Zone::None
             && DAW::ApexPointerPolicy::isDirect(e))
         {
@@ -760,7 +759,8 @@ namespace ArrangementEditor
         const bool requestTouchMenu = m_touchMenuPending
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && DAW::ApexPointerPolicy::isDirect(e)
-            && TouchNavigationMath::withinTapSlop(
+            && TouchNavigationMath::contextHoldReady(
+                e.getLengthOfMousePress(),
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
