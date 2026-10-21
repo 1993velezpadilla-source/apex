@@ -42,9 +42,9 @@ assertion that the equivalent APEX editing backend is available.
 | --- | --- | --- | --- |
 | Tap unselected region | Select it once, no movement | SOURCE PATCHED: ClipRenderCore onClick -> canonical engine selected state | Tap first take, ensure visual + inspector identity sync |
 | Drag unselected region *without hold* | Scroll timeline, don't move clip | SOURCE PATCHED: ClipRenderCore touchPanFromUnselected + ArrangementViewCore | Swipe clip left/right; check session/sample positions unchanged |
-| Drag selected region | Move region with snap, stable undo; one finger | EXISTING ArrangementViewCore drag path | Select, drag, undo/reopen, no duplicate event |
-| Tap already-selected region | Reveal native clip shortcut actions, like right-click | SOURCE PATCHED: ClipRenderCore onTouchContextMenu -> showClipContextMenu | One tap select, next stationary tap opens context |
-| Hold selected region | Also reach shortcut menu | SOURCE PATCHED on release for stationary hold; instantaneous on-hold menu not implemented | Hold then release >500ms; menu actions same as right-click |
+| Drag selected region | Move region with snap, stable undo; one finger | SOURCE PATCHED: routes selected-region touch drag through canonical edit/undo path, without also panning | Select, drag, undo/reopen, no duplicate event |
+| Tap already-selected region | Preserve selection, do NOT unexpectedly open context while trying to edit | SOURCE PATCHED: quick tap does not invoke context | Tap selected clip quickly; no context, no movement |
+| Hold selected region | Open radial/classic shortcut menu with same canonical actions | SOURCE PATCHED: 500ms stationary hold on release; mid-press popup still TODO | Hold then release >=500ms; right click equivalent |
 | Secondary click with mouse/trackpad | Existing desktop menu | EXISTING ArrangementViewCore mouseUp | Right-click still works; keyboard/trackpad |
 | Hold background, nothing selected | Show empty-track context actions | SOURCE PATCHED: timer begins on down, context on release | Deselect, hold empty area 600ms; menu; swipe must not show |
 | Tap background | Deselect region(s) | SOURCE PATCHED: handleSelectTool touch | Tap elsewhere, inspector/selection cleared |
@@ -82,7 +82,7 @@ assertion that the equivalent APEX editing backend is available.
 | Swipe dialog down | Dismiss dialogs safely, never commit unintended edits | TODO |
 | Disclosures/pop-ups | 1 tap opens menu/expanded group, not hover-only | PARTIAL existing UI |
 | Numeric fields swipe up/down | Fine parameter edit + entry keyboard + bounds | TODO |
-| Pinch while scrolling & heavy waveforms | Consistent LOD and >=60Hz target | PARTIAL painting LOD; device profiling TODO |
+| Pinch while scrolling & heavy waveforms | No waveform blanking on stationary taps; LOD only after real pan/pinch | SOURCE PATCHED painter lifecycle; 60Hz device profiling TODO |
 
 ## 3. Tracks, header, mixer, automation
 
@@ -99,7 +99,7 @@ assertion that the equivalent APEX editing backend is available.
 | Fader finger grab | Entire track lane hit zone, not only thumb | SOURCE PATCHED MixerPanel |
 | Double-tap fader | 0dB/reset through same parameter authority | SOURCE PATCHED MixerPanel |
 | Double-tap knob | Reset to default via parameter authority | EXISTING BubblegumKnobComponent; plug-in-by-plugin audit TODO |
-| Move two mixer faders at once | Independent source capture & automation begin/end | PARTIAL per-component, hardware test TODO |
+| Move two mixer faders at once | Independent source capture & automation begin/end | PARTIAL: per-component source ownership; real two-finger hardware gate TODO |
 | Mix pan or send via finger drag | Drag stable on touch, no cursor capture | EXISTING UI; device test TODO |
 | Track/region automation mode | Distinguish track vs region Touch and Latch | TODO parity; existing APEX track-native modes must not be regressed |
 | Touch/Latch record multiple controls | Write the parameters independently with matching IDs | TODO end-to-end native and hosted plugin gate |
@@ -113,10 +113,10 @@ assertion that the equivalent APEX editing backend is available.
 | Tap unselected plugin tile | Select the slot | TODO slot gesture parity |
 | Tap selected plugin tile | Open detailed parameters | TODO |
 | Double-tap plugin tile | Details editor | TODO |
-| Hold plugin tile | Add-before, replace, remove, copy, paste context menu | TODO |
+| Hold plugin tile | Open existing plugin actions (bypass, replace, remove) | SOURCE PATCHED: 550ms hold, radial/classic; add-before/copy/paste TODO |
 | Swipe plugin pane down | Dismiss without changing inserts | TODO |
 | Reorder plugin chain | Touch drag with activation/deadzone; no dangling host pointer | TODO |
-| Touch plug-in controls | Each parameter gets stable begin/change/end automation gesture | EXISTING partially; audit TODO |
+| Touch plug-in controls | Each parameter gets stable begin/change/end automation gesture | PARTIAL: Bubblegum knobs capture pointer and end gesture when destroyed; binding propagation audit TODO |
 | External mouse or trackpad | Desktop semantics preserved (right-click, wheel, Ctrl/Shift) | EXISTING, regression required |
 | Lenovo Legion Go Windows touchscreen | Native touch + mouse/gamepad coexist; scaling; rotation | Required **first physical validation target** |
 | Android tablet / foldable | 48dp touch targets + window/safe area & density | TODO Android native build/device |
@@ -125,12 +125,14 @@ assertion that the equivalent APEX editing backend is available.
 
 ## Regression matrix for Lenovo Legion Go (Windows)
 1. Touch only: select an audio clip once; confirm its track and inspector.
-2. Second tap selected clip: same actions as desktop right-click menu. Choose a
-   safe action, Undo, Save, reopen.
+2. Quick tap selected clip must **not** open actions. Hold selected clip
+   stationary >=500ms then release: same radial/classic commands as desktop
+   right-click. Undo, Save, reopen.
 3. Swipe first-tap unselected clip; timeline scrolls and the clip's project
    sample start and source offset remain bitwise unchanged.
-4. Touch selected clip then drag: region moves, snaps correctly and Undo is
-   a single action; an ordinary tap never moves it.
+4. Touch selected clip then drag: region moves using the existing clip
+   transaction (not the background pan), snaps correctly and Undo is a
+   single action; an ordinary tap never moves it.
 5. Two-finger pan/zoom across a clip; NO context popup when fingers lift.
 6. Slow two-finger spread (<2px sampled each frame) eventually zooms and
    never oscillates; zoom focus does not drift.
@@ -141,7 +143,8 @@ assertion that the equivalent APEX editing backend is available.
    reorder only when intentional.
 10. Fader touch anywhere in slider lane: gain changes with one automation
     begin/end. Double-tap returns to default. Drag two different faders at once.
-11. While turning an effect knob and moving mixer fader, timeline does not pan.
+11. While turning an effect knob and moving mixer fader, timeline does not pan;
+    test destroying an open plugin GUI mid-drag and ensure automation gesture ends.
 12. Switch between finger, mouse, hardware keyboard and trackpad; no stuck
     virtual cursor/drag gesture; right-click remains correct.
 13. Save, close, reopen, then repeat clip menu, drag, playlist promotion,
@@ -155,3 +158,30 @@ assertion that the equivalent APEX editing backend is available.
 **Blocking rule:** no mobile "1:1" or Release declaration until missing TODO
 items and device checks are materially completed and measured; a passing
 portable-math unit test is only a small sub-gate.
+
+## 2026-10-21 regression-focused touch/scroll patch
+- **Fixed selected audio clip drag**: the previous touch-only early return in
+  `ArrangementViewCore::mouseDrag` routed ALL touches to navigation, making a
+  selected region impossible to drag. Selected clip drag now reaches the
+  existing arrangement command/undo path. Unselected-region first swipe still
+  pans without altering the clip.
+- **Gesture ownership**: two fingers anywhere over audio regions switch to
+  anchored pan/pinch and cancel pending clip movement. A single finger on a
+  selected region cannot also pan. Faders and effect widgets remain outside
+  the arrangement's finger-capture scope.
+- **Waveform LOD stability**: only enter low-detail painting when fingers
+  actually move; stationary tap/hold never blanks all waveforms or triggers
+  an expensive clip-rebuild on finger lift.
+- **Radial trigger safety**: selected audio region quick tap is harmless;
+  stationary 500ms hold opens context. Apple first-party shortcut guidance
+  distinguishes hold from a selection tap.
+- **Mixer body touch swipe**: a quick swipe across the channel body actually
+  scrolls the horizontal viewport; a slow intentional hold+drag can reorder.
+- **Settings**: APEX Radial vs Classic selector reserves its full 48px touch
+  height, so it doesn't overlap the next card.
+- **Automation**: native Bubblegum knob on component destruction ends an
+  active gesture, preventing stuck parameter writes.
+- **Open blocking checks**: Windows Release/Debug compilation, device
+  integration, 100–200% DPI, 32+ tracks, plugin lifecycle stress, transport
+  audio glitch and xrun instrumentation, and remaining audio-side gesture
+  parity. No beat making/MIDI work in this release.
