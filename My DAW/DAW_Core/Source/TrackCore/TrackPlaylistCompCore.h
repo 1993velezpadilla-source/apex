@@ -26,6 +26,40 @@ struct TrackPlaylistCompCore final
         }
     }
 
+    // One transport recording pass is NOT a loop.  The FIRST take lands on
+    // Main; a later recording over the same area gets its own saved lane.
+    // Do not switch the audible Main away from unrelated clips outside the
+    // newly recorded range: doing so would hide existing song material.
+    struct NonLoopTakePlacement
+    {
+        bool createPlaylist = false;
+        bool showAsMain = false;
+    };
+
+    static NonLoopTakePlacement planNonLoopTake(const Track& track, ClipManager& clips,
+                                               int64_t start, int64_t length)
+    {
+        if (start < 0 || length <= 0) return {};
+        const int64_t end = start + length;
+        if (end <= start) return {};
+        bool overlapsRecordedArea = false;
+        bool hasMainMaterialOutsideTake = false;
+        for (auto* clip : clips.getClipsOnTrack(track.getID()))
+        {
+            if (!clip || clip->getPlaylistId() != track.getMainPlaylistId())
+                continue;
+            const auto a = (int64_t)clip->getStartPosition();
+            const auto b = (int64_t)clip->getEndPosition();
+            if (b <= a) continue;
+            if (clip->getType() == ClipType::Audio && a < end && b > start)
+                overlapsRecordedArea = true;
+            if (a < start || b > end || b <= start || a >= end)
+                hasMainMaterialOutsideTake = true;
+        }
+        return { overlapsRecordedArea,
+                 overlapsRecordedArea && !hasMainMaterialOutsideTake };
+    }
+
     static juce::String createEmptyPlaylist(Track& track, TrackManager& tracks,
                                              ClipManager& clips)
     {

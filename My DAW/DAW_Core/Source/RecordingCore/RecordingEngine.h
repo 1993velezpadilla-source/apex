@@ -171,6 +171,11 @@ public:
     bool getAutoLoopPlaylists() const noexcept { return autoLoopPlaylists_; }
     void setAutoLoopPlaylists(bool enabled) noexcept { autoLoopPlaylists_ = enabled; }
 
+    // No marked loop range required: pressing Stop/Pause after a new pass
+    // automatically saves overlapping repeat takes in separate playlists.
+    bool getAutoTakePlaylists() const noexcept { return autoTakePlaylists_; }
+    void setAutoTakePlaylists(bool enabled) noexcept { autoTakePlaylists_ = enabled; }
+
     void setRecordingFinalizedCallback(std::function<void()> callback)
     {
         recordingFinalizedCallback_ = std::move(callback);
@@ -249,6 +254,7 @@ public:
         }
 
         recordStartPos_ = transport_->getPosition();
+        recordAutoTakes_ = autoTakePlaylists_;
         const auto currentLoop = transport_->getLoopRange();
         // Allow capture anywhere inside the loop. The pass planner places
         // the initial partial take at the actual start, with subsequent
@@ -716,6 +722,7 @@ private:
             req.loopStart      = recordLoopStart_;
             req.loopEnd        = recordLoopEnd_;
             req.autoLoopPlaylists = recordLoopAuto_;
+            req.autoTakePlaylists = recordAutoTakes_;
             finalizeRequests.push_back(req);
         }
 
@@ -793,10 +800,18 @@ private:
             if (tracks_ != nullptr)
                 for (const auto& req : *requestsForMessageThread)
                 {
-                    if (LoopPlaylistTakePlanCore::make(
-                            req.startPosition, req.loopStart, req.loopEnd,
-                            req.samplesWritten, req.autoLoopPlaylists).empty())
+                    if (req.samplesWritten <= 0 || !req.outputFile.existsAsFile())
                         continue;
+                    const bool isLoopMultiPass = !LoopPlaylistTakePlanCore::make(
+                        req.startPosition, req.loopStart, req.loopEnd,
+                        req.samplesWritten, req.autoLoopPlaylists).empty();
+                    bool needsNewLane = isLoopMultiPass;
+                    if (!needsNewLane && req.autoTakePlaylists && clips_ != nullptr)
+                        if (auto* track = tracks_->getTrack(req.trackId))
+                            needsNewLane = TrackPlaylistCompCore::planNonLoopTake(
+                                *track, *clips_, req.startPosition,
+                                req.samplesWritten).createPlaylist;
+                    if (!needsNewLane) continue;
                     bool alreadyCaptured = false;
                     for (const auto& change : playlistChanges)
                         alreadyCaptured |= change.trackId == req.trackId;
@@ -820,8 +835,41 @@ private:
                     take.currentId  = clip->getID();
                     takes.push_back(std::move(take));
                 };
+                if (req.samplesWritten <= 0 || !req.outputFile.existsAsFile())
+                    continue;
                 if (passPlan.empty() || tracks_ == nullptr)
                 {
+                    if (passPlan.empty() && req.autoTakePlaylists && tracks_ != nullptr)
+                    {
+                        if (auto* track = tracks_->getTrack(req.trackId))
+                        {
+                            const auto plan = TrackPlaylistCompCore::planNonLoopTake(
+                                *track, *clips_, req.startPosition,
+                                req.samplesWritten);
+                            if (plan.createPlaylist)
+                            {
+                                const auto savedState = track->getPlaylistState().createCopy();
+                                auto part = req;
+                                part.playlistId = track->createPlaylist();
+                                if (!plan.showAsMain)
+                                {
+                                    // A new take must not hide other material
+                                    // on Main outside the recorded interval.
+                                    track->showPlaylistAsMain(
+                                        savedState.getProperty("main").toString());
+                                    track->setTargetPlaylist(
+                                        savedState.getProperty("target").toString());
+                                }
+                                auto* clip = RecordingClipFinalizerCore::finalize(part);
+                                if (clip != nullptr)
+                                    registerTake(clip);
+                                else
+                                    track->restorePlaylistState(savedState);
+                                continue;
+                            }
+                        }
+                    }
+                    // First/non-overlapping take: keep the normal Main audio.
                     registerTake(RecordingClipFinalizerCore::finalize(req));
                     continue;
                 }
@@ -1098,6 +1146,8 @@ private:
     std::vector<std::unique_ptr<TrackRecording>> activeRecordings_;
     SamplePosition recordStartPos_ = 0;
     bool autoLoopPlaylists_ = true;
+    bool autoTakePlaylists_ = true; // convenient Stop/Return-to-start workflow
+    bool recordAutoTakes_ = true;
     bool recordLoopAuto_ = false;
     SamplePosition recordLoopStart_ = 0, recordLoopEnd_ = 0;
     juce::AudioBuffer<float> printBuffer_;   // scratch for printing track FX (audio thread)

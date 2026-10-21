@@ -1424,6 +1424,15 @@ MainComponent::MainComponent()
         if (!appCore_.getRecordingEngine().isRecording())
             appCore_.getRecordingEngine().setAutoLoopPlaylists(enabled);
     };
+    trackList_->onGetAutoTakePlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoTakePlaylists();
+    };
+    trackList_->onSetAutoTakePlaylistsRequested = [this](bool enabled)
+    {
+        if (!appCore_.getRecordingEngine().isRecording())
+            appCore_.getRecordingEngine().setAutoTakePlaylists(enabled);
+    };
     trackList_->onPlaylistStateChangedRequested = [this](const DAW::TrackID&)
     {
         DAW::TrackPlaylistCompCore::publishPlaybackVisibility(

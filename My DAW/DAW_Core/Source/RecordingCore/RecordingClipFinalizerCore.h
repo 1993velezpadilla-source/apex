@@ -26,6 +26,9 @@ public:
         juce::String      playlistId;
         ClipID            shareExistingAudioClipId;
         bool              autoLoopPlaylists = false;
+        // Frozen at recording start so changing the menu cannot alter a take
+        // while disk flush/finalization is in progress.
+        bool              autoTakePlaylists = false;
         SamplePosition    loopStart = 0, loopEnd = 0;
         juce::File        outputFile;
         ClipManager*      clipManager    = nullptr;

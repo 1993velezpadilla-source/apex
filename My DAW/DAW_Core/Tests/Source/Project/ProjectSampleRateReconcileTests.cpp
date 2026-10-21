@@ -250,6 +250,42 @@ public:
             expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
         }
 
+        beginTest("Stop at start marker saves overlapping vocal passes without a loop");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead");
+            const auto first = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(!first.createPlaylist); // first pass records on Main
+            auto* take1 = clips.createAudioClip("take 1", {});
+            take1->setTrackID(vocal->getID());
+            take1->setStartPosition(15 * 48000);
+            take1->setLength(5 * 48000);
+            const auto repeat = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(repeat.createPlaylist);
+            expect(repeat.showAsMain); // latest take can become Main
+            const auto shortPass = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 3 * 48000);
+            expect(shortPass.createPlaylist);
+            expect(!shortPass.showAsMain); // preserve unrecorded tail
+            const auto later = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 25 * 48000, 5 * 48000);
+            expect(!later.createPlaylist); // regular non-overlap clips stay Main
+            auto* intro = clips.createAudioClip("intro", {});
+            intro->setTrackID(vocal->getID());
+            intro->setStartPosition(0);
+            intro->setLength(48000);
+            const auto withIntro = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(withIntro.createPlaylist);
+            expect(!withIntro.showAsMain); // do not mute unrelated Main
+            const auto noSamples = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 0);
+            expect(!noSamples.createPlaylist);
+        }
+
         beginTest("loop pass planner splits one recorded WAV into aligned lanes");
         {
             auto passes = DAW::LoopPlaylistTakePlanCore::make(
