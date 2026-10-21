@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "ApexRadialContextMenu.h"
 #include <map>
 #include <cmath>
 #include "../TrackCore/TrackPlaylistCompCore.h"
@@ -657,7 +658,8 @@ private:
         {
             if (weakThis) weakThis->createNew(true);
         });
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+        ApexRadialContextMenu::show(std::move(menu), this,
+            getScreenBounds().getCentre(),
             [weakThis](int) { juce::ignoreUnused(weakThis); });
     }
 
