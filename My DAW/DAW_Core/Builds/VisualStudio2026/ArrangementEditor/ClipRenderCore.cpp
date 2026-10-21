@@ -3,6 +3,7 @@
 // ===========================================================================
 #include "ClipRenderCore.h"
 #include "TouchNavigationMath.h"
+#include "../../../Source/UICore/ApexPointerPolicy.h"
 #include "ClipPitchCore.h"
 #include "ClipGainCore.h"
 #include "ClipWaveformColourCore.h"
@@ -475,7 +476,7 @@ namespace ArrangementEditor
         // if the finger remained within tap slop. Handles and tool actions
         // keep their normal owner.
         if (z == Zone::None
-            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            && DAW::ApexPointerPolicy::isDirect(e))
         {
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
             {
@@ -750,7 +751,7 @@ namespace ArrangementEditor
         const auto* touchView = findParentComponentOfClass<ArrangementViewCore>();
         const bool requestTouchMenu = m_touchMenuPending
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
-            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && DAW::ApexPointerPolicy::isDirect(e)
             && TouchNavigationMath::withinTapSlop(
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
@@ -808,7 +809,7 @@ namespace ArrangementEditor
     {
         // On touch, selected-region tap owns the context menu. A quick
         // second tap must not additionally open the desktop clip editor.
-        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+        if (DAW::ApexPointerPolicy::isDirect(e))
             return;
         DBG("[ClipRenderCore] double-click fired, forwarding to parent");
 
