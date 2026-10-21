@@ -40,6 +40,14 @@ int main()
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 10.0) - 0.85) < 1e-8);
     assert(TouchNavigationMath::pinchRatio(0.0, 200.0) == 1.0);
 
-    std::cout << "TouchNavigationMath: 17 deterministic assertions passed\n";
+    // Selected-region second tap => menu. A drag must cancel it, including
+    // diagonal movements that stay below the per-axis threshold.
+    assert(TouchNavigationMath::withinTapSlop(100, 100, 100, 100));
+    assert(TouchNavigationMath::withinTapSlop(100, 100, 104, 104));
+    assert(!TouchNavigationMath::withinTapSlop(100, 100, 106, 106));
+    assert(!TouchNavigationMath::withinTapSlop(100, 100, 112, 100));
+    assert(!TouchNavigationMath::withinTapSlop(100, 100, 100, 92));
+
+    std::cout << "TouchNavigationMath: 22 deterministic assertions passed\n";
     return 0;
 }
