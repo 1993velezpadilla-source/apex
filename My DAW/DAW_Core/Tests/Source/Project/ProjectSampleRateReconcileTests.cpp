@@ -332,6 +332,46 @@ public:
             expect(!noSamples.createPlaylist);
         }
 
+        beginTest("auto take #3 recognizes archived take even when Main is empty in range");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead");
+            auto* take1 = clips.createAudioClip("archived", {});
+            take1->setTrackID(vocal->getID());
+            take1->setStartPosition(15 * 48000);
+            take1->setLength(5 * 48000);
+            // Main switches to a new empty lane, while the original recording
+            // remains alive as an alternate. Another take at :15 must not be
+            // dropped onto the same Main simply because it has no clips.
+            const auto newMain = vocal->createPlaylist();
+            expectEquals(vocal->getMainPlaylistId(), newMain);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(!take1->isPlaylistAudible());
+            const auto planned = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 5 * 48000);
+            expect(planned.createPlaylist);
+            expect(planned.showAsMain);  // empty Main hides nothing
+
+            // An unrelated intro on the new Main must remain audible, while
+            // that repeat take is routed to a separate alternate playlist.
+            auto* intro = clips.createAudioClip("intro", {});
+            intro->setTrackID(vocal->getID());
+            intro->setPlaylistId(newMain);
+            intro->setStartPosition(0);
+            intro->setLength(48000);
+            const auto keepIntro = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 15 * 48000, 3 * 48000);
+            expect(keepIntro.createPlaylist);
+            expect(!keepIntro.showAsMain);
+
+            // Existing alternate material that does NOT overlap the range
+            // must not generate random new playlists.
+            const auto differentArea = DAW::TrackPlaylistCompCore::planNonLoopTake(
+                *vocal, clips, 25 * 48000, 2 * 48000);
+            expect(!differentArea.createPlaylist);
+        }
+
         beginTest("loop pass planner splits one recorded WAV into aligned lanes");
         {
             auto passes = DAW::LoopPlaylistTakePlanCore::make(

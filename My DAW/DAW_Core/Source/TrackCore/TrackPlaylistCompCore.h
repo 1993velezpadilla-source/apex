@@ -27,7 +27,8 @@ struct TrackPlaylistCompCore final
     }
 
     // One transport recording pass is NOT a loop.  The FIRST take lands on
-    // Main; a later recording over the same area gets its own saved lane.
+    // Main; a later recording over the same area gets its own saved lane,
+    // even if the old take is already on an ALTERNATE and Main is empty here.
     // Do not switch the audible Main away from unrelated clips outside the
     // newly recorded range: doing so would hide existing song material.
     struct NonLoopTakePlacement
@@ -44,16 +45,21 @@ struct TrackPlaylistCompCore final
         if (end <= start) return {};
         bool overlapsRecordedArea = false;
         bool hasMainMaterialOutsideTake = false;
+        const auto& currentMain = track.getMainPlaylistId();
         for (auto* clip : clips.getClipsOnTrack(track.getID()))
         {
-            if (!clip || clip->getPlaylistId() != track.getMainPlaylistId())
-                continue;
+            if (!clip) continue;
             const auto a = (int64_t)clip->getStartPosition();
             const auto b = (int64_t)clip->getEndPosition();
             if (b <= a) continue;
+            // Historical alternate takes count, even when the current Main
+            // was switched/cleared during comping. Never lose take #3 just
+            // because take #2 lives in an off-Main lane.
             if (clip->getType() == ClipType::Audio && a < end && b > start)
                 overlapsRecordedArea = true;
-            if (a < start || b > end || b <= start || a >= end)
+            // Only material audible on Main can be hidden by switching it.
+            if (clip->getPlaylistId() == currentMain
+                && (a < start || b > end || b <= start || a >= end))
                 hasMainMaterialOutsideTake = true;
         }
         return { overlapsRecordedArea,

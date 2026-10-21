@@ -301,8 +301,10 @@ namespace ArrangementEditor
                 : juce::Rectangle<int>();
             if (!bounds.isEmpty()) x += width + 7;
         };
-        place(m_autoArmBounds, 64);
+        // Keep the user-requested recording mode visible first when the
+        // viewport narrows: unlike ancillary controls it must not vanish.
         place(m_autoPlaylistBounds, 86);
+        place(m_autoArmBounds, 64);
         place(m_snapButtonBounds, 90);
         place(m_metronomeBounds, 64);
     }
