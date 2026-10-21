@@ -68,13 +68,24 @@ namespace
 
     static void appendMainStartupTrace(const juce::String& stage)
     {
+        // We log stage-to-stage elapsed time instead of only whole-second
+        // timestamps. The first body marker precedes GUI wiring; the Main.cpp
+        // outer marker also measures expensive member construction.
+        const auto nowUs = (juce::int64) (juce::Time::getMillisecondCounterHiRes() * 1000.0);
+        static const juce::int64 firstUs = nowUs;
+        static std::atomic<juce::int64> previousUs { nowUs };
+        const auto stepMs = (nowUs - previousUs.exchange(nowUs)) / 1000.0;
+        const auto elapsedMs = (nowUs - firstUs) / 1000.0;
+
         auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
             .getChildFile("DAW_Core");
         dir.createDirectory();
 
         auto file = dir.getChildFile("startup_trace.log");
         auto line = juce::Time::getCurrentTime().toString(true, true)
-            + " [MainComponent] " + stage + "\n";
+            + " [MainComponent] +" + juce::String(elapsedMs, 1)
+            + "ms step=" + juce::String(stepMs, 1)
+            + "ms " + stage + "\n";
         file.appendText(line, false, false, "\n");
     }
 }
@@ -1111,6 +1122,7 @@ MainComponent::MainComponent()
 
     // Menu bar
     menuBar_ = std::make_unique<DAW::DAWMenuBar>();
+    appendMainStartupTrace("ctor.menu-bar.created");
     menuBar_->setMenuAction("Track", "Add Audio Track", [this]
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::TrackAddAudio);
@@ -1314,6 +1326,7 @@ MainComponent::MainComponent()
     // Use the single authoritative click state from ApplicationCore.
     clickState_ = &appCore_.getClickState();
     transportBar_ = std::make_unique<DAW::TransportBar>(appCore_.getTransport(), clickState_);
+    appendMainStartupTrace("ctor.transport-bar.created");
     addAndMakeVisible(transportBar_.get());
 
     // Playhead clock: convert transport sample position to seconds at the
@@ -1352,6 +1365,7 @@ MainComponent::MainComponent()
 
     // Track list (headers on left)
     trackList_ = std::make_unique<DAW::TrackList>(appCore_.getTrackManager());
+    appendMainStartupTrace("ctor.track-list.created");
     trackList_->onWidthDrag = [this](int deltaX)
     {
         trackListW_ = juce::jlimit(kTrackListMin, kTrackListMax, trackListW_ + deltaX);
@@ -3015,6 +3029,7 @@ MainComponent::MainComponent()
 
     // Mixer (the only panel that should be open/visible by default)
     mixerPanel_ = std::make_unique<DAW::MixerPanel>(appCore_.getTrackManager(), appCore_.getFaderRangeCore());
+    appendMainStartupTrace("ctor.mixer-panel.created");
     mixerPanel_->setTransportActive(appCore_.getTransport().isPlaying()
                                      || appCore_.getTransport().isRecording());
     mixerPanel_->bindBubblegumV2(&appCore_.getBubblegumV2());
@@ -3162,6 +3177,7 @@ MainComponent::MainComponent()
     };
 
     pluginSidePanel_ = std::make_unique<DAW::MixerPluginSidePanel>(appCore_.getPluginScanner());
+    appendMainStartupTrace("ctor.plugin-side-panel.created");
     pluginSidePanel_->setTrackManager(&appCore_.getTrackManager());
 
     // Arranger, docked Mixer, and Floating Mixer all feed the same canonical
@@ -3638,6 +3654,7 @@ MainComponent::MainComponent()
 
     // Plugin browser panel - categorized FX explorer
     pluginBrowser_ = std::make_unique<DAW::PluginBrowserPanel>(appCore_.getPluginScanner());
+    appendMainStartupTrace("ctor.plugin-browser.created");
     auto handleBrowserPlugin = [this](const juce::PluginDescription& desc,
                                       DAW::PluginExecutionMode executionMode)
     {
@@ -3929,6 +3946,7 @@ MainComponent::MainComponent()
 
     // Startup scan dialog
     scanDialog_ = std::make_unique<DAW::PluginScanStartupDialog>(appCore_.getPluginScanner());
+    appendMainStartupTrace("ctor.plugin-scan-dialog.created");
     scanDialog_->onScanComplete = [this]
     {
         if (pluginBrowser_) pluginBrowser_->refresh();
@@ -3976,6 +3994,7 @@ MainComponent::MainComponent()
 
     // Startup panel — shown after first scan
     startupPanel_ = std::make_unique<DAW::StartupPanel>();
+    appendMainStartupTrace("ctor.startup-panel.created");
     // Closing the start page is an explicit choice. An in-flight plugin scan
     // must never resurrect it over an active user session.
     startupPanel_->onDismissed = [this] { startupPanelMayBeShown_ = false; };
@@ -4339,6 +4358,7 @@ MainComponent::MainComponent()
 
     // Settings panel (floating, hidden by default)
     settingsPanel_ = std::make_unique<DAW::SettingsPanel>();
+    appendMainStartupTrace("ctor.settings-panel.created");
     settingsPanel_->setGamepadManager(&appCore_.getGamepadManager());
     settingsPanel_->setInteractionManager(&appCore_.getInteractionManager());
     settingsPanel_->getGamepadToggle()->onClick = [this](bool enabled)
@@ -9264,11 +9284,26 @@ void MainComponent::startPluginScanIfNeeded()
     if (hasCachedPlugins)
         return; // Persisted registry is ready; manual Rescan stays available.
 
-    appendMainStartupTrace("startPluginScanIfNeeded.begin");
-    // First-run discovery must not cover or gate the start page. The existing
-    // scan dialog still owns progress/completion and is shown for MANUAL rescans.
-    scanDialog_->startScan(false, false);
-    appendMainStartupTrace("startPluginScanIfNeeded.after-startScan");
+    appendMainStartupTrace("startPluginScanIfNeeded.page-presented");
+    // Give JUCE an actual opportunity to draw New/Open/Recent before starting
+    // the non-essential first-run VST discovery. The scan still runs normally,
+    // remains fully available via Rescan, and never blocks the start page.
+    // This is presentation deferral, NOT a fake splash/progress timer.
+    juce::Component::SafePointer<MainComponent> safeForInitialScan(this);
+    juce::Timer::callAfterDelay(250, [safeForInitialScan]
+    {
+        auto* self = safeForInitialScan.getComponent();
+        if (self == nullptr || self->scanDialog_ == nullptr)
+            return;
+        auto& scanner = self->appCore_.getPluginScanner();
+        if (scanner.isScanning()
+            || scanner.getCache().getCount() > 0
+            || scanner.getKnownPlugins().getNumTypes() > 0)
+            return; // A user-triggered Rescan or restored cache won the race.
+        appendMainStartupTrace("startPluginScanIfNeeded.begin");
+        self->scanDialog_->startScan(false, false);
+        appendMainStartupTrace("startPluginScanIfNeeded.after-startScan");
+    });
 }
 
 void MainComponent::openPianoRollForClip(DAW::MidiClip& clip)
