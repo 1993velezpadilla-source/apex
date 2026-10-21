@@ -6,6 +6,7 @@
 #include "../ControlsCore/ModernControls.h"
 #include "../GamepadCore/GamepadManager.h"
 #include "../InteractionModeCore/InteractionModeManager.h"
+#include "ApexContextMenuStyle.h"
 #include "../KeyBindingCore/KeyBindingManager.h"
 #include "../ShortcutCore/ShortcutEngineCore.h"
 #include "../StateCore/ApplicationState.h"
@@ -396,6 +397,26 @@ public:
         controlRoomBtn_->onClick = [this]() { if (onOpenControlRoom) onOpenControlRoom(); };
         styleActionButton(*controlRoomBtn_);
         addContentComponent(controlRoomBtn_.get());
+
+        contextMenuStyleLabel_ = std::make_unique<juce::Label>();
+        contextMenuStyleLabel_->setText("Context / Right-click menu", juce::dontSendNotification);
+        contextMenuStyleLabel_->setColour(juce::Label::textColourId, t.colors.text);
+        addContentComponent(contextMenuStyleLabel_.get());
+        contextMenuStyleCombo_ = std::make_unique<juce::ComboBox>();
+        contextMenuStyleCombo_->addItem("APEX Radial Wheel (default)", 1);
+        contextMenuStyleCombo_->addItem("Classic Windows / macOS Menu", 2);
+        contextMenuStyleCombo_->setSelectedId(
+            ApexContextMenuStyle::get().getMode() == ApexContextMenuStyle::Mode::Radial ? 1 : 2,
+            juce::dontSendNotification);
+        contextMenuStyleCombo_->onChange = [this]
+        {
+            ApexContextMenuStyle::get().setMode(
+                contextMenuStyleCombo_->getSelectedId() == 2
+                    ? ApexContextMenuStyle::Mode::Classic
+                    : ApexContextMenuStyle::Mode::Radial);
+        };
+        styleComboBox(*contextMenuStyleCombo_);
+        addContentComponent(contextMenuStyleCombo_.get());
 
         waveformScrollToggle_ = std::make_unique<ToggleButton>("Keep waveforms visible while scrolling");
         waveformScrollToggle_->setToggleState(true);
@@ -1113,7 +1134,8 @@ private:
         noResultsLabel_->setVisible(false);
 
         if ((searching || currentTab_ == Tab::General)
-            && matchesSearch({ "hardware", "audio device", "control room", "monitor", "device" }))
+            && matchesSearch({ "hardware", "audio device", "control room", "monitor", "device",
+                                "right click", "right-click", "context", "radial", "wheel", "menu" }))
         {
             anythingShown = true;
             beginCard(x, y, w, 40, searching);
@@ -1125,6 +1147,12 @@ private:
             y += 36;
             controlRoomBtn_->setVisible(true);
             controlRoomBtn_->setBounds(insetX, y, insetW, 30);
+            y += 40;
+            contextMenuStyleLabel_->setVisible(true);
+            contextMenuStyleLabel_->setBounds(insetX, y, insetW, 25);
+            y += 26;
+            contextMenuStyleCombo_->setVisible(true);
+            contextMenuStyleCombo_->setBounds(insetX, y, insetW, 36);
             y += 12;
             }
             y = endCard(y);
@@ -1373,6 +1401,8 @@ private:
     std::unique_ptr<juce::TextButton> applyProfileBtn_;
     std::unique_ptr<juce::TextButton> audioDeviceBtn_;
     std::unique_ptr<juce::TextButton> controlRoomBtn_;
+    std::unique_ptr<juce::Label> contextMenuStyleLabel_;
+    std::unique_ptr<juce::ComboBox> contextMenuStyleCombo_;
     std::unique_ptr<juce::TextButton> shortcutHelpBtn_;
     std::unique_ptr<juce::TextButton> generalCollapseBtn_, interactionCollapseBtn_, scrollingCollapseBtn_, mixerVisualCollapseBtn_;
     std::unique_ptr<juce::TextButton> mixerBubblesCollapseBtn_;
