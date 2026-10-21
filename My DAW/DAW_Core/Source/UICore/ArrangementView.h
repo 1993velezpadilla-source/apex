@@ -707,8 +707,9 @@ trackManager_.addListener(this);
     {
         if (core_ != nullptr)
         {
-            const int trackH = getLaneHeight(0);
-            const int contentTop = 48 + 32;
+            // The first lane can have virtual take rows; its expanded
+            // height is NOT the height of a physical recording track.
+            const int trackH = getPhysicalTrackHeight();
             const double sr = juce::jmax(1.0, core_->m_engineSampleRate);
             const double pxPerSecond = core_->getZoom().getPixelsPerSecond();
             const auto currentSamples = transport_.getPosition();
@@ -740,8 +741,14 @@ trackManager_.addListener(this);
                 const float x = (float)core_->timeToScreenX((double)startSamples / sr);
                 const float endX = (float)core_->timeToScreenX((double)(startSamples + recordedSamples) / sr);
                 const float w = juce::jmax(2.0f, endX - x);
-                const int laneIndex = (trackManager_.hasMasterTrack() ? 1 : 0) + i;
-                const float y = (float)(contentTop + laneIndex * trackH);
+                // Use the same authoritative Y projection as native clip
+                // renderers. An expanded playlist above this track inserts
+                // virtual lanes, so multiplying physical index by trackH
+                // paints live recording waves on the WRONG track.
+                const auto physicalBand = core_->getTrackLaneBounds(track->getID());
+                if (physicalBand.isEmpty())
+                    continue; // collapsed folder descendants stay hidden
+                const float y = (float)physicalBand.getY();
                 juce::Rectangle<float> clipBounds(x, y, w, (float)trackH - 2.0f);
 
                 g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
