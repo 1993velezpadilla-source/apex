@@ -49,7 +49,9 @@ It distinguishes implemented code, existing-but-untested behaviour and TODOs.
 
 **Outstanding:** full Windows CI, real Lenovo Legion Go UX tests, drag/resize
 handles, dynamic/mobile layout, playlist promotion, all native/hosted plugin
-editors, MIDI touch workflows, and iPad/iPhone/Android native device coverage.
+audio editors, and iPad/iPhone/Android native device coverage.
+**Explicitly deferred:** MIDI, piano roll, sequencers, instruments and all
+beat-making touch workflows; these are not part of the current APEX release.
 
 ## Code audit (source, not an APK/iPad runtime test)
 
