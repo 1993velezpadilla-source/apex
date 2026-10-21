@@ -474,6 +474,7 @@ namespace ArrangementEditor
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
             {
                 m_touchMenuPending = view->getToolState().getActiveTool() == EditorTool::Select;
+                m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
                 m_touchMenuDownScreen = e.getScreenPosition();
             }
         }
@@ -740,7 +741,9 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseUp(const juce::MouseEvent& e)
     {
+        const auto* touchView = findParentComponentOfClass<ArrangementViewCore>();
         const bool requestTouchMenu = m_touchMenuPending
+            && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
             && TouchNavigationMath::withinTapSlop(
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
