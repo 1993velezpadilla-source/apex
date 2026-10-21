@@ -227,6 +227,22 @@ trackManager_.addListener(this);
         }
     }
 
+    void setAutoPlaylistBindings(std::function<bool()> isEnabled,
+                                 std::function<void()> toggle)
+    {
+        if (core_ != nullptr)
+        {
+            core_->getToolbar().setAutoPlaylistEnabledQuery(std::move(isEnabled));
+            core_->getToolbar().setAutoPlaylistToggleAction(std::move(toggle));
+        }
+    }
+
+    void refreshAutoPlaylistButton()
+    {
+        if (core_ != nullptr)
+            core_->getToolbar().repaint();
+    }
+
     void setAddTrackRequested(std::function<void()> request)
     {
         onAddTrackRequested = std::move(request);

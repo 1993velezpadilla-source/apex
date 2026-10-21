@@ -103,9 +103,9 @@ namespace ArrangementEditor
             g.setColour(fromU32(Col::border).withAlpha(0.6f));
             g.drawVerticalLine(sepX, 10.f, (float)(b.getHeight() - 10));
         }
-        if (!m_autoArmBounds.isEmpty())
+        if (!m_autoPlaylistBounds.isEmpty())
         {
-            const int sepX = m_autoArmBounds.getRight() + 8;
+            const int sepX = m_autoPlaylistBounds.getRight() + 5;
             g.setColour(fromU32(Col::border).withAlpha(0.6f));
             g.drawVerticalLine(sepX, 10.f, (float)(b.getHeight() - 10));
         }
@@ -261,6 +261,24 @@ namespace ArrangementEditor
             g.drawText("Auto", m_autoArmBounds.withTrimmedTop(20), juce::Justification::centred);
         }
 
+        // Master automatic playlist switch. Default OFF = manual recording.
+        if (!m_autoPlaylistBounds.isEmpty())
+        {
+            const bool active = m_isAutoPlaylistEnabled && m_isAutoPlaylistEnabled();
+            g.setColour(fromU32(active ? Col::accent
+                                      : (m_autoPlaylistHovered ? Col::btnHover : Col::btnNormal)));
+            g.fillRoundedRectangle(m_autoPlaylistBounds.toFloat(), 4.f);
+            g.setColour(fromU32(active ? Col::accent : Col::border));
+            g.drawRoundedRectangle(m_autoPlaylistBounds.toFloat().reduced(0.5f), 4.f, 1.f);
+            g.setColour(fromU32(active ? 0xFFFFFFFF : Col::text));
+            g.setFont(juce::Font("Segoe UI", 11.f, juce::Font::bold));
+            g.drawText("AUTO PL", m_autoPlaylistBounds.withTrimmedBottom(17),
+                       juce::Justification::centred);
+            g.setFont(juce::Font("Segoe UI", 10.f, juce::Font::plain));
+            g.drawText(active ? "ON" : "OFF", m_autoPlaylistBounds.withTrimmedTop(22),
+                       juce::Justification::centred);
+        }
+
         // The "+" Quick New Track button is a real child component
         // (m_addTrackBtn) and paints itself — no painted rect here.
     }
@@ -270,20 +288,23 @@ namespace ArrangementEditor
         buildButtons();
         int x = m_buttons.empty() ? 8 : (m_buttons.back().bounds.getRight() + 10);
 
-        // Auto arm button placed immediately after tool buttons so it is
-        // visible even on narrower viewports where snap/metro would be clipped.
-        m_autoArmBounds = juce::Rectangle<int>(x, kBtnY, 64, kBtnH);
-
-        x = m_autoArmBounds.getRight() + 8;
-        m_snapButtonBounds = juce::Rectangle<int>(x, kBtnY, 90, kBtnH);
-
-        x = m_snapButtonBounds.getRight() + 8;
-        m_metronomeBounds = juce::Rectangle<int>(x, kBtnY, 64, kBtnH);
-
-        // Compact "+" add-track button at the far right of the toolbar.
-        // Touch-safe target (44×40) while staying inside the 48px strip.
-        m_addTrackBounds = juce::Rectangle<int>(getWidth() - 54, 4, 44, 40);
+        // Reserve the far-right Quick Track + button. Avoid overlapping
+        // controls when the arranger narrows; Auto PL takes priority over
+        // optional Snap/Metro buttons.
+        m_addTrackBounds = juce::Rectangle<int>(juce::jmax(0, getWidth() - 54), 4, 44, 40);
         m_addTrackBtn.setBounds(m_addTrackBounds);
+        const int rightLimit = m_addTrackBounds.getX() - 6;
+        const auto place = [&x, rightLimit](juce::Rectangle<int>& bounds, int width)
+        {
+            bounds = (x + width <= rightLimit)
+                ? juce::Rectangle<int>(x, 4, width, 40)
+                : juce::Rectangle<int>();
+            if (!bounds.isEmpty()) x += width + 7;
+        };
+        place(m_autoArmBounds, 64);
+        place(m_autoPlaylistBounds, 86);
+        place(m_snapButtonBounds, 90);
+        place(m_metronomeBounds, 64);
     }
 
     void ArrangementToolbarCore::setSelectedSnapModeIndex(int index)
@@ -321,6 +342,11 @@ namespace ArrangementEditor
         if (wasAutoArmHovered != m_autoArmHovered)
             needsRepaint = true;
 
+        const bool wasAutoPlaylistHovered = m_autoPlaylistHovered;
+        m_autoPlaylistHovered = m_autoPlaylistBounds.contains(e.getPosition());
+        if (wasAutoPlaylistHovered != m_autoPlaylistHovered)
+            needsRepaint = true;
+
         updateTooltip(e.getPosition());
 
         if (needsRepaint)
@@ -334,6 +360,7 @@ namespace ArrangementEditor
         m_snapButtonHovered = false;
         m_metronomeHovered = false;
         m_autoArmHovered = false;
+        m_autoPlaylistHovered = false;
         m_currentTooltip = {};
         repaint();
     }
@@ -358,6 +385,13 @@ namespace ArrangementEditor
         {
             if (m_toggleAutoArm)
                 m_toggleAutoArm();
+            repaint();
+            return;
+        }
+        if (m_autoPlaylistBounds.contains(e.getPosition()))
+        {
+            if (m_toggleAutoPlaylist)
+                m_toggleAutoPlaylist();
             repaint();
             return;
         }
@@ -468,6 +502,18 @@ namespace ArrangementEditor
                 + "\nWhen enabled, parameter changes during playback"
                 + "\nare recorded as automation data in Touch mode."
                 + "\nClick to toggle on or off.";
+            return;
+        }
+
+        if (m_autoPlaylistBounds.contains(pos))
+        {
+            const bool enabled = m_isAutoPlaylistEnabled && m_isAutoPlaylistEnabled();
+            m_currentTooltip = "Auto Playlists" + juce::String(enabled ? " (ON)" : " (OFF)")
+                + "\nON: automatically archive overlapping takes and loop passes."
+                + "\nOFF: manual workflow, no new playlists created by recording."
+                + "\nUse each track's WAV menu > New Playlist or Duplicate Main"
+                + "\nto prepare alternate takes manually, as in Pro Tools."
+                + "\nChange modes only between recordings.";
             return;
         }
 

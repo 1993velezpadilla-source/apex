@@ -95,6 +95,8 @@ public:
     std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTake;
     std::function<bool()> onGetAutoLoopPlaylists;
     std::function<void(bool)> onSetAutoLoopPlaylists;
+    std::function<bool()> onGetAutoPlaylists;
+    std::function<void(bool)> onSetAutoPlaylists;
     std::function<bool()> onGetAutoTakePlaylists;
     std::function<void(bool)> onSetAutoTakePlaylists;
     std::function<void(const TrackID&)> onPreFaderToggleRequested;
@@ -1344,15 +1346,24 @@ private:
                 weakThis->onCreatePlaylist(weakThis->track_.getID(), true);
         });
         menu.addSeparator();
+        const bool autoEnabled = onGetAutoPlaylists && onGetAutoPlaylists();
+        menu.addItem("Auto Playlists (top toolbar)", true, autoEnabled,
+            [weakThis, autoEnabled]
+            {
+                if (weakThis && weakThis->onSetAutoPlaylists)
+                    weakThis->onSetAutoPlaylists(!autoEnabled);
+            });
+        menu.addSectionHeader(autoEnabled ? "Automatic recording options"
+                                           : "Manual: select New before recording");
         const bool autoLoop = onGetAutoLoopPlaylists && onGetAutoLoopPlaylists();
-        menu.addItem("Auto-create Playlists on Loop Record", true, autoLoop,
+        menu.addItem("Auto-create Playlists on Loop Record", autoEnabled, autoLoop,
             [weakThis, autoLoop]
             {
                 if (weakThis && weakThis->onSetAutoLoopPlaylists)
                     weakThis->onSetAutoLoopPlaylists(!autoLoop);
             });
         const bool autoTakes = onGetAutoTakePlaylists && onGetAutoTakePlaylists();
-        menu.addItem("Auto-save Repeat Takes (No Loop Needed)", true, autoTakes,
+        menu.addItem("Auto-save Repeat Takes (No Loop Needed)", autoEnabled, autoTakes,
             [weakThis, autoTakes]
             {
                 if (weakThis && weakThis->onSetAutoTakePlaylists)
@@ -2823,6 +2834,8 @@ public:
     std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTakeRequested;
     std::function<bool()> onGetAutoLoopPlaylistsRequested;
     std::function<void(bool)> onSetAutoLoopPlaylistsRequested;
+    std::function<bool()> onGetAutoPlaylistsRequested;
+    std::function<void(bool)> onSetAutoPlaylistsRequested;
     std::function<bool()> onGetAutoTakePlaylistsRequested;
     std::function<void(bool)> onSetAutoTakePlaylistsRequested;
     std::function<void(const TrackID&)>          onPreFaderToggleRequested;
@@ -3497,6 +3510,8 @@ private:
                 };
                 row->onGetAutoLoopPlaylists = [this] { return onGetAutoLoopPlaylistsRequested && onGetAutoLoopPlaylistsRequested(); };
                 row->onSetAutoLoopPlaylists = [this](bool enabled) { if (onSetAutoLoopPlaylistsRequested) onSetAutoLoopPlaylistsRequested(enabled); };
+                row->onGetAutoPlaylists = [this] { return onGetAutoPlaylistsRequested && onGetAutoPlaylistsRequested(); };
+                row->onSetAutoPlaylists = [this](bool enabled) { if (onSetAutoPlaylistsRequested) onSetAutoPlaylistsRequested(enabled); };
                 row->onGetAutoTakePlaylists = [this] { return onGetAutoTakePlaylistsRequested && onGetAutoTakePlaylistsRequested(); };
                 row->onSetAutoTakePlaylists = [this](bool enabled) { if (onSetAutoTakePlaylistsRequested) onSetAutoTakePlaylistsRequested(enabled); };
                 row->onPreFaderToggleRequested = [this](const TrackID& id) { if (onPreFaderToggleRequested) onPreFaderToggleRequested(id); };

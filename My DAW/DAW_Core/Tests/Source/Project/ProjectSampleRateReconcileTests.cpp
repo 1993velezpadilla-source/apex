@@ -250,6 +250,51 @@ public:
             expectEquals(copy.getTargetPlaylistId(), vocal->getTargetPlaylistId());
         }
 
+        beginTest("AUTO PL defaults OFF and gates BOTH automatic record modes");
+        {
+            DAW::RecordingEngine recorder;
+            expect(!recorder.getAutoPlaylistsEnabled());
+            expect(!recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoPlaylistsEnabled(true);
+            expect(recorder.isAutoTakePlaylistsEffective());
+            expect(recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoLoopPlaylists(false);
+            expect(recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+            recorder.setAutoPlaylistsEnabled(false);
+            expect(!recorder.isAutoTakePlaylistsEffective());
+            expect(!recorder.isAutoLoopPlaylistsEffective());
+        }
+
+        beginTest("manual New Playlist switches Main before next record");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            auto* vocal = tracks.createTrack("Lead Vocal");
+            auto* first = clips.createAudioClip("take one", {});
+            first->setTrackID(vocal->getID());
+            first->setStartPosition(15 * 48000);
+            first->setLength(5 * 48000);
+            const auto manualLane = DAW::TrackPlaylistCompCore::createEmptyPlaylist(
+                *vocal, tracks, clips);
+            expectEquals((int)vocal->getPlaylists().size(), 2);
+            expectEquals(vocal->getMainPlaylistId(), manualLane);
+            expect(!first->isPlaylistAudible());
+            auto* second = clips.createAudioClip("take two", {});
+            second->setTrackID(vocal->getID());
+            second->setPlaylistId(vocal->getMainPlaylistId());
+            second->setStartPosition(15 * 48000);
+            second->setLength(5 * 48000);
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(second->isPlaylistAudible());
+            expect(!first->isPlaylistAudible());
+            expect(vocal->showPlaylistAsMain("main"));
+            DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+            expect(first->isPlaylistAudible());
+            expect(!second->isPlaylistAudible());
+        }
+
         beginTest("Stop at start marker saves overlapping vocal passes without a loop");
         {
             DAW::TrackManager tracks;

@@ -1424,6 +1424,18 @@ MainComponent::MainComponent()
         if (!appCore_.getRecordingEngine().isRecording())
             appCore_.getRecordingEngine().setAutoLoopPlaylists(enabled);
     };
+    trackList_->onGetAutoPlaylistsRequested = [this]
+    {
+        return appCore_.getRecordingEngine().getAutoPlaylistsEnabled();
+    };
+    trackList_->onSetAutoPlaylistsRequested = [this](bool enabled)
+    {
+        auto& recorder = appCore_.getRecordingEngine();
+        if (recorder.isRecording() || appCore_.getTransport().isRecording())
+            return;
+        recorder.setAutoPlaylistsEnabled(enabled);
+        if (arrangement_) arrangement_->refreshAutoPlaylistButton();
+    };
     trackList_->onGetAutoTakePlaylistsRequested = [this]
     {
         return appCore_.getRecordingEngine().getAutoTakePlaylists();
@@ -2230,6 +2242,21 @@ MainComponent::MainComponent()
         {
             auto& state = apex::automation::AutomationTransportState::getInstance();
             state.setRecordArmed(!state.isRecordArmed());
+        });
+
+    // Top toolbar Auto PL is the master mode switch: OFF means no automatic
+    // playlist creation from either repeat takes or loop recording.
+    arrangement_->setAutoPlaylistBindings(
+        [this]() -> bool
+        {
+            return appCore_.getRecordingEngine().getAutoPlaylistsEnabled();
+        },
+        [this]()
+        {
+            auto& recorder = appCore_.getRecordingEngine();
+            if (recorder.isRecording() || appCore_.getTransport().isRecording())
+                return;
+            recorder.setAutoPlaylistsEnabled(!recorder.getAutoPlaylistsEnabled());
         });
 
     // Wire the compact "+" add-track toolbar button to the Quick Track

@@ -171,10 +171,25 @@ public:
     bool getAutoLoopPlaylists() const noexcept { return autoLoopPlaylists_; }
     void setAutoLoopPlaylists(bool enabled) noexcept { autoLoopPlaylists_ = enabled; }
 
-    // No marked loop range required: pressing Stop/Pause after a new pass
-    // automatically saves overlapping repeat takes in separate playlists.
+    // Master recording-mode switch (top arrangement toolbar). MANUAL is
+    // the safe default: ordinary takes never create a new playlist on Stop.
+    // Users can manually choose WAV > New Playlist or Duplicate Main before
+    // recording, exactly as with a Pro Tools track playlist selector.
+    bool getAutoPlaylistsEnabled() const noexcept { return autoPlaylistsEnabled_; }
+    void setAutoPlaylistsEnabled(bool enabled) noexcept { autoPlaylistsEnabled_ = enabled; }
+
+    // Fine-grained automatic policies are gated by the master switch.
+    // Capture the effective values at record start, never during finalization.
     bool getAutoTakePlaylists() const noexcept { return autoTakePlaylists_; }
     void setAutoTakePlaylists(bool enabled) noexcept { autoTakePlaylists_ = enabled; }
+    bool isAutoTakePlaylistsEffective() const noexcept
+    {
+        return autoPlaylistsEnabled_ && autoTakePlaylists_;
+    }
+    bool isAutoLoopPlaylistsEffective() const noexcept
+    {
+        return autoPlaylistsEnabled_ && autoLoopPlaylists_;
+    }
 
     void setRecordingFinalizedCallback(std::function<void()> callback)
     {
@@ -254,13 +269,13 @@ public:
         }
 
         recordStartPos_ = transport_->getPosition();
-        recordAutoTakes_ = autoTakePlaylists_;
+        recordAutoTakes_ = isAutoTakePlaylistsEffective();
         const auto currentLoop = transport_->getLoopRange();
         // Allow capture anywhere inside the loop. The pass planner places
         // the initial partial take at the actual start, with subsequent
         // complete passes aligned to loopStart. Starts outside the loop are
         // intentionally excluded (punch-in/preroll needs a separate plan).
-        const bool canSplitLoop = autoLoopPlaylists_ && transport_->isLooping()
+        const bool canSplitLoop = isAutoLoopPlaylistsEffective() && transport_->isLooping()
             && currentLoop.second > currentLoop.first
             && recordStartPos_ >= currentLoop.first
             && recordStartPos_ < currentLoop.second;
@@ -1145,9 +1160,10 @@ private:
 
     std::vector<std::unique_ptr<TrackRecording>> activeRecordings_;
     SamplePosition recordStartPos_ = 0;
+    bool autoPlaylistsEnabled_ = false; // no surprise playlist clutter
     bool autoLoopPlaylists_ = true;
-    bool autoTakePlaylists_ = true; // convenient Stop/Return-to-start workflow
-    bool recordAutoTakes_ = true;
+    bool autoTakePlaylists_ = true;  // policy takes effect only when master ON
+    bool recordAutoTakes_ = false;
     bool recordLoopAuto_ = false;
     SamplePosition recordLoopStart_ = 0, recordLoopEnd_ = 0;
     juce::AudioBuffer<float> printBuffer_;   // scratch for printing track FX (audio thread)
