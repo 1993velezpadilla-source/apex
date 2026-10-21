@@ -2556,6 +2556,11 @@ namespace ArrangementEditor
         // interactive overlays stay above the toolbar for drag feedback.
         m_toolbar.toFront(false);
         m_ruler.toFront(false);
+        // Clip rebuilds and scrolling may add new children after the pinned
+        // button shield. Restore its z-order on every mutation, otherwise
+        // Lock/Free View taps can resolve to the clip underneath.
+        if (m_headerButtonShield != nullptr)
+            m_headerButtonShield->toFront(false);
         m_pianoRollBtn.toFront(false);
         m_rubberBand.toFront(false);
         m_splitIndicator.toFront(false);
