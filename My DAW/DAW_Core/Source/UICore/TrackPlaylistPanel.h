@@ -68,6 +68,25 @@ public:
     std::function<void(bool)> onTimelineZoom;
     std::function<void(float)> onTimelinePan;
     std::function<void(float)> onTimelineVerticalScroll;
+    std::function<void()> onSelectionChanged;
+
+    // Clicking the always-visible arrow in the owning TrackList header must
+    // promote only a real phrase selection from THAT take, never stale ranges
+    // belonging to a different playlist.
+    bool canPromoteForLane(const TrackID& id, const juce::String& laneId) const
+    {
+        if (trackId_ != id || laneId.isEmpty() || selectedPlaylist_ != laneId
+            || selectionStart_ < 0 || selectionEnd_ <= selectionStart_)
+            return false;
+        auto* track = tracks_.getTrack(trackId_);
+        return track != nullptr && laneId != track->getTargetPlaylistId();
+    }
+
+    void promoteFromTrackHeader(const TrackID& id, const juce::String& laneId)
+    {
+        if (canPromoteForLane(id, laneId))
+            promote();
+    }
 
     void showForTrack(const TrackID& id, double engineRate)
     {
@@ -90,7 +109,12 @@ public:
         if (pixelsPerSecond <= 0.0 || sampleRate_ <= 0.0)
             return;
         followingArrangement_ = true;
-        const double start = juce::jmax(0.0, firstVisibleSample);
+        // The inline panel is a CHILD of the horizontally scrolled arranger
+        // content (not a pinned viewport widget). Its x=161 is content x=0.
+        // Subtracting the viewport's first-visible sample here would scroll
+        // alternate takes TWICE and make comp boundaries drift from Main.
+        const double start = inlineMode_ ? 0.0
+                                         : juce::jmax(0.0, firstVisibleSample);
         const double end = start + (double)juce::jmax(40, getWidth() - 222)
                            * sampleRate_ / pixelsPerSecond;
         if (std::abs(viewStart_ - start) < 0.5 && std::abs(viewEnd_ - end) < 0.5)
@@ -353,6 +377,7 @@ public:
         {
             selectedPlaylist_ = playlistId;
             selectionStart_ = selectionEnd_ = -1;
+            if (onSelectionChanged) onSelectionChanged();
             repaint();
             return;
         }
@@ -363,6 +388,7 @@ public:
             selectionStart_ = selectionEnd_ = dragAnchor_;
             selectionDragging_ = true;
             grabKeyboardFocus();
+            if (onSelectionChanged) onSelectionChanged();
             repaint();
         }
     }
@@ -373,6 +399,7 @@ public:
         const auto current = sampleForX(e.x);
         selectionStart_ = juce::jmin(dragAnchor_, current);
         selectionEnd_ = juce::jmax(dragAnchor_, current);
+        if (onSelectionChanged) onSelectionChanged();
         repaint();
     }
     void mouseUp(const juce::MouseEvent&) override { selectionDragging_ = false; }

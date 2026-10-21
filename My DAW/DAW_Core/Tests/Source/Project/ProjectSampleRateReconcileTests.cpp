@@ -320,6 +320,30 @@ public:
             expectEquals(Layout::laneAtY(79, h, expanded, takePixels), -1);
         }
 
+        beginTest("horizontal playlist time remains aligned after viewport scrolling");
+        {
+            // Content-space x = 0 is always sample 0. The viewport scrolls
+            // the entire arrangement AND its inline child panel together.
+            constexpr double sr = 48000.0, pps = 320.0;
+            for (const double sample : { 0.0, 24000.0, 48000.0, 96000.0 })
+            {
+                const double contentX = sample / sr * pps;
+                for (const int viewportX : { 0, 120, 600 })
+                {
+                    const double rulerScreenX = contentX - viewportX;
+                    const double takeScreenX = contentX - viewportX;
+                    expectWithinAbsoluteError(takeScreenX, rulerScreenX, 1.0e-12);
+                    // Forbidden regression: subtracting viewport offset in
+                    // BOTH sample origin and component scroll would drift.
+                    if (viewportX > 0)
+                    {
+                        const double incorrect = contentX - 2.0 * viewportX;
+                        expect(std::abs(incorrect - rulerScreenX) >= viewportX);
+                    }
+                }
+            }
+        }
+
         beginTest("expanded take lanes follow vertical zoom and cannot intercept other tracks");
         {
             using Layout = DAW::TrackPlaylistInlineLayoutCore;

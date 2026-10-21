@@ -1432,6 +1432,20 @@ MainComponent::MainComponent()
         appCore_.getProjectManager().markDirty();
         if (trackList_) trackList_->repaint();
     };
+    trackList_->onCanPromotePlaylistTakeRequested =
+        [this](const DAW::TrackID& trackId, const juce::String& laneId)
+    {
+        return arrangement_ && arrangement_->isInlinePlaylistPanelActive()
+            && playlistPanel_
+            && playlistPanel_->canPromoteForLane(trackId, laneId);
+    };
+    trackList_->onPromotePlaylistTakeRequested =
+        [this](const DAW::TrackID& trackId, const juce::String& laneId)
+    {
+        if (arrangement_ && arrangement_->isInlinePlaylistPanelActive()
+            && playlistPanel_)
+            playlistPanel_->promoteFromTrackHeader(trackId, laneId);
+    };
     trackList_->onOpenInputTrimRequested = [this](const DAW::TrackID& id)
     {
         if (inputTrimPanelManager_)
@@ -2072,6 +2086,10 @@ MainComponent::MainComponent()
     {
         return !appCore_.getRecordingEngine().isRecording()
             && !appCore_.getTransport().isRecording();
+    };
+    playlistPanel_->onSelectionChanged = [this]
+    {
+        if (trackList_) trackList_->repaint();
     };
     playlistPanel_->onChanged = [this]
     {
@@ -8813,9 +8831,11 @@ void MainComponent::syncPlaylistTimeline()
         return;
     const double pps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
     const double projectRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
-    const double firstVisibleSample =
-        (double)timelineViewport_->getViewPositionX() / pps * projectRate;
-    playlistPanel_->followArrangementTimeline(firstVisibleSample, pps);
+    // The take editor lives IN the horizontally scrolled arrangement,
+    // not in screen space. The viewport already scrolls its x=0 origin.
+    // An additional first-visible-sample offset would double-scroll clips.
+    juce::ignoreUnused(projectRate);
+    playlistPanel_->followArrangementTimeline(0.0, pps);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()

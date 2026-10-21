@@ -91,6 +91,8 @@ public:
     std::function<void(const TrackID&)> onShowWaveformView;
     std::function<void(const TrackID&, bool)> onCreatePlaylist;
     std::function<void(const TrackID&)> onPlaylistStateChanged;
+    std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTake;
+    std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTake;
     std::function<bool()> onGetAutoLoopPlaylists;
     std::function<void(bool)> onSetAutoLoopPlaylists;
     std::function<void(const TrackID&)> onPreFaderToggleRequested;
@@ -665,7 +667,7 @@ public:
                 g.setColour(juce::Colours::white);
                 g.drawFittedText(lane.name, 18,
                     y + juce::jmax(3, takeHeight / 10),
-                    juce::jmax(40, getWidth() - 70),
+                    juce::jmax(40, getWidth() - 109),
                     juce::jmin(23, takeHeight / 2),
                     juce::Justification::centredLeft, 1);
                 g.setColour(target ? juce::Colour(0xffb985ff)
@@ -684,6 +686,20 @@ public:
                 g.setColour(audition ? juce::Colours::black : juce::Colours::white);
                 g.setFont(juce::Font(12.f, juce::Font::bold));
                 g.drawText("S", solo, juce::Justification::centred);
+                // The inline waveform editor is a scrolled content child.
+                // Its old promotion arrow at x=getWidth()-49 is offscreen
+                // on long timelines: pin an accessible arrow to the header.
+                const auto arrow = juce::Rectangle<int>(getWidth() - 81,
+                    y + juce::jmax(0, (takeHeight - 25) / 2), 29, 25);
+                const bool canPromote = onCanPromotePlaylistTake
+                    && onCanPromotePlaylistTake(track_.getID(), lane.id);
+                g.setColour(canPromote ? juce::Colour(0xffb88cff)
+                                       : juce::Colour(0xff423959));
+                g.fillRoundedRectangle(arrow.toFloat(), 4.f);
+                g.setColour(canPromote ? juce::Colours::black
+                                       : juce::Colour(0xffa59fb6));
+                g.drawText(juce::CharPointer_UTF8("↑"), arrow,
+                    juce::Justification::centred);
             }
         }
     }
@@ -902,10 +918,24 @@ public:
                     });
                     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
                 }
-                else if (e.x >= getWidth() - 48)
+                else
                 {
-                    if (track_.soloPlaylistLane(id) && onPlaylistStateChanged)
-                        onPlaylistStateChanged(track_.getID());
+                    const int takeHeight = getVirtualTakeHeight();
+                    const int buttonTop = getPrimaryHeight()
+                        + ((e.y - getPrimaryHeight()) / takeHeight) * takeHeight
+                        + juce::jmax(0, (takeHeight - 25) / 2);
+                    if (juce::Rectangle<int>(getWidth() - 42,
+                            buttonTop, 29, 25).contains(e.getPosition()))
+                    {
+                        if (track_.soloPlaylistLane(id) && onPlaylistStateChanged)
+                            onPlaylistStateChanged(track_.getID());
+                    }
+                    else if (juce::Rectangle<int>(getWidth() - 81,
+                                 buttonTop, 29, 25).contains(e.getPosition()))
+                    {
+                        if (onPromotePlaylistTake)
+                            onPromotePlaylistTake(track_.getID(), id);
+                    }
                 }
                 return; // virtual takes have no track reorder/resize
             }
@@ -2768,6 +2798,8 @@ public:
     std::function<void(const TrackID&)> onShowWaveformViewRequested;
     std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
     std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
+    std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTakeRequested;
+    std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTakeRequested;
     std::function<bool()> onGetAutoLoopPlaylistsRequested;
     std::function<void(bool)> onSetAutoLoopPlaylistsRequested;
     std::function<void(const TrackID&)>          onPreFaderToggleRequested;
@@ -3430,6 +3462,16 @@ private:
                 row->onShowWaveformView = [this](const TrackID& id) { if (onShowWaveformViewRequested) onShowWaveformViewRequested(id); };
                 row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
                 row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
+                row->onCanPromotePlaylistTake = [this](const TrackID& id, const juce::String& laneId)
+                {
+                    return onCanPromotePlaylistTakeRequested
+                        && onCanPromotePlaylistTakeRequested(id, laneId);
+                };
+                row->onPromotePlaylistTake = [this](const TrackID& id, const juce::String& laneId)
+                {
+                    if (onPromotePlaylistTakeRequested)
+                        onPromotePlaylistTakeRequested(id, laneId);
+                };
                 row->onGetAutoLoopPlaylists = [this] { return onGetAutoLoopPlaylistsRequested && onGetAutoLoopPlaylistsRequested(); };
                 row->onSetAutoLoopPlaylists = [this](bool enabled) { if (onSetAutoLoopPlaylistsRequested) onSetAutoLoopPlaylistsRequested(enabled); };
                 row->onPreFaderToggleRequested = [this](const TrackID& id) { if (onPreFaderToggleRequested) onPreFaderToggleRequested(id); };
