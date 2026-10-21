@@ -94,7 +94,13 @@ namespace ArrangementEditor
         public:
             HeaderClipGuard()
             {
-                setInterceptsMouseClicks(false, false);
+                // The pinned toolbar/ruler occlusion mask must block POINTER
+                // input as well as pixels. Otherwise a clip scrolled beneath
+                // an empty strip gap remains the JUCE hit-test winner and a
+                // click unexpectedly selects/moves audio. Real toolbar/ruler
+                // controls are raised ABOVE this guard by ensureToolbarZOrder.
+                // No children of the guard should intercept input.
+                setInterceptsMouseClicks(true, false);
             }
 
             void paint(juce::Graphics& g) override
