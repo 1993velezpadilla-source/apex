@@ -159,7 +159,8 @@ public:
         g.setColour(juce::Colour(0xff67ebd7).withAlpha(appear * 0.95f));
         g.drawEllipse(centre.x - inner, centre.y - inner, inner * 2.0f, inner * 2.0f, 2.0f);
         g.setFont(juce::Font(juce::FontOptions(juce::jlimit(10.0f, 13.0f, inner * 0.35f))));
-        g.drawFittedText(levels_.size() > 1 ? "BACK" : "CLOSE",
+        g.drawFittedText((levels_.size() > 1 || levels_.back().page > 0)
+                             ? "BACK" : "CLOSE",
                          juce::Rectangle<int>((int)(centre.x - inner),
                                               (int)(centre.y - inner * 0.55f),
                                               (int)(inner * 2.0f), (int)inner),
