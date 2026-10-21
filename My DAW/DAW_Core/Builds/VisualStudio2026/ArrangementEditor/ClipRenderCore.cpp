@@ -397,6 +397,7 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDown(const juce::MouseEvent& e)
     {
+        m_touchPanFromUnselected = false;
         if (!m_model)
         {
             if (auto* parent = getParentComponent())
@@ -451,7 +452,12 @@ namespace ArrangementEditor
         if (! m_selected)
         {
             if (onClick) onClick(e.mods);   // selection honors Ctrl even on the first tap
-            m_activeZone = Zone::VolumeBtn;  // marks the gesture as consumed
+            // Selecting must not block an intended one-finger scroll. A drag
+            // on this newly selected region navigates; a second gesture can
+            // deliberately move or trim it. Mouse behaviour is unchanged.
+            m_touchPanFromUnselected =
+                e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+            m_activeZone = Zone::VolumeBtn;  // consumes click without editing
             return;
         }
 
@@ -493,6 +499,13 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDrag(const juce::MouseEvent& e)
     {
+        if (m_touchPanFromUnselected)
+        {
+            if (auto* parent = getParentComponent())
+                parent->mouseDrag(e.getEventRelativeTo(parent));
+            return;
+        }
+
         // Free View Mode guard (global flag): a drag that began before the
         // mode was switched on must not keep moving the clip.
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
@@ -705,6 +718,12 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseUp(const juce::MouseEvent& e)
     {
+        if (m_touchPanFromUnselected)
+        {
+            m_touchPanFromUnselected = false;
+            m_activeZone = Zone::None;
+            return;
+        }
         if (m_gainDragActive)
         {
             m_gainDragActive = false;
