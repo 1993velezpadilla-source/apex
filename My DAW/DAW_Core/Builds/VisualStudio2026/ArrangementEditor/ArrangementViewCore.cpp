@@ -1151,7 +1151,7 @@ namespace ArrangementEditor
             // to navigation. Discard the uncommitted move rather than
             // allowing viewport pinch + clip drag in the same transaction.
             if (m_drag.pending || m_drag.active)
-                cancelClipDrag();
+                cancelClipDragForTouchNavigation();
 
             // Two fingers share a single navigation owner. Switching from one
             // finger to two must cancel its hold/fling, never inherit its anchor.
@@ -2919,7 +2919,11 @@ namespace ArrangementEditor
                         ++activeFingers;
                 if (activeFingers > 1)
                 {
-                    cancelClipDrag();
+                    cancelClipDragForTouchNavigation();
+                    if (!m_inertiaTimer)
+                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+                    if (!m_inertiaTimer->isTimerRunning())
+                        m_inertiaTimer->startTimerHz(60);
                     return;
                 }
 
@@ -3375,6 +3379,30 @@ namespace ArrangementEditor
 
         if (clip)
         {
+            // The second finger may land on a selected clip while the first
+            // owns a move transaction. Pinch navigation must win without
+            // replacing the selected clip, starting a second transaction or
+            // rebuilding the renderer under its captured pointer.
+            if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            {
+                int arrangementFingers = 0;
+                for (const auto& source : juce::Desktop::getInstance().getMouseSources())
+                    if (source.getType() == juce::MouseInputSource::InputSourceType::touch
+                        && source.isDragging()
+                        && source.getComponentUnderMouse() != nullptr
+                        && (source.getComponentUnderMouse() == this
+                            || isParentOf(source.getComponentUnderMouse())))
+                        ++arrangementFingers;
+                if (arrangementFingers > 1)
+                {
+                    cancelClipDragForTouchNavigation();
+                    if (!m_inertiaTimer)
+                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+                    if (!m_inertiaTimer->isTimerRunning())
+                        m_inertiaTimer->startTimerHz(60);
+                    return;
+                }
+            }
             if (e.mods.isRightButtonDown())
                 return; // handled in mouseUp
 
@@ -5875,6 +5903,35 @@ namespace ArrangementEditor
 
         setMouseCursorForActiveTool();
         rebuildClipRenderers();
+        repaint();
+    }
+
+    void ArrangementViewCore::cancelClipDragForTouchNavigation()
+    {
+        if (!m_drag.pending && !m_drag.active)
+            return;
+
+        // A JUCE touch source can still be captured by ClipRenderCore while
+        // a second finger arrives. The old cancelClipDrag() called
+        // rebuildClipRenderers() immediately, destroying that source's live
+        // component during the touch callback. A cancel before commit needs
+        // only to restore its original local bounds; the engine/state was
+        // never changed by updateClipDrag().
+        if (m_drag.active && !m_drag.duplicate)
+            for (const auto& item : m_drag.items)
+                if (auto* renderer = findClipRendererFor(item.clipId))
+                    renderer->setBounds(item.bounds);
+
+        m_drag.active = false;
+        m_drag.pending = false;
+        m_drag.duplicate = false;
+        m_drag.clipId = {};
+        m_drag.clipIds.clear();
+        m_drag.items.clear();
+        m_drag.anchorOriginalBounds = {};
+        m_pendingExclusiveOnRelease.reset();
+        m_ghostOverlay.setVisible(false);
+        setMouseCursorForActiveTool();
         repaint();
     }
 
