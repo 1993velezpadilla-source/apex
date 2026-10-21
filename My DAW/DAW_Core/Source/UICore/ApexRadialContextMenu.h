@@ -3,6 +3,7 @@
 #include "ApexContextMenuStyle.h"
 #include "ApexRadialGeometry.h"
 #include <functional>
+#include <cstddef>
 #include <vector>
 #include <cmath>
 
@@ -205,7 +206,8 @@ public:
         if (item == nullptr || ! item->isEnabled) return;
         if (item->subMenu != nullptr)
         {
-            levels_.push_back({item->subMenu.get(), 0, item->text});
+            levels_.push_back({item->subMenu.get(), 0, item->text,
+                               collectItems(*item->subMenu)});
             hovered_ = -1;
             repaint();
             return;
@@ -226,11 +228,12 @@ private:
         const juce::PopupMenu* menu;
         int page;
         juce::String title;
+        std::vector<const juce::PopupMenu::Item*> items;
     };
     explicit ApexRadialContextMenu(juce::PopupMenu menu, Completion completion)
         : menu_(std::move(menu)), completion_(std::move(completion))
     {
-        levels_.push_back({ &menu_, 0, "APEX" });
+        levels_.push_back({ &menu_, 0, "APEX", collectItems(menu_) });
         setWantsKeyboardFocus(true);
         setInterceptsMouseClicks(true, true);
         setOpaque(false);
@@ -249,10 +252,12 @@ private:
         }
         return false;
     }
-    std::vector<const juce::PopupMenu::Item*> allItems() const
+    static std::vector<const juce::PopupMenu::Item*> collectItems(
+        const juce::PopupMenu& source)
     {
         std::vector<const juce::PopupMenu::Item*> found;
-        juce::PopupMenu::MenuItemIterator it(*levels_.back().menu);
+        found.reserve((size_t) juce::jmax(0, source.getNumItems()));
+        juce::PopupMenu::MenuItemIterator it(source);
         while (it.next())
         {
             const auto& item = it.getItem();
@@ -264,7 +269,7 @@ private:
     }
     std::vector<const juce::PopupMenu::Item*> pageItems() const
     {
-        const auto all = allItems();
+        const auto& all = levels_.back().items;
         const size_t first = (size_t) levels_.back().page * kPageSize;
         if (first >= all.size()) return {};
         return {all.begin() + (std::ptrdiff_t) first,
@@ -272,7 +277,7 @@ private:
     }
     bool hasMore() const
     {
-        return allItems().size() > (size_t)(levels_.back().page + 1) * kPageSize;
+        return levels_.back().items.size() > (size_t)(levels_.back().page + 1) * kPageSize;
     }
     void computeGeometry()
     {
@@ -299,15 +304,15 @@ private:
     }
     void backOrClose()
     {
-        if (levels_.size() > 1)
+        if (levels_.back().page > 0)
         {
-            levels_.pop_back();
+            --levels_.back().page;
             hovered_ = -1;
             repaint();
         }
-        else if (levels_.back().page > 0)
+        else if (levels_.size() > 1)
         {
-            --levels_.back().page;
+            levels_.pop_back();
             hovered_ = -1;
             repaint();
         }
