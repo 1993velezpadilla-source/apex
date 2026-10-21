@@ -1120,6 +1120,7 @@ namespace ArrangementEditor
             const double sepY = std::abs((double) firstTouch.y - (double) secondTouch.y);
             if (! m_twoFingerGestureActive)
             {
+                ++m_touchGestureEpoch; // cancel any pending selected-clip tap menu
                 m_twoFingerGestureActive = true;
                 m_lastTwoFingerPos = centreScreen;
                 m_lastPinchSepX = sepX;
