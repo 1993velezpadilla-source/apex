@@ -1078,7 +1078,9 @@ namespace ArrangementEditor
         // event stream is what makes it feel like an Apple device: every frame
         // advances by the same amount, no bursts, no stalls.
         int touchCount = 0;
+        int gestureAreaFingerCount = 0;
         juce::Point<float> firstTouch, secondTouch;
+        juce::Point<float> firstGestureFinger, secondGestureFinger;
         // Capture the VALUE, not a pointer: getMouseSources() returns the array
         // by value, so a pointer into it dangles after the loop and reading the
         // down time from freed memory produced random stops and reversals
@@ -1098,6 +1100,16 @@ namespace ArrangementEditor
                 continue;
             if (! viewport->getScreenBounds().contains(source.getScreenPosition().toInt()))
                 continue;
+
+            // Two fingers claim navigation even if one initially landed on a
+            // selected region or an edit handle. Capture *all* arrangement
+            // fingers separately so the wheel/pinch is not lost when one of
+            // the two is on a region; the edit is cancelled below.
+            if (gestureAreaFingerCount == 0)
+                firstGestureFinger = source.getScreenPosition();
+            else if (gestureAreaFingerCount == 1)
+                secondGestureFinger = source.getScreenPosition();
+            ++gestureAreaFingerCount;
 
             // A touch captured by an interactive audio region/handle must
             // NEVER also pan the arrangement. Newly tapped, previously
@@ -1122,6 +1134,13 @@ namespace ArrangementEditor
                 secondTouch = source.getScreenPosition();
             }
             ++touchCount;
+        }
+
+        if (gestureAreaFingerCount >= 2)
+        {
+            touchCount = 2;
+            firstTouch = firstGestureFinger;
+            secondTouch = secondGestureFinger;
         }
 
         if (touchCount >= 2)
