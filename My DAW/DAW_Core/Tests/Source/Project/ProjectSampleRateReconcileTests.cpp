@@ -320,6 +320,23 @@ public:
             expectEquals(Layout::laneAtY(79, h, expanded, takePixels), -1);
         }
 
+        beginTest("expanded take lanes follow vertical zoom and cannot intercept other tracks");
+        {
+            using Layout = DAW::TrackPlaylistInlineLayoutCore;
+            expectEquals(Layout::takeHeightForTrackHeight(80), 66);
+            expect(Layout::takeHeightForTrackHeight(50) < 66);
+            expect(Layout::takeHeightForTrackHeight(140) > 66);
+            for (const int trackH : { 50, 80, 140 })
+            {
+                const int h = Layout::takeHeightForTrackHeight(trackH);
+                const int extra = 3 * h;
+                const int nextY = Layout::topOfLane(3, trackH, 2, extra);
+                expectEquals(nextY, 80 + 3 * trackH + extra);
+                expectEquals(Layout::laneAtY(nextY - 1, trackH, 2, extra), -1);
+                expectEquals(Layout::laneAtY(nextY, trackH, 2, extra), 3);
+            }
+        }
+
         beginTest("loop-record Undo/Redo restores take lanes but never the mixer");
         {
             DAW::TrackManager tracks;

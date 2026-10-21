@@ -20,6 +20,7 @@
 #include "../RoutingCore/RoutingGraph.h"
 #include "../RecordingCore/RecordingOverlayStateCore.h"
 #include "TrackPlaylistPanel.h"
+#include "TrackPlaylistInlineLayoutCore.h"
 #include "../../Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h"
 
 namespace DAW {
@@ -172,9 +173,14 @@ public:
             defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
             if (core_ != nullptr)
                 core_->resized();
-            updateInlinePlaylistBounds();
-            if (onLaneLayoutChanged)
-                onLaneLayoutChanged();
+            // Dynamic take rows must be re-laid out on vertical zoom too.
+            if (inlinePlaylistPanel_ != nullptr)
+                refreshInlinePlaylistLayout();
+            else
+            {
+                updateInlinePlaylistBounds();
+                if (onLaneLayoutChanged) onLaneLayoutChanged();
+            }
             repaint();
         };
 
@@ -339,8 +345,11 @@ trackManager_.addListener(this);
             return;
         }
         // One native main band + N alternate take bands in this SAME track.
+        const int takeHeight = TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
+            (int)core_->getZoom().getTrackHeightPx());
         const int extras = juce::jmin(128, juce::jmax(0,
-            (int)track->getPlaylists().size() - 1)) * 66;
+            (int)track->getPlaylists().size() - 1)) * takeHeight;
+        inlinePlaylistPanel_->setInlineTakeHeight(takeHeight);
         core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
         updateInlinePlaylistBounds();
         if (onLaneLayoutChanged) onLaneLayoutChanged();
@@ -1319,7 +1328,9 @@ void trackPropertyChanged(Track* track) override
             const int index = trackManager_.getTrackIndex(trackId)
                 + (trackManager_.hasMasterTrack() ? 1 : 0);
             const int required = juce::jmin(128, juce::jmax(0,
-                (int)track->getPlaylists().size() - 1)) * 66;
+                (int)track->getPlaylists().size() - 1))
+                * TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
+                    (int)core_->getZoom().getTrackHeightPx());
             if (core_->getInlinePlaylistExtraForLane(index) != required)
             {
                 inlineRefreshScheduled_ = true;

@@ -6924,7 +6924,7 @@ int ArrangementViewCore::getLaneIndexForY(int y) const noexcept
 void ArrangementViewCore::setInlinePlaylistExpansion(
     const DAW::TrackID& trackId, int extraPixels)
 {
-    const int clamped = juce::jlimit(0, 128 * 66, extraPixels);
+    const int clamped = juce::jlimit(0, 128 * 180, extraPixels);
     if (m_inlinePlaylistTrackId == trackId && m_inlinePlaylistExtraPixels == clamped)
         return;
     m_inlinePlaylistTrackId = trackId;

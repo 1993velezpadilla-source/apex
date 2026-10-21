@@ -138,6 +138,13 @@ public:
         repaint();
     }
     int getPlaylistExtraHeight() const noexcept { return playlistExtraHeight_; }
+    int getVirtualTakeHeight() const noexcept
+    {
+        const int count = juce::jmin(128, juce::jmax(0,
+            (int)track_.getPlaylists().size() - 1));
+        return count > 0 && playlistExtraHeight_ > 0
+            ? juce::jmax(1, playlistExtraHeight_ / count) : 66;
+    }
     int getPrimaryHeight() const noexcept
     {
         return juce::jmax(24, getHeight() - playlistExtraHeight_);
@@ -641,30 +648,36 @@ public:
         g.restoreState();
         if (playlistExtraHeight_ > 0 && !master)
         {
+            const int takeHeight = getVirtualTakeHeight();
             int takeIndex = 0;
             for (const auto& lane : track_.getPlaylists())
             {
                 if (lane.id == track_.getMainPlaylistId()) continue;
-                const int y = primaryHeight + takeIndex++ * 66;
+                const int y = primaryHeight + takeIndex++ * takeHeight;
                 if (y >= getHeight()) break;
                 const bool audition = lane.id == track_.getAuditionPlaylistId();
                 const bool target = lane.id == track_.getTargetPlaylistId();
                 g.setColour(juce::Colour(target ? 0xff221c34 : 0xff171723));
-                g.fillRect(0, y, getWidth(), 66);
+                g.fillRect(0, y, getWidth(), takeHeight);
                 g.setColour(juce::Colour(target ? 0xffb985ff : 0xff3c374e));
-                g.drawHorizontalLine(y + 65, 0.f, (float)getWidth());
+                g.drawHorizontalLine(y + takeHeight - 1, 0.f, (float)getWidth());
                 g.setFont(juce::Font(12.f, juce::Font::bold));
                 g.setColour(juce::Colours::white);
-                g.drawFittedText(lane.name, 18, y + 8,
-                    juce::jmax(40, getWidth() - 70), 23,
+                g.drawFittedText(lane.name, 18,
+                    y + juce::jmax(3, takeHeight / 10),
+                    juce::jmax(40, getWidth() - 70),
+                    juce::jmin(23, takeHeight / 2),
                     juce::Justification::centredLeft, 1);
                 g.setColour(target ? juce::Colour(0xffb985ff)
                                    : juce::Colour(0xff8b85ab));
                 g.setFont(juce::Font(10.f));
-                g.drawText(target ? "COMP TARGET" : "TAKE",
-                    18, y + 34, juce::jmax(0, getWidth() - 70), 18,
-                    juce::Justification::centredLeft);
-                const auto solo = juce::Rectangle<int>(getWidth() - 42, y + 19, 29, 25);
+                if (takeHeight >= 54)
+                    g.drawText(target ? "COMP TARGET" : "TAKE",
+                        18, y + takeHeight - 26,
+                        juce::jmax(0, getWidth() - 70), 18,
+                        juce::Justification::centredLeft);
+                const auto solo = juce::Rectangle<int>(getWidth() - 42,
+                    y + juce::jmax(0, (takeHeight - 25) / 2), 29, 25);
                 g.setColour(audition ? juce::Colour(0xff33db9a)
                                      : juce::Colour(0xff423959));
                 g.fillRoundedRectangle(solo.toFloat(), 4.f);
@@ -836,7 +849,7 @@ public:
         if (!track_.isMaster() && playlistExtraHeight_ > 0
             && e.y >= getPrimaryHeight() && e.y < getHeight())
         {
-            int alt = (e.y - getPrimaryHeight()) / 66;
+            int alt = (e.y - getPrimaryHeight()) / getVirtualTakeHeight();
             for (const auto& lane : track_.getPlaylists())
             {
                 if (lane.id == track_.getMainPlaylistId()) continue;

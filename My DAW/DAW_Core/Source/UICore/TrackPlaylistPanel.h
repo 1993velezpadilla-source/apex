@@ -48,6 +48,14 @@ public:
         repaint();
     }
 
+    void setInlineTakeHeight(int pixels)
+    {
+        const int height = juce::jlimit(40, 180, pixels);
+        if (inlineTakeHeight_ == height) return;
+        inlineTakeHeight_ = height;
+        repaint();
+    }
+
     void createForTrack(const TrackID& id, bool duplicate, double engineRate)
     {
         showForTrack(id, engineRate);
@@ -120,6 +128,7 @@ public:
             g.setColour(juce::Colour(0xff5f5974));
             g.fillRect(10, 74, getWidth() - 20, 1);
         }
+        const int rowHeight = inlineMode_ ? inlineTakeHeight_ : 66;
         int alternateRow = 0;
         for (int i = 0; i < (int)playlists.size(); ++i)
         {
@@ -127,15 +136,16 @@ public:
             if (inlineMode_ && p.id == track->getMainPlaylistId())
                 continue; // Main is the owning track's normal clip row
             if (inlineMode_ && alternateRow >= 128) break;
-            const int y = inlineMode_ ? alternateRow++ * 66
-                                      : 81 + i * 66 - scrollY_;
-            if (y + 66 < (inlineMode_ ? 0 : 76)
+            const int y = inlineMode_ ? alternateRow++ * rowHeight
+                                      : 81 + i * rowHeight - scrollY_;
+            if (y + rowHeight < (inlineMode_ ? 0 : 76)
                 || y >= getHeight() - (inlineMode_ ? 0 : 22)) continue;
             const bool main = p.id == track->getMainPlaylistId();
             const bool target = p.id == track->getTargetPlaylistId();
             const bool solo = p.id == track->getAuditionPlaylistId();
             const bool selected = p.id == selectedPlaylist_;
-            auto row = juce::Rectangle<int>(10, y, getWidth() - 20, 62);
+            auto row = juce::Rectangle<int>(10, y, getWidth() - 20,
+                                            juce::jmax(1, rowHeight - 4));
             g.setColour(main ? juce::Colour(0xff31204c) :
                         selected ? juce::Colour(0xff23233a) : juce::Colour(0xff191829));
             g.fillRoundedRectangle(row.toFloat(), 6.f);
@@ -143,12 +153,17 @@ public:
             g.drawRoundedRectangle(row.toFloat(), 6.f, target ? 1.5f : 0.8f);
             g.setFont(juce::Font(12.f, juce::Font::bold));
             g.setColour(target ? juce::Colours::white : juce::Colour(0xffbbb5d5));
-            g.drawText(p.name, 18, y + 8, 105, 23, juce::Justification::centredLeft, true);
+            g.drawText(p.name, 18, y + juce::jmax(3, rowHeight / 10), 105,
+                       juce::jmin(23, rowHeight / 2),
+                       juce::Justification::centredLeft, true);
             g.setFont(juce::Font(10.f));
             g.setColour(juce::Colour(0xffa393c9));
-            g.drawText(main ? "MAIN" : target ? "TARGET" : "TAKE",
-                       18, y + 34, 62, 16, juce::Justification::centredLeft);
-            auto soloRect = juce::Rectangle<int>(126, y + 19, 27, 25);
+            if (rowHeight >= 54)
+                g.drawText(main ? "MAIN" : target ? "TARGET" : "TAKE",
+                           18, y + rowHeight - 27, 62, 16,
+                           juce::Justification::centredLeft);
+            auto soloRect = juce::Rectangle<int>(126,
+                y + juce::jmax(0, (rowHeight - 25) / 2), 27, 25);
             g.setColour(solo ? juce::Colour(0xff33db9a) : juce::Colour(0xff3c3456));
             g.fillRoundedRectangle(soloRect.toFloat(), 4.f);
             g.setColour(solo ? juce::Colours::black : juce::Colours::white);
@@ -167,8 +182,9 @@ public:
                 const double start = (double)clip->getStartPosition();
                 const double end = (double)clip->getEndPosition();
                 auto x1 = xForSample(start), x2 = xForSample(end);
-                auto body = juce::Rectangle<int>((int)x1, y + 10,
-                                        juce::jmax(1, (int)(x2 - x1)), 42);
+                auto body = juce::Rectangle<int>((int)x1, y + 8,
+                    juce::jmax(1, (int)(x2 - x1)),
+                    juce::jmax(10, rowHeight - 16));
                 g.setColour(main ? juce::Colour(0xff6642b6) : juce::Colour(0xff315977));
                 g.fillRoundedRectangle(body.toFloat(), 3.f);
                 if (auto* thumb = getThumbnail(audio->getSourceFile()))
@@ -198,10 +214,12 @@ public:
                 auto xb = xForSample((double)selectionEnd_);
                 g.setColour(juce::Colour(0x7055eaff));
                 g.fillRect(juce::Rectangle<float>(xa, (float)y + 3.f,
-                                                 juce::jmax(1.f, xb - xa), 56.f));
+                    juce::jmax(1.f, xb - xa), (float)juce::jmax(1, rowHeight - 6)));
                 g.setColour(juce::Colour(0xff90eeff));
-                g.drawLine(xa, (float)y + 2.f, xa, (float)y + 59.f, 1.5f);
-                g.drawLine(xb, (float)y + 2.f, xb, (float)y + 59.f, 1.5f);
+                g.drawLine(xa, (float)y + 2.f,
+                    xa, (float)y + rowHeight - 4.f, 1.5f);
+                g.drawLine(xb, (float)y + 2.f,
+                    xb, (float)y + rowHeight - 4.f, 1.5f);
             }
             g.restoreState();
 
@@ -279,16 +297,17 @@ public:
         auto* track = tracks_.getTrack(trackId_);
         if (!track) return nullptr;
         const int firstY = inlineMode_ ? 0 : 81;
+        const int rowHeight = inlineMode_ ? inlineTakeHeight_ : 66;
         const int contentY = y + (inlineMode_ ? 0 : scrollY_) - firstY;
         if (contentY < 0) return nullptr;
-        int targetRow = contentY / 66;
+        int targetRow = contentY / rowHeight;
         for (const auto& p : track->getPlaylists())
         {
             if (inlineMode_ && p.id == track->getMainPlaylistId())
                 continue;
             if (targetRow-- == 0)
             {
-                rowTop = firstY + contentY / 66 * 66
+                rowTop = firstY + contentY / rowHeight * rowHeight
                          - (inlineMode_ ? 0 : scrollY_);
                 return &p;
             }
@@ -317,7 +336,9 @@ public:
             openPlaylistMenu(playlistId);
             return;
         }
-        if (juce::Rectangle<int>(126, y + 19, 27, 25).contains(e.getPosition()))
+        if (juce::Rectangle<int>(126, y + juce::jmax(0,
+                ((inlineMode_ ? inlineTakeHeight_ : 66) - 25) / 2), 27, 25)
+                .contains(e.getPosition()))
         {
             track->soloPlaylistLane(playlistId);
             notifyMutation();
@@ -454,11 +475,14 @@ private:
     }
     juce::Rectangle<int> getTimelineBounds(int y) const
     {
-        return { 161, y + 5, juce::jmax(40, getWidth() - 222), 52 };
+        const int h = inlineMode_ ? inlineTakeHeight_ : 66;
+        return { 161, y + 5, juce::jmax(40, getWidth() - 222),
+                 juce::jmax(20, h - 14) };
     }
     juce::Rectangle<int> getArrowBounds(int y) const
     {
-        return { getWidth() - 49, y + 16, 34, 30 };
+        const int h = inlineMode_ ? inlineTakeHeight_ : 66;
+        return { getWidth() - 49, y + juce::jmax(0, (h - 30) / 2), 34, 30 };
     }
     float xForSample(double sample) const
     {
@@ -619,6 +643,7 @@ private:
     bool selectionDragging_ = false;
     bool followingArrangement_ = false;
     bool inlineMode_ = false;
+    int inlineTakeHeight_ = 66;
     int scrollY_ = 0;
     juce::TextButton newButton_, duplicateButton_, closeButton_;
     juce::TextEditor renameEditor_;
