@@ -91,6 +91,8 @@ public:
     std::function<void(const TrackID&)> onShowWaveformView;
     std::function<void(const TrackID&, bool)> onCreatePlaylist;
     std::function<void(const TrackID&)> onPlaylistStateChanged;
+    // Prevent mid-record menu edits from changing the destination lane.
+    std::function<bool()> onCanModifyPlaylists;
     std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTake;
     std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTake;
     std::function<bool()> onGetAutoLoopPlaylists;
@@ -877,6 +879,7 @@ public:
                 const auto id = lane.id;
                 if (e.mods.isPopupMenu())
                 {
+                    if (onCanModifyPlaylists && !onCanModifyPlaylists()) return;
                     juce::PopupMenu menu;
                     juce::Component::SafePointer<TrackRow> weak(this);
                     menu.addItem("Show as Main", true, id == track_.getMainPlaylistId(),
@@ -924,6 +927,7 @@ public:
                 }
                 else
                 {
+                    if (onCanModifyPlaylists && !onCanModifyPlaylists()) return;
                     const int takeHeight = getVirtualTakeHeight();
                     const int buttonTop = getPrimaryHeight()
                         + ((e.y - getPrimaryHeight()) / takeHeight) * takeHeight
@@ -1337,12 +1341,14 @@ private:
         menu.addSeparator();
         menu.addItem("+ New Playlist", true, false, [weakThis]
         {
-            if (weakThis && weakThis->onCreatePlaylist)
+            if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                && weakThis->onCreatePlaylist)
                 weakThis->onCreatePlaylist(weakThis->track_.getID(), false);
         });
         menu.addItem("Duplicate Main Playlist", true, false, [weakThis]
         {
-            if (weakThis && weakThis->onCreatePlaylist)
+            if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                && weakThis->onCreatePlaylist)
                 weakThis->onCreatePlaylist(weakThis->track_.getID(), true);
         });
         menu.addSeparator();
@@ -1377,7 +1383,8 @@ private:
             item.isTicked = playlist.id == track_.getMainPlaylistId();
             item.action = [weakThis, id = playlist.id]
             {
-                if (weakThis && weakThis->track_.showPlaylistAsMain(id))
+                if (weakThis && (!weakThis->onCanModifyPlaylists || weakThis->onCanModifyPlaylists())
+                    && weakThis->track_.showPlaylistAsMain(id))
                     if (weakThis->onPlaylistStateChanged)
                         weakThis->onPlaylistStateChanged(weakThis->track_.getID());
             };
@@ -2830,6 +2837,7 @@ public:
     std::function<void(const TrackID&)> onShowWaveformViewRequested;
     std::function<void(const TrackID&, bool)> onCreatePlaylistRequested;
     std::function<void(const TrackID&)> onPlaylistStateChangedRequested;
+    std::function<bool()> onCanModifyPlaylistsRequested;
     std::function<bool(const TrackID&, const juce::String&)> onCanPromotePlaylistTakeRequested;
     std::function<void(const TrackID&, const juce::String&)> onPromotePlaylistTakeRequested;
     std::function<bool()> onGetAutoLoopPlaylistsRequested;
@@ -3498,6 +3506,7 @@ private:
                 row->onShowWaveformView = [this](const TrackID& id) { if (onShowWaveformViewRequested) onShowWaveformViewRequested(id); };
                 row->onCreatePlaylist = [this](const TrackID& id, bool duplicate) { if (onCreatePlaylistRequested) onCreatePlaylistRequested(id, duplicate); };
                 row->onPlaylistStateChanged = [this](const TrackID& id) { if (onPlaylistStateChangedRequested) onPlaylistStateChangedRequested(id); };
+                row->onCanModifyPlaylists = [this] { return !onCanModifyPlaylistsRequested || onCanModifyPlaylistsRequested(); };
                 row->onCanPromotePlaylistTake = [this](const TrackID& id, const juce::String& laneId)
                 {
                     return onCanPromotePlaylistTakeRequested

@@ -387,6 +387,74 @@ public:
             expectEquals((juce::int64)transport.getPosition(), (juce::int64)finish);
         }
 
+        beginTest("real WAV recording finalizes onto selected manual playlist with intact audio");
+        {
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            DAW::AudioFileManager audioFiles;
+            auto* vocal = tracks.createTrack("Vocal");
+            const auto firstId = vocal->getMainPlaylistId();
+            const auto manualId = vocal->createPlaylist();
+            const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                .getChildFile("apex-playlists-real-wav-" + juce::Uuid().toString() + ".wav");
+
+            // Generate actual 48k/16-bit stereo PCM audio, not an empty mock:
+            // finalization must decode/cache the recorded file and preserve its
+            // timeline placement, take membership and non-destructive media.
+            juce::WavAudioFormat wav;
+            auto stream = file.createOutputStream();
+            expect(stream != nullptr);
+            if (stream != nullptr)
+            {
+                auto writer = std::unique_ptr<juce::AudioFormatWriter>(
+                    wav.createWriterFor(stream.release(), 48000.0, 2, 16, {}, 0));
+                expect(writer != nullptr);
+                if (writer != nullptr)
+                {
+                    juce::AudioBuffer<float> pcm(2, 4096);
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < pcm.getNumSamples(); ++i)
+                            pcm.setSample(ch, i,
+                                0.2f * std::sin((float)(2.0 * juce::MathConstants<double>::pi
+                                    * 440.0 * (double)i / 48000.0)));
+                    expect(writer->writeFromAudioSampleBuffer(pcm, 0, pcm.getNumSamples()));
+                }
+            }
+            DAW::RecordingClipFinalizerCore::FinalizeRequest req;
+            req.trackId = vocal->getID();
+            req.playlistId = manualId; // frozen at REC, not resolved from Main later
+            req.startPosition = 15 * 48000;
+            req.samplesWritten = 4096;
+            req.outputFile = file;
+            req.sampleRate = 48000.0;
+            req.clipManager = &clips;
+            req.trackManager = &tracks;
+            req.audioFiles = &audioFiles;
+            auto* take = DAW::RecordingClipFinalizerCore::finalize(req);
+            expect(take != nullptr);
+            if (take != nullptr)
+            {
+                expectEquals(take->getPlaylistId(), manualId);
+                expectEquals((juce::int64)take->getStartPosition(), (juce::int64)(15 * 48000));
+                expectEquals((juce::int64)take->getLength(), (juce::int64)4096);
+                expect(audioFiles.hasAudio(take->getID()));
+                if (auto cached = audioFiles.getCachedAudioSnapshot(take->getID()))
+                {
+                    expectEquals(cached->getBufferRef().getNumSamples(), 4096);
+                    expect(cached->getBufferRef().getMagnitude(0, 0, 4096) > 0.1f);
+                }
+                expect(take->isPlaylistAudible());
+                vocal->showPlaylistAsMain(firstId);
+                DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+                expect(!take->isPlaylistAudible());
+                vocal->showPlaylistAsMain(manualId);
+                DAW::TrackPlaylistCompCore::publishPlaybackVisibility(tracks, clips);
+                expect(take->isPlaylistAudible());
+            }
+            expect(file.existsAsFile()); // source WAV is not deleted by view switches
+            expect(file.deleteFile()); // only remove this temporary test fixture
+        }
+
         beginTest("auto take #3 recognizes archived take even when Main is empty in range");
         {
             DAW::TrackManager tracks;

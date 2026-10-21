@@ -1445,6 +1445,11 @@ MainComponent::MainComponent()
         if (!appCore_.getRecordingEngine().isRecording())
             appCore_.getRecordingEngine().setAutoTakePlaylists(enabled);
     };
+    trackList_->onCanModifyPlaylistsRequested = [this]
+    {
+        return !appCore_.getRecordingEngine().isRecording()
+            && !appCore_.getTransport().isRecording();
+    };
     trackList_->onPlaylistStateChangedRequested = [this](const DAW::TrackID&)
     {
         DAW::TrackPlaylistCompCore::publishPlaybackVisibility(

@@ -300,6 +300,9 @@ public:
             auto rec = std::make_unique<TrackRecording>();
             rec->trackID       = track->getID();
             rec->startPosition = recordStartPos_;
+            // Bind the manual playlist at REC time, not after disk flush.
+            // A menu/view change must never silently relocate a finished WAV.
+            rec->playlistId   = track->getMainPlaylistId();
             // Track is the source of truth for input routing (per-track input
             // selector). The legacy channel map is a fallback.
             rec->firstInputCh  = track->getInputFirstChannel() > 0
@@ -728,6 +731,7 @@ private:
             RecordingClipFinalizerCore::FinalizeRequest req;
             req.trackId        = rec->trackID;
             req.startPosition  = rec->startPosition;
+            req.playlistId     = rec->playlistId;
             req.samplesWritten = samplesWritten;
             req.outputFile     = rec->outputFile;
             req.clipManager    = clips_;
@@ -1069,6 +1073,7 @@ private:
     struct TrackRecording
     {
         TrackID                 trackID;
+        juce::String            playlistId;
         SamplePosition          startPosition { 0 };
         int                     firstInputCh  { 0 };
         bool                    monoInput     { false };
