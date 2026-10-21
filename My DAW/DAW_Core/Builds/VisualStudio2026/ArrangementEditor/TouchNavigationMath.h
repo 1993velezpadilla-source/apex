@@ -28,6 +28,17 @@ namespace ArrangementEditor
                 0, std::max(0, maxViewPx));
         }
 
+        // Distinguish a region tap from a drag using Euclidean SCREEN
+        // displacement. A tap opens the contextual menu only when the region
+        // was already selected at pointer-down; higher-level code enforces
+        // tool ownership and edit-handle exclusion.
+        static bool withinTapSlop(double startX, double startY,
+                                  double currentX, double currentY) noexcept
+        {
+            constexpr double kTouchTapSlopPx = 7.0;
+            return std::hypot(currentX - startX, currentY - startY) <= kTouchTapSlopPx;
+        }
+
         // Compare to the LAST APPLIED pinch distance, not the last sampled
         // distance. Tiny slow movements must accumulate rather than vanish.
         static bool pinchReady(double appliedSeparationPx, double currentSeparationPx) noexcept
