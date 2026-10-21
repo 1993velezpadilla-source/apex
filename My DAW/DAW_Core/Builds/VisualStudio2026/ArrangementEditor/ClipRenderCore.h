@@ -151,6 +151,9 @@ namespace ArrangementEditor
         // A renderer must remain interactive while an edge/fade gesture owns
         // the mouse, even if its bounds temporarily leave the viewport.
         bool isEditGestureActive() const noexcept { return m_activeZone != Zone::None; }
+        // Only the FIRST drag of an unselected region is delegated to touch
+        // navigation. Other presses on this renderer belong to clip editing.
+        bool isTouchPanFromUnselected() const noexcept { return m_touchPanFromUnselected; }
 
         ClipGroupEditCore::Kind getActiveGroupEditKind() const noexcept
         {
