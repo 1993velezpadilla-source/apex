@@ -1,5 +1,12 @@
 # APEX FLOW radial menu — MorningDAW and Logic iPad input audit
-Date: 2026-10-21. Source-level implementation on PR #151. **Do not mark
+Date: 2026-10-21. Source-level implementation on PR #151.
+
+**CURRENT RELEASE SCOPE:** audio production, recording, editing, playlists,
+mixer, effects, automation, cross-platform touch input and contextual menus.
+**OUT OF SCOPE UNTIL A FUTURE UPDATE:** beat making, MIDI editing,
+piano-roll interaction, step sequencers and instrument workflows. MorningDAW
+MIDI material is background research ONLY; no parity work or release gates
+should be spent on those features now. **Do not mark
 Release ready until Windows compiler + real Lenovo Legion Go gates pass.**
 
 ## Direct manufacturer references
@@ -61,8 +68,8 @@ Release ready until Windows compiler + real Lenovo Legion Go gates pass.**
   windows and system windows cannot be forcibly converted to APEX wheel.
 - Contextual keyboard/gamepad access, stylus hover, barrel click, Pencil
   double tap and scribble require platform-specific validation/bridges.
-- Multitouch MIDI editors, transport menus and all automation-lane
-  gestures are not complete. Pressure-sensitive automation drawing is
+- Transport menus and all audio/track automation-lane gestures are not complete.
+  Beat-making/MIDI/Piano Roll are expressly deferred and not current gates. Pressure-sensitive automation drawing is
   **not enabled**; only event metadata is extracted.
 - No benchmark yet on Lenovo Legion Go 100/125/150/200% DPI or
   32+ track projects, no p95/p99 latency/xrun measurements.
