@@ -57,6 +57,17 @@ public:
         overlay->toFront(true);
         overlay->grabKeyboardFocus();
         overlay->startTimerHz(60); // stops itself after entrance glow settles
+
+        // MorningDAW-style press/flick/release: when the caller opens the
+        // menu during right-button DOWN, the original JUCE component still
+        // owns the mouse capture. Listen to that same captured source
+        // (not globally) so a quick drag toward a wedge works on release.
+        if (juce::ModifierKeys::getCurrentModifiersRealtime().isRightButtonDown())
+        {
+            overlay->flickSource_ = target;
+            overlay->watchSourceFlick_ = true;
+            target->addMouseListener(overlay, false);
+        }
     }
 
     void resized() override { computeGeometry(); }
@@ -161,14 +172,19 @@ public:
 
     void mouseMove(const juce::MouseEvent& e) override
     {
-        updateHovered(e.getPosition());
+        if (e.eventComponent == this)
+            updateHovered(e.getPosition());
     }
     void mouseDrag(const juce::MouseEvent& e) override
     {
-        updateHovered(e.getPosition());
+        if (e.eventComponent == this)
+            updateHovered(e.getPosition());
+        else if (watchSourceFlick_)
+            updateHovered(getLocalPoint(nullptr, e.getScreenPosition()));
     }
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (e.eventComponent != this) return; // observed source's original down
         pressed_ = true;
         down_ = e.getPosition();
         updateHovered(down_);
@@ -181,9 +197,26 @@ public:
     }
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (e.eventComponent != this)
+        {
+            if (!watchSourceFlick_) return;
+            const auto position = getLocalPoint(nullptr, e.getScreenPosition());
+            const float travel = position.toFloat().getDistanceFrom(anchor_.toFloat());
+            detachFlickSource();
+            // A stationary right click leaves the wheel available for
+            // click-to-choose. Only an intentional flick commits a command.
+            if (travel > radius_ * 0.39f && travel <= radius_ + 8.0f)
+                activateAt(position);
+            return;
+        }
         if (!pressed_) return;
         pressed_ = false;
-        const auto pos = e.getPosition();
+        activateAt(e.getPosition());
+    }
+
+private:
+    void activateAt(juce::Point<int> pos)
+    {
         const float inner = radius_ * 0.34f;
         if (ApexRadialGeometry::isCentre(pos.x, pos.y, centre_.x, centre_.y, inner))
         {
@@ -222,7 +255,6 @@ public:
         else if (completion && id > 0) completion(id);
     }
 
-private:
     struct Level
     {
         const juce::PopupMenu* menu;
@@ -326,9 +358,17 @@ private:
         }
         else closeMenu();
     }
+    void detachFlickSource()
+    {
+        if (watchSourceFlick_ && flickSource_ != nullptr)
+            flickSource_->removeMouseListener(this);
+        watchSourceFlick_ = false;
+        flickSource_ = nullptr;
+    }
     void closeMenu(bool notifyDismiss = true)
     {
         stopTimer();
+        detachFlickSource();
         // JUCE's showMenuAsync always completes with 0 on cancellation.
         // Preserve that contract: mixer/browser components clear their
         // "menu open" state even when the user taps outside or presses Esc.
@@ -355,6 +395,8 @@ private:
     juce::Point<int> anchor_;
     juce::Point<int> centre_;
     juce::Point<int> down_;
+    juce::Component::SafePointer<juce::Component> flickSource_;
+    bool watchSourceFlick_ = false;
     float radius_ = 150.0f;
     float age_ = 0.0f;
     int hovered_ = -1;
