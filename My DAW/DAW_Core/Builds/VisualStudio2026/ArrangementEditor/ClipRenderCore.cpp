@@ -453,7 +453,13 @@ namespace ArrangementEditor
         // scrolling can never displace a clip.
         if (! m_selected)
         {
+            // Selection publishes into the real application state; listeners
+            // may rebuild or destroy a renderer. Never read its members after
+            // that callback unless it survived.
+            juce::Component::SafePointer<ClipRenderCore> safeThis(this);
             if (onClick) onClick(e.mods);   // selection honors Ctrl even on the first tap
+            if (safeThis == nullptr)
+                return;
             // Selecting must not block an intended one-finger scroll. A drag
             // on this newly selected region navigates; a second gesture can
             // deliberately move or trim it. Mouse behaviour is unchanged.
