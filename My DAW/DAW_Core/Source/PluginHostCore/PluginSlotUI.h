@@ -5,6 +5,7 @@
 #include "../PluginHostCore/PluginInstanceCore.h"
 #include "../PluginHostCore/PluginHostingProductPolicyCore.h"
 #include "../PluginHostCore/PluginScannerCore.h"
+#include "../UICore/ApexRadialContextMenu.h"
 
 namespace DAW {
 
@@ -17,7 +18,7 @@ namespace DAW {
  *
  * Lives inside MixerStrip. One per chain slot (up to PluginChainCore::kMaxSlots).
  */
-class PluginSlotUI : public juce::Component
+class PluginSlotUI : public juce::Component, private juce::Timer
 {
 public:
     static constexpr int kSlotH = 18;
@@ -91,23 +92,74 @@ public:
     {
         if (e.mods.isPopupMenu() && chain_.hasPlugin(slotIndex_))
         {
-            showContextMenu();
+            showContextMenu(e.getScreenPosition());
             return;
         }
-        if (chain_.hasPlugin(slotIndex_))
+
+        // Apple Pencil and touch both use stable pointer routing; a finger
+        // down is NOT a click until released within slop. Press and hold
+        // exposes the same actions as a mouse right-click.
+        const auto input = e.source.getType();
+        if (input == juce::MouseInputSource::InputSourceType::touch
+            || input == juce::MouseInputSource::InputSourceType::pen)
         {
-            if (auto* slot = chain_.getSlot(slotIndex_))
-            {
-                slot->openEditor();
-            }
+            directPressPending_ = true;
+            directPressHeld_ = false;
+            directDownScreen_ = e.getScreenPosition();
+            startTimer(550);
+            return;
         }
-        else
+        activateSlot();
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (directPressPending_
+            && e.getScreenPosition().toFloat().getDistanceFrom(directDownScreen_.toFloat()) > 9.0f)
         {
-            showPluginBrowser();
+            directPressPending_ = false;
+            stopTimer(); // scrolling/reordering never activates plugin editor
         }
     }
 
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (!directPressPending_ && !directPressHeld_) return;
+        const bool activate = directPressPending_ && !directPressHeld_
+            && e.getScreenPosition().toFloat().getDistanceFrom(directDownScreen_.toFloat()) <= 9.0f;
+        directPressPending_ = false;
+        directPressHeld_ = false;
+        stopTimer();
+        if (activate) activateSlot();
+    }
+
 private:
+    void timerCallback() override
+    {
+        stopTimer();
+        if (!directPressPending_) return;
+        directPressPending_ = false;
+        directPressHeld_ = true;
+        if (chain_.hasPlugin(slotIndex_))
+            showContextMenu(directDownScreen_);
+        else
+            showPluginBrowser();
+    }
+
+    void activateSlot()
+    {
+        if (chain_.hasPlugin(slotIndex_))
+        {
+            if (auto* slot = chain_.getSlot(slotIndex_))
+                slot->openEditor();
+        }
+        else showPluginBrowser();
+    }
+
+    bool directPressPending_ = false;
+    bool directPressHeld_ = false;
+    juce::Point<int> directDownScreen_;
+
     int               slotIndex_;
     PluginChainCore&  chain_;
     PluginScannerCore& scanner_;
@@ -178,8 +230,8 @@ private:
          int capturedSlot = slotIndex_;
 
         juce::Component::SafePointer<PluginSlotUI> safeThis(this);
-        menu.showMenuAsync(
-            juce::PopupMenu::Options().withTargetComponent(this),
+        ApexRadialContextMenu::show(std::move(menu), this,
+             getScreenBounds().getCentre(),
              [safeThis, chainPtr, scannerPtr, capturedSlot, orderedDescs,
               requestedMode, preserveCurrentMode](int result)
              {
@@ -219,8 +271,9 @@ private:
             });
     }
 
-    void showContextMenu()
+    void showContextMenu(juce::Point<int> screenPos = {})
     {
+        if (screenPos.isOrigin()) screenPos = getScreenBounds().getCentre();
         auto* slot = chain_.getSlot(slotIndex_);
         if (!slot) return;
 
@@ -256,9 +309,8 @@ private:
         menu.addSeparator();
         menu.addItem(20, "Remove Plugin");
 
-        menu.showMenuAsync(
-            juce::PopupMenu::Options().withTargetComponent(this),
-            [safeThis](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+            screenPos, [safeThis](int result)
              {
                  if (!safeThis) return;
                  if (result == 30)
