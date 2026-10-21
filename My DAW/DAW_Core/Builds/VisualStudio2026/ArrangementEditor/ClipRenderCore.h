@@ -192,6 +192,7 @@ namespace ArrangementEditor
         enum class Zone { None, FadeIn, FadeOut,
                           ResizeLeft, ResizeRight, VolumeBtn, MuteBtn };
         Zone m_activeZone   = Zone::None; // currently being dragged
+        bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
         Zone m_hoveredZone  = Zone::None; // under cursor (drives cursor + paint)
 
         // Drawn pitch/stretch/mode badge area (local coords), refreshed by
