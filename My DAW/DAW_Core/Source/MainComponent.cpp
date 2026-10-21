@@ -16,6 +16,7 @@
 #include "CommandCore/GeneralCommands.h"
 #include "RenderCore/ExportProgressWindow.h"
 #include "UICore/CrashRecoveryDialogComponent.h"
+#include "UICore/BeatMakingFeaturePolicy.h"
 #include "TrackCore/TrackReorderCore.h"
 #include "UICore/CursorThemeCore.h"
 #include "DeviceCore/SafeAsioDeviceTypeCore.h"
@@ -1169,6 +1170,8 @@ MainComponent::MainComponent()
     });
     menuBar_->setMenuAction("View", "Piano Roll", [this]
     {
+        if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+            return; // Historical binding retained; audio-first release.
         auto selectedId = appCore_.getState().selectedClipID.getValue().toString();
         if (selectedId.isNotEmpty())
         {
@@ -2706,6 +2709,11 @@ MainComponent::MainComponent()
     };
     arrangement_->onOpenSelectedMidiClip = [this]()
     {
+        // The Piano Roll button and all alternate entry points are disabled
+        // until the future beat-making update. In particular, do not open
+        // the previously reachable "empty" Piano Roll window.
+        if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+            return;
         auto selectedId = appCore_.getState().selectedClipID.getValue().toString();
         if (selectedId.isNotEmpty())
         {
@@ -2919,6 +2927,10 @@ MainComponent::MainComponent()
     timelineWindow_->setEmbedded(true);
     timelineWindow_->setVisible(true);
 
+    // Keep the editor allocation code for the future update, but do not
+    // instantiate a heavy hidden window in the audio-first release.
+    if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+    {
     pianoRollWindow_ = std::make_unique<DAW::PianoRollWindow>();
     pianoRollWindow_->setTransport(&appCore_.getTransport());
     pianoRollWindow_->setVirtualKeyboardCore(&appCore_.getVirtualKeyboard());
@@ -2929,6 +2941,7 @@ MainComponent::MainComponent()
             pianoRollWindow_->setVisible(false);
     };
     addAndMakeVisible(pianoRollWindow_.get());
+    }
 
     // Beat-making system (FL Studio clone)
     stepSequencerWindow_ = std::make_unique<DAW::StepSequencerWindow>();
