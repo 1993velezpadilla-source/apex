@@ -199,7 +199,7 @@ public:
         {
             ++levels_.back().page;
             hovered_ = -1;
-            repaint();
+            repaintWheel();
             return;
         }
         const auto* item = items[(size_t) index];
@@ -209,7 +209,7 @@ public:
             levels_.push_back({item->subMenu.get(), 0, item->text,
                                collectItems(*item->subMenu)});
             hovered_ = -1;
-            repaint();
+            repaintWheel();
             return;
         }
 
@@ -288,8 +288,16 @@ private:
         const float margin = radius_ + 10.0f;
         centre_ = { juce::jlimit((int)margin, juce::jmax((int)margin, getWidth() - (int)margin), anchor_.x),
                     juce::jlimit((int)margin, juce::jmax((int)margin, getHeight() - (int)margin), anchor_.y) };
-        repaint();
+        repaintWheel();
     }
+    void repaintWheel()
+    {
+        // Never invalidate the entire top-level DAW window for hover or
+        // the 180ms opening animation; only the actual pie paint bounds.
+        const int r = (int) std::ceil(radius_) + 40;
+        repaint(centre_.x - r, centre_.y - r, r * 2, r * 2);
+    }
+
     void updateHovered(juce::Point<int> pos)
     {
         const auto items = pageItems();
@@ -299,7 +307,7 @@ private:
         if (next != hovered_)
         {
             hovered_ = next;
-            repaint();
+            repaintWheel();
         }
     }
     void backOrClose()
@@ -308,13 +316,13 @@ private:
         {
             --levels_.back().page;
             hovered_ = -1;
-            repaint();
+            repaintWheel();
         }
         else if (levels_.size() > 1)
         {
             levels_.pop_back();
             hovered_ = -1;
-            repaint();
+            repaintWheel();
         }
         else closeMenu();
     }
@@ -337,7 +345,7 @@ private:
     void timerCallback() override
     {
         age_ += 1.0f / 60.0f;
-        repaint();
+        repaintWheel();
         if (age_ >= 0.18f) stopTimer();
     }
 
