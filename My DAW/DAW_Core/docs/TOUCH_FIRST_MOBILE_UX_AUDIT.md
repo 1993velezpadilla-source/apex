@@ -35,7 +35,7 @@ Preserve the APEX visual identity, transport, automation, routing and project au
 | Gesture ownership | same | Global Desktop source scan could include fader and popup touches during an active timeline timer. | **Patched**: component/viewport filtering. Needs device regression. |
 | Region-first scroll | `ClipRenderCore.cpp::mouseDown/mouseDrag` | First tap selected a region but swallowed drag and prevented scrolling over that region. | **Patched**: unselected touch drag forwards to navigation without editing. |
 | Mouse/trackpad | `ArrangementViewCore.cpp` and `ClipRenderCore.cpp` | Must retain mouse editing, wheel and shortcut semantics. | **Preserved paths**; CI and device checks pending. |
-| Mixer | `Source/UICore/MixerPanel.h` | Mouse-style layouts/hit zones; audit target dimensions and simultaneous fader ownership. | **Not yet ported**. |
+| Mixer | `Source/UICore/MixerPanel.h::mouseDown/mouseDrag/mouseDoubleClick` | Fader required hitting a narrow thumb and ordinary touch of strip started a reorder. | **Patched**: whole fader lane accepts touch, double-tap on lane resets, reorder needs hold. Multi-fader and responsive geometry still need device verification. |
 | Plugin/knobs | `Source/BubblegumKnobCore/`, plugin views | Needs explicit multi-pointer capture, enlarged invisible hit zones, one gesture per parameter and reset affordance. | **Not yet ported**. |
 | Timeline / take playlists | `Source/UICore/TrackPlaylistPanel.h` and editor | Needs large explicit promote/comp targets, scroll vs edit arbitration. | **Not yet ported**. |
 | Mobile packaging | `DAW_Core.jucer` and platform layers | Native iOS/iPadOS/Android lifecycle, safe-area, scale and plugin-host policies are not proven by JUCE Windows build. | **Unverified**. |
