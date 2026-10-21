@@ -1251,7 +1251,12 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
         }
 
         // Double-click on any other EMPTY area of the strip toggles Quick Send
-        // mode with this track as source — same rule as the timeline row:
+        // mode with this track as source — same rule as the timeline row.
+        // But on fingers/Pencil a quick second tap after scrolling must not
+        // silently change routing mode. Explicit touch context commands stay.
+        if (e.source.getType() != juce::MouseInputSource::InputSourceType::mouse)
+            return;
+        // Desktop mouse behaviour is retained exactly:
         // only the empty parts of the strip respond (child buttons such as
         // mute/solo/arm/trim/pan own their own mouse events).
         if (!track_.isMaster() && onQuickSendToggleRequested)
