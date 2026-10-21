@@ -1013,7 +1013,12 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
                 // Ordinary touch scrolling/tapping must never immediately
                 // reorder a channel. Long-press, THEN drag to reorder.
                 touchBodyReorderPending_ = true;
+                touchBodyScrollActive_ = false;
                 touchBodyDownScreen_ = e.getScreenPosition();
+                // Screen-space anchor: scrolling the viewport repositions
+                // child strips, but cannot change the original swipe delta.
+                if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                    touchBodyScrollStartX_ = viewport->getViewPositionX();
             }
             else
             {
@@ -1109,23 +1114,44 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
         {
             const float travel = e.getScreenPosition().toFloat()
                 .getDistanceFrom(touchBodyDownScreen_.toFloat());
-            // Cancel early swipes; do not transform them into delayed reorders.
-            if (e.getLengthOfMousePress() < 400)
-            {
-                if (travel > 12.0f)
-                    touchBodyReorderPending_ = false;
-                return;
-            }
-            if (travel > 24.0f)
+            // An immediate horizontal swipe scrolls the MIXER, never
+            // silently disappears and never becomes a delayed reorder.
+            if (travel > 12.0f && e.getLengthOfMousePress() < 400)
             {
                 touchBodyReorderPending_ = false;
+                touchBodyScrollActive_ = true;
+            }
+            else if (travel > 24.0f && e.getLengthOfMousePress() >= 400)
+            {
+                // A large swipe before entering intentional reorder mode
+                // remains navigation rather than moving a track.
+                touchBodyReorderPending_ = false;
+                touchBodyScrollActive_ = true;
+            }
+            else if (e.getLengthOfMousePress() < 400 || travel <= 10.0f)
+                return;
+            else
+            {
+                touchBodyReorderPending_ = false;
+                bodyDragging_ = true;
+                if (onBodyDragBegin)
+                    onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
                 return;
             }
+        }
 
-            touchBodyReorderPending_ = false;
-            bodyDragging_ = true;
-            if (onBodyDragBegin)
-                onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+        if (touchBodyScrollActive_)
+        {
+            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            {
+                auto* view = viewport->getViewedComponent();
+                const int maxX = view != nullptr
+                    ? juce::jmax(0, view->getWidth() - viewport->getViewWidth()) : 0;
+                const int deltaX = e.getScreenPosition().x - touchBodyDownScreen_.x;
+                viewport->setViewPosition(
+                    juce::jlimit(0, maxX, touchBodyScrollStartX_ - deltaX),
+                    viewport->getViewPositionY());
+            }
             return;
         }
 
@@ -1219,6 +1245,7 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
 
         bodyDragging_ = false;
         touchBodyReorderPending_ = false;
+        touchBodyScrollActive_ = false;
 
         const bool wasFaderDragging = draggingFader_;
         if (wasFaderDragging)
@@ -1816,6 +1843,8 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     bool  draggingFader_   = false;
     bool  bodyDragging_    = false;
     bool  touchBodyReorderPending_ = false;
+    bool  touchBodyScrollActive_ = false;
+    int   touchBodyScrollStartX_ = 0;
     juce::Point<int> touchBodyDownScreen_;
     bool  isFolderBus_     = false;
     bool  folderExpanded_  = true;
