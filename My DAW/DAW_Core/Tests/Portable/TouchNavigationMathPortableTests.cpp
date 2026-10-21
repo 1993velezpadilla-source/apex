@@ -1,6 +1,12 @@
 // Build standalone on any C++17 compiler:
 // c++ -std=c++17 -Wall -Wextra -Werror TouchNavigationMathPortableTests.cpp -o touch-tests && ./touch-tests
 #include "../../Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h"
+#include "../../Source/UICore/BeatMakingFeaturePolicy.h"
+
+// Audio-first release invariant: UI code must retain but must not expose
+// Piano Roll until the explicit future beat-making feature update.
+static_assert(!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled,
+              "Current APEX release must not enable the Piano Roll");
 
 #include <cassert>
 #include <cmath>
