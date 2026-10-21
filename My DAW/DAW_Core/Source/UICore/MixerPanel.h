@@ -984,8 +984,12 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         // click on an existing multi-selected strip is intentionally ignored
         // here so a drag can begin without collapsing the canonical set.
         notifySelectionForInteraction(e.mods);
-        // Fader drag
-        if (getFaderThumbBounds().contains(e.position))
+        // A finger can grab the whole fader lane, not only the tiny thumb.
+        // Mouse keeps its precise original thumb hit-test. Each JUCE touch
+        // source is captured by its own strip, allowing simultaneous faders.
+        const bool isTouch = e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+        if (getFaderThumbBounds().contains(e.position)
+            || (isTouch && faderTrackBounds_.contains(e.position)))
         {
             dragStartY_           = e.getScreenPosition().y;
             dragStartVolumeDb_     = FaderRangeCore::gainToDb(track_.getVolume());
@@ -998,9 +1002,19 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         }
         else if (!track_.isMaster())
         {
-            bodyDragging_ = true;
-            if (onBodyDragBegin)
-                onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+            if (isTouch)
+            {
+                // Ordinary touch scrolling/tapping must never immediately
+                // reorder a channel. Long-press, THEN drag to reorder.
+                touchBodyReorderPending_ = true;
+                touchBodyDownScreen_ = e.getScreenPosition();
+            }
+            else
+            {
+                bodyDragging_ = true;
+                if (onBodyDragBegin)
+                    onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+            }
         }
     }
 
@@ -1083,6 +1097,30 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (touchBodyReorderPending_)
+        {
+            const float travel = e.getScreenPosition().toFloat()
+                .getDistanceFrom(touchBodyDownScreen_.toFloat());
+            // Cancel early swipes; do not transform them into delayed reorders.
+            if (e.getLengthOfMousePress() < 400)
+            {
+                if (travel > 12.0f)
+                    touchBodyReorderPending_ = false;
+                return;
+            }
+            if (travel > 24.0f)
+            {
+                touchBodyReorderPending_ = false;
+                return;
+            }
+
+            touchBodyReorderPending_ = false;
+            bodyDragging_ = true;
+            if (onBodyDragBegin)
+                onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+            return;
+        }
+
         if (draggingFader_)
         {
             int dy = dragStartY_ - e.getScreenPosition().y; // up = positive
@@ -1113,8 +1151,11 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
 
         notifySelectionForInteraction(e.mods);
 
-        // Double-click on the fader thumb keeps its reset-to-0dB behaviour.
-        if (getFaderThumbBounds().contains(e.position))
+        // Double-tap anywhere on the fader lane resets it, like a native
+        // touch mixer; desktop double-click remains thumb-only.
+        const bool touchReset = e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && faderTrackBounds_.contains(e.position);
+        if (getFaderThumbBounds().contains(e.position) || touchReset)
         {
             const float oldGain = track_.getVolume();
             const float resetDb = 0.0f;
@@ -1169,6 +1210,7 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
             return;
 
         bodyDragging_ = false;
+        touchBodyReorderPending_ = false;
 
         const bool wasFaderDragging = draggingFader_;
         if (wasFaderDragging)
@@ -1765,6 +1807,8 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     juce::Rectangle<float> faderTrackBounds_;
     bool  draggingFader_   = false;
     bool  bodyDragging_    = false;
+    bool  touchBodyReorderPending_ = false;
+    juce::Point<int> touchBodyDownScreen_;
     bool  isFolderBus_     = false;
     bool  folderExpanded_  = true;
     bool  lastSetSelectedValue_       = false;
