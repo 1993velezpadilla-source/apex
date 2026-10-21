@@ -723,6 +723,9 @@ namespace ArrangementEditor
         void updateClipDrag  (juce::Point<int> localPos);
         void commitClipDrag  ();
         void cancelClipDrag  ();
+        // Multi-touch pinch cancellation must restore live renderer bounds
+        // without destroying components that still own active JUCE pointers.
+        void cancelClipDragForTouchNavigation();
         void drawGhost       (juce::Graphics& g);
 
         ArrangementDebugLogCore m_arrangementDebugLog;
