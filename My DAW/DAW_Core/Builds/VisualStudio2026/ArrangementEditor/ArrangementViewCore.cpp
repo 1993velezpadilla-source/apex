@@ -2761,6 +2761,18 @@ namespace ArrangementEditor
             }
         }
 
+        // Start the gesture clock on touch DOWN, not the first drag event.
+        // Stationary long-presses on empty space otherwise never fire.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && m_toolState.getActiveTool() == EditorTool::Select
+            && !m_viewOnlyMode && findClipAt(e.getPosition()) == nullptr)
+        {
+            if (! m_inertiaTimer)
+                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+            if (!m_inertiaTimer->isTimerRunning())
+                m_inertiaTimer->startTimerHz(60);
+        }
+
         grabKeyboardFocus();
 
         if (m_toolState.getActiveTool() != EditorTool::Split
@@ -2888,6 +2900,26 @@ namespace ArrangementEditor
             << " clip=" << formatUuidShort(m_lastMouseDownClipId));
         m_lastMousePos = e.getPosition();
         m_lastMouseMods = e.mods;
+
+        // Background long-press = the same menu as desktop right-click.
+        // No mouse emulation and no destructive tool operation. The timer
+        // must have observed the stationary finger for >=500 ms.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && !m_viewOnlyMode && m_toolState.getActiveTool() == EditorTool::Select
+            && m_holdActive && !m_holdDragging
+            && m_selection.getSelectionCount() == 0
+            && findClipAt(e.getPosition()) == nullptr)
+        {
+            m_touchScrollActive = false;
+            m_holdActive = false;
+            m_holdDragging = false;
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+            showEmptyTrackContextMenu(e.getScreenPosition(), e.getPosition());
+            return;
+        }
 
         // Touch pan finished → start the iOS-style momentum (slow stop).
         if (m_touchScrollActive)
@@ -3289,6 +3321,21 @@ namespace ArrangementEditor
         }
         else
         {
+            if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            {
+                // Logic touch semantics: touching empty space deselects the
+                // region, exposing a clean background shortcut menu on hold.
+                m_selection.deselectAll();
+                m_pendingExclusiveOnRelease.reset();
+                for (auto& renderer : m_clipRenderers)
+                    if (renderer != nullptr)
+                        renderer->setSelected(false);
+                if (onEngineClipSelectionCleared)
+                    onEngineClipSelectionCleared();
+                repaint();
+                return;
+            }
+
             // Marquee for MOUSE input only: one finger on touch pans the
             // timeline (see the gesture timer).
             if (e.source.getType() != juce::MouseInputSource::InputSourceType::touch)
