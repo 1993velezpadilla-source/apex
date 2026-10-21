@@ -6,6 +6,7 @@
 // ===========================================================================
 #pragma once
 #include <JuceHeader.h>
+#include <cstdint>
 #include "ArrangementClipModel.h"
 #include "ArrangementClipStateCore.h"
 #include "ArrangementSelectionCore.h"
