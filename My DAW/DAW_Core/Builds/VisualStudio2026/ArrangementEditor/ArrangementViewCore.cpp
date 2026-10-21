@@ -1098,6 +1098,20 @@ namespace ArrangementEditor
                 continue;
             if (! viewport->getScreenBounds().contains(source.getScreenPosition().toInt()))
                 continue;
+
+            // A touch captured by an interactive audio region/handle must
+            // NEVER also pan the arrangement. Newly tapped, previously
+            // unselected regions explicitly delegate their first drag to
+            // scrolling; selected regions and trim/fade handles own theirs.
+            auto* owningClip = dynamic_cast<ClipRenderCore*>(hit);
+            for (auto* ancestor = hit->getParentComponent();
+                 owningClip == nullptr && ancestor != nullptr && ancestor != this;
+                 ancestor = ancestor->getParentComponent())
+                owningClip = dynamic_cast<ClipRenderCore*>(ancestor);
+            if (owningClip != nullptr
+                && !owningClip->isTouchPanFromUnselected())
+                continue;
+
             if (touchCount == 0)
             {
                 firstTouch         = source.getScreenPosition();
@@ -1112,6 +1126,12 @@ namespace ArrangementEditor
 
         if (touchCount >= 2)
         {
+            // A second finger changes the gesture owner from region editing
+            // to navigation. Discard the uncommitted move rather than
+            // allowing viewport pinch + clip drag in the same transaction.
+            if (m_drag.pending || m_drag.active)
+                cancelClipDrag();
+
             // Two fingers share a single navigation owner. Switching from one
             // finger to two must cancel its hold/fling, never inherit its anchor.
             m_touchScrollActive = false;
@@ -1229,6 +1249,16 @@ namespace ArrangementEditor
 
         if (touchCount == 1)
         {
+            // Selected clip drag owns this finger. Do not let stale kinetic
+            // frames keep moving the viewport under a region in flight.
+            if (m_drag.pending || m_drag.active)
+            {
+                m_touchScrollActive = false;
+                m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+                m_smoothedTouchValid = false;
+                ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+                return false;
+            }
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
@@ -2843,9 +2873,32 @@ namespace ArrangementEditor
         // view-only guard below.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
         {
-            if (! m_inertiaTimer)
+            // Logic iPad: first drag of an unselected clip pans; after
+            // selecting it, the NEXT drag moves it. The previous blanket
+            // touch return made selected regions impossible to move.
+            if (!m_viewOnlyMode
+                && m_toolState.getActiveTool() == EditorTool::Select
+                && (m_drag.pending || m_drag.active))
+            {
+                // A simultaneous second finger cancels this pending edit;
+                // the two-finger timer becomes the sole gesture owner.
+                int activeFingers = 0;
+                for (const auto& input : juce::Desktop::getInstance().getMouseSources())
+                    if (input.getType() == juce::MouseInputSource::InputSourceType::touch
+                        && input.isDragging())
+                        ++activeFingers;
+                if (activeFingers > 1)
+                {
+                    cancelClipDrag();
+                    return;
+                }
+
+                updateClipDrag(e.getPosition());
+                return;
+            }
+            if (!m_inertiaTimer)
                 m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (! m_inertiaTimer->isTimerRunning())
+            if (!m_inertiaTimer->isTimerRunning())
                 m_inertiaTimer->startTimerHz(60);
             return;
         }
@@ -5569,6 +5622,15 @@ namespace ArrangementEditor
         m_drag.currentMouse = localPos;
         m_drag.pending      = true;
         m_drag.active       = false;
+
+        // Taking ownership of a selected clip invalidates fling velocity
+        // left over from a previous one-finger scroll.
+        m_touchScrollActive = false;
+        m_smoothedTouchValid = false;
+        m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+        if (m_inertiaTimer)
+            m_inertiaTimer->stopTimer();
+        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
 
         appendDebugLog("[startClipDrag end] selectionCount=" + juce::String(m_selection.getSelectionCount())
             + " dragItemCount=" + juce::String((int)m_drag.items.size()));
