@@ -40,6 +40,6 @@ int main()
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 10.0) - 0.85) < 1e-8);
     assert(TouchNavigationMath::pinchRatio(0.0, 200.0) == 1.0);
 
-    std::cout << "TouchNavigationMath: 15 deterministic assertions passed\n";
+    std::cout << "TouchNavigationMath: 17 deterministic assertions passed\n";
     return 0;
 }
