@@ -47,8 +47,12 @@ Release ready until Windows compiler + real Lenovo Legion Go gates pass.**
 
 ## Differences still OPEN vs MorningDAW / Logic iPad
 - **Press/flick/release while holding the original right mouse button** is
-  NOT fully wired for every widget; currently release/right-click then
-  hover/click is supported on many paths. This is not yet MorningDAW 1:1.
+  now routed for menu providers that open while the mouse button is still
+  down (track headers, mixer strips, plugin slots) via their existing captured
+  JUCE MouseListener source. A stationary right-click leaves the wheel open
+  for click-to-select. Clip menus are still opened on mouseUp, so support
+  click-to-select rather than same-down flick. This is not yet full
+  MorningDAW 1:1 across every widget.
 - Existing context menus in *other* codebase components still use
   PopupMenu directly; no dishonest whole-app coverage claim.
 - Wheel's per-wedge labels (long manufacturer names) need hardware
