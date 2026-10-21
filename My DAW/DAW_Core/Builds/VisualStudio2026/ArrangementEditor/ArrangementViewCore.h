@@ -442,8 +442,9 @@ namespace ArrangementEditor
         bool m_gestureMoved = false;   // moved past the threshold → it is a drag
         bool m_marqueePending = false; // empty-space press waiting for the hold
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
-        double m_lastPinchDistance = 0.0; // last two-finger separation (pinch)
-        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // two-finger pan anchor
+        bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
+        double m_lastPinchDistance = 0.0; // legacy pinch scratch state
+        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
         // Gesture classification: decided once per gesture (pan by default,
         // promoted to pinch on a clear separation change) so the two never
         // flip-flop mid-gesture.
@@ -478,7 +479,8 @@ namespace ArrangementEditor
             ArrangementViewCore& m_owner;
         };
         std::unique_ptr<TouchPanInertiaTimer> m_inertiaTimer;
-        juce::Point<int> m_lastTouchPanPos;
+        juce::Point<int> m_touchPanDownScreenPos; // screen-space origin avoids scroll feedback
+        juce::Point<int> m_lastTouchPanPos; // screen-space for stable velocity
         double m_lastTouchPanTimeMs = 0.0;
         double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
         double m_touchPanVelocityY = 0.0;
