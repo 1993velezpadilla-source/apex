@@ -4192,26 +4192,29 @@ void bindRouting(RoutingGraph* graph, void*)
         menu.addItem(kRescanPlugins, "Rescan Plugins...");
 
         settingsMenuOpen_ = true;
+        juce::Component::SafePointer<MixerPanel> safeThis(this);
         ApexRadialContextMenu::show(std::move(menu), this,
-                           getScreenBounds().getCentre(), [this](int result)
+                           getScreenBounds().getCentre(), [safeThis](int result)
                            {
-                               settingsMenuOpen_ = false;
+                               if (safeThis == nullptr) return;
+                               auto& panel = *safeThis;
+                               panel.settingsMenuOpen_ = false;
 
                                switch (result)
                                {
-                                   case 1: toggleSidePanel(); break;
-                                   case 2: toggleBrowser(); break;
-                                   case 3: toggleCableForceVisible(); break;
-                                   case 4: toggleOffscreenForceVisible(); break;
+                                   case 1: panel.toggleSidePanel(); break;
+                                   case 2: panel.toggleBrowser(); break;
+                                   case 3: panel.toggleCableForceVisible(); break;
+                                   case 4: panel.toggleOffscreenForceVisible(); break;
                                    case 5:
-                                       if (onRescanPlugins)
-                                           onRescanPlugins();
+                                       if (panel.onRescanPlugins)
+                                           panel.onRescanPlugins();
                                        break;
                                    default:
                                        break;
                                }
 
-                               repaint();
+                               if (safeThis != nullptr) panel.repaint();
                            });
     }
 
