@@ -147,6 +147,16 @@ public:
         if (! listenersAttached_)
             return;
 
+        // If a channel is destroyed/rebuilt while a finger still holds its
+        // fader, close the host/native automation transaction BEFORE the
+        // AutomationParameter is unregistered. Never leave Touch/Write stuck.
+        if (draggingFader_)
+        {
+            draggingFader_ = false;
+            activeFaderPointerIndex_ = -1;
+            if (volumeParameter_ != nullptr)
+                volumeParameter_->endGesture();
+        }
         vu_.clearSource();
         unregisterNativeAutomationParameters();
         if (auto* c = FaderRangeCore::getGlobalInstance())
@@ -950,6 +960,16 @@ muteBtn_.setBounds(nextButtonBounds());
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        // A different touch may operate another fader, but cannot hijack an
+        // existing channel gesture and corrupt its Undo/automation lifetime.
+        if (draggingFader_ && activeFaderPointerIndex_ >= 0
+            && e.source.getIndex() != activeFaderPointerIndex_)
+            return;
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ >= 0
+            && e.source.getIndex() != touchBodyPointerIndex_)
+            return;
+
         // Quick Send mode takes priority over the normal strip context menu:
         // left-click toggles the send, right-click toggles the sidechain on a
         // non-source strip. When the mode is inactive the regular right-click
@@ -1000,6 +1020,7 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
             dragStartY_           = e.getScreenPosition().y;
             dragStartVolumeDb_     = FaderRangeCore::gainToDb(track_.getVolume());
             dragStartVolumeGain_   = track_.getVolume();
+            activeFaderPointerIndex_ = e.source.getIndex();
             setFaderDragging(true);
             if (volumeParameter_ != nullptr)
             {
@@ -1014,6 +1035,7 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
                 // reorder a channel. Long-press, THEN drag to reorder.
                 touchBodyReorderPending_ = true;
                 touchBodyScrollActive_ = false;
+                touchBodyPointerIndex_ = e.source.getIndex();
                 touchBodyDownScreen_ = e.getScreenPosition();
                 // Screen-space anchor: scrolling the viewport repositions
                 // child strips, but cannot change the original swipe delta.
@@ -1110,6 +1132,12 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ != e.source.getIndex())
+            return;
+        if (draggingFader_ && activeFaderPointerIndex_ != e.source.getIndex())
+            return;
+
         if (touchBodyReorderPending_)
         {
             const float travel = e.getScreenPosition().toFloat()
@@ -1232,6 +1260,12 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (draggingFader_ && activeFaderPointerIndex_ != e.source.getIndex())
+            return;
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ != e.source.getIndex())
+            return;
+
         // Guard against this strip being destroyed during the drag-end callback
         // (folder creation/reorder can trigger rebuildStrips() synchronously)
         juce::Component::SafePointer<MixerStrip> safeThis(this);
@@ -1246,6 +1280,7 @@ if (BeatMakingFeaturePolicy::kPianoRollEnabled
         bodyDragging_ = false;
         touchBodyReorderPending_ = false;
         touchBodyScrollActive_ = false;
+        touchBodyPointerIndex_ = -1;
 
         const bool wasFaderDragging = draggingFader_;
         if (wasFaderDragging)
@@ -1290,6 +1325,8 @@ private:
             return;
 
         draggingFader_ = dragging;
+        if (!dragging)
+            activeFaderPointerIndex_ = -1;
         if (onFaderDragStateChanged)
             onFaderDragStateChanged(dragging);
     }
@@ -1841,9 +1878,11 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
 
     juce::Rectangle<float> faderTrackBounds_;
     bool  draggingFader_   = false;
+    int   activeFaderPointerIndex_ = -1;
     bool  bodyDragging_    = false;
     bool  touchBodyReorderPending_ = false;
     bool  touchBodyScrollActive_ = false;
+    int   touchBodyPointerIndex_ = -1;
     int   touchBodyScrollStartX_ = 0;
     juce::Point<int> touchBodyDownScreen_;
     bool  isFolderBus_     = false;
