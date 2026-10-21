@@ -39,6 +39,12 @@ struct BubblegumKnobValueBinding
     float maxValue     { 1.0f };
     float defaultValue { 0.0f };
 
+    // Optional parameter-gesture lifecycle bridge: provide begin/end for
+    // native or hosted automation while fingers control the knob. Keeping
+    // these optional preserves legacy bindings that only provide get/set.
+    std::function<void()> beginGesture;
+    std::function<void()> endGesture;
+
     bool isValid() const noexcept
     {
         return getValue != nullptr && setValue != nullptr;
