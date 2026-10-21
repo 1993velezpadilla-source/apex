@@ -3,6 +3,7 @@
 // ===========================================================================
 #include "ArrangementViewCore.h"
 #include "TouchNavigationMath.h"
+#include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
@@ -185,7 +186,11 @@ namespace ArrangementEditor
         addAndMakeVisible(m_ruler);
         addAndMakeVisible(m_rubberBand);
         addAndMakeVisible(m_splitIndicator);
-        addAndMakeVisible(m_pianoRollBtn);
+        // Keep the existing Piano Roll component, but do not display or
+        // activate it during APEX's audio-first release.
+        addChildComponent(m_pianoRollBtn);
+        m_pianoRollBtn.setEnabled(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled);
+        m_pianoRollBtn.setInterceptsMouseClicks(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled, false);
         addChildComponent(m_ghostOverlay);
 
         m_arrangementDebugPanel = std::make_unique<ArrangementDebugPanelCore>();
@@ -286,6 +291,8 @@ namespace ArrangementEditor
 
         // Wire Piano Roll button
         m_pianoRollBtn.onClick = [this]() {
+            if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+                return;
             DBG("Piano Roll button clicked");
             if (onOpenPianoRollRequested)
                 onOpenPianoRollRequested();
@@ -1754,13 +1761,25 @@ namespace ArrangementEditor
             m_headerButtonShield = std::make_unique<HeaderButtonShield>(*this);
             addAndMakeVisible(*m_headerButtonShield);
         }
-        m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 168,
-                                        m_viewportScrollY + 6, 164, 36);
+        // The hidden Piano Roll must not leave a transparent mouse/touch
+        // interception region. Shield only the two active buttons (Free View
+        // and Lock), preserving the right-hand arranger interaction area.
+        m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
+                                        m_viewportScrollY + 6, 80, 36);
         m_headerButtonShield->toFront(false);
         m_pianoRollBtn.toFront(false);
 
-        // Piano Roll button — compact, to the right of lock button
-        m_pianoRollBtn.setBounds(m_viewportScrollX + viewportWidth - 56, m_viewportScrollY + 10, 48, 28);
+        // Keep Piano Roll code intact but hide/disable its actual widget.
+        if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+        {
+            m_pianoRollBtn.setBounds(m_viewportScrollX + viewportWidth - 56, m_viewportScrollY + 10, 48, 28);
+            m_pianoRollBtn.setVisible(true);
+        }
+        else
+        {
+            m_pianoRollBtn.setVisible(false);
+            m_pianoRollBtn.setBounds({});
+        }
         m_ruler.setBounds(m_viewportScrollX, m_viewportScrollY + toolbarH, viewportWidth, rulerH);
         m_ghostOverlay.setBounds(getLocalBounds());
 
