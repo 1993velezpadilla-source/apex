@@ -4,6 +4,7 @@
 #include "../../../Source/TrackCore/TrackPlaylistCompCore.h"
 #include "../../../Source/RecordingCore/LoopPlaylistTakePlanCore.h"
 #include "../../../Source/RecordingCore/RecordingEngine.h"
+#include "../../../Source/TransportCore/TransportController.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/CommandCore/RecordCommands.h"
 #include <cmath>
@@ -330,6 +331,60 @@ public:
             const auto noSamples = DAW::TrackPlaylistCompCore::planNonLoopTake(
                 *vocal, clips, 15 * 48000, 0);
             expect(!noSamples.createPlaylist);
+        }
+
+        beginTest("Stop seals take and returns to the exact user-set :15 cursor");
+        {
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto marker = (DAW::SamplePosition)(15 * 48000);
+            transport.setPosition(marker);
+            transport.setReturnToLastPosition(true);
+            transport.record();
+            expect(transport.isRecording());
+            expect(transport.isPlaying());
+            transport.setPositionFromAudioThread(marker + 5 * 48000);
+            transport.stop();
+            expect(!transport.isRecording());
+            expect(!transport.isPlaying());
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)marker);
+        }
+
+        beginTest("Pause intentionally keeps the take open until Stop, which seals it");
+        {
+            // A paused writer is NOT another completed take. This distinguishes
+            // the native Pause semantics from Stop and prevents bogus lanes.
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto marker = (DAW::SamplePosition)(15 * 48000);
+            transport.setPosition(marker);
+            transport.setReturnToLastPosition(true);
+            transport.record();
+            transport.setPositionFromAudioThread(marker + 2 * 48000);
+            transport.pause();
+            expect(transport.isRecording());
+            expect(transport.isPaused());
+            expect(!transport.isPlaying());
+            expectEquals((juce::int64)transport.getPosition(),
+                         (juce::int64)(marker + 2 * 48000));
+            transport.stop();
+            expect(!transport.isRecording());
+            expect(!transport.isPaused());
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)marker);
+        }
+
+        beginTest("Return to Last Position OFF leaves playback at recording stop");
+        {
+            DAW::ApplicationState app;
+            DAW::TransportController transport(app);
+            const auto start = (DAW::SamplePosition)(15 * 48000);
+            const auto finish = (DAW::SamplePosition)(22 * 48000);
+            transport.setPosition(start);
+            transport.setReturnToLastPosition(false);
+            transport.record();
+            transport.setPositionFromAudioThread(finish);
+            transport.stop();
+            expectEquals((juce::int64)transport.getPosition(), (juce::int64)finish);
         }
 
         beginTest("auto take #3 recognizes archived take even when Main is empty in range");
