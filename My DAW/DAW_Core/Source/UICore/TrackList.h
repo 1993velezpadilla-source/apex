@@ -6,6 +6,7 @@
 #include "../ThemeCore/ApexLivingSeal.h"
 #include "CursorThemeCore.h"
 #include "ApexRadialContextMenu.h"
+#include "ApexPointerPolicy.h"
 #include "../TrackCore/Track.h"
 #include "../TrackCore/TrackReorderCore.h"
 #include "../ControlsCore/ModernControls.h"
@@ -1083,7 +1084,7 @@ public:
             {
                 dragStartY_ = e.getScreenY();
                 dragMode_ = DragMode::PendingReorder;
-                touchRowCandidate_ = e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+                touchRowCandidate_ = ApexPointerPolicy::isDirect(e);
                 touchRowScrolling_ = false;
                 if (touchRowCandidate_)
                 {
@@ -1206,7 +1207,7 @@ public:
     void mouseUp(const juce::MouseEvent& e) override
     {
         const bool showTouchMenu = touchRowCandidate_
-            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && ApexPointerPolicy::isDirect(e)
             && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 500.0
             && e.getScreenPosition().toFloat().getDistanceFrom(
                    touchRowDownScreen_.toFloat()) <= 10.0f;
