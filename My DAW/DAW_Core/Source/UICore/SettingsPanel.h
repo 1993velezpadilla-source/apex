@@ -1153,7 +1153,7 @@ private:
             y += 26;
             contextMenuStyleCombo_->setVisible(true);
             contextMenuStyleCombo_->setBounds(insetX, y, insetW, 48); // 48dp touch-safe
-            y += 12;
+            y += 56; // reserve the full control height plus gap; no card overlap
             }
             y = endCard(y);
 
