@@ -24,6 +24,7 @@
 #include "../PluginHostCore/PluginSlotUI.h"
 #include "TrackSelectionVisualCore.h"
 #include "ApexRadialContextMenu.h"
+#include "BeatMakingFeaturePolicy.h"
 #include "InputTrimFloatingPanel.h"
 #include "ApexPresentationClock.h"
 #include "MixerUiFeaturePolicy.h"
@@ -846,8 +847,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 // Mute / Solo / Arm row
         auto btnRow = b.removeFromTop(18).reduced(4, 1);
         const bool isMaster = track_.isMaster();
-        // DISABLED (product decision): the piano roll is a beat-making surface.
-        const bool showPiano = false;
+        // Keep the Piano Roll slot for the later beat-making update.
+        const bool showPiano = BeatMakingFeaturePolicy::kPianoRollEnabled;
         const int buttonCount = isMaster ? 2 : 4;
         const int buttonGap = 2;
         const int buttonWidth = juce::jmax(10, (btnRow.getWidth() - buttonGap * (buttonCount - 1)) / buttonCount);
@@ -859,6 +860,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
             return bounds;
         };
 
+        pianoBtn_.setEnabled(showPiano);
+        pianoBtn_.setInterceptsMouseClicks(showPiano, false);
         pianoBtn_.setVisible(showPiano);
         if (showPiano)
             pianoBtn_.setBounds(nextButtonBounds());
@@ -975,7 +978,8 @@ muteBtn_.setBounds(nextButtonBounds());
             return;
         }
         if (e.mods.isRightButtonDown()) return;
-if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
+if (BeatMakingFeaturePolicy::kPianoRollEnabled
+    && pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         {
             if (onClicked) onClicked();
             if (onPianoRollRequested) onPianoRollRequested();
