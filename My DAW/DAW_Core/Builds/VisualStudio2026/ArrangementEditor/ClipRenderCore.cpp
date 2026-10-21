@@ -398,6 +398,7 @@ namespace ArrangementEditor
     void ClipRenderCore::mouseDown(const juce::MouseEvent& e)
     {
         m_touchPanFromUnselected = false;
+        m_touchMenuPending = false;
         if (!m_model)
         {
             if (auto* parent = getParentComponent())
@@ -461,6 +462,21 @@ namespace ArrangementEditor
             return;
         }
 
+        // In Select mode, a tap on an ALREADY selected region is the
+        // touch equivalent of desktop right-click. Do not show immediately:
+        // the user may be starting an intentional drag. Open on release only
+        // if the finger remained within tap slop. Handles and tool actions
+        // keep their normal owner.
+        if (z == Zone::None
+            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+        {
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+            {
+                m_touchMenuPending = view->getToolState().getActiveTool() == EditorTool::Select;
+                m_touchMenuDownScreen = e.getScreenPosition();
+            }
+        }
+
         // NOTE: the Alt+drag waveform clip-gain gesture is DISABLED for now —
         // it conflicted with the expected waveform interactions. The dedicated
         // gain handle remains the way to adjust clip gain.
@@ -499,6 +515,10 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDrag(const juce::MouseEvent& e)
     {
+        if (m_touchMenuPending
+            && e.getScreenPosition().getDistanceFrom(m_touchMenuDownScreen) > 7.0f)
+            m_touchMenuPending = false;
+
         if (m_touchPanFromUnselected)
         {
             if (auto* parent = getParentComponent())
@@ -718,6 +738,12 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseUp(const juce::MouseEvent& e)
     {
+        const bool requestTouchMenu = m_touchMenuPending
+            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && e.getScreenPosition().getDistanceFrom(m_touchMenuDownScreen) <= 7.0f
+            && ! s_viewOnlyMode.load(std::memory_order_relaxed);
+        m_touchMenuPending = false;
+
         if (m_touchPanFromUnselected)
         {
             m_touchPanFromUnselected = false;
@@ -753,11 +779,24 @@ namespace ArrangementEditor
         }
 
         if (auto* parent = getParentComponent())
+        {
+            const auto localPos = e.getEventRelativeTo(parent).getPosition();
+            const auto screenPos = e.getScreenPosition();
+            // Parent mouseUp may commit/cancel edits and rebuild renderers.
+            // Only call back after verifying this component is still alive.
+            juce::Component::SafePointer<ClipRenderCore> safeThis(this);
             parent->mouseUp(e.getEventRelativeTo(parent));
+            if (safeThis != nullptr && requestTouchMenu && onTouchContextMenu)
+                onTouchContextMenu(screenPos, localPos);
+        }
     }
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
+        // On touch, selected-region tap owns the context menu. A quick
+        // second tap must not additionally open the desktop clip editor.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            return;
         DBG("[ClipRenderCore] double-click fired, forwarding to parent");
 
         if (auto* parent = getParentComponent())
