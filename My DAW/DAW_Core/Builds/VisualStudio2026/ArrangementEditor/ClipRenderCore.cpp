@@ -2,6 +2,7 @@
 // ClipRenderCore.cpp
 // ===========================================================================
 #include "ClipRenderCore.h"
+#include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "TouchNavigationMath.h"
 #include "../../../Source/UICore/ApexPointerPolicy.h"
 #include "ClipPitchCore.h"
@@ -47,10 +48,14 @@ namespace ArrangementEditor
 
         m_pianoRollBtn = std::make_unique<PianoRollButtonCore>(PianoRollButtonCore::Style::ClipOverlay);
         m_pianoRollBtn->onClick = [this]() {
-            if (onPianoRollClick)
+            if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled && onPianoRollClick)
                 onPianoRollClick();
         };
-        addAndMakeVisible(*m_pianoRollBtn);
+        // Retain the component and callback for the future beat-making
+        // update, but do not render or intercept touch/mouse/Pencil today.
+        addChildComponent(*m_pianoRollBtn);
+        m_pianoRollBtn->setEnabled(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled);
+        m_pianoRollBtn->setInterceptsMouseClicks(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled, false);
 
         setSize(100, 80);
     }
@@ -241,11 +246,14 @@ namespace ArrangementEditor
         // lock icon (drawn at x=4, width=16).
         if (m_pianoRollBtn)
         {
-            const bool showPianoRollButton = getWidth() >= 40;
+            const bool showPianoRollButton = DAW::BeatMakingFeaturePolicy::kPianoRollEnabled
+                && getWidth() >= 40;
             m_pianoRollBtn->setVisible(showPianoRollButton);
-
-            if (showPianoRollButton)
-                m_pianoRollBtn->setBounds(getWidth() - 24, 1, 22, 14);
+            // An invisible button must not reserve any hit region or overlap
+            // audio clip badges.
+            m_pianoRollBtn->setBounds(showPianoRollButton
+                ? juce::Rectangle<int>(getWidth() - 24, 1, 22, 14)
+                : juce::Rectangle<int>());
         }
 
         // setBounds() is also used for every scroll reposition.  Refreshing
@@ -1263,11 +1271,10 @@ namespace ArrangementEditor
 
         g.setFont(juce::Font("Segoe UI", 7.5f, juce::Font::bold));
         const int bx = getLocalBounds().getX();
-        // Keep the badges clear of the piano-roll button in the clip's
-        // top-right corner (resized() places it at getWidth()-24 with a width
-        // of 22 when the clip is >= 40 px wide). It is a child component and
-        // would otherwise paint over the badges.
-        const bool pianoRollVisible = getWidth() >= 40;
+        // Reserve room for the Piano Roll only in a future beat-making
+        // release. For audio-first APEX, badges use the freed header space.
+        const bool pianoRollVisible = DAW::BeatMakingFeaturePolicy::kPianoRollEnabled
+            && getWidth() >= 40;
         int x = bx + getWidth() - (pianoRollVisible ? 28 : 4);
         const int badgeRight = x;
         const int badgeY = 1;
