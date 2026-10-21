@@ -1081,6 +1081,15 @@ public:
             {
                 dragStartY_ = e.getScreenY();
                 dragMode_ = DragMode::PendingReorder;
+                touchRowCandidate_ = e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+                touchRowScrolling_ = false;
+                if (touchRowCandidate_)
+                {
+                    touchRowDownScreen_ = e.getScreenPosition();
+                    touchRowDownMs_ = juce::Time::getMillisecondCounterHiRes();
+                    if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                        touchRowViewportStartY_ = viewport->getViewPositionY();
+                }
             }
             notifySelectionForInteraction(e.mods);
         }
@@ -1148,6 +1157,33 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (touchRowCandidate_ || touchRowScrolling_)
+        {
+            const auto screen = e.getScreenPosition();
+            const float travel = screen.toFloat().getDistanceFrom(touchRowDownScreen_.toFloat());
+            const double heldMs = juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_;
+            // A quick vertical swipe scrolls; it can NEVER retroactively
+            // become a track reorder when the 500ms hold expires.
+            if (touchRowScrolling_ || (travel > 10.0f && heldMs < 500.0))
+            {
+                touchRowScrolling_ = true;
+                touchRowCandidate_ = false;
+                dragMode_ = DragMode::None;
+                if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                    viewport->setViewPosition(viewport->getViewPositionX(),
+                        juce::jlimit(0, juce::jmax(0, viewport->getViewedComponent() != nullptr
+                            ? viewport->getViewedComponent()->getHeight() - viewport->getViewHeight() : 0),
+                            touchRowViewportStartY_ - (screen.y - touchRowDownScreen_.y)));
+                return;
+            }
+            if (heldMs < 500.0 || travel <= 10.0f)
+                return; // selected header long press is a menu, not a reorder
+            touchRowCandidate_ = false;
+            dragMode_ = DragMode::Reorder;
+            // The next drag event is owned by the existing reorder path.
+            return;
+        }
+
         if (dragMode_ == DragMode::Resize && dragStartY_ >= 0 && onHeightDrag)
         {
             int delta = e.getScreenY() - dragStartY_;
@@ -1165,12 +1201,21 @@ public:
         }
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
+        const bool showTouchMenu = touchRowCandidate_
+            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 500.0
+            && e.getScreenPosition().toFloat().getDistanceFrom(
+                   touchRowDownScreen_.toFloat()) <= 10.0f;
+        touchRowCandidate_ = false;
+        touchRowScrolling_ = false;
         if (dragMode_ == DragMode::Reorder && onReorderDrop)
             onReorderDrop(this);
         dragStartY_ = -1;
         dragMode_ = DragMode::None;
+        if (showTouchMenu && !track_.isMaster())
+            showContextMenu(); // exactly the native desktop right-click actions
     }
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
@@ -1792,6 +1837,11 @@ public:
     int  height_      = 72;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
+    bool touchRowCandidate_ = false;
+    bool touchRowScrolling_ = false;
+    juce::Point<int> touchRowDownScreen_;
+    double touchRowDownMs_ = 0.0;
+    int touchRowViewportStartY_ = 0;
     bool selected_    = false;
     bool resizeHover_ = false;
     bool pluginDropHover_ = false;
