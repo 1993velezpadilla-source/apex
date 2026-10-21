@@ -23,6 +23,7 @@
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
 #include "../PluginHostCore/PluginSlotUI.h"
 #include "TrackSelectionVisualCore.h"
+#include "ApexRadialContextMenu.h"
 #include "InputTrimFloatingPanel.h"
 #include "ApexPresentationClock.h"
 #include "MixerUiFeaturePolicy.h"
@@ -968,6 +969,7 @@ muteBtn_.setBounds(nextButtonBounds());
 
         if (e.mods.isPopupMenu())
         {
+            stripContextScreenPoint_ = e.getScreenPosition();
             notifySelectionForInteraction(e.mods);
             showStripContextMenu();
             return;
@@ -1092,7 +1094,9 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
             menu.addItem(del);
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            stripContextScreenPoint_.isOrigin() ? getScreenBounds().getCentre()
+                                                : stripContextScreenPoint_);
     }
 
     void mouseDrag(const juce::MouseEvent& e) override
@@ -1818,6 +1822,7 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     juce::Colour folderParentColour_ = juce::Colours::transparentBlack;
     int   depth_           = 0;
     int   dragStartY_      = 0;
+    juce::Point<int> stripContextScreenPoint_;
     float dragStartVolumeDb_ = 0.f;
     float dragStartVolumeGain_ = 1.f;
 
@@ -2717,7 +2722,7 @@ private:
                          "Monitor Off records dry; Auto/On prints FX. Playback runs FX again",
                          false, false);
 
-            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(getParentComponent()),
+            ApexRadialContextMenu::show(std::move(menu), this, e.getScreenPosition(),
                                [this, kRecordDry, kRecordPostFader](int result)
                                {
                                    if (result == kRecordDry)
@@ -4187,8 +4192,8 @@ void bindRouting(RoutingGraph* graph, void*)
         menu.addItem(kRescanPlugins, "Rescan Plugins...");
 
         settingsMenuOpen_ = true;
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
-                           [this](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+                           getScreenBounds().getCentre(), [this](int result)
                            {
                                settingsMenuOpen_ = false;
 
