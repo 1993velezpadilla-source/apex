@@ -83,7 +83,7 @@ public:
         copy_.onClick = [this] { copySnapshot(); };
         preset_.onClick = [this] { openPresetActions(); };
         phase_.onClick = [this] { toggleParameter (kPhaseModeParameter); sync(); };
-        analyzer_.onClick = [this] { cycleAnalyzer(); };
+        analyzer_.onClick = [this] { showAnalyzerMenu(); };
         displayRange_.onClick = [this]
         {
             rangeIndex_ = (rangeIndex_ + 1) % 4;
@@ -668,6 +668,11 @@ public:
             Analysis::SpectrumAnalyzerCore::kSpectrumBins - 1);
         return spectrum_[post ? 1 : 0][static_cast<std::size_t> (bin)];
     }
+    void setSpectrumSmoothingForTesting (double octaveWidth)
+    {
+        spectrumSmoothingOctaves_ = std::clamp (octaveWidth,
+                                                1.0 / 72.0, 1.0 / 6.0);
+    }
     float displayedSpectrumDbForTesting (bool post, float frequencyHz)
         const noexcept
     {
@@ -1078,8 +1083,7 @@ private:
         // harmonics. Gaussian kernel width 1/18 octave: smooth only the
         // PRESENTATION (spatial frequency axis). Native worker measurements,
         // true harmonic locations and PRE/POST delta remain unchanged.
-        constexpr double sigmaOctaves = 1.0 / 18.0;
-        const double sigma = sigmaOctaves * std::log (2.0);
+        const double sigma = spectrumSmoothingOctaves_ * std::log (2.0);
         const double lower = frequencyHz * std::exp (-2.5 * sigma);
         const double upper = frequencyHz * std::exp ( 2.5 * sigma);
         const int first = std::max (1, static_cast<int> (
@@ -1152,14 +1156,47 @@ private:
                 mode == 0 ? 1.0f : 1.45f));
         }
     }
-    void cycleAnalyzer()
+    void showAnalyzerMenu()
     {
-        const auto previous = processor_.getAnalyzerMode();
-        const int next = (static_cast<int> (previous) + 1) % 4;
-        processor_.setAnalyzerMode (
-            static_cast<Analysis::SpectrumTapMode> (next));
-        analyzerAutoStarted_ = false;
-        syncAnalyzerText();
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("REAL FFT ANALYZER");
+        static constexpr const char* modes[] = {
+            "Off", "Pre-EQ", "Post-EQ", "Pre + Post"
+        };
+        for (int i = 0; i < 4; ++i)
+            menu.addItem (i + 1, modes[i], true,
+                static_cast<int> (processor_.getAnalyzerMode()) == i);
+        menu.addSeparator();
+        menu.addSectionHeader ("FREQUENCY SMOOTHING (DISPLAY ONLY)");
+        menu.addItem (11, "Precise - 1/36 octave", true,
+                      spectrumSmoothingOctaves_ < 1.0 / 26.0);
+        menu.addItem (12, "Natural - 1/18 octave", true,
+                      spectrumSmoothingOctaves_ >= 1.0 / 26.0
+                      && spectrumSmoothingOctaves_ < 1.0 / 13.0);
+        menu.addItem (13, "Smooth - 1/9 octave", true,
+                      spectrumSmoothingOctaves_ >= 1.0 / 13.0);
+        juce::Component::SafePointer<ApexQ4Editor> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&analyzer_), [safe] (int id)
+        {
+            if (auto* editor = safe.getComponent())
+            {
+                if (id >= 1 && id <= 4)
+                {
+                    editor->processor_.setAnalyzerMode (
+                        static_cast<Analysis::SpectrumTapMode> (id - 1));
+                    editor->analyzerAutoStarted_ = false;
+                    editor->spectrumReady_ = false;
+                    editor->spectrumIndex_ = -1;
+                    editor->syncAnalyzerText();
+                }
+                if (id >= 11 && id <= 13)
+                    editor->spectrumSmoothingOctaves_ =
+                        id == 11 ? 1.0 / 36.0
+                          : id == 12 ? 1.0 / 18.0 : 1.0 / 9.0;
+                editor->repaint();
+            }
+        });
     }
     void syncAnalyzerText()
     {
@@ -1454,6 +1491,7 @@ private:
     float spectrumBinHz_ = 11.71875f;
     int spectrumIndex_ = -1;
     bool spectrumReady_ = false;
+    double spectrumSmoothingOctaves_ = 1.0 / 18.0;
     Analysis::SpectrumTapMode lastAnalyzerMode_ = Analysis::SpectrumTapMode::Closed;
     bool analyzerAutoStarted_ = false;
     std::uint32_t auditionToken_ = 0;
