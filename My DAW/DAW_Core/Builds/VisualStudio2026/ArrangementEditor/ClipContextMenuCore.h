@@ -74,8 +74,9 @@ struct ClipContextCallbacks
     // Automation quick-create for the clicked clip/track.
     std::function<void(ArrangementClipModel*, const juce::String&)> createAutomationForClip;
 
-    // Open the full "Automate This Clip" floating panel.
+    // Open or remove automation for precisely this engine clip (not its parent track).
     std::function<void(ArrangementClipModel*)> openAutomateClipPanel;
+    std::function<void(ArrangementClipModel*)> removeClipAutomation;
 
     // Open Vocal Tune for the clicked clip.
     std::function<void(ArrangementClipModel*)> openVocalTune;
@@ -165,18 +166,10 @@ public:
         menu.addItem(kIdAutomateThisClip,
                      juce::String(juce::CharPointer_UTF8("\xf0\x9f\x8e\x9b  Automate This Clip\xe2\x80\xa6")),
                      cb.openAutomateClipPanel != nullptr);
-        menu.addItem(kIdVocalTune,
-                     "Vocal Tune",
-                     cb.openVocalTune != nullptr);
-        {
-            const bool bypassed = cb.isVocalTuneBypassed ? cb.isVocalTuneBypassed(clip) : false;
-            juce::PopupMenu::Item bypassItem;
-            bypassItem.itemID    = kIdVocalTuneBypass;
-            bypassItem.text      = "Bypass Vocal Tune";
-            bypassItem.isEnabled = cb.toggleVocalTuneBypass != nullptr;
-            bypassItem.isTicked  = bypassed;
-            menu.addItem(bypassItem);
-        }
+        menu.addItem(kIdRemoveClipAutomation, "Remove Clip Automation",
+                     cb.removeClipAutomation != nullptr);
+        // Vocal Tune and its bypass are intentionally absent from clip menus.
+
 
         // ── Show ──────────────────────────────────────────
         const auto stableId = clip->id;
@@ -229,6 +222,7 @@ private:
         kIdVocalTuneBypass  = 22,
         kIdNormalize        = 23,
         kIdVoiceCleaner     = 24,
+        kIdRemoveClipAutomation = 25,
         kIdAutomationBase   = 300,
         // Presets: 100-106
         kIdPresetBase       = 100,
@@ -389,13 +383,9 @@ private:
         {
             if (cb.openAutomateClipPanel) cb.openAutomateClipPanel(clip);
         }
-        else if (result == kIdVocalTune)
+        else if (result == kIdRemoveClipAutomation)
         {
-            if (cb.openVocalTune) cb.openVocalTune(clip);
-        }
-        else if (result == kIdVocalTuneBypass)
-        {
-            if (cb.toggleVocalTuneBypass) cb.toggleVocalTuneBypass(clip);
+            if (cb.removeClipAutomation) cb.removeClipAutomation(clip);
         }
         else if (result == kIdVoiceCleaner)
         {
