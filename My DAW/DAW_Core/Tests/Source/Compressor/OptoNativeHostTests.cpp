@@ -64,10 +64,10 @@ public:
                     expect(std::isfinite(signal.getSample(1,127)));
                     juce::MemoryBlock originalState;
                     native->getStateInformation(originalState);
-                    const auto oldRatio = native->parameter(APEX::PrecisionC3::Ratio).getValue();
-                    native->parameter(APEX::PrecisionC3::Ratio).setValue(0.95f);
+                    const auto oldRatio = native->getC3Parameter(APEX::PrecisionC3::Ratio).getValue();
+                    native->getC3Parameter(APEX::PrecisionC3::Ratio).setValue(0.95f);
                     native->setStateInformation(originalState.getData(),(int)originalState.getSize());
-                    expectWithinAbsoluteError(native->parameter(APEX::PrecisionC3::Ratio).getValue(),oldRatio,1.e-6f);
+                    expectWithinAbsoluteError(native->getC3Parameter(APEX::PrecisionC3::Ratio).getValue(),oldRatio,1.e-6f);
                     native->releaseResources();
                 }
             }
