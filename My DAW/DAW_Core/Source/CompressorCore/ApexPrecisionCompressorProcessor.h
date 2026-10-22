@@ -224,7 +224,7 @@ private:
     {
         auto p=std::make_unique<PrecisionC3HostedParameter>(id,name,lo,hi,initial,steps,unit);
         precisionParameters_[static_cast<std::size_t>(index)]=p.get();
-        addPrecisionC3HostedParameter(std::move(p));
+        addHostedParameter(std::move(p));
     }
     Parameters readParameters() const noexcept
     {
