@@ -1,5 +1,6 @@
 // APEX limiter — portable C++17 realtime/DSP regression suite.
 #include "../../Source/LimiterCore/ApexLimiterCore.h"
+#include "../../Source/LimiterCore/ApexLimiterLoudness.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -150,6 +151,56 @@ static void testReset()
     a.process(second.data(),nullptr,static_cast<int>(second.size()));
     assert(first==second);
 }
+
+static void testStereoIntegratedAndLra()
+{
+    using APEX::Limiter::LoudnessSummary;
+    LoudnessSummary whole,split;
+    whole.prepare(kRate);
+    split.prepare(kRate);
+    assert(!std::isfinite(whole.integratedLufs()));
+    assert(whole.loudnessRange()==0.0f);
+
+    const int length=static_cast<int>(12*kRate);
+    std::vector<float> l(static_cast<size_t>(length)),r(static_cast<size_t>(length));
+    for(int i=0;i<length;++i)
+    {
+        const double t=i/kRate;
+        // Same stereo programme in two block schedules; five seconds
+        // quieter, followed by an abrupt, controlled +12dB level jump.
+        const double amplitude=t<5.0?0.035:0.14;
+        l[static_cast<size_t>(i)]=static_cast<float>(
+            amplitude*std::sin(2.0*kPi*997.0*t));
+        r[static_cast<size_t>(i)]=static_cast<float>(
+            amplitude*0.82*std::sin(2.0*kPi*701.0*t));
+    }
+    whole.process(l.data(),r.data(),length);
+    for(int i=0;i<length;i+=127)
+        split.process(l.data()+i,r.data()+i,std::min(127,length-i));
+    const float iA=whole.integratedLufs();
+    const float iB=split.integratedLufs();
+    const float rangeA=whole.loudnessRange();
+    assert(std::isfinite(iA) && iA>-40.0f && iA<-10.0f);
+    assert(std::abs(iA-iB)<0.01f);
+    assert(std::abs(rangeA-split.loudnessRange())<0.01f);
+    assert(rangeA>2.0f && rangeA<30.0f);
+
+    whole.reset();
+    assert(!std::isfinite(whole.integratedLufs()));
+    assert(whole.loudnessRange()==0.0f);
+    whole.process(l.data(),r.data(),length);
+    assert(std::abs(whole.integratedLufs()-iA)<0.01f);
+    assert(std::abs(whole.loudnessRange()-rangeA)<0.01f);
+
+    // Mono session is a supported host layout and must remain finite.
+    LoudnessSummary mono;
+    mono.prepare(44100.0);
+    auto sample=signal(44100*5,0.1);
+    mono.process(sample.data(),nullptr,static_cast<int>(sample.size()));
+    assert(std::isfinite(mono.integratedLufs()));
+    assert(mono.loudnessRange()>=0.0f);
+}
+
 int main()
 {
     testParameterSanitisation();
@@ -159,6 +210,7 @@ int main()
     testDitherDeterminismAndCeiling();
     testBlockSizeIndependence();
     testReset();
+    testStereoIntegratedAndLra();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
