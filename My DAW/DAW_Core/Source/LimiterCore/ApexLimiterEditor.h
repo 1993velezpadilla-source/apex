@@ -89,6 +89,16 @@ public:
                                 juce::dontSendNotification);
         detector_.onChange=[this] { selectParameter(DetectorQuality,detector_.getSelectedId()-1); };
         addAndMakeVisible(detector_);
+        dither_.addItemList({"Off","TPDF","Shaped"},1);
+        dither_.setTooltip("Final 16/24-bit triangular dither or bounded first-order noise shaping.");
+        dither_.setSelectedId(static_cast<int>(param(DitherMode).units())+1,juce::dontSendNotification);
+        dither_.onChange=[this] {selectParameter(DitherMode,dither_.getSelectedId()-1);};
+        addAndMakeVisible(dither_);
+        bits_.addItemList({"16","24"},1);
+        bits_.setTooltip("Target word length for optional final dither.");
+        bits_.setSelectedId(static_cast<int>(param(DitherBits).units())+1,juce::dontSendNotification);
+        bits_.onChange=[this]{selectParameter(DitherBits,bits_.getSelectedId()-1);};
+        addAndMakeVisible(bits_);
 
         setupToggle(tp_,TruePeak,"ISP","Inter-sample peak estimator; not certified true peak.");
         setupToggle(bypass_,Bypass,"BYPASS","Click-free latency-compensated bypass.");
@@ -144,6 +154,7 @@ public:
         label(g,"APEX",31,10,95,29,23,0xfff2eef3,true);
         label(g,"/ BUBBLEGUM LIMITER",118,12,270,26,19,0xffe474a8,true);
         label(g,"NATIVE MASTERING",31,36,230,15,10,0xff8c95a9,false);
+        label(g,"DITHER",w-323,3,87,18,9,0xffabb5c8,true);
         label(g,"A/B",w-262,13,41,30,12,0xff9fa9b9,true);
 
         // Pro-L-like information hierarchy: gain rail at left, full-height
@@ -287,7 +298,7 @@ public:
         label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
         label(g,"Ceiling "+juce::String(param(Ceiling).units(),1)+" dBFS",
               w-160,footerY+9,142,19,11,0xfff7b9d5,true);
-        label(g,"True-peak certification, audio oversampling, gated integrated LUFS and dithering pending",
+        label(g,"True-peak certification, 32x oversampling, multichannel and gated integrated LUFS pending",
               chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
               10,0xffddbac2,false);
     }
@@ -315,6 +326,8 @@ public:
 
         const int footerY=getHeight()-37;
         detector_.setBounds(getWidth()-206,footerY+4,53,27);
+        dither_.setBounds(getWidth()-326,22,94,26);
+        bits_.setBounds(getWidth()-354,footerY+4,46,27);
         tp_.setBounds(195,footerY+3,59,29);
         unity_.setBounds(256,footerY+3,74,29);
         audition_.setBounds(333,footerY+3,73,29);
@@ -460,6 +473,10 @@ private:
         reflect(releaseLink_,ChannelLinkRelease);
         style_.setSelectedId(static_cast<int>(param(LimitingStyle).units())+1,
                              juce::dontSendNotification);
+        dither_.setSelectedId(static_cast<int>(param(DitherMode).units())+1,
+                              juce::dontSendNotification);
+        bits_.setSelectedId(static_cast<int>(param(DitherBits).units())+1,
+                            juce::dontSendNotification);
         detector_.setSelectedId(static_cast<int>(param(DetectorQuality).units())+1,
                                 juce::dontSendNotification);
         auto reflectToggle=[this](juce::ToggleButton& b,int i){
@@ -474,7 +491,7 @@ private:
     Processor& processor_;
     LimiterLookAndFeel skin_;
     juce::Slider gain_,ceiling_,lookahead_,attack_,release_,link_,releaseLink_;
-    juce::ComboBox style_,detector_;
+    juce::ComboBox style_,detector_,dither_,bits_;
     juce::ToggleButton tp_,bypass_,unity_,audition_,dc_;
     juce::TextButton bankA_,bankB_,copy_,resetMeter_,advanced_;
     std::array<Snapshot,2> banks_{};
