@@ -1342,12 +1342,20 @@ public:
         dragBand_ = -1;
         longPressFired_ = false;
         longPressTarget_.reset();
+        createOnTap_ = false;
         pointerDown_ = true;
         pressTime_ = juce::Time::getMillisecondCounter();
         pressPosition_ = event.position;
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
+        if (event.mods.isPopupMenu())
+        {
+            pointerDown_ = false;
+            owner_.selectBand (hit);
+            showBandContextMenu (hit, event.position);
+            return;
+        }
         if (hit < 0 && grabArmed_ && useGrabPeak (event.position))
         {
             longPressFired_ = true;
@@ -1356,7 +1364,7 @@ public:
         if (sketchArmed_ && hit < 0)
         {
             sketching_ = true;
-            longPressFired_ = true; // sketch owns this pointer lease
+            longPressFired_ = true;
             sketchPointCount_ = 0;
             appendSketchPoint (event.position);
             owner_.selectBand (-1);
@@ -1365,6 +1373,41 @@ public:
         }
         if (hit >= 0)
         {
+            // Pro-Q 4 manual: Alt-click bypasses a band. Ctrl+Alt
+            // changes shape, and Alt+Shift steps its slope.
+            if (event.mods.isAltDown())
+            {
+                const auto shapeIndex = parameterIndex (
+                    hit, BandParameterOffset::Shape);
+                const auto slopeIndex = parameterIndex (
+                    hit, BandParameterOffset::Slope);
+                const auto bypassIndex = parameterIndex (
+                    hit, BandParameterOffset::Bypass);
+                if (event.mods.isCtrlDown() || event.mods.isCommandDown())
+                {
+                    auto* p = processor_.getParametricEQParameter (shapeIndex);
+                    const int next = (p->getChoiceIndex() + 1) % 10;
+                    notifyParameter (processor_, shapeIndex,
+                                     p->toNormalised (static_cast<float> (next)));
+                }
+                else if (event.mods.isShiftDown())
+                {
+                    auto* p = processor_.getParametricEQParameter (slopeIndex);
+                    notifyParameter (processor_, slopeIndex,
+                        std::clamp (p->getValue() + 0.10f, 0.0f, 1.0f));
+                }
+                else
+                {
+                    auto* p = processor_.getParametricEQParameter (bypassIndex);
+                    notifyParameter (processor_, bypassIndex,
+                                     p->getBool() ? 0.0f : 1.0f);
+                }
+                pointerDown_ = false;
+                curveDirty_ = true;
+                repaint();
+                return;
+            }
+
             owner_.selectBand (hit);
             dragging_ = true;
             dragBand_ = hit;
@@ -1377,26 +1420,17 @@ public:
         }
         else
         {
+            // Manual: the first background click deselects a selected band.
+            // A subsequent single click (or any double click) creates one.
+            createOnTap_ = owner_.getSelectedBandForTesting() < 0;
             owner_.selectBand (-1);
             longPressTarget_ = firstDisabledBand();
         }
     }
 
-    // Direct, canvas-first creation: double-click any empty frequency/gain
-    // position to create a new hosted APEX band with the real target values.
-    // This complements long-press (touch) and the existing Sketch/Grab tools.
-    void mouseDoubleClick (const juce::MouseEvent& event) override
+    void createBandAt (juce::Point<float> position,
+                       bool dynamic, bool spectral)
     {
-        if (sketchArmed_ || grabArmed_)
-            return;
-        pointerDown_ = false;
-        longPressTarget_.reset();
-        const int existing = hitTest (event.position);
-        if (existing >= 0)
-        {
-            owner_.selectBand (existing);
-            return;
-        }
         const auto slot = firstDisabledBand();
         if (! slot.has_value())
             return;
@@ -1413,21 +1447,93 @@ public:
                    static_cast<float> (FilterShape::Bell));
         applyBand (BandParameterOffset::Frequency,
                    static_cast<float> (frequencyForX (
-                       event.position.x, std::max (1, getWidth()))));
+                       position.x, std::max (1, getWidth()))));
         applyBand (BandParameterOffset::Gain,
                    static_cast<float> (gainForY (
-                       event.position.y, std::max (1, getHeight()))));
+                       position.y, std::max (1, getHeight()))));
         applyBand (BandParameterOffset::Q, 1.0f);
-        if (event.mods.isAltDown())
-        {
-            const int index = dynamicParameterIndex (
-                band, DynamicBandOffset::Enable);
-            notifyParameter (processor_, index, 1.0f);
-        }
+        if (dynamic)
+            notifyParameter (processor_, dynamicParameterIndex (
+                band, DynamicBandOffset::Enable), 1.0f);
+        if (spectral)
+            notifyParameter (processor_, spectralBandParameterIndex (band), 1.0f);
         applyBand (BandParameterOffset::Enabled, 1.0f);
         owner_.selectBand (band);
         curveDirty_ = true;
         repaint();
+    }
+
+    void showBandContextMenu (int band, juce::Point<float> position)
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader (band >= 0 ? "APEX EQ BAND" : "APEX EQ");
+        if (band >= 0)
+        {
+            menu.addItem (1, "Toggle band bypass");
+            menu.addItem (2, "Copy band");
+            menu.addItem (3, "Delete band");
+            menu.addItem (4, "Toggle dynamic EQ");
+        }
+        menu.addItem (5, "Paste band", nativeBandClipboard().valid);
+        juce::Component::SafePointer<EqGraphComponent> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (this)
+            .withTargetScreenArea (juce::Rectangle<int> (
+                localPointToGlobal (position.toInt()), { 2, 2 })),
+            [safe, band] (int id)
+            {
+                if (auto* graph = safe.getComponent())
+                {
+                    if (band >= 0 && band < kMaxBands)
+                    {
+                        if (id == 1)
+                        {
+                            const int idx = parameterIndex (
+                                band, BandParameterOffset::Bypass);
+                            auto* p = graph->processor_.getParametricEQParameter (idx);
+                            notifyParameter (graph->processor_, idx,
+                                             p->getBool() ? 0.0f : 1.0f);
+                        }
+                        else if (id == 2)
+                            graph->copySelectedBand();
+                        else if (id == 3)
+                        {
+                            notifyParameter (graph->processor_,
+                                parameterIndex (band, BandParameterOffset::Enabled), 0.0f);
+                            graph->owner_.selectBand (-1);
+                        }
+                        else if (id == 4)
+                        {
+                            const int idx = dynamicParameterIndex (
+                                band, DynamicBandOffset::Enable);
+                            auto* p = graph->processor_.getParametricEQParameter (idx);
+                            notifyParameter (graph->processor_, idx,
+                                             p->getBool() ? 0.0f : 1.0f);
+                        }
+                    }
+                    if (id == 5)
+                        graph->pasteNewBand();
+                    graph->curveDirty_ = true;
+                    graph->repaint();
+                }
+            });
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& event) override
+    {
+        if (sketchArmed_ || grabArmed_)
+            return;
+        pointerDown_ = false;
+        createOnTap_ = false;
+        longPressTarget_.reset();
+        const int existing = hitTest (event.position);
+        if (existing >= 0)
+        {
+            owner_.selectBand (existing);
+            return;
+        }
+        createBandAt (event.position, event.mods.isAltDown(),
+                      event.mods.isAltDown() && event.mods.isShiftDown());
     }
 
     // Mouse wheel over a node adjusts its hosted Q with balanced gestures.
@@ -1439,7 +1545,21 @@ public:
         const int band = hitTest (event.position);
         if (band < 0 || std::abs (wheel.deltaY) <= 1.0e-6f)
             return;
-        const int index = parameterIndex (band, BandParameterOffset::Q);
+        // Pro-Q manual: cut filters use slope; Ctrl adjusts gain;
+        // Alt adjusts dynamic range; otherwise the wheel adjusts Q.
+        const int shape = processor_.getParametricEQParameter (parameterIndex (
+            band, BandParameterOffset::Shape))->getChoiceIndex();
+        const auto offset = event.mods.isAltDown()
+            ? DynamicBandOffset::Range : DynamicBandOffset::Threshold;
+        const int index = event.mods.isAltDown()
+            ? dynamicParameterIndex (band, offset)
+            : parameterIndex (band,
+                (event.mods.isCtrlDown() || event.mods.isCommandDown())
+                    ? BandParameterOffset::Gain
+                    : (shape == static_cast<int> (FilterShape::LowCut)
+                        || shape == static_cast<int> (FilterShape::HighCut))
+                            ? BandParameterOffset::Slope
+                            : BandParameterOffset::Q);
         auto* parameter = processor_.getParametricEQParameter (index);
         const float precision = event.mods.isShiftDown() ? 0.012f : 0.065f;
         const float next = std::clamp (
@@ -1468,10 +1588,26 @@ public:
         {
             const auto width = static_cast<double> (std::max (1, getWidth()));
             const auto height = static_cast<double> (std::max (1, getHeight()));
+            auto point = event.position;
+            const float dx = point.x - pressPosition_.x;
+            const float dy = point.y - pressPosition_.y;
+            if (event.mods.isShiftDown())
+            {
+                point.x = pressPosition_.x + dx * 0.18f;
+                point.y = pressPosition_.y + dy * 0.18f;
+            }
+            // Alt locks to the dominant axis; Shift fine-tunes either.
+            if (event.mods.isAltDown())
+            {
+                if (std::abs (dx) > std::abs (dy))
+                    point.y = pressPosition_.y;
+                else
+                    point.x = pressPosition_.x;
+            }
             const auto frequency = static_cast<float> (frequencyForX (
-                event.position.x, width));
+                point.x, width));
             const auto gain = static_cast<float> (gainForY (
-                event.position.y, height));
+                point.y, height));
             auto* frequencyParameter = processor_.getParametricEQParameter (
                 parameterIndex (dragBand_, BandParameterOffset::Frequency));
             auto* gainParameter = processor_.getParametricEQParameter (
@@ -1492,8 +1628,18 @@ public:
         }
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& event) override
     {
+        // A stationary first tap on an unselected background adds a band.
+        // Moving the finger or holding until the long-press fires never
+        // creates a second band on release.
+        if (pointerDown_ && ! longPressFired_ && createOnTap_
+            && longPressTarget_.has_value() && dragBand_ < 0
+            && event.position.getDistanceFrom (pressPosition_) <= 10.0f)
+            createBandAt (event.position, event.mods.isAltDown(),
+                          event.mods.isAltDown() && event.mods.isShiftDown());
+        createOnTap_ = false;
+        longPressTarget_.reset();
         pointerDown_ = false;
         if (sketching_)
         {
@@ -2495,6 +2641,7 @@ private:
     int dragBand_ = -1;
     juce::Point<float> lastDragPosition_;
     bool pointerDown_ = false;
+    bool createOnTap_ = false;
     bool longPressFired_ = false;
     std::optional<int> longPressTarget_;
     std::uint32_t pressTime_ = 0;
