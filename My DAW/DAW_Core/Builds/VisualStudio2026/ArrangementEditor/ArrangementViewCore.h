@@ -658,6 +658,8 @@ namespace ArrangementEditor
         bool                   m_suppressEngineClipCreation = false;
         bool                   m_syncingArrangementToEngine = false;
         bool                   m_syncingEngineToArrangement = false;
+        // UI-only clip audition solo; project mutes are untouched.
+        juce::Uuid             m_clipAuditionSoloId;
         double                 m_playheadTimeSeconds = 0.0;
         struct MasterPreviewBin
         {
