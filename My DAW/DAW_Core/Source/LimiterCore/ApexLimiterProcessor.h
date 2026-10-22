@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "ApexLimiterCore.h"
+#include "../MeteringCore/LufsMeterCore.h"
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -111,9 +112,13 @@ public:
     {
         setRateAndBufferSizeDetails(rate,block);
         core_.prepare(rate);
+        lufsLeft_.prepare(rate);
+        lufsRight_.prepare(rate);
         core_.setSettings(readSettings());
         core_.reset();
         setLatencySamples(core_.latencySamples());
+        momentaryLufs_.store(-120.0f,std::memory_order_relaxed);
+        shortTermLufs_.store(-120.0f,std::memory_order_relaxed);
         gainReduction_.store(0,std::memory_order_relaxed);
         peakOutput_.store(0,std::memory_order_relaxed);
         peakInput_.store(0,std::memory_order_relaxed);
@@ -132,6 +137,25 @@ public:
             buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr,
             buffer.getNumSamples());
         for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,buffer.getNumSamples());
+        // Reuse the APEX K-weighting meter, bounded to its preallocated 8192
+        // sample scratch: NO resizing, allocation or locks in the callback.
+        for(int base=0;base<buffer.getNumSamples();base+=8192)
+        {
+            const int count=juce::jmin(8192,buffer.getNumSamples()-base);
+            lufsLeft_.process(buffer.getReadPointer(0,base),count);
+            if (buffer.getNumChannels()>1)
+                lufsRight_.process(buffer.getReadPointer(1,base),count);
+        }
+        const auto combine=[&](float left,float right) noexcept {
+            const double a=std::isfinite(left)?std::pow(10.0,(left+0.691)/10.0):0.0;
+            const double b=(buffer.getNumChannels()>1&&std::isfinite(right))
+                         ?std::pow(10.0,(right+0.691)/10.0):0.0;
+            return a+b>0.0?static_cast<float>(-0.691+10.0*std::log10(a+b)):-120.0f;
+        };
+        momentaryLufs_.store(combine(lufsLeft_.getMomentaryLufs(),lufsRight_.getMomentaryLufs()),
+                              std::memory_order_relaxed);
+        shortTermLufs_.store(combine(lufsLeft_.getShortTermLufs(),lufsRight_.getShortTermLufs()),
+                              std::memory_order_relaxed);
         gainReduction_.store(static_cast<float>(core_.reductionDb()),std::memory_order_relaxed);
         peakOutput_.store(static_cast<float>(core_.outputPeak()),std::memory_order_relaxed);
         peakInput_.store(static_cast<float>(core_.inputPeak()),std::memory_order_relaxed);
@@ -143,6 +167,8 @@ public:
         displayCursor_.store(cursor+1,std::memory_order_release);
     }
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
+    float meterMomentaryLufs() const noexcept { return momentaryLufs_.load(std::memory_order_relaxed); }
+    float meterShortTermLufs() const noexcept { return shortTermLufs_.load(std::memory_order_relaxed); }
     float meterInput() const noexcept { return peakInput_.load(std::memory_order_relaxed); }
     float meterOutput() const noexcept { return peakOutput_.load(std::memory_order_relaxed); }
     static constexpr size_t kDisplayHistory=512;
@@ -230,6 +256,8 @@ private:
     }
     std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
     Core core_;
+    DAW::LufsMeterCore lufsLeft_,lufsRight_;
+    std::atomic<float> momentaryLufs_{-120},shortTermLufs_{-120};
     std::atomic<float> gainReduction_{0},peakInput_{0},peakOutput_{0};
     std::array<std::atomic<float>,kDisplayHistory> displayInput_{};
     std::array<std::atomic<float>,kDisplayHistory> displayOutput_{};
