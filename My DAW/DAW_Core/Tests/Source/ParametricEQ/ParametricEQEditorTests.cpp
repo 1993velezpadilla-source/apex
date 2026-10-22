@@ -70,6 +70,7 @@ public:
     {
         testApexQ4CleanRoomProductionEditor();
         testManualGraphCreationAndModifierModes();
+        testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
@@ -90,6 +91,81 @@ public:
     }
 
 private:
+    void testNativeMultiSelectionRelativeGroupedDragAndHistory()
+    {
+        beginTest ("manual multi-select: Ctrl-click two real bands, octave"
+                   " relative drag, grouped automation, one-step undo");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+        enableBell (*processor, 1, 2100.0f, -3.0f, 1.5f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        expectEquals (editor->selectedBandCountForTesting(), 1);
+        const juce::ModifierKeys control (juce::ModifierKeys::ctrlModifier);
+        const auto p1 = editor->nodeHitAreaForTesting (1).getCentre().toFloat();
+        editor->injectGraphPointerForTesting (p1, 0, control);
+        editor->injectGraphPointerForTesting (p1, 2, control);
+        expectEquals (editor->selectedBandCountForTesting(), 2);
+        expect (editor->isBandSelectedForTesting (0)
+                && editor->isBandSelectedForTesting (1),
+                "Ctrl-click must retain existing band and add new one");
+
+        const auto p0 = editor->nodeHitAreaForTesting (0).getCentre().toFloat();
+        editor->injectGraphPointerForTesting (p0, 0);
+        editor->injectGraphPointerForTesting (
+            { p0.x + 60.0f, p0.y - 25.0f }, 1);
+        editor->injectGraphPointerForTesting (
+            { p0.x + 60.0f, p0.y - 25.0f }, 2);
+        const auto freq0 = processor->getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Frequency))->getUnitsValue();
+        const auto freq1 = processor->getParametricEQParameter (
+            parameterIndex (1, BandParameterOffset::Frequency))->getUnitsValue();
+        const auto gain0 = processor->getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Gain))->getUnitsValue();
+        const auto gain1 = processor->getParametricEQParameter (
+            parameterIndex (1, BandParameterOffset::Gain))->getUnitsValue();
+        expect (freq0 > 930.0f && freq1 > 2100.0f,
+                "group drag actually edits BOTH hosted frequencies");
+        expectWithinAbsoluteError (
+            static_cast<double> (freq0) / 930.0,
+            static_cast<double> (freq1) / 2100.0, 0.02,
+            "grouped bands preserve intervals in log-frequency space");
+        expectWithinAbsoluteError (static_cast<double> (gain0) - 6.0,
+            static_cast<double> (gain1) + 3.0, 0.08,
+            "grouped bands keep equal dB deltas and relative gain balance");
+        expectEquals (editor->selectedBandCountForTesting(), 2);
+        expect (! processor->isAuditionHoldingForTesting(),
+                "grouped drag never implicitly auditions or mutes vocals");
+        editor->undoForTesting();
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), 930.0, 3.0,
+            "undo restores first group's frequency in one action");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), 2100.0, 5.0,
+            "undo also restores second group's frequency");
+        editor->redoForTesting();
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), static_cast<double> (freq0), 3.0,
+            "redo repeats grouped change");
+
+        const auto p1Updated = editor->nodeHitAreaForTesting (1)
+            .getCentre().toFloat();
+        editor->injectGraphPointerForTesting (p1Updated, 0, control);
+        editor->injectGraphPointerForTesting (p1Updated, 2, control);
+        expectEquals (editor->selectedBandCountForTesting(), 1,
+            "Ctrl-click selected band removes it from linked edit group");
+        expect (editor->isBandSelectedForTesting (0));
+        expect (! editor->isBandSelectedForTesting (1));
+    }
+
     void testManualGraphCreationAndModifierModes()
     {
         beginTest ("Pro-Q manual: deselect / Ctrl-click / Alt dynamic / "
