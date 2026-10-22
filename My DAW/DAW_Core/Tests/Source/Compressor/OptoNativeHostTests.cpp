@@ -82,6 +82,16 @@ public:
                             // before capturing its gain-reduction timeline.
                             // GUI curves will reflect those processed blocks;
                             // no invented screenshot waveform is drawn.
+                            // Adversarial criterion #1: prove the graph is LIVE
+                            // (before-pulse vs after-pulse production paint).
+                            // A cosmetically plausible but frozen EQ screenshot
+                            // must fail this gate.
+                            juce::Image dormant(juce::Image::ARGB,1080,740,true,
+                                                juce::SoftwareImageType{});
+                            {
+                                juce::Graphics graph(dormant);
+                                c3Editor->paint(graph);
+                            }
                             juce::AudioBuffer<float> meterDrive(2,128);
                             for(int block=0;block<440;++block)
                             {
@@ -96,6 +106,24 @@ public:
                                 }
                                 native->processBlock(meterDrive,midi);
                             }
+                            // Measure changed LIVE meter pixels in the central
+                            // graph. No random decoration qualifies as audio.
+                            juce::Image active(juce::Image::ARGB,1080,740,true,
+                                               juce::SoftwareImageType{});
+                            {
+                                juce::Graphics graph(active);
+                                c3Editor->paint(graph);
+                            }
+                            int changedTimelinePixels=0;
+                            for(int y=79;y<283;y+=4)
+                                for(int x=64;x<948;x+=4)
+                                    if(dormant.getPixelAt(x,y)!=active.getPixelAt(x,y))
+                                        ++changedTimelinePixels;
+                            expect(changedTimelinePixels > 60,
+                                   "REAL compressed audio MUST move the level history; static decorative scopes fail");
+                            expect(c3Editor->getNumChildComponents() >= 25,
+                                   "one production GUI must expose actual host-bound controls");
+
                             const auto outDir = juce::File::getCurrentWorkingDirectory()
                                 .getChildFile("evidence")
                                 .getChildFile("precision_c3_gui");
