@@ -598,10 +598,12 @@ private:
     }
     void setSelectedVisible (bool visible)
     {
-        for (juce::Component* c : { static_cast<juce::Component*> (&bandPower_),
-                                   &shape_, &slope_, &placement_, &dynamic_,
-                                   &advanced_, &closeBand_, &soloHold_, &freq_, &gain_, &q_ })
-            c->setVisible (visible);
+        const std::array<juce::Component*, 11> widgets {{
+            &bandPower_, &shape_, &slope_, &placement_, &dynamic_,
+            &advanced_, &closeBand_, &soloHold_, &freq_, &gain_, &q_
+        }};
+        for (auto* widget : widgets)
+            widget->setVisible (visible);
     }
     void select (int index)
     {
