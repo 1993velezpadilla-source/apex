@@ -1247,15 +1247,15 @@ namespace ArrangementEditor
             m_touchScrollActive  = false;
             m_smoothedTouchValid = false;
 
-            // Hold released without dragging = right click at that point.
-            if (m_holdActive && ! m_holdDragging)
-            {
-                const auto localPos = m_holdLocalPos.toInt();
-                if (auto* clip = findClipAt(localPos))
-                    showClipContextMenu(clip, localPointToGlobal(localPos), localPos);
-            }
+            // A clip renderer owns clip-long-press dispatch on its OWN
+            // mouseUp. Do not open a second wheel from this polling timer,
+            // which sometimes ran before mouseUp and swallowed the menu.
+            const auto endedHoldPos = m_holdLocalPos.toInt();
+            const bool hadHoldGlow = m_holdActive;
             m_holdActive   = false;
             m_holdDragging = false;
+            if (hadHoldGlow)
+                repaint(endedHoldPos.x - 48, endedHoldPos.y - 48, 96, 96);
 
             // A stationary tap or a tiny digitizer jitter must NEVER enter
             // inertial motion, even though this 60 Hz timer is already active.
@@ -3270,7 +3270,11 @@ namespace ArrangementEditor
         // No mouse emulation or destructive tool operation.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
             && !m_viewOnlyMode && m_toolState.getActiveTool() == EditorTool::Select
-            && m_holdActive && !m_holdDragging
+            && TouchNavigationMath::contextHoldReady(
+                e.getLengthOfMousePress(),
+                e.getMouseDownScreenPosition().x, e.getMouseDownScreenPosition().y,
+                e.getScreenPosition().x, e.getScreenPosition().y)
+            && !m_holdDragging
             && m_selection.getSelectionCount() == 0
             && findClipAt(e.getPosition()) == nullptr)
         {
