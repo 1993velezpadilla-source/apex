@@ -77,6 +77,7 @@ public:
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
         testLongPressCreatesBand();
+        testHeldNodeNeverTriggersImplicitAudition();
         testSketchGestureCreatesBands();
         testSpectrumGrabAndTouchToBand();
         testNativeBandCopyPasteAcrossInstances();
@@ -776,6 +777,39 @@ private:
         expect (created >= 0, "long-press must enable a band");
         expectEquals (editor->getSelectedBandForTesting(), created,
                       "created band becomes the selection");
+    }
+
+    void testHeldNodeNeverTriggersImplicitAudition()
+    {
+        beginTest ("held and dragged EQ nodes keep the vocal path intact");
+        auto storage = std::make_unique<Processor>();
+        auto& processor = *storage;
+        enableBell (processor, 0, 1000.0f, 7.0f, 2.0f);
+        processor.prepareToPlay (48000.0, 128);
+        processBlocks (processor, 2);
+        auto editor = std::make_unique<ParametricEQEditor> (processor);
+        editor->setSize (1280, 720);
+        editor->setSelectedBandForTesting (0);
+        const auto start = editor->getNodeBoundsForTesting (0).getCentre().toFloat();
+        editor->injectGraphMouseDownForTesting (start);
+
+        // This previously called beginAuditionGesture() after 450 ms:
+        // playback became isolated to one narrow frequency region, often
+        // making the singer disappear until finger-up.
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (620);
+        processBlocks (processor, 2);
+        expect (! editor->isAuditionArmedForTesting(),
+                "holding a move handle must never arm solo audition");
+        expect (! processor.isAuditionHoldingForTesting(),
+                "the processor must not silence the singer during a held move");
+
+        editor->injectGraphMouseDragForTesting (
+            start.translated (43.0f, -24.0f));
+        processBlocks (processor, 3);
+        expect (! processor.isAuditionHoldingForTesting(),
+                "continuous drag must stay in full-mix mode");
+        editor->injectGraphMouseUpForTesting (start);
+        expect (! editor->isAuditionArmedForTesting());
     }
 
     void testSketchGestureCreatesBands()
