@@ -220,10 +220,10 @@ namespace ArrangementEditor
 
         // Layer 11b: Interactive handles (fade corners, edge resize, volume btn)
         drawClipHandles(g);
-        // The clip header only carries M and S. Gain is edited through
-        // Clip Properties, avoiding a second unsynchronised gain control.
+        // M / S / V share the same canonical engine clip properties.
         drawMuteButton(g);
         drawSoloButton(g);
+        drawVolumeButton(g);
         // Drag status is now painted in the pinned ruler by ArrangementViewCore.
         // Never cover waveform pixels with the opaque trim/fade information.
 
@@ -332,9 +332,9 @@ namespace ArrangementEditor
 
     juce::Rectangle<int> ClipRenderCore::volumeButtonRect() const
     {
-        // Header strip, left side.
-        const int pad = 2;
-        return { pad, pad, kVolBtnSize, kNameH - pad * 2 };
+        // Third small pill after M/S. All three controls remain in the
+        // 16-pixel clip header, not over the waveform or text.
+        return { 6 + 2 * kMuteBtnSize, 2, kVolBtnSize, kNameH - 4 };
     }
 
     juce::Rectangle<int> ClipRenderCore::muteButtonRect() const
@@ -353,6 +353,7 @@ namespace ArrangementEditor
 
         if (getWidth() >= 44 && muteButtonRect().contains(pos)) return Zone::MuteBtn;
         if (getWidth() >= 62 && soloButtonRect().contains(pos)) return Zone::SoloBtn;
+        if (getWidth() >= 82 && volumeButtonRect().contains(pos)) return Zone::VolumeBtn;
 
         // The fade band (header bottom â†’ green divider line) is reserved
         // exclusively for fade in/out. The left half grows fade-in, the right
@@ -1224,7 +1225,9 @@ namespace ArrangementEditor
         const auto b   = getLocalBounds();
         const int  bx  = b.getX();
         const int  bw  = b.getWidth();
-        const int  textX = bx + (bw >= 62 ? 5 + 2 * (kMuteBtnSize + 2) : 5);
+        const int  textX = bx + (bw >= 82 ? 8 + 2 * kMuteBtnSize + kVolBtnSize
+                                         : bw >= 62 ? 5 + 2 * (kMuteBtnSize + 2)
+                                         : bw >= 44 ? 5 + kMuteBtnSize + 2 : 5);
         const int  textW = bw - (textX - bx) - 5;
 
         if (textW <= 0)
@@ -1489,9 +1492,9 @@ namespace ArrangementEditor
 
     void ClipRenderCore::drawVolumeButton(juce::Graphics& g)
     {
-        if (getWidth() < 50
+        if (getWidth() < 82
             || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
-            return; // hide on tiny clips
+            return; // no overlapping M/S/name on tiny clips
 
         auto r = volumeButtonRect().toFloat();
         const bool hot = (m_hoveredZone == Zone::VolumeBtn);
