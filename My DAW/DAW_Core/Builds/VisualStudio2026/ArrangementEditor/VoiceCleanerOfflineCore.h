@@ -23,6 +23,14 @@ public:
     static RenderResult render(const juce::File& source, const juce::File& destination,
                                float strength = 0.68f)
     {
+        VoiceCleanerDspCore::Options opt;
+        opt.strength = strength;
+        return render(source, destination, opt);
+    }
+
+    static RenderResult render(const juce::File& source, const juce::File& destination,
+                               const VoiceCleanerDspCore::Options& options)
+    {
         RenderResult result;
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
@@ -59,7 +67,7 @@ public:
         for (int ch = 0; ch < channels; ++ch)
             if (!VoiceCleanerDspCore::process(original.getReadPointer(ch),
                                               cleaned.getWritePointer(ch),
-                                              length, sampleRate, strength))
+                                              length, sampleRate, options))
             {
                 result.error = "Spectral cleaner failed.";
                 return result;
