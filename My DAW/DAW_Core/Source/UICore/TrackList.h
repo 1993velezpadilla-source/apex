@@ -631,12 +631,9 @@ public:
         {
             drawMonitorButton(g, monitorBounds_, track_.isMonitoring(), monitorHover_);
             drawMSRButton(g, armBounds_, "R", track_.isArmed(), armHover_, t.colors.transportRecord);
-            const char* preLabel = preFaderSummary_ == 2 ? "PRE"
-                                 : preFaderSummary_ == 3 ? "MIX"
-                                 : preFaderSummary_ == 1 ? "POST" : "—";
-            drawMSRButton(g, preFaderBounds_, preLabel, preFaderSummary_ >= 2, preFaderHover_, juce::Colour(0xFF00B3A4));
+            // PRE/POST and Input TRIM are mixer-only; preserve their actual
+            // DSP/routing controls and remove clutter from arranger rows.
             drawAutomationButton(g, automationBounds_, track_.isAutomationVisible(), track_.isAutomationMuted(), automationHover_);
-            drawTrimButton(g, trimBounds_, trimHover_);
             drawInputButton(g, inputBounds_, inputHover_);
             drawAutomationTargetButton(g, automationTargetBounds_, automationTargetHover_);
         }
@@ -764,91 +761,68 @@ public:
         const float btnH     = juce::jlimit(18.0f, 24.0f, h * 0.44f);
         const float btnY     = btnRowY + (h * 0.5f - btnH) * 0.5f;
 
-        // Optional stacked area (Input above Trim) lives in the right half
-        // so the bottom row stays uncluttered.
-        const float stackH = juce::jlimit(26.0f, 30.0f, h * 0.44f);
-        const float stackTopY = bounds.getY() + 6.0f;
+        // Keep the playlist chooser alone at top right. Input routing and
+        // automation target go in their own reserved slots on the BOTTOM row;
+        // the previous stacked "In 1" overlay obscured the playlist button.
         const float kRightMargin = 10.0f;
-
-        // Count buttons
-        int numBtns = 1; // M
-        if (showPiano)    ++numBtns;
-        if (!isMaster)    numBtns += 4; // S Mon R A
-        if (!isMaster)    ++numBtns;    // Trim counts as 1 slot
-        if (!isMaster)    ++numBtns;    // POST/PRE tap point
-        if (showTarget)   ++numBtns;
-
-        // Reserve a right-side stacked area when input selector is visible.
-        const float stackW = showInput ? juce::jlimit(46.0f, 74.0f, bounds.getWidth() * 0.22f) : 0.0f;
-        const float availW = bounds.getWidth() - kRightMargin - (showInput ? (stackW + 10.0f) : 0.0f);
-        const float kGap   = 8.0f;
-        const float totalGaps = kGap * (float)(numBtns - 1);
-        const float btnW   = juce::jmax(20.0f, (availW - totalGaps) / (float)numBtns);
-        const float trimW  = btnW * 1.3f; // Trim a bit wider
+        const float kGap = 7.0f;
+        const float inputW = showInput ? juce::jlimit(45.0f, 66.0f, bounds.getWidth() * 0.20f) : 0.0f;
+        const float targetW = showTarget ? 40.0f : 0.0f;
+        const int numBtns = (isMaster ? 2 : 5) + (showPiano ? 1 : 0);
+        const float rightReserved = (showInput ? inputW + kGap : 0.0f)
+                                  + (showTarget ? targetW + kGap : 0.0f);
+        const float availW = juce::jmax(50.0f, bounds.getWidth() - kRightMargin - rightReserved);
+        const float btnW = juce::jmax(20.0f,
+            (availW - kGap * (float)(numBtns - 1)) / (float)numBtns);
 
         float x = bounds.getX();
-
         if (showPiano)
         {
             pianoRollBounds_.setBounds(x, btnY, btnW, btnH);
             x += btnW + kGap;
         }
         else
-        {
             pianoRollBounds_ = {};
-        }
 
         muteBounds_.setBounds(x, btnY, btnW, btnH);
         x += btnW + kGap;
+        soloBounds_.setBounds(x, btnY, btnW, btnH);
+        x += btnW + kGap;
+        preFaderBounds_ = {};
+        trimBounds_ = {};
 
         if (isMaster)
         {
-            soloBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-            monitorBounds_ = {}; armBounds_ = {}; preFaderBounds_ = {};
-            automationBounds_ = {}; trimBounds_ = {}; automationTargetBounds_ = {};
+            monitorBounds_ = {};
+            armBounds_ = {};
+            automationBounds_ = {};
+            automationTargetBounds_ = {};
             inputBounds_ = {};
             return;
         }
 
-        soloBounds_.setBounds(x, btnY, btnW, btnH);   x += btnW + kGap;
         monitorBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
         armBounds_.setBounds(x, btnY, btnW, btnH);     x += btnW + kGap;
-        preFaderBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-        automationBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-        trimBounds_.setBounds(x, btnY, trimW, btnH);   x += trimW + kGap;
+        automationBounds_.setBounds(x, btnY, btnW, btnH);
 
-        // Input selector stacked above Trim on the right to avoid border collisions.
+        // Both live BELOW the playlist chip (at y=7..28), never above it.
+        float rightX = bounds.getRight() - kRightMargin;
         if (showInput)
         {
-            const float stackX = bounds.getRight() - kRightMargin - stackW;
-            inputBounds_.setBounds(stackX, stackTopY, stackW, stackH);
-
-            // Keep Trim from running into the stacked area.
-            const float maxRight = stackX - 10.0f;
-            if (trimBounds_.getRight() > maxRight)
-                trimBounds_.setWidth(juce::jmax(18.0f, maxRight - trimBounds_.getX()));
+            rightX -= inputW;
+            inputBounds_.setBounds(rightX, btnY, inputW, btnH);
+            rightX -= kGap;
         }
         else
-        {
             inputBounds_ = {};
-        }
 
         if (showTarget)
         {
-            const float targetW = juce::jlimit(34.0f, 58.0f, btnW * 1.55f);
-            const float targetX = bounds.getRight() - kRightMargin - targetW;
-            automationTargetBounds_.setBounds(targetX, btnY, targetW, btnH);
-
-            const float maxRight = targetX - kGap;
-            if (!inputBounds_.isEmpty() && inputBounds_.getRight() > maxRight)
-                inputBounds_.setWidth(juce::jmax(18.0f, maxRight - inputBounds_.getX()));
-            if (trimBounds_.getRight() > maxRight)
-                trimBounds_.setWidth(juce::jmax(18.0f, maxRight - trimBounds_.getX()));
+            rightX -= targetW;
+            automationTargetBounds_.setBounds(rightX, btnY, targetW, btnH);
         }
         else
-        {
             automationTargetBounds_ = {};
-        }
 
         // DISABLED (product decision): per-row trim VU needle hidden — it
         // looked like a non-interactive knob. Trim metering still lives in
