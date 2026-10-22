@@ -2771,18 +2771,10 @@ namespace ArrangementEditor
 
         rendererPtr->onSoloButtonClicked = [this, clipUuid]()
         {
-            m_clipAuditionSoloId = m_clipAuditionSoloId == clipUuid
-                ? juce::Uuid() : clipUuid;
-            // SOLO is a monitoring mask applied directly to engine clips.
-            // Never rewrite the model's persisted mute state or undo history.
-            juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
-            for (const auto& model : m_clipState.allClips())
-                syncClipToEngine(model);
-            for (const auto& renderer : m_clipRenderers)
-                if (renderer != nullptr)
-                    renderer->setSoloActive(
-                        !m_clipAuditionSoloId.isNull()
-                        && renderer->getClipId() == m_clipAuditionSoloId);
+            // Same action/authority as the SOLO pill in Clip Properties.
+            const auto mapped = m_uuidToEngineId.find(clipUuid);
+            if (mapped != m_uuidToEngineId.end())
+                toggleClipSoloByEngineId(mapped->second);
         };
 
         rendererPtr->onPianoRollClick = [this, clipUuid]()
@@ -5021,6 +5013,60 @@ namespace ArrangementEditor
     // =========================================================================
     // Clip context menu — right-click on arrangement clip
     // =========================================================================
+
+    bool ArrangementViewCore::isClipSoloedByEngineId(
+        const juce::String& engineClipId) const
+    {
+        if (engineClipId.isEmpty() || m_clipAuditionSoloId.isNull())
+            return false;
+        const auto mapped = m_uuidToEngineId.find(m_clipAuditionSoloId);
+        return mapped != m_uuidToEngineId.end() && mapped->second == engineClipId;
+    }
+
+    void ArrangementViewCore::toggleClipSoloByEngineId(
+        const juce::String& engineClipId)
+    {
+        if (engineClipId.isEmpty() || m_engineClipManager == nullptr
+            || m_engineClipManager->getClip(engineClipId) == nullptr)
+            return;
+
+        // Resolve a canonical engine ClipID, not a transient renderer pointer.
+        juce::Uuid selectedId;
+        for (const auto& mapped : m_uuidToEngineId)
+        {
+            if (mapped.second == engineClipId
+                && m_clipState.findClip(mapped.first) != nullptr)
+            {
+                selectedId = mapped.first;
+                break;
+            }
+        }
+        if (selectedId.isNull())
+            return;
+
+        const juce::Uuid previousId = m_clipAuditionSoloId;
+        m_clipAuditionSoloId = previousId == selectedId ? juce::Uuid() : selectedId;
+
+        // Solo is deliberately transient audition masking. Do not toggle
+        // persisted model Mute or the track's own Solo/Automation lanes.
+        // The existing core sync applies model.muted || non-soloed clip.
+        {
+            juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
+            for (const auto& model : m_clipState.allClips())
+                syncClipToEngine(model);
+        }
+        for (const auto& renderer : m_clipRenderers)
+            if (renderer != nullptr)
+                renderer->setSoloActive(
+                    !m_clipAuditionSoloId.isNull()
+                    && renderer->getClipId() == m_clipAuditionSoloId);
+
+        // Notify both windows: switching solo away from a previously active
+        // clip must clear that clip's Solo pill, not just light the new one.
+        if (!previousId.isNull() && previousId != selectedId)
+            notifyEngineClipPropertiesChanged(previousId);
+        notifyEngineClipPropertiesChanged(selectedId);
+    }
 
     float ArrangementViewCore::getCanonicalClipGain(const juce::Uuid& clipId) const
     {
