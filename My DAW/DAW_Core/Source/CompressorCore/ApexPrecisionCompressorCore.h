@@ -92,6 +92,9 @@ public:
         smoothedDry_ = parameters_.dryPercent * 0.01;
         smoothedBypass_ = parameters_.bypass ? 0.0 : 1.0;
         smoothedThreshold_ = parameters_.thresholdDb;
+        smoothedMakeup_ = 1.0;
+        smoothedDrive_ = parameters_.drive;
+        smoothedAutoCorrection_ = 0.0;
         trackedLevelDb_ = -18.0;
         gainReductionDb_ = 0.0;
         inputPeakDb_ = outputPeakDb_ = -120.0;
@@ -114,6 +117,9 @@ public:
             smoothedDry_ = parameters_.dryPercent * 0.01;
             smoothedBypass_ = parameters_.bypass ? 0.0 : 1.0;
             smoothedThreshold_ = parameters_.thresholdDb;
+            smoothedMakeup_ = 1.0;
+            smoothedDrive_ = parameters_.drive;
+            smoothedAutoCorrection_ = 0.0;
         }
     }
 
@@ -153,6 +159,7 @@ public:
             smoothedOutput_ = smooth(smoothedOutput_, outputTarget);
             smoothedBypass_ = smooth(smoothedBypass_, activeTarget);
             smoothedThreshold_ = smooth(smoothedThreshold_, parameters_.thresholdDb);
+            smoothedDrive_ = smooth(smoothedDrive_, parameters_.drive);
 
             const double dryL = safe(left[i]);
             const double dryR = stereo ? safe(right[i]) : dryL;
@@ -191,7 +198,8 @@ public:
                                 + (1.0 - thresholdTrackingCoeff_) * louder;
             const double correction = parameters_.autoThreshold
                 ? std::clamp(trackedLevelDb_ + 18.0, -18.0, 18.0) : 0.0;
-            const double threshold = std::clamp(smoothedThreshold_ + correction, -72.0, 18.0);
+            smoothedAutoCorrection_ = smooth(smoothedAutoCorrection_, correction);
+            const double threshold = std::clamp(smoothedThreshold_ + smoothedAutoCorrection_, -72.0, 18.0);
             double gr[2] {};
             for (int c = 0; c < (stereo ? 2 : 1); ++c)
             {
@@ -227,12 +235,13 @@ public:
             const double makeup = parameters_.autoGain
                 ? std::clamp((-threshold) * (1.0 - 1.0 / parameters_.ratio) * 0.15,
                              0.0, 12.0) : 0.0;
-            const double wetGain = smoothedWet_ * dbGain(makeup);
+            smoothedMakeup_ = smooth(smoothedMakeup_, dbGain(makeup));
+            const double wetGain = smoothedWet_ * smoothedMakeup_;
             double yL = colour(x[0] * dbGain(-gr[0]), parameters_.character,
-                               parameters_.drive) * wetGain
+                               smoothedDrive_) * wetGain
                       + x[0] * smoothedDry_;
             double yR = colour(x[1] * dbGain(-gr[1]), parameters_.character,
-                               parameters_.drive) * wetGain
+                               smoothedDrive_) * wetGain
                       + x[1] * smoothedDry_;
             yL *= smoothedOutput_;
             yR *= smoothedOutput_;
@@ -335,6 +344,7 @@ private:
     std::array<int,2> holdRemaining_ {};
     double smoothedInput_ = 1.0, smoothedWet_ = 1.0, smoothedOutput_ = 1.0;
     double smoothedDry_ = 0.0, smoothedBypass_ = 1.0, smoothedThreshold_ = -18.0;
+    double smoothedMakeup_ = 1.0, smoothedDrive_ = 0.0, smoothedAutoCorrection_ = 0.0;
     double gainReductionDb_ = 0.0, inputPeakDb_ = -120.0, outputPeakDb_ = -120.0;
     bool initialised_ = false;
 };
