@@ -1100,8 +1100,7 @@ public:
         {
             setMouseCursor(DAW::CursorThemeCore::getStandard(
                 resizeHover_ ? juce::MouseCursor::UpDownResizeCursor
-                             : automationTargetHover_ ? juce::MouseCursor::PointingHandCursor
-                                                      : juce::MouseCursor::NormalCursor));
+                             : juce::MouseCursor::NormalCursor));
             repaint();
         }
 
