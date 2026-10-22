@@ -253,21 +253,30 @@ public:
             soloHold_.setBounds (px + 123, py + 40, 75, 30);
             dynamic_.setVisible (false);
         }
+        else if (phone)
+        {
+            // 390px mobile: no overlapping placement, solo or MORE controls.
+            bandPower_.setBounds (px + 7, py + 7, 28, 30);
+            shape_.setBounds (px + 37, py + 7, 81, 30);
+            slope_.setBounds (px + 120, py + 7, 82, 30);
+            placement_.setBounds (px + 204, py + 7, 58, 30);
+            soloHold_.setBounds (px + 264, py + 7, 45, 30);
+            advanced_.setBounds (px + 311, py + 7, 32, 30);
+            closeBand_.setBounds (px + 345, py + 7, 32, 30);
+            dynamic_.setVisible (false);
+        }
         else
         {
-            bandPower_.setBounds (px + 8, py + 9, 31, 30);
-            shape_.setBounds (px + 44, py + 9,
-                              phone ? 83 : 98, 30);
-            slope_.setBounds (px + (phone ? 131 : 147), py + 9,
-                              phone ? 91 : 110, 30);
-            placement_.setBounds (px + controlWidth - (phone ? 146 : 160),
-                                  py + 9, phone ? 68 : 80, 30);
-            advanced_.setBounds (px + controlWidth - 79, py + 9, 33, 30);
-            closeBand_.setBounds (px + controlWidth - 41, py + 9, 32, 30);
-            soloHold_.setBounds (px + (phone ? 232 : 328), py + 9,
-                                 phone ? 64 : 52, 30);
-            dynamic_.setBounds (px + 262, py + 9, 59, 30);
-            dynamic_.setVisible (selected_ >= 0 && ! phone);
+            // 450px desktop: one 30px header row, no floating widget overlap.
+            bandPower_.setBounds (px + 7, py + 7, 28, 30);
+            shape_.setBounds (px + 37, py + 7, 88, 30);
+            slope_.setBounds (px + 127, py + 7, 87, 30);
+            placement_.setBounds (px + 216, py + 7, 70, 30);
+            dynamic_.setBounds (px + 288, py + 7, 44, 30);
+            soloHold_.setBounds (px + 334, py + 7, 46, 30);
+            advanced_.setBounds (px + 382, py + 7, 33, 30);
+            closeBand_.setBounds (px + 417, py + 7, 26, 30);
+            dynamic_.setVisible (selected_ >= 0);
         }
         const int sliderY = py + (narrow ? 68 : 39);
         const int sliderSpace = controlWidth - 18;
