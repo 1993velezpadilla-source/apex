@@ -5841,10 +5841,27 @@ namespace ArrangementEditor
         dialog->enterModalState(true,
             juce::ModalCallbackFunction::create([weakOwner, id, dialog](int result)
             {
-                if (result != 1 || weakOwner == nullptr)
-                    return;
-                const auto nextName = dialog->getTextEditorContents("clipName").trim();
-                if (nextName.isEmpty())
+                // JUCE invokes the callback AFTER destroying the modal when
+                // deleteWhenDismissed=true. That made dialog a dangling pointer,
+                // and could leave Windows touch text input attached to APEX.
+                // Read the editor while alive, explicitly release IME focus,
+                // then destroy the dialog on the message thread.
+                const auto nextName = result == 1
+                    ? dialog->getTextEditorContents("clipName").trim()
+                    : juce::String();
+                if (auto* editor = dialog->getTextEditor("clipName"))
+                {
+                    editor->setWantsKeyboardFocus(false);
+                    editor->giveAwayKeyboardFocus();
+                }
+                dialog->giveAwayKeyboardFocus();
+                juce::Component::SafePointer<juce::AlertWindow> safeDialog(dialog);
+                juce::MessageManager::callAsync([safeDialog]() mutable
+                {
+                    if (safeDialog != nullptr)
+                        delete safeDialog.getComponent();
+                });
+                if (result != 1 || weakOwner == nullptr || nextName.isEmpty())
                     return;
                 auto* existing = weakOwner->m_clipState.findClip(id);
                 if (existing == nullptr || existing->clipName == nextName.toStdString())
@@ -5869,7 +5886,7 @@ namespace ArrangementEditor
                     std::make_unique<LambdaArrangementCommand>("Rename Clip",
                         [apply, nextName]() { apply(nextName); },
                         [apply, oldName]() { apply(juce::String(oldName)); }));
-            }), true);
+            }), false);
     }
 
     void ArrangementViewCore::onClipMute(ArrangementClipModel* clip)
