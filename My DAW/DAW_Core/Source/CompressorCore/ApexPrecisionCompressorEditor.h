@@ -747,42 +747,65 @@ private:
                        juce::Justification::centred);
             g.setColour(juce::Colour(0xff343037));
         }
-        const float hp=processor_.getC3Parameter(SidechainHP).getUnits();
-        const float lp=processor_.getC3Parameter(SidechainLP).getUnits();
-        juce::Path eq;
-        for(int i=0;i<=200;++i)
+        // Zero dB is the true center line. Gain boosts extend above it
+        // and cuts below it. All six filters affect the live detector.
+        constexpr float baseline=589.0f;
+        g.setColour(juce::Colour(0xff565054));
+        g.drawHorizontalLine((int)baseline,178,1005);
+        juce::Path response;
+        for(int i=0;i<=260;++i)
         {
-            const float x=178.0f+i*826.0f/200.0f;
+            const float x=178.0f+i*826.0f/260.0f;
             const float f=freqAtX(x);
-            // 1-pole HP and LP detector response matches implemented path,
-            // not a fictional six-band sidechain EQ.
-            const float h=hp<=0.0f ? 1.0f : f/std::sqrt(f*f+hp*hp);
-            const float l=lp>=19999.0f ? 1.0f : lp/std::sqrt(lp*lp+f*f);
-            const float db=20.0f*std::log10(juce::jmax(1.0e-8f,h*l));
-            const float y=juce::jlimit(top,bottom,top+(-db)*2.05f);
-            if(i==0)eq.startNewSubPath(x,y);
-            else eq.lineTo(x,y);
+            const float db=detectorDbAt(f);
+            const float y=juce::jlimit(top,bottom,baseline-db*2.6f);
+            if(i==0)response.startNewSubPath(x,y);
+            else response.lineTo(x,y);
         }
-        g.setColour(juce::Colour(0xffe8c05b));
-        g.strokePath(eq,juce::PathStrokeType(2.25f));
-        const auto node=[&](float f,juce::Colour c)
+        g.setColour(juce::Colour(0xfff4bc4c));
+        g.strokePath(response,juce::PathStrokeType(2.6f));
+
+        // Genuine draggable high-pass, four parametric bells and low-pass.
+        // Unlike a decorative Pro-Q clone, every circle is tied to real DSP.
+        constexpr std::array<int,6> nodeParams {{
+            SidechainHP,SC1Freq,SC2Freq,SC3Freq,SC4Freq,SidechainLP
+        }};
+        const std::array<juce::Colour,6> nodeColors {{
+            juce::Colour(0xffd87983),juce::Colour(0xff71c884),
+            juce::Colour(0xff65bed5),juce::Colour(0xffda83ce),
+            juce::Colour(0xffe8ba60),juce::Colour(0xff8c9af0)
+        }};
+        for(int i=0;i<6;++i)
         {
-            const float x=freqX(f);
-            const float h=hp<=0.0f?1.0f:f/std::sqrt(f*f+hp*hp);
-            const float l=lp>=19999.0f?1.0f:lp/std::sqrt(lp*lp+f*f);
-            const float db=20.0f*std::log10(juce::jmax(1.0e-8f,h*l));
-            const float y=juce::jlimit(top,bottom,top-db*2.05f);
-            g.setColour(c);g.fillEllipse(x-5.5f,y-5.5f,11.0f,11.0f);
-            g.setColour(juce::Colour(0xfffaf1e1));g.drawEllipse(x-5.5f,y-5.5f,11.0f,11.0f,1.0f);
-        };
-        node(hp<=0.0f?20.0f:hp,juce::Colour(0xffdd8194));
-        node(lp,juce::Colour(0xff89c9a3));
-        g.setColour(juce::Colour(0xff898386));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("LIVE DETECTOR FILTER • DRAG RED HP / GREEN LP",170,523,630,16,
-                   juce::Justification::centredLeft);
-        g.drawText("2 FILTERS ACTIVE  /  6-BAND EQ NOT YET IMPLEMENTED",580,685,426,15,
-                   juce::Justification::centredRight);
+            const int idx=nodeParams[static_cast<std::size_t>(i)];
+            float f=processor_.getC3Parameter(idx).getUnits();
+            if(idx==SidechainHP&&f<=0.0f)f=20.0f;
+            const float x=freqX(f), y=nodeY(idx);
+            const bool selected=i>=1&&i<=4&&(i-1)==selectedBell_;
+            const float r=selected ? 8.5f : 7.0f;
+            g.setColour(juce::Colour(0xff111116));
+            g.fillEllipse(x-r-2,y-r-2,2*(r+2),2*(r+2));
+            g.setColour(nodeColors[static_cast<std::size_t>(i)]);
+            g.fillEllipse(x-r,y-r,2*r,2*r);
+            g.setColour(juce::Colour(0xff19191d));
+            g.setFont(juce::Font(juce::FontOptions(10.0f,juce::Font::bold)));
+            g.drawText(i==0 ? "H" : i==5 ? "L" : juce::String(i),
+                (int)(x-r),(int)(y-r), (int)(2*r),(int)(2*r),
+                juce::Justification::centred);
+        }
+        const int selected=SC1Freq+3*selectedBell_;
+        const auto freq=processor_.getC3Parameter(selected).getUnits();
+        const auto gain=processor_.getC3Parameter(selected+1).getUnits();
+        const auto q=processor_.getC3Parameter(selected+2).getUnits();
+        g.setColour(juce::Colour(0xffc5b9a9));
+        g.setFont(juce::Font(juce::FontOptions(10.0f)));
+        g.drawText("SIX DETECTOR FILTERS   /   DRAG: FREQ + GAIN   /   WHEEL: Q",
+                   170,523,670,16,juce::Justification::centredLeft);
+        g.drawText("BAND "+juce::String(selectedBell_+1)+"   "
+                   +juce::String(freq,0)+" Hz    "
+                   +juce::String(gain,1)+" dB    Q "
+                   +juce::String(q,2),
+                   492,671,516,18,juce::Justification::centredRight);
         const bool wantsExternal=processor_.getC3Parameter(ExternalSidechain).getUnits()>0.5f;
         g.setColour(wantsExternal
             ? (processor_.externalSidechainRouted()
@@ -945,7 +968,7 @@ private:
     std::array<Snapshot,2> snapshots_{};
     Snapshot undoState_{},redoState_{};
     bool hasUndo_=false,hasRedo_=false;
-    int activeSnapshot_=0,activeEqNode_=-1;
+    int activeSnapshot_=0,activeEqNode_=-1,selectedBell_=1;
     bool sidechainOpen_=true;
 };
 
