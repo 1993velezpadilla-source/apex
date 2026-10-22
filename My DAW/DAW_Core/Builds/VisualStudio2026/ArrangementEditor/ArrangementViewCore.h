@@ -667,6 +667,7 @@ namespace ArrangementEditor
         void onClipCopy    (ArrangementClipModel* clip);
         void onClipDuplicate(ArrangementClipModel* clip);
         void onClipDelete  (ArrangementClipModel* clip);
+        void openClipProperties(ArrangementClipModel* clip);
         void onClipRename  (ArrangementClipModel* clip);
         void onClipMute    (ArrangementClipModel* clip);
         void onClipPaste   (double time, int trackIndex);
