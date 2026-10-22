@@ -1836,6 +1836,12 @@ namespace ArrangementEditor
                 else if (auto it = m_playbackClippedClipBins.find(key);
                          it != m_playbackClippedClipBins.end())
                     it->second.erase(bin);
+                // The tick is a tiny read-only timeline overlay, not a
+                // cached waveform rewrite. Invalidate just the playhead
+                // vicinity of the owning clip while sampling the meter.
+                if (auto* renderer = findClipRendererFor(active->id))
+                    repaint(timeToScreenX(seconds) - 3,
+                            renderer->getY() + 15, 7, 14);
             }
         }
         // Only the MASTER lane is invalidated, not the entire arrangement.
