@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 
 namespace APEX::PrecisionC3
@@ -157,6 +158,7 @@ public:
         meterInput_.store(-120.0f, std::memory_order_relaxed);
         meterOutput_.store(-120.0f, std::memory_order_relaxed);
         meterGR_.store(0.0f, std::memory_order_relaxed);
+        meterHistoryCounter_.store(0, std::memory_order_release);
         setLatencySamples(0); // no hidden lookahead/PDC in this preview
     }
     void releaseResources() override {}
@@ -176,6 +178,13 @@ public:
                            std::memory_order_relaxed);
         meterGR_.store(static_cast<float>(engine_.getGainReductionDb()),
                        std::memory_order_relaxed);
+        // One atomic frame per processed buffer. No allocation or locking.
+        const auto write = meterHistoryCounter_.load(std::memory_order_relaxed);
+        const auto cell = static_cast<std::size_t>(write % kMeterHistoryLength);
+        meterHistoryInput_[cell].store(inputLevel(), std::memory_order_relaxed);
+        meterHistoryOutput_[cell].store(outputLevel(), std::memory_order_relaxed);
+        meterHistoryGr_[cell].store(gainReduction(), std::memory_order_relaxed);
+        meterHistoryCounter_.store(write + 1, std::memory_order_release);
     }
     double getTailLengthSeconds() const override { return 0.0; }
     bool acceptsMidi() const override { return false; }
@@ -193,6 +202,22 @@ public:
     float gainReduction() const noexcept { return meterGR_.load(std::memory_order_relaxed); }
     float inputLevel() const noexcept { return meterInput_.load(std::memory_order_relaxed); }
     float outputLevel() const noexcept { return meterOutput_.load(std::memory_order_relaxed); }
+
+    // Read-only GUI history of the ACTUAL compressor DSP meters. Each atomic
+    // cell can be read without blocking the audio callback.
+    static constexpr std::size_t kMeterHistoryLength = 512;
+    std::uint32_t meterHistoryCount() const noexcept
+    {
+        return meterHistoryCounter_.load(std::memory_order_acquire);
+    }
+    void meterHistoryFrame(std::uint32_t sequence, float& in,
+                           float& out, float& gr) const noexcept
+    {
+        const auto cell=static_cast<std::size_t>(sequence % kMeterHistoryLength);
+        in=meterHistoryInput_[cell].load(std::memory_order_relaxed);
+        out=meterHistoryOutput_[cell].load(std::memory_order_relaxed);
+        gr=meterHistoryGr_[cell].load(std::memory_order_relaxed);
+    }
 
     void getStateInformation (juce::MemoryBlock& destination) override
     {
@@ -269,6 +294,10 @@ private:
     std::atomic<float> meterGR_ {0.0f};
     std::atomic<float> meterInput_ {-120.0f};
     std::atomic<float> meterOutput_ {-120.0f};
+    std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryInput_ {};
+    std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryOutput_ {};
+    std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryGr_ {};
+    std::atomic<std::uint32_t> meterHistoryCounter_ {0};
 };
 } // namespace APEX::PrecisionC3
 
