@@ -1738,12 +1738,104 @@ namespace ArrangementEditor
         return snap != nullptr && !snap->empty();
     }
 
+    void ArrangementViewCore::recordMasterOutputPreview(
+        double seconds, float leftPeak, float rightPeak, bool playing)
+    {
+        if (!playing || !std::isfinite(seconds) || seconds < 0.0)
+            return;
+        constexpr double kPreviewHz = 25.0;
+        constexpr size_t kMaxBins = 45000; // 30 minutes, bounded on UI thread
+        const int64_t bin = (int64_t)std::floor(seconds * kPreviewHz);
+        if (!m_masterPreviewBins.empty())
+        {
+            const auto previous = m_masterPreviewBins.back().timeBin;
+            // Seek/rewind is a new listen pass. Never display old output
+            // values at a location that now belongs to another mix state.
+            if (bin < previous || bin - previous > 2500)
+                m_masterPreviewBins.clear();
+        }
+        const float l = std::isfinite(leftPeak) ? juce::jlimit(0.0f, 8.0f, leftPeak) : 0.0f;
+        const float r = std::isfinite(rightPeak) ? juce::jlimit(0.0f, 8.0f, rightPeak) : 0.0f;
+        if (!m_masterPreviewBins.empty() && m_masterPreviewBins.back().timeBin == bin)
+        {
+            m_masterPreviewBins.back().left = juce::jmax(m_masterPreviewBins.back().left, l);
+            m_masterPreviewBins.back().right = juce::jmax(m_masterPreviewBins.back().right, r);
+        }
+        else
+        {
+            m_masterPreviewBins.push_back({bin, l, r});
+            while (m_masterPreviewBins.size() > kMaxBins)
+                m_masterPreviewBins.pop_front();
+        }
+        // Only the MASTER lane is invalidated, not the entire arrangement.
+        const int y = getLaneTopForIndex(0);
+        repaint(m_viewportScrollX, y,
+                juce::jmax(1, getViewportVisibleBounds().getWidth()),
+                juce::jmax(16, (int)m_zoom.getTrackHeightPx()));
+    }
+
+    void ArrangementViewCore::drawReadOnlyMasterPreview(juce::Graphics& g)
+    {
+        if (m_masterPreviewBins.empty() || m_engineTrackManager == nullptr
+            || !m_engineTrackManager->hasMasterTrack())
+            return;
+
+        const float laneH = m_zoom.getTrackHeightPx();
+        const float laneY = (float)getLaneTopForIndex(0);
+        const float top = laneY + 11.0f;
+        const float bottom = laneY + laneH - 11.0f;
+        if (bottom <= top)
+            return;
+
+        const float centre = (top + bottom) * 0.5f;
+        const float half = (bottom - top) * 0.5f;
+        const int visibleLeft = m_viewportScrollX;
+        const int visibleRight = visibleLeft
+            + juce::jmax(1, getViewportVisibleBounds().getWidth());
+        const double pps = m_zoom.getPixelsPerSecond();
+
+        g.saveState();
+        g.reduceClipRegion(juce::Rectangle<int>(
+            visibleLeft, (int)laneY, visibleRight - visibleLeft,
+            juce::jmax(1, (int)laneH)));
+        g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.28f));
+        g.drawHorizontalLine((int)centre, (float)visibleLeft, (float)visibleRight);
+
+        const int64_t firstBin = (int64_t)std::floor(visibleLeft / pps * 25.0) - 2;
+        const auto first = std::lower_bound(m_masterPreviewBins.begin(),
+            m_masterPreviewBins.end(), firstBin,
+            [](const MasterPreviewBin& item, int64_t query)
+            { return item.timeBin < query; });
+        for (auto it = first; it != m_masterPreviewBins.end(); ++it)
+        {
+            const float x = (float)(it->timeBin / 25.0 * pps);
+            if (x > visibleRight + 2)
+                break;
+            const float left = juce::jmin(1.0f, it->left);
+            const float right = juce::jmin(1.0f, it->right);
+            g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.76f));
+            g.fillRect(x, centre - left * half, 1.5f, left * half);
+            g.fillRect(x, centre, 1.5f, right * half);
+
+            if (it->left >= 1.0f || it->right >= 1.0f)
+            {
+                g.setColour(juce::Colour(0xFFFF3B30));
+                g.fillRect(x, top, 2.0f, juce::jmax(3.0f, laneH * 0.125f));
+            }
+        }
+        g.restoreState();
+    }
+
     void ArrangementViewCore::paintOverChildren(juce::Graphics& g)
     {
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
         if (metricsActive)
             TimelinePaintMetrics::paintOverChildrenCount.fetch_add(1);
         TimelinePaintMetrics::ScopedTimer paintChildrenTimer(TimelinePaintMetrics::paintChildrenDurationNs);
+
+        // Master is a read-only scope: no clip component, selection, handles,
+        // plugin chain or audio mutation. Draw the observed stereo peak history.
+        drawReadOnlyMasterPreview(g);
 
         // Automation lanes drawn here so they always appear above clip components
         drawPhase1VolumeAutomation(g);
