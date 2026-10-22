@@ -1873,8 +1873,9 @@ namespace ArrangementEditor
         // Full-value trim/fade feedback lives in the PINNED RULER, never
         // inside a clip: the waveform remains completely unobstructed, even
         // during a multi-clip left/right edge gesture.
-        const juce::String rulerEditReadout = m_activeClipEditInfo.isNotEmpty()
-            ? m_activeClipEditInfo : m_voiceCleanerStatus;
+        // Clip edit values moved to the left-hand TRACKS header above MASTER.
+        // The ruler remains uncluttered and only shows background job status.
+        const juce::String rulerEditReadout = m_voiceCleanerStatus;
         if (rulerEditReadout.isNotEmpty())
         {
             const auto rulerBounds = m_ruler.getBounds();
