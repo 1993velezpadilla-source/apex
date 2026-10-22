@@ -18,7 +18,10 @@ enum ParameterIndex : int
     Threshold = 0, Ratio, Knee, Range, Attack, Release, Hold, Input, Wet,
     Dry, Output, SidechainHP, SidechainLP, StereoLink, Drive, Style,
     Character, AutoThreshold, AutoRelease, AutoGain, Bypass,
-    ExternalSidechain, CharacterPre, ParameterCount
+    ExternalSidechain, CharacterPre,
+    SC1Freq,SC1Gain,SC1Q,SC2Freq,SC2Gain,SC2Q,
+    SC3Freq,SC3Gain,SC3Q,SC4Freq,SC4Gain,SC4Q,
+    ParameterCount
 };
 
 class PrecisionC3HostedParameter final : public juce::AudioProcessorParameterWithID
@@ -135,6 +138,20 @@ public:
         add(Bypass,        "c3.bypass", "Bypass", 0, 1, 0, 2);
         add(ExternalSidechain, "c3.external", "External sidechain", 0, 1, 0, 2);
         add(CharacterPre, "c3.charpre", "Character pre", 0, 1, 0, 2);
+        // Stable append-only indices preserve sessions and automation made
+        // before the detector six-filter expansion.
+        add(SC1Freq,"c3.sc1.freq","SC Bell 1 Frequency",20,20000,130,0," Hz");
+        add(SC1Gain,"c3.sc1.gain","SC Bell 1 Gain",-18,18,0,0," dB");
+        add(SC1Q,"c3.sc1.q","SC Bell 1 Q",0.15f,18,1);
+        add(SC2Freq,"c3.sc2.freq","SC Bell 2 Frequency",20,20000,680,0," Hz");
+        add(SC2Gain,"c3.sc2.gain","SC Bell 2 Gain",-18,18,0,0," dB");
+        add(SC2Q,"c3.sc2.q","SC Bell 2 Q",0.15f,18,1);
+        add(SC3Freq,"c3.sc3.freq","SC Bell 3 Frequency",20,20000,2700,0," Hz");
+        add(SC3Gain,"c3.sc3.gain","SC Bell 3 Gain",-18,18,0,0," dB");
+        add(SC3Q,"c3.sc3.q","SC Bell 3 Q",0.15f,18,1);
+        add(SC4Freq,"c3.sc4.freq","SC Bell 4 Frequency",20,20000,9300,0," Hz");
+        add(SC4Gain,"c3.sc4.gain","SC Bell 4 Gain",-18,18,0,0," dB");
+        add(SC4Q,"c3.sc4.q","SC Bell 4 Q",0.15f,18,1);
     }
 
     const juce::String getName() const override { return kPluginName; }
@@ -309,6 +326,16 @@ private:
         p.outputDb=value(Output);
         p.sidechainHighpassHz=value(SidechainHP);
         p.sidechainLowpassHz=value(SidechainLP);
+        constexpr int bellParams[4][3] = {
+            {SC1Freq,SC1Gain,SC1Q},{SC2Freq,SC2Gain,SC2Q},
+            {SC3Freq,SC3Gain,SC3Q},{SC4Freq,SC4Gain,SC4Q}
+        };
+        for(int i=0;i<4;++i)
+        {
+            p.sidechainBells[static_cast<std::size_t>(i)].hz=value(bellParams[i][0]);
+            p.sidechainBells[static_cast<std::size_t>(i)].gainDb=value(bellParams[i][1]);
+            p.sidechainBells[static_cast<std::size_t>(i)].q=value(bellParams[i][2]);
+        }
         p.stereoLinkPercent=value(StereoLink);
         p.drive=value(Drive);
         p.style=static_cast<int>(std::lround(value(Style)));
@@ -325,7 +352,11 @@ private:
         "c3.release","c3.hold","c3.input","c3.wet","c3.dry",
         "c3.output","c3.schp","c3.sclp","c3.link","c3.drive",
         "c3.style","c3.character","c3.autothr","c3.autorel",
-        "c3.autogain","c3.bypass","c3.external","c3.charpre"
+        "c3.autogain","c3.bypass","c3.external","c3.charpre",
+        "c3.sc1.freq","c3.sc1.gain","c3.sc1.q",
+        "c3.sc2.freq","c3.sc2.gain","c3.sc2.q",
+        "c3.sc3.freq","c3.sc3.gain","c3.sc3.q",
+        "c3.sc4.freq","c3.sc4.gain","c3.sc4.q"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
