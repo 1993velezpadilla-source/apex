@@ -4903,10 +4903,42 @@ namespace ArrangementEditor
 
         cb.normalizeClip = [this](ArrangementClipModel* c)
         {
-            if (c == nullptr || m_engineAudioFiles == nullptr) return;
+            if (c == nullptr || m_engineAudioFiles == nullptr || m_engineClipManager == nullptr)
+                return;
             const auto mapped = m_uuidToEngineId.find(c->id);
-            if (mapped == m_uuidToEngineId.end()) return;
-            m_engineAudioFiles->togglePeakNormalize(mapped->second);
+            if (mapped == m_uuidToEngineId.end())
+                return;
+            auto* audio = dynamic_cast<DAW::AudioClip*>(m_engineClipManager->getClip(mapped->second));
+            if (audio == nullptr)
+                return;
+            // Use the same source boundaries as Clip Properties. Both
+            // surfaces share one normalization state and cannot disagree.
+            auto* buffer = m_engineAudioFiles->getBuffer(audio->getID());
+            if (buffer == nullptr || buffer->getNumSamples() < 1)
+                return;
+            const auto start = juce::jlimit<DAW::SamplePosition>(0,
+                (DAW::SamplePosition)buffer->getNumSamples() - 1,
+                (DAW::SamplePosition)juce::jmax<int64_t>(
+                    (int64_t)audio->getSourceOffset(), audio->getSourceStartSample()));
+            const auto end = audio->getSourceEndSample() > 0
+                ? juce::jlimit<DAW::SamplePosition>(start + 1,
+                    (DAW::SamplePosition)buffer->getNumSamples(),
+                    (DAW::SamplePosition)audio->getSourceEndSample())
+                : (DAW::SamplePosition)buffer->getNumSamples();
+            const auto result = m_engineAudioFiles->togglePeakNormalize(
+                audio->getID(), start, end, 0.0f);
+            if (result == DAW::AudioFileManager::NormalizeResult::Applied
+                && m_engineAudioFiles->isPeakNormalized(audio->getID()))
+            {
+                c->gain = 1.0f;
+                audio->setGain(1.0f);
+                m_clipState.updateClip(*c);
+            }
+            if (onEngineClipNormalizeChanged)
+                onEngineClipNormalizeChanged(*audio);
+            if (auto* renderer = findClipRendererFor(c->id))
+                renderer->repaint();
+            repaint();
         };
 
         cb.isClipNormalized = [this](ArrangementClipModel* c) -> bool
