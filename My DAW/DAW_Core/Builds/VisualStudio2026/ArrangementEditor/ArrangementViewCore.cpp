@@ -3355,12 +3355,11 @@ namespace ArrangementEditor
             }
         }
 
-        // Default: open clip properties window
-        if (m_propertiesWindow)
-        {
-            DBG("[ArrangementView] opening properties for clip: " << clip->clipName);
-            m_propertiesWindow->openForClip(clip);
-        }
+        // Do not fall through to the obsolete ArrangementClipModel properties
+        // window: the production APEX panel is owned by MainComponent through
+        // onEngineClipDoubleClicked. Missing/unloaded engine clips are not
+        // editable, and must not silently open a different editor.
+        DBG("[ArrangementView] clip properties unavailable for unmapped clip: " << clip->clipName);
     }
 
     void ArrangementViewCore::mouseWheelMove(const juce::MouseEvent& e,
