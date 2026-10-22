@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "ApexLimiterCore.h"
 #include "../MeteringCore/LufsMeterCore.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -125,6 +126,11 @@ public:
         gainReduction_.store(0,std::memory_order_relaxed);
         peakOutput_.store(0,std::memory_order_relaxed);
         peakInput_.store(0,std::memory_order_relaxed);
+        // Fixed time-base (~100 history frames/second), independent of host
+        // buffer size. Reinitialised outside the audio callback.
+        displayFrameSamples_=juce::jlimit(64,8192,juce::roundToInt(rate/100.0));
+        displaySamplesCollected_=0;
+        displayFrameInput_=displayFrameOutput_=displayFrameReduction_=0.0f;
         displayCursor_.store(0,std::memory_order_relaxed);
         for (auto& f:displayInput_) f.store(0,std::memory_order_relaxed);
         for (auto& f:displayOutput_) f.store(0,std::memory_order_relaxed);
@@ -136,10 +142,41 @@ public:
     {
         if (buffer.getNumChannels() < 1 || buffer.getNumSamples() < 1) return;
         core_.setSettings(readSettings());
-        core_.process(buffer.getWritePointer(0),
-            buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr,
-            buffer.getNumSamples());
-        for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,buffer.getNumSamples());
+        // Segment DSP at persistent sample-count boundaries, not host callback
+        // boundaries. This produces one real peak/reduction history frame every
+        // ~10 ms at 44.1/48/96 kHz, whether the host uses 64, 128, 1024 or
+        // irregular block sizes. No allocation or lock on the audio thread.
+        float blockInput=0.0f,blockOutput=0.0f,blockReduction=0.0f;
+        const int total=buffer.getNumSamples();
+        for (int base=0;base<total;)
+        {
+            const int chunk=juce::jmin(total-base,displayFrameSamples_-displaySamplesCollected_);
+            core_.process(buffer.getWritePointer(0,base),
+                buffer.getNumChannels()>1?buffer.getWritePointer(1,base):nullptr,chunk);
+            const float input=static_cast<float>(core_.inputPeak());
+            const float output=static_cast<float>(core_.outputPeak());
+            const float reduction=static_cast<float>(core_.reductionDb());
+            blockInput=juce::jmax(blockInput,input);
+            blockOutput=juce::jmax(blockOutput,output);
+            blockReduction=juce::jmax(blockReduction,reduction);
+            displayFrameInput_=juce::jmax(displayFrameInput_,input);
+            displayFrameOutput_=juce::jmax(displayFrameOutput_,output);
+            displayFrameReduction_=juce::jmax(displayFrameReduction_,reduction);
+            base+=chunk;
+            displaySamplesCollected_+=chunk;
+            if(displaySamplesCollected_==displayFrameSamples_)
+            {
+                const auto cursor=displayCursor_.load(std::memory_order_relaxed);
+                const auto slot=static_cast<size_t>(cursor%kDisplayHistory);
+                displayInput_[slot].store(displayFrameInput_,std::memory_order_relaxed);
+                displayOutput_[slot].store(displayFrameOutput_,std::memory_order_relaxed);
+                displayReduction_[slot].store(displayFrameReduction_,std::memory_order_relaxed);
+                displayCursor_.store(cursor+1,std::memory_order_release);
+                displaySamplesCollected_=0;
+                displayFrameInput_=displayFrameOutput_=displayFrameReduction_=0.0f;
+            }
+        }
+        for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,total);
         // Reuse the APEX K-weighting meter, bounded to its preallocated 8192
         // sample scratch: NO resizing, allocation or locks in the callback.
         for(int base=0;base<buffer.getNumSamples();base+=8192)
@@ -159,15 +196,9 @@ public:
                               std::memory_order_relaxed);
         shortTermLufs_.store(combine(lufsLeft_.getShortTermLufs(),lufsRight_.getShortTermLufs()),
                               std::memory_order_relaxed);
-        gainReduction_.store(static_cast<float>(core_.reductionDb()),std::memory_order_relaxed);
-        peakOutput_.store(static_cast<float>(core_.outputPeak()),std::memory_order_relaxed);
-        peakInput_.store(static_cast<float>(core_.inputPeak()),std::memory_order_relaxed);
-        const auto cursor=displayCursor_.load(std::memory_order_relaxed);
-        const auto slot=static_cast<size_t>(cursor%kDisplayHistory);
-        displayInput_[slot].store(meterInput(),std::memory_order_relaxed);
-        displayOutput_[slot].store(meterOutput(),std::memory_order_relaxed);
-        displayReduction_[slot].store(meterReduction(),std::memory_order_relaxed);
-        displayCursor_.store(cursor+1,std::memory_order_release);
+        gainReduction_.store(blockReduction,std::memory_order_relaxed);
+        peakOutput_.store(blockOutput,std::memory_order_relaxed);
+        peakInput_.store(blockInput,std::memory_order_relaxed);
     }
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
     float meterMomentaryLufs() const noexcept { return momentaryLufs_.load(std::memory_order_relaxed); }
@@ -175,6 +206,10 @@ public:
     float meterInput() const noexcept { return peakInput_.load(std::memory_order_relaxed); }
     float meterOutput() const noexcept { return peakOutput_.load(std::memory_order_relaxed); }
     static constexpr size_t kDisplayHistory=512;
+    uint32_t displayFramesPublished() const noexcept
+    {
+        return displayCursor_.load(std::memory_order_acquire);
+    }
     struct DisplayFrame { float input=0.0f,output=0.0f,reduction=0.0f; };
     DisplayFrame displayFrame(size_t age) const noexcept
     {
@@ -269,6 +304,9 @@ private:
     std::array<std::atomic<float>,kDisplayHistory> displayOutput_{};
     std::array<std::atomic<float>,kDisplayHistory> displayReduction_{};
     std::atomic<uint32_t> displayCursor_{0};
+    int displayFrameSamples_=480;
+    int displaySamplesCollected_=0;
+    float displayFrameInput_=0.0f,displayFrameOutput_=0.0f,displayFrameReduction_=0.0f;
 };
 
 }} // namespace APEX::Limiter
