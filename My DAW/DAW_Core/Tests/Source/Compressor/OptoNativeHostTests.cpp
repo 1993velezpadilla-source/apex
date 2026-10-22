@@ -137,22 +137,34 @@ public:
                                                   juce::SoftwareImageType{});
                                 juce::Graphics graphics(image);
                                 c3Editor->paint(graphics);
-                                // JUCE suppresses paintEntireComponent on the
-                                // headless CI runner without a native window peer.
-                                // Explicitly paint each REAL visible child using
-                                // its original local bounds, matching Opto 2A
-                                // screenshot evidence path.
-                                for (int i=0; i<c3Editor->getNumChildComponents(); ++i)
+                                // Headless CI has no window peer. The previous
+                                // renderer painted only direct children, which
+                                // dropped Slider value Labels, ComboBox selected
+                                // text and other nested JUCE components.
+                                // Paint each production component recursively,
+                                // preserving local transforms and clip bounds.
+                                // This is not an invented GUI mockup.
+                                auto paintDescendants =
+                                    [&](auto&& self,juce::Component& parent,
+                                        juce::Graphics& g)->void
                                 {
-                                    auto* child=c3Editor->getChildComponent(i);
-                                    if (child==nullptr || !child->isVisible()) continue;
-                                    const auto bounds=child->getBounds();
-                                    juce::Graphics::ScopedSaveState scope(graphics);
-                                    graphics.reduceClipRegion(bounds);
-                                    graphics.addTransform(juce::AffineTransform::translation(
-                                        (float)bounds.getX(),(float)bounds.getY()));
-                                    child->paint(graphics);
-                                }
+                                    for(int i=0;i<parent.getNumChildComponents();++i)
+                                    {
+                                        auto* child=parent.getChildComponent(i);
+                                        if(child==nullptr || !child->isVisible())
+                                            continue;
+                                        const auto bounds=child->getBounds();
+                                        juce::Graphics::ScopedSaveState state(g);
+                                        g.reduceClipRegion(bounds);
+                                        g.addTransform(juce::AffineTransform::translation(
+                                            (float)bounds.getX(),(float)bounds.getY()));
+                                        child->paint(g);
+                                        self(self,*child,g);
+                                        child->paintOverChildren(g);
+                                    }
+                                };
+                                paintDescendants(paintDescendants,*c3Editor,graphics);
+                                c3Editor->paintOverChildren(graphics);
                                 expect(image.getPixelAt(40,35).getAlpha() > 0,
                                        "C3 production background must be painted");
                                 expect(image.getPixelAt(width/2,height/2).getAlpha() > 0,
