@@ -18,7 +18,7 @@ enum ParameterIndex : int
     Threshold = 0, Ratio, Knee, Range, Attack, Release, Hold, Input, Wet,
     Dry, Output, SidechainHP, SidechainLP, StereoLink, Drive, Style,
     Character, AutoThreshold, AutoRelease, AutoGain, Bypass,
-    ExternalSidechain, ParameterCount
+    ExternalSidechain, CharacterPre, ParameterCount
 };
 
 class PrecisionC3HostedParameter final : public juce::AudioProcessorParameterWithID
@@ -134,6 +134,7 @@ public:
         add(AutoGain,      "c3.autogain", "Auto Gain", 0, 1, 0, 2);
         add(Bypass,        "c3.bypass", "Bypass", 0, 1, 0, 2);
         add(ExternalSidechain, "c3.external", "External sidechain", 0, 1, 0, 2);
+        add(CharacterPre, "c3.charpre", "Character pre", 0, 1, 0, 2);
     }
 
     const juce::String getName() const override { return kPluginName; }
@@ -312,6 +313,7 @@ private:
         p.drive=value(Drive);
         p.style=static_cast<int>(std::lround(value(Style)));
         p.character=static_cast<int>(std::lround(value(Character)));
+        p.characterPre=value(CharacterPre)>=0.5;
         p.autoThreshold=value(AutoThreshold)>=0.5;
         p.autoRelease=value(AutoRelease)>=0.5;
         p.autoGain=value(AutoGain)>=0.5;
@@ -323,7 +325,7 @@ private:
         "c3.release","c3.hold","c3.input","c3.wet","c3.dry",
         "c3.output","c3.schp","c3.sclp","c3.link","c3.drive",
         "c3.style","c3.character","c3.autothr","c3.autorel",
-        "c3.autogain","c3.bypass","c3.external"
+        "c3.autogain","c3.bypass","c3.external","c3.charpre"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
