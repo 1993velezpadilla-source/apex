@@ -60,6 +60,8 @@ public:
                              {"Keybinding Profile", nullptr},
                              {"---"},
                              {"Preferences...", nullptr},
+                             {"Right-click Menu: Radial Wheel", nullptr},
+                             {"Right-click Menu: Classic Windows", nullptr},
                              {"---"},
                              {"Project Settings", nullptr},
                              {"Reset Project...", nullptr} } }
