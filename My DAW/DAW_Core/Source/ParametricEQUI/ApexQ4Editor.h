@@ -637,6 +637,15 @@ public:
     int selectedBandForTesting() const noexcept { return selected_; }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
+    std::array<juce::Rectangle<int>, 8> contextualHeaderBoundsForTesting() const
+    {
+        return {{ bandPower_.getBounds(), shape_.getBounds(),
+                  slope_.getBounds(), placement_.getBounds(),
+                  soloHold_.getBounds(), advanced_.getBounds(),
+                  closeBand_.getBounds(),
+                  dynamic_.isVisible() ? dynamic_.getBounds()
+                                       : juce::Rectangle<int> {} }};
+    }
     juce::Rectangle<int> bootEyeBoundsForTesting() const noexcept
     {
         return bootEyeBounds_;
