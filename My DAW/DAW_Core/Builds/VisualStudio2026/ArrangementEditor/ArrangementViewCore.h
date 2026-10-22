@@ -406,6 +406,7 @@ namespace ArrangementEditor
         std::function<void()> onEngineClipSelectionCleared;
         std::function<void(DAW::Clip&)> onEngineClipDoubleClicked;
         std::function<void(DAW::Clip&)> onEngineClipAutomationRequested;
+        std::function<void(DAW::Clip&)> onEngineClipNormalizeChanged;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneRequested;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneBypassToggled;
         std::function<bool(const DAW::Clip&)> onEngineClipIsVocalTuneBypassed;
