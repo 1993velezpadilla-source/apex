@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <optional>
+#include <limits>
 
 namespace APEX::ParametricEQ
 {
