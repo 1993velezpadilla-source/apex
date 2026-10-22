@@ -200,7 +200,7 @@ namespace ArrangementEditor
                           ResizeLeft, ResizeRight, VolumeBtn, MuteBtn };
         Zone m_activeZone   = Zone::None; // currently being dragged
         bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
-        bool m_touchMenuPending = false; // armed by either a selected or first-tap clip hold
+        bool m_touchMenuPending = false; // selected clip short-tap only
         double m_touchMenuDownMs = 0.0;
         juce::Point<int> m_touchMenuLocalPos;
         std::uint64_t m_touchMenuGestureEpoch = 0; // multi-touch invalidates pending tap
