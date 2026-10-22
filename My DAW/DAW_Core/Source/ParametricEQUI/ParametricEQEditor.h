@@ -104,7 +104,7 @@ public:
                                     float deltaY);
 
 private:
-    void selectBand (int band);
+    void selectBand (int band, bool deferLayoutUntilPointerUp = false);
     void setViewMode (int mode);
     void applyLayout();
     bool isCompactLayout() const noexcept;
