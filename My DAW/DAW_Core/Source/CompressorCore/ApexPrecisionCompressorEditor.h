@@ -289,22 +289,22 @@ public:
 
     void resized() override
     {
-        constexpr std::array<juce::Rectangle<int>,6> mainBounds {{
+        const std::array<juce::Rectangle<int>,6> mainBounds {{
             {77,315,106,106},{251,315,106,106},{578,315,106,106},
             {752,315,106,106},{952,325,62,69},{952,407,62,69}
         }};
         for(int i=0;i<6;++i)
         {
             const auto& b=mainBounds[static_cast<std::size_t>(i)];
-            knobs_[static_cast<std::size_t>(i)].setBounds(rect(b.x,b.y,b.getWidth(),b.getHeight()));
+            knobs_[static_cast<std::size_t>(i)].setBounds(rect(b.getX(),b.getY(),b.getWidth(),b.getHeight()));
         }
-        constexpr std::array<juce::Rectangle<int>,4> miniBounds {{
+        const std::array<juce::Rectangle<int>,4> miniBounds {{
             {72,442,122,36},{241,442,122,36},{580,442,122,36},{749,442,122,36}
         }};
         for(int i=0;i<4;++i)
         {
             const auto& b=miniBounds[static_cast<std::size_t>(i)];
-            minis_[static_cast<std::size_t>(i)].setBounds(rect(b.x,b.y,b.getWidth(),b.getHeight()));
+            minis_[static_cast<std::size_t>(i)].setBounds(rect(b.getX(),b.getY(),b.getWidth(),b.getHeight()));
         }
         toggles_[0].setBounds(rect(76,296,123,21));
         toggles_[1].setBounds(rect(753,296,128,21));
@@ -314,13 +314,13 @@ public:
         scToggle_.setBounds(rect(447,489,189,25));
         for(int i=0;i<5;++i)
         {
-            constexpr std::array<juce::Rectangle<int>,5> utilityBounds {{
+            const std::array<juce::Rectangle<int>,5> utilityBounds {{
                 {27,598,115,27},{27,656,115,27},{228,654,170,28},
                 {750,654,145,28},{898,654,111,28}
             }};
             const auto& b=utilityBounds[static_cast<std::size_t>(i)];
             utilities_[static_cast<std::size_t>(i)].setBounds(
-                rect(b.x,b.y,b.getWidth(),b.getHeight()));
+                rect(b.getX(),b.getY(),b.getWidth(),b.getHeight()));
             utilities_[static_cast<std::size_t>(i)].setVisible(sidechainOpen_||i>=3);
         }
         style_.setBounds(rect(407,365,128,30));
