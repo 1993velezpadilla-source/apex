@@ -278,9 +278,9 @@ public:
         // host's callback block size. Two callbacks sizes must report the
         // same 100 frames over one second and matching real DSP telemetry.
         beginTest("Live history is deterministic across 128/1024 sample host blocks");
-        APEX::Limiter::Processor small,large;
-        small.prepareToPlay(48000.0,128);
-        large.prepareToPlay(48000.0,1024);
+        APEX::Limiter::Processor processor128,processor1024;
+        processor128.prepareToPlay(48000.0,128);
+        processor1024.prepareToPlay(48000.0,1024);
         juce::MidiBuffer midi;
         const auto exercise=[&](APEX::Limiter::Processor& p,int blockSize)
         {
@@ -302,15 +302,15 @@ public:
                 p.processBlock(input,midi);
             }
         };
-        exercise(small,128);
-        exercise(large,1024);
-        expectEquals(static_cast<int>(small.displayFramesPublished()),100,
+        exercise(processor128,128);
+        exercise(processor1024,1024);
+        expectEquals(static_cast<int>(processor128.displayFramesPublished()),100,
                      "48kHz / 100 history Hz = exactly 100 frames");
-        expectEquals(static_cast<int>(large.displayFramesPublished()),100,
+        expectEquals(static_cast<int>(processor1024.displayFramesPublished()),100,
                      "larger host blocks must not compress the graph time axis");
         for(const size_t age:{size_t{0},size_t{1},size_t{9},size_t{34},size_t{99}})
         {
-            const auto a=small.displayFrame(age),b=large.displayFrame(age);
+            const auto a=processor128.displayFrame(age),b=processor1024.displayFrame(age);
             expectWithinAbsoluteError(static_cast<double>(a.input),static_cast<double>(b.input),1e-5,
                                       "input peak must match across host buffer sizes");
             expectWithinAbsoluteError(static_cast<double>(a.output),static_cast<double>(b.output),1e-5,
@@ -318,8 +318,8 @@ public:
             expectWithinAbsoluteError(static_cast<double>(a.reduction),static_cast<double>(b.reduction),1e-5,
                                       "gain reduction must match across host buffer sizes");
         }
-        small.releaseResources();
-        large.releaseResources();
+        processor128.releaseResources();
+        processor1024.releaseResources();
 
         beginTest("Capture real hosted limiter editor including live JUCE controls");
         APEX::Limiter::Processor processor;
