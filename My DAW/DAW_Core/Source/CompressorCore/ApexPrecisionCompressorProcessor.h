@@ -50,8 +50,9 @@ public:
     juce::String getText (float normal, int) const override
     {
         if (steps_ == 2) return normal >= 0.5f ? "On" : "Off";
-        const int index = juce::jlimit(0, steps_ - 1,
-            static_cast<int>(std::lround(normal * (steps_ - 1))));
+        const int index = steps_ > 1
+            ? juce::jlimit(0, steps_ - 1,
+                static_cast<int>(std::lround(normal * (steps_ - 1)))) : 0;
         if (steps_ == 14) return kStyleNames[static_cast<std::size_t>(index)];
         if (steps_ == 4)
         {
