@@ -1759,7 +1759,18 @@ namespace ArrangementEditor
         double seconds, float leftPeak, float rightPeak, bool playing)
     {
         if (!playing || !std::isfinite(seconds) || seconds < 0.0)
+        {
+            m_masterPreviewWasPlaying = false;
             return;
+        }
+        if (!m_masterPreviewWasPlaying)
+        {
+            // Each playback pass re-evaluates clips: a gain/limiter adjustment
+            // can eliminate previously observed clipping. No stale red marks.
+            m_masterPreviewBins.clear();
+            m_playbackClippedClipBins.clear();
+        }
+        m_masterPreviewWasPlaying = true;
         constexpr double kPreviewHz = 25.0;
         constexpr size_t kMaxBins = 45000; // 30 minutes, bounded on UI thread
         const int64_t bin = (int64_t)std::floor(seconds * kPreviewHz);
@@ -1769,7 +1780,10 @@ namespace ArrangementEditor
             // Seek/rewind is a new listen pass. Never display old output
             // values at a location that now belongs to another mix state.
             if (bin < previous || bin - previous > 2500)
+            {
                 m_masterPreviewBins.clear();
+                m_playbackClippedClipBins.clear();
+            }
         }
         const float l = std::isfinite(leftPeak) ? juce::jlimit(0.0f, 8.0f, leftPeak) : 0.0f;
         const float r = std::isfinite(rightPeak) ? juce::jlimit(0.0f, 8.0f, rightPeak) : 0.0f;
@@ -1783,6 +1797,46 @@ namespace ArrangementEditor
             m_masterPreviewBins.push_back({bin, l, r});
             while (m_masterPreviewBins.size() > kMaxBins)
                 m_masterPreviewBins.pop_front();
+        }
+        // Actual track-output clipping is observed during playback, never
+        // inferred from the source file or a static visual gain estimate.
+        // Attribute it only when EXACTLY ONE clip owns that track at this time;
+        // overlapping clips make attribution ambiguous.
+        if (m_engineTrackManager != nullptr)
+        {
+            const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+            for (int index = 0; index < m_engineTrackManager->getNumTracks(); ++index)
+            {
+                auto* track = m_engineTrackManager->getTrack(index);
+                if (track == nullptr || track->isMaster())
+                    continue;
+                const ArrangementClipModel* active = nullptr;
+                int owners = 0;
+                for (const auto& candidate : m_clipState.allClips())
+                {
+                    const double duration = candidate.length
+                        * juce::jmax(0.01, (double)candidate.timePitch.stretchRatio);
+                    if (candidate.trackIndex == index + masterOffset
+                        && !candidate.muted && candidate.startTime <= seconds
+                        && seconds < candidate.startTime + duration)
+                    {
+                        active = &candidate;
+                        if (++owners > 1)
+                            break;
+                    }
+                }
+                if (owners != 1 || active == nullptr)
+                    continue;
+                const auto key = active->id.toString();
+                const float peak = juce::jmax(track->getPeakLevelLeft(), track->getPeakLevelRight());
+                // >1.0f, not >=1.0f: a brickwall limiter exactly at
+                // digital full-scale is NOT evidence of overshoot.
+                if (std::isfinite(peak) && peak > 1.0f)
+                    m_playbackClippedClipBins[key].insert(bin);
+                else if (auto it = m_playbackClippedClipBins.find(key);
+                         it != m_playbackClippedClipBins.end())
+                    it->second.erase(bin);
+            }
         }
         // Only the MASTER lane is invalidated, not the entire arrangement.
         const int y = getLaneTopForIndex(0);
@@ -1845,7 +1899,7 @@ namespace ArrangementEditor
             g.fillRect(x, centre - left * half, 1.5f, left * half);
             g.fillRect(x, centre, 1.5f, right * half);
 
-            if (it->left >= 1.0f || it->right >= 1.0f)
+            if (it->left > 1.0f || it->right > 1.0f)
             {
                 g.setColour(juce::Colour(0xFFFF3B30));
                 g.fillRect(x, top, 2.0f, juce::jmax(3.0f, laneH * 0.125f));
@@ -1864,6 +1918,40 @@ namespace ArrangementEditor
         // Master is a read-only scope: no clip component, selection, handles,
         // plugin chain or audio mutation. Draw the observed stereo peak history.
         drawReadOnlyMasterPreview(g);
+
+        // n-Track-inspired playback history, sourced from REAL channel meters.
+        // No red tick before playback; every new playback pass clears history.
+        // Display only the single clip owning a clipping track, never all the
+        // source-file peaks or other clips sharing an overlapping track.
+        if (!m_playbackClippedClipBins.empty())
+        {
+            const auto visible = getViewportVisibleBounds();
+            const auto pps = m_zoom.getPixelsPerSecond();
+            const auto leftBin = (int64_t)std::floor(m_viewportScrollX / pps * 25.0);
+            const auto rightBin = (int64_t)std::ceil(
+                (m_viewportScrollX + visible.getWidth()) / pps * 25.0);
+            const int protectedTop = m_viewportScrollY + 80;
+            g.setColour(juce::Colour(0xFFFF3B30));
+            for (const auto& entry : m_playbackClippedClipBins)
+            {
+                const juce::Uuid id(entry.first);
+                const auto* clip = m_clipState.findClip(id);
+                auto* renderer = findClipRendererFor(id);
+                if (clip == nullptr || renderer == nullptr)
+                    continue;
+                const auto bounds = renderer->getBounds();
+                const int top = juce::jmax(bounds.getY() + 17, protectedTop);
+                if (top >= bounds.getBottom())
+                    continue;
+                for (auto it = entry.second.lower_bound(leftBin);
+                     it != entry.second.end() && *it <= rightBin; ++it)
+                {
+                    const float x = (float)((double)(*it) / 25.0 * pps);
+                    if (x >= bounds.getX() && x < bounds.getRight())
+                        g.fillRect(x, (float)top, 2.0f, 6.0f);
+                }
+            }
+        }
 
         // Automation lanes drawn here so they always appear above clip components
         drawPhase1VolumeAutomation(g);
