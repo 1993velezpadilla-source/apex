@@ -2495,6 +2495,16 @@ public:
             // Next 32px — matches the ruler height.
             g.setColour(a.color.deepestA);
             g.fillRect(0, 48, getWidth(), 32);
+            if (clipEditInfo_.isNotEmpty())
+            {
+                // Live trim/fade/gain feedback shares this pinned header area,
+                // above MASTER, instead of covering the waveform or controls.
+                g.setFont(juce::Font(juce::FontOptions(12.0f)));
+                g.setColour(a.color.textPrimary);
+                g.drawFittedText(clipEditInfo_, juce::Rectangle<int>(8, 49,
+                    juce::jmax(0, getWidth() - 16), 29),
+                    juce::Justification::centredLeft, 1, 0.75f);
+            }
             g.setColour(a.color.borderSoftA.withAlpha(0.65f));
             g.fillRect(0, 79, getWidth(), 1);
         }
@@ -2504,8 +2514,18 @@ public:
             addBtn_.setBounds(getWidth() - 44, 10, 34, 28);
         }
 
+        void setClipEditInfo(const juce::String& info)
+        {
+            if (clipEditInfo_ == info)
+                return;
+            clipEditInfo_ = info;
+            repaint(0, 48, getWidth(), 32);
+        }
+
         std::function<void()> onQuickAdd;
         QuickAddButton addBtn_;
+    private:
+        juce::String clipEditInfo_;
     };
 
     std::function<void(int deltaX)> onWidthDrag;  // callback for resize
@@ -2517,6 +2537,12 @@ public:
     {
         const auto local = headerBar_.addBtn_.getBounds() + headerBar_.getPosition();
         return local.isEmpty() ? local : local + getScreenPosition();
+    }
+
+    // Non-destructive read-only editing HUD in the pinned TRACKS header.
+    void setClipEditInfo(const juce::String& info)
+    {
+        headerBar_.setClipEditInfo(info);
     }
 
     void setScrollOffset(int y)
