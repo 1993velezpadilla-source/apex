@@ -189,8 +189,12 @@ public:
         // Overlaid pale-blue input, blue output, magenta gain reduction.
         const size_t steps=juce::jmin(static_cast<int>(Processor::kDisplayHistory),
                                       juce::jmax(1,juce::roundToInt(chart.getWidth())));
-        juce::Path gainReduction;
-        bool hasReduction=false;
+        // Two truthful *envelope curves*, not hundreds of bottom-anchored
+        // opaque bars. Adjacent block peaks are joined with JUCE paths and
+        // reduction is drawn separately along the top. All samples are from
+        // processBlock()'s atomic telemetry.
+        juce::Path inputCurve,outputCurve,gainReduction;
+        bool started=false;
         for(size_t i=0;i<steps;++i)
         {
             const auto frame=processor_.displayFrame(steps-i-1);
@@ -199,25 +203,33 @@ public:
             {
                 const float db=20.0f*std::log10(juce::jmax(1.0e-6f,peak));
                 const float fraction=juce::jlimit(0.0f,1.0f,(db+42.0f)/48.0f);
-                return chart.getBottom()-3-fraction*(chart.getHeight()-8);
+                return chart.getBottom()-4-fraction*(chart.getHeight()-10);
             };
-            if(frame.input>0.00001f)
+            if(frame.input<=0.00001f) { started=false; continue; }
+            const float inY=levelY(frame.input);
+            const float outY=levelY(frame.output);
+            const float redY=chart.getY()+4+
+                juce::jlimit(0.0f,1.0f,frame.reduction/18.0f)*(chart.getHeight()*0.23f);
+            if(!started)
             {
-                const float inY=levelY(frame.input);
-                const float outY=levelY(frame.output);
-                g.setColour(juce::Colour(0xffc4cadc).withAlpha(0.65f));
-                g.drawVerticalLine(juce::roundToInt(x),inY,chart.getBottom()-3);
-                g.setColour(juce::Colour(0xff6f92bb).withAlpha(0.78f));
-                g.drawVerticalLine(juce::roundToInt(x),outY,chart.getBottom()-3);
-                const float redY=chart.getY()+3+
-                      juce::jlimit(0.0f,1.0f,frame.reduction/18.0f)*(chart.getHeight()*0.25f);
-                if(!hasReduction) { gainReduction.startNewSubPath(x,redY); hasReduction=true; }
-                else gainReduction.lineTo(x,redY);
+                inputCurve.startNewSubPath(x,inY);
+                outputCurve.startNewSubPath(x,outY);
+                gainReduction.startNewSubPath(x,redY);
+                started=true;
             }
-            else if(hasReduction) hasReduction=false;
+            else
+            {
+                inputCurve.lineTo(x,inY);
+                outputCurve.lineTo(x,outY);
+                gainReduction.lineTo(x,redY);
+            }
         }
-        g.setColour(juce::Colour(0xfff34f77));
-        g.strokePath(gainReduction,juce::PathStrokeType(1.9f));
+        g.setColour(juce::Colour(0xffb7c9e9).withAlpha(0.90f));
+        g.strokePath(inputCurve,juce::PathStrokeType(1.7f));
+        g.setColour(juce::Colour(0xff72a5cc).withAlpha(0.95f));
+        g.strokePath(outputCurve,juce::PathStrokeType(2.0f));
+        g.setColour(juce::Colour(0xfff65393));
+        g.strokePath(gainReduction,juce::PathStrokeType(1.8f));
         label(g,"INPUT / OUTPUT / GAIN REDUCTION",chart.getX()+11,chart.getY()+7,
               chart.getWidth()-85,16,10,0xffe3e0ea,true);
         label(g,"Recent DSP history",chart.getX()+11,chart.getBottom()-24,
@@ -298,8 +310,8 @@ public:
         label(g,"Powered by Bubblegum Engine",13,footerY+7,176,19,
               10,0xffb3a2b1,false);
         label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
-        label(g,"Ceiling "+juce::String(param(Ceiling).units(),1)+" dBFS",
-              w-160,footerY+9,142,19,11,0xfff7b9d5,true);
+        // The ceiling readout is already attached to the top-right slider.
+        // Duplicating it here covers the detector selector at 820px wide.
         label(g,"True-peak certification, 32x oversampling, multichannel and gated integrated LUFS pending",
               chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
               10,0xffddbac2,false);
