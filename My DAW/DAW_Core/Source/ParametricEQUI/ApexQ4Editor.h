@@ -10,6 +10,26 @@
 
 namespace APEX::ParametricEQ
 {
+// Real press-and-hold audition — never starts from touching an EQ node.
+class ApexQ4SoloHold final : public juce::TextButton
+{
+public:
+    std::function<void (bool)> setHolding;
+    ApexQ4SoloHold() : juce::TextButton ("SOLO") {}
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (setHolding) setHolding (true);
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (setHolding) setHolding (false);
+    }
+    void mouseExit (const juce::MouseEvent&) override
+    {
+        if (setHolding) setHolding (false);
+    }
+};
+
 class ApexQ4Editor final : public juce::AudioProcessorEditor,
                            private juce::Timer
 {
@@ -39,6 +59,20 @@ public:
         attach (shape_, "Bell"); attach (slope_, "12 dB/oct");
         attach (placement_, "STEREO");
         attach (dynamic_, "DYN");
+        addAndMakeVisible (soloHold_);
+        soloHold_.setHolding = [this] (bool held)
+        {
+            if (held && selected_ >= 0)
+            {
+                ++auditionToken_;
+                auditionHolding_ = processor_.beginAudition (selected_, auditionToken_);
+            }
+            else if (auditionHolding_)
+            {
+                processor_.endAudition (auditionToken_);
+                auditionHolding_ = false;
+            }
+        };
         attach (advanced_, "•••");
         attach (closeBand_, "×");
 
@@ -108,6 +142,7 @@ public:
         stopTimer();
         if (dragBand_ >= 0)
             finishGestures();
+        if (auditionHolding_) processor_.endAudition (auditionToken_);
         processor_.cancelAudition();
         if (analyzerAutoStarted_ &&
             processor_.getAnalyzerMode() == Analysis::SpectrumTapMode::Both)
@@ -167,9 +202,12 @@ public:
         gain_.setBounds (px + 13 + cw, sliderY, cw, controlHeight - 49);
         q_.setBounds (px + 13 + 2 * cw, sliderY,
                       sliderSpace - 2 * cw, controlHeight - 49);
-        dynamic_.setBounds (px + (phone ? 230 : 270),
-                            py + 8, 64, 30);
-        dynamic_.toFront (false);
+        // Touch-safe audition always needs a dedicated hold target.
+        soloHold_.setBounds (px + (phone ? 232 : 328), py + 9,
+                             phone ? 64 : 52, 30);
+        dynamic_.setBounds (px + 262, py + 9, 59, 30);
+        dynamic_.setVisible (selected_ >= 0 && ! phone);
+        soloHold_.toFront (false);
         curveDirty_ = true;
     }
 
@@ -562,7 +600,7 @@ private:
     {
         for (juce::Component* c : { static_cast<juce::Component*> (&bandPower_),
                                    &shape_, &slope_, &placement_, &dynamic_,
-                                   &advanced_, &closeBand_, &freq_, &gain_, &q_ })
+                                   &advanced_, &closeBand_, &soloHold_, &freq_, &gain_, &q_ })
             c->setVisible (visible);
     }
     void select (int index)
@@ -851,7 +889,7 @@ private:
         juce::PopupMenu menu;
         menu.addItem (1, "Toggle Dynamic EQ");
         menu.addItem (2, "Toggle Spectral Dynamics");
-        menu.addItem (3, "Band audition (hold to listen)");
+        menu.addItem (3, "Solo: use HOLD control on band strip", false);
         menu.addItem (4, "Reset selected band");
         menu.addItem (5, "Delete band");
         juce::Component::SafePointer<ApexQ4Editor> safe (this);
@@ -866,13 +904,6 @@ private:
                         band, DynamicBandOffset::Enable));
                 else if (id == 2)
                     e->toggleParameter (spectralBandParameterIndex (band));
-                else if (id == 3)
-                {
-                    e->processor_.beginAudition (band, ++e->auditionToken_);
-                    // A menu action cannot safely implement hold-to-audition:
-                    // immediately stop rather than risk latching solo.
-                    e->processor_.endAudition (e->auditionToken_);
-                }
                 else if (id == 4)
                 {
                     e->setUnits (parameterIndex (band,
@@ -1043,6 +1074,7 @@ private:
         analyzer_, displayRange_, globalBypass_, autoGain_;
     juce::TextButton bandPower_, shape_, slope_, placement_, dynamic_,
         advanced_, closeBand_;
+    ApexQ4SoloHold soloHold_;
     juce::Slider freq_, gain_, q_;
     int selected_ = -1, dragBand_ = -1, rangeIndex_ = 2;
     float rangeDb_ = 12.0f;
@@ -1061,6 +1093,7 @@ private:
     Analysis::SpectrumTapMode lastAnalyzerMode_ = Analysis::SpectrumTapMode::Closed;
     bool analyzerAutoStarted_ = false;
     std::uint32_t auditionToken_ = 0;
+    bool auditionHolding_ = false;
     std::array<Snapshot, 16> history_ {};
     int historyCount_ = 0, historyPosition_ = 0;
     Snapshot compareCopy_ {};
