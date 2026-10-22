@@ -232,6 +232,42 @@ namespace ArrangementEditor
             g.fillRoundedRectangle(b, 3.0f);
         }
 
+        // Touch hold feedback is attached to the actual clip finger, not
+        // the scrolling ruler. Complete cyan ring = lift to open the wheel.
+        if (m_touchMenuPending)
+        {
+            const auto ms = juce::Time::getMillisecondCounterHiRes() - m_touchMenuDownMs;
+            const float progress = juce::jlimit(0.0f, 1.0f, (float)(ms / 320.0));
+            const auto centre = m_touchMenuLocalPos.toFloat();
+            const float radius = 17.0f + 3.0f * progress;
+            g.setColour(juce::Colour(0xFF1D2937).withAlpha(0.55f));
+            g.fillEllipse(centre.x - radius, centre.y - radius,
+                          radius * 2.0f, radius * 2.0f);
+            juce::Path arc;
+            arc.addCentredArc(centre.x, centre.y, radius, radius, 0.0f,
+                             -juce::MathConstants<float>::halfPi,
+                             -juce::MathConstants<float>::halfPi
+                                 + progress * juce::MathConstants<float>::twoPi, true);
+            g.setColour(progress >= 1.0f ? juce::Colour(0xFF56F8BE)
+                                         : juce::Colour(0xFFFF1678));
+            g.strokePath(arc, juce::PathStrokeType(3.3f));
+            if (progress >= 1.0f)
+            {
+                g.setColour(juce::Colour(0xFF56F8BE).withAlpha(0.80f));
+                g.fillEllipse(centre.x - 4.0f, centre.y - 4.0f, 8.0f, 8.0f);
+            }
+        }
+    }
+
+    void ClipRenderCore::timerCallback()
+    {
+        if (!m_touchMenuPending)
+        {
+            stopTimer();
+            return;
+        }
+        const auto c = m_touchMenuLocalPos;
+        repaint(juce::Rectangle<int>(c.x - 28, c.y - 28, 56, 56));
     }
 
     void ClipRenderCore::resized()
@@ -409,6 +445,7 @@ namespace ArrangementEditor
     {
         m_touchPanFromUnselected = false;
         m_touchMenuPending = false;
+        stopTimer();
         if (!m_model)
         {
             if (auto* parent = getParentComponent())
@@ -481,6 +518,18 @@ namespace ArrangementEditor
             // deliberately move or trim it. Mouse behaviour is unchanged.
             m_touchPanFromUnselected =
                 e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+            if (m_touchPanFromUnselected && z == Zone::None)
+            {
+                if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                {
+                    m_touchMenuPending = true;
+                    m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
+                    m_touchMenuDownScreen = e.getScreenPosition();
+                    m_touchMenuLocalPos = e.getPosition();
+                    m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
+                    startTimerHz(30);
+                }
+            }
             m_activeZone = Zone::VolumeBtn;  // consumes click without editing
             return;
         }
@@ -497,6 +546,10 @@ namespace ArrangementEditor
                 m_touchMenuPending = view->getToolState().getActiveTool() == EditorTool::Select;
                 m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
                 m_touchMenuDownScreen = e.getScreenPosition();
+                m_touchMenuLocalPos = e.getPosition();
+                m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
+                if (m_touchMenuPending)
+                    startTimerHz(30);
             }
         }
 
@@ -541,7 +594,11 @@ namespace ArrangementEditor
         if (m_touchMenuPending && ! TouchNavigationMath::withinTapSlop(
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y))
+        {
             m_touchMenuPending = false;
+            stopTimer();
+            repaint();
+        }
 
         if (m_touchPanFromUnselected)
         {
@@ -772,13 +829,25 @@ namespace ArrangementEditor
                 e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
         m_touchMenuPending = false;
+        stopTimer();
+        // Invalidate the completed hold ring immediately (no ghost dot).
+        repaint();
 
         if (m_touchPanFromUnselected)
         {
             m_touchPanFromUnselected = false;
             m_activeZone = Zone::None;
+            const auto screen = e.getScreenPosition();
+            const auto* parent = getParentComponent();
+            const auto local = parent != nullptr
+                ? e.getEventRelativeTo(parent).getPosition() : e.getPosition();
+            // The parent can rebuild clip renderers when navigation ends.
+            // Copy the callback before that possible destruction.
+            const auto openMenu = onTouchContextMenu;
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
                 view->finishUnselectedClipTouchPan();
+            if (requestTouchMenu && openMenu)
+                openMenu(screen, local);
             return;
         }
         if (m_gainDragActive)
