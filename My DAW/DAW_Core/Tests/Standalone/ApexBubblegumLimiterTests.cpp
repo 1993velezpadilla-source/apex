@@ -103,6 +103,27 @@ static void testBypassIsTrulyDryAndLatencyAligned()
         assert(std::abs(output[static_cast<size_t>(i)]-expected)<1.0e-6f);
     }
 }
+static void testDitherDeterminismAndCeiling()
+{
+    for(int mode=1;mode<=2;++mode)
+    {
+        Core whole,split;
+        whole.prepare(kRate);
+        split.prepare(kRate);
+        Settings settings; settings.ditherMode=mode; settings.ditherBits=16;
+        settings.ceilingDb=-2.0; settings.gainDb=10.0;
+        whole.setSettings(settings);
+        split.setSettings(settings);
+        auto input=signal(23000,0.7), single=input, blocks=input;
+        whole.process(single.data(),nullptr,static_cast<int>(single.size()));
+        for(int i=0;i<static_cast<int>(blocks.size());i+=131)
+            split.process(blocks.data()+i,nullptr,
+                          std::min(131,static_cast<int>(blocks.size())-i));
+        assert(single==blocks);
+        const double ceiling=std::pow(10.0,settings.ceilingDb/20.0);
+        assert(maxAbs(single)<=ceiling+1.0e-6);
+    }
+}
 static void testParameterSanitisation()
 {
     Settings p;
@@ -135,6 +156,7 @@ int main()
     testSilenceAndCorruptInputs();
     testNoUnwantedGainBelowCeiling();
     testBypassIsTrulyDryAndLatencyAligned();
+    testDitherDeterminismAndCeiling();
     testBlockSizeIndependence();
     testReset();
     for (const int block : {1,17,64,128,257,1024})
