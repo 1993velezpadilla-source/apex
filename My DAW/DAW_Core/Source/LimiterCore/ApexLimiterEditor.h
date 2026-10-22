@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <functional>
+#include <utility>
 
 namespace APEX { namespace Limiter {
 
