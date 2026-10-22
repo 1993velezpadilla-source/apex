@@ -41,7 +41,7 @@ jobs:
           & $exe --category=APEX.LimiterPreview --seed=0xA9E12026
           if ($LASTEXITCODE -ne 0) { throw 'Actual limiter editor rendering test failed' }
           $folder='evidence/renderpacks/APEX_LIMITER_NATIVE'
-          foreach ($name in @('01_APEX_Bubblegum_Limiter_REAL_1060x640.png','02_APEX_Bubblegum_Limiter_REAL_820x520.png')) {
+          foreach ($name in @('01_APEX_Bubblegum_Limiter_REAL_1060x640.png','02_APEX_Bubblegum_Limiter_REAL_820x520.png','03_APEX_Bubblegum_Limiter_REAL_1440x800.png')) {
             $file=Join-Path $folder $name
             if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -lt 10000) { throw "Real JUCE screenshot is missing or invalid: $file" }
             $base64=[Convert]::ToBase64String([System.IO.File]::ReadAllBytes($file))
