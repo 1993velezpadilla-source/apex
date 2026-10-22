@@ -68,6 +68,9 @@ public:
     void runTest() override
     {
         testResponsiveLayoutMatrix();
+        testAdversarialCriticBandSwitches();
+        testStaticEvoEyeStamp();
+        testPurpleAnalyzerAndPresetRestore();
         testPrismOffscreenRenderAndSnapshots();
         testDoubleClickCreatesNativeBandAndWheelEditsQ();
         testNodeDragUpdatesParametersThroughRealHierarchy();
@@ -83,6 +86,181 @@ public:
     }
 
 private:
+    void testStaticEvoEyeStamp()
+    {
+        beginTest ("PRISM uses exact static open boot-eye renderer, no extra GUI controls");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        for (const auto& dimensions : std::array<juce::Point<int>, 3> {{
+                {320, 568}, {900, 620}, {1920, 1080} }})
+        {
+            editor->setSize (dimensions.x, dimensions.y);
+            // AudioProcessorEditor adds JUCE's built-in resize-corner
+            // child as the fourth entry. The eye is PAINTED by the existing
+            // editor; it must not create a fifth interactive component.
+            expectEquals (editor->getNumChildComponents(), 4,
+                "only three EQ panels plus JUCE resize-corner; no eye widget");
+            juce::Image rendered (juce::Image::RGB,
+                dimensions.x, dimensions.y, true);
+            {
+                juce::Graphics graphics (rendered);
+                editor->paintEntireComponent (graphics, false);
+            }
+            expect (rendered.isValid(), "branding render keeps GUI valid");
+        }
+#if JUCE_WINDOWS
+        juce::Image stamp (juce::Image::ARGB, 84, 36, true);
+        {
+            juce::Graphics g (stamp);
+            APEX::Branding::EvoEyeStamp::paint (g, {0.0f, 0.0f, 84.0f, 36.0f});
+        }
+        int opaque = 0;
+        for (int y = 0; y < stamp.getHeight(); ++y)
+            for (int x = 0; x < stamp.getWidth(); ++x)
+                if (stamp.getPixelAt (x, y).getAlpha() > 64)
+                    ++opaque;
+        expect (opaque > 50,
+                "canonical boot eye open frame paints recognizable plugin stamp");
+#endif
+    }
+
+    void testPurpleAnalyzerAndPresetRestore()
+    {
+        beginTest ("editor-on analyzer shows normal dBFS material full-height "
+                   "and releases its worker when closed");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 512);
+        expect (processor->getAnalyzerMode()
+            == APEX::Analysis::SpectrumTapMode::Closed);
+        {
+            auto editor = std::make_unique<ParametricEQEditor> (*processor);
+            editor->setSize (1280, 720);
+            expect (processor->getAnalyzerMode()
+                == APEX::Analysis::SpectrumTapMode::Both,
+                "GUI opens the actual pre/post FFT without changing no-GUI default");
+            const float upper = editor->analyzerYForTesting (-6.0f);
+            const float mid = editor->analyzerYForTesting (-38.0f);
+            const float lower = editor->analyzerYForTesting (-96.0f);
+            expect (upper < mid && mid < lower);
+            expect (lower - mid > editor->getGraphBoundsForTesting()
+                          .getHeight() * 0.3f,
+                    "ordinary -38 dBFS analyzer peaks are no longer squashed "
+                    "onto the graph baseline");
+
+            beginTest ("phone effect uses real hosted low/high cuts and preset "
+                       "undo restores 24-band identity");
+            enableBell (*processor, 7, 1880.0f, -3.5f, 2.6f);
+            setUnits (*processor, placementParameterIndex (7), 3.0f);
+            std::array<std::array<float, 7>, kMaxBands> before {};
+            for (int band = 0; band < kMaxBands; ++band)
+                for (int off = 0; off < 7; ++off)
+                    before[static_cast<std::size_t> (band)]
+                          [static_cast<std::size_t> (off)] =
+                        processor->getParametricEQParameter (parameterIndex (
+                            band, static_cast<BandParameterOffset> (off)))->getValue();
+            editor->applyPresetForTesting (2);
+            const auto enabled = [&] (int band)
+            {
+                return processor->getParametricEQParameter (parameterIndex (
+                    band, BandParameterOffset::Enabled))->getBool();
+            };
+            expect (enabled (0) && enabled (1) && enabled (2));
+            expect (! enabled (7), "old bands are disabled not destructively removed");
+            expectEquals (processor->getParametricEQParameter (parameterIndex (
+                0, BandParameterOffset::Shape))->getChoiceIndex(),
+                static_cast<int> (FilterShape::LowCut));
+            expectEquals (processor->getParametricEQParameter (parameterIndex (
+                1, BandParameterOffset::Shape))->getChoiceIndex(),
+                static_cast<int> (FilterShape::HighCut));
+            expectWithinAbsoluteError (
+                processor->getParametricEQParameter (parameterIndex (
+                    0, BandParameterOffset::Frequency))->getUnitsValue(),
+                340.0f, 2.0f);
+            editor->applyPresetForTesting (7);
+            for (int band = 0; band < kMaxBands; ++band)
+                for (int off = 0; off < 7; ++off)
+                    expectWithinAbsoluteError (
+                        processor->getParametricEQParameter (parameterIndex (
+                            band, static_cast<BandParameterOffset> (off)))
+                            ->getValue(),
+                        before[static_cast<std::size_t> (band)]
+                              [static_cast<std::size_t> (off)], 1.0e-6f,
+                        "preset undo preserves stored hosted band IDs");
+            expectWithinAbsoluteError (
+                processor->getParametricEQParameter (
+                    placementParameterIndex (7))->getUnitsValue(),
+                3.0f, 0.01f, "undo restores original Mid placement");
+        }
+        expect (processor->getAnalyzerMode()
+            == APEX::Analysis::SpectrumTapMode::Closed,
+            "closing editor restores dormant analyzer unless changed by user");
+    }
+
+    // Master Orchestrator / Adversarial Critic gate: one deterministic
+    // regression probe in the EXISTING Gauntlet. No extra CI jobs, retries,
+    // external LLM dependency or unbounded test loops.
+    void testAdversarialCriticBandSwitches()
+    {
+        beginTest ("adversarial critic: changing selected bands preserves "
+                   "node access and isolates hosted channel state");
+        auto processor = std::make_unique<Processor>();
+        enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+        enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        auto& channel = editor->getPlacementComboForTesting();
+
+        // Regression from the larger approved floating panel: changing
+        // the focus must not strand either EQ point under the HUD.
+        // The small case uses an intentionally separate touch sheet.
+        for (const auto size : std::array<juce::Point<int>, 4> {{
+                {320, 568}, {900, 620}, {1280, 720}, {1920, 1080}
+             }})
+        {
+            editor->setSize (size.x, size.y);
+            for (int attempt = 0; attempt < 6; ++attempt)
+            {
+                const int selected = attempt % 2;
+                const int choice = (attempt + selected) % kChannelPlacementCount;
+                editor->setSelectedBandForTesting (selected);
+                expectEquals (channel.getSelectedId(),
+                    processor->getParametricEQParameter (
+                        placementParameterIndex (selected))->getChoiceIndex() + 1,
+                    "dropdown follows SELECTED band's canonical placement");
+                channel.setSelectedId (choice + 1, juce::sendNotificationSync);
+                expectEquals (processor->getParametricEQParameter (
+                    placementParameterIndex (selected))->getChoiceIndex(),
+                    choice, "dropdown persists its choice to the selected band");
+                const int otherBand = 1 - selected;
+                const int previousOther = processor->getParametricEQParameter (
+                    placementParameterIndex (otherBand))->getChoiceIndex();
+                // Selecting the next band without editing it may not carry
+                // the previous band's Left/Right/Mid/Side choice over.
+                editor->setSelectedBandForTesting (otherBand);
+                expectEquals (channel.getSelectedId(), previousOther + 1,
+                    "changing bands never leaks another band's channel mode");
+
+                const auto graph = editor->getGraphBoundsForTesting();
+                const auto inspector = editor->getInspectorBoundsForTesting();
+                expect (editor->getLocalBounds().contains (inspector),
+                    "inspector stays on screen under rapid band switching");
+                expect (! inspector.intersects (editor->getTopBarBoundsForTesting()),
+                    "inspector never obscures the footer");
+                if (size.x >= 900 && size.y >= 500)
+                {
+                    expect (graph.contains (inspector),
+                        "floating inspector never escapes the frequency graph");
+                    for (int band = 0; band < 2; ++band)
+                        expect (! inspector.intersects (
+                            editor->getNodeBoundsForTesting (band).translated (
+                                graph.getX(), graph.getY())),
+                            "active EQ handles remain available while switching");
+                }
+            }
+        }
+    }
+
     void testResponsiveLayoutMatrix()
     {
         beginTest ("responsive layout at phone, tablet and desktop sizes");
@@ -104,17 +282,25 @@ private:
             const auto topBar = editor->getTopBarBoundsForTesting();
             const auto graph = editor->getGraphBoundsForTesting();
             const auto inspector = editor->getInspectorBoundsForTesting();
-            // Even when the host forces a narrow or unusually short editor,
-            // the seven graph tools must remain independently tappable.
-            const std::array<juce::TextButton*, 7> tools {{
+            // Premium graph has four visible 44px+ actions; remaining
+            // clipboard/reference features live in the contextual menu.
+            const std::array<juce::TextButton*, 4> tools {{
                 &editor->getSketchButtonForTesting(),
                 &editor->getGrabButtonForTesting(),
-                &editor->getCopyButtonForTesting(),
-                &editor->getPasteButtonForTesting(),
                 &editor->getMatchButtonForTesting(),
-                &editor->getMatchSaveButtonForTesting(),
-                &editor->getMatchLoadButtonForTesting()
+                &editor->getToolsButtonForTesting()
             }};
+            for (auto* hidden : { &editor->getCopyButtonForTesting(),
+                                   &editor->getPasteButtonForTesting(),
+                                   &editor->getMatchSaveButtonForTesting(),
+                                   &editor->getMatchLoadButtonForTesting() })
+            {
+                expect (! hidden->isVisible(),
+                    "contextual features must not crowd the EQ graph");
+                expect (hidden->getWidth() >= 44
+                    && hidden->getHeight() >= 44,
+                    "hidden action handlers remain accessible and testable");
+            }
             for (std::size_t tool = 0; tool < tools.size(); ++tool)
             {
                 const auto b = tools[tool]->getBounds();
@@ -269,11 +455,17 @@ private:
                 expect (bounds.getX() >= 0 && bounds.getY() >= 0,
                         "placement non-negative");
             }
-            for (std::size_t first = 0; first < placements.size(); ++first)
-                for (std::size_t second = first + 1; second < placements.size(); ++second)
-                    expect (! placements[first]->getBounds().intersects (
-                                placements[second]->getBounds()),
-                            "placement buttons must not overlap");
+            for (const auto& button : placements)
+                expect (! button->isVisible(),
+                    "five legacy channel buttons must not clutter the HUD");
+            auto& channel = editor->getPlacementComboForTesting();
+            expect (channel.isVisible(), "single channel dropdown is visible");
+            expectEquals (channel.getNumItems(), 5,
+                          "Stereo/Left/Right/Mid/Side all remain available");
+            expectEquals (channel.getSelectedId(), 1,
+                          "per-band channel defaults to Stereo");
+            expect (channel.getWidth() >= 44 && channel.getHeight() >= 40,
+                    "channel selector stays touch accessible");
 
             const auto audition = editor->getAuditionButtonForTesting().getBounds();
             expect (editor->getAuditionButtonForTesting().isEnabled(),
@@ -288,6 +480,7 @@ private:
                     "audition disabled without selection");
             for (const auto& button : placements)
                 expect (! button->isEnabled(), "placement disabled without selection");
+            expect (! channel.isEnabled(), "channel selector disabled without band");
         }
     }
 
@@ -463,7 +656,7 @@ private:
 
     void testPlacementButtonsAreTouchAccessibleAndFunctional()
     {
-        beginTest ("placement segmented control switches the stable parameter");
+        beginTest ("single Channel dropdown drives the stable placement parameter");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         enableBell (processor, 0, 1000.0f, 6.0f, 2.0f);
@@ -484,16 +677,27 @@ private:
             juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
         };
 
+        auto& channel = editor->getPlacementComboForTesting();
+        expectEquals (channel.getSelectedId(), 1, "Stereo is the default");
         for (int choice = 0; choice < kChannelPlacementCount; ++choice)
         {
-            press (*placements[static_cast<std::size_t> (choice)]);
+            channel.setSelectedId (choice + 1, juce::sendNotificationSync);
             expectEquals (processor.getParametricEQParameter (
                               placementParameterIndex (0))->getChoiceIndex(),
-                          choice);
-            expectEquals (juce::String (channelPlacementName (
+                          choice, "dropdown changes canonical hosted parameter");
+            expectEquals (channel.getText(), juce::String (channelPlacementName (
                               static_cast<ChannelPlacement> (choice))),
-                          placements[static_cast<std::size_t> (choice)]->getButtonText());
+                          "dropdown displays active placement");
         }
+        // Old API is preserved for backwards-compatible programmatic use,
+        // but its five buttons never appear in the on-screen inspector.
+        for (const auto& button : placements)
+            expect (! button->isVisible(), "no duplicate channel buttons");
+        press (*placements[0]);
+        expectEquals (processor.getParametricEQParameter (
+            placementParameterIndex (0))->getChoiceIndex(), 0);
+        editor->setSelectedBandForTesting (0);
+        expectEquals (channel.getSelectedId(), 1);
     }
 
     void testAuditionHoldGestureLifecycle()
@@ -884,8 +1088,9 @@ private:
         auto& load = editor->getMatchLoadButtonForTesting();
         expect (save.getBounds().getHeight() >= 44
             && load.getBounds().getHeight() >= 44);
-        expect (! match.getBounds().intersects (save.getBounds()));
-        expect (! save.getBounds().intersects (load.getBounds()));
+        expect (! save.isVisible() && ! load.isVisible(),
+            "reference actions remain reachable via TOOLS without adding "
+            "overlapping visible graph buttons");
         save.triggerClick();
         juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
         expectEquals (juce::String ("SAVED"), save.getButtonText());
@@ -1056,8 +1261,8 @@ private:
                       restoredEditor->getPhaseButtonForTesting().getButtonText(),
                       "restored editor shows the restored phase mode");
 
-        // The control must remain visible, inside the top bar, and touch-safe
-        // at every responsive breakpoint.
+        // The hosted Phase control lives in Utility instead of adding a
+        // sixth permanent footer button; hidden click path is still tested.
         for (const auto& sizeCase : kSizes)
         {
             restoredEditor->setSize (sizeCase.width, sizeCase.height);

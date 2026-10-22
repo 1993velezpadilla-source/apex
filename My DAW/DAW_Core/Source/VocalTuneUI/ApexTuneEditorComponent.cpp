@@ -388,6 +388,13 @@ void ApexTuneEditorComponent::paint (juce::Graphics& g)
 }
 
 // -----------------------------------------------------------------------------
+void ApexTuneEditorComponent::paintOverChildren (juce::Graphics& g)
+{
+    const float w = (float) juce::jmin (80, juce::jmax (52, getWidth() / 11));
+    APEX::Branding::EvoEyeStamp::paint (g,
+        { (float) getWidth() - w - 7.0f, 5.0f, w, w * 0.37f });
+}
+
 void ApexTuneEditorComponent::resized()
 {
     if (getWidth() <= 0 || getHeight() <= 0) return;

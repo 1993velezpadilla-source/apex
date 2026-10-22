@@ -16,6 +16,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include "../VocalTuneCore/ApexTuneTypes.h"
 #include "ApexTuneToolBarComponent.h"
 #include "ApexTunePianoGridComponent.h"
@@ -54,6 +55,7 @@ public:
 
     // ---- juce::Component ---------------------------------------------------
     void paint   (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
 
