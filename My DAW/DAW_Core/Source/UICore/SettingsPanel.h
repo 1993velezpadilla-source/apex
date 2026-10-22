@@ -399,7 +399,7 @@ public:
         addContentComponent(controlRoomBtn_.get());
 
         contextMenuStyleLabel_ = std::make_unique<juce::Label>();
-        contextMenuStyleLabel_->setText("Context / Right-click menu", juce::dontSendNotification);
+        contextMenuStyleLabel_->setText("Right-click Menu Style  |  Radial / Classic Windows", juce::dontSendNotification);
         contextMenuStyleLabel_->setColour(juce::Label::textColourId, t.colors.text);
         addContentComponent(contextMenuStyleLabel_.get());
         contextMenuStyleCombo_ = std::make_unique<juce::ComboBox>();
@@ -1135,25 +1135,29 @@ private:
 
         if ((searching || currentTab_ == Tab::General)
             && matchesSearch({ "hardware", "audio device", "control room", "monitor", "device",
-                                "right click", "right-click", "context", "radial", "wheel", "menu" }))
+                                "right click", "right-click", "context", "radial", "wheel", "menu", "classic", "windows" }))
         {
             anythingShown = true;
             beginCard(x, y, w, 40, searching);
             y = layoutSectionTitle(generalHeaderLabel_.get(), generalDescriptionLabel_.get(), generalCollapseBtn_.get(), SectionId::GeneralHardware, searching, x, y, w);
-            if (!isSectionCollapsed(SectionId::GeneralHardware))
-            {
-            audioDeviceBtn_->setVisible(true);
-            audioDeviceBtn_->setBounds(insetX, y, insetW, 30);
-            y += 36;
-            controlRoomBtn_->setVisible(true);
-            controlRoomBtn_->setBounds(insetX, y, insetW, 30);
-            y += 40;
+            // Keep this critical gesture preference directly visible on
+            // General even when the Hardware section is collapsed. Previously
+            // users could not find a way back to the Windows right-click menu.
             contextMenuStyleLabel_->setVisible(true);
             contextMenuStyleLabel_->setBounds(insetX, y, insetW, 25);
             y += 26;
             contextMenuStyleCombo_->setVisible(true);
-            contextMenuStyleCombo_->setBounds(insetX, y, insetW, 48); // 48dp touch-safe
-            y += 56; // reserve the full control height plus gap; no card overlap
+            contextMenuStyleCombo_->setBounds(insetX, y, insetW, 48);
+            y += 56;
+
+            if (!isSectionCollapsed(SectionId::GeneralHardware))
+            {
+                audioDeviceBtn_->setVisible(true);
+                audioDeviceBtn_->setBounds(insetX, y, insetW, 30);
+                y += 36;
+                controlRoomBtn_->setVisible(true);
+                controlRoomBtn_->setBounds(insetX, y, insetW, 30);
+                y += 40;
             }
             y = endCard(y);
 
