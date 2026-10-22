@@ -60,6 +60,11 @@ int main()
     assert(TouchNavigationMath::contextHoldReady(320, 100, 100, 104, 104));
     assert(!TouchNavigationMath::contextHoldReady(700, 100, 100, 108, 100));
 
-    std::cout << "TouchNavigationMath: 26 deterministic assertions passed\n";
+    assert(TouchNavigationMath::selectedSecondTapReady(true, 80, 100, 100, 100, 100));
+    assert(TouchNavigationMath::selectedSecondTapReady(true, 280, 100, 100, 104, 104));
+    assert(!TouchNavigationMath::selectedSecondTapReady(false, 80, 100, 100, 100, 100));
+    assert(!TouchNavigationMath::selectedSecondTapReady(true, 281, 100, 100, 100, 100));
+    assert(!TouchNavigationMath::selectedSecondTapReady(true, 120, 100, 100, 108, 100));
+    std::cout << "TouchNavigationMath: 31 deterministic assertions passed\n";
     return 0;
 }

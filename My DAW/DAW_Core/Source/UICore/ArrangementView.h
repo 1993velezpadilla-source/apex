@@ -130,10 +130,10 @@ public:
             if (onOpenClipProperties)
                 onOpenClipProperties(clip);
         };
-        core_->onEngineClipNormalizeChanged = [this](Clip& clip)
+        core_->onEngineClipPropertiesChanged = [this](Clip& clip)
         {
-            if (onClipNormalizationChanged)
-                onClipNormalizationChanged(clip);
+            if (onClipPropertiesChanged)
+                onClipPropertiesChanged(clip);
         };
         core_->onEngineClipAutomationRequested = [this](Clip& clip)
         {
@@ -274,7 +274,7 @@ trackManager_.addListener(this);
             core_->onEngineClipSelected = nullptr;
             core_->onEngineClipSelectionCleared = nullptr;
             core_->onEngineClipDoubleClicked = nullptr;
-            core_->onEngineClipNormalizeChanged = nullptr;
+            core_->onEngineClipPropertiesChanged = nullptr;
             core_->onEngineClipAutomationRequested = nullptr;
             core_->onEngineClipVocalTuneRequested = nullptr;
             core_->onEngineClipVocalTuneBypassToggled = nullptr;
@@ -838,7 +838,7 @@ trackManager_.addListener(this);
     std::function<void()> onClipSelectionCleared;
     std::function<void(Clip&)> onOpenClipProperties;
     std::function<void(Clip&)> onOpenClipAutomation;
-    std::function<void(Clip&)> onClipNormalizationChanged;
+    std::function<void(Clip&)> onClipPropertiesChanged;
     std::function<void(Clip&)> onOpenClipVocalTune;
     std::function<void(Clip&)> onToggleClipVocalTuneBypass;
     std::function<bool(const Clip&)> onIsClipVocalTuneBypassed;

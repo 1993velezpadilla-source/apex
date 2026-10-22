@@ -220,8 +220,10 @@ namespace ArrangementEditor
 
         // Layer 11b: Interactive handles (fade corners, edge resize, volume btn)
         drawClipHandles(g);
-        drawVolumeButton(g);
+        // M / S / V share the same canonical engine clip properties.
         drawMuteButton(g);
+        drawSoloButton(g);
+        drawVolumeButton(g);
         // Drag status is now painted in the pinned ruler by ArrangementViewCore.
         // Never cover waveform pixels with the opaque trim/fade information.
 
@@ -232,42 +234,6 @@ namespace ArrangementEditor
             g.fillRoundedRectangle(b, 3.0f);
         }
 
-        // Touch hold feedback is attached to the actual clip finger, not
-        // the scrolling ruler. Complete cyan ring = lift to open the wheel.
-        if (m_touchMenuPending)
-        {
-            const auto ms = juce::Time::getMillisecondCounterHiRes() - m_touchMenuDownMs;
-            const float progress = juce::jlimit(0.0f, 1.0f, (float)(ms / 320.0));
-            const auto centre = m_touchMenuLocalPos.toFloat();
-            const float radius = 17.0f + 3.0f * progress;
-            g.setColour(juce::Colour(0xFF1D2937).withAlpha(0.55f));
-            g.fillEllipse(centre.x - radius, centre.y - radius,
-                          radius * 2.0f, radius * 2.0f);
-            juce::Path arc;
-            arc.addCentredArc(centre.x, centre.y, radius, radius, 0.0f,
-                             -juce::MathConstants<float>::halfPi,
-                             -juce::MathConstants<float>::halfPi
-                                 + progress * juce::MathConstants<float>::twoPi, true);
-            g.setColour(progress >= 1.0f ? juce::Colour(0xFF56F8BE)
-                                         : juce::Colour(0xFFFF1678));
-            g.strokePath(arc, juce::PathStrokeType(3.3f));
-            if (progress >= 1.0f)
-            {
-                g.setColour(juce::Colour(0xFF56F8BE).withAlpha(0.80f));
-                g.fillEllipse(centre.x - 4.0f, centre.y - 4.0f, 8.0f, 8.0f);
-            }
-        }
-    }
-
-    void ClipRenderCore::timerCallback()
-    {
-        if (!m_touchMenuPending)
-        {
-            stopTimer();
-            return;
-        }
-        const auto c = m_touchMenuLocalPos;
-        repaint(juce::Rectangle<int>(c.x - 28, c.y - 28, 56, 56));
     }
 
     void ClipRenderCore::resized()
@@ -366,25 +332,28 @@ namespace ArrangementEditor
 
     juce::Rectangle<int> ClipRenderCore::volumeButtonRect() const
     {
-        // Header strip, left side.
-        const int pad = 2;
-        return { pad, pad, kVolBtnSize, kNameH - pad * 2 };
+        // Third small pill after M/S. All three controls remain in the
+        // 16-pixel clip header, not over the waveform or text.
+        return { 6 + 2 * kMuteBtnSize, 2, kVolBtnSize, kNameH - 4 };
     }
 
     juce::Rectangle<int> ClipRenderCore::muteButtonRect() const
     {
-        // Right after the volume button.
-        const int pad = 2;
-        const int x = pad + kVolBtnSize + pad;
-        return { x, pad, kMuteBtnSize, kNameH - pad * 2 };
+        return { 2, 2, kMuteBtnSize, kNameH - 4 };
+    }
+
+    juce::Rectangle<int> ClipRenderCore::soloButtonRect() const
+    {
+        return { 4 + kMuteBtnSize, 2, kMuteBtnSize, kNameH - 4 };
     }
 
     ClipRenderCore::Zone ClipRenderCore::hitTestZone(juce::Point<int> pos) const
     {
         if (!m_model) return Zone::None;
 
-        if (volumeButtonRect().contains(pos))  return Zone::VolumeBtn;
-        if (muteButtonRect().contains(pos))    return Zone::MuteBtn;
+        if (getWidth() >= 44 && muteButtonRect().contains(pos)) return Zone::MuteBtn;
+        if (getWidth() >= 62 && soloButtonRect().contains(pos)) return Zone::SoloBtn;
+        if (getWidth() >= 82 && volumeButtonRect().contains(pos)) return Zone::VolumeBtn;
 
         // The fade band (header bottom â†’ green divider line) is reserved
         // exclusively for fade in/out. The left half grows fade-in, the right
@@ -409,7 +378,8 @@ namespace ArrangementEditor
             case Zone::ResizeLeft:
             case Zone::ResizeRight: setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::LeftRightResizeCursor)); break;
             case Zone::VolumeBtn:
-            case Zone::MuteBtn:     setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::PointingHandCursor));    break;
+            case Zone::MuteBtn:
+            case Zone::SoloBtn:     setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::PointingHandCursor));    break;
             default:                setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::NormalCursor));          break;
         }
     }
@@ -445,7 +415,6 @@ namespace ArrangementEditor
     {
         m_touchPanFromUnselected = false;
         m_touchMenuPending = false;
-        stopTimer();
         if (!m_model)
         {
             if (auto* parent = getParentComponent())
@@ -499,6 +468,12 @@ namespace ArrangementEditor
             m_activeZone = Zone::MuteBtn;
             return;
         }
+        if (z == Zone::SoloBtn)
+        {
+            if (onSoloButtonClicked) onSoloButtonClicked();
+            m_activeZone = Zone::SoloBtn;
+            return;
+        }
 
         // Anti-accidental edit: a clip must be SELECTED (tapped) before a drag
         // can move/trim/fade it. Dragging an unselected clip only selects it —
@@ -518,26 +493,15 @@ namespace ArrangementEditor
             // deliberately move or trim it. Mouse behaviour is unchanged.
             m_touchPanFromUnselected =
                 e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
-            if (m_touchPanFromUnselected && z == Zone::None)
-            {
-                if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
-                {
-                    m_touchMenuPending = true;
-                    m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
-                    m_touchMenuDownScreen = e.getScreenPosition();
-                    m_touchMenuLocalPos = e.getPosition();
-                    m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
-                    startTimerHz(30);
-                }
-            }
+            // First finger tap ONLY selects, as in Logic Pro for iPad.
+            // Do not arm a menu or focus a text editor on this gesture.
             m_activeZone = Zone::VolumeBtn;  // consumes click without editing
             return;
         }
 
-        // In Select mode, a STATIONARY HOLD on a selected region invokes
-        // right-click. A normal tap keeps selection and a drag can move the
-        // region without an unwanted menu. The 500 ms hold threshold is
-        // checked on release, outside any audio callback.
+        // Logic Pro iPad semantics: first tap selects; a subsequent short tap
+        // on that selected clip opens the context menu. Movement cancels the
+        // menu, letting a deliberate drag reposition the clip. No long hold.
         if (z == Zone::None
             && DAW::ApexPointerPolicy::isDirect(e))
         {
@@ -546,10 +510,8 @@ namespace ArrangementEditor
                 m_touchMenuPending = view->getToolState().getActiveTool() == EditorTool::Select;
                 m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
                 m_touchMenuDownScreen = e.getScreenPosition();
-                m_touchMenuLocalPos = e.getPosition();
-                m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
-                if (m_touchMenuPending)
-                    startTimerHz(30);
+                // Short tap only. No long-hold ring or countdown.
+                // Mouse and pen retain their normal clip editing behavior.
             }
         }
 
@@ -596,7 +558,6 @@ namespace ArrangementEditor
                 e.getScreenPosition().x, e.getScreenPosition().y))
         {
             m_touchMenuPending = false;
-            stopTimer();
             repaint();
         }
 
@@ -823,13 +784,12 @@ namespace ArrangementEditor
         const bool requestTouchMenu = m_touchMenuPending
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && DAW::ApexPointerPolicy::isDirect(e)
-            && TouchNavigationMath::contextHoldReady(
-                e.getLengthOfMousePress(),
+            && TouchNavigationMath::selectedSecondTapReady(
+                true, e.getLengthOfMousePress(),
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
         m_touchMenuPending = false;
-        stopTimer();
         // Invalidate the completed hold ring immediately (no ghost dot).
         repaint();
 
@@ -861,7 +821,8 @@ namespace ArrangementEditor
             return;
         }
 
-        if (m_activeZone == Zone::VolumeBtn || m_activeZone == Zone::MuteBtn)
+        if (m_activeZone == Zone::VolumeBtn || m_activeZone == Zone::MuteBtn
+            || m_activeZone == Zone::SoloBtn)
         {
             // Button gesture already consumed on mouseDown â€” do not forward
             // to the parent (which would deselect / reselect the wrong clip).
@@ -893,11 +854,10 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        // Both double-click and double-tap open Clip Properties. A stationary
-        // 500ms hold still owns the context menu; these are distinct gestures.
-        // Previously every direct-input double tap was deliberately ignored.
-        DBG("[ClipRenderCore] double click/tap forwarding to parent");
-
+        // Mouse double-click opens Properties. On direct touch the second
+        // tap belongs to the selected-clip menu; never open both surfaces.
+        if (DAW::ApexPointerPolicy::isDirect(e))
+            return;
         if (auto* parent = getParentComponent())
             parent->mouseDoubleClick(e.getEventRelativeTo(parent));
     }
@@ -1108,10 +1068,18 @@ namespace ArrangementEditor
         const double peaksPerPixel = readRatio * (double)visiblePeakCount / (double)clipW;
         const int    lastPeak      = visibleStartPeak + visiblePeakCount - 1;
 
+        // The Graphics clip region already excludes the offscreen part of
+        // the component. Avoid walking cached peaks for pixels that cannot
+        // possibly be drawn. This matters for wide, zoomed arrangements.
+        const auto dirty = g.getClipBounds();
+        const int startPx = juce::jlimit(0, (int)clipW,
+                                       dirty.getX() - full.getX());
+        const int endPx = juce::jlimit(startPx, (int)clipW,
+                                     dirty.getRight() - full.getX());
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
 
-        for (int px = 0; px < (int)clipW; ++px)
+        for (int px = startPx; px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
             const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
@@ -1257,7 +1225,10 @@ namespace ArrangementEditor
         const auto b   = getLocalBounds();
         const int  bx  = b.getX();
         const int  bw  = b.getWidth();
-        const int  textW = bw - 10;
+        const int  textX = bx + (bw >= 82 ? 8 + 2 * kMuteBtnSize + kVolBtnSize
+                                         : bw >= 62 ? 5 + 2 * (kMuteBtnSize + 2)
+                                         : bw >= 44 ? 5 + kMuteBtnSize + 2 : 5);
+        const int  textW = bw - (textX - bx) - 5;
 
         if (textW <= 0)
             return;
@@ -1267,7 +1238,7 @@ namespace ArrangementEditor
         auto name = m_model->clipName.empty() ? "(unnamed)" : m_model->clipName;
         g.setColour(juce::Colours::white.withAlpha(0.92f));
         g.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::bold));
-        g.drawText(juce::String(name), bx + 5, 1, textW, kNameH - 2,
+        g.drawText(juce::String(name), textX, 1, textW, kNameH - 2,
                    juce::Justification::centredLeft, true /*ellipsis*/);
     }
 
@@ -1521,9 +1492,9 @@ namespace ArrangementEditor
 
     void ClipRenderCore::drawVolumeButton(juce::Graphics& g)
     {
-        if (getWidth() < 50
+        if (getWidth() < 82
             || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
-            return; // hide on tiny clips
+            return; // no overlapping M/S/name on tiny clips
 
         auto r = volumeButtonRect().toFloat();
         const bool hot = (m_hoveredZone == Zone::VolumeBtn);
@@ -1538,7 +1509,7 @@ namespace ArrangementEditor
 
     void ClipRenderCore::drawMuteButton(juce::Graphics& g)
     {
-        if (getWidth() < 66
+        if (getWidth() < 44
             || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
             return; // need room for the second pill and a usable lane height
 
@@ -1556,6 +1527,22 @@ namespace ArrangementEditor
         g.setColour(juce::Colours::white.withAlpha(muted ? 1.0f : (hot ? 0.95f : 0.78f)));
         g.setFont(juce::Font("Segoe UI", (float)(kNameH - 6), juce::Font::bold));
         g.drawText("M", r.toNearestInt(), juce::Justification::centred, false);
+    }
+
+    void ClipRenderCore::drawSoloButton(juce::Graphics& g)
+    {
+        if (getWidth() < 62
+            || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
+            return;
+        const auto r = soloButtonRect().toFloat();
+        const bool hot = (m_hoveredZone == Zone::SoloBtn);
+        g.setColour(m_soloActive ? juce::Colour(0xFFFFCC49)
+                                 : juce::Colours::black.withAlpha(hot ? 0.55f : 0.35f));
+        g.fillRoundedRectangle(r, 2.0f);
+        g.setColour(m_soloActive ? juce::Colours::black
+                                 : juce::Colours::white.withAlpha(0.86f));
+        g.setFont(juce::Font("Segoe UI", (float)(kNameH - 6), juce::Font::bold));
+        g.drawText("S", r.toNearestInt(), juce::Justification::centred, false);
     }
 
 } // namespace ArrangementEditor

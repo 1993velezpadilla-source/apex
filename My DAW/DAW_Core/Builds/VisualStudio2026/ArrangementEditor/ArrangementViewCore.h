@@ -246,6 +246,12 @@ namespace ArrangementEditor
         // Any multi-finger navigation invalidates an outstanding selected
         // region tap. Read only from the UI/message thread.
         std::uint64_t getTouchGestureEpoch() const noexcept { return m_touchGestureEpoch; }
+
+        // One non-persistent clip-audition Solo authority for both the M/S/V
+        // clip header and the floating Clip Properties panel. The engine
+        // clip ID is stable across renderer rebuilds and UI window changes.
+        bool isClipSoloedByEngineId(const juce::String& engineClipId) const;
+        void toggleClipSoloByEngineId(const juce::String& engineClipId);
         // ClipRenderCore owns taps on audio regions. Cancel previous inertial
         // scrolling immediately on DOWN, before selection listeners rebuild
         // renderers; a stationary selection must never fling the timeline.
@@ -406,7 +412,7 @@ namespace ArrangementEditor
         std::function<void()> onEngineClipSelectionCleared;
         std::function<void(DAW::Clip&)> onEngineClipDoubleClicked;
         std::function<void(DAW::Clip&)> onEngineClipAutomationRequested;
-        std::function<void(DAW::Clip&)> onEngineClipNormalizeChanged;
+        std::function<void(DAW::Clip&)> onEngineClipPropertiesChanged;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneRequested;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneBypassToggled;
         std::function<bool(const DAW::Clip&)> onEngineClipIsVocalTuneBypassed;
@@ -521,6 +527,8 @@ namespace ArrangementEditor
 
         // Clip renderers (one per clip)
         std::vector<std::unique_ptr<ClipRenderCore>> m_clipRenderers;
+        // Stable UUID -> renderer index makes zoom-out rebuilds O(N) not O(N^2).
+        std::map<juce::Uuid, ClipRenderCore*> m_rendererByClipId;
         std::set<juce::Uuid> m_lastVisualSelection;
         std::vector<std::pair<juce::Uuid, juce::Rectangle<int>>> m_marqueeHitGeometry;
 
@@ -612,6 +620,12 @@ namespace ArrangementEditor
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);
         void syncClipToEngine(const ArrangementClipModel& clip);
+        // Both the quick V popup and Radial Normalize use the same engine
+        // clip + Clip Properties state, never a UI-only second gain.
+        bool toggleClipPeakNormalize(const juce::Uuid& clipId);
+        bool isClipPeakNormalized(const juce::Uuid& clipId) const;
+        float getCanonicalClipGain(const juce::Uuid& clipId) const;
+        void notifyEngineClipPropertiesChanged(const juce::Uuid& clipId);
         void refreshAutoCrossfadesForTrack(int trackIndex);
         void refreshAutoCrossfadesForAllTracks();
         double screenXToTime(int x) const;
@@ -658,6 +672,8 @@ namespace ArrangementEditor
         bool                   m_suppressEngineClipCreation = false;
         bool                   m_syncingArrangementToEngine = false;
         bool                   m_syncingEngineToArrangement = false;
+        // UI-only clip audition solo; project mutes are untouched.
+        juce::Uuid             m_clipAuditionSoloId;
         double                 m_playheadTimeSeconds = 0.0;
         struct MasterPreviewBin
         {

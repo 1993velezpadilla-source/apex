@@ -824,6 +824,10 @@ public:
     /** Message-thread notification after a successful clip-FX chain edit. */
     std::function<void()>                                             onClipFxChanged;
     std::function<void(const juce::String&)>                          onBeforeClipFxRemoved;
+    // Both Clip Properties and the arrangement S button call the SAME
+    // non-persistent solo state in ArrangementViewCore. Do not setMute here.
+    std::function<bool(const Clip&)>                                  isClipSoloed;
+    std::function<void(Clip&)>                                        onToggleClipSolo;
 
     ClipPropertiesPanel()
     {
@@ -958,6 +962,7 @@ public:
 
         // ── Action buttons ────────────────────────────────────────────────────
         muteBtn_      = std::make_unique<CPWPillBtn>("Mute",       CPW::kGold);
+        soloBtn_      = std::make_unique<CPWPillBtn>("Solo",       CPW::kAccent);
         pianoBtn_     = std::make_unique<CPWPillBtn>("Piano Roll", CPW::kPurple);
         fxPanelBtn_   = std::make_unique<CPWPillBtn>("FX",         CPW::kAccent);
         waveBtn_      = std::make_unique<CPWPillBtn>("Wave",       CPW::kAccent);
@@ -967,6 +972,14 @@ public:
         automationBypassBtn_ = std::make_unique<CPWPillBtn>("Auto On", CPW::kPink);
 
         muteBtn_->onClick      = [this] { if (clip_) { clip_->setMuted(!clip_->isMuted()); muteBtn_->active = clip_->isMuted(); muteBtn_->repaint(); }};
+        soloBtn_->onClick      = [this]
+        {
+            if (clip_ == nullptr || !onToggleClipSolo)
+                return;
+            onToggleClipSolo(*clip_);
+            soloBtn_->active = isClipSoloed && isClipSoloed(*clip_);
+            soloBtn_->repaint();
+        };
         pianoBtn_->onClick     = [this] { if (auto* mc = dynamic_cast<MidiClip*>(clip_); mc && onOpenPianoRoll) onOpenPianoRoll(*mc); };
         fxPanelBtn_->onClick   = [this] { toggleFxFloatingPanel(); };
         waveBtn_->onClick      = [this] { toggleWaveform(); };
@@ -978,6 +991,7 @@ public:
         automationBypassBtn_->onClick = [this] { toggleSelectedAutomationBypass(); };
 
         addAndMakeVisible(*muteBtn_);
+        addAndMakeVisible(*soloBtn_);
         addAndMakeVisible(*pianoBtn_);
         addAndMakeVisible(*fxPanelBtn_);
         addAndMakeVisible(*waveBtn_);
@@ -1125,9 +1139,11 @@ public:
         const int P = 10;
         auto area = getLocalBounds().reduced(P);
 
-        // ── Top utility row: mute on the right ───────────────────────────────
+        // ── Top utility row: SOLO + MUTE (both clip-local) ────────────────────
         auto hdr = area.removeFromTop(20);
         muteBtn_->setBounds(hdr.removeFromRight(52).reduced(0, 1));
+        hdr.removeFromRight(5);
+        soloBtn_->setBounds(hdr.removeFromRight(52).reduced(0, 1));
         area.removeFromTop(5); sep1_.setBounds(area.removeFromTop(1)); area.removeFromTop(6);
 
         // ── Knobs up top ─────────────────────────────────────────────────────
@@ -1478,6 +1494,8 @@ private:
         }
 
         muteBtn_->active = clip_->isMuted();
+        soloBtn_->active = isClipSoloed && isClipSoloed(*clip_);
+        soloBtn_->repaint();
         waveBtn_->active = waveformVisible_;
         if (automateBtn_)
         {
@@ -2583,7 +2601,7 @@ private:
 
     std::unique_ptr<CPWKnobCell> gainCell_, pitchCell_, fineTuneCell_, panCell_, stretchCell_, fadeInCell_, fadeOutCell_;
     std::unique_ptr<CPWCurveBtn> fadeInCurveBtn_, fadeOutCurveBtn_;
-    std::unique_ptr<CPWPillBtn>  muteBtn_, pianoBtn_, colourBtn_, fxPanelBtn_, waveBtn_, normalizeBtn_, reverseBtn_, automateBtn_, automationBypassBtn_;
+    std::unique_ptr<CPWPillBtn>  muteBtn_, soloBtn_, pianoBtn_, colourBtn_, fxPanelBtn_, waveBtn_, normalizeBtn_, reverseBtn_, automateBtn_, automationBypassBtn_;
     // Clip-properties counterpart of the track "automation visibility" button.
     std::unique_ptr<CPWPillBtn>  autoVisBtn_;
 
