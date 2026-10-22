@@ -107,6 +107,109 @@ private:
         const auto workspace = juce::SystemStats::getEnvironmentVariable (
             "GITHUB_WORKSPACE", {});
 
+        // ADVERTISEMENT-FREE EVIDENCE: write a real RIFF/WAVE file,
+        // reopen it with JUCE's WAV decoder, and stream its PCM audio into
+        // the REAL APEX Processor -> analyzer FIFO -> 4,096-bin FFT worker.
+        // The exported PNGs therefore show ACTUAL PRE+POST measured audio.
+        // No painted/mock spectrum and no manual external laptop required.
+        if (workspace.isNotEmpty())
+        {
+            const auto snapshotsDir = juce::File (workspace).getChildFile (
+                "apex-eq-ui-snapshots");
+            expect (snapshotsDir.createDirectory().wasOk(),
+                    "EQ spectrum evidence directory can be created");
+            const auto wavFile = snapshotsDir.getChildFile (
+                "APEX-EQ-Reference-48k-Stereo.wav");
+            juce::WavAudioFormat wav;
+            constexpr int sampleRate = 48000;
+            constexpr int totalSamples = sampleRate * 3;
+            {
+                auto stream = wavFile.createOutputStream();
+                expect (stream != nullptr, "real WAV output stream opens");
+                if (stream != nullptr)
+                {
+                    std::unique_ptr<juce::AudioFormatWriter> writer (
+                        wav.createWriterFor (stream.release(), 48000.0,
+                                             2, 16, {}, 0));
+                    expect (writer != nullptr,
+                            "JUCE WAV encoder provides a 48kHz stereo writer");
+                    if (writer != nullptr)
+                    {
+                        juce::AudioBuffer<float> musicalTest (2, totalSamples);
+                        juce::Random noise (0x5a071);
+                        constexpr double tau = juce::MathConstants<double>::twoPi;
+                        for (int s = 0; s < totalSamples; ++s)
+                        {
+                            const double time = s / 48000.0;
+                            const double envelope = 0.73
+                                + 0.27 * std::sin (tau * 1.6 * time);
+                            // Deterministic musical harmonics, vocal-like
+                            // upper partials, and low-level broadband floor.
+                            const double waveform = envelope * (
+                                0.23 * std::sin (tau * 196.0 * time)
+                              + 0.17 * std::sin (tau * 392.0 * time)
+                              + 0.11 * std::sin (tau * 784.0 * time)
+                              + 0.08 * std::sin (tau * 1568.0 * time)
+                              + 0.065 * std::sin (tau * 3136.0 * time)
+                              + 0.035 * std::sin (tau * 6272.0 * time))
+                              + 0.055 * (noise.nextFloat() * 2.0 - 1.0);
+                            musicalTest.setSample (0, s,
+                                static_cast<float> (waveform));
+                            musicalTest.setSample (1, s,
+                                static_cast<float> (waveform * 0.93
+                                    + 0.012 * std::sin (tau * 421.0 * time)));
+                        }
+                        expect (writer->writeFromAudioSampleBuffer (
+                            musicalTest, 0, totalSamples),
+                            "real reference PCM written to disk as WAV");
+                    }
+                }
+            }
+            expect (wavFile.existsAsFile() && wavFile.getSize() > 250000,
+                    "3-second stereo WAV exists and contains nontrivial PCM");
+            std::unique_ptr<juce::AudioFormatReader> reader (
+                wav.createReaderFor (new juce::FileInputStream (wavFile), true));
+            expect (reader != nullptr, "reference WAV is decodable");
+            if (reader != nullptr)
+            {
+                expectWithinAbsoluteError (reader->sampleRate, 48000.0, 0.1);
+                juce::AudioBuffer<float> chunk (2, 128);
+                juce::MidiBuffer midi;
+                for (int start = 0; start < totalSamples; start += 128)
+                {
+                    const int count = std::min (128, totalSamples - start);
+                    chunk.clear();
+                    expect (reader->read (&chunk, 0, count,
+                                           static_cast<juce::int64> (start),
+                                           true, true),
+                            "decode full PCM block");
+                    processor->processBlock (chunk, midi);
+                    // Let the 20ms asynchronous FFT worker drain the FIFO,
+                    // avoiding fake visualization and audio FIFO overflows.
+                    if ((start / 128) % 6 == 0)
+                        juce::Thread::sleep (2);
+                }
+                for (int attempt = 0; attempt < 40; ++attempt)
+                {
+                    editor->refreshMeasuredSpectrumForTesting();
+                    if (editor->hasMeasuredSpectrumForTesting())
+                        break;
+                    juce::Thread::sleep (20);
+                }
+                expect (editor->hasMeasuredSpectrumForTesting(),
+                        "real PRE/POST FFT must publish actual WAV audio");
+                if (editor->hasMeasuredSpectrumForTesting())
+                {
+                    expect (editor->maximumMeasuredSpectrumDbForTesting (false)
+                                > -70.0f,
+                        "real measured PRE bins contain strong audible energy");
+                    expect (editor->maximumMeasuredSpectrumDbForTesting (true)
+                                > -80.0f,
+                        "real measured POST bins contain audible EQ audio");
+                }
+            }
+        }
+
         for (auto size : std::array<juce::Point<int>, 5> {{
                 { 320, 568 }, { 480, 800 }, { 900, 300 },
                 { 1280, 720 }, { 1920, 1080 } }})
@@ -131,6 +234,11 @@ private:
                     "floating band controls must remain on-screen");
             expect (graph.contains (popover),
                     "EQ4 contextual controls must FLOAT within the canvas");
+            const auto bootEye = editor->bootEyeBoundsForTesting();
+            expect (editor->getLocalBounds().contains (bootEye),
+                    "canonical APEX boot eye remains entirely inside header");
+            expect (! bootEye.intersects (editor->presetBoundsForTesting()),
+                    "boot logo may never cover the actual preset control");
             expect (popover.getHeight() <= 136,
                     "no giant inspector covering the entire EQ");
 
