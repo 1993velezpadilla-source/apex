@@ -5375,6 +5375,122 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
     {
+        if (clip == nullptr || m_voiceCleanerBusy)
+            return;
+        const auto id = clip->id;
+
+        // Small native callout, deliberately a little larger than the V popup.
+        // No audio is changed by opening, dragging sliders, or cancelling.
+        class VoiceCleanerPanel final : public juce::Component
+        {
+        public:
+            std::function<void(float, float, int)> onApply;
+            VoiceCleanerPanel()
+            {
+                setSize(210, 245);
+                title.setText("VOICE CLEANER", juce::dontSendNotification);
+                title.setJustificationType(juce::Justification::centred);
+                title.setColour(juce::Label::textColourId, juce::Colour(0xFF59F5CE));
+                title.setFont(juce::Font("Segoe UI", 13.0f, juce::Font::bold));
+                addAndMakeVisible(title);
+                amount.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+                amount.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 19);
+                amount.setRange(0.0, 100.0, 1.0);
+                amount.setValue(68.0, juce::dontSendNotification);
+                amount.setTextValueSuffix("%");
+                amount.setTooltip("0% is exact bypass. More removes noise, but can affect consonants.");
+                addAndMakeVisible(amount);
+                focusLabel.setText("FOCUS", juce::dontSendNotification);
+                focusLabel.setJustificationType(juce::Justification::centredLeft);
+                addAndMakeVisible(focusLabel);
+                focus.addItem("Auto", 1);
+                focus.addItem("Crickets", 2);
+                focus.addItem("Hiss / Room", 3);
+                focus.setSelectedId(2, juce::dontSendNotification);
+                focus.setTooltip("Crickets targets learned narrowband chirps; Auto balances tonal & broad noise.");
+                addAndMakeVisible(focus);
+                protect.setButtonText("Protect vocal detail");
+                protect.setToggleState(true, juce::dontSendNotification);
+                protect.setTooltip("Retain breaths, high consonants, and sung harmonics.");
+                addAndMakeVisible(protect);
+                hint.setText("Offline  /  Undoable  /  Original safe",
+                             juce::dontSendNotification);
+                hint.setJustificationType(juce::Justification::centred);
+                hint.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::plain));
+                addAndMakeVisible(hint);
+                apply.setButtonText("Apply");
+                apply.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF197E70));
+                apply.onClick = [this]
+                {
+                    // Callback copies only plain settings and a stable clip ID.
+                    if (onApply)
+                        onApply((float)amount.getValue() / 100.0f,
+                                protect.getToggleState() ? 0.85f : 0.35f,
+                                focus.getSelectedId());
+                    if (auto* callout = findParentComponentOfClass<juce::CallOutBox>())
+                        callout->dismiss();
+                };
+                cancel.setButtonText("Cancel");
+                cancel.onClick = [this]
+                {
+                    if (auto* callout = findParentComponentOfClass<juce::CallOutBox>())
+                        callout->dismiss();
+                };
+                addAndMakeVisible(apply);
+                addAndMakeVisible(cancel);
+            }
+
+            void paint(juce::Graphics& g) override
+            {
+                g.fillAll(juce::Colour(0xFF16232B));
+                g.setColour(juce::Colour(0xFFFF1F83).withAlpha(0.70f));
+                g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.7f),
+                                       7.0f, 1.0f);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced(10, 6);
+                title.setBounds(area.removeFromTop(23));
+                amount.setBounds(area.removeFromTop(93));
+                auto focusRow = area.removeFromTop(28);
+                focusLabel.setBounds(focusRow.removeFromLeft(55));
+                focus.setBounds(focusRow);
+                protect.setBounds(area.removeFromTop(25));
+                hint.setBounds(area.removeFromTop(22));
+                area.removeFromTop(4);
+                auto buttons = area.removeFromTop(30);
+                apply.setBounds(buttons.removeFromLeft(90).reduced(2));
+                cancel.setBounds(buttons.removeFromRight(90).reduced(2));
+            }
+        private:
+            juce::Label title, focusLabel, hint;
+            juce::Slider amount;
+            juce::ComboBox focus;
+            juce::ToggleButton protect;
+            juce::TextButton apply, cancel;
+        };
+
+        auto panel = std::make_unique<VoiceCleanerPanel>();
+        juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
+        panel->onApply = [safeOwner, id](float strength, float voiceProtect, int focus)
+        {
+            if (safeOwner != nullptr)
+                if (auto* active = safeOwner->m_clipState.findClip(id))
+                    safeOwner->runClipVoiceCleaner(active, strength, voiceProtect, focus);
+        };
+        auto* renderer = findClipRendererFor(id);
+        const auto anchor = renderer != nullptr
+            ? renderer->getScreenBounds().withWidth(juce::jmin(100, renderer->getWidth()))
+            : getScreenBounds().withSizeKeepingCentre(20, 20);
+        juce::CallOutBox::launchAsynchronously(std::move(panel), anchor, nullptr);
+    }
+
+    void ArrangementViewCore::runClipVoiceCleaner(ArrangementClipModel* clip,
+                                                   float strength,
+                                                   float voiceProtection,
+                                                   int focus)
+    {
         if (clip == nullptr || m_voiceCleanerBusy || m_engineClipManager == nullptr
             || m_engineAudioFiles == nullptr)
             return;
@@ -5441,7 +5557,13 @@ namespace ArrangementEditor
             + " audio clip(s), sources untouched");
 
         const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
-        std::thread([weakOwner, items]()
+        VoiceCleanerDspCore::Options settings;
+        settings.strength = juce::jlimit(0.0f, 1.0f, strength);
+        settings.voiceProtection = juce::jlimit(0.0f, 1.0f, voiceProtection);
+        settings.focus = focus == 2 ? VoiceCleanerDspCore::Focus::Crickets
+                       : focus == 3 ? VoiceCleanerDspCore::Focus::Broadband
+                                    : VoiceCleanerDspCore::Focus::Auto;
+        std::thread([weakOwner, items, settings]()
         {
             juce::String error;
             try
@@ -5450,7 +5572,7 @@ namespace ArrangementEditor
                 for (auto& item : *items)
                 {
                     item.result = VoiceCleanerOfflineCore::render(item.original,
-                                                                    item.rendered);
+                                                                  item.rendered, settings);
                     if (!item.result.success)
                     {
                         error = item.original.getFileName() + ": " + item.result.error;
