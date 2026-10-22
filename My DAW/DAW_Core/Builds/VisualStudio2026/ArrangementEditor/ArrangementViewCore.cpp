@@ -5394,6 +5394,7 @@ namespace ArrangementEditor
             {
                 setSize(218, 273);
                 title.setText("VOICE CLEANER", juce::dontSendNotification);
+                title.setTooltip("Audition this clip while the DAW plays. Apply uses these settings on all selected clips.");
                 title.setJustificationType(juce::Justification::centred);
                 title.setColour(juce::Label::textColourId, juce::Colour(0xFF59F5CE));
                 title.setFont(juce::Font("Segoe UI", 13.0f, juce::Font::bold));
@@ -5726,7 +5727,7 @@ namespace ArrangementEditor
                 if (files->publishPreparedForClip(engineId, prepared).success)
                 {
                     previewPublished = files->getCachedAudioSnapshot(engineId);
-                    status.setText("LIVE AUDITION / use Play", juce::dontSendNotification);
+                    status.setText("PREVIEW ACTIVE (this clip)", juce::dontSendNotification);
                 }
                 else
                     status.setText("Could not audition clip", juce::dontSendNotification);
