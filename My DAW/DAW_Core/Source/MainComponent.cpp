@@ -2754,9 +2754,9 @@ MainComponent::MainComponent()
             pianoRollWindow_->toFront(true);
         }
     };
-    // A menu-driven normalize updates the SAME shared AudioFileManager state
-    // used by the Clip Properties pill; refresh it without reopening a window.
-    arrangement_->onClipNormalizationChanged = [this](DAW::Clip& clip)
+    // Every quick-V gain edit and menu/popup Normalize goes through the
+    // engine clip; refresh the *same* visible Clip Properties knobs/pill.
+    arrangement_->onClipPropertiesChanged = [this](DAW::Clip& clip)
     {
         if (clipPropertiesWindow_ && clipPropertiesWindow_->isShowingClip(clip.getID()))
         {
