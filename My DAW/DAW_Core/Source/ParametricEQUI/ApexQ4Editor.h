@@ -202,8 +202,13 @@ public:
         // Context controls are genuinely floating OVER the frequency display,
         // directly beneath the selected EQ nodes: NO permanent bottom sheet.
         // The canvas does not shrink when switching bands.
-        const int controlWidth = std::min (phone ? 456 : 548, w - 18);
-        const int controlHeight = narrow ? 136 : (h < 400 ? 112 : 136);
+        // Adversarial visual pass: the manual uses a SMALL transient
+        // contextual strip, never a large persistent parameter sheet.
+        // Preserve 44px+ touch controls and a fully-visible 20px text box.
+        const int controlWidth = std::min (
+            narrow ? 338 : (phone ? 390 : 450), w - 18);
+        const int controlHeight = narrow ? 126
+                                 : (h < 400 ? 104 : 116);
         const int baseX = selected_ < 0
             ? (w - controlWidth) / 2
             : juce::jlimit (9, std::max (9, w - controlWidth - 9),
@@ -264,16 +269,16 @@ public:
             dynamic_.setBounds (px + 262, py + 9, 59, 30);
             dynamic_.setVisible (selected_ >= 0 && ! phone);
         }
-        const int sliderY = py + (narrow ? 76 : 43);
-        const int sliderSpace = controlWidth - 26;
+        const int sliderY = py + (narrow ? 68 : 39);
+        const int sliderSpace = controlWidth - 18;
         const int cw = sliderSpace / 3;
-        freq_.setBounds (px + 13, sliderY, cw,
-                         controlHeight - (narrow ? 82 : 49));
-        gain_.setBounds (px + 13 + cw, sliderY, cw,
-                         controlHeight - (narrow ? 82 : 49));
-        q_.setBounds (px + 13 + 2 * cw, sliderY,
+        freq_.setBounds (px + 9, sliderY, cw,
+                         controlHeight - (narrow ? 72 : 43));
+        gain_.setBounds (px + 9 + cw, sliderY, cw,
+                         controlHeight - (narrow ? 72 : 43));
+        q_.setBounds (px + 9 + 2 * cw, sliderY,
                       sliderSpace - 2 * cw,
-                      controlHeight - (narrow ? 82 : 49));
+                      controlHeight - (narrow ? 72 : 43));
         soloHold_.toFront (false);
         curveDirty_ = true;
     }
@@ -646,6 +651,11 @@ public:
             std::round (frequencyHz / spectrumBinHz_)), 0,
             Analysis::SpectrumAnalyzerCore::kSpectrumBins - 1);
         return spectrum_[post ? 1 : 0][static_cast<std::size_t> (bin)];
+    }
+    float displayedSpectrumDbForTesting (bool post, float frequencyHz)
+        const noexcept
+    {
+        return displayedSpectrumDb (post ? 1 : 0, frequencyHz);
     }
     float maximumMeasuredSpectrumDbForTesting (bool post) const noexcept
     {
@@ -1038,6 +1048,50 @@ private:
         }
         curveDirty_ = false;
     }
+    float displayedSpectrumDb (int mode, double frequencyHz) const noexcept
+    {
+        if (mode < 0 || mode > 1 || spectrumBinHz_ <= 0.0f
+            || frequencyHz < 20.0)
+            return -120.0f;
+        const auto& measured = spectrum_[static_cast<std::size_t> (mode)];
+        const int count = Analysis::SpectrumAnalyzerCore::kSpectrumBins;
+        const double fractional = frequencyHz / spectrumBinHz_;
+        if (fractional > count - 1.0) return -120.0f;
+
+        // Linear power integration, not a made-up spectrum or synthetic
+        // harmonics. Gaussian kernel width 1/18 octave: smooth only the
+        // PRESENTATION (spatial frequency axis). Native worker measurements,
+        // true harmonic locations and PRE/POST delta remain unchanged.
+        constexpr double sigmaOctaves = 1.0 / 18.0;
+        const double sigma = sigmaOctaves * std::log (2.0);
+        const double lower = frequencyHz * std::exp (-2.5 * sigma);
+        const double upper = frequencyHz * std::exp ( 2.5 * sigma);
+        const int first = std::max (1, static_cast<int> (
+            std::floor (lower / spectrumBinHz_)));
+        const int last = std::min (count - 1, static_cast<int> (
+            std::ceil (upper / spectrumBinHz_)));
+        double totalPower = 0.0, totalWeight = 0.0;
+        for (int bin = first; bin <= last; ++bin)
+        {
+            const float db = measured[static_cast<std::size_t> (bin)];
+            if (! std::isfinite (db)) continue;
+            const double hz = bin * static_cast<double> (spectrumBinHz_);
+            const double distance = std::log (hz / frequencyHz) / sigma;
+            const double weight = std::exp (-0.5 * distance * distance);
+            totalPower += weight * std::pow (10.0, db * 0.1);
+            totalWeight += weight;
+        }
+        if (totalWeight > 1.0e-8)
+            return static_cast<float> (10.0 * std::log10 (
+                std::max (1.0e-13, totalPower / totalWeight)));
+
+        // Below FFT resolution, use its nearest measured bin rather than
+        // extrapolating harmonics or hiding all information at 20–50 Hz.
+        const int nearest = std::clamp (
+            static_cast<int> (std::round (fractional)), 1, count - 1);
+        return measured[static_cast<std::size_t> (nearest)];
+    }
+
     void drawSpectrum (juce::Graphics& g)
     {
         if (! spectrumReady_) return;
@@ -1047,22 +1101,39 @@ private:
             if (! spectrumShown_[mode]) continue;
             juce::Path spectrum;
             bool begun = false;
-            for (int i = 2; i < count; i += 3)
+            const float bottom = static_cast<float> (graph_.getBottom() - 25);
+            const int points = std::clamp (getWidth() / 2, 160, 950);
+            for (int sample = 0; sample <= points; ++sample)
             {
-                const double hz = i * spectrumBinHz_;
-                if (hz < 20 || hz > 30000) continue;
-                const float db = spectrum_[mode][static_cast<std::size_t> (i)];
+                const float x = getWidth() * static_cast<float> (sample)
+                                / static_cast<float> (points);
+                const double hz = xToHz (x);
+                const float maxMeasuredHz = spectrumBinHz_ * (count - 1);
+                if (hz > maxMeasuredHz || hz < 20.0) continue;
+                // Log-frequency power integration of ACTUAL FFT bins.
+                // Raw PRE/POST values remain untouched and testable.
+                const float db = displayedSpectrumDb (mode, hz);
                 if (! std::isfinite (db)) continue;
-                const float x = hzToX (hz);
-                const float y = graph_.getY() + graph_.getHeight() - 24.0f
-                    - (std::clamp (db, -110.0f, -10.0f) + 110.0f)
-                      * (graph_.getHeight() - 48) / 100.0f;
+                const float y = bottom
+                    - (std::clamp (db, -108.0f, -8.0f) + 108.0f)
+                      * (graph_.getHeight() - 49) / 100.0f;
                 if (! begun) { spectrum.startNewSubPath (x, y); begun = true; }
                 else spectrum.lineTo (x, y);
             }
-            g.setColour (mode == 0 ? juce::Colour (0xff77747b).withAlpha (0.68f)
-                                    : juce::Colour (0xffd6a75d).withAlpha (0.68f));
-            g.strokePath (spectrum, juce::PathStrokeType (1.2f));
+            if (! begun) continue;
+            // A translucent filled measured spectrum beneath subtle strokes.
+            // PRE stays muted gray, POST warm gold, both always distinguishable.
+            juce::Path fill (spectrum);
+            fill.lineTo (static_cast<float> (getWidth()), bottom);
+            fill.lineTo (0.0f, bottom);
+            fill.closeSubPath();
+            const auto ink = mode == 0 ? juce::Colour (0xffa6a2af)
+                                       : juce::Colour (0xffe5ba65);
+            g.setColour (ink.withAlpha (mode == 0 ? 0.07f : 0.12f));
+            g.fillPath (fill);
+            g.setColour (ink.withAlpha (mode == 0 ? 0.56f : 0.79f));
+            g.strokePath (spectrum, juce::PathStrokeType (
+                mode == 0 ? 1.0f : 1.45f));
         }
     }
     void cycleAnalyzer()
