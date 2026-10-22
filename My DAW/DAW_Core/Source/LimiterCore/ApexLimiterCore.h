@@ -191,9 +191,9 @@ public:
                     for (int k=1; k<factor; ++k)
                     {
                         const double t = static_cast<double>(k)/factor;
-                        const double spline = 0.5 * ((2.0*d)
-                            +(-b+x)*t +(2.0*b-5.0*d+4.0*x-a)*t*t
-                            +(-b+3.0*d-3.0*x+a)*t*t*t);
+                        const double spline = 0.5 * ((2.0*b)
+                            +(-a+d)*t +(2.0*a-5.0*b+4.0*d-x)*t*t
+                            +(-a+3.0*b-3.0*d+x)*t*t*t);
                         peak = std::max(peak,std::abs(spline));
                     }
                 }
