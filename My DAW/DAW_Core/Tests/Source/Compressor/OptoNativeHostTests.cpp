@@ -19,6 +19,60 @@ public:
         juce::OwnedArray<juce::PluginDescription> catalog;
         format.findAllTypesForFile(catalog,{});
         expect(catalog.size() >= 4, "G10/C4/Parametric EQ/Opto coexist");
+        beginTest("APEX Precision C3 and Opto 2A are separate native identities");
+        juce::PluginDescription c3Description;
+        bool foundC3=false;
+        for (auto* entry : catalog)
+            if (entry->fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier)
+            {
+                c3Description = *entry;
+                foundC3 = true;
+                break;
+            }
+        expect(foundC3, "Precision C3 must appear beside existing Opto 2A");
+        if (foundC3)
+        {
+            expectEquals(c3Description.uniqueId, APEX::PrecisionC3::Processor::kUniqueId);
+            expect(c3Description.uniqueId != OptoProcessor::kUniqueId);
+            expect(format.fileMightContainThisPluginType(c3Description.fileOrIdentifier));
+            expect(format.doesPluginStillExist(c3Description));
+            juce::AudioPluginFormatManager c3Manager;
+            c3Manager.addFormat(std::make_unique<DAW::ApexNativePluginFormat>());
+            juce::String c3Error;
+            auto c3 = c3Manager.createPluginInstance(c3Description,48000.0,128,c3Error);
+            expect(c3 != nullptr, c3Error);
+            if(c3 != nullptr)
+            {
+                expectEquals(c3->getParameters().size(),(int)APEX::PrecisionC3::ParameterCount);
+                auto* native = dynamic_cast<APEX::PrecisionC3::Processor*>(c3.get());
+                expect(native != nullptr);
+                if(native != nullptr)
+                {
+                    for(auto* parameter : c3->getParameters())
+                        expect(dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)!=nullptr);
+                    native->prepareToPlay(48000.0,128);
+                    juce::AudioBuffer<float> signal(2,128);
+                    signal.clear();
+                    for(int i=0;i<128;++i)
+                    {
+                        signal.setSample(0,i,0.3f);
+                        signal.setSample(1,i,0.1f);
+                    }
+                    juce::MidiBuffer midi;
+                    native->processBlock(signal,midi);
+                    expect(std::isfinite(signal.getSample(0,127)));
+                    expect(std::isfinite(signal.getSample(1,127)));
+                    juce::MemoryBlock originalState;
+                    native->getStateInformation(originalState);
+                    const auto oldRatio = native->parameter(APEX::PrecisionC3::Ratio).getValue();
+                    native->parameter(APEX::PrecisionC3::Ratio).setValue(0.95f);
+                    native->setStateInformation(originalState.getData(),(int)originalState.getSize());
+                    expectWithinAbsoluteError(native->parameter(APEX::PrecisionC3::Ratio).getValue(),oldRatio,1.e-6f);
+                    native->releaseResources();
+                }
+            }
+        }
+
         juce::PluginDescription opto;
         bool found=false;
         for(auto* desc:catalog)
