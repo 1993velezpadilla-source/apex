@@ -283,15 +283,25 @@ public:
             }
             label(g,juce::String(value,1),px-10,barBottom+7,47,19,12,0xffe8e5f1,true);
         }
-        label(g,"GR",meter.getX()+8,meter.getBottom()-65,28,18,10,0xffe799ad,true);
+        // Five truthful level/loudness summaries fit without covering the
+        // lower advanced controls even at the touch-safe 820x520 minimum.
+        const float lineStep=16.0f;
+        const float topLine=meter.getBottom()-80.0f;
+        label(g,"GR",meter.getX()+8,topLine,30,15,10,0xffe799ad,true);
         label(g,juce::String(reduction,1)+" dB",
-              meter.getX()+41,meter.getBottom()-67,88,21,16,0xfff68f9c,true);
-        label(g,"M",meter.getX()+8,meter.getBottom()-45,21,18,11,0xffd4d2e4,true);
+              meter.getX()+41,topLine,104,15,12,0xfff68f9c,true);
+        label(g,"M",meter.getX()+8,topLine+lineStep,22,15,10,0xffd4d2e4,true);
         label(g,juce::String(processor_.meterMomentaryLufs(),1)+" LUFS",
-              meter.getX()+32,meter.getBottom()-45,112,18,13,0xffc1cae7,true);
-        label(g,"S",meter.getX()+8,meter.getBottom()-25,21,18,11,0xffd4d2e4,true);
+              meter.getX()+32,topLine+lineStep,112,15,11,0xffc1cae7,true);
+        label(g,"S",meter.getX()+8,topLine+2*lineStep,22,15,10,0xffd4d2e4,true);
         label(g,juce::String(processor_.meterShortTermLufs(),1)+" LUFS",
-              meter.getX()+32,meter.getBottom()-25,112,18,13,0xffd2dfec,true);
+              meter.getX()+32,topLine+2*lineStep,112,15,11,0xffd2dfec,true);
+        label(g,"I",meter.getX()+8,topLine+3*lineStep,22,15,10,0xffd4d2e4,true);
+        label(g,juce::String(processor_.meterIntegratedLufs(),1)+" LUFS",
+              meter.getX()+32,topLine+3*lineStep,112,15,11,0xffe7dce6,true);
+        label(g,"LRA",meter.getX()+8,topLine+4*lineStep,28,15,10,0xffd4d2e4,true);
+        label(g,juce::String(processor_.meterLoudnessRange(),1)+" LU",
+              meter.getX()+41,topLine+4*lineStep,100,15,11,0xffe7dce6,true);
 
         g.setColour(juce::Colour(0xff23252c));
         g.fillRoundedRectangle(advance,5);
