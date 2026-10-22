@@ -421,6 +421,13 @@ namespace ArrangementEditor
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
             return;
 
+        // Touching a region claims the prior fling even on a stationary tap.
+        // A clip owns this pointer, so parent mouseDown is not guaranteed to
+        // see it; stop the old inertia before selection callbacks run.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                view->stopTouchMomentumOnClipPress();
+
         // Right-click must reach the parent context menu without selecting,
         // trimming, muting or disturbing an existing multi-selection.
         if (e.mods.isRightButtonDown())
@@ -770,6 +777,8 @@ namespace ArrangementEditor
         {
             m_touchPanFromUnselected = false;
             m_activeZone = Zone::None;
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                view->finishUnselectedClipTouchPan();
             return;
         }
         if (m_gainDragActive)
@@ -815,11 +824,10 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        // On touch, selected-region tap owns the context menu. A quick
-        // second tap must not additionally open the desktop clip editor.
-        if (DAW::ApexPointerPolicy::isDirect(e))
-            return;
-        DBG("[ClipRenderCore] double-click fired, forwarding to parent");
+        // Both double-click and double-tap open Clip Properties. A stationary
+        // 500ms hold still owns the context menu; these are distinct gestures.
+        // Previously every direct-input double tap was deliberately ignored.
+        DBG("[ClipRenderCore] double click/tap forwarding to parent");
 
         if (auto* parent = getParentComponent())
             parent->mouseDoubleClick(e.getEventRelativeTo(parent));
