@@ -343,6 +343,35 @@ public:
         g.setColour (juce::Colour (0xfff4ce55));
         g.strokePath (response_, juce::PathStrokeType (2.0f,
             juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        // Official workflow: a subtle EQ response preview appears on hover,
+        // dashed if another band is selected (then a single tap deselects).
+        if (hover_.has_value() && dragBand_ < 0 && hitBand (*hover_) < 0)
+        {
+            juce::Path preview, dashed;
+            const float baseline = dbToY (0.0);
+            const float extent = baseline - hover_->y;
+            const float centreX = hover_->x;
+            for (int step = 0; step <= 70; ++step)
+            {
+                const float x = std::max (0.0f, centreX - getWidth() * 0.17f)
+                    + step * (getWidth() * 0.34f / 70.0f);
+                const float scale = (x - centreX) / (getWidth() * 0.049f);
+                const float y = baseline - extent * std::exp (-0.5f * scale * scale);
+                if (step == 0) preview.startNewSubPath (x, y);
+                else preview.lineTo (x, y);
+            }
+            g.setColour (juce::Colour (0xfff1d78b).withAlpha (0.45f));
+            if (selected_ >= 0)
+            {
+                const float pattern[] = { 4.0f, 5.0f };
+                juce::PathStrokeType (1.3f).createDashedStroke (
+                    dashed, preview, pattern, 2);
+                g.strokePath (dashed, juce::PathStrokeType (1.3f));
+            }
+            else
+                g.strokePath (preview, juce::PathStrokeType (1.3f));
+        }
+
         for (int band = 0; band < kMaxBands; ++band)
         {
             const auto& s = cachedBands_[static_cast<std::size_t> (band)];
@@ -466,7 +495,10 @@ public:
         createBand (e.position, e.mods.isAltDown(),
                     e.mods.isAltDown() && e.mods.isShiftDown());
         if (selected_ >= 0)
+        {
             beginNodeGesture (selected_, e.position);
+            createdDuringGesture_ = true;
+        }
     }
 
     void mouseMove (const juce::MouseEvent& e) override
@@ -562,6 +594,29 @@ public:
         p->endChangeGesture();
         select (band);
         curveDirty_ = true;
+    }
+
+    // Native mouse event injection for CI adversarial gesture tests.
+    // Production callbacks are invoked, rather than simulating parameters.
+    void injectGraphPointerForTesting (juce::Point<float> pt, int action,
+                                       juce::ModifierKeys modifiers = {})
+    {
+        auto* mouse = juce::Desktop::getInstance().getMouseSource (0);
+        if (mouse == nullptr)
+        {
+            addToDesktop (0);
+            mouse = juce::Desktop::getInstance().getMouseSource (0);
+        }
+        if (mouse == nullptr) return;
+        const auto now = juce::Time::getCurrentTime();
+        const juce::MouseEvent event (
+            *mouse, pt, modifiers, 1.0f,
+            0.0f, 0.0f, 0.0f, 0.0f, this, this,
+            now, pt, now, action == 3 ? 2 : 1, action == 1);
+        if (action == 0) mouseDown (event);
+        if (action == 1) mouseDrag (event);
+        if (action == 2) mouseUp (event);
+        if (action == 3) mouseDoubleClick (event);
     }
 
     // Exact native-offscreen snapshot test (not a generated concept image).
