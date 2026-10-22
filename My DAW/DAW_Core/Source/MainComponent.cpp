@@ -2752,6 +2752,16 @@ MainComponent::MainComponent()
             pianoRollWindow_->toFront(true);
         }
     };
+    // A menu-driven normalize updates the SAME shared AudioFileManager state
+    // used by the Clip Properties pill; refresh it without reopening a window.
+    arrangement_->onClipNormalizationChanged = [this](DAW::Clip& clip)
+    {
+        if (clipPropertiesWindow_ && clipPropertiesWindow_->isShowingClip(clip.getID()))
+        {
+            clipPropertiesWindow_->getPanel().refresh();
+            clipPropertiesWindow_->repaint();
+        }
+    };
     arrangement_->onOpenClipAutomation = [this](DAW::Clip& clip)
     {
         if (!clipPropertiesWindow_)
@@ -2769,20 +2779,24 @@ MainComponent::MainComponent()
                 appCore_.getAutomationManager(), t, t.regionLengthSamples > 0);
             if (arrangement_)
             {
-                arrangement_->showAutomationLane(t.trackId, t.parameterId);
+                // Clip parameter automation belongs INSIDE the clip only.
+                // Never activate a track-wide automation row just because
+                // the user chose Automate This Clip in the radial menu.
+                if (DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
+                    arrangement_->showAutomationLane(t.trackId, t.parameterId);
                 arrangement_->repaint();
             }
         };
 
         panelCb.showLane = [this](const DAW::AutomationQuickCreateCore::ControlTarget& t)
         {
-            if (arrangement_)
+            if (arrangement_ && DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
                 arrangement_->showAutomationLane(t.trackId, t.parameterId);
         };
 
         panelCb.hideLane = [this](const DAW::AutomationQuickCreateCore::ControlTarget& t)
         {
-            if (arrangement_)
+            if (arrangement_ && DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
                 arrangement_->hideAutomationLane(t.trackId, t.parameterId);
         };
 
