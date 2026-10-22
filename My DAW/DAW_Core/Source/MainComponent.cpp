@@ -19,6 +19,7 @@
 #include "UICore/BeatMakingFeaturePolicy.h"
 #include "TrackCore/TrackReorderCore.h"
 #include "UICore/CursorThemeCore.h"
+#include "UICore/ApexContextMenuStyle.h"
 #include "DeviceCore/SafeAsioDeviceTypeCore.h"
 #include "DeviceCore/AudioDeviceBlockAdapterCore.h"
 #include "VocalTuneCore/ApexTuneIntegrationCore.h"
@@ -1270,6 +1271,15 @@ MainComponent::MainComponent()
     menuBar_->setMenuAction("Settings", "Preferences...", [this]
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::ViewToggleSettings);
+    });
+    // Directly accessible from Settings, not buried in the Preferences window.
+    menuBar_->setMenuAction("Settings", "Right-click Menu: Radial Wheel", []
+    {
+        DAW::ApexContextMenuStyle::get().setMode(DAW::ApexContextMenuStyle::Mode::Radial);
+    });
+    menuBar_->setMenuAction("Settings", "Right-click Menu: Classic Windows", []
+    {
+        DAW::ApexContextMenuStyle::get().setMode(DAW::ApexContextMenuStyle::Mode::Classic);
     });
     menuBar_->setMenuAction("Settings", "Reset Project...", [this]
     {
@@ -9348,24 +9358,24 @@ void MainComponent::showExportAudioDialog()
     const auto makeFormatMenu = [](int base)
     {
         juce::PopupMenu menu;
-        menu.addItem(base + 1, "WAV — 16-bit PCM");
-        menu.addItem(base + 2, "WAV — 24-bit PCM");
-        menu.addItem(base + 3, "WAV — 32-bit float");
+        menu.addItem(base + 1, "WAV - 16-bit PCM");
+        menu.addItem(base + 2, "WAV - 24-bit PCM");
+        menu.addItem(base + 3, "WAV - 32-bit float");
         menu.addSeparator();
-        menu.addItem(base + 4, "AIFF — 16-bit PCM");
-        menu.addItem(base + 5, "AIFF — 24-bit PCM");
-        menu.addItem(base + 6, "FLAC — 16-bit lossless");
-        menu.addItem(base + 7, "FLAC — 24-bit lossless");
-        menu.addItem(base + 8, "Ogg Vorbis — high quality");
+        menu.addItem(base + 4, "AIFF - 16-bit PCM");
+        menu.addItem(base + 5, "AIFF - 24-bit PCM");
+        menu.addItem(base + 6, "FLAC - 16-bit lossless");
+        menu.addItem(base + 7, "FLAC - 24-bit lossless");
+        menu.addItem(base + 8, "Ogg Vorbis - high quality");
         return menu;
     };
 
     juce::PopupMenu menu;
     menu.addSubMenu("Full Mix", makeFormatMenu(0));
     menu.addSeparator();
-    menu.addSubMenu("Stems — Individual Tracks (Pre-Master)", makeFormatMenu(100));
-    menu.addSubMenu("Stems — Folder Buses (Pre-Master)", makeFormatMenu(200));
-    menu.addSubMenu("Stems — Tracks + Folder Buses (Pre-Master)", makeFormatMenu(300));
+    menu.addSubMenu("Stems - Individual Tracks (Pre-Master)", makeFormatMenu(100));
+    menu.addSubMenu("Stems - Folder Buses (Pre-Master)", makeFormatMenu(200));
+    menu.addSubMenu("Stems - Tracks + Folder Buses (Pre-Master)", makeFormatMenu(300));
 
     juce::Component::SafePointer<MainComponent> safeThis(this);
     menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis](int choice)
