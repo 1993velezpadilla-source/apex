@@ -393,6 +393,8 @@ namespace ArrangementEditor
         // CommandManager::Listener — refresh timeline immediately on undo/redo
         void undoHistoryChanged() override;
 
+        // Live clip trim/fade/level details for the pinned TRACKS info band.
+        std::function<void(const juce::String&)> onClipEditInfoChanged;
         std::function<void(DAW::Clip&)> onEngineClipSelected;
         std::function<void()> onEngineClipSelectionCleared;
         std::function<void(DAW::Clip&)> onEngineClipDoubleClicked;
