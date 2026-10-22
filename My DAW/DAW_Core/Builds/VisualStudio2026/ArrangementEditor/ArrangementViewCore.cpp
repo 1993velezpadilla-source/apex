@@ -2304,6 +2304,14 @@ namespace ArrangementEditor
             }
         }
 
+        if (!m_clipAuditionSoloId.isNull()
+            && m_clipState.findClip(m_clipAuditionSoloId) == nullptr)
+        {
+            m_clipAuditionSoloId = {};
+            juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
+            for (const auto& model : m_clipState.allClips())
+                syncClipToEngine(model);
+        }
         for (auto& clip : m_clipState.allClips())
             upsertClipRenderer(clip.id);
 
@@ -2383,6 +2391,8 @@ namespace ArrangementEditor
             if (renderer->getBounds() != targetBounds)
                 renderer->setBounds(targetBounds);
             renderer->setSelected(m_selection.isSelected(clip->id));
+            renderer->setSoloActive(!m_clipAuditionSoloId.isNull()
+                && clip->id == m_clipAuditionSoloId);
             renderer->setVisible(shouldShowClipRenderer(*renderer));
             if (renderer->isVisible() && renderer->shouldRenderWaveform()
                 && renderer->getClip() != nullptr
@@ -2650,6 +2660,22 @@ namespace ArrangementEditor
                 before.size() > 1 ? "Mute Selected Clips" : "Mute Clip",
                 [apply, after]() { apply(after); },
                 [apply, before]() { apply(before); }, true));
+        };
+
+        rendererPtr->onSoloButtonClicked = [this, clipUuid]()
+        {
+            m_clipAuditionSoloId = m_clipAuditionSoloId == clipUuid
+                ? juce::Uuid() : clipUuid;
+            // SOLO is a monitoring mask applied directly to engine clips.
+            // Never rewrite the model's persisted mute state or undo history.
+            juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
+            for (const auto& model : m_clipState.allClips())
+                syncClipToEngine(model);
+            for (const auto& renderer : m_clipRenderers)
+                if (renderer != nullptr)
+                    renderer->setSoloActive(
+                        !m_clipAuditionSoloId.isNull()
+                        && renderer->getClipId() == m_clipAuditionSoloId);
         };
 
         rendererPtr->onPianoRollClick = [this, clipUuid]()
@@ -4542,7 +4568,8 @@ namespace ArrangementEditor
         audioClip->setSourceOffset(juce::jmax((DAW::SamplePosition) 0,
                                    (DAW::SamplePosition) std::llround(clip.sourceOffset * srcRate)));
         audioClip->setGain(clip.gain);
-        audioClip->setMuted(clip.muted);
+        audioClip->setMuted(clip.muted
+            || (!m_clipAuditionSoloId.isNull() && clip.id != m_clipAuditionSoloId));
         audioClip->setFadeInLength((DAW::SamplePosition) std::llround(clip.fadeInLength * m_engineSampleRate));
         audioClip->setFadeOutLength((DAW::SamplePosition) std::llround(clip.fadeOutLength * m_engineSampleRate));
 
