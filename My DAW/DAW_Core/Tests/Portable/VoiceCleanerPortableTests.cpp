@@ -86,6 +86,31 @@ int main()
     assert(energy(focused, 26000, 50000) >
            energy(mixed, 26000, 50000) * 0.60);
 
+    // Live-audition contract: the Amount knob uses dry/wet mixing of a
+    // precomputed 100%-wet profile; it must match offline Apply at ANY amount
+    // up to floating point rounding, including while a clip is playing.
+    VoiceCleanerDspCore::Options full;
+    full.strength = 1.0f;
+    full.focus = VoiceCleanerDspCore::Focus::Crickets;
+    full.voiceProtection = 0.85f;
+    std::vector<float> fullyClean(count), fromKnob(count), fromApply(count);
+    assert(VoiceCleanerDspCore::process(mixed.data(), fullyClean.data(),
+                                       count, sampleRate, full));
+    constexpr float kAmount = 0.37f;
+    for (int i = 0; i < count; ++i)
+        fromKnob[(size_t)i] = mixed[(size_t)i]
+            + kAmount * (fullyClean[(size_t)i] - mixed[(size_t)i]);
+    full.strength = kAmount;
+    assert(VoiceCleanerDspCore::process(mixed.data(), fromApply.data(),
+                                       count, sampleRate, full));
+    double maxPreviewError = 0.0;
+    for (int i = 0; i < count; ++i)
+        maxPreviewError = std::max(maxPreviewError,
+            std::abs((double)fromKnob[(size_t)i]
+                     - (double)fromApply[(size_t)i]));
+    std::cout << "preview_vs_apply_max_err=" << maxPreviewError << "\\n";
+    assert(maxPreviewError < 1.0e-5);
+
     // Silence, one-sample input, bad args, and non-overrun tail frames.
     std::vector<float> silence(8192, 0.f), result(silence.size(), 99.f);
     assert(VoiceCleanerDspCore::process(silence.data(), result.data(), 8192, sampleRate));
