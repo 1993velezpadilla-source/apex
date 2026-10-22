@@ -261,8 +261,8 @@ public:
     void resized() override
     {
         constexpr std::array<juce::Rectangle<int>,6> mainBounds {{
-            {77,319,106,119},{251,319,106,119},{578,319,106,119},
-            {752,319,106,119},{952,325,62,79},{952,407,62,79}
+            {77,315,106,106},{251,315,106,106},{578,315,106,106},
+            {752,315,106,106},{952,325,62,69},{952,407,62,69}
         }};
         for(int i=0;i<6;++i)
         {
@@ -270,7 +270,7 @@ public:
             knobs_[static_cast<std::size_t>(i)].setBounds(rect(b.x,b.y,b.getWidth(),b.getHeight()));
         }
         constexpr std::array<juce::Rectangle<int>,4> miniBounds {{
-            {72,449,122,41},{241,449,122,41},{580,449,122,41},{749,449,122,41}
+            {72,442,122,36},{241,442,122,36},{580,442,122,36},{749,442,122,36}
         }};
         for(int i=0;i<4;++i)
         {
@@ -500,11 +500,11 @@ private:
         constexpr std::array<int,4> x {{68,242,569,746}};
         for(int i=0;i<4;++i)
             g.drawText(labels[static_cast<std::size_t>(i)],x[static_cast<std::size_t>(i)],
-                       433,125,18,juce::Justification::centred);
+                       422,125,17,juce::Justification::centred);
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("STYLE",409,337,123,18,juce::Justification::centred);
-        g.drawText("WET GAIN",939,402,93,16,juce::Justification::centred);
-        g.drawText("DRY",953,480,65,16,juce::Justification::centred);
+        g.drawText("WET GAIN",939,394,93,16,juce::Justification::centred);
+        g.drawText("DRY",953,473,65,16,juce::Justification::centred);
         g.setColour(juce::Colour(0xffe3c16a));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
         g.drawText("CHARACTER",416,403,113,14,juce::Justification::centred);
@@ -524,7 +524,7 @@ private:
             const float val=processor_.getC3Parameter(p).getUnits();
             g.drawText(labels[static_cast<std::size_t>(i)]+
                        juce::String("   ")+juce::String(val,1),
-                       xs[static_cast<std::size_t>(i)],472,125,15,
+                       xs[static_cast<std::size_t>(i)],475,125,15,
                        juce::Justification::centred);
         }
     }
