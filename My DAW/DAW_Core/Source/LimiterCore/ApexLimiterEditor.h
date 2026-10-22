@@ -247,11 +247,15 @@ public:
             g.fillRoundedRectangle(px,y,barW,barHeight*fraction,2);
             label(g,juce::String(value,1),px-10,barBottom+7,47,19,12,0xffe8e5f1,true);
         }
-        label(g,"GR",meter.getX()+10,meter.getBottom()-59,30,18,10,0xffe799ad,true);
+        label(g,"GR",meter.getX()+8,meter.getBottom()-65,28,18,10,0xffe799ad,true);
         label(g,juce::String(reduction,1)+" dB",
-              meter.getX()+42,meter.getBottom()-62,85,22,17,0xfff68f9c,true);
-        label(g,"MAX "+juce::String(heldReduction_,1)+" dB",
-              meter.getX()+10,meter.getBottom()-34,110,17,10,0xffaeb9ce,false);
+              meter.getX()+41,meter.getBottom()-67,88,21,16,0xfff68f9c,true);
+        label(g,"M",meter.getX()+8,meter.getBottom()-45,21,18,11,0xffd4d2e4,true);
+        label(g,juce::String(processor_.meterMomentaryLufs(),1)+" LUFS",
+              meter.getX()+32,meter.getBottom()-45,112,18,13,0xffc1cae7,true);
+        label(g,"S",meter.getX()+8,meter.getBottom()-25,21,18,11,0xffd4d2e4,true);
+        label(g,juce::String(processor_.meterShortTermLufs(),1)+" LUFS",
+              meter.getX()+32,meter.getBottom()-25,112,18,13,0xffd2dfec,true);
 
         g.setColour(juce::Colour(0xff23252c));
         g.fillRoundedRectangle(advance,5);
@@ -283,7 +287,7 @@ public:
         label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
         label(g,"Ceiling "+juce::String(param(Ceiling).units(),1)+" dBFS",
               w-160,footerY+9,142,19,11,0xfff7b9d5,true);
-        label(g,"True-peak certification, oversampling, dithering and LUFS: not yet verified",
+        label(g,"True-peak certification, audio oversampling, gated integrated LUFS and dithering pending",
               chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
               10,0xffddbac2,false);
     }
