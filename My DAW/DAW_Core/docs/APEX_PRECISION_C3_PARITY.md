@@ -28,11 +28,52 @@ Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/he
 | Character | Off/Tube/Diode/Bright; Drive and pre/post | Original post-compression color approximations | Pre/post option; oversampling |
 | Lookahead/PDC | Configurable 0–20 ms | Not implemented; zero reported latency | Preallocated delay and exact host PDC |
 | Oversampling | Up to 32× | Not implemented | Anti-alias engine + CPU/load limits |
-| Input/output and GR metering | Accurate peak/loudness + dynamic graph | Block peak and GR, transfer graph | Meter ballistic verification |
+| Input/output and GR metering | Accurate peak/loudness + dynamic graph | Lock-free histories of actual per-block input/output/GR values; reference-hierarchy GUI with scrolling meter graph | Meter ballistics / true-peak & loudness still missing |
 | Surround | Up to immersive 9.1.6 | Mono/stereo only | Multi-bus and channel policies |
-| Presets / A-B / undo | Browser, tags and editing | Session state only | UI and migration tests |
+| Presets / A-B / undo | Browser, tags and editing | Functional four preset choices, two A/B snapshots, Copy, and single-level Undo/Redo in actual editor; no tag-search browser yet | GUI interaction, undo depth and migration tests |
 | MIDI learn / keyboard / touch | Desktop/multi-touch UX | Stable host automation, touch-sized knobs | Touchscreen gauntlet |
 | Instance List | Links to other FabFilter processors | Not applicable to independent APEX branding | Optional APEX native instance manager |
+
+
+## Visual reset (2026-10-22, after user rejected prior screenshot)
+
+**Do not accept a green Windows compiler as a GUI fidelity acceptance criterion.**
+The previous 1080×740 screenshot was a generic cyan dashboard with
+fifteen equally weighted knobs in rounded panels, little numerical feedback,
+a short static transfer curve and a fake-looking sidechain bottom strip. The
+user explicitly rejected it as the same old Prism EQ-style UI.
+
+Reference: [official Pro-C 3 manual, overview p.6](https://www.fabfilter.com/downloads/pdf/help/ffproc3-manual.pdf).
+
+The replacement production JUCE editor now deliberately uses:
+- A **full-bleed level-history display** with real atomic DSP input/output/GR
+  history, red reduction over gray output/input, and right-hand level meters.
+- **Four prominent main knobs** (Threshold, Ratio, Attack, Release),
+  two smaller parallel-gain controls; grouped mini sliders for Knee, Range,
+  Hold and Drive, and a Style control between dynamics and time controls.
+- Gold-accented graphite styling (original APEX drawing assets; no FabFilter
+  copyrighted logo). No detached row-of-panels dashboard hierarchy.
+- Expand/collapse bottom **sidechain detector filter graph**, with draggable
+  HP/LP points bound to the actual TWO implemented detector filters.
+  There are NOT six secretly working filter bands.
+- Actual working A/B snapshot switch and copy, single-level undo/redo,
+  four real parameter presets, host automation gestures, live numeric
+  textboxes and scalable touch-safe controls.
+- A **real screen capture gate** in OptoNativeHostTests: two PNGs from the
+  newly compiled production editor, with genuine compressed pulsed test audio
+  fed into the processing path. No mock screenshot and no decorative
+  imaginary waveform.
+
+This improves visual hierarchy and interaction only. It **does NOT** imply
+1:1 visual or functional parity is already achieved. Gaps include a true
+multi-band sidechain EQ, lookahead/PDC, oversampling, external sidechain,
+M/S/channel modes, loudness ballistic metering, 3-band TTM, analog matching,
+factory preset search and true multi-level undo/history.
+
+A release gate requires a human reviewer to compare the fresh captured PNG
+at 1080×740 and the minimum responsive capture against the official
+reference, verify all visible affordances control *real* DSP, and reject
+blank/overlapping/clipped or misleading controls even if CI is GREEN.
 
 ## Engineering gates before merge to main
 
