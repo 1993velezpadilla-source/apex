@@ -17,7 +17,8 @@ enum ParameterIndex : int
 {
     Threshold = 0, Ratio, Knee, Range, Attack, Release, Hold, Input, Wet,
     Dry, Output, SidechainHP, SidechainLP, StereoLink, Drive, Style,
-    Character, AutoThreshold, AutoRelease, AutoGain, Bypass, ParameterCount
+    Character, AutoThreshold, AutoRelease, AutoGain, Bypass,
+    ExternalSidechain, ParameterCount
 };
 
 class PrecisionC3HostedParameter final : public juce::AudioProcessorParameterWithID
@@ -108,6 +109,7 @@ public:
     Processor()
         : juce::AudioPluginInstance(juce::AudioProcessor::BusesProperties()
             .withInput("Input", juce::AudioChannelSet::stereo(), true)
+            .withInput("Sidechain", juce::AudioChannelSet::stereo(), false)
             .withOutput("Output", juce::AudioChannelSet::stereo(), true))
     {
         add(Threshold,     "c3.threshold", "Threshold", -60, 0, -18, 0, " dB");
@@ -131,6 +133,7 @@ public:
         add(AutoRelease,   "c3.autorel", "Auto Release", 0, 1, 0, 2);
         add(AutoGain,      "c3.autogain", "Auto Gain", 0, 1, 0, 2);
         add(Bypass,        "c3.bypass", "Bypass", 0, 1, 0, 2);
+        add(ExternalSidechain, "c3.external", "External sidechain", 0, 1, 0, 2);
     }
 
     const juce::String getName() const override { return kPluginName; }
@@ -146,9 +149,20 @@ public:
     bool isBusesLayoutSupported (const BusesLayout& l) const override
     {
         const auto input=l.getMainInputChannelSet();
-        return input == l.getMainOutputChannelSet()
-            && (input == juce::AudioChannelSet::mono()
-                || input == juce::AudioChannelSet::stereo());
+        if(input != l.getMainOutputChannelSet()
+           || (input != juce::AudioChannelSet::mono()
+               && input != juce::AudioChannelSet::stereo()))
+            return false;
+        // Optional external detector bus: disabled, mono, or stereo, but
+        // never required by existing APEX projects using only main inputs.
+        if(l.inputBuses.size() > 1)
+        {
+            const auto sc=l.inputBuses[1];
+            if(!sc.isDisabled() && sc != juce::AudioChannelSet::mono()
+                                && sc != juce::AudioChannelSet::stereo())
+                return false;
+        }
+        return true;
     }
     void prepareToPlay(double sampleRate, int blockSize) override
     {
@@ -166,12 +180,30 @@ public:
 
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
     {
-        const int channels=buffer.getNumChannels();
-        if (channels < 1 || buffer.getNumSamples() <= 0) return;
+        // Route the MAIN output bus only: host sidechain samples must NEVER
+        // be overwritten. The detector bus stays off unless both host routing
+        // and the explicit External trigger are enabled.
+        auto main=getBusBuffer(buffer,true,0);
+        const int channels=main.getNumChannels();
+        if(channels<1 || main.getNumSamples()<=0) return;
+        const bool wantExternal=getC3Parameter(ExternalSidechain).getUnits()>0.5f;
+        const bool routed=wantExternal && getBusCount(true)>1
+            && getBus(true,1)!=nullptr && getBus(true,1)->isEnabled();
+        externalSidechainRouted_.store(routed,std::memory_order_relaxed);
         engine_.setParameters(readParameters());
-        engine_.process(buffer.getWritePointer(0),
-                        channels > 1 ? buffer.getWritePointer(1) : nullptr,
-                        buffer.getNumSamples());
+        if(routed)
+        {
+            auto sc=getBusBuffer(buffer,true,1);
+            engine_.process(main.getWritePointer(0),
+                channels>1 ? main.getWritePointer(1) : nullptr,
+                main.getNumSamples(),
+                sc.getNumChannels()>0 ? sc.getReadPointer(0) : nullptr,
+                sc.getNumChannels()>1 ? sc.getReadPointer(1) : nullptr);
+        }
+        else
+            engine_.process(main.getWritePointer(0),
+                channels>1 ? main.getWritePointer(1) : nullptr,
+                main.getNumSamples());
         meterInput_.store(static_cast<float>(engine_.getInputPeakDb()),
                           std::memory_order_relaxed);
         meterOutput_.store(static_cast<float>(engine_.getOutputPeakDb()),
@@ -202,6 +234,10 @@ public:
     float gainReduction() const noexcept { return meterGR_.load(std::memory_order_relaxed); }
     float inputLevel() const noexcept { return meterInput_.load(std::memory_order_relaxed); }
     float outputLevel() const noexcept { return meterOutput_.load(std::memory_order_relaxed); }
+    bool externalSidechainRouted() const noexcept
+    {
+        return externalSidechainRouted_.load(std::memory_order_relaxed);
+    }
 
     // Read-only GUI history of the ACTUAL compressor DSP meters. Each atomic
     // cell can be read without blocking the audio callback.
@@ -287,7 +323,7 @@ private:
         "c3.release","c3.hold","c3.input","c3.wet","c3.dry",
         "c3.output","c3.schp","c3.sclp","c3.link","c3.drive",
         "c3.style","c3.character","c3.autothr","c3.autorel",
-        "c3.autogain","c3.bypass"
+        "c3.autogain","c3.bypass","c3.external"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
@@ -298,6 +334,7 @@ private:
     std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryOutput_ {};
     std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryGr_ {};
     std::atomic<std::uint32_t> meterHistoryCounter_ {0};
+    std::atomic<bool> externalSidechainRouted_ {false};
 };
 } // namespace APEX::PrecisionC3
 
