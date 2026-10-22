@@ -7,6 +7,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <cstdint>
+#include <deque>
 #include "ArrangementClipModel.h"
 #include "ArrangementClipStateCore.h"
 #include "ArrangementSelectionCore.h"
@@ -349,6 +350,12 @@ namespace ArrangementEditor
                           void recalculateEngineClipsForNewSampleRate(double oldSr, double newSr);
                  public:
                           void setPlayheadPosition(double timeSeconds);
+        // Read-only master output envelope PREVIEW. Uses atomic stereo peaks
+        // sampled on the message thread; does not synthesize/edit audio clips.
+        // Unlike an offline render, the preview fills only while transport
+        // plays and is not persisted as editable session audio.
+        void recordMasterOutputPreview(double seconds, float leftPeak,
+                                       float rightPeak, bool playing);
         void setViewportScrollOffset(int scrollX, int scrollY);
         void setSnapMode(SnapMode mode);
         SnapMode getSnapMode() const noexcept { return m_snapMode; }
@@ -651,6 +658,13 @@ namespace ArrangementEditor
         bool                   m_syncingArrangementToEngine = false;
         bool                   m_syncingEngineToArrangement = false;
         double                 m_playheadTimeSeconds = 0.0;
+        struct MasterPreviewBin
+        {
+            int64_t timeBin = 0;
+            float left = 0.0f, right = 0.0f;
+        };
+        std::deque<MasterPreviewBin> m_masterPreviewBins;
+        void drawReadOnlyMasterPreview(juce::Graphics& g);
 
         // Maps ArrangementClipModel UUID → engine ClipID (for remove/split sync)
         std::map<juce::Uuid, juce::String> m_uuidToEngineId;
