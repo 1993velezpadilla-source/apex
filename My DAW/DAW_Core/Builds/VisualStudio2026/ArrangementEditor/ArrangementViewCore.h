@@ -406,7 +406,7 @@ namespace ArrangementEditor
         std::function<void()> onEngineClipSelectionCleared;
         std::function<void(DAW::Clip&)> onEngineClipDoubleClicked;
         std::function<void(DAW::Clip&)> onEngineClipAutomationRequested;
-        std::function<void(DAW::Clip&)> onEngineClipNormalizeChanged;
+        std::function<void(DAW::Clip&)> onEngineClipPropertiesChanged;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneRequested;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneBypassToggled;
         std::function<bool(const DAW::Clip&)> onEngineClipIsVocalTuneBypassed;
@@ -614,6 +614,12 @@ namespace ArrangementEditor
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);
         void syncClipToEngine(const ArrangementClipModel& clip);
+        // Both the quick V popup and Radial Normalize use the same engine
+        // clip + Clip Properties state, never a UI-only second gain.
+        bool toggleClipPeakNormalize(const juce::Uuid& clipId);
+        bool isClipPeakNormalized(const juce::Uuid& clipId) const;
+        float getCanonicalClipGain(const juce::Uuid& clipId) const;
+        void notifyEngineClipPropertiesChanged(const juce::Uuid& clipId);
         void refreshAutoCrossfadesForTrack(int trackIndex);
         void refreshAutoCrossfadesForAllTracks();
         double screenXToTime(int x) const;
