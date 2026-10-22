@@ -11,7 +11,7 @@ namespace APEX { namespace Limiter {
 enum Parameter : int
 {
     Gain, Ceiling, Lookahead, Attack, Release, ChannelLink, LimitingStyle,
-    TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, Count
+    TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, ChannelLinkRelease, Count
 };
 
 class LimiterHostedParameter final : public juce::AudioProcessorParameterWithID
@@ -89,6 +89,7 @@ public:
         add(UnityGain,"lim.unity","Unity Gain Monitoring",0,1,0,2);
         add(Audition,"lim.audition","Audition Difference",0,1,0,2);
         add(DcFilter,"lim.dc","DC Offset Filter",0,1,0,2);
+        add(ChannelLinkRelease,"lim.link.release","Release Stereo Link",0,100,100);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override
@@ -116,6 +117,10 @@ public:
         gainReduction_.store(0,std::memory_order_relaxed);
         peakOutput_.store(0,std::memory_order_relaxed);
         peakInput_.store(0,std::memory_order_relaxed);
+        displayCursor_.store(0,std::memory_order_relaxed);
+        for (auto& f:displayInput_) f.store(0,std::memory_order_relaxed);
+        for (auto& f:displayOutput_) f.store(0,std::memory_order_relaxed);
+        for (auto& f:displayReduction_) f.store(0,std::memory_order_relaxed);
     }
     void releaseResources() override {}
     void reset() override { core_.reset(); }
@@ -130,10 +135,27 @@ public:
         gainReduction_.store(static_cast<float>(core_.reductionDb()),std::memory_order_relaxed);
         peakOutput_.store(static_cast<float>(core_.outputPeak()),std::memory_order_relaxed);
         peakInput_.store(static_cast<float>(core_.inputPeak()),std::memory_order_relaxed);
+        const auto cursor=displayCursor_.load(std::memory_order_relaxed);
+        const auto slot=static_cast<size_t>(cursor%kDisplayHistory);
+        displayInput_[slot].store(meterInput(),std::memory_order_relaxed);
+        displayOutput_[slot].store(meterOutput(),std::memory_order_relaxed);
+        displayReduction_[slot].store(meterReduction(),std::memory_order_relaxed);
+        displayCursor_.store(cursor+1,std::memory_order_release);
     }
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
     float meterInput() const noexcept { return peakInput_.load(std::memory_order_relaxed); }
     float meterOutput() const noexcept { return peakOutput_.load(std::memory_order_relaxed); }
+    static constexpr size_t kDisplayHistory=512;
+    struct DisplayFrame { float input=0.0f,output=0.0f,reduction=0.0f; };
+    DisplayFrame displayFrame(size_t age) const noexcept
+    {
+        const auto end=displayCursor_.load(std::memory_order_acquire);
+        if (age>=kDisplayHistory || age>=end) return {};
+        const auto slot=static_cast<size_t>((end-1-static_cast<uint32_t>(age))%kDisplayHistory);
+        return {displayInput_[slot].load(std::memory_order_relaxed),
+                displayOutput_[slot].load(std::memory_order_relaxed),
+                displayReduction_[slot].load(std::memory_order_relaxed)};
+    }
     LimiterHostedParameter& getLimiterParameter(int i) noexcept { return *limiterParameters_[static_cast<size_t>(i)]; }
     juce::AudioProcessorParameter* getBypassParameter() const override { return limiterParameters_[Bypass]; }
     bool acceptsMidi() const override { return false; }
@@ -177,7 +199,7 @@ private:
         static const std::array<const char*,Count> values = {{
             "lim.gain","lim.ceiling","lim.lookahead","lim.attack",
             "lim.release","lim.link","lim.style","lim.tp","lim.quality",
-            "lim.bypass","lim.unity","lim.audition","lim.dc"
+            "lim.bypass","lim.unity","lim.audition","lim.dc","lim.link.release"
         }};
         return values;
     }
@@ -196,6 +218,7 @@ private:
         s.attackMs=limiterParameters_[Attack]->units();
         s.releaseMs=limiterParameters_[Release]->units();
         s.channelLink=limiterParameters_[ChannelLink]->units()/100.0;
+        s.releaseLink=limiterParameters_[ChannelLinkRelease]->units()/100.0;
         s.style=static_cast<int>(limiterParameters_[LimitingStyle]->units());
         s.truePeak=limiterParameters_[TruePeak]->units()>0.5f;
         s.detectorQuality=static_cast<int>(limiterParameters_[DetectorQuality]->units());
@@ -208,6 +231,10 @@ private:
     std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
     Core core_;
     std::atomic<float> gainReduction_{0},peakInput_{0},peakOutput_{0};
+    std::array<std::atomic<float>,kDisplayHistory> displayInput_{};
+    std::array<std::atomic<float>,kDisplayHistory> displayOutput_{};
+    std::array<std::atomic<float>,kDisplayHistory> displayReduction_{};
+    std::atomic<uint32_t> displayCursor_{0};
 };
 
 }} // namespace APEX::Limiter
