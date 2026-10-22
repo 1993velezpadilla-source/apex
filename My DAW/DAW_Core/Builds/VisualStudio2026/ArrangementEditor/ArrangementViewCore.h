@@ -665,6 +665,11 @@ namespace ArrangementEditor
             float left = 0.0f, right = 0.0f;
         };
         std::deque<MasterPreviewBin> m_masterPreviewBins;
+        // GUI-thread observation only: audio-track output meters >0 dBFS
+        // while its single active clip is playing. Never prelabel cached
+        // source waveform peaks as audible output clipping.
+        std::map<juce::String, std::set<int64_t>> m_playbackClippedClipBins;
+        bool m_masterPreviewWasPlaying = false;
         void drawReadOnlyMasterPreview(juce::Graphics& g);
 
         // Maps ArrangementClipModel UUID → engine ClipID (for remove/split sync)
