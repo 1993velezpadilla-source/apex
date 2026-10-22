@@ -644,6 +644,10 @@ public:
         dragBand_ = -1;
         createdDuringGesture_ = false;
         sync();
+        // Do not shift graph geometry during the pointer drag; only move
+        // the contextual HUD AFTER all grouped gestures are balanced.
+        resized();
+        repaint();
     }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -785,6 +789,8 @@ public:
         return result;
     }
     void selectBandForTesting (int band) { select (band); }
+    void undoForTesting() { historyStep (-1); }
+    void redoForTesting() { historyStep (1); }
     void createBandForTesting (juce::Point<float> pt) { createBand (pt); }
     void refreshForTesting() { curveDirty_ = true; sync(); repaint(); }
 
