@@ -1143,7 +1143,7 @@ public:
             const double heldMs = juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_;
             // A quick vertical swipe scrolls; it can NEVER retroactively
             // become a track reorder when the 500ms hold expires.
-            if (touchRowScrolling_ || (travel > 10.0f && heldMs < 500.0))
+            if (touchRowScrolling_ || (travel > 10.0f && heldMs < 320.0))
             {
                 touchRowScrolling_ = true;
                 touchRowCandidate_ = false;
@@ -1155,7 +1155,7 @@ public:
                             touchRowViewportStartY_ - (screen.y - touchRowDownScreen_.y)));
                 return;
             }
-            if (heldMs < 500.0 || travel <= 10.0f)
+            if (heldMs < 320.0 || travel <= 10.0f)
                 return; // selected header long press is a menu, not a reorder
             touchRowCandidate_ = false;
             dragMode_ = DragMode::Reorder;
@@ -1184,7 +1184,7 @@ public:
     {
         const bool showTouchMenu = touchRowCandidate_
             && ApexPointerPolicy::isDirect(e)
-            && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 500.0
+            && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 320.0
             && e.getScreenPosition().toFloat().getDistanceFrom(
                    touchRowDownScreen_.toFloat()) <= 10.0f;
         touchRowCandidate_ = false;
