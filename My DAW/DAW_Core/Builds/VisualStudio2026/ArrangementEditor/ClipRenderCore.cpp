@@ -518,26 +518,15 @@ namespace ArrangementEditor
             // deliberately move or trim it. Mouse behaviour is unchanged.
             m_touchPanFromUnselected =
                 e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
-            if (m_touchPanFromUnselected && z == Zone::None)
-            {
-                if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
-                {
-                    m_touchMenuPending = true;
-                    m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
-                    m_touchMenuDownScreen = e.getScreenPosition();
-                    m_touchMenuLocalPos = e.getPosition();
-                    m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
-                    startTimerHz(30);
-                }
-            }
+            // First finger tap ONLY selects, as in Logic Pro for iPad.
+            // Do not arm a menu or focus a text editor on this gesture.
             m_activeZone = Zone::VolumeBtn;  // consumes click without editing
             return;
         }
 
-        // In Select mode, a STATIONARY HOLD on a selected region invokes
-        // right-click. A normal tap keeps selection and a drag can move the
-        // region without an unwanted menu. The 500 ms hold threshold is
-        // checked on release, outside any audio callback.
+        // Logic Pro iPad semantics: first tap selects; a subsequent short tap
+        // on that selected clip opens the context menu. Movement cancels the
+        // menu, letting a deliberate drag reposition the clip. No long hold.
         if (z == Zone::None
             && DAW::ApexPointerPolicy::isDirect(e))
         {
@@ -548,8 +537,8 @@ namespace ArrangementEditor
                 m_touchMenuDownScreen = e.getScreenPosition();
                 m_touchMenuLocalPos = e.getPosition();
                 m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
-                if (m_touchMenuPending)
-                    startTimerHz(30);
+                // Short tap only. No long-hold ring or countdown.
+                // Mouse and pen retain their normal clip editing behavior.
             }
         }
 
@@ -823,8 +812,8 @@ namespace ArrangementEditor
         const bool requestTouchMenu = m_touchMenuPending
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && DAW::ApexPointerPolicy::isDirect(e)
-            && TouchNavigationMath::contextHoldReady(
-                e.getLengthOfMousePress(),
+            && e.getLengthOfMousePress() <= 280
+            && TouchNavigationMath::withinTapSlop(
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
@@ -893,11 +882,10 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        // Both double-click and double-tap open Clip Properties. A stationary
-        // 500ms hold still owns the context menu; these are distinct gestures.
-        // Previously every direct-input double tap was deliberately ignored.
-        DBG("[ClipRenderCore] double click/tap forwarding to parent");
-
+        // Mouse double-click opens Properties. On direct touch the second
+        // tap belongs to the selected-clip menu; never open both surfaces.
+        if (DAW::ApexPointerPolicy::isDirect(e))
+            return;
         if (auto* parent = getParentComponent())
             parent->mouseDoubleClick(e.getEventRelativeTo(parent));
     }
