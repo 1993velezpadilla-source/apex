@@ -1,0 +1,61 @@
+name: APEX Bubblegum Limiter DSP and native integration
+on:
+  push:
+    paths:
+      - "My DAW/DAW_Core/Source/LimiterCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexBubblegumLimiterTests.cpp"
+      - ".github/workflows/apex-limiter-core.yml"
+  pull_request:
+    paths:
+      - "My DAW/DAW_Core/Source/LimiterCore/**"
+      - "My DAW/DAW_Core/Source/PluginHostCore/ApexNativePluginFormat.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexBubblegumLimiterTests.cpp"
+      - ".github/workflows/apex-limiter-core.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build DSP tests with ASAN/UBSAN
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            Tests/Standalone/ApexBubblegumLimiterTests.cpp -o /tmp/apex-limiter-tests
+      - name: Run DSP gates
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: /tmp/apex-limiter-tests
+  windows-app:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Prepare dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build APEX x64 Release with native limiter
+        run: .\Scripts\build_apex.ps1 -Configuration Release -Rebuild -Unsigned
+      - name: Exercise standard APEX native tests
+        run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Seed 0xA9E12026
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-limiter-native-evidence
+          path: My DAW/DAW_Core/evidence/runs/
+          if-no-files-found: warn
