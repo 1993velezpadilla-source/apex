@@ -107,8 +107,8 @@ private:
         const auto workspace = juce::SystemStats::getEnvironmentVariable (
             "GITHUB_WORKSPACE", {});
 
-        for (auto size : std::array<juce::Point<int>, 4> {{
-                { 480, 800 }, { 900, 300 },
+        for (auto size : std::array<juce::Point<int>, 5> {{
+                { 320, 568 }, { 480, 800 }, { 900, 300 },
                 { 1280, 720 }, { 1920, 1080 } }})
         {
             editor->setSize (size.x, size.y);
