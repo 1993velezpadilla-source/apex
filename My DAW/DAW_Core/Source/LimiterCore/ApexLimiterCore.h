@@ -29,6 +29,8 @@ struct Settings
     bool unityGain = false;
     bool audition = false;
     bool dcFilter = false;
+    int ditherMode = 0; // 0 off, 1 TPDF, 2 first-order noise shaping
+    int ditherBits = 24;
 
     static Settings sanitized(Settings p) noexcept
     {
@@ -48,6 +50,8 @@ struct Settings
         p.releaseLink = std::clamp(p.releaseLink, 0.0, 1.0);
         p.style = std::clamp(p.style, 0, 7);
         p.detectorQuality = std::clamp(p.detectorQuality, 0, 3);
+        p.ditherMode = std::clamp(p.ditherMode, 0, 2);
+        p.ditherBits = p.ditherBits <= 16 ? 16 : 24;
         return p;
     }
 };
@@ -119,6 +123,8 @@ public:
             c.maximum.clear();
             c.prev = {0,0,0};
             c.dcX = c.dcY = c.reduction = 0.0;
+            c.ditherError=0.0;
+            c.rng = (&c == &channel_[0]) ? 0x12345678u : 0x91ABCDEFu;
         }
         index_ = 0;
         lookaheadSamples_ = -1;
@@ -242,6 +248,25 @@ public:
                     processed /= std::max(1.0e-12,runningGain_);
                 if (settings_.audition)
                     processed = processed - delayed[ch];
+                // Dither follows the limiter; disabled by default, with two
+                // independently seeded bounded channel RNGs. The optional
+                // first-order shaping feeds back quantization error only.
+                if (settings_.ditherMode > 0 && !settings_.audition)
+                {
+                    const double lsb=std::ldexp(1.0,1-settings_.ditherBits);
+                    const auto uniform=[&c]() noexcept {
+                        c.rng=c.rng*1664525u+1013904223u;
+                        return static_cast<double>(c.rng>>8)/16777216.0;
+                    };
+                    const double tpdf=(uniform()-uniform())*lsb;
+                    const double shaped=settings_.ditherMode==2
+                        ? std::clamp(c.ditherError,-lsb,lsb)*0.85 : 0.0;
+                    const double candidate=processed+tpdf+shaped;
+                    const double quantized=std::round(candidate/lsb)*lsb;
+                    c.ditherError=settings_.ditherMode==2
+                        ? std::clamp(candidate-quantized,-lsb,lsb) : 0.0;
+                    processed=std::clamp(quantized,-ceiling,ceiling);
+                }
                 const double out = dryDelayed[ch]*(1.0-bypassBlend_)
                                    + processed*bypassBlend_;
                 const float result = static_cast<float>(safe(out));
@@ -263,7 +288,8 @@ private:
         std::vector<float> input, dry, peak;
         SlidingPeak maximum;
         std::array<double,3> prev{0,0,0};
-        double dcX=0, dcY=0, reduction=0;
+        double dcX=0, dcY=0, reduction=0, ditherError=0;
+        uint32_t rng=0x12345678u;
     };
     std::array<Channel,2> channel_;
     Settings settings_;
