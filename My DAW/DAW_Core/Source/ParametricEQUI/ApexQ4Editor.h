@@ -435,10 +435,16 @@ public:
                            pt.y - (band == selected_ ? 6.0f : 4.5f),
                            band == selected_ ? 12.0f : 9.0f,
                            band == selected_ ? 12.0f : 9.0f);
+            if (selectedMask_[static_cast<std::size_t> (band)])
+            {
+                // Multiple selected bands remain visibly linked while only
+                // the primary band gets the detailed value tooltip.
+                g.setColour (juce::Colours::white.withAlpha (
+                    band == selected_ ? 0.86f : 0.54f));
+                g.drawEllipse (pt.x - 10.0f, pt.y - 10.0f, 20.0f, 20.0f, 1.4f);
+            }
             if (band == selected_)
             {
-                g.setColour (juce::Colours::white.withAlpha (0.86f));
-                g.drawEllipse (pt.x - 10.0f, pt.y - 10.0f, 20.0f, 20.0f, 1.4f);
                 g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
                 const auto label = juce::String (s.frequencyHz, 0) + " Hz   "
                     + juce::String (s.gainDb, 2) + " dB   Q "
@@ -515,6 +521,15 @@ public:
         }
         if (dragBand_ >= 0)
         {
+            if (e.mods.isCtrlDown() || e.mods.isCommandDown())
+            {
+                // Pro-Q desktop workflow: Ctrl/Cmd-click an existing handle
+                // toggles membership in the grouped selection, while
+                // Ctrl/Cmd-click the background creates a new band.
+                toggleSelectedBand (dragBand_);
+                dragBand_ = -1;
+                return;
+            }
             if (e.mods.isAltDown())
             {
                 toggleParameter (parameterIndex (dragBand_,
@@ -523,7 +538,9 @@ public:
                 dragBand_ = -1;
                 return;
             }
-            select (dragBand_);
+            const bool keepGroup = selectedMask_[
+                static_cast<std::size_t> (dragBand_)] && selectedCount() > 1;
+            select (dragBand_, keepGroup);
             beginNodeGesture (dragBand_, e.position);
             return;
         }
@@ -595,10 +612,27 @@ public:
             if (dx > dy) pt.y = dragOrigin_.y;
             else pt.x = dragOrigin_.x;
         }
-        setUnits (parameterIndex (dragBand_, BandParameterOffset::Frequency),
-                  static_cast<float> (xToHz (pt.x)));
-        setUnits (parameterIndex (dragBand_, BandParameterOffset::Gain),
-                  static_cast<float> (yToDb (pt.y)));
+        const float newHz = static_cast<float> (xToHz (pt.x));
+        const float newGain = static_cast<float> (yToDb (pt.y));
+        const double frequencyRatio = newHz
+            / std::max (20.0f, dragStartHz_);
+        const float gainDelta = newGain - dragStartGain_;
+        // Use a frequency RATIO, not an additive Hz offset. Selected bands
+        // shift by equivalent musical octaves while preserving intervals.
+        // Gain moves by equal dB offsets. Each hosted parameter receives an
+        // independent, balanced automation gesture.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            if (! gestureMask_[static_cast<std::size_t> (band)])
+                continue;
+            setUnits (parameterIndex (band, BandParameterOffset::Frequency),
+                static_cast<float> (std::clamp (
+                    groupStartHz_[static_cast<std::size_t> (band)]
+                        * frequencyRatio, 20.0, 30000.0)));
+            setUnits (parameterIndex (band, BandParameterOffset::Gain),
+                groupStartGain_[static_cast<std::size_t> (band)]
+                    + gainDelta);
+        }
         curveDirty_ = true;
         repaint();
     }
@@ -672,6 +706,12 @@ public:
 
     // Exact native-offscreen snapshot test (not a generated concept image).
     int selectedBandForTesting() const noexcept { return selected_; }
+    int selectedBandCountForTesting() const noexcept { return selectedCount(); }
+    bool isBandSelectedForTesting (int band) const noexcept
+    {
+        return band >= 0 && band < kMaxBands
+            && selectedMask_[static_cast<std::size_t> (band)];
+    }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
     juce::Rectangle<int> nodeHitAreaForTesting (int band) const
@@ -887,19 +927,58 @@ private:
         for (auto* widget : widgets)
             widget->setVisible (visible);
     }
-    void select (int index)
+    int selectedCount() const noexcept
     {
-        selected_ = index >= 0 && index < kMaxBands ? index : -1;
+        return static_cast<int> (std::count (
+            selectedMask_.begin(), selectedMask_.end(), true));
+    }
+    void select (int index, bool retainGroup = false)
+    {
+        if (index < 0 || index >= kMaxBands
+            || ! param (parameterIndex (
+                index, BandParameterOffset::Enabled))->getBool())
+            index = -1;
+        if (! retainGroup)
+            selectedMask_.fill (false);
+        selected_ = index;
+        if (index >= 0)
+            selectedMask_[static_cast<std::size_t> (index)] = true;
+        setSelectedVisible (selected_ >= 0);
+        sync(); resized(); repaint();
+    }
+    void toggleSelectedBand (int band)
+    {
+        if (band < 0 || band >= kMaxBands
+            || ! param (parameterIndex (band,
+                BandParameterOffset::Enabled))->getBool())
+            return;
+        const auto index = static_cast<std::size_t> (band);
+        selectedMask_[index] = ! selectedMask_[index];
+        if (selectedMask_[index])
+            selected_ = band;
+        else if (selected_ == band)
+        {
+            selected_ = -1;
+            for (int other = 0; other < kMaxBands; ++other)
+                if (selectedMask_[static_cast<std::size_t> (other)])
+                    selected_ = other;
+        }
         setSelectedVisible (selected_ >= 0);
         sync(); resized(); repaint();
     }
     void finishGestures()
     {
         if (dragBand_ < 0) return;
-        param (parameterIndex (dragBand_, BandParameterOffset::Frequency))
-            ->endChangeGesture();
-        param (parameterIndex (dragBand_, BandParameterOffset::Gain))
-            ->endChangeGesture();
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            if (! gestureMask_[static_cast<std::size_t> (band)])
+                continue;
+            param (parameterIndex (band, BandParameterOffset::Frequency))
+                ->endChangeGesture();
+            param (parameterIndex (band, BandParameterOffset::Gain))
+                ->endChangeGesture();
+        }
+        gestureMask_.fill (false);
         commitHistory();
     }
     void sync()
@@ -942,7 +1021,7 @@ private:
     }
     void beginNodeGesture (int band, juce::Point<float> at)
     {
-        if (band < 0) return;
+        if (band < 0 || band >= kMaxBands) return;
         dragBand_ = band;
         dragOrigin_ = at;
         createdDuringGesture_ = false;
@@ -950,8 +1029,26 @@ private:
         auto* gain = param (parameterIndex (band, BandParameterOffset::Gain));
         dragStartHz_ = hz->getUnitsValue();
         dragStartGain_ = gain->getUnitsValue();
-        hz->beginChangeGesture();
-        gain->beginChangeGesture();
+        gestureMask_.fill (false);
+        for (int other = 0; other < kMaxBands; ++other)
+        {
+            if (! selectedMask_[static_cast<std::size_t> (other)])
+                continue;
+            if (! param (parameterIndex (other,
+                BandParameterOffset::Enabled))->getBool())
+                continue;
+            gestureMask_[static_cast<std::size_t> (other)] = true;
+            groupStartHz_[static_cast<std::size_t> (other)] =
+                param (parameterIndex (other,
+                    BandParameterOffset::Frequency))->getUnitsValue();
+            groupStartGain_[static_cast<std::size_t> (other)] =
+                param (parameterIndex (other,
+                    BandParameterOffset::Gain))->getUnitsValue();
+            param (parameterIndex (other,
+                BandParameterOffset::Frequency))->beginChangeGesture();
+            param (parameterIndex (other,
+                BandParameterOffset::Gain))->beginChangeGesture();
+        }
     }
     bool nearResultCurve (juce::Point<float> at) const
     {
@@ -1529,6 +1626,10 @@ private:
     bool pendingDynamic_ = false, pendingSpectral_ = false;
     juce::Point<float> pendingOrigin_ {};
     std::optional<juce::Point<float>> hover_;
+    std::array<bool, kMaxBands> selectedMask_ {};
+    std::array<bool, kMaxBands> gestureMask_ {};
+    std::array<double, kMaxBands> groupStartHz_ {};
+    std::array<float, kMaxBands> groupStartGain_ {};
     float rangeDb_ = 12.0f;
     bool syncing_ = false, curveDirty_ = true;
     juce::Point<float> dragOrigin_;
