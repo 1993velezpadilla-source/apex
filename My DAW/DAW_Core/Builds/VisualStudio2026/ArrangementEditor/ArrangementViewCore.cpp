@@ -5508,7 +5508,8 @@ namespace ArrangementEditor
             VoiceCleanerOfflineCore::RenderResult result;
         };
         auto items = std::make_shared<std::vector<CleanItem>>();
-        auto add = [this, &items](const juce::Uuid& id)
+        juce::String unsupportedCacheState;
+        auto add = [this, &items, &unsupportedCacheState](const juce::Uuid& id)
         {
             auto* model = m_clipState.findClip(id);
             if (!model || model->sourcePath.empty())
@@ -5520,6 +5521,18 @@ namespace ArrangementEditor
                 m_engineClipManager->getClip(mapped->second));
             if (engineClip == nullptr)
                 return;
+            // The offline worker renders from a file path. Do NOT silently
+            // discard a pending AudioFileManager normalization that lives in
+            // the current in-memory cache rather than in that source file.
+            // Until a cache-authoritative offline renderer is implemented,
+            // abort the entire batch with an actionable message.
+            if (m_engineAudioFiles->isPeakNormalized(mapped->second))
+            {
+                unsupportedCacheState = "One or more selected clips have an active Normalize state. "
+                    "Turn Normalize off before Voice Cleaner, or bounce the clip first; "
+                    "the original and normalized audio were not changed.";
+                return;
+            }
             auto originalCache = m_engineAudioFiles->getCachedAudioSnapshot(mapped->second);
             if (!originalCache)
                 return;
@@ -5540,10 +5553,12 @@ namespace ArrangementEditor
         else
             add(clip->id);
 
-        if (items->empty())
+        if (items->empty() || unsupportedCacheState.isNotEmpty())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                "APEX Voice Cleaner", "Select at least one loaded audio clip.");
+                "APEX Voice Cleaner",
+                unsupportedCacheState.isNotEmpty() ? unsupportedCacheState
+                    : "Select at least one loaded audio clip.");
             return;
         }
 
