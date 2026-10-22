@@ -5375,6 +5375,401 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
     {
+        if (clip == nullptr || m_voiceCleanerBusy)
+            return;
+        const auto id = clip->id;
+
+        // Preview is a temporary, in-memory, per-clip playback cache.
+        // Render on a worker, publish the immutable audio cache on the UI
+        // thread, then the existing AudioEngine picks it up on its NEXT audio
+        // block through AudioFileManager's atomic change generation.
+        // Never run the long offline STFT inside the realtime callback.
+        class VoiceCleanerPanel final : public juce::Component, private juce::Timer
+        {
+        public:
+            std::function<void(float, float, int)> onApply;
+
+            VoiceCleanerPanel(ArrangementViewCore& view, juce::Uuid selected)
+                : owner(&view), clipUuid(selected)
+            {
+                setSize(218, 273);
+                title.setText("VOICE CLEANER", juce::dontSendNotification);
+                title.setTooltip("Audition this clip while the DAW plays. Apply uses these settings on all selected clips.");
+                title.setJustificationType(juce::Justification::centred);
+                title.setColour(juce::Label::textColourId, juce::Colour(0xFF59F5CE));
+                title.setFont(juce::Font("Segoe UI", 13.0f, juce::Font::bold));
+                addAndMakeVisible(title);
+
+                amount.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+                amount.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 19);
+                amount.setRange(0.0, 100.0, 1.0);
+                amount.setValue(68.0, juce::dontSendNotification);
+                amount.setTextValueSuffix("%");
+                amount.setTooltip("During playback the knob re-renders a background audition. Apply commits the same settings.");
+                amount.onValueChange = [this] { requestPreview(); };
+                addAndMakeVisible(amount);
+
+                focusLabel.setText("FOCUS", juce::dontSendNotification);
+                focusLabel.setJustificationType(juce::Justification::centredLeft);
+                addAndMakeVisible(focusLabel);
+                focus.addItem("Auto", 1);
+                focus.addItem("Crickets", 2);
+                focus.addItem("Hiss / Room", 3);
+                focus.setSelectedId(2, juce::dontSendNotification);
+                focus.onChange = [this] { requestPreview(); };
+                focus.setTooltip("Auto balances tones/noise. Crickets learns narrow tonal chirps.");
+                addAndMakeVisible(focus);
+
+                protect.setButtonText("Protect vocal detail");
+                protect.setToggleState(true, juce::dontSendNotification);
+                protect.onClick = [this] { requestPreview(); };
+                addAndMakeVisible(protect);
+
+                bypass.setButtonText("Bypass / compare dry");
+                bypass.onClick = [this] { requestPreview(); };
+                bypass.setTooltip("Instant dry comparison; turning bypass off restores preview.");
+                addAndMakeVisible(bypass);
+
+                status.setText("Preparing audition...", juce::dontSendNotification);
+                status.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::plain));
+                status.setJustificationType(juce::Justification::centred);
+                addAndMakeVisible(status);
+
+                apply.setButtonText("Apply");
+                apply.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF197E70));
+                apply.onClick = [this]
+                {
+                    // Return playback to the actual source BEFORE the existing
+                    // non-destructive offline batch records its original state.
+                    stopPreview();
+                    if (onApply)
+                        onApply((float)amount.getValue() / 100.0f,
+                                protect.getToggleState() ? 0.85f : 0.35f,
+                                focus.getSelectedId());
+                    if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                        box->dismiss();
+                };
+                cancel.setButtonText("Cancel");
+                cancel.onClick = [this]
+                {
+                    stopPreview();
+                    if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                        box->dismiss();
+                };
+                addAndMakeVisible(apply);
+                addAndMakeVisible(cancel);
+
+                // The cache is captured BEFORE any preview modification;
+                // never read a mutated preview as the next "original".
+                if (owner != nullptr && owner->m_engineAudioFiles != nullptr)
+                {
+                    const auto id = owner->m_uuidToEngineId.find(clipUuid);
+                    if (id != owner->m_uuidToEngineId.end())
+                    {
+                        engineId = id->second;
+                        original = owner->m_engineAudioFiles->getCachedAudioSnapshot(engineId);
+                        const bool normalized = owner->m_engineAudioFiles->isPeakNormalized(engineId);
+                        if (normalized)
+                            previewError = "Disable Normalize to audition";
+                    }
+                }
+                if (original == nullptr)
+                    previewError = "No loaded audio to audition";
+                else if (original->getBufferRef().getNumChannels() > 2
+                      || original->sampleRate <= 0.0
+                      || (double)original->getBufferRef().getNumSamples()
+                            > original->sampleRate * 300.0)
+                    previewError = "Preview supports clips up to 5 min";
+                if (previewError.isNotEmpty())
+                    status.setText(previewError, juce::dontSendNotification);
+                else
+                    previewPending = true;
+
+                startTimer(125); // coalesce rapid touch knob movements
+            }
+
+            ~VoiceCleanerPanel() override
+            {
+                stopTimer();
+                stopPreview();
+            }
+
+            void paint(juce::Graphics& g) override
+            {
+                g.fillAll(juce::Colour(0xFF16232B));
+                g.setColour(juce::Colour(0xFFFF1F83).withAlpha(0.70f));
+                g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.7f),
+                                       7.0f, 1.0f);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced(9, 6);
+                title.setBounds(area.removeFromTop(22));
+                amount.setBounds(area.removeFromTop(88));
+                auto row = area.removeFromTop(28);
+                focusLabel.setBounds(row.removeFromLeft(56));
+                focus.setBounds(row);
+                protect.setBounds(area.removeFromTop(25));
+                bypass.setBounds(area.removeFromTop(26));
+                status.setBounds(area.removeFromTop(25));
+                area.removeFromTop(5);
+                auto buttons = area.removeFromTop(31);
+                apply.setBounds(buttons.removeFromLeft(94).reduced(2));
+                cancel.setBounds(buttons.removeFromRight(94).reduced(2));
+            }
+
+        private:
+            void restoreOriginal()
+            {
+                if (owner == nullptr || original == nullptr || engineId.isEmpty()
+                    || owner->m_engineAudioFiles == nullptr || previewPublished == nullptr)
+                    return;
+                auto* files = owner->m_engineAudioFiles;
+                // External Normalize, import, Undo or another processor owns
+                // the source if this pointer no longer matches our preview.
+                if (files->getCachedAudioSnapshot(engineId) == previewPublished)
+                    files->shareSnapshotForClip(original, engineId);
+                previewPublished.reset();
+            }
+
+            void requestPreview()
+            {
+                ++requestedVersion;
+                previewPending = true;
+                if (bypass.getToggleState() || amount.getValue() <= 0.0)
+                {
+                    restoreOriginal(); // bypass is immediate, not queued
+                    status.setText("DRY / bypass", juce::dontSendNotification);
+                    previewPending = false;
+                }
+                else if (previewError.isNotEmpty())
+                {
+                    status.setText(previewError, juce::dontSendNotification);
+                    previewPending = false;
+                }
+                else
+                    status.setText("Updating live audition...", juce::dontSendNotification);
+            }
+
+            void stopPreview()
+            {
+                ++requestedVersion; // invalidate worker results after close
+                previewPending = false;
+                restoreOriginal();
+            }
+
+            void timerCallback() override
+            {
+                if (!previewPending || rendering || previewError.isNotEmpty()
+                    || bypass.getToggleState() || amount.getValue() <= 0.0)
+                    return;
+                if (owner == nullptr || original == nullptr
+                    || owner->m_clipState.findClip(clipUuid) == nullptr)
+                {
+                    previewPending = false;
+                    status.setText("Clip unavailable", juce::dontSendNotification);
+                    return;
+                }
+
+                previewPending = false;
+                rendering = true;
+                const int version = requestedVersion;
+                const auto base = original;
+                const auto settings = currentOptions();
+                const int key = currentProfileKey();
+                const auto cachedWet = key == wetProfileKey ? wetProfile : nullptr;
+                const juce::Component::SafePointer<VoiceCleanerPanel> safePanel(this);
+
+                // Learn+clean once for a given Focus/Protect profile. Moving
+                // ONLY Amount then blends immutable dry and 100%-wet arrays
+                // on a worker, so touch adjustments do NOT repeat FFT work.
+                // The offline Apply uses the identical dry/wet DSP law.
+                std::thread([base, settings, key, cachedWet, version, safePanel]()
+                {
+                    DAW::AudioFileManager::PreparedAudio result;
+                    std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wet = cachedWet;
+                    juce::String error;
+                    try
+                    {
+                        const auto& in = base->getBufferRef();
+                        const int channels = in.getNumChannels();
+                        const int samples = in.getNumSamples();
+                        if (channels < 1 || channels > 2 || samples <= 0)
+                            error = "Preview source unavailable";
+                        else
+                        {
+                            if (!wet)
+                            {
+                                auto decodedWet = std::make_shared<DAW::AudioFileManager::CachedAudio>();
+                                decodedWet->sampleRate = base->sampleRate;
+                                decodedWet->buffer.setSize(channels, samples);
+                                auto full = settings;
+                                full.strength = 1.0f;
+                                for (int ch = 0; ch < channels; ++ch)
+                                {
+                                    if (!VoiceCleanerDspCore::process(
+                                            in.getReadPointer(ch),
+                                            decodedWet->buffer.getWritePointer(ch),
+                                            samples, base->sampleRate, full))
+                                    {
+                                        error = "Cannot analyze audition";
+                                        break;
+                                    }
+                                }
+                                if (error.isEmpty())
+                                    wet = std::move(decodedWet);
+                            }
+
+                            if (error.isEmpty() && wet)
+                            {
+                                auto decoded = std::make_shared<DAW::AudioFileManager::CachedAudio>();
+                                decoded->sampleRate = base->sampleRate;
+                                decoded->buffer.setSize(channels, samples);
+                                const auto& filtered = wet->getBufferRef();
+                                for (int ch = 0; ch < channels; ++ch)
+                                {
+                                    const float* dry = in.getReadPointer(ch);
+                                    const float* fx = filtered.getReadPointer(ch);
+                                    float* dst = decoded->buffer.getWritePointer(ch);
+                                    for (int i = 0; i < samples; ++i)
+                                        dst[i] = dry[i] + settings.strength * (fx[i] - dry[i]);
+                                }
+                                result.decodedSource = std::move(decoded);
+                                result.result.success = true;
+                                result.result.sampleRate = base->sampleRate;
+                                result.result.numChannels = channels;
+                                result.result.numSamples = samples;
+                            }
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        error = juce::String("Preview failed: ") + e.what();
+                    }
+                    catch (...)
+                    {
+                        error = "Preview processing failed";
+                    }
+                    juce::MessageManager::callAsync(
+                        [safePanel, version, key, wet = std::move(wet),
+                         result = std::move(result), error]() mutable
+                        {
+                            if (safePanel != nullptr)
+                                safePanel->finishPreview(version, key, std::move(wet),
+                                                         std::move(result), error);
+                        });
+                }).detach();
+            }
+
+            int currentProfileKey() const
+            {
+                return focus.getSelectedId() * 2
+                    + (protect.getToggleState() ? 1 : 0);
+            }
+
+            VoiceCleanerDspCore::Options currentOptions() const
+            {
+                VoiceCleanerDspCore::Options options;
+                options.strength = (float)amount.getValue() / 100.0f;
+                options.voiceProtection =
+                    protect.getToggleState() ? 0.85f : 0.35f;
+                options.focus = focus.getSelectedId() == 2
+                    ? VoiceCleanerDspCore::Focus::Crickets
+                    : focus.getSelectedId() == 3
+                        ? VoiceCleanerDspCore::Focus::Broadband
+                        : VoiceCleanerDspCore::Focus::Auto;
+                return options;
+            }
+
+            void finishPreview(
+                               int version, int profileKey,
+                               std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wet,
+                               DAW::AudioFileManager::PreparedAudio prepared,
+                               const juce::String& error)
+            {
+                rendering = false;
+                // A knob-only change can reuse the expensive spectral
+                // analysis even when its audition version went stale.
+                if (wet && profileKey == currentProfileKey())
+                {
+                    wetProfile = std::move(wet);
+                    wetProfileKey = profileKey;
+                }
+                if (version != requestedVersion || bypass.getToggleState()
+                    || amount.getValue() <= 0.0)
+                {
+                    previewPending = version != requestedVersion
+                        && amount.getValue() > 0.0 && !bypass.getToggleState();
+                    return;
+                }
+                if (owner == nullptr || owner->m_engineAudioFiles == nullptr
+                    || owner->m_clipState.findClip(clipUuid) == nullptr)
+                    return;
+                if (error.isNotEmpty() || !prepared.result.success)
+                {
+                    status.setText(error.isNotEmpty() ? error
+                        : "Preview render failed", juce::dontSendNotification);
+                    return;
+                }
+
+                auto* files = owner->m_engineAudioFiles;
+                const auto current = files->getCachedAudioSnapshot(engineId);
+                if (current != original && current != previewPublished)
+                {
+                    // Somebody changed the canonical source while this worker
+                    // ran. Refuse to overwrite newer edits.
+                    status.setText("Source changed; reopen cleaner",
+                                   juce::dontSendNotification);
+                    previewError = "Source changed";
+                    return;
+                }
+                if (files->publishPreparedForClip(engineId, prepared).success)
+                {
+                    previewPublished = files->getCachedAudioSnapshot(engineId);
+                    status.setText("PREVIEW ACTIVE (this clip)", juce::dontSendNotification);
+                }
+                else
+                    status.setText("Could not audition clip", juce::dontSendNotification);
+            }
+
+            juce::Component::SafePointer<ArrangementViewCore> owner;
+            juce::Uuid clipUuid;
+            juce::String engineId;
+            DAW::AudioFileManager::CachedAudioHandle original, previewPublished;
+            std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wetProfile;
+            int wetProfileKey = -1;
+            juce::String previewError;
+            int requestedVersion = 0;
+            bool previewPending = false;
+            bool rendering = false;
+            juce::Label title, focusLabel, status;
+            juce::Slider amount;
+            juce::ComboBox focus;
+            juce::ToggleButton protect, bypass;
+            juce::TextButton apply, cancel;
+        };
+
+        auto panel = std::make_unique<VoiceCleanerPanel>(*this, id);
+        juce::Component::SafePointer<ArrangementViewCore> safeOwner(this);
+        panel->onApply = [safeOwner, id](float strength, float voiceProtect, int focus)
+        {
+            if (safeOwner != nullptr)
+                if (auto* active = safeOwner->m_clipState.findClip(id))
+                    safeOwner->runClipVoiceCleaner(active, strength, voiceProtect, focus);
+        };
+        auto* renderer = findClipRendererFor(id);
+        const auto anchor = renderer != nullptr
+            ? renderer->getScreenBounds().withWidth(juce::jmin(100, renderer->getWidth()))
+            : getScreenBounds().withSizeKeepingCentre(20, 20);
+        juce::CallOutBox::launchAsynchronously(std::move(panel), anchor, nullptr);
+    }
+
+    void ArrangementViewCore::runClipVoiceCleaner(ArrangementClipModel* clip,
+                                                   float strength,
+                                                   float voiceProtection,
+                                                   int focus)
+    {
         if (clip == nullptr || m_voiceCleanerBusy || m_engineClipManager == nullptr
             || m_engineAudioFiles == nullptr)
             return;
@@ -5392,7 +5787,8 @@ namespace ArrangementEditor
             VoiceCleanerOfflineCore::RenderResult result;
         };
         auto items = std::make_shared<std::vector<CleanItem>>();
-        auto add = [this, &items](const juce::Uuid& id)
+        juce::String unsupportedCacheState;
+        auto add = [this, &items, &unsupportedCacheState](const juce::Uuid& id)
         {
             auto* model = m_clipState.findClip(id);
             if (!model || model->sourcePath.empty())
@@ -5404,6 +5800,18 @@ namespace ArrangementEditor
                 m_engineClipManager->getClip(mapped->second));
             if (engineClip == nullptr)
                 return;
+            // The offline worker renders from a file path. Do NOT silently
+            // discard a pending AudioFileManager normalization that lives in
+            // the current in-memory cache rather than in that source file.
+            // Until a cache-authoritative offline renderer is implemented,
+            // abort the entire batch with an actionable message.
+            if (m_engineAudioFiles->isPeakNormalized(mapped->second))
+            {
+                unsupportedCacheState = "One or more selected clips have an active Normalize state. "
+                    "Turn Normalize off before Voice Cleaner, or bounce the clip first; "
+                    "the original and normalized audio were not changed.";
+                return;
+            }
             auto originalCache = m_engineAudioFiles->getCachedAudioSnapshot(mapped->second);
             if (!originalCache)
                 return;
@@ -5424,10 +5832,12 @@ namespace ArrangementEditor
         else
             add(clip->id);
 
-        if (items->empty())
+        if (items->empty() || unsupportedCacheState.isNotEmpty())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                "APEX Voice Cleaner", "Select at least one loaded audio clip.");
+                "APEX Voice Cleaner",
+                unsupportedCacheState.isNotEmpty() ? unsupportedCacheState
+                    : "Select at least one loaded audio clip.");
             return;
         }
 
@@ -5441,7 +5851,13 @@ namespace ArrangementEditor
             + " audio clip(s), sources untouched");
 
         const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
-        std::thread([weakOwner, items]()
+        VoiceCleanerDspCore::Options settings;
+        settings.strength = juce::jlimit(0.0f, 1.0f, strength);
+        settings.voiceProtection = juce::jlimit(0.0f, 1.0f, voiceProtection);
+        settings.focus = focus == 2 ? VoiceCleanerDspCore::Focus::Crickets
+                       : focus == 3 ? VoiceCleanerDspCore::Focus::Broadband
+                                    : VoiceCleanerDspCore::Focus::Auto;
+        std::thread([weakOwner, items, settings]()
         {
             juce::String error;
             try
@@ -5450,7 +5866,7 @@ namespace ArrangementEditor
                 for (auto& item : *items)
                 {
                     item.result = VoiceCleanerOfflineCore::render(item.original,
-                                                                    item.rendered);
+                                                                  item.rendered, settings);
                     if (!item.result.success)
                     {
                         error = item.original.getFileName() + ": " + item.result.error;

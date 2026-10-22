@@ -711,6 +711,8 @@ namespace ArrangementEditor
         void onClipPaste   (double time, int trackIndex);
         void onClipBounce  (ArrangementClipModel* clip);
         void onClipVoiceCleaner(ArrangementClipModel* clip);
+        void runClipVoiceCleaner(ArrangementClipModel* clip, float strength,
+                                 float voiceProtection, int focus);
         void onClipFreeze  (ArrangementClipModel* clip);
         void onClipUnfreeze(ArrangementClipModel* clip);
         void onClipPreset  (ArrangementClipModel* clip, const std::string& name);
