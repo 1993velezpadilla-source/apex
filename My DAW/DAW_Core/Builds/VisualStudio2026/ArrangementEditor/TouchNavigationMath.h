@@ -47,6 +47,18 @@ namespace ArrangementEditor
             return durationMs >= 320 && withinTapSlop(x0, y0, x1, y1);
         }
 
+        // Logic for iPad: an already selected clip accepts a second short tap;
+        // the first tap only selects. Any real movement must cancel the menu
+        // so drag-to-move remains instantaneous and unambiguous.
+        static bool selectedSecondTapReady(bool selectedAtPointerDown,
+                                           int durationMs, double x0, double y0,
+                                           double x1, double y1) noexcept
+        {
+            return selectedAtPointerDown && durationMs >= 0
+                && durationMs <= 280
+                && withinTapSlop(x0, y0, x1, y1);
+        }
+
         // Compare to the LAST APPLIED pinch distance, not the last sampled
         // distance. Tiny slow movements must accumulate rather than vanish.
         static bool pinchReady(double appliedSeparationPx, double currentSeparationPx) noexcept
