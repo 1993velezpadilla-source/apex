@@ -74,6 +74,7 @@ public:
         testPrismOffscreenRenderAndSnapshots();
         testDoubleClickCreatesNativeBandAndWheelEditsQ();
         testSingleTapDeselectThenCreateNativeBand();
+        testTypedValuesFollowCanonicalNormalization();
         testNodeDragUpdatesParametersThroughRealHierarchy();
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
@@ -471,6 +472,42 @@ private:
                 "hovering band wheel increases canonical hosted Q");
         expect (std::isfinite (q->getUnitsValue()),
                 "wheel editing keeps Q finite");
+    }
+
+    void testTypedValuesFollowCanonicalNormalization()
+    {
+        beginTest ("manual: typed frequency/gain/Q keep units, not [0..1] clamp");
+        auto processor = std::make_unique<Processor>();
+        enableBell (*processor, 0, 1000.0f, 0.0f, 1.0f);
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        editor->setSize (1280, 720);
+        editor->setSelectedBandForTesting (0);
+        auto primary = editor->getPrimaryDialsForTesting();
+        const auto applyText = [] (juce::Slider& slider,
+                                   const juce::String& value)
+        {
+            slider.setValue (slider.valueFromTextFunction (value),
+                             juce::sendNotificationSync);
+        };
+        applyText (*primary[0], "930 Hz");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency))
+                    ->getUnitsValue()), 930.0, 5.0,
+            "930 Hz stays 930 Hz, not maximum cutoff");
+        applyText (*primary[1], "+8 dB");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                    ->getUnitsValue()), 8.0, 0.10,
+            "typed +8 dB remains +8 dB");
+        applyText (*primary[2], "2.4");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Q))
+                    ->getUnitsValue()), 2.4, 0.10,
+            "typed 2.4 Q remains 2.4");
     }
 
     void testSingleTapDeselectThenCreateNativeBand()
