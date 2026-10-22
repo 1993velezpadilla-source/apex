@@ -103,6 +103,7 @@ public:
         for (auto& c : channel_)
         {
             c.input.assign(static_cast<size_t>(capacity), 0.0f);
+            c.dry.assign(static_cast<size_t>(capacity), 0.0f);
             c.peak.assign(static_cast<size_t>(capacity), 0.0f);
             c.maximum.prepare(capacity);
         }
@@ -113,6 +114,7 @@ public:
         for (auto& c : channel_)
         {
             std::fill(c.input.begin(), c.input.end(), 0.0f);
+            std::fill(c.dry.begin(), c.dry.end(), 0.0f);
             std::fill(c.peak.begin(), c.peak.end(), 0.0f);
             c.maximum.clear();
             c.prev = {0,0,0};
@@ -170,6 +172,7 @@ public:
             const int64_t keyIndex = outputIndex + lookahead;
             double raw[2] = {safe(left[i]), stereo ? safe(right[i]) : 0.0};
             double delayed[2] = {0, 0};
+            double dryDelayed[2] = {0, 0};
             double required[2] = {0, 0};
             const int active = stereo ? 2 : 1;
             for (int ch=0; ch<active; ++ch)
@@ -184,6 +187,7 @@ public:
                 }
                 else { c.dcX = x; c.dcY = 0.0; }
                 c.input[static_cast<size_t>(w)] = static_cast<float>(x);
+                c.dry[static_cast<size_t>(w)] = static_cast<float>(raw[ch]);
                 // Cubic reconstruction is an inter-sample *estimate*, not
                 // a certified ITU true-peak reconstruction filter.
                 double peak = std::abs(x);
@@ -215,6 +219,7 @@ public:
                 {
                     const int read = static_cast<int>(outputIndex % count);
                     delayed[ch] = c.input[static_cast<size_t>(read)];
+                    dryDelayed[ch] = c.dry[static_cast<size_t>(read)];
                 }
                 peakInput_ = std::max(peakInput_,std::abs(raw[ch]));
             }
@@ -237,7 +242,7 @@ public:
                     processed /= std::max(1.0e-12,runningGain_);
                 if (settings_.audition)
                     processed = processed - delayed[ch];
-                const double out = delayed[ch]*(1.0-bypassBlend_)
+                const double out = dryDelayed[ch]*(1.0-bypassBlend_)
                                    + processed*bypassBlend_;
                 const float result = static_cast<float>(safe(out));
                 if (ch == 0) left[i] = result;
@@ -255,7 +260,7 @@ private:
     }
     struct Channel
     {
-        std::vector<float> input, peak;
+        std::vector<float> input, dry, peak;
         SlidingPeak maximum;
         std::array<double,3> prev{0,0,0};
         double dcX=0, dcY=0, reduction=0;
