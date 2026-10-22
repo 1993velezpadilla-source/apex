@@ -292,7 +292,7 @@ public:
     {
         const std::array<juce::Rectangle<int>,6> mainBounds {{
             {77,315,106,106},{251,315,106,106},{578,315,106,106},
-            {752,315,106,106},{952,325,62,69},{952,407,62,69}
+            {752,315,106,106},{926,325,65,69},{926,407,65,69}
         }};
         for(int i=0;i<6;++i)
         {
@@ -300,7 +300,7 @@ public:
             knobs_[static_cast<std::size_t>(i)].setBounds(rect(b.getX(),b.getY(),b.getWidth(),b.getHeight()));
         }
         const std::array<juce::Rectangle<int>,4> miniBounds {{
-            {72,442,122,36},{241,442,122,36},{580,442,122,36},{749,442,122,36}
+            {72,442,122,30},{241,442,122,30},{580,442,122,30},{749,442,122,30}
         }};
         for(int i=0;i<4;++i)
         {
@@ -309,7 +309,7 @@ public:
         }
         toggles_[0].setBounds(rect(76,296,123,21));
         toggles_[1].setBounds(rect(753,296,128,21));
-        toggles_[2].setBounds(rect(937,300,95,21));
+        toggles_[2].setBounds(rect(906,300,95,21));
         toggles_[3].setBounds(rect(980,708,93,25));
 
         scToggle_.setBounds(rect(447,489,189,25));
@@ -558,8 +558,8 @@ private:
                        422,125,17,juce::Justification::centred);
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("STYLE",409,337,123,18,juce::Justification::centred);
-        g.drawText("WET GAIN",939,394,93,16,juce::Justification::centred);
-        g.drawText("DRY",953,473,65,16,juce::Justification::centred);
+        g.drawText("WET GAIN",910,394,91,16,juce::Justification::centred);
+        g.drawText("DRY",926,473,65,16,juce::Justification::centred);
         g.setColour(juce::Colour(0xffe3c16a));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
         g.drawText("CHARACTER",416,403,113,14,juce::Justification::centred);
@@ -800,12 +800,12 @@ private:
         g.setColour(juce::Colour(0xffc5b9a9));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
         g.drawText("SIX DETECTOR FILTERS   /   DRAG: FREQ + GAIN   /   WHEEL: Q",
-                   170,523,670,16,juce::Justification::centredLeft);
+                   170,523,610,16,juce::Justification::centredLeft);
         g.drawText("BAND "+juce::String(selectedBell_+1)+"   "
                    +juce::String(freq,0)+" Hz    "
                    +juce::String(gain,1)+" dB    Q "
                    +juce::String(q,2),
-                   492,671,516,18,juce::Justification::centredRight);
+                   416,671,326,18,juce::Justification::centredRight);
         const bool wantsExternal=processor_.getC3Parameter(ExternalSidechain).getUnits()>0.5f;
         g.setColour(wantsExternal
             ? (processor_.externalSidechainRouted()
