@@ -79,6 +79,8 @@ struct ClipContextCallbacks
     std::function<void(ArrangementClipModel*)> openAutomateClipPanel;
     std::function<void(ArrangementClipModel*)> removeClipAutomation;
     std::function<void(ArrangementClipModel*, juce::Colour, bool)> recolorClip;
+    std::function<void(ArrangementClipModel*)> toggleTapeStop;
+    std::function<bool(ArrangementClipModel*)> isTapeStopActive;
 
     // Open Vocal Tune for the clicked clip.
     std::function<void(ArrangementClipModel*)> openVocalTune;
@@ -229,6 +231,7 @@ private:
         kIdRemoveClipAutomation = 25,
         kIdClipColourBase = 400,
         kIdFollowTrackColour = 408,
+        kIdTapeStop = 109,
         kIdAutomationBase   = 300,
         // Presets: 100-106
         kIdPresetBase       = 100,
@@ -273,6 +276,14 @@ private:
                                             const ClipContextCallbacks& cb)
     {
         juce::PopupMenu sub;
+        juce::PopupMenu::Item tape;
+        tape.itemID = kIdTapeStop;
+        tape.text = "Tape Stop";
+        tape.isEnabled = cb.toggleTapeStop != nullptr;
+        tape.isTicked = cb.isTapeStopActive
+            ? cb.isTapeStopActive(const_cast<ArrangementClipModel*>(&clip)) : false;
+        sub.addItem(tape);
+        sub.addSeparator();
         const auto names = TimePitchPresetsCore::allNames();
         const auto presets = TimePitchPresetsCore::allPresets();
         for (int i = 0; i < (int)names.size(); ++i)
@@ -421,6 +432,11 @@ private:
         else if (result == kIdNormalize)
         {
             if (cb.normalizeClip) cb.normalizeClip(clip);
+        }
+        else if (result == kIdTapeStop)
+        {
+            if (cb.toggleTapeStop)
+                cb.toggleTapeStop(clip);
         }
         else if (result == kIdPresetCurveVisible)
         {
