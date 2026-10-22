@@ -2463,6 +2463,15 @@ MainComponent::MainComponent()
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->setAutomationManager(&appCore_.getAutomationManager());
 
+    // Pinned TRACKS header carries the same clip-edit info that the timeline
+    // already computes for trim, fades and clip gain. No extra DSP or polling.
+    if (arrangement_ && arrangement_->getCore() != nullptr)
+        arrangement_->getCore()->onClipEditInfoChanged = [this](const juce::String& info)
+        {
+            if (trackList_ != nullptr)
+                trackList_->setClipEditInfo(info);
+        };
+
     appCore_.setBeforeClipFxProjectReset([this]()
     {
         if (clipPropertiesWindow_)
