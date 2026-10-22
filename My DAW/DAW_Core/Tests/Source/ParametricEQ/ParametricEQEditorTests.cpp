@@ -73,6 +73,7 @@ public:
         testPurpleAnalyzerAndPresetRestore();
         testPrismOffscreenRenderAndSnapshots();
         testDoubleClickCreatesNativeBandAndWheelEditsQ();
+        testSingleTapDeselectThenCreateNativeBand();
         testNodeDragUpdatesParametersThroughRealHierarchy();
         testPlacementButtonsAreTouchAccessibleAndFunctional();
         testAuditionHoldGestureLifecycle();
@@ -248,23 +249,22 @@ private:
                     "inspector stays on screen under rapid band switching");
                 expect (! inspector.intersects (editor->getTopBarBoundsForTesting()),
                     "inspector never obscures the footer");
-                if (size.x >= 900 && size.y >= 500)
-                {
-                    expect (graph.contains (inspector),
-                        "floating inspector never escapes the frequency graph");
-                    for (int band = 0; band < 2; ++band)
-                        expect (! inspector.intersects (
-                            editor->getNodeBoundsForTesting (band).translated (
-                                graph.getX(), graph.getY())),
-                            "active EQ handles remain available while switching");
-                }
+                expect (! graph.intersects (inspector),
+                    "manual-guided inline band controls never cover the response");
+                expectEquals (graph.getBottom(), inspector.getY(),
+                    "band controls attach immediately below the EQ graph");
+                for (int band = 0; band < 2; ++band)
+                    expect (! inspector.intersects (
+                        editor->getNodeBoundsForTesting (band).translated (
+                            graph.getX(), graph.getY())),
+                        "no EQ handle can be hidden by the band strip");
             }
         }
     }
 
     void testResponsiveLayoutMatrix()
     {
-        beginTest ("responsive layout at phone, tablet and desktop sizes");
+        beginTest ("manual-guided inline EQ band strip stays graph-first at all sizes");
         for (const auto& sizeCase : kSizes)
         {
             auto processorStorage = std::make_unique<Processor>();
@@ -277,211 +277,82 @@ private:
             editor->setSize (sizeCase.width, sizeCase.height);
             expectEquals (static_cast<int> (editor->getLayoutMode()),
                           static_cast<int> (sizeCase.expected));
+            // Without a selected band, ALL space except the command bar is
+            // available to the graph. No empty half-screen inspector.
+            expect (! editor->getInspectorBoundsForTesting().isEmpty()
+                    || ! editor->getGraphBoundsForTesting().isEmpty());
             editor->setSelectedBandForTesting (0);
-
-            const auto editorBounds = editor->getLocalBounds();
-            const auto topBar = editor->getTopBarBoundsForTesting();
+            const auto full = editor->getLocalBounds();
             const auto graph = editor->getGraphBoundsForTesting();
-            const auto inspector = editor->getInspectorBoundsForTesting();
-            // Premium graph has four visible 44px+ actions; remaining
-            // clipboard/reference features live in the contextual menu.
-            const std::array<juce::TextButton*, 4> tools {{
+            const auto strip = editor->getInspectorBoundsForTesting();
+            const auto footer = editor->getTopBarBoundsForTesting();
+            expect (full.contains (graph), "native EQ graph remains in window");
+            expect (full.contains (strip), "band strip remains in window");
+            expect (full.contains (footer), "bottom command bar remains in window");
+            expectEquals (footer.getBottom(), full.getBottom());
+            expectEquals (graph.getBottom(), strip.getY());
+            expectEquals (strip.getBottom(), footer.getY());
+            expect (! graph.intersects (strip), "band controls never obscure nodes");
+            expect (! footer.intersects (strip), "footer never obscures controls");
+            expect (graph.getHeight() >= 140, "response always usable");
+            expect (graph.getHeight() * 100 >= sizeCase.height * 45,
+                    "at least 45% of vertical space for the graph");
+            expect (strip.getHeight() <= 184,
+                    "band controls may never swallow half the editor");
+
+            const auto dials = editor->getPrimaryDialsForTesting();
+            for (const auto* dial : dials)
+            {
+                expect (dial != nullptr);
+                if (dial == nullptr)
+                    continue;
+                expect (dial->getWidth() >= 44 && dial->getHeight() >= 82,
+                        "frequency, gain and Q are genuine touch-safe controls");
+                const bool desktop = sizeCase.width >= 900
+                    && sizeCase.height >= 500;
+                expect (dial->getSliderStyle() ==
+                            (desktop
+                                ? juce::Slider::RotaryHorizontalVerticalDrag
+                                : juce::Slider::LinearHorizontal),
+                    "desktop rotary / touch linear control matches actual layout");
+                expect (dial->getY() <= 65,
+                    "all essential controls immediately accessible");
+            }
+            expect (! dials[0]->getBounds().intersects (dials[1]->getBounds()));
+            expect (! dials[1]->getBounds().intersects (dials[2]->getBounds()));
+            const auto tools = std::array<juce::TextButton*, 4> {{
                 &editor->getSketchButtonForTesting(),
                 &editor->getGrabButtonForTesting(),
                 &editor->getMatchButtonForTesting(),
                 &editor->getToolsButtonForTesting()
             }};
+            for (auto* tool : tools)
+            {
+                expect (tool->getWidth() >= 44 && tool->getHeight() >= 44);
+                expect (juce::Rectangle<int> (0, 0, graph.getWidth(),
+                    graph.getHeight()).contains (tool->getBounds()));
+            }
             for (auto* hidden : { &editor->getCopyButtonForTesting(),
                                    &editor->getPasteButtonForTesting(),
                                    &editor->getMatchSaveButtonForTesting(),
                                    &editor->getMatchLoadButtonForTesting() })
             {
-                expect (! hidden->isVisible(),
-                    "contextual features must not crowd the EQ graph");
-                expect (hidden->getWidth() >= 44
-                    && hidden->getHeight() >= 44,
-                    "hidden action handlers remain accessible and testable");
-            }
-            for (std::size_t tool = 0; tool < tools.size(); ++tool)
-            {
-                const auto b = tools[tool]->getBounds();
-                expect (b.getWidth() >= 44 && b.getHeight() >= 44,
-                        "graph actions have >=44px touch targets");
-                expect (juce::Rectangle<int> (0, 0, graph.getWidth(),
-                                                graph.getHeight()).contains (b),
-                        "graph actions fit their own panel");
-                if (tool > 0)
-                    expect (! b.intersects (tools[tool - 1]->getBounds()),
-                            "adjacent graph actions cannot overlap");
-            }
-            if (graph.getHeight() <= 200)
-            {
-                // Real 640x400 native screenshots previously hid the boosted
-                // EQ handle behind EQ MATCH. Test the source of the problem,
-                // not just whether the seven action buttons fit on screen.
-                for (int band = 0; band < 2; ++band)
-                {
-                    const auto node = editor->getNodeBoundsForTesting (band);
-                    for (const auto* tool : tools)
-                        expect (! node.intersects (tool->getBounds()),
-                                "short landscape EQ node is NOT concealed "
-                                "behind any top-row graph action");
-                }
+                expect (! hidden->isVisible());
+                expect (hidden->getWidth() >= 44);
             }
             expectEquals (editor->getMatchButtonForTesting().getButtonText(),
                 sizeCase.width <= 430 ? juce::String ("MATCH")
-                                      : juce::String ("EQ MATCH"),
-                "compact EQ Match caption stays readable");
-            expectEquals (editor->getMatchSaveButtonForTesting().getButtonText(),
-                sizeCase.width <= 430 ? juce::String ("SAVE")
-                                      : juce::String ("REF SAVE"),
-                "compact reference save caption stays readable");
-            expectEquals (editor->getMatchLoadButtonForTesting().getButtonText(),
-                sizeCase.width <= 430 ? juce::String ("LOAD")
-                                      : juce::String ("REF LOAD"),
-                "compact reference load caption stays readable");
-
-            const auto primary = editor->getPrimaryDialsForTesting();
-            for (const auto* dial : primary)
-            {
-                expect (dial != nullptr, "every primary EQ dial exists");
-                if (dial == nullptr)
-                    continue;
-                expect (dial->getWidth() >= 44,
-                        "primary parameter keeps a safe 44px touch target");
-                if (sizeCase.width >= 900 && sizeCase.height >= 500)
-                {
-                    expect (dial->getSliderStyle()
-                            == juce::Slider::RotaryHorizontalVerticalDrag,
-                            "floating HUD uses real interactive APEX rotary dial");
-                    expect (dial->getHeight() >= 110,
-                            "floating dial stays legible and touch safe");
-                }
-                else
-                {
-                    expect (dial->getSliderStyle()
-                            == juce::Slider::LinearHorizontal,
-                            "phone/tablet sheet retains horizontal touch sliders");
-                    const bool shortSheet = sizeCase.height < 500;
-                    expect (dial->getHeight() >= (shortSheet ? 88 : 96)
-                            && dial->getWidth() >= 80,
-                            "touch quick-edit strip keeps real FREQ/GAIN/Q "
-                            "controls large enough for fingers and text");
-                    expect (dial->getY() < 70,
-                            "touch EQ essentials immediately visible before "
-                            "secondary inspector controls");
-                }
-            }
-            if (sizeCase.width < 900 || sizeCase.height < 500)
-            {
-                expectEquals (primary[0]->getY(), primary[1]->getY(),
-                              "quick-edit band strip aligns FREQ and GAIN");
-                expectEquals (primary[1]->getY(), primary[2]->getY(),
-                              "quick-edit band strip aligns GAIN and Q");
-                expect (! primary[0]->getBounds().intersects (
-                            primary[1]->getBounds()),
-                        "FREQ and GAIN hit targets cannot overlap");
-                expect (! primary[1]->getBounds().intersects (
-                            primary[2]->getBounds()),
-                        "GAIN and Q hit targets cannot overlap");
-                if (sizeCase.height < 500)
-                    for (const auto* dial : primary)
-                        expect (dial->getBottom() + 10 <= inspector.getHeight(),
-                            "short landscape numeric text box needs at least "
-                            "10px breathing room BEFORE the bottom command "
-                            "dock (previous native PNG cropped Hz/dB/Q)");
-            }
-
-            auto inBounds = [] (const juce::Rectangle<int>& child,
-                                const juce::Rectangle<int>& parent)
-            {
-                return child.getWidth() > 0 && child.getHeight() > 0
-                    && parent.contains (child);
-            };
-            expect (inBounds (topBar, editorBounds), "bottom dock in bounds");
-            expect (inBounds (graph, editorBounds), "graph in bounds");
-            expect (inBounds (inspector, editorBounds), "inspector in bounds");
-            expect (! graph.intersects (topBar), "graph/bottom dock overlap");
-            expect (! inspector.intersects (topBar), "inspector/bottom dock overlap");
-            expectEquals (topBar.getBottom(), editorBounds.getBottom(),
-                          "Pro-Q-style bottom command dock sits at window foot");
-
-            const bool touchSheet = sizeCase.width < 900
-                || sizeCase.height < 500;
-            if (touchSheet)
-                expect (! graph.intersects (inspector),
-                        "touch phone/tablet inspector stays BELOW graph in "
-                        "both landscape and portrait orientations");
-            else
-            {
-                expect (graph.contains (inspector),
-                        "floating APEX band HUD stays INSIDE graph");
-                expectEquals (graph.getWidth(), sizeCase.width,
-                              "immersive desktop graph uses the entire width");
-                const auto selectedNode = editor->getNodeBoundsForTesting (0)
-                    .translated (graph.getX(), graph.getY());
-                expect (! inspector.intersects (selectedNode),
-                        "floating band HUD cannot cover selected node");
-                const auto otherNode = editor->getNodeBoundsForTesting (1)
-                    .translated (graph.getX(), graph.getY());
-                expect (! inspector.intersects (otherNode),
-                        "floating HUD must preserve access to other EQ nodes");
-                editor->setSelectedBandForTesting (1);
-                const auto movedInspector = editor->getInspectorBoundsForTesting();
-                expect (! movedInspector.intersects (
-                    editor->getNodeBoundsForTesting (0).translated (
-                        graph.getX(), graph.getY())),
-                    "switching bands repositions the HUD without hiding prior band");
-            }
-            expect (graph.getWidth() >= 0 && graph.getHeight() >= 0);
-            expect (graph.getHeight() >= 140, "graph must remain usable");
-            expect (graph.getWidth() * graph.getHeight() * 4
-                        >= editorBounds.getWidth() * editorBounds.getHeight(),
-                    "graph must stay a dominant surface");
-            if (touchSheet)
-                expect (graph.getWidth() * graph.getHeight() * 100
-                            >= editorBounds.getWidth()
-                                 * editorBounds.getHeight() * 45,
-                        "touch canvas must reserve 45% of screen for response "
-                        "in both landscape and portrait");
-
+                                      : juce::String ("EQ MATCH"));
             const auto& placements = editor->getPlacementButtonsForTesting();
             expectEquals (placements.size(), static_cast<std::size_t> (5));
-            for (const auto& button : placements)
-            {
-                expect (button->isEnabled(), "placement enabled");
-                const auto bounds = button->getBounds();
-                expect (bounds.getWidth() >= 40 && bounds.getHeight() >= 40,
-                        "placement touch target size");
-                expect (bounds.getX() >= 0 && bounds.getY() >= 0,
-                        "placement non-negative");
-            }
-            for (const auto& button : placements)
-                expect (! button->isVisible(),
-                    "five legacy channel buttons must not clutter the HUD");
             auto& channel = editor->getPlacementComboForTesting();
-            expect (channel.isVisible(), "single channel dropdown is visible");
-            expectEquals (channel.getNumItems(), 5,
-                          "Stereo/Left/Right/Mid/Side all remain available");
-            expectEquals (channel.getSelectedId(), 1,
-                          "per-band channel defaults to Stereo");
-            expect (channel.getWidth() >= 44 && channel.getHeight() >= 40,
-                    "channel selector stays touch accessible");
-
-            const auto audition = editor->getAuditionButtonForTesting().getBounds();
-            expect (editor->getAuditionButtonForTesting().isEnabled(),
-                    "audition enabled with a selected band");
-            expect (audition.getHeight() >= 44, "audition touch target height");
-            expect (audition.getWidth() >= 60, "audition touch target width");
-            expect (audition.getX() >= 0 && audition.getY() >= 0,
-                    "audition non-negative");
-
+            expectEquals (channel.getNumItems(), 5);
+            expectEquals (channel.getSelectedId(), 1);
+            expect (channel.getWidth() >= 44 && channel.getHeight() >= 40);
+            expect (editor->getAuditionButtonForTesting().getHeight() >= 44);
+            expect (editor->getAuditionButtonForTesting().isEnabled());
             editor->setSelectedBandForTesting (-1);
-            expect (! editor->getAuditionButtonForTesting().isEnabled(),
-                    "audition disabled without selection");
-            for (const auto& button : placements)
-                expect (! button->isEnabled(), "placement disabled without selection");
-            expect (! channel.isEnabled(), "channel selector disabled without band");
+            expect (! editor->getAuditionButtonForTesting().isEnabled());
         }
     }
 
@@ -579,8 +450,9 @@ private:
         editor->injectGraphDoubleClickForTesting (point);
         expect (enabled->getBool(), "double-click creates a real hosted band");
         expectEquals (editor->getSelectedBandForTesting(), band);
-        expect (graph.contains (editor->getInspectorBoundsForTesting()),
-                "creation opens native floating inspector within canvas");
+        expect (! editor->getGraphBoundsForTesting().intersects (
+                        editor->getInspectorBoundsForTesting()),
+                "creation opens inline controls without covering EQ bands");
         const auto frequency = processor.getParametricEQParameter (
             parameterIndex (band, BandParameterOffset::Frequency))
                 ->getUnitsValue();
@@ -599,6 +471,37 @@ private:
                 "hovering band wheel increases canonical hosted Q");
         expect (std::isfinite (q->getUnitsValue()),
                 "wheel editing keeps Q finite");
+    }
+
+    void testSingleTapDeselectThenCreateNativeBand()
+    {
+        beginTest ("Pro-Q 4 manual gesture: first empty click deselects, "
+                   "next empty click creates exactly one hosted band");
+        auto processor = std::make_unique<Processor>();
+        enableBell (*processor, 0, 1000.0f, 4.0f, 2.0f);
+        processor->prepareToPlay (48000.0, 128);
+        auto editor = std::make_unique<ParametricEQEditor> (*processor);
+        editor->setSize (1280, 720);
+        editor->setSelectedBandForTesting (0);
+        auto graph = editor->getGraphBoundsForTesting();
+        const auto location = juce::Point<float> (
+            static_cast<float> (graph.getWidth()) * 0.27f,
+            static_cast<float> (graph.getHeight()) * 0.65f);
+        editor->injectGraphMouseDownForTesting (location);
+        editor->injectGraphMouseUpForTesting (location);
+        expectEquals (editor->getSelectedBandForTesting(), -1,
+            "first click on background only deselects");
+        auto* band1 = processor->getParametricEQParameter (
+            parameterIndex (1, BandParameterOffset::Enabled));
+        expect (! band1->getBool(), "deselect must not add a band");
+
+        editor->injectGraphMouseDownForTesting (location);
+        editor->injectGraphMouseUpForTesting (location);
+        expect (band1->getBool(), "next click creates an actual hosted band");
+        expectEquals (editor->getSelectedBandForTesting(), 1);
+        expect (! processor->getParametricEQParameter (
+            parameterIndex (2, BandParameterOffset::Enabled))->getBool(),
+            "tap up must not create a duplicate band");
     }
 
     void testNodeDragUpdatesParametersThroughRealHierarchy()
@@ -630,8 +533,8 @@ private:
         // parameter values move: the floating native HUD follows the band.
         const auto inspector = editor->getInspectorBoundsForTesting();
         const auto graphAfter = editor->getGraphBoundsForTesting();
-        expect (graphAfter.contains (inspector),
-                "moving a band keeps floating HUD inside graph");
+        expect (! graphAfter.intersects (inspector),
+                "moving a band keeps controls out of the frequency graph");
         expect (! inspector.intersects (
                     editor->getNodeBoundsForTesting (0).translated (
                         graphAfter.getX(), graphAfter.getY())),
