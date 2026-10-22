@@ -25,7 +25,7 @@ Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/he
 | Stereo link | Variable linking and M/S modes | Variable L/R peak linking | Mid/side modes still required |
 | Sidechain | Internal, external host bus, MIDI, host tempo | Optional external mono/stereo host bus + explicit trigger selector (new param); MIDI/host tempo remain absent | Windows bus-route audio test; APEX mixer support; MIDI/tempo |
 | Sidechain EQ | Up to six bands, sophisticated shapes | 1 internal HP + 1 LP | 6-band EQ and band editor |
-| Character | Off/Tube/Diode/Bright; Drive and pre/post | Original post-compression color approximations | Pre/post option; oversampling |
+| Character | Off/Tube/Diode/Bright; Drive and pre/post | Original mode/drive with functional PRE and POST DSP routing; not analog-calibrated | Harmonics measurements and oversampling |
 | Lookahead/PDC | Configurable 0–20 ms | Not implemented; zero reported latency | Preallocated delay and exact host PDC |
 | Oversampling | Up to 32× | Not implemented | Anti-alias engine + CPU/load limits |
 | Input/output and GR metering | Accurate peak/loudness + dynamic graph | Lock-free histories of actual per-block input/output/GR values; reference-hierarchy GUI with scrolling meter graph | Meter ballistics / true-peak & loudness still missing |
@@ -59,6 +59,7 @@ The replacement production JUCE editor now deliberately uses:
 - Actual working A/B snapshot switch and copy, single-level undo/redo,
   four real parameter presets, host automation gestures, live numeric
   textboxes and scalable touch-safe controls.
+- A **recursive headless production renderer** captures nested ComboBox labels and value boxes (the earlier renderer lost these and produced misleading blank fields).
 - An **adversarial GUI gate** proves that authentic pulse-driven DSP level-history changes its rendered pixels. In addition, a real screenshot gate in OptoNativeHostTests: two PNGs from the
   newly compiled production editor, with genuine compressed pulsed test audio
   fed into the processing path. No mock screenshot and no decorative
@@ -90,7 +91,7 @@ These verdicts are **fail-until-demonstrated**; passing C++ compilation alone is
 | Layout labels | Knob values and names readable; no overlap with sliders | **NEEDS VISUAL PROOF**: reduced primary knob size, moved labels and sidechain trigger | Screenshot review under 100%, 125%, 150%, 200% DPI |
 | Sidechain | Toggle bottom EQ and variable frequency filter nodes; input routing | **PARTIAL**: functional two-filter EQ + optional external bus; not six bands | 6-band filter topology, EQ node gestures, host route test |
 | Advanced features | Lookahead, oversampling, true 3-band TTM, calibrated 14 voicings | **FAIL** | Never render enabled fake controls; implement DSP with tests |
-| Character | Mode + Drive + Pre/Post routing | **PARTIAL**: 4 characters and drive, only Post processing | Implement Pre/Post audio routing & harmonics tests |
+| Character | Mode + Drive + Pre/Post routing | **PARTIAL**: PRE/POST now changes the real DSP audio/trigger topology; analog modelling still uncalibrated | PRE/POST audio difference, aliasing and harmonic calibration |
 | Sessions | Stable controls/automation and A/B state | **PARTIAL**: host parameters + session values, but GUI A/B undo ephemeral | Session and automation test across track, bus and reopened session |
 | Plugin family | Opto 2A must coexist unchanged | **PASS in earlier Windows integration**; latest head still awaiting | Both unique IDs in plugin browser, restored project tests |
 | User acceptance | User can use it naturally and sees reference-class workflow | **FAIL until explicitly accepted by user** | Real screenshot, direct interaction and side-by-side annotated audit |
@@ -101,7 +102,7 @@ These verdicts are **fail-until-demonstrated**; passing C++ compilation alone is
 
 1. Windows Debug + Release builds, host unit tests and portable C++17 sanitizer tests GREEN.
 2. Reopen older Opto 2A sessions and confirm identical plugin identity and state.
-3. Save/load Precision C3 on tracks, buses and clips; verify 22 stable parameter IDs and Read/Write/Touch/Latch automation.
+3. Save/load Precision C3 on tracks, buses and clips; verify 23 stable parameter IDs and Read/Write/Touch/Latch automation.
 4. Zero allocations/locks in audio processing, deterministic results across block sizes, mono/stereo and no crashes on NaN, silence or extreme parameters.
 5. Auditory AB blind comparison against reference recordings at several sample rates, input levels, compression curves and transient programs **before any sonic 1:1 claim**.
 6. Real audio interface recording at 48 kHz / 128 frames, moving every parameter while streaming, no mutes/stalls/dropouts.
