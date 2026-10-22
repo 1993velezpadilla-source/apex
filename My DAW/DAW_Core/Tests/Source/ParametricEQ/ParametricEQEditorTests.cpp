@@ -373,6 +373,20 @@ private:
             }
             expect (popover.getHeight() <= (size.x < 460 ? 136 : 116),
                     "contextual strip remains compact across layouts");
+            // A visual green status is meaningless if the contextual panel
+            // still masks the EQ node being edited, or another active band.
+            for (int band = 0; band < 2; ++band)
+                expect (! popover.intersects (
+                    editor->nodeHitAreaForTesting (band)),
+                    "band HUD MUST NOT cover an active EQ node");
+
+            editor->selectBandForTesting (1);
+            const auto secondBandPanel = editor->panelBoundsForTesting();
+            for (int band = 0; band < 2; ++band)
+                expect (! secondBandPanel.intersects (
+                    editor->nodeHitAreaForTesting (band)),
+                    "switching bands must not make any EQ node untouchable");
+            editor->selectBandForTesting (0);
 
             juce::Image screenshot (juce::Image::RGB, size.x, size.y, true);
             {
