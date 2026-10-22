@@ -540,6 +540,16 @@ public:
     }
     // Never seeds artificial analyser data. Only latches a worker FFT frame.
     void refreshMeasuredSpectrumForTesting() { timerCallback(); }
+    float measuredSpectrumAtHzForTesting (bool post, float frequencyHz) const noexcept
+    {
+        if (! spectrumReady_ || ! spectrumShown_[post ? 1 : 0]
+            || spectrumBinHz_ <= 0.0f)
+            return -120.0f;
+        const auto bin = std::clamp (static_cast<int> (
+            std::round (frequencyHz / spectrumBinHz_)), 0,
+            Analysis::SpectrumAnalyzerCore::kSpectrumBins - 1);
+        return spectrum_[post ? 1 : 0][static_cast<std::size_t> (bin)];
+    }
     float maximumMeasuredSpectrumDbForTesting (bool post) const noexcept
     {
         if (! spectrumReady_ || ! spectrumShown_[post ? 1 : 0])
