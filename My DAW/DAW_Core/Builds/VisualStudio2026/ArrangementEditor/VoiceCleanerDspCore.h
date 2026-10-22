@@ -19,19 +19,37 @@ public:
     static constexpr int kFftSize = 2048;
     static constexpr int kHop = kFftSize / 4;
 
-    // strength: 0 = bit-identical bypass, 1 = strongest conservative removal.
-    // Preserves input size, sample rate and channel alignment; no hard gate.
+    // No proprietary model is implied: spectral noise-floor estimation with
+    // a learned tonal-noise fingerprint. Processing remains OFFLINE.
+    enum class Focus { Auto, Crickets, Broadband };
+    struct Options
+    {
+        float strength = 0.68f;       // 0 = exact bypass, 1 = maximum
+        float voiceProtection = 0.78f; // transient and harmonic preservation
+        Focus focus = Focus::Auto;
+    };
+
     static bool process(const float* input, float* output, int samples,
                         double sampleRate, float strength = 0.68f)
     {
+        Options settings;
+        settings.strength = strength;
+        return process(input, output, samples, sampleRate, settings);
+    }
+
+    // Preserves input size, sample rate and phase/stereo alignment; no gate.
+    static bool process(const float* input, float* output, int samples,
+                        double sampleRate, const Options& settings)
+    {
+        const float strength = std::max(0.0f, std::min(1.0f, settings.strength));
+        const float protection = std::max(0.0f,
+            std::min(1.0f, settings.voiceProtection));
         if (!input || !output || samples < 0 || sampleRate <= 0.0) return false;
         if (strength <= 0.0f || samples < kFftSize)
         {
             std::copy_n(input, samples, output);
             return true;
         }
-        strength = std::max(0.f, std::min(1.f, strength));
-
         const int frames = (samples + kHop - 1) / kHop + 2;
         const int bins = kFftSize / 2 + 1;
         std::vector<float> window(kFftSize);
@@ -81,6 +99,35 @@ public:
         const float inv = 1.f / (float)learnCount;
         for (auto& value : noisePower) value *= inv;
 
+        // Crickets usually create narrow persistent, sometimes harmonic
+        // spectral ridges rather than broadband hiss. Detect those ridges
+        // only in the learned QUIET-frame noise spectrum, not in voiced
+        // frames (where the singer's harmonics are never noise evidence).
+        std::vector<float> tonalConfidence(bins, 0.0f);
+        for (int k = 5; k < bins - 5; ++k)
+        {
+            const double hz = (double)k * sampleRate / kFftSize;
+            if (hz < 1100.0 || hz > 14000.0)
+                continue;
+            float neighbors = 0.0f;
+            for (int d = 2; d <= 5; ++d)
+                neighbors += noisePower[(size_t)(k-d)] + noisePower[(size_t)(k+d)];
+            neighbors /= 8.0f;
+            const float baseline = noisePower[(size_t)k];
+            if (baseline > 1.0e-10f && baseline > neighbors * 2.8f)
+            {
+                tonalConfidence[(size_t)k] = std::min(1.0f,
+                    (baseline / std::max(1.0e-10f, neighbors) - 2.8f) / 8.0f);
+            }
+        }
+        // Adjacent bins inherit a little notch reduction so modest cricket
+        // frequency drift does not leave razor-sharp musical-noise holes.
+        for (int k = 1; k < bins - 1; ++k)
+            tonalConfidence[(size_t)k] = std::max(
+                tonalConfidence[(size_t)k],
+                0.35f * std::max(tonalConfidence[(size_t)(k-1)],
+                                 tonalConfidence[(size_t)(k+1)]));
+
         std::vector<float> overlap((size_t)samples + kFftSize, 0.f);
         std::vector<float> weight((size_t)samples + kFftSize, 0.f);
         std::vector<float> smoothGain(bins, 1.f);
@@ -100,14 +147,24 @@ public:
                 const float n = noisePower[(size_t)k];
                 // Wiener-like soft mask with generous voice floor; reduce
                 // tonal ambience without chopping vowels or breath endings.
-                const float subtraction = strength * 1.65f * n;
+                const float tonal = tonalConfidence[(size_t)k];
+                const float focusScale = settings.focus == Focus::Crickets ? 3.3f
+                                       : settings.focus == Focus::Broadband ? 0.0f
+                                       : 1.9f;
+                const float boostedNoise = n * (1.65f + focusScale * tonal);
+                const float subtraction = strength * boostedNoise;
                 const float cleanRatio = std::max(0.f, (p - subtraction) /
                                                      std::max(p, 1.0e-12f));
-                const float target = std::max(0.24f, std::sqrt(cleanRatio));
+                // Soft floor preserves breaths, presence and vowel harmonics;
+                // even focused cricket reduction never fully zeros bins.
+                const float voiceFloor = 0.12f + 0.23f * protection;
+                const float target = std::max(voiceFloor, std::sqrt(cleanRatio));
                 // Slow attenuation release prevents rapid musical-noise chatter.
                 const float previous = smoothGain[(size_t)k];
                 const float smoothed = previous + (target - previous) *
-                                                (target < previous ? 0.55f : 0.24f);
+                                                (target < previous
+                                                    ? (0.35f + 0.16f * (1.0f-protection))
+                                                    : (0.16f + 0.10f * protection));
                 smoothGain[(size_t)k] = smoothed;
                 spectrum[(size_t)k] *= smoothed;
                 if (k > 0 && k < kFftSize / 2)
