@@ -1339,10 +1339,12 @@ public:
     void mouseDown (const juce::MouseEvent& event) override
     {
         dragging_ = false;
+        dragBand_ = -1;
         longPressFired_ = false;
         longPressTarget_.reset();
         pointerDown_ = true;
         pressTime_ = juce::Time::getMillisecondCounter();
+        pressPosition_ = event.position;
         lastDragPosition_ = event.position;
 
         const auto hit = hitTest (event.position);
@@ -1452,6 +1454,10 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override
     {
         lastDragPosition_ = event.position;
+        // A touch scroll or missed node must never create a stray band.
+        if (pointerDown_ && longPressTarget_.has_value()
+            && event.position.getDistanceFrom (pressPosition_) > 10.0f)
+            longPressTarget_.reset();
         if (sketching_)
         {
             appendSketchPoint (event.position);
@@ -1694,17 +1700,17 @@ private:
             changed = true;
         }
 
-        // Long-press: audition the held node, or create a band on empty space.
+        // Only a stationary, EMPTY-graph long-press creates a band.
+        // A held node is a MOVE gesture, never an implicit SOLO/Audition:
+        // auto-audition was filtering the singer into a narrow band until
+        // finger-up and made the original EQ appear to mute all playback.
+        // Audition remains available exclusively from the explicit HOLD
+        // control, with a balanced release.
         if (pointerDown_ && ! longPressFired_
+            && longPressTarget_.has_value() && dragBand_ < 0
             && juce::Time::getMillisecondCounter() - pressTime_ > 450)
         {
             longPressFired_ = true;
-            if (dragBand_ >= 0)
-            {
-                owner_.selectBand (dragBand_);
-                owner_.beginAuditionGesture();
-            }
-            else if (longPressTarget_.has_value())
             {
                 const int band = *longPressTarget_;
                 const auto frequency = static_cast<float> (frequencyForX (
@@ -2492,6 +2498,7 @@ private:
     bool longPressFired_ = false;
     std::optional<int> longPressTarget_;
     std::uint32_t pressTime_ = 0;
+    juce::Point<float> pressPosition_;
     std::uint32_t lastHudRelayoutMs_ = 0;
 };
 
