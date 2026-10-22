@@ -1,9 +1,10 @@
 #pragma once
-// APEX EQ4 — clean-room, standalone native editor.
+// APEX EQ — clean-room, standalone native editor.
 // UI is reconstructed from interaction principles in the Pro-Q 4 user manual.
 // It does NOT import or subclass the retired Prism GUI, its theme, inspectors,
 // toolbars or preset widgets. All DSP, IDs and serialized state stay APEX-owned.
 #include "../ParametricEQCore/ParametricEQProcessor.h"
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include <array>
 #include <cmath>
 #include <optional>
@@ -162,10 +163,20 @@ public:
         redo_.setBounds (w > 620 ? 256 : 169, 5, b, b);
         compare_.setBounds (w > 620 ? 301 : 209, 5, 42, b);
         copy_.setBounds (w > 620 ? 350 : 254, 5, 50, b);
-        preset_.setBounds (w > 620 ? std::max (405, w / 2 - 110) : w - 155,
-                           5, w > 620 ? 220 : 135, b);
+        // The canonical boot-eye logo occupies its own reserved upper-right
+        // space; unlike the rejected Prism UI it cannot cover live controls.
+        const int logoWidth = w < 670 ? 61 : 82;
+        bootEyeBounds_ = { w - logoWidth - 8, 6, logoWidth, 28 };
+        if (phone)
+            preset_.setBounds (165, 5,
+                               std::max (44, w - 165 - logoWidth - 17), b);
+        else
+            preset_.setBounds (std::max (405, w / 2 - 110), 5,
+                               std::min (220, std::max (92,
+                                   w - std::max (405, w / 2 - 110)
+                                   - logoWidth - 30)), b);
         for (auto* secondary : { &undo_, &redo_, &compare_, &copy_ })
-            secondary->setVisible (! narrow);
+            secondary->setVisible (! phone);
         if (narrow)
         {
             const int y = h - foot + 4;
@@ -374,8 +385,12 @@ public:
                           juce::Justification::centredLeft, 1);
         g.setColour (juce::Colour (0xffdbd7dc));
         g.setFont (juce::FontOptions (13.5f));
-        g.drawFittedText ("EQ 4", 94, 9, 56, 25,
+        g.drawFittedText ("EQ", 94, 9, 43, 25,
                           juce::Justification::centredLeft, 1);
+        // The SAME unanimated eye rendered by the APEX boot-up screen.
+        // No invented replacement logo and no bitmap copy.
+        APEX::Branding::EvoEyeStamp::paint (
+            g, bootEyeBounds_.toFloat());
 
         // Thin floating control bar anchored beneath selected EQ point.
         if (selected_ >= 0)
@@ -395,7 +410,8 @@ public:
                 static_cast<float> (panel_.getWidth() - 22), 1.5f, 1.0f);
         }
 
-        const int footerY = getHeight() - (getHeight() < 390 ? 40 : 44);
+        const int footerY = getHeight()
+            - (getWidth() < 460 ? 84 : (getHeight() < 390 ? 40 : 44));
         g.setColour (juce::Colour (0xff211d26));
         g.fillRect (0, footerY, getWidth(), getHeight() - footerY);
         g.setColour (juce::Colour (0xff4d424d));
@@ -510,6 +526,27 @@ public:
     int selectedBandForTesting() const noexcept { return selected_; }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
+    juce::Rectangle<int> bootEyeBoundsForTesting() const noexcept
+    {
+        return bootEyeBounds_;
+    }
+    juce::Rectangle<int> presetBoundsForTesting() const noexcept
+    {
+        return preset_.getBounds();
+    }
+    bool hasMeasuredSpectrumForTesting() const noexcept
+    {
+        return spectrumReady_ && spectrumShown_[0] && spectrumShown_[1];
+    }
+    // Never seeds artificial analyser data. Only latches a worker FFT frame.
+    void refreshMeasuredSpectrumForTesting() { timerCallback(); }
+    float maximumMeasuredSpectrumDbForTesting (bool post) const noexcept
+    {
+        if (! spectrumReady_ || ! spectrumShown_[post ? 1 : 0])
+            return -120.0f;
+        const auto& bins = spectrum_[post ? 1 : 0];
+        return *std::max_element (bins.begin() + 2, bins.end());
+    }
     int activeBandsForTesting() const noexcept
     {
         int result = 0;
@@ -1127,7 +1164,7 @@ private:
 
     Processor& processor_;
     EQ4Look look_;
-    juce::Rectangle<int> graph_ {}, panel_ {};
+    juce::Rectangle<int> graph_ {}, panel_ {}, bootEyeBounds_ {};
     juce::TextButton undo_, redo_, compare_, copy_, preset_, phase_,
         analyzer_, displayRange_, globalBypass_, autoGain_;
     juce::TextButton bandPower_, shape_, slope_, placement_, dynamic_,
