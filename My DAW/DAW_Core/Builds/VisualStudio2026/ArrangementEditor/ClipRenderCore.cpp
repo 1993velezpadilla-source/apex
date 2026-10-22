@@ -1108,10 +1108,18 @@ namespace ArrangementEditor
         const double peaksPerPixel = readRatio * (double)visiblePeakCount / (double)clipW;
         const int    lastPeak      = visibleStartPeak + visiblePeakCount - 1;
 
+        // The Graphics clip region already excludes the offscreen part of
+        // the component. Avoid walking cached peaks for pixels that cannot
+        // possibly be drawn. This matters for wide, zoomed arrangements.
+        const auto dirty = g.getClipBounds();
+        const int startPx = juce::jlimit(0, (int)clipW,
+                                       dirty.getX() - full.getX());
+        const int endPx = juce::jlimit(startPx, (int)clipW,
+                                     dirty.getRight() - full.getX());
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
 
-        for (int px = 0; px < (int)clipW; ++px)
+        for (int px = startPx; px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
             const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
