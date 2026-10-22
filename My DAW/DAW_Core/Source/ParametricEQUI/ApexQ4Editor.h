@@ -244,25 +244,25 @@ public:
         const int px = panel_.getX(), py = panel_.getY();
         if (narrow)
         {
-            bandPower_.setBounds (px + 7, py + 7, 34, 30);
-            shape_.setBounds (px + 44, py + 7, 104, 30);
-            slope_.setBounds (px + 7, py + 40, 112, 30);
-            placement_.setBounds (px + 151, py + 7, 75, 30);
-            advanced_.setBounds (px + controlWidth - 73, py + 7, 37, 30);
-            closeBand_.setBounds (px + controlWidth - 34, py + 7, 28, 30);
-            soloHold_.setBounds (px + 123, py + 40, 75, 30);
+            // 320px portrait: prioritized touch gestures, other features in MORE.
+            bandPower_.setBounds (px + 3, py + 5, 44, 40);
+            shape_.setBounds (px + 49, py + 5, 90, 40);
+            soloHold_.setBounds (px + 141, py + 5, 62, 40);
+            advanced_.setBounds (px + 205, py + 5, 56, 40);
+            closeBand_.setBounds (px + 263, py + 5, 34, 40);
+            slope_.setVisible (false);
+            placement_.setVisible (false);
             dynamic_.setVisible (false);
         }
         else if (phone)
         {
-            // 390px mobile: no overlapping placement, solo or MORE controls.
-            bandPower_.setBounds (px + 7, py + 7, 28, 30);
-            shape_.setBounds (px + 37, py + 7, 81, 30);
-            slope_.setBounds (px + 120, py + 7, 82, 30);
-            placement_.setBounds (px + 204, py + 7, 58, 30);
-            soloHold_.setBounds (px + 264, py + 7, 45, 30);
-            advanced_.setBounds (px + 311, py + 7, 32, 30);
-            closeBand_.setBounds (px + 345, py + 7, 32, 30);
+            bandPower_.setBounds (px + 5, py + 5, 39, 36);
+            shape_.setBounds (px + 46, py + 5, 90, 36);
+            slope_.setBounds (px + 138, py + 5, 80, 36);
+            soloHold_.setBounds (px + 220, py + 5, 56, 36);
+            advanced_.setBounds (px + 278, py + 5, 65, 36);
+            closeBand_.setBounds (px + 345, py + 5, 37, 36);
+            placement_.setVisible (false);
             dynamic_.setVisible (false);
         }
         else
@@ -278,16 +278,14 @@ public:
             closeBand_.setBounds (px + 417, py + 7, 26, 30);
             dynamic_.setVisible (selected_ >= 0);
         }
-        const int sliderY = py + (narrow ? 68 : 39);
+        const int sliderY = py + (narrow ? 49 : 43);
         const int sliderSpace = controlWidth - 18;
         const int cw = sliderSpace / 3;
-        freq_.setBounds (px + 9, sliderY, cw,
-                         controlHeight - (narrow ? 72 : 43));
-        gain_.setBounds (px + 9 + cw, sliderY, cw,
-                         controlHeight - (narrow ? 72 : 43));
+        const int sliderHeight = controlHeight - (narrow ? 53 : 47);
+        freq_.setBounds (px + 9, sliderY, cw, sliderHeight);
+        gain_.setBounds (px + 9 + cw, sliderY, cw, sliderHeight);
         q_.setBounds (px + 9 + 2 * cw, sliderY,
-                      sliderSpace - 2 * cw,
-                      controlHeight - (narrow ? 72 : 43));
+                      sliderSpace - 2 * cw, sliderHeight);
         soloHold_.toFront (false);
         curveDirty_ = true;
     }
@@ -1244,6 +1242,10 @@ private:
         menu.addItem (3, "Solo: use HOLD control on band strip", false);
         menu.addItem (4, "Reset selected band");
         menu.addItem (5, "Delete band");
+        menu.addSeparator();
+        menu.addItem (6, "Filter slope...");
+        menu.addItem (7, "Channel placement...");
+        menu.addItem (8, "Filter shape...");
         juce::Component::SafePointer<ApexQ4Editor> safe (this);
         menu.showMenuAsync (juce::PopupMenu::Options()
             .withTargetComponent (&advanced_), [safe] (int id)
@@ -1269,6 +1271,12 @@ private:
                         BandParameterOffset::Enabled), 0.0f);
                     e->select (-1);
                 }
+                else if (id == 6)
+                    e->showSlopeMenu();
+                else if (id == 7)
+                    e->showPlacementMenu();
+                else if (id == 8)
+                    e->showShapeMenu();
                 e->curveDirty_ = true; e->sync(); e->repaint();
             }
         });
