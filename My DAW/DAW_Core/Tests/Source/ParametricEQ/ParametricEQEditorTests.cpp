@@ -3,6 +3,7 @@
 #include "../../../Source/ParametricEQCore/ParametricEQSpectrumGrabCore.h"
 #include "../../../Source/ParametricEQCore/ParametricEQMatchCore.h"
 #include "../../../Source/ParametricEQUI/ParametricEQEditor.h"
+#include "../../../Source/ParametricEQUI/ApexQ4Editor.h"
 
 #include <array>
 #include <cmath>
@@ -67,6 +68,7 @@ public:
 
     void runTest() override
     {
+        testApexQ4CleanRoomProductionEditor();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
@@ -87,6 +89,84 @@ public:
     }
 
 private:
+    void testApexQ4CleanRoomProductionEditor()
+    {
+        beginTest ("factory launches NEW native EQ4 UI — not legacy Prism editor");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        // In production the factory must instantiate the clean-room editor.
+        std::unique_ptr<juce::AudioProcessorEditor> base (processor->createEditor());
+        auto* editor = dynamic_cast<ApexQ4Editor*> (base.get());
+        expect (editor != nullptr,
+            "production factory must not launch rejected Prism V2/V3 GUI");
+        if (editor == nullptr)
+            return;
+
+        expectEquals (editor->selectedBandForTesting(), -1);
+        expectEquals (editor->activeBandsForTesting(), 0);
+        const auto workspace = juce::SystemStats::getEnvironmentVariable (
+            "GITHUB_WORKSPACE", {});
+
+        for (auto size : std::array<juce::Point<int>, 4> {{
+                { 480, 800 }, { 900, 300 },
+                { 1280, 720 }, { 1920, 1080 } }})
+        {
+            editor->setSize (size.x, size.y);
+            const auto graph = editor->graphBoundsForTesting();
+            expect (editor->getLocalBounds().contains (graph),
+                    "new EQ4 graph stays inside host at every size");
+            expect (graph.getHeight() >= 140);
+            expect (graph.getWidth() == size.x,
+                    "no old Prism dock or side pane reduces graph width");
+
+            // Populate two REAL hosted bands. The graph and band controls
+            // must paint from processor values, not mocked view-only points.
+            enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+            enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+            editor->selectBandForTesting (0);
+            editor->refreshForTesting();
+            expectEquals (editor->activeBandsForTesting(), 2);
+            const auto popover = editor->panelBoundsForTesting();
+            expect (editor->getLocalBounds().contains (popover),
+                    "floating band controls must remain on-screen");
+            expect (graph.contains (popover),
+                    "EQ4 contextual controls must FLOAT within the canvas");
+            expect (popover.getHeight() <= 136,
+                    "no giant inspector covering the entire EQ");
+
+            juce::Image screenshot (juce::Image::RGB, size.x, size.y, true);
+            {
+                juce::Graphics graphics (screenshot);
+                editor->paintEntireComponent (graphics, false);
+            }
+            expect (screenshot.getPixelAt (0, 0)
+                    != screenshot.getPixelAt (size.x / 2, size.y / 2),
+                    "new native GUI paints more than a flat background");
+            if (workspace.isNotEmpty())
+            {
+                const auto dir = juce::File (workspace).getChildFile (
+                    "apex-eq-ui-snapshots");
+                expect (dir.createDirectory().wasOk());
+                const auto file = dir.getChildFile (
+                    "APEX-EQ4-NEW-" + juce::String (size.x) + "x"
+                    + juce::String (size.y) + ".png");
+                auto stream = file.createOutputStream();
+                expect (stream != nullptr);
+                if (stream != nullptr)
+                {
+                    juce::PNGImageFormat png;
+                    expect (png.writeImageToStream (screenshot, *stream));
+                }
+            }
+        }
+        // Full range precision: never assume typed UI values are raw 0..1.
+        editor->selectBandForTesting (-1);
+        editor->createBandForTesting ({ 300.0f, 230.0f });
+        expectEquals (editor->activeBandsForTesting(), 3);
+        expect (editor->selectedBandForTesting() >= 0,
+                "new EQ4 creation binds a persistent hosted band");
+    }
+
     void testStaticEvoEyeStamp()
     {
         beginTest ("PRISM uses exact static open boot-eye renderer, no extra GUI controls");
