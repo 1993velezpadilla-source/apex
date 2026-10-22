@@ -1113,41 +1113,23 @@ namespace ArrangementEditor
 
             const float x = (float)(full.getX() + px);
             g.fillRect(x, top, 1.0f, bot - top);
-        }
 
-        // ── Clipped-position markers (n-Track style) ─────────────────────
-        // Small red ticks hanging from the top of the waveform area (1/8 of
-        // its height) at every bucket whose source reached 0 dBFS. Gain-aware:
-        // a bucket stops showing a marker as soon as the clip's current gain
-        // brings it back under 0 dBFS, so fixing a hot clip clears its markers.
-        if (! peaks.clippedPeaks.empty() && peaksPerPixel > 0.0)
-        {
-            g.setColour(juce::Colour(0xFFFF3B30));
-            const float markerTop    = areaTop + 1.0f;
-            const float markerHeight = juce::jmax(3.0f, areaH * 0.125f);
-
-            for (int peakIndex : peaks.clippedPeaks)
+            // Real-time VISUAL clipping at this clip's current gain/fades.
+            // The old pass only walked source peaks already preflagged as
+            // clipped, missing ordinary audio that clips AFTER the user
+            // raises clip gain. No DSP is touched: paint from cached peaks.
+            if (!m_model->muted &&
+                juce::jmax(std::fabs(displayMin), std::fabs(displayMax)) >= 1.0f)
             {
-                if (peakIndex < visibleStartPeak)
-                    continue;
-                if (peakIndex > lastPeak)
-                    break;   // sorted ascending
-
-                // Still clipping at the clip's CURRENT gain? (fade-independent)
-                const float bucketPeak = juce::jmax(
-                    std::fabs(peaks.minPeaks[(size_t) peakIndex]),
-                    std::fabs(peaks.maxPeaks[(size_t) peakIndex]));
-                if (bucketPeak * clipGainLinear < 1.0f)
-                    continue;
-
-                double visualPx = (double)(peakIndex - visibleStartPeak) / peaksPerPixel;
-                if (m_model->reversed)
-                    visualPx = (double)clipW - 1.0 - visualPx;
-
-                const float markerX = (float)(full.getX() + visualPx);
-                g.fillRect(markerX, markerTop, 1.5f, markerHeight);
+                g.setColour(juce::Colour(0xFFFF3B30));
+                g.fillRect(x, areaTop + 1.0f, 1.5f,
+                           juce::jmax(3.0f, areaH * 0.125f));
+                g.setColour(ClipWaveformColourCore::resolveWaveformColour(
+                    m_model->trackColour, m_model->muted, m_selected));
             }
         }
+
+
     }
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
