@@ -121,6 +121,49 @@ public:
                                         ++changedTimelinePixels;
                             expect(changedTimelinePixels > 60,
                                    "REAL compressed audio MUST move the level history; static decorative scopes fail");
+
+                            // Adversarial filter test: the six-band EQ must
+                            // draw from ACTUAL host parameter values rather
+                            // than a fixed designer curve. Probe real Editor::paint.
+                            beginTest("Precision C3 detector bell changes rendered EQ response");
+                            const int gainIndex=APEX::PrecisionC3::SC2Gain;
+                            auto& gainParam=native->getC3Parameter(gainIndex);
+                            const float oldGain=gainParam.getValue();
+                            juce::Image flatFilter(juce::Image::ARGB,1080,740,true,
+                                                  juce::SoftwareImageType{});
+                            {
+                                juce::Graphics before(flatFilter);
+                                c3Editor->paint(before);
+                            }
+                            gainParam.setValue(gainParam.toNormalised(14.0f));
+                            juce::Image hotFilter(juce::Image::ARGB,1080,740,true,
+                                                 juce::SoftwareImageType{});
+                            {
+                                juce::Graphics after(hotFilter);
+                                c3Editor->paint(after);
+                            }
+                            int movedEqPixels=0;
+                            for(int y=541;y<636;y+=2)
+                                for(int x=179;x<1000;x+=3)
+                                    if(flatFilter.getPixelAt(x,y)!=hotFilter.getPixelAt(x,y))
+                                        ++movedEqPixels;
+                            expect(movedEqPixels>28,
+                                "Bell 2 gain must visibly redraw the real six-filter EQ curve");
+                            gainParam.setValue(oldGain);
+                            expectEquals(native->getParameters().size(),
+                                         (int)APEX::PrecisionC3::ParameterCount);
+                            constexpr int bellOffsets[] = {
+                                APEX::PrecisionC3::SC1Freq,APEX::PrecisionC3::SC2Freq,
+                                APEX::PrecisionC3::SC3Freq,APEX::PrecisionC3::SC4Freq
+                            };
+                            for(const int start:bellOffsets)
+                            {
+                                for(int param=start;param<=start+2;++param)
+                                    expect(dynamic_cast<juce::AudioProcessorParameterWithID*>(
+                                        native->getParameters()[param])!=nullptr,
+                                        "All six-filter controls have stable host IDs");
+                            }
+
                             expect(c3Editor->getNumChildComponents() >= 25,
                                    "one production GUI must expose actual host-bound controls");
 
