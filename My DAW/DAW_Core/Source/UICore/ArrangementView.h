@@ -1431,7 +1431,15 @@ void trackPropertyChanged(Track* track) override
         {
             core_->setTempoBpm(transport_.getTempo());
             const double sr = juce::jmax(1.0, core_->m_engineSampleRate);
-            core_->setPlayheadPosition((double)transport_.getPosition() / sr);
+            const double playheadSeconds = (double)transport_.getPosition() / sr;
+            core_->setPlayheadPosition(playheadSeconds);
+            // Stereo peaks are published atomically by the real master audio
+            // thread. Sample on the UI timer only: never allocate/lock or
+            // render waveform objects inside the audio callback.
+            if (auto* master = trackManager_.getMasterTrack())
+                core_->recordMasterOutputPreview(playheadSeconds,
+                    master->getPeakLevelLeft(), master->getPeakLevelRight(),
+                    transport_.isPlaying());
         }
 
         if (automationSyncDirty_)
