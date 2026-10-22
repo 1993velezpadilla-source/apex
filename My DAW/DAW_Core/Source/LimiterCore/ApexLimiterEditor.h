@@ -280,7 +280,7 @@ public:
         g.drawLine(0,(float)footerY,(float)w,(float)footerY,1);
         label(g,"Powered by Bubblegum Engine",13,footerY+7,176,19,
               10,0xffb3a2b1,false);
-        label(g,"DETECTOR",w-288,footerY+8,81,19,10,0xffb9bdc9,true);
+        label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
         label(g,"Ceiling "+juce::String(param(Ceiling).units(),1)+" dBFS",
               w-160,footerY+9,142,19,11,0xfff7b9d5,true);
         label(g,"True-peak certification, oversampling, dithering and LUFS: not yet verified",
@@ -294,7 +294,6 @@ public:
         const auto advance=advancedBounds();
         const int x=advance.getX(),y=advance.getY(),c=columnWidth();
         gain_.setBounds(17,chart.getY()+24,74,chart.getHeight()-32);
-        ceiling_.setBounds(getWidth()-163,advance.getBottom()-22,0,0);
         // Output ceiling has its own clearly visible large numeric control:
         // place above the right meter where it cannot cover the graph.
         ceiling_.setBounds(getWidth()-166,54,152,27);
@@ -311,6 +310,7 @@ public:
         dial(link_,3);dial(releaseLink_,4);
 
         const int footerY=getHeight()-37;
+        detector_.setBounds(getWidth()-206,footerY+4,53,27);
         tp_.setBounds(195,footerY+3,59,29);
         unity_.setBounds(256,footerY+3,74,29);
         audition_.setBounds(333,footerY+3,73,29);
