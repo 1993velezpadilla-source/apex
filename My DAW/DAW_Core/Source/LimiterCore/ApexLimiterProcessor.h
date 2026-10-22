@@ -12,7 +12,8 @@ namespace APEX { namespace Limiter {
 enum Parameter : int
 {
     Gain, Ceiling, Lookahead, Attack, Release, ChannelLink, LimitingStyle,
-    TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, ChannelLinkRelease, Count
+    TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, ChannelLinkRelease,
+    DitherMode, DitherBits, Count
 };
 
 class LimiterHostedParameter final : public juce::AudioProcessorParameterWithID
@@ -91,6 +92,8 @@ public:
         add(Audition,"lim.audition","Audition Difference",0,1,0,2);
         add(DcFilter,"lim.dc","DC Offset Filter",0,1,0,2);
         add(ChannelLinkRelease,"lim.link.release","Release Stereo Link",0,100,100);
+        add(DitherMode,"lim.dither.mode","Dither Mode",0,2,0,3);
+        add(DitherBits,"lim.dither.bits","Dither Bits",0,1,1,2);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override
@@ -225,7 +228,8 @@ private:
         static const std::array<const char*,Count> values = {{
             "lim.gain","lim.ceiling","lim.lookahead","lim.attack",
             "lim.release","lim.link","lim.style","lim.tp","lim.quality",
-            "lim.bypass","lim.unity","lim.audition","lim.dc","lim.link.release"
+            "lim.bypass","lim.unity","lim.audition","lim.dc","lim.link.release",
+            "lim.dither.mode","lim.dither.bits"
         }};
         return values;
     }
@@ -252,6 +256,8 @@ private:
         s.unityGain=limiterParameters_[UnityGain]->units()>0.5f;
         s.audition=limiterParameters_[Audition]->units()>0.5f;
         s.dcFilter=limiterParameters_[DcFilter]->units()>0.5f;
+        s.ditherMode=static_cast<int>(limiterParameters_[DitherMode]->units());
+        s.ditherBits=limiterParameters_[DitherBits]->units()>0.5f?24:16;
         return s;
     }
     std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
