@@ -97,6 +97,9 @@ public:
             analyzerAutoStarted_ = true;
         }
         setSize (1000, 640);
+        history_[0] = capture();
+        historyCount_ = 1;
+        historyPosition_ = 0;
         startTimerHz (25);
     }
 
@@ -164,7 +167,7 @@ public:
         gain_.setBounds (px + 13 + cw, sliderY, cw, controlHeight - 49);
         q_.setBounds (px + 13 + 2 * cw, sliderY,
                       sliderSpace - 2 * cw, controlHeight - 49);
-        dynamic_.setBounds (px + controlWidth / 2 - 32,
+        dynamic_.setBounds (px + (phone ? 230 : 270),
                             py + 8, 64, 30);
         dynamic_.toFront (false);
         curveDirty_ = true;
@@ -308,7 +311,8 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (! graph_.contains (e.getPosition()) || panel_.contains (e.getPosition()))
+        if (! graph_.contains (e.getPosition())
+            || (selected_ >= 0 && panel_.contains (e.getPosition())))
             return;
         dragBand_ = hitBand (e.position);
         if (e.mods.isPopupMenu())
@@ -509,6 +513,7 @@ private:
         p->beginChangeGesture();
         p->setValueNotifyingHost (p->getBool() ? 0.0f : 1.0f);
         p->endChangeGesture();
+        commitHistory();
         curveDirty_ = true;
     }
     void setupDial (juce::Slider& slider,
@@ -527,6 +532,7 @@ private:
         {
             if (selected_ >= 0)
                 param (parameterIndex (selected_, offset))->endChangeGesture();
+            commitHistory();
         };
         slider.onValueChange = [this, &slider, offset]
         {
@@ -534,6 +540,7 @@ private:
             {
                 param (parameterIndex (selected_, offset))->setValueNotifyingHost (
                     static_cast<float> (slider.getValue()));
+                if (! slider.isMouseButtonDown()) commitHistory();
                 curveDirty_ = true; repaint();
             }
         };
@@ -571,6 +578,7 @@ private:
             ->endChangeGesture();
         param (parameterIndex (dragBand_, BandParameterOffset::Gain))
             ->endChangeGesture();
+        commitHistory();
     }
     void sync()
     {
@@ -628,6 +636,7 @@ private:
                   static_cast<float> (FilterShape::Bell));
         setUnits (parameterIndex (slot, BandParameterOffset::Bypass), 0.0f);
         setUnits (parameterIndex (slot, BandParameterOffset::Enabled), 1.0f);
+        commitHistory();
         curveDirty_ = true;
         select (slot);
     }
@@ -801,7 +810,7 @@ private:
     {
         if (selected_ < 0) return;
         juce::PopupMenu menu;
-        constexpr int slopes[] = { 0, 6, 12, 18, 24, 30, 36, 48, 72, 96 };
+        static constexpr int slopes[] = { 0, 6, 12, 18, 24, 30, 36, 48, 72, 96 };
         for (int i = 0; i < 10; ++i)
             menu.addItem (i + 1, juce::String (slopes[i]) + " dB/oct");
         juce::Component::SafePointer<ApexQ4Editor> safe (this);
@@ -930,6 +939,22 @@ private:
             if (param (i)->getValue() != s[static_cast<std::size_t> (i)])
                 param (i)->setValueNotifyingHost (s[static_cast<std::size_t> (i)]);
         curveDirty_ = true; sync(); repaint();
+    }
+    void commitHistory()
+    {
+        const auto state = capture();
+        if (historyCount_ > 0 && state == history_[static_cast<std::size_t> (historyPosition_)])
+            return;
+        if (historyPosition_ + 1 < historyCount_)
+            historyCount_ = historyPosition_ + 1;
+        if (historyCount_ == static_cast<int> (history_.size()))
+        {
+            std::move (history_.begin() + 1, history_.end(), history_.begin());
+            --historyCount_;
+            --historyPosition_;
+        }
+        history_[static_cast<std::size_t> (historyCount_)] = state;
+        historyPosition_ = historyCount_++;
     }
     void historyStep (int offset)
     {
