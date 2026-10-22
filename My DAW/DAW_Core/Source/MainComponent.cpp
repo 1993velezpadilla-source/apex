@@ -20,6 +20,7 @@
 #include "TrackCore/TrackReorderCore.h"
 #include "UICore/CursorThemeCore.h"
 #include "UICore/ApexContextMenuStyle.h"
+#include "AutomationCore/LastTouchedPluginParameterCore.h"
 #include "DeviceCore/SafeAsioDeviceTypeCore.h"
 #include "DeviceCore/AudioDeviceBlockAdapterCore.h"
 #include "VocalTuneCore/ApexTuneIntegrationCore.h"
@@ -2473,14 +2474,15 @@ MainComponent::MainComponent()
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->setAutomationManager(&appCore_.getAutomationManager());
 
-    // Pinned TRACKS header carries the same clip-edit info that the timeline
-    // already computes for trim, fades and clip gain. No extra DSP or polling.
+    // Unified pinned value box: clip edit has first priority; otherwise show
+    // the last touched host/VST3 parameter for 3.5 seconds (normalized value).
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->onClipEditInfoChanged = [this](const juce::String& info)
         {
-            if (trackList_ != nullptr)
-                trackList_->setClipEditInfo(info);
+            liveClipEditInfo_ = info;
+            refreshPinnedValueHint();
         };
+    pinnedValueTimer_.startTimer(100);
 
     appCore_.setBeforeClipFxProjectReset([this]()
     {
@@ -7731,8 +7733,32 @@ void MainComponent::hideBubblegumPanel()
         bubblegumOrb_->setVisible(true);
 }
 
+void MainComponent::refreshPinnedValueHint()
+{
+    if (trackList_ == nullptr)
+        return;
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto touched = DAW::LastTouchedPluginParameterCore::getInstance().get();
+    if (touched.isValid()
+        && touched.timestampMs != lastPluginHintTimestampMs_)
+    {
+        lastPluginHintTimestampMs_ = touched.timestampMs;
+        lastPluginHintObservedMs_ = now;
+        const auto normalized = juce::jlimit(0.0f, 1.0f, touched.normalizedValue);
+        lastPluginValueHint_ = touched.pluginDisplayName + " / "
+            + touched.parameterName + "  "
+            + juce::String(normalized * 100.0f, 1) + "% (normalized)";
+    }
+    const bool showPlugin = lastPluginValueHint_.isNotEmpty()
+        && now - lastPluginHintObservedMs_ <= 3500.0;
+    trackList_->setClipEditInfo(
+        liveClipEditInfo_.isNotEmpty() ? liveClipEditInfo_
+                                      : (showPlugin ? lastPluginValueHint_ : juce::String()));
+}
+
 MainComponent::~MainComponent()
 {
+    pinnedValueTimer_.stopTimer();
     // 1. Detach listeners first - prevents callbacks into dying objects
     removeKeyListener(this);
     DAW::GlobalTransportSpaceHook::shutdown();
