@@ -4,6 +4,7 @@
 // to APEX host parameters. The meters draw only live DSP data. Unimplemented
 // oversampling, lookahead and 6-band SC are deliberately NOT misrepresented.
 #include <JuceHeader.h>
+#include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -232,12 +233,13 @@ public:
         g.setColour(juce::Colour(0xffe7ba58));
         g.setFont(juce::Font(juce::FontOptions(28.0f,juce::Font::bold)));
         g.drawText("APEX",21,7,115,36,juce::Justification::centredLeft);
+        APEX::Branding::EvoEyeStamp::paint(g,{18.0f,35.0f,30.0f,14.0f});
         g.setColour(juce::Colour(0xffe2d0a0));
         g.setFont(juce::Font(juce::FontOptions(24.0f,juce::Font::bold)));
         g.drawText("Precision C3",129,8,220,34,juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff787177));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("BUBBLEGUM ENGINE",22,39,218,12,juce::Justification::left);
+        g.drawText("BUBBLEGUM ENGINE",54,39,188,12,juce::Justification::left);
 
         paintScope(g);
         paintKnobLabels(g);
@@ -259,8 +261,8 @@ public:
     void resized() override
     {
         constexpr std::array<juce::Rectangle<int>,6> mainBounds {{
-            {77,307,106,121},{251,307,106,121},{578,307,106,121},
-            {752,307,106,121},{952,314,62,79},{952,402,62,79}
+            {77,319,106,119},{251,319,106,119},{578,319,106,119},
+            {752,319,106,119},{952,325,62,79},{952,407,62,79}
         }};
         for(int i=0;i<6;++i)
         {
@@ -268,16 +270,16 @@ public:
             knobs_[static_cast<std::size_t>(i)].setBounds(rect(b.x,b.y,b.getWidth(),b.getHeight()));
         }
         constexpr std::array<juce::Rectangle<int>,4> miniBounds {{
-            {72,452,122,27},{241,452,122,27},{580,452,122,27},{749,452,122,27}
+            {72,449,122,41},{241,449,122,41},{580,449,122,41},{749,449,122,41}
         }};
         for(int i=0;i<4;++i)
         {
             const auto& b=miniBounds[static_cast<std::size_t>(i)];
             minis_[static_cast<std::size_t>(i)].setBounds(rect(b.x,b.y,b.getWidth(),b.getHeight()));
         }
-        toggles_[0].setBounds(rect(76,431,123,22));
-        toggles_[1].setBounds(rect(753,431,128,22));
-        toggles_[2].setBounds(rect(941,390,83,21));
+        toggles_[0].setBounds(rect(76,296,123,21));
+        toggles_[1].setBounds(rect(753,296,128,21));
+        toggles_[2].setBounds(rect(937,300,95,21));
         toggles_[3].setBounds(rect(980,708,93,25));
 
         scToggle_.setBounds(rect(447,489,189,25));
@@ -293,7 +295,9 @@ public:
             utilities_[static_cast<std::size_t>(i)].setVisible(sidechainOpen_||i>=3);
         }
         style_.setBounds(rect(407,365,128,30));
-        character_.setBounds(rect(425,652,154,27));
+        // Style and Character belong to the center Dynamics control cluster,
+        // not inside the detector EQ. Both remain usable if SC is collapsed.
+        character_.setBounds(rect(407,420,128,29));
         aB_.setBounds(rect(455,9,91,29));
         copy_.setBounds(rect(551,9,59,29));
         undo_.setBounds(rect(349,9,58,29));
@@ -496,14 +500,14 @@ private:
         constexpr std::array<int,4> x {{68,242,569,746}};
         for(int i=0;i<4;++i)
             g.drawText(labels[static_cast<std::size_t>(i)],x[static_cast<std::size_t>(i)],
-                       415,125,18,juce::Justification::centred);
+                       433,125,18,juce::Justification::centred);
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("STYLE",409,337,123,18,juce::Justification::centred);
-        g.drawText("WET GAIN",939,390,93,16,juce::Justification::centred);
-        g.drawText("DRY",953,475,65,16,juce::Justification::centred);
+        g.drawText("WET GAIN",939,402,93,16,juce::Justification::centred);
+        g.drawText("DRY",953,480,65,16,juce::Justification::centred);
         g.setColour(juce::Colour(0xffe3c16a));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("LIVE DYNAMICS",444,399,125,15,juce::Justification::centred);
+        g.drawText("CHARACTER",416,403,113,14,juce::Justification::centred);
     }
 
     void paintMiniLabels(juce::Graphics& g)
@@ -520,7 +524,7 @@ private:
             const float val=processor_.getC3Parameter(p).getUnits();
             g.drawText(labels[static_cast<std::size_t>(i)]+
                        juce::String("   ")+juce::String(val,1),
-                       xs[static_cast<std::size_t>(i)],475,125,18,
+                       xs[static_cast<std::size_t>(i)],472,125,15,
                        juce::Justification::centred);
         }
     }
@@ -582,7 +586,6 @@ private:
         g.drawText("LOW-PASS",230,635,160,14,juce::Justification::centred);
         g.drawText("INPUT TRIM",742,635,145,14,juce::Justification::centred);
         g.drawText("OUTPUT TRIM",891,635,120,14,juce::Justification::centred);
-        g.drawText("CHARACTER",425,627,153,20,juce::Justification::centred);
 
         const float top=539.0f,bottom=639.0f;
         g.setColour(juce::Colour(0xff343037));
