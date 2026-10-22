@@ -18,7 +18,7 @@
 
 namespace ArrangementEditor
 {
-    class ClipRenderCore : public juce::Component, private juce::Timer
+    class ClipRenderCore : public juce::Component
     {
     public:
         ClipRenderCore(ArrangementClipModel& model,
@@ -203,8 +203,6 @@ namespace ArrangementEditor
         Zone m_activeZone   = Zone::None; // currently being dragged
         bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
         bool m_touchMenuPending = false; // selected clip short-tap only
-        double m_touchMenuDownMs = 0.0;
-        juce::Point<int> m_touchMenuLocalPos;
         std::uint64_t m_touchMenuGestureEpoch = 0; // multi-touch invalidates pending tap
         juce::Point<int> m_touchMenuDownScreen;
         Zone m_hoveredZone  = Zone::None; // under cursor (drives cursor + paint)
@@ -286,7 +284,6 @@ namespace ArrangementEditor
         void drawMuteButton(juce::Graphics& g);
         void drawSoloButton(juce::Graphics& g);
         void drawTrimTooltip(juce::Graphics& g);
-        void timerCallback() override;
 
         static juce::Colour fromU32(uint32_t c)
         {
