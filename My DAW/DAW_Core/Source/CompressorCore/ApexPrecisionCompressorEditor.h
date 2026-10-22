@@ -125,7 +125,7 @@ public:
             setupSlider(utilities_[static_cast<std::size_t>(i)],
                         kUtilityParams[static_cast<std::size_t>(i)],false,true);
 
-        for(auto* combo : {&style_,&character_,&preset_})
+        for(auto* combo : {&style_,&character_,&preset_,&triggerSource_})
         {
             combo->setColour(juce::ComboBox::textColourId,juce::Colour(0xffebdfc3));
             combo->setColour(juce::ComboBox::backgroundColourId,juce::Colour(0xff302c30));
@@ -141,6 +141,14 @@ public:
         for (int i=0;i<4;++i) character_.addItem(characters[i],i+1);
         character_.onChange=[this] { setDiscrete(Character,character_.getSelectedId()-1); };
         addAndMakeVisible(character_);
+
+        triggerSource_.addItem("Internal",1);
+        triggerSource_.addItem("External",2);
+        triggerSource_.setTooltip("Trigger from main input or host-routed external sidechain");
+        triggerSource_.onChange=[this] {
+            setDiscrete(ExternalSidechain,triggerSource_.getSelectedId()-1);
+        };
+        addAndMakeVisible(triggerSource_);
 
         constexpr std::array<const char*,4> buttonNames {
             "AUTO THRESHOLD","AUTO RELEASE","AUTO GAIN","BYPASS"
@@ -295,6 +303,8 @@ public:
             utilities_[static_cast<std::size_t>(i)].setVisible(sidechainOpen_||i>=3);
         }
         style_.setBounds(rect(407,365,128,30));
+        triggerSource_.setBounds(rect(16,542,125,28));
+        triggerSource_.setVisible(sidechainOpen_);
         // Style and Character belong to the center Dynamics control cluster,
         // not inside the detector EQ. Both remain usable if SC is collapsed.
         character_.setBounds(rect(407,420,128,29));
@@ -581,7 +591,8 @@ private:
         g.drawVerticalLine(154,525,692);
         g.setColour(juce::Colour(0xff9b9291));
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("STEREO LINK",20,548,130,18,juce::Justification::centred);
+        g.drawText("TRIGGER INPUT",20,521,130,17,juce::Justification::centred);
+        g.drawText("STEREO LINK",20,575,130,18,juce::Justification::centred);
         g.drawText("HP FREQUENCY",20,631,130,17,juce::Justification::centred);
         g.drawText("LOW-PASS",230,635,160,14,juce::Justification::centred);
         g.drawText("INPUT TRIM",742,635,145,14,juce::Justification::centred);
@@ -634,10 +645,19 @@ private:
         node(lp,juce::Colour(0xff89c9a3));
         g.setColour(juce::Colour(0xff898386));
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("LIVE DETECTOR FILTER • DRAG RED HP / GREEN LP",170,523,795,16,
+        g.drawText("LIVE DETECTOR FILTER • DRAG RED HP / GREEN LP",170,523,630,16,
                    juce::Justification::centredLeft);
         g.drawText("2 FILTERS ACTIVE  /  6-BAND EQ NOT YET IMPLEMENTED",580,685,426,15,
                    juce::Justification::centredRight);
+        const bool wantsExternal=processor_.getC3Parameter(ExternalSidechain).getUnits()>0.5f;
+        g.setColour(wantsExternal
+            ? (processor_.externalSidechainRouted()
+                ? juce::Colour(0xff99daab) : juce::Colour(0xffffa369))
+            : juce::Colour(0xffb0a3a6));
+        g.drawText(wantsExternal
+            ? (processor_.externalSidechainRouted() ? "EXT ROUTED" : "EXT NOT ROUTED")
+            : "INTERNAL",
+            795,523,208,17,juce::Justification::centredRight);
     }
 
     void paintFooter(juce::Graphics& g)
@@ -736,6 +756,9 @@ private:
                              juce::dontSendNotification);
         character_.setSelectedId(1+(int)std::lround(processor_.getC3Parameter(Character).getUnits()),
                                  juce::dontSendNotification);
+        triggerSource_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(ExternalSidechain).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
     }
     void timerCallback() override
@@ -759,6 +782,9 @@ private:
                              juce::dontSendNotification);
         character_.setSelectedId(1+(int)std::lround(processor_.getC3Parameter(Character).getUnits()),
                                  juce::dontSendNotification);
+        triggerSource_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(ExternalSidechain).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
         repaint();
     }
@@ -770,7 +796,7 @@ private:
     std::array<juce::Slider,5> utilities_{};
     std::array<juce::TextButton,4> toggles_{};
     juce::TextButton scToggle_,aB_,copy_,undo_,redo_;
-    juce::ComboBox style_,character_,preset_;
+    juce::ComboBox style_,character_,preset_,triggerSource_;
     std::array<Snapshot,2> snapshots_{};
     Snapshot undoState_{},redoState_{};
     bool hasUndo_=false,hasRedo_=false;
