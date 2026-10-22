@@ -1183,19 +1183,10 @@ namespace ArrangementEditor
             const float x = (float)(full.getX() + px);
             g.fillRect(x, top, 1.0f, bot - top);
 
-            // Real-time VISUAL clipping at this clip's current gain/fades.
-            // The old pass only walked source peaks already preflagged as
-            // clipped, missing ordinary audio that clips AFTER the user
-            // raises clip gain. No DSP is touched: paint from cached peaks.
-            if (!m_model->muted &&
-                juce::jmax(std::fabs(displayMin), std::fabs(displayMax)) >= 1.0f)
-            {
-                g.setColour(juce::Colour(0xFFFF3B30));
-                g.fillRect(x, areaTop + 1.0f, 1.5f,
-                           juce::jmax(3.0f, areaH * 0.125f));
-                g.setColour(ClipWaveformColourCore::resolveWaveformColour(
-                    m_model->trackColour, m_model->muted, m_selected));
-            }
+            // Red clipping markers are NOT a source-waveform decoration.
+            // ArrangementViewCore now paints only playback-observed output
+            // over-0 dBFS markers, so a limiter/gain change clears them on
+            // the next listen pass rather than producing false positives.
         }
 
 
