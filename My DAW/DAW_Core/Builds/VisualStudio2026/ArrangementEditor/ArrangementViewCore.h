@@ -521,6 +521,8 @@ namespace ArrangementEditor
 
         // Clip renderers (one per clip)
         std::vector<std::unique_ptr<ClipRenderCore>> m_clipRenderers;
+        // Stable UUID -> renderer index makes zoom-out rebuilds O(N) not O(N^2).
+        std::map<juce::Uuid, ClipRenderCore*> m_rendererByClipId;
         std::set<juce::Uuid> m_lastVisualSelection;
         std::vector<std::pair<juce::Uuid, juce::Rectangle<int>>> m_marqueeHitGeometry;
 
