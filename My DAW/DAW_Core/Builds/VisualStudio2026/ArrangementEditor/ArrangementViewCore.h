@@ -6,6 +6,8 @@
 // ===========================================================================
 #pragma once
 #include <JuceHeader.h>
+#include <cstdint>
+#include <deque>
 #include "ArrangementClipModel.h"
 #include "ArrangementClipStateCore.h"
 #include "ArrangementSelectionCore.h"
@@ -93,7 +95,13 @@ namespace ArrangementEditor
         public:
             HeaderClipGuard()
             {
-                setInterceptsMouseClicks(false, false);
+                // The pinned toolbar/ruler occlusion mask must block POINTER
+                // input as well as pixels. Otherwise a clip scrolled beneath
+                // an empty strip gap remains the JUCE hit-test winner and a
+                // click unexpectedly selects/moves audio. Real toolbar/ruler
+                // controls are raised ABOVE this guard by ensureToolbarZOrder.
+                // No children of the guard should intercept input.
+                setInterceptsMouseClicks(true, false);
             }
 
             void paint(juce::Graphics& g) override
@@ -119,7 +127,11 @@ namespace ArrangementEditor
             void mouseDown(const juce::MouseEvent& e) override
             {
                 const auto ownerPos = e.getEventRelativeTo(&m_owner);
-                if (m_owner.m_pianoRollBtn.getBounds().contains(ownerPos.getPosition()))
+                // A hidden/disabled Piano Roll button must never swallow
+                // audio-first toolbar gestures, including pen and touch.
+                if (m_owner.m_pianoRollBtn.isShowing()
+                    && m_owner.m_pianoRollBtn.isEnabled()
+                    && m_owner.m_pianoRollBtn.getBounds().contains(ownerPos.getPosition()))
                 {
                     if (m_owner.m_pianoRollBtn.onClick)
                         m_owner.m_pianoRollBtn.onClick();
@@ -231,6 +243,14 @@ namespace ArrangementEditor
         int getLaneTopForIndex(int laneIndex) const noexcept;
         int getLaneIndexForY(int y) const noexcept;
         EditorToolState& getToolState() { return m_toolState; }
+        // Any multi-finger navigation invalidates an outstanding selected
+        // region tap. Read only from the UI/message thread.
+        std::uint64_t getTouchGestureEpoch() const noexcept { return m_touchGestureEpoch; }
+        // ClipRenderCore owns taps on audio regions. Cancel previous inertial
+        // scrolling immediately on DOWN, before selection listeners rebuild
+        // renderers; a stationary selection must never fling the timeline.
+        void stopTouchMomentumOnClipPress() noexcept;
+        void finishUnselectedClipTouchPan() noexcept;
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
         // ── Diagnostics / benchmark access ──────────────────────────────────
@@ -330,6 +350,12 @@ namespace ArrangementEditor
                           void recalculateEngineClipsForNewSampleRate(double oldSr, double newSr);
                  public:
                           void setPlayheadPosition(double timeSeconds);
+        // Read-only master output envelope PREVIEW. Uses atomic stereo peaks
+        // sampled on the message thread; does not synthesize/edit audio clips.
+        // Unlike an offline render, the preview fills only while transport
+        // plays and is not persisted as editable session audio.
+        void recordMasterOutputPreview(double seconds, float leftPeak,
+                                       float rightPeak, bool playing);
         void setViewportScrollOffset(int scrollX, int scrollY);
         void setSnapMode(SnapMode mode);
         SnapMode getSnapMode() const noexcept { return m_snapMode; }
@@ -374,10 +400,13 @@ namespace ArrangementEditor
         // CommandManager::Listener — refresh timeline immediately on undo/redo
         void undoHistoryChanged() override;
 
+        // Live clip trim/fade/level details for the pinned TRACKS info band.
+        std::function<void(const juce::String&)> onClipEditInfoChanged;
         std::function<void(DAW::Clip&)> onEngineClipSelected;
         std::function<void()> onEngineClipSelectionCleared;
         std::function<void(DAW::Clip&)> onEngineClipDoubleClicked;
         std::function<void(DAW::Clip&)> onEngineClipAutomationRequested;
+        std::function<void(DAW::Clip&)> onEngineClipNormalizeChanged;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneRequested;
         std::function<void(DAW::Clip&)> onEngineClipVocalTuneBypassToggled;
         std::function<bool(const DAW::Clip&)> onEngineClipIsVocalTuneBypassed;
@@ -442,8 +471,10 @@ namespace ArrangementEditor
         bool m_gestureMoved = false;   // moved past the threshold → it is a drag
         bool m_marqueePending = false; // empty-space press waiting for the hold
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
-        double m_lastPinchDistance = 0.0; // last two-finger separation (pinch)
-        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // two-finger pan anchor
+        bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
+        std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
+        double m_lastPinchDistance = 0.0; // legacy pinch scratch state
+        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
         // Gesture classification: decided once per gesture (pan by default,
         // promoted to pinch on a clear separation change) so the two never
         // flip-flop mid-gesture.
@@ -478,7 +509,8 @@ namespace ArrangementEditor
             ArrangementViewCore& m_owner;
         };
         std::unique_ptr<TouchPanInertiaTimer> m_inertiaTimer;
-        juce::Point<int> m_lastTouchPanPos;
+        juce::Point<int> m_touchPanDownScreenPos; // screen-space origin avoids scroll feedback
+        juce::Point<int> m_lastTouchPanPos; // screen-space for stable velocity
         double m_lastTouchPanTimeMs = 0.0;
         double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
         double m_touchPanVelocityY = 0.0;
@@ -627,6 +659,18 @@ namespace ArrangementEditor
         bool                   m_syncingArrangementToEngine = false;
         bool                   m_syncingEngineToArrangement = false;
         double                 m_playheadTimeSeconds = 0.0;
+        struct MasterPreviewBin
+        {
+            int64_t timeBin = 0;
+            float left = 0.0f, right = 0.0f;
+        };
+        std::deque<MasterPreviewBin> m_masterPreviewBins;
+        // GUI-thread observation only: audio-track output meters >0 dBFS
+        // while its single active clip is playing. Never prelabel cached
+        // source waveform peaks as audible output clipping.
+        std::map<juce::String, std::set<int64_t>> m_playbackClippedClipBins;
+        bool m_masterPreviewWasPlaying = false;
+        void drawReadOnlyMasterPreview(juce::Graphics& g);
 
         // Maps ArrangementClipModel UUID → engine ClipID (for remove/split sync)
         std::map<juce::Uuid, juce::String> m_uuidToEngineId;
@@ -645,6 +689,7 @@ namespace ArrangementEditor
         void onClipCopy    (ArrangementClipModel* clip);
         void onClipDuplicate(ArrangementClipModel* clip);
         void onClipDelete  (ArrangementClipModel* clip);
+        void openClipProperties(ArrangementClipModel* clip);
         void onClipRename  (ArrangementClipModel* clip);
         void onClipMute    (ArrangementClipModel* clip);
         void onClipPaste   (double time, int trackIndex);
@@ -712,6 +757,9 @@ namespace ArrangementEditor
         void updateClipDrag  (juce::Point<int> localPos);
         void commitClipDrag  ();
         void cancelClipDrag  ();
+        // Multi-touch pinch cancellation must restore live renderer bounds
+        // without destroying components that still own active JUCE pointers.
+        void cancelClipDragForTouchNavigation();
         void drawGhost       (juce::Graphics& g);
 
         ArrangementDebugLogCore m_arrangementDebugLog;

@@ -28,6 +28,7 @@
 #include "../../../Source/AutomationCore/AutomationLaneCore.h"
 #include "../../../Source/AutomationCore/AutomationQuickCreateCore.h"
 #include "ClipAutomationPanel.h"
+#include "../../../Source/UICore/ApexRadialContextMenu.h"
 #include <JuceHeader.h>
 #include <functional>
 
@@ -39,12 +40,16 @@ namespace ArrangementEditor
 // ---------------------------------------------------------------------------
 struct ClipContextCallbacks
 {
+    // Context menus are asynchronous. The clip may be deleted/replaced
+    // while a wheel is open: resolve the current model by stable UUID.
+    std::function<ArrangementClipModel*(const juce::Uuid&)> resolveClipById;
     // Standard DAW clip operations
     std::function<void(ArrangementClipModel*)>    cutClip;
     std::function<void(ArrangementClipModel*)>    copyClip;
     std::function<void(ArrangementClipModel*)>    duplicateClip;
     std::function<void(ArrangementClipModel*)>    deleteClip;
     std::function<void(ArrangementClipModel*)>    renameClip;
+    std::function<void(ArrangementClipModel*)>    openClipProperties;
     std::function<void(ArrangementClipModel*)>    muteClip;
     std::function<void(ArrangementClipModel*)>    loopClip;
     std::function<bool()>                         canPaste;
@@ -69,8 +74,9 @@ struct ClipContextCallbacks
     // Automation quick-create for the clicked clip/track.
     std::function<void(ArrangementClipModel*, const juce::String&)> createAutomationForClip;
 
-    // Open the full "Automate This Clip" floating panel.
+    // Open or remove automation for precisely this engine clip (not its parent track).
     std::function<void(ArrangementClipModel*)> openAutomateClipPanel;
+    std::function<void(ArrangementClipModel*)> removeClipAutomation;
 
     // Open Vocal Tune for the clicked clip.
     std::function<void(ArrangementClipModel*)> openVocalTune;
@@ -118,7 +124,8 @@ public:
     static void show(ArrangementClipModel*       clip,
                      juce::Point<int>             screenPos,
                      const ClipContextCallbacks&  cb,
-                     const ClipFreezeState*       freezeState = nullptr)
+                     const ClipFreezeState*       freezeState = nullptr,
+                     juce::Component*             contextOwner = nullptr)
     {
         if (!clip) return;
 
@@ -134,25 +141,14 @@ public:
         menu.addSeparator();
         menu.addItem(kIdMute,  clip->muted ? "Unmute" : "Mute", cb.muteClip != nullptr);
         menu.addItem(kIdRename, juce::String(juce::CharPointer_UTF8("Rename\xe2\x80\xa6")), cb.renameClip != nullptr);
+        menu.addItem(kIdClipProperties, "Clip Properties...", cb.openClipProperties != nullptr);
         menu.addSeparator();
         menu.addItem(kIdDelete, "Delete", cb.deleteClip != nullptr);
         menu.addSeparator();
 
-        // ── Pitch / Time ──────────────────────────────────────────────────
-        menu.addItem(kIdPitchTimePanel, juce::String(juce::CharPointer_UTF8("Pitch / Time\xe2\x80\xa6")),
-                     cb.openTimePitchPanel != nullptr);
-
-        // ── Presets submenu ────────────────────────────────────────────────
-        menu.addSubMenu("Presets", buildPresetsMenu(*clip, cb));
-        menu.addSubMenu("Safe Defaults", buildSafeDefaultsMenu());
-        menu.addItem(kIdReset, "Reset Pitch / Time", cb.resetTimePitch != nullptr);
-        menu.addSeparator();
-
-        // ── Bounce / Freeze ────────────────────────────────────────────────
-        const bool isFrozen = freezeState && freezeState->frozen;
-        menu.addItem(kIdBounce,   "Bounce",   cb.bounceClip   != nullptr && !isFrozen);
-        menu.addItem(kIdFreeze,   "Freeze",   cb.freezeClip   != nullptr && !isFrozen);
-        menu.addItem(kIdUnfreeze, "Unfreeze", cb.unfreezeClip != nullptr && isFrozen);
+        // Pitch/Time, presets, Safe Defaults, Reset Pitch/Time, Freeze and
+        // Bounce are intentionally NOT in the Radial/Classic clip menus.
+        // Double-click/tap (or Clip Properties) owns detailed editing.
         {
             const bool normalized = cb.isClipNormalized ? cb.isClipNormalized(clip) : false;
             juce::PopupMenu::Item normItem;
@@ -170,41 +166,33 @@ public:
         menu.addItem(kIdAutomateThisClip,
                      juce::String(juce::CharPointer_UTF8("\xf0\x9f\x8e\x9b  Automate This Clip\xe2\x80\xa6")),
                      cb.openAutomateClipPanel != nullptr);
-        menu.addItem(kIdVocalTune,
-                     "Vocal Tune",
-                     cb.openVocalTune != nullptr);
-        {
-            const bool bypassed = cb.isVocalTuneBypassed ? cb.isVocalTuneBypassed(clip) : false;
-            juce::PopupMenu::Item bypassItem;
-            bypassItem.itemID    = kIdVocalTuneBypass;
-            bypassItem.text      = "Bypass Vocal Tune";
-            bypassItem.isEnabled = cb.toggleVocalTuneBypass != nullptr;
-            bypassItem.isTicked  = bypassed;
-            menu.addItem(bypassItem);
-        }
+        menu.addItem(kIdRemoveClipAutomation, "Remove Clip Automation",
+                     cb.removeClipAutomation != nullptr);
+        // Vocal Tune and its bypass are intentionally absent from clip menus.
+
 
         // ── Show ──────────────────────────────────────────
-        menu.showMenuAsync(
-            juce::PopupMenu::Options()
-                .withTargetScreenArea(juce::Rectangle<int>(screenPos.x,
-                                                           screenPos.y, 1, 1)),
-            [clip, cb](int result)
+        const auto stableId = clip->id;
+        DAW::ApexRadialContextMenu::show(std::move(menu), contextOwner, screenPos,
+            [stableId, cb, clip](int result)
             {
-                handleResult(result, clip, cb);
+                // APEX arrangement supplies a resolver, so an outstanding
+                // popup can NEVER dereference a deleted/rebuilt clip.
+                auto* current = cb.resolveClipById ? cb.resolveClipById(stableId) : clip;
+                if (current != nullptr) handleResult(result, current, cb);
             });
     }
 
     // showOnEmptyTrack — right-click on empty arrangement space (no clip)
     static void showOnEmptyTrack(juce::Point<int>            screenPos,
-                                 const ClipContextCallbacks& cb)
+                                 const ClipContextCallbacks& cb,
+                                 juce::Component*             contextOwner = nullptr)
     {
         juce::PopupMenu menu;
         const bool hasPaste = cb.pasteClip != nullptr && cb.canPaste && cb.canPaste();
         menu.addItem(kIdPaste, "Paste", hasPaste);
 
-        menu.showMenuAsync(
-            juce::PopupMenu::Options()
-                .withTargetScreenArea(juce::Rectangle<int>(screenPos.x, screenPos.y, 1, 1)),
+        DAW::ApexRadialContextMenu::show(std::move(menu), contextOwner, screenPos,
             [cb](int result)
             {
                 if (result == kIdPaste && cb.pasteClip)
@@ -223,6 +211,7 @@ private:
         kIdDelete           = 5,
         kIdMute             = 6,
         kIdRename           = 7,
+        kIdClipProperties   = 8,
         kIdPitchTimePanel   = 10,
         kIdBounce           = 11,
         kIdFreeze           = 12,
@@ -233,6 +222,7 @@ private:
         kIdVocalTuneBypass  = 22,
         kIdNormalize        = 23,
         kIdVoiceCleaner     = 24,
+        kIdRemoveClipAutomation = 25,
         kIdAutomationBase   = 300,
         // Presets: 100-106
         kIdPresetBase       = 100,
@@ -365,6 +355,10 @@ private:
         {
             if (cb.renameClip) cb.renameClip(clip);
         }
+        else if (result == kIdClipProperties)
+        {
+            if (cb.openClipProperties) cb.openClipProperties(clip);
+        }
         else if (result == kIdPitchTimePanel)
         {
             if (cb.openTimePitchPanel) cb.openTimePitchPanel(clip);
@@ -389,13 +383,9 @@ private:
         {
             if (cb.openAutomateClipPanel) cb.openAutomateClipPanel(clip);
         }
-        else if (result == kIdVocalTune)
+        else if (result == kIdRemoveClipAutomation)
         {
-            if (cb.openVocalTune) cb.openVocalTune(clip);
-        }
-        else if (result == kIdVocalTuneBypass)
-        {
-            if (cb.toggleVocalTuneBypass) cb.toggleVocalTuneBypass(clip);
+            if (cb.removeClipAutomation) cb.removeClipAutomation(clip);
         }
         else if (result == kIdVoiceCleaner)
         {

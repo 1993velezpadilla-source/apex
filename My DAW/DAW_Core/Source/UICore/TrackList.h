@@ -5,6 +5,9 @@
 #include "../ThemeCore/Theme.h"
 #include "../ThemeCore/ApexLivingSeal.h"
 #include "CursorThemeCore.h"
+#include "ApexRadialContextMenu.h"
+#include "ApexPointerPolicy.h"
+#include "BeatMakingFeaturePolicy.h"
 #include "../TrackCore/Track.h"
 #include "../TrackCore/TrackReorderCore.h"
 #include "../ControlsCore/ModernControls.h"
@@ -628,12 +631,9 @@ public:
         {
             drawMonitorButton(g, monitorBounds_, track_.isMonitoring(), monitorHover_);
             drawMSRButton(g, armBounds_, "R", track_.isArmed(), armHover_, t.colors.transportRecord);
-            const char* preLabel = preFaderSummary_ == 2 ? "PRE"
-                                 : preFaderSummary_ == 3 ? "MIX"
-                                 : preFaderSummary_ == 1 ? "POST" : "—";
-            drawMSRButton(g, preFaderBounds_, preLabel, preFaderSummary_ >= 2, preFaderHover_, juce::Colour(0xFF00B3A4));
+            // PRE/POST and Input TRIM are mixer-only; preserve their actual
+            // DSP/routing controls and remove clutter from arranger rows.
             drawAutomationButton(g, automationBounds_, track_.isAutomationVisible(), track_.isAutomationMuted(), automationHover_);
-            drawTrimButton(g, trimBounds_, trimHover_);
             drawInputButton(g, inputBounds_, inputHover_);
             drawAutomationTargetButton(g, automationTargetBounds_, automationTargetHover_);
         }
@@ -750,8 +750,8 @@ public:
         bounds = bounds.reduced(6.0f, 0.0f);
 
         const bool isMaster  = track_.isMaster();
-        // DISABLED (product decision): the piano roll is a beat-making surface.
-        const bool showPiano = false;
+        // Preserve the existing widget, but omit its geometry in audio-first APEX.
+        const bool showPiano = BeatMakingFeaturePolicy::kPianoRollEnabled;
         const bool showTarget = !isMaster && track_.isAutomationVisible();
         const bool showInput  = !isMaster && track_.getRole() == TrackRole::Audio;
 
@@ -761,91 +761,68 @@ public:
         const float btnH     = juce::jlimit(18.0f, 24.0f, h * 0.44f);
         const float btnY     = btnRowY + (h * 0.5f - btnH) * 0.5f;
 
-        // Optional stacked area (Input above Trim) lives in the right half
-        // so the bottom row stays uncluttered.
-        const float stackH = juce::jlimit(26.0f, 30.0f, h * 0.44f);
-        const float stackTopY = bounds.getY() + 6.0f;
+        // Keep the playlist chooser alone at top right. Input routing and
+        // automation target go in their own reserved slots on the BOTTOM row;
+        // the previous stacked "In 1" overlay obscured the playlist button.
         const float kRightMargin = 10.0f;
-
-        // Count buttons
-        int numBtns = 1; // M
-        if (showPiano)    ++numBtns;
-        if (!isMaster)    numBtns += 4; // S Mon R A
-        if (!isMaster)    ++numBtns;    // Trim counts as 1 slot
-        if (!isMaster)    ++numBtns;    // POST/PRE tap point
-        if (showTarget)   ++numBtns;
-
-        // Reserve a right-side stacked area when input selector is visible.
-        const float stackW = showInput ? juce::jlimit(46.0f, 74.0f, bounds.getWidth() * 0.22f) : 0.0f;
-        const float availW = bounds.getWidth() - kRightMargin - (showInput ? (stackW + 10.0f) : 0.0f);
-        const float kGap   = 8.0f;
-        const float totalGaps = kGap * (float)(numBtns - 1);
-        const float btnW   = juce::jmax(20.0f, (availW - totalGaps) / (float)numBtns);
-        const float trimW  = btnW * 1.3f; // Trim a bit wider
+        const float kGap = 7.0f;
+        const float inputW = showInput ? juce::jlimit(45.0f, 66.0f, bounds.getWidth() * 0.20f) : 0.0f;
+        const float targetW = showTarget ? 40.0f : 0.0f;
+        const int numBtns = (isMaster ? 2 : 5) + (showPiano ? 1 : 0);
+        const float rightReserved = (showInput ? inputW + kGap : 0.0f)
+                                  + (showTarget ? targetW + kGap : 0.0f);
+        const float availW = juce::jmax(50.0f, bounds.getWidth() - kRightMargin - rightReserved);
+        const float btnW = juce::jmax(20.0f,
+            (availW - kGap * (float)(numBtns - 1)) / (float)numBtns);
 
         float x = bounds.getX();
-
         if (showPiano)
         {
             pianoRollBounds_.setBounds(x, btnY, btnW, btnH);
             x += btnW + kGap;
         }
         else
-        {
             pianoRollBounds_ = {};
-        }
 
         muteBounds_.setBounds(x, btnY, btnW, btnH);
         x += btnW + kGap;
+        soloBounds_.setBounds(x, btnY, btnW, btnH);
+        x += btnW + kGap;
+        preFaderBounds_ = {};
+        trimBounds_ = {};
 
         if (isMaster)
         {
-            soloBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-            monitorBounds_ = {}; armBounds_ = {}; preFaderBounds_ = {};
-            automationBounds_ = {}; trimBounds_ = {}; automationTargetBounds_ = {};
+            monitorBounds_ = {};
+            armBounds_ = {};
+            automationBounds_ = {};
+            automationTargetBounds_ = {};
             inputBounds_ = {};
             return;
         }
 
-        soloBounds_.setBounds(x, btnY, btnW, btnH);   x += btnW + kGap;
         monitorBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
         armBounds_.setBounds(x, btnY, btnW, btnH);     x += btnW + kGap;
-        preFaderBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-        automationBounds_.setBounds(x, btnY, btnW, btnH); x += btnW + kGap;
-        trimBounds_.setBounds(x, btnY, trimW, btnH);   x += trimW + kGap;
+        automationBounds_.setBounds(x, btnY, btnW, btnH);
 
-        // Input selector stacked above Trim on the right to avoid border collisions.
+        // Both live BELOW the playlist chip (at y=7..28), never above it.
+        float rightX = bounds.getRight() - kRightMargin;
         if (showInput)
         {
-            const float stackX = bounds.getRight() - kRightMargin - stackW;
-            inputBounds_.setBounds(stackX, stackTopY, stackW, stackH);
-
-            // Keep Trim from running into the stacked area.
-            const float maxRight = stackX - 10.0f;
-            if (trimBounds_.getRight() > maxRight)
-                trimBounds_.setWidth(juce::jmax(18.0f, maxRight - trimBounds_.getX()));
+            rightX -= inputW;
+            inputBounds_.setBounds(rightX, btnY, inputW, btnH);
+            rightX -= kGap;
         }
         else
-        {
             inputBounds_ = {};
-        }
 
         if (showTarget)
         {
-            const float targetW = juce::jlimit(34.0f, 58.0f, btnW * 1.55f);
-            const float targetX = bounds.getRight() - kRightMargin - targetW;
-            automationTargetBounds_.setBounds(targetX, btnY, targetW, btnH);
-
-            const float maxRight = targetX - kGap;
-            if (!inputBounds_.isEmpty() && inputBounds_.getRight() > maxRight)
-                inputBounds_.setWidth(juce::jmax(18.0f, maxRight - inputBounds_.getX()));
-            if (trimBounds_.getRight() > maxRight)
-                trimBounds_.setWidth(juce::jmax(18.0f, maxRight - trimBounds_.getX()));
+            rightX -= targetW;
+            automationTargetBounds_.setBounds(rightX, btnY, targetW, btnH);
         }
         else
-        {
             automationTargetBounds_ = {};
-        }
 
         // DISABLED (product decision): per-row trim VU needle hidden — it
         // looked like a non-interactive knob. Trim metering still lives in
@@ -923,7 +900,7 @@ public:
                                             weak->onPlaylistStateChanged(weak->track_.getID());
                             }), true);
                     });
-                    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+                    ApexRadialContextMenu::show(std::move(menu), this, e.getScreenPosition());
                 }
                 else
                 {
@@ -986,6 +963,7 @@ public:
         // the existing set.
         if (e.mods.isPopupMenu())
         {
+            contextScreenPoint_ = e.getScreenPosition();
             // While Quick Send mode is active, right-click toggles the
             // sidechain to/from this track (create if missing, remove if
             // exists) — the same rule as the mixer strip. The normal context
@@ -1037,7 +1015,8 @@ public:
             else track_.setMuted(!track_.isMuted());
             repaint();
         }
-        else if (pianoRollBounds_.contains(e.position))
+        else if (BeatMakingFeaturePolicy::kPianoRollEnabled
+                 && pianoRollBounds_.contains(e.position))
         {
             if (onOpenPianoRoll) onOpenPianoRoll(track_.getID());
             repaint();
@@ -1081,6 +1060,15 @@ public:
             {
                 dragStartY_ = e.getScreenY();
                 dragMode_ = DragMode::PendingReorder;
+                touchRowCandidate_ = ApexPointerPolicy::isDirect(e);
+                touchRowScrolling_ = false;
+                if (touchRowCandidate_)
+                {
+                    touchRowDownScreen_ = e.getScreenPosition();
+                    touchRowDownMs_ = juce::Time::getMillisecondCounterHiRes();
+                    if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                        touchRowViewportStartY_ = viewport->getViewPositionY();
+                }
             }
             notifySelectionForInteraction(e.mods);
         }
@@ -1112,8 +1100,7 @@ public:
         {
             setMouseCursor(DAW::CursorThemeCore::getStandard(
                 resizeHover_ ? juce::MouseCursor::UpDownResizeCursor
-                             : automationTargetHover_ ? juce::MouseCursor::PointingHandCursor
-                                                      : juce::MouseCursor::NormalCursor));
+                             : juce::MouseCursor::NormalCursor));
             repaint();
         }
 
@@ -1148,6 +1135,33 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (touchRowCandidate_ || touchRowScrolling_)
+        {
+            const auto screen = e.getScreenPosition();
+            const float travel = screen.toFloat().getDistanceFrom(touchRowDownScreen_.toFloat());
+            const double heldMs = juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_;
+            // A quick vertical swipe scrolls; it can NEVER retroactively
+            // become a track reorder when the 500ms hold expires.
+            if (touchRowScrolling_ || (travel > 10.0f && heldMs < 320.0))
+            {
+                touchRowScrolling_ = true;
+                touchRowCandidate_ = false;
+                dragMode_ = DragMode::None;
+                if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                    viewport->setViewPosition(viewport->getViewPositionX(),
+                        juce::jlimit(0, juce::jmax(0, viewport->getViewedComponent() != nullptr
+                            ? viewport->getViewedComponent()->getHeight() - viewport->getViewHeight() : 0),
+                            touchRowViewportStartY_ - (screen.y - touchRowDownScreen_.y)));
+                return;
+            }
+            if (heldMs < 320.0 || travel <= 10.0f)
+                return; // selected header long press is a menu, not a reorder
+            touchRowCandidate_ = false;
+            dragMode_ = DragMode::Reorder;
+            // The next drag event is owned by the existing reorder path.
+            return;
+        }
+
         if (dragMode_ == DragMode::Resize && dragStartY_ >= 0 && onHeightDrag)
         {
             int delta = e.getScreenY() - dragStartY_;
@@ -1165,12 +1179,21 @@ public:
         }
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
+        const bool showTouchMenu = touchRowCandidate_
+            && ApexPointerPolicy::isDirect(e)
+            && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 320.0
+            && e.getScreenPosition().toFloat().getDistanceFrom(
+                   touchRowDownScreen_.toFloat()) <= 10.0f;
+        touchRowCandidate_ = false;
+        touchRowScrolling_ = false;
         if (dragMode_ == DragMode::Reorder && onReorderDrop)
             onReorderDrop(this);
         dragStartY_ = -1;
         dragMode_ = DragMode::None;
+        if (showTouchMenu && !track_.isMaster())
+            showContextMenu(); // exactly the native desktop right-click actions
     }
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
@@ -1261,6 +1284,11 @@ public:
         }
         else if (!track_.isMaster())
         {
+            // Double-taps on a touchscreen must not unexpectedly switch
+            // routing modes while someone scrolls or selects a track.
+            // Keep mouse double-click Quick Send and explicit touch menus.
+            if (ApexPointerPolicy::isDirect(e))
+                return;
             // Double-click on the row body (outside the name area and all
             // controls) toggles Quick Send mode with this track as source.
             const bool overControl =
@@ -1390,9 +1418,8 @@ private:
             };
             menu.addItem(item);
         }
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this)
-            .withTargetScreenArea(localAreaToGlobal(playlistBounds_.toNearestInt())));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(playlistBounds_.toNearestInt().getCentre()));
     }
 
     void showContextMenu()
@@ -1564,8 +1591,8 @@ private:
             menu.addItem(del);
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            contextScreenPoint_.isOrigin() ? getScreenBounds().getCentre() : contextScreenPoint_);
     }
 
     void showAutomationMenu()
@@ -1741,7 +1768,9 @@ private:
         snapItem.isEnabled = false;
         menu.addItem(snapItem);
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safeThis, order, clipInfos](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(automationBounds_.toNearestInt().getCentre()),
+            [safeThis, order, clipInfos](int result)
         {
             if (!safeThis)
                 return;
@@ -1792,6 +1821,12 @@ public:
     int  height_      = 72;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
+    juce::Point<int> contextScreenPoint_; // exact mouse/touch position for wheel
+    bool touchRowCandidate_ = false;
+    bool touchRowScrolling_ = false;
+    juce::Point<int> touchRowDownScreen_;
+    double touchRowDownMs_ = 0.0;
+    int touchRowViewportStartY_ = 0;
     bool selected_    = false;
     bool resizeHover_ = false;
     bool pluginDropHover_ = false;
@@ -2034,9 +2069,8 @@ public:
             }
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options()
-            .withTargetComponent(this)
-            .withTargetScreenArea(localAreaToGlobal(inputBounds_.toNearestInt())));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(inputBounds_.toNearestInt().getCentre()));
     }
 
     void drawAutomationButton(juce::Graphics& g, const juce::Rectangle<float>& bounds,
@@ -2330,7 +2364,9 @@ public:
         reorder.addItem(202, "Move Current Down", activeIndex >= 0 && activeIndex < order.size() - 1);
         menu.addSubMenu("Reorder List", reorder);
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safeThis, order, clipInfos, sendKeys, pluginParamKeys](int result)
+        ApexRadialContextMenu::show(std::move(menu), this,
+            localPointToGlobal(automationTargetBounds_.toNearestInt().getCentre()),
+            [safeThis, order, clipInfos, sendKeys, pluginParamKeys](int result)
         {
             if (!safeThis) return;
             if (result >= 8000 && result < 8000 + (int)clipInfos.size() * 2)
@@ -2458,6 +2494,16 @@ public:
             // Next 32px — matches the ruler height.
             g.setColour(a.color.deepestA);
             g.fillRect(0, 48, getWidth(), 32);
+            if (clipEditInfo_.isNotEmpty())
+            {
+                // Live trim/fade/gain feedback shares this pinned header area,
+                // above MASTER, instead of covering the waveform or controls.
+                g.setFont(juce::Font(juce::FontOptions(12.0f)));
+                g.setColour(a.color.textPrimary);
+                g.drawFittedText(clipEditInfo_, juce::Rectangle<int>(8, 49,
+                    juce::jmax(0, getWidth() - 16), 29),
+                    juce::Justification::centredLeft, 1, 0.75f);
+            }
             g.setColour(a.color.borderSoftA.withAlpha(0.65f));
             g.fillRect(0, 79, getWidth(), 1);
         }
@@ -2467,8 +2513,18 @@ public:
             addBtn_.setBounds(getWidth() - 44, 10, 34, 28);
         }
 
+        void setClipEditInfo(const juce::String& info)
+        {
+            if (clipEditInfo_ == info)
+                return;
+            clipEditInfo_ = info;
+            repaint(0, 48, getWidth(), 32);
+        }
+
         std::function<void()> onQuickAdd;
         QuickAddButton addBtn_;
+    private:
+        juce::String clipEditInfo_;
     };
 
     std::function<void(int deltaX)> onWidthDrag;  // callback for resize
@@ -2480,6 +2536,12 @@ public:
     {
         const auto local = headerBar_.addBtn_.getBounds() + headerBar_.getPosition();
         return local.isEmpty() ? local : local + getScreenPosition();
+    }
+
+    // Non-destructive read-only editing HUD in the pinned TRACKS header.
+    void setClipEditInfo(const juce::String& info)
+    {
+        headerBar_.setClipEditInfo(info);
     }
 
     void setScrollOffset(int y)

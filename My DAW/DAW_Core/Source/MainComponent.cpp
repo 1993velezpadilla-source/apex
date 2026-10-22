@@ -16,8 +16,10 @@
 #include "CommandCore/GeneralCommands.h"
 #include "RenderCore/ExportProgressWindow.h"
 #include "UICore/CrashRecoveryDialogComponent.h"
+#include "UICore/BeatMakingFeaturePolicy.h"
 #include "TrackCore/TrackReorderCore.h"
 #include "UICore/CursorThemeCore.h"
+#include "UICore/ApexContextMenuStyle.h"
 #include "DeviceCore/SafeAsioDeviceTypeCore.h"
 #include "DeviceCore/AudioDeviceBlockAdapterCore.h"
 #include "VocalTuneCore/ApexTuneIntegrationCore.h"
@@ -1169,6 +1171,8 @@ MainComponent::MainComponent()
     });
     menuBar_->setMenuAction("View", "Piano Roll", [this]
     {
+        if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+            return; // Historical binding retained; audio-first release.
         auto selectedId = appCore_.getState().selectedClipID.getValue().toString();
         if (selectedId.isNotEmpty())
         {
@@ -1267,6 +1271,15 @@ MainComponent::MainComponent()
     menuBar_->setMenuAction("Settings", "Preferences...", [this]
     {
         DAW::ActionManager::getInstance().dispatch(DAW::ActionID::ViewToggleSettings);
+    });
+    // Directly accessible from Settings, not buried in the Preferences window.
+    menuBar_->setMenuAction("Settings", "Right-click Menu: Radial Wheel", []
+    {
+        DAW::ApexContextMenuStyle::get().setMode(DAW::ApexContextMenuStyle::Mode::Radial);
+    });
+    menuBar_->setMenuAction("Settings", "Right-click Menu: Classic Windows", []
+    {
+        DAW::ApexContextMenuStyle::get().setMode(DAW::ApexContextMenuStyle::Mode::Classic);
     });
     menuBar_->setMenuAction("Settings", "Reset Project...", [this]
     {
@@ -2460,6 +2473,15 @@ MainComponent::MainComponent()
     if (arrangement_ && arrangement_->getCore() != nullptr)
         arrangement_->getCore()->setAutomationManager(&appCore_.getAutomationManager());
 
+    // Pinned TRACKS header carries the same clip-edit info that the timeline
+    // already computes for trim, fades and clip gain. No extra DSP or polling.
+    if (arrangement_ && arrangement_->getCore() != nullptr)
+        arrangement_->getCore()->onClipEditInfoChanged = [this](const juce::String& info)
+        {
+            if (trackList_ != nullptr)
+                trackList_->setClipEditInfo(info);
+        };
+
     appCore_.setBeforeClipFxProjectReset([this]()
     {
         if (clipPropertiesWindow_)
@@ -2706,6 +2728,11 @@ MainComponent::MainComponent()
     };
     arrangement_->onOpenSelectedMidiClip = [this]()
     {
+        // The Piano Roll button and all alternate entry points are disabled
+        // until the future beat-making update. In particular, do not open
+        // the previously reachable "empty" Piano Roll window.
+        if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+            return;
         auto selectedId = appCore_.getState().selectedClipID.getValue().toString();
         if (selectedId.isNotEmpty())
         {
@@ -2725,6 +2752,16 @@ MainComponent::MainComponent()
             pianoRollWindow_->toFront(true);
         }
     };
+    // A menu-driven normalize updates the SAME shared AudioFileManager state
+    // used by the Clip Properties pill; refresh it without reopening a window.
+    arrangement_->onClipNormalizationChanged = [this](DAW::Clip& clip)
+    {
+        if (clipPropertiesWindow_ && clipPropertiesWindow_->isShowingClip(clip.getID()))
+        {
+            clipPropertiesWindow_->getPanel().refreshFromEngineState();
+            clipPropertiesWindow_->repaint();
+        }
+    };
     arrangement_->onOpenClipAutomation = [this](DAW::Clip& clip)
     {
         if (!clipPropertiesWindow_)
@@ -2742,20 +2779,24 @@ MainComponent::MainComponent()
                 appCore_.getAutomationManager(), t, t.regionLengthSamples > 0);
             if (arrangement_)
             {
-                arrangement_->showAutomationLane(t.trackId, t.parameterId);
+                // Clip parameter automation belongs INSIDE the clip only.
+                // Never activate a track-wide automation row just because
+                // the user chose Automate This Clip in the radial menu.
+                if (DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
+                    arrangement_->showAutomationLane(t.trackId, t.parameterId);
                 arrangement_->repaint();
             }
         };
 
         panelCb.showLane = [this](const DAW::AutomationQuickCreateCore::ControlTarget& t)
         {
-            if (arrangement_)
+            if (arrangement_ && DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
                 arrangement_->showAutomationLane(t.trackId, t.parameterId);
         };
 
         panelCb.hideLane = [this](const DAW::AutomationQuickCreateCore::ControlTarget& t)
         {
-            if (arrangement_)
+            if (arrangement_ && DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(t.parameterId).isEmpty())
                 arrangement_->hideAutomationLane(t.trackId, t.parameterId);
         };
 
@@ -2919,6 +2960,10 @@ MainComponent::MainComponent()
     timelineWindow_->setEmbedded(true);
     timelineWindow_->setVisible(true);
 
+    // Keep the editor allocation code for the future update, but do not
+    // instantiate a heavy hidden window in the audio-first release.
+    if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+    {
     pianoRollWindow_ = std::make_unique<DAW::PianoRollWindow>();
     pianoRollWindow_->setTransport(&appCore_.getTransport());
     pianoRollWindow_->setVirtualKeyboardCore(&appCore_.getVirtualKeyboard());
@@ -2929,6 +2974,7 @@ MainComponent::MainComponent()
             pianoRollWindow_->setVisible(false);
     };
     addAndMakeVisible(pianoRollWindow_.get());
+    }
 
     // Beat-making system (FL Studio clone)
     stepSequencerWindow_ = std::make_unique<DAW::StepSequencerWindow>();
@@ -9326,24 +9372,24 @@ void MainComponent::showExportAudioDialog()
     const auto makeFormatMenu = [](int base)
     {
         juce::PopupMenu menu;
-        menu.addItem(base + 1, "WAV — 16-bit PCM");
-        menu.addItem(base + 2, "WAV — 24-bit PCM");
-        menu.addItem(base + 3, "WAV — 32-bit float");
+        menu.addItem(base + 1, "WAV - 16-bit PCM");
+        menu.addItem(base + 2, "WAV - 24-bit PCM");
+        menu.addItem(base + 3, "WAV - 32-bit float");
         menu.addSeparator();
-        menu.addItem(base + 4, "AIFF — 16-bit PCM");
-        menu.addItem(base + 5, "AIFF — 24-bit PCM");
-        menu.addItem(base + 6, "FLAC — 16-bit lossless");
-        menu.addItem(base + 7, "FLAC — 24-bit lossless");
-        menu.addItem(base + 8, "Ogg Vorbis — high quality");
+        menu.addItem(base + 4, "AIFF - 16-bit PCM");
+        menu.addItem(base + 5, "AIFF - 24-bit PCM");
+        menu.addItem(base + 6, "FLAC - 16-bit lossless");
+        menu.addItem(base + 7, "FLAC - 24-bit lossless");
+        menu.addItem(base + 8, "Ogg Vorbis - high quality");
         return menu;
     };
 
     juce::PopupMenu menu;
     menu.addSubMenu("Full Mix", makeFormatMenu(0));
     menu.addSeparator();
-    menu.addSubMenu("Stems — Individual Tracks (Pre-Master)", makeFormatMenu(100));
-    menu.addSubMenu("Stems — Folder Buses (Pre-Master)", makeFormatMenu(200));
-    menu.addSubMenu("Stems — Tracks + Folder Buses (Pre-Master)", makeFormatMenu(300));
+    menu.addSubMenu("Stems - Individual Tracks (Pre-Master)", makeFormatMenu(100));
+    menu.addSubMenu("Stems - Folder Buses (Pre-Master)", makeFormatMenu(200));
+    menu.addSubMenu("Stems - Tracks + Folder Buses (Pre-Master)", makeFormatMenu(300));
 
     juce::Component::SafePointer<MainComponent> safeThis(this);
     menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis](int choice)

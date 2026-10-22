@@ -2,6 +2,9 @@
 // ClipRenderCore.cpp
 // ===========================================================================
 #include "ClipRenderCore.h"
+#include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
+#include "TouchNavigationMath.h"
+#include "../../../Source/UICore/ApexPointerPolicy.h"
 #include "ClipPitchCore.h"
 #include "ClipGainCore.h"
 #include "ClipWaveformColourCore.h"
@@ -45,10 +48,14 @@ namespace ArrangementEditor
 
         m_pianoRollBtn = std::make_unique<PianoRollButtonCore>(PianoRollButtonCore::Style::ClipOverlay);
         m_pianoRollBtn->onClick = [this]() {
-            if (onPianoRollClick)
+            if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled && onPianoRollClick)
                 onPianoRollClick();
         };
-        addAndMakeVisible(*m_pianoRollBtn);
+        // Retain the component and callback for the future beat-making
+        // update, but do not render or intercept touch/mouse/Pencil today.
+        addChildComponent(*m_pianoRollBtn);
+        m_pianoRollBtn->setEnabled(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled);
+        m_pianoRollBtn->setInterceptsMouseClicks(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled, false);
 
         setSize(100, 80);
     }
@@ -225,6 +232,42 @@ namespace ArrangementEditor
             g.fillRoundedRectangle(b, 3.0f);
         }
 
+        // Touch hold feedback is attached to the actual clip finger, not
+        // the scrolling ruler. Complete cyan ring = lift to open the wheel.
+        if (m_touchMenuPending)
+        {
+            const auto ms = juce::Time::getMillisecondCounterHiRes() - m_touchMenuDownMs;
+            const float progress = juce::jlimit(0.0f, 1.0f, (float)(ms / 320.0));
+            const auto centre = m_touchMenuLocalPos.toFloat();
+            const float radius = 17.0f + 3.0f * progress;
+            g.setColour(juce::Colour(0xFF1D2937).withAlpha(0.55f));
+            g.fillEllipse(centre.x - radius, centre.y - radius,
+                          radius * 2.0f, radius * 2.0f);
+            juce::Path arc;
+            arc.addCentredArc(centre.x, centre.y, radius, radius, 0.0f,
+                             -juce::MathConstants<float>::halfPi,
+                             -juce::MathConstants<float>::halfPi
+                                 + progress * juce::MathConstants<float>::twoPi, true);
+            g.setColour(progress >= 1.0f ? juce::Colour(0xFF56F8BE)
+                                         : juce::Colour(0xFFFF1678));
+            g.strokePath(arc, juce::PathStrokeType(3.3f));
+            if (progress >= 1.0f)
+            {
+                g.setColour(juce::Colour(0xFF56F8BE).withAlpha(0.80f));
+                g.fillEllipse(centre.x - 4.0f, centre.y - 4.0f, 8.0f, 8.0f);
+            }
+        }
+    }
+
+    void ClipRenderCore::timerCallback()
+    {
+        if (!m_touchMenuPending)
+        {
+            stopTimer();
+            return;
+        }
+        const auto c = m_touchMenuLocalPos;
+        repaint(juce::Rectangle<int>(c.x - 28, c.y - 28, 56, 56));
     }
 
     void ClipRenderCore::resized()
@@ -239,11 +282,14 @@ namespace ArrangementEditor
         // lock icon (drawn at x=4, width=16).
         if (m_pianoRollBtn)
         {
-            const bool showPianoRollButton = getWidth() >= 40;
+            const bool showPianoRollButton = DAW::BeatMakingFeaturePolicy::kPianoRollEnabled
+                && getWidth() >= 40;
             m_pianoRollBtn->setVisible(showPianoRollButton);
-
-            if (showPianoRollButton)
-                m_pianoRollBtn->setBounds(getWidth() - 24, 1, 22, 14);
+            // An invisible button must not reserve any hit region or overlap
+            // audio clip badges.
+            m_pianoRollBtn->setBounds(showPianoRollButton
+                ? juce::Rectangle<int>(getWidth() - 24, 1, 22, 14)
+                : juce::Rectangle<int>());
         }
 
         // setBounds() is also used for every scroll reposition.  Refreshing
@@ -397,6 +443,9 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDown(const juce::MouseEvent& e)
     {
+        m_touchPanFromUnselected = false;
+        m_touchMenuPending = false;
+        stopTimer();
         if (!m_model)
         {
             if (auto* parent = getParentComponent())
@@ -408,6 +457,13 @@ namespace ArrangementEditor
         // creation path or renderer rebuild.
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
             return;
+
+        // Touching a region claims the prior fling even on a stationary tap.
+        // A clip owns this pointer, so parent mouseDown is not guaranteed to
+        // see it; stop the old inertia before selection callbacks run.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                view->stopTouchMomentumOnClipPress();
 
         // Right-click must reach the parent context menu without selecting,
         // trimming, muting or disturbing an existing multi-selection.
@@ -450,9 +506,51 @@ namespace ArrangementEditor
         // scrolling can never displace a clip.
         if (! m_selected)
         {
+            // Selection publishes into the real application state; listeners
+            // may rebuild or destroy a renderer. Never read its members after
+            // that callback unless it survived.
+            juce::Component::SafePointer<ClipRenderCore> safeThis(this);
             if (onClick) onClick(e.mods);   // selection honors Ctrl even on the first tap
-            m_activeZone = Zone::VolumeBtn;  // marks the gesture as consumed
+            if (safeThis == nullptr)
+                return;
+            // Selecting must not block an intended one-finger scroll. A drag
+            // on this newly selected region navigates; a second gesture can
+            // deliberately move or trim it. Mouse behaviour is unchanged.
+            m_touchPanFromUnselected =
+                e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+            if (m_touchPanFromUnselected && z == Zone::None)
+            {
+                if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                {
+                    m_touchMenuPending = true;
+                    m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
+                    m_touchMenuDownScreen = e.getScreenPosition();
+                    m_touchMenuLocalPos = e.getPosition();
+                    m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
+                    startTimerHz(30);
+                }
+            }
+            m_activeZone = Zone::VolumeBtn;  // consumes click without editing
             return;
+        }
+
+        // In Select mode, a STATIONARY HOLD on a selected region invokes
+        // right-click. A normal tap keeps selection and a drag can move the
+        // region without an unwanted menu. The 500 ms hold threshold is
+        // checked on release, outside any audio callback.
+        if (z == Zone::None
+            && DAW::ApexPointerPolicy::isDirect(e))
+        {
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+            {
+                m_touchMenuPending = view->getToolState().getActiveTool() == EditorTool::Select;
+                m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
+                m_touchMenuDownScreen = e.getScreenPosition();
+                m_touchMenuLocalPos = e.getPosition();
+                m_touchMenuDownMs = juce::Time::getMillisecondCounterHiRes();
+                if (m_touchMenuPending)
+                    startTimerHz(30);
+            }
         }
 
         // NOTE: the Alt+drag waveform clip-gain gesture is DISABLED for now —
@@ -493,6 +591,22 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDrag(const juce::MouseEvent& e)
     {
+        if (m_touchMenuPending && ! TouchNavigationMath::withinTapSlop(
+                m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
+                e.getScreenPosition().x, e.getScreenPosition().y))
+        {
+            m_touchMenuPending = false;
+            stopTimer();
+            repaint();
+        }
+
+        if (m_touchPanFromUnselected)
+        {
+            if (auto* parent = getParentComponent())
+                parent->mouseDrag(e.getEventRelativeTo(parent));
+            return;
+        }
+
         // Free View Mode guard (global flag): a drag that began before the
         // mode was switched on must not keep moving the clip.
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
@@ -705,6 +819,37 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseUp(const juce::MouseEvent& e)
     {
+        const auto* touchView = findParentComponentOfClass<ArrangementViewCore>();
+        const bool requestTouchMenu = m_touchMenuPending
+            && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
+            && DAW::ApexPointerPolicy::isDirect(e)
+            && TouchNavigationMath::contextHoldReady(
+                e.getLengthOfMousePress(),
+                m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
+                e.getScreenPosition().x, e.getScreenPosition().y)
+            && ! s_viewOnlyMode.load(std::memory_order_relaxed);
+        m_touchMenuPending = false;
+        stopTimer();
+        // Invalidate the completed hold ring immediately (no ghost dot).
+        repaint();
+
+        if (m_touchPanFromUnselected)
+        {
+            m_touchPanFromUnselected = false;
+            m_activeZone = Zone::None;
+            const auto screen = e.getScreenPosition();
+            auto* parent = getParentComponent();
+            const auto local = parent != nullptr
+                ? e.getEventRelativeTo(parent).getPosition() : e.getPosition();
+            // The parent can rebuild clip renderers when navigation ends.
+            // Copy the callback before that possible destruction.
+            const auto openMenu = onTouchContextMenu;
+            if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                view->finishUnselectedClipTouchPan();
+            if (requestTouchMenu && openMenu)
+                openMenu(screen, local);
+            return;
+        }
         if (m_gainDragActive)
         {
             m_gainDragActive = false;
@@ -734,12 +879,24 @@ namespace ArrangementEditor
         }
 
         if (auto* parent = getParentComponent())
+        {
+            const auto localPos = e.getEventRelativeTo(parent).getPosition();
+            const auto screenPos = e.getScreenPosition();
+            // Parent mouseUp may commit/cancel edits and rebuild renderers.
+            // Only call back after verifying this component is still alive.
+            juce::Component::SafePointer<ClipRenderCore> safeThis(this);
             parent->mouseUp(e.getEventRelativeTo(parent));
+            if (safeThis != nullptr && requestTouchMenu && onTouchContextMenu)
+                onTouchContextMenu(screenPos, localPos);
+        }
     }
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        DBG("[ClipRenderCore] double-click fired, forwarding to parent");
+        // Both double-click and double-tap open Clip Properties. A stationary
+        // 500ms hold still owns the context menu; these are distinct gestures.
+        // Previously every direct-input double tap was deliberately ignored.
+        DBG("[ClipRenderCore] double click/tap forwarding to parent");
 
         if (auto* parent = getParentComponent())
             parent->mouseDoubleClick(e.getEventRelativeTo(parent));
@@ -1025,41 +1182,14 @@ namespace ArrangementEditor
 
             const float x = (float)(full.getX() + px);
             g.fillRect(x, top, 1.0f, bot - top);
+
+            // Red clipping markers are NOT a source-waveform decoration.
+            // ArrangementViewCore now paints only playback-observed output
+            // over-0 dBFS markers, so a limiter/gain change clears them on
+            // the next listen pass rather than producing false positives.
         }
 
-        // ── Clipped-position markers (n-Track style) ─────────────────────
-        // Small red ticks hanging from the top of the waveform area (1/8 of
-        // its height) at every bucket whose source reached 0 dBFS. Gain-aware:
-        // a bucket stops showing a marker as soon as the clip's current gain
-        // brings it back under 0 dBFS, so fixing a hot clip clears its markers.
-        if (! peaks.clippedPeaks.empty() && peaksPerPixel > 0.0)
-        {
-            g.setColour(juce::Colour(0xFFFF3B30));
-            const float markerTop    = areaTop + 1.0f;
-            const float markerHeight = juce::jmax(3.0f, areaH * 0.125f);
 
-            for (int peakIndex : peaks.clippedPeaks)
-            {
-                if (peakIndex < visibleStartPeak)
-                    continue;
-                if (peakIndex > lastPeak)
-                    break;   // sorted ascending
-
-                // Still clipping at the clip's CURRENT gain? (fade-independent)
-                const float bucketPeak = juce::jmax(
-                    std::fabs(peaks.minPeaks[(size_t) peakIndex]),
-                    std::fabs(peaks.maxPeaks[(size_t) peakIndex]));
-                if (bucketPeak * clipGainLinear < 1.0f)
-                    continue;
-
-                double visualPx = (double)(peakIndex - visibleStartPeak) / peaksPerPixel;
-                if (m_model->reversed)
-                    visualPx = (double)clipW - 1.0 - visualPx;
-
-                const float markerX = (float)(full.getX() + visualPx);
-                g.fillRect(markerX, markerTop, 1.5f, markerHeight);
-            }
-        }
     }
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
@@ -1191,11 +1321,10 @@ namespace ArrangementEditor
 
         g.setFont(juce::Font("Segoe UI", 7.5f, juce::Font::bold));
         const int bx = getLocalBounds().getX();
-        // Keep the badges clear of the piano-roll button in the clip's
-        // top-right corner (resized() places it at getWidth()-24 with a width
-        // of 22 when the clip is >= 40 px wide). It is a child component and
-        // would otherwise paint over the badges.
-        const bool pianoRollVisible = getWidth() >= 40;
+        // Reserve room for the Piano Roll only in a future beat-making
+        // release. For audio-first APEX, badges use the freed header space.
+        const bool pianoRollVisible = DAW::BeatMakingFeaturePolicy::kPianoRollEnabled
+            && getWidth() >= 40;
         int x = bx + getWidth() - (pianoRollVisible ? 28 : 4);
         const int badgeRight = x;
         const int badgeY = 1;

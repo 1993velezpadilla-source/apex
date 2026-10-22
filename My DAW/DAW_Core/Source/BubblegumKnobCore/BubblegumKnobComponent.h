@@ -37,9 +37,30 @@ public:
         setBinding(std::move(binding));
     }
 
+    ~BubblegumKnobComponent() override
+    {
+        // Closing/rebuilding a plug-in panel mid-touch MUST end its automation
+        // gesture. Otherwise the parameter can remain latched in Write/Touch
+        // after the JUCE component is destroyed.
+        if (interaction_.isDragging())
+        {
+            interaction_.endDrag();
+            activePointerIndex_ = -1;
+            if (binding_.endGesture) binding_.endGesture();
+        }
+    }
+
     /** Replace the value binding. Reconfigures the scale's unity value. */
     void setBinding(BubblegumKnobValueBinding b)
     {
+        // Changing the target mid-touch cannot leave the old automation
+        // parameter stuck in a writing gesture.
+        if (interaction_.isDragging())
+        {
+            interaction_.endDrag();
+            activePointerIndex_ = -1;
+            if (binding_.endGesture) binding_.endGesture();
+        }
         binding_ = std::move(b);
 
         BubblegumKnobScaleCore::Config sc;
@@ -82,38 +103,62 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (! binding_.isValid()) return;
+        if (! binding_.isValid() || e.mods.isRightButtonDown()) return;
+        // Every knob owns a single source; simultaneous fingers may edit
+        // different knobs, but a second finger must never steal THIS value.
+        if (interaction_.isDragging()) return;
+        activePointerIndex_ = e.source.getIndex();
         interaction_.beginDrag(binding_.read(), e.getScreenY());
+        if (binding_.beginGesture) binding_.beginGesture();
     }
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
-        if (! binding_.isValid() || ! interaction_.isDragging()) return;
+        if (! binding_.isValid() || ! interaction_.isDragging()
+            || e.source.getIndex() != activePointerIndex_) return;
         const float v = interaction_.computeDragValue(
             e.getScreenY(),
             binding_.minValue, binding_.maxValue, binding_.defaultValue,
             e.mods.isShiftDown(), e.mods.isCtrlDown());
         binding_.write(v);
+        juce::Component::SafePointer<BubblegumKnobComponent> safeThis(this);
         if (onValueChanged) onValueChanged();
-        repaint();
+        if (safeThis != nullptr) repaint();
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
+        if (! interaction_.isDragging()
+            || e.source.getIndex() != activePointerIndex_) return;
         interaction_.endDrag();
+        activePointerIndex_ = -1;
+        if (binding_.endGesture) binding_.endGesture();
     }
 
-    void mouseDoubleClick(const juce::MouseEvent&) override
+    void mouseDoubleClick(const juce::MouseEvent& e) override
     {
-        if (! binding_.isValid()) return;
+        if (! binding_.isValid() || e.mods.isRightButtonDown()) return;
+        // Reset is one complete automation/Undo gesture even on touch.
+        if (interaction_.isDragging())
+        {
+            interaction_.endDrag();
+            activePointerIndex_ = -1;
+            if (binding_.endGesture) binding_.endGesture();
+        }
+        juce::Component::SafePointer<BubblegumKnobComponent> safeThis(this);
+        if (binding_.beginGesture) binding_.beginGesture();
+        if (safeThis == nullptr) return;
         binding_.write(binding_.defaultValue);
         if (onValueChanged) onValueChanged();
-        repaint();
+        if (safeThis == nullptr) return;
+        if (binding_.endGesture) binding_.endGesture();
+        if (safeThis != nullptr) repaint();
     }
 
 private:
     BubblegumKnobValueBinding       binding_;
     BubblegumKnobInteractionCore    interaction_;
+    int activePointerIndex_ = -1; // JUCE source index, not a global shared finger
     BubblegumKnobScaleCore          scale_;
     BubblegumKnobHaloRenderer       halo_;
     BubblegumKnobTrackRenderer      track_;

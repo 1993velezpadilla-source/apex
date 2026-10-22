@@ -2,6 +2,8 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
+#include "TouchNavigationMath.h"
+#include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
@@ -184,7 +186,11 @@ namespace ArrangementEditor
         addAndMakeVisible(m_ruler);
         addAndMakeVisible(m_rubberBand);
         addAndMakeVisible(m_splitIndicator);
-        addAndMakeVisible(m_pianoRollBtn);
+        // Keep the existing Piano Roll component, but do not display or
+        // activate it during APEX's audio-first release.
+        addChildComponent(m_pianoRollBtn);
+        m_pianoRollBtn.setEnabled(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled);
+        m_pianoRollBtn.setInterceptsMouseClicks(DAW::BeatMakingFeaturePolicy::kPianoRollEnabled, false);
         addChildComponent(m_ghostOverlay);
 
         m_arrangementDebugPanel = std::make_unique<ArrangementDebugPanelCore>();
@@ -285,6 +291,8 @@ namespace ArrangementEditor
 
         // Wire Piano Roll button
         m_pianoRollBtn.onClick = [this]() {
+            if (!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+                return;
             DBG("Piano Roll button clicked");
             if (onOpenPianoRollRequested)
                 onOpenPianoRollRequested();
@@ -1061,16 +1069,20 @@ namespace ArrangementEditor
         if (viewport == nullptr)
             return false;
 
-        // Scroll/gesture LOD: every renderer paints only its background+header
-        // while this runs, which is what makes the gesture smooth.
-        ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+        // Scroll/gesture LOD must be activated only after REAL movement.
+        // Previously tapping/holding the arranger hid every waveform and
+        // rebuilding all clips on release caused a visible frame hitch.
+        // A stationary tap/hold now keeps full-detail paint and requires no
+        // unnecessary end-of-gesture renderer rebuild.
 
         // ── Live two-finger gesture, sampled at 60 Hz ──
         // Driving the pan/pinch from this timer instead of the irregular mouse
         // event stream is what makes it feel like an Apple device: every frame
         // advances by the same amount, no bursts, no stalls.
         int touchCount = 0;
+        int gestureAreaFingerCount = 0;
         juce::Point<float> firstTouch, secondTouch;
+        juce::Point<float> firstGestureFinger, secondGestureFinger;
         // Capture the VALUE, not a pointer: getMouseSources() returns the array
         // by value, so a pointer into it dangles after the loop and reading the
         // down time from freed memory produced random stops and reversals
@@ -1081,6 +1093,39 @@ namespace ArrangementEditor
             if (! source.isDragging()
                 || source.getType() != juce::MouseInputSource::InputSourceType::touch)
                 continue;
+
+            // A fader, plug-in or popover must own its own fingers. The old
+            // desktop-global scan counted touches anywhere on the app and
+            // could unexpectedly pan/zoom the arrangement during mixing.
+            auto* hit = source.getComponentUnderMouse();
+            if (hit == nullptr || (hit != this && ! isParentOf(hit)))
+                continue;
+            if (! viewport->getScreenBounds().contains(source.getScreenPosition().toInt()))
+                continue;
+
+            // Two fingers claim navigation even if one initially landed on a
+            // selected region or an edit handle. Capture *all* arrangement
+            // fingers separately so the wheel/pinch is not lost when one of
+            // the two is on a region; the edit is cancelled below.
+            if (gestureAreaFingerCount == 0)
+                firstGestureFinger = source.getScreenPosition();
+            else if (gestureAreaFingerCount == 1)
+                secondGestureFinger = source.getScreenPosition();
+            ++gestureAreaFingerCount;
+
+            // A touch captured by an interactive audio region/handle must
+            // NEVER also pan the arrangement. Newly tapped, previously
+            // unselected regions explicitly delegate their first drag to
+            // scrolling; selected regions and trim/fade handles own theirs.
+            auto* owningClip = dynamic_cast<ClipRenderCore*>(hit);
+            for (auto* ancestor = hit->getParentComponent();
+                 owningClip == nullptr && ancestor != nullptr && ancestor != this;
+                 ancestor = ancestor->getParentComponent())
+                owningClip = dynamic_cast<ClipRenderCore*>(ancestor);
+            if (owningClip != nullptr
+                && !owningClip->isTouchPanFromUnselected())
+                continue;
+
             if (touchCount == 0)
             {
                 firstTouch         = source.getScreenPosition();
@@ -1093,38 +1138,100 @@ namespace ArrangementEditor
             ++touchCount;
         }
 
+        if (gestureAreaFingerCount >= 2)
+        {
+            touchCount = 2;
+            firstTouch = firstGestureFinger;
+            secondTouch = secondGestureFinger;
+        }
+
         if (touchCount >= 2)
         {
-            const auto firstLocal  = getLocalPoint(nullptr, firstTouch.toInt()).toFloat();
-            const auto secondLocal = getLocalPoint(nullptr, secondTouch.toInt()).toFloat();
+            // A second finger changes the gesture owner from region editing
+            // to navigation. Discard the uncommitted move rather than
+            // allowing viewport pinch + clip drag in the same transaction.
+            if (m_drag.pending || m_drag.active)
+                cancelClipDragForTouchNavigation();
 
-            // Axis-specific pinch: horizontal separation drives the time zoom,
-            // vertical separation drives the track height — each independent,
-            // in and out.
-            const double sepX = std::abs((double) firstLocal.x - (double) secondLocal.x);
-            const double sepY = std::abs((double) firstLocal.y - (double) secondLocal.y);
+            // Two fingers share a single navigation owner. Switching from one
+            // finger to two must cancel its hold/fling, never inherit its anchor.
+            m_touchScrollActive = false;
+            m_smoothedTouchValid = false;
+            m_holdActive = false;
+            m_holdDragging = false;
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
 
-            if (m_lastPinchSepX > 1.0 && std::abs(sepX - m_lastPinchSepX) > 6.0)
+            // SCREEN coordinates are stable across Viewport scrolling. Using
+            // content-local deltas fed scrolling back into itself (jitter).
+            const auto centreScreen = (firstTouch + secondTouch) * 0.5f;
+            const double sepX = std::abs((double) firstTouch.x - (double) secondTouch.x);
+            const double sepY = std::abs((double) firstTouch.y - (double) secondTouch.y);
+            if (! m_twoFingerGestureActive)
             {
-                const double ratio = juce::jlimit(0.85, 1.18, sepX / m_lastPinchSepX);
-                m_zoom.setPixelsPerSecond(juce::jlimit(10.0, 4000.0,
-                    m_zoom.getPixelsPerSecond() * ratio));
+                ++m_touchGestureEpoch; // cancel any pending selected-clip tap menu
+                m_twoFingerGestureActive = true;
+                m_lastTwoFingerPos = centreScreen;
+                m_lastPinchSepX = sepX;
+                m_lastPinchSepY = sepY;
+                return true;
+            }
+
+            const auto delta = centreScreen - m_lastTwoFingerPos;
+            const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
+            const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
+            if (delta.getDistanceFromOrigin() >= 1.0f || zoomingX || zoomingY)
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+            const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
+            const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
+            viewport->setViewPosition(
+                TouchNavigationMath::panPosition(viewport->getViewPositionX(), delta.x, maxX),
+                TouchNavigationMath::panPosition(viewport->getViewPositionY(), delta.y, maxY));
+
+            // Horizontal spread = time zoom. Keep the musical time under the
+            // two-finger midpoint fixed rather than zooming toward song start.
+            // Compare to LAST APPLIED separation to catch slow pinches.
+            if (zoomingX)
+            {
+                const double oldPps = m_zoom.getPixelsPerSecond();
+                const double newPps = juce::jlimit(2.0, 4000.0,
+                    oldPps * TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX));
+                const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
+                const double focusViewportX = focusX - viewport->getViewPositionX();
+                m_zoom.setPixelsPerSecond(newPps);
+                viewport->setViewPosition(
+                    TouchNavigationMath::zoomPosition(focusX, focusViewportX,
+                        newPps / juce::jmax(1.0, oldPps),
+                        juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                    viewport->getViewPositionY());
+                m_lastPinchSepX = sepX;
                 repaint();
             }
 
-            if (m_lastPinchSepY > 1.0 && std::abs(sepY - m_lastPinchSepY) > 6.0)
+            // Vertical spread = lane zoom; preserve the lane beneath fingers.
+            if (zoomingY)
             {
-                const double ratio = juce::jlimit(0.85, 1.18, sepY / m_lastPinchSepY);
-                m_zoom.setTrackHeightPx(juce::jlimit(24.0, 400.0,
-                    m_zoom.getTrackHeightPx() * ratio));
+                const double oldH = m_zoom.getTrackHeightPx();
+                const double newH = juce::jlimit(24.0, 180.0,
+                    oldH * TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY));
+                const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
+                const double focusViewportY = focusY - viewport->getViewPositionY();
+                const double contentTop = (double) arrangementContentTop();
+                m_zoom.setTrackHeightPx(newH);
+                const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
+                viewport->setViewPosition(viewport->getViewPositionX(),
+                    juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
+                        juce::roundToInt(newFocusY - focusViewportY)));
+                m_lastPinchSepY = sepY;
                 repaint();
             }
 
-            m_lastPinchSepX = sepX;
-            m_lastPinchSepY = sepY;
+            m_lastTwoFingerPos = centreScreen;
             return true;
         }
 
+        // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
+        // than jumping to the obsolete single-finger pan origin.
+        m_twoFingerGestureActive = false;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
 
@@ -1140,15 +1247,22 @@ namespace ArrangementEditor
             m_touchScrollActive  = false;
             m_smoothedTouchValid = false;
 
-            // Hold released without dragging = right click at that point.
-            if (m_holdActive && ! m_holdDragging)
-            {
-                const auto localPos = m_holdLocalPos.toInt();
-                if (auto* clip = findClipAt(localPos))
-                    showClipContextMenu(clip, localPointToGlobal(localPos), localPos);
-            }
+            // A clip renderer owns clip-long-press dispatch on its OWN
+            // mouseUp. Do not open a second wheel from this polling timer,
+            // which sometimes ran before mouseUp and swallowed the menu.
+            const auto endedHoldPos = m_holdLocalPos.toInt();
+            const bool hadHoldGlow = m_holdActive;
             m_holdActive   = false;
             m_holdDragging = false;
+            if (hadHoldGlow)
+                repaint(endedHoldPos.x - 48, endedHoldPos.y - 48, 96, 96);
+
+            // A stationary tap or a tiny digitizer jitter must NEVER enter
+            // inertial motion, even though this 60 Hz timer is already active.
+            const double swipeX = m_lastTouchPanPos.x - m_touchPanDownScreenPos.x;
+            const double swipeY = m_lastTouchPanPos.y - m_touchPanDownScreenPos.y;
+            if (swipeX * swipeX + swipeY * swipeY <= 24.0 * 24.0)
+                m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
 
             // Fling thresholds, Android-style: below the minimum velocity there
             // is no fling at all, and the release velocity is clamped so a fast
@@ -1167,13 +1281,23 @@ namespace ArrangementEditor
 
         if (touchCount == 1)
         {
+            // Selected clip drag owns this finger. Do not let stale kinetic
+            // frames keep moving the viewport under a region in flight.
+            if (m_drag.pending || m_drag.active)
+            {
+                m_touchScrollActive = false;
+                m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+                m_smoothedTouchValid = false;
+                ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+                return false;
+            }
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
             // Low-pass the touch position before using it: digitizers report
             // ±1 px of noise on a nearly still finger, which is what made slow
             // pans shake. The filter trades ~1 frame of lag for stability.
-            const auto localRaw = getLocalPoint(nullptr, firstTouch.toInt()).toFloat();
+            const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
             if (! m_smoothedTouchValid)
             {
                 m_smoothedTouchPos   = localRaw;
@@ -1183,7 +1307,8 @@ namespace ArrangementEditor
             {
                 m_smoothedTouchPos = m_smoothedTouchPos * 0.6f + localRaw * 0.4f;
             }
-            const auto local = m_smoothedTouchPos;
+            const auto posScreen = m_smoothedTouchPos.toInt();
+            const auto local = getLocalPoint(nullptr, posScreen).toFloat();
 
             // A new swipe is detected by the touch's OWN down time — exact, no
             // distance threshold. (The old 250 px bound missed a re-touch close
@@ -1205,9 +1330,10 @@ namespace ArrangementEditor
                 m_touchScrollActive = true;
                 m_skipSlop          = momentumWasRunning;
                 m_gestureDownPos    = local.toInt();
+                m_touchPanDownScreenPos = posScreen;
                 m_gestureStartViewX = viewport->getViewPositionX();
                 m_gestureStartViewY = viewport->getViewPositionY();
-                m_lastTouchPanPos    = local.toInt();
+                m_lastTouchPanPos    = posScreen;
                 m_lastTouchPanTimeMs = juce::Time::getMillisecondCounterHiRes();
                 m_touchPanVelocityX  = 0.0;
                 m_touchPanVelocityY  = 0.0;
@@ -1222,16 +1348,16 @@ namespace ArrangementEditor
                 return true;
             }
 
-            const auto pos = local.toInt();
-            const bool still = std::abs(pos.x - m_gestureDownPos.x) < 10
-                            && std::abs(pos.y - m_gestureDownPos.y) < 10;
+            const auto pos = posScreen;
+            const bool still = std::abs(pos.x - m_touchPanDownScreenPos.x) < 10
+                            && std::abs(pos.y - m_touchPanDownScreenPos.y) < 10;
 
-            // Long press: a still finger for 500 ms lights the glow pulse under
+            // Fast touch menu: a still finger for 320 ms lights the glow pulse under
             // it. Release at that point = right click; move = marquee.
             if (still && ! m_skipSlop)
             {
                 if (! m_holdActive
-                    && juce::Time::getMillisecondCounterHiRes() - m_holdStartMs >= 500.0)
+                    && juce::Time::getMillisecondCounterHiRes() - m_holdStartMs >= 320.0)
                 {
                     m_holdActive   = true;
                     m_holdLocalPos = local;
@@ -1263,12 +1389,18 @@ namespace ArrangementEditor
             if (m_holdDragging)
             {
                 if (m_rubberBand.isVisible())
-                    m_rubberBand.updateDrag(pos);
+                    m_rubberBand.updateDrag(local.toInt());
                 return true;
             }
 
-            viewport->setViewPosition(m_gestureStartViewX - (pos.x - m_gestureDownPos.x),
-                                      m_gestureStartViewY - (pos.y - m_gestureDownPos.y));
+            ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+            viewport->setViewPosition(
+                TouchNavigationMath::panPosition(m_gestureStartViewX,
+                    pos.x - m_touchPanDownScreenPos.x,
+                    juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                TouchNavigationMath::panPosition(m_gestureStartViewY,
+                    pos.y - m_touchPanDownScreenPos.y,
+                    juce::jmax(0, getHeight() - viewport->getViewHeight())));
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
@@ -1295,10 +1427,14 @@ namespace ArrangementEditor
         {
             // Gesture (and its momentum) finished: restore full detail and
             // re-lay-out the clips once, not every frame.
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
-            rebuildClipRenderers();
-            updateAutomationLayout();
-            repaint();
+            const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            if (wasLightweight)
+            {
+                rebuildClipRenderers();
+                updateAutomationLayout();
+                repaint();
+            }
             return false;
         }
 
@@ -1310,14 +1446,48 @@ namespace ArrangementEditor
         return true;
     }
 
+    void ArrangementViewCore::stopTouchMomentumOnClipPress() noexcept
+    {
+        // Stop the previous fling as soon as a region takes a new finger.
+        // Simply selecting a clip must not reuse a stale viewport anchor or
+        // keep moving after finger-up (the reported timeline-flying bug).
+        ++m_touchGestureEpoch;
+        if (m_inertiaTimer)
+            m_inertiaTimer->stopTimer();
+        m_touchScrollActive = false;
+        m_smoothedTouchValid = false;
+        m_holdActive = false;
+        m_holdDragging = false;
+        m_skipSlop = false;
+        m_touchPanVelocityX = 0.0;
+        m_touchPanVelocityY = 0.0;
+        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+    }
+
+    void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
+    {
+        // This touch-up is delivered to ClipRenderCore, not its parent.
+        // Close the same navigation transaction that an empty-area gesture
+        // would close, and do not leave an unowned momentum timer running.
+        if (m_touchScrollActive)
+            endTouchPanGesture();
+        else if (!m_twoFingerGestureActive)
+        {
+            m_touchPanVelocityX = 0.0;
+            m_touchPanVelocityY = 0.0;
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+        }
+    }
+
     void ArrangementViewCore::endTouchPanGesture()
     {
         m_touchScrollActive = false;
 
         // Momentum only after a REAL swipe. A tiny nudge used to fling on a
         // spurious velocity spike, which is what made small movements jitter.
-        const double dx = (double) (m_lastTouchPanPos.x - m_gestureDownPos.x);
-        const double dy = (double) (m_lastTouchPanPos.y - m_gestureDownPos.y);
+        const double dx = (double) (m_lastTouchPanPos.x - m_touchPanDownScreenPos.x);
+        const double dy = (double) (m_lastTouchPanPos.y - m_touchPanDownScreenPos.y);
         const bool realSwipe = std::sqrt(dx * dx + dy * dy) > 24.0;
 
         if (realSwipe
@@ -1326,6 +1496,16 @@ namespace ArrangementEditor
             if (! m_inertiaTimer)
                 m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
             m_inertiaTimer->startTimerHz(60);
+        }
+        else
+        {
+            // The timer may have started on initial touch drag, *before*
+            // mouseUp. Ending with a non-fling must cancel that existing
+            // timer and its velocity, not merely decline to start a new one.
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
         }
     }
 
@@ -1575,12 +1755,209 @@ namespace ArrangementEditor
         return snap != nullptr && !snap->empty();
     }
 
+    void ArrangementViewCore::recordMasterOutputPreview(
+        double seconds, float leftPeak, float rightPeak, bool playing)
+    {
+        if (!playing || !std::isfinite(seconds) || seconds < 0.0)
+        {
+            m_masterPreviewWasPlaying = false;
+            return;
+        }
+        if (!m_masterPreviewWasPlaying)
+        {
+            // Each playback pass re-evaluates clips: a gain/limiter adjustment
+            // can eliminate previously observed clipping. No stale red marks.
+            m_masterPreviewBins.clear();
+            m_playbackClippedClipBins.clear();
+        }
+        m_masterPreviewWasPlaying = true;
+        constexpr double kPreviewHz = 25.0;
+        constexpr size_t kMaxBins = 45000; // 30 minutes, bounded on UI thread
+        const int64_t bin = (int64_t)std::floor(seconds * kPreviewHz);
+        if (!m_masterPreviewBins.empty())
+        {
+            const auto previous = m_masterPreviewBins.back().timeBin;
+            // Seek/rewind is a new listen pass. Never display old output
+            // values at a location that now belongs to another mix state.
+            if (bin < previous || bin - previous > 2500)
+            {
+                m_masterPreviewBins.clear();
+                m_playbackClippedClipBins.clear();
+            }
+        }
+        const float l = std::isfinite(leftPeak) ? juce::jlimit(0.0f, 8.0f, leftPeak) : 0.0f;
+        const float r = std::isfinite(rightPeak) ? juce::jlimit(0.0f, 8.0f, rightPeak) : 0.0f;
+        if (!m_masterPreviewBins.empty() && m_masterPreviewBins.back().timeBin == bin)
+        {
+            m_masterPreviewBins.back().left = juce::jmax(m_masterPreviewBins.back().left, l);
+            m_masterPreviewBins.back().right = juce::jmax(m_masterPreviewBins.back().right, r);
+        }
+        else
+        {
+            m_masterPreviewBins.push_back({bin, l, r});
+            while (m_masterPreviewBins.size() > kMaxBins)
+                m_masterPreviewBins.pop_front();
+        }
+        // Actual track-output clipping is observed during playback, never
+        // inferred from the source file or a static visual gain estimate.
+        // Attribute it only when EXACTLY ONE clip owns that track at this time;
+        // overlapping clips make attribution ambiguous.
+        if (m_engineTrackManager != nullptr)
+        {
+            const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+            for (int index = 0; index < m_engineTrackManager->getNumTracks(); ++index)
+            {
+                auto* track = m_engineTrackManager->getTrack(index);
+                if (track == nullptr || track->isMaster())
+                    continue;
+                const ArrangementClipModel* active = nullptr;
+                int owners = 0;
+                for (const auto& candidate : m_clipState.allClips())
+                {
+                    const double duration = candidate.length
+                        * juce::jmax(0.01, (double)candidate.timePitch.stretchRatio);
+                    if (candidate.trackIndex == index + masterOffset
+                        && !candidate.muted && candidate.startTime <= seconds
+                        && seconds < candidate.startTime + duration)
+                    {
+                        active = &candidate;
+                        if (++owners > 1)
+                            break;
+                    }
+                }
+                if (owners != 1 || active == nullptr)
+                    continue;
+                const auto key = active->id.toString();
+                const float peak = juce::jmax(track->getPeakLevelLeft(), track->getPeakLevelRight());
+                // >1.0f, not >=1.0f: a brickwall limiter exactly at
+                // digital full-scale is NOT evidence of overshoot.
+                if (std::isfinite(peak) && peak > 1.0f)
+                    m_playbackClippedClipBins[key].insert(bin);
+                else if (auto it = m_playbackClippedClipBins.find(key);
+                         it != m_playbackClippedClipBins.end())
+                    it->second.erase(bin);
+                // The tick is a tiny read-only timeline overlay, not a
+                // cached waveform rewrite. Invalidate just the playhead
+                // vicinity of the owning clip while sampling the meter.
+                if (auto* renderer = findClipRendererFor(active->id))
+                    repaint(timeToScreenX(seconds) - 3,
+                            renderer->getY() + 15, 7, 14);
+            }
+        }
+        // Only the MASTER lane is invalidated, not the entire arrangement.
+        const int y = getLaneTopForIndex(0);
+        repaint(m_viewportScrollX, y,
+                juce::jmax(1, getViewportVisibleBounds().getWidth()),
+                juce::jmax(16, (int)m_zoom.getTrackHeightPx()));
+    }
+
+    void ArrangementViewCore::drawReadOnlyMasterPreview(juce::Graphics& g)
+    {
+        if (m_masterPreviewBins.empty() || m_engineTrackManager == nullptr
+            || !m_engineTrackManager->hasMasterTrack())
+            return;
+
+        const float laneH = m_zoom.getTrackHeightPx();
+        const float laneY = (float)getLaneTopForIndex(0);
+        const float top = laneY + 11.0f;
+        const float bottom = laneY + laneH - 11.0f;
+        if (bottom <= top)
+            return;
+
+        const float centre = (top + bottom) * 0.5f;
+        const float half = (bottom - top) * 0.5f;
+        const int visibleLeft = m_viewportScrollX;
+        const int visibleRight = visibleLeft
+            + juce::jmax(1, getViewportVisibleBounds().getWidth());
+        const double pps = m_zoom.getPixelsPerSecond();
+
+        g.saveState();
+        // The master is part of the scrollable canvas, but this is painted
+        // above child components. Clip to the visible timeline BELOW both
+        // pinned toolbars so playback peaks never draw across their controls.
+        const int protectedTop = m_viewportScrollY + 80;
+        const int visibleTop = juce::jmax((int)laneY, protectedTop);
+        const int visibleBottom = (int)(laneY + laneH);
+        if (visibleBottom <= visibleTop)
+        {
+            g.restoreState();
+            return;
+        }
+        g.reduceClipRegion(juce::Rectangle<int>(
+            visibleLeft, visibleTop, visibleRight - visibleLeft,
+            visibleBottom - visibleTop));
+        g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.28f));
+        g.drawHorizontalLine((int)centre, (float)visibleLeft, (float)visibleRight);
+
+        const int64_t firstBin = (int64_t)std::floor(visibleLeft / pps * 25.0) - 2;
+        const auto first = std::lower_bound(m_masterPreviewBins.begin(),
+            m_masterPreviewBins.end(), firstBin,
+            [](const MasterPreviewBin& item, int64_t query)
+            { return item.timeBin < query; });
+        for (auto it = first; it != m_masterPreviewBins.end(); ++it)
+        {
+            const float x = (float)(it->timeBin / 25.0 * pps);
+            if (x > visibleRight + 2)
+                break;
+            const float left = juce::jmin(1.0f, it->left);
+            const float right = juce::jmin(1.0f, it->right);
+            g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.76f));
+            g.fillRect(x, centre - left * half, 1.5f, left * half);
+            g.fillRect(x, centre, 1.5f, right * half);
+
+            if (it->left > 1.0f || it->right > 1.0f)
+            {
+                g.setColour(juce::Colour(0xFFFF3B30));
+                g.fillRect(x, top, 2.0f, juce::jmax(3.0f, laneH * 0.125f));
+            }
+        }
+        g.restoreState();
+    }
+
     void ArrangementViewCore::paintOverChildren(juce::Graphics& g)
     {
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
         if (metricsActive)
             TimelinePaintMetrics::paintOverChildrenCount.fetch_add(1);
         TimelinePaintMetrics::ScopedTimer paintChildrenTimer(TimelinePaintMetrics::paintChildrenDurationNs);
+
+        // Master is a read-only scope: no clip component, selection, handles,
+        // plugin chain or audio mutation. Draw the observed stereo peak history.
+        drawReadOnlyMasterPreview(g);
+
+        // n-Track-inspired playback history, sourced from REAL channel meters.
+        // No red tick before playback; every new playback pass clears history.
+        // Display only the single clip owning a clipping track, never all the
+        // source-file peaks or other clips sharing an overlapping track.
+        if (!m_playbackClippedClipBins.empty())
+        {
+            const auto visible = getViewportVisibleBounds();
+            const auto pps = m_zoom.getPixelsPerSecond();
+            const auto leftBin = (int64_t)std::floor(m_viewportScrollX / pps * 25.0);
+            const auto rightBin = (int64_t)std::ceil(
+                (m_viewportScrollX + visible.getWidth()) / pps * 25.0);
+            const int protectedTop = m_viewportScrollY + 80;
+            g.setColour(juce::Colour(0xFFFF3B30));
+            for (const auto& entry : m_playbackClippedClipBins)
+            {
+                const juce::Uuid id(entry.first);
+                const auto* clip = m_clipState.findClip(id);
+                auto* renderer = findClipRendererFor(id);
+                if (clip == nullptr || renderer == nullptr)
+                    continue;
+                const auto bounds = renderer->getBounds();
+                const int top = juce::jmax(bounds.getY() + 17, protectedTop);
+                if (top >= bounds.getBottom())
+                    continue;
+                for (auto it = entry.second.lower_bound(leftBin);
+                     it != entry.second.end() && *it <= rightBin; ++it)
+                {
+                    const float x = (float)((double)(*it) / 25.0 * pps);
+                    if (x >= bounds.getX() && x < bounds.getRight())
+                        g.fillRect(x, (float)top, 2.0f, 6.0f);
+                }
+            }
+        }
 
         // Automation lanes drawn here so they always appear above clip components
         drawPhase1VolumeAutomation(g);
@@ -1618,8 +1995,9 @@ namespace ArrangementEditor
         // Full-value trim/fade feedback lives in the PINNED RULER, never
         // inside a clip: the waveform remains completely unobstructed, even
         // during a multi-clip left/right edge gesture.
-        const juce::String rulerEditReadout = m_activeClipEditInfo.isNotEmpty()
-            ? m_activeClipEditInfo : m_voiceCleanerStatus;
+        // Clip edit values moved to the left-hand TRACKS header above MASTER.
+        // The ruler remains uncluttered and only shows background job status.
+        const juce::String rulerEditReadout = m_voiceCleanerStatus;
         if (rulerEditReadout.isNotEmpty())
         {
             const auto rulerBounds = m_ruler.getBounds();
@@ -1692,13 +2070,25 @@ namespace ArrangementEditor
             m_headerButtonShield = std::make_unique<HeaderButtonShield>(*this);
             addAndMakeVisible(*m_headerButtonShield);
         }
-        m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 168,
-                                        m_viewportScrollY + 6, 164, 36);
+        // The hidden Piano Roll must not leave a transparent mouse/touch
+        // interception region. Shield only the two active buttons (Free View
+        // and Lock), preserving the right-hand arranger interaction area.
+        m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
+                                        m_viewportScrollY + 6, 80, 36);
         m_headerButtonShield->toFront(false);
         m_pianoRollBtn.toFront(false);
 
-        // Piano Roll button — compact, to the right of lock button
-        m_pianoRollBtn.setBounds(m_viewportScrollX + viewportWidth - 56, m_viewportScrollY + 10, 48, 28);
+        // Keep Piano Roll code intact but hide/disable its actual widget.
+        if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
+        {
+            m_pianoRollBtn.setBounds(m_viewportScrollX + viewportWidth - 56, m_viewportScrollY + 10, 48, 28);
+            m_pianoRollBtn.setVisible(true);
+        }
+        else
+        {
+            m_pianoRollBtn.setVisible(false);
+            m_pianoRollBtn.setBounds({});
+        }
         m_ruler.setBounds(m_viewportScrollX, m_viewportScrollY + toolbarH, viewportWidth, rulerH);
         m_ghostOverlay.setBounds(getLocalBounds());
 
@@ -2078,6 +2468,8 @@ namespace ArrangementEditor
                     if (m_activeClipEditInfo.isNotEmpty() && preEdit->size() > 1)
                         m_activeClipEditInfo = juce::String((int)preEdit->size())
                             + " CLIPS  |  " + m_activeClipEditInfo;
+                    if (onClipEditInfoChanged)
+                        onClipEditInfoChanged(m_activeClipEditInfo);
                     repaint(m_ruler.getBounds());
                 }
 
@@ -2287,6 +2679,18 @@ namespace ArrangementEditor
                 togglePresetCurveVisibility(clip);
         };
 
+        rendererPtr->onTouchContextMenu = [this, clipUuid](juce::Point<int> screenPos,
+                                                            juce::Point<int> localPos)
+        {
+            // Resolve by stable UUID, never a renderer/model pointer that
+            // might be invalidated by an edit or undo.
+            if (m_viewOnlyMode || m_toolState.getActiveTool() != EditorTool::Select)
+                return;
+            if (auto* clip = m_clipState.findClip(clipUuid))
+                if (m_selection.isSelected(clipUuid))
+                    showClipContextMenu(clip, screenPos, localPos);
+        };
+
         rendererPtr->onClick = [this, clipUuid](juce::ModifierKeys mods)
         {
             // Ctrl adds/removes; plain click is ALWAYS an exclusive selection.
@@ -2298,12 +2702,25 @@ namespace ArrangementEditor
             for (auto& r : m_clipRenderers)
                 if (r != nullptr)
                     r->setSelected(m_selection.isSelected(r->getClipId()));
+            // A first finger tap previously only changed the painted selection,
+            // without updating selected clip/track in ApplicationState. Keep
+            // plugin panels and inspectors synchronized with the real clip.
+            if (m_selection.isSelected(clipUuid)
+                && m_engineClipManager != nullptr && onEngineClipSelected)
+            {
+                const auto mapped = m_uuidToEngineId.find(clipUuid);
+                if (mapped != m_uuidToEngineId.end())
+                    if (auto* engineClip = m_engineClipManager->getClip(mapped->second))
+                        onEngineClipSelected(*engineClip);
+            }
             repaint();
         };
 
         rendererPtr->onEditCommit = [this, preEdit]()
         {
             m_activeClipEditInfo.clear();
+            if (onClipEditInfoChanged)
+                onClipEditInfoChanged({});
             repaint(m_ruler.getBounds());
             if (preEdit->empty()) return;
             const std::vector<ArrangementClipModel> before = *preEdit;
@@ -2392,6 +2809,11 @@ namespace ArrangementEditor
         // interactive overlays stay above the toolbar for drag feedback.
         m_toolbar.toFront(false);
         m_ruler.toFront(false);
+        // Clip rebuilds and scrolling may add new children after the pinned
+        // button shield. Restore its z-order on every mutation, otherwise
+        // Lock/Free View taps can resolve to the clip underneath.
+        if (m_headerButtonShield != nullptr)
+            m_headerButtonShield->toFront(false);
         m_pianoRollBtn.toFront(false);
         m_rubberBand.toFront(false);
         m_splitIndicator.toFront(false);
@@ -2677,6 +3099,18 @@ namespace ArrangementEditor
             }
         }
 
+        // Start the gesture clock on touch DOWN, not the first drag event.
+        // Stationary long-presses on empty space otherwise never fire.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && m_toolState.getActiveTool() == EditorTool::Select
+            && !m_viewOnlyMode && findClipAt(e.getPosition()) == nullptr)
+        {
+            if (! m_inertiaTimer)
+                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+            if (!m_inertiaTimer->isTimerRunning())
+                m_inertiaTimer->startTimerHz(60);
+        }
+
         grabKeyboardFocus();
 
         if (m_toolState.getActiveTool() != EditorTool::Split
@@ -2727,9 +3161,36 @@ namespace ArrangementEditor
         // view-only guard below.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
         {
-            if (! m_inertiaTimer)
+            // Logic iPad: first drag of an unselected clip pans; after
+            // selecting it, the NEXT drag moves it. The previous blanket
+            // touch return made selected regions impossible to move.
+            if (!m_viewOnlyMode
+                && m_toolState.getActiveTool() == EditorTool::Select
+                && (m_drag.pending || m_drag.active))
+            {
+                // A simultaneous second finger cancels this pending edit;
+                // the two-finger timer becomes the sole gesture owner.
+                int activeFingers = 0;
+                for (const auto& input : juce::Desktop::getInstance().getMouseSources())
+                    if (input.getType() == juce::MouseInputSource::InputSourceType::touch
+                        && input.isDragging())
+                        ++activeFingers;
+                if (activeFingers > 1)
+                {
+                    cancelClipDragForTouchNavigation();
+                    if (!m_inertiaTimer)
+                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+                    if (!m_inertiaTimer->isTimerRunning())
+                        m_inertiaTimer->startTimerHz(60);
+                    return;
+                }
+
+                updateClipDrag(e.getPosition());
+                return;
+            }
+            if (!m_inertiaTimer)
                 m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (! m_inertiaTimer->isTimerRunning())
+            if (!m_inertiaTimer->isTimerRunning())
                 m_inertiaTimer->startTimerHz(60);
             return;
         }
@@ -2805,9 +3266,40 @@ namespace ArrangementEditor
         m_lastMousePos = e.getPosition();
         m_lastMouseMods = e.mods;
 
+        // Background short-hold (320 ms) = native context menu.
+        // No mouse emulation or destructive tool operation.
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && !m_viewOnlyMode && m_toolState.getActiveTool() == EditorTool::Select
+            && TouchNavigationMath::contextHoldReady(
+                e.getLengthOfMousePress(),
+                e.getMouseDownScreenPosition().x, e.getMouseDownScreenPosition().y,
+                e.getScreenPosition().x, e.getScreenPosition().y)
+            && !m_holdDragging
+            && m_selection.getSelectionCount() == 0
+            && findClipAt(e.getPosition()) == nullptr)
+        {
+            m_touchScrollActive = false;
+            m_holdActive = false;
+            m_holdDragging = false;
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+            showEmptyTrackContextMenu(e.getScreenPosition(), e.getPosition());
+            repaint(juce::Rectangle<int>(e.x - 48, e.y - 48, 96, 96));
+            return;
+        }
+
         // Touch pan finished → start the iOS-style momentum (slow stop).
         if (m_touchScrollActive)
+        {
+            const auto oldHoldPos = m_holdLocalPos.toInt();
             endTouchPanGesture();
+            m_holdActive = false;
+            m_holdDragging = false;
+            // A hold ring must disappear immediately after finger-up.
+            repaint(juce::Rectangle<int>(oldHoldPos.x - 48, oldHoldPos.y - 48, 96, 96));
+        }
 
         if (m_middleMousePanActive)
         {
@@ -2944,6 +3436,13 @@ namespace ArrangementEditor
         if (!clip)
             return;
 
+        openClipProperties(clip);
+    }
+
+    void ArrangementViewCore::openClipProperties(ArrangementClipModel* clip)
+    {
+        if (clip == nullptr)
+            return;
         // MIDI clips may open the piano roll/editor on double-click.
         if (m_engineClipManager != nullptr)
         {
@@ -2972,12 +3471,11 @@ namespace ArrangementEditor
             }
         }
 
-        // Default: open clip properties window
-        if (m_propertiesWindow)
-        {
-            DBG("[ArrangementView] opening properties for clip: " << clip->clipName);
-            m_propertiesWindow->openForClip(clip);
-        }
+        // Do not fall through to the obsolete ArrangementClipModel properties
+        // window: the production APEX panel is owned by MainComponent through
+        // onEngineClipDoubleClicked. Missing/unloaded engine clips are not
+        // editable, and must not silently open a different editor.
+        DBG("[ArrangementView] clip properties unavailable for unmapped clip: " << clip->clipName);
     }
 
     void ArrangementViewCore::mouseWheelMove(const juce::MouseEvent& e,
@@ -3156,6 +3654,30 @@ namespace ArrangementEditor
 
         if (clip)
         {
+            // The second finger may land on a selected clip while the first
+            // owns a move transaction. Pinch navigation must win without
+            // replacing the selected clip, starting a second transaction or
+            // rebuilding the renderer under its captured pointer.
+            if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            {
+                int arrangementFingers = 0;
+                for (const auto& source : juce::Desktop::getInstance().getMouseSources())
+                    if (source.getType() == juce::MouseInputSource::InputSourceType::touch
+                        && source.isDragging()
+                        && source.getComponentUnderMouse() != nullptr
+                        && (source.getComponentUnderMouse() == this
+                            || isParentOf(source.getComponentUnderMouse())))
+                        ++arrangementFingers;
+                if (arrangementFingers > 1)
+                {
+                    cancelClipDragForTouchNavigation();
+                    if (!m_inertiaTimer)
+                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+                    if (!m_inertiaTimer->isTimerRunning())
+                        m_inertiaTimer->startTimerHz(60);
+                    return;
+                }
+            }
             if (e.mods.isRightButtonDown())
                 return; // handled in mouseUp
 
@@ -3205,6 +3727,21 @@ namespace ArrangementEditor
         }
         else
         {
+            if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            {
+                // Logic touch semantics: touching empty space deselects the
+                // region, exposing a clean background shortcut menu on hold.
+                m_selection.deselectAll();
+                m_pendingExclusiveOnRelease.reset();
+                for (auto& renderer : m_clipRenderers)
+                    if (renderer != nullptr)
+                        renderer->setSelected(false);
+                if (onEngineClipSelectionCleared)
+                    onEngineClipSelectionCleared();
+                repaint();
+                return;
+            }
+
             // Marquee for MOUSE input only: one finger on touch pans the
             // timeline (see the gesture timer).
             if (e.source.getType() != juce::MouseInputSource::InputSourceType::touch)
@@ -3990,6 +4527,10 @@ namespace ArrangementEditor
         if (audioClip == nullptr)
             return;
 
+        // Keep the engine's canonical name (and therefore Clip Properties)
+        // synchronized with Radial/Classic Rename and Undo/Redo.
+        if (audioClip->getName() != juce::String(clip.clipName))
+            audioClip->setName(juce::String(clip.clipName));
         audioClip->setStartPosition((DAW::SamplePosition) std::llround(clip.startTime * m_engineSampleRate));
         audioClip->setLength(juce::jmax((DAW::SamplePosition) 1,
                             (DAW::SamplePosition) std::llround(clip.length * m_engineSampleRate)));
@@ -4357,6 +4898,11 @@ namespace ArrangementEditor
         if (it != m_freezeStates.end()) fs = &it->second;
 
         ClipContextCallbacks cb;
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        cb.resolveClipById = [weakOwner](const juce::Uuid& id) -> ArrangementClipModel*
+        {
+            return weakOwner != nullptr ? weakOwner->m_clipState.findClip(id) : nullptr;
+        };
         cb.clickTime  = screenXToTime(localPos.x);
         cb.clickTrack = trackIndexAt(localPos);
 
@@ -4365,6 +4911,7 @@ namespace ArrangementEditor
         cb.duplicateClip = [this](ArrangementClipModel* c) { onClipDuplicate(c); };
         cb.deleteClip    = [this](ArrangementClipModel* c) { onClipDelete(c);    };
         cb.renameClip    = [this](ArrangementClipModel* c) { onClipRename(c);    };
+        cb.openClipProperties = [this](ArrangementClipModel* c) { openClipProperties(c); };
         cb.muteClip      = [this](ArrangementClipModel* c) { onClipMute(c);      };
         cb.canPaste      = [this]() { return !m_clipboardClips.empty(); };
         cb.pasteClip     = [this](double t, int tr) { onClipPaste(t, tr); };
@@ -4392,6 +4939,29 @@ namespace ArrangementEditor
         };
 
         cb.openAutomateClipPanel = [this](ArrangementClipModel* c) { onClipOpenAutomationPanel(c); };
+        cb.removeClipAutomation = m_automationManager != nullptr
+            ? std::function<void(ArrangementClipModel*)>([this](ArrangementClipModel* c)
+            {
+                if (c == nullptr || m_automationManager == nullptr)
+                    return;
+                const auto mapped = m_uuidToEngineId.find(c->id);
+                if (mapped == m_uuidToEngineId.end())
+                    return;
+                const juce::String clipId = mapped->second;
+                // Snapshot affected lane keys before removing them. This is
+                // clip-scoped removal; track volume/pan/send lanes survive.
+                std::vector<std::pair<DAW::TrackID, juce::String>> affected;
+                for (const auto& lane : m_automationManager->getLanes())
+                    if (DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(lane.parameterId) == clipId)
+                        affected.emplace_back(lane.trackId, lane.parameterId);
+                if (!m_automationManager->removeClipAutomationForIds({clipId}))
+                    return;
+                for (const auto& lane : affected)
+                    hideAutomationLane(lane.first, lane.second);
+                if (auto* renderer = findClipRendererFor(c->id))
+                    renderer->setAutomationActive(false);
+                repaint();
+            }) : std::function<void(ArrangementClipModel*)>{};
         cb.openVocalTune = [this](ArrangementClipModel* c)
         {
             if (c == nullptr || m_engineClipManager == nullptr || onEngineClipVocalTuneRequested == nullptr)
@@ -4431,10 +5001,42 @@ namespace ArrangementEditor
 
         cb.normalizeClip = [this](ArrangementClipModel* c)
         {
-            if (c == nullptr || m_engineAudioFiles == nullptr) return;
+            if (c == nullptr || m_engineAudioFiles == nullptr || m_engineClipManager == nullptr)
+                return;
             const auto mapped = m_uuidToEngineId.find(c->id);
-            if (mapped == m_uuidToEngineId.end()) return;
-            m_engineAudioFiles->togglePeakNormalize(mapped->second);
+            if (mapped == m_uuidToEngineId.end())
+                return;
+            auto* audio = dynamic_cast<DAW::AudioClip*>(m_engineClipManager->getClip(mapped->second));
+            if (audio == nullptr)
+                return;
+            // Use the same source boundaries as Clip Properties. Both
+            // surfaces share one normalization state and cannot disagree.
+            auto* buffer = m_engineAudioFiles->getBuffer(audio->getID());
+            if (buffer == nullptr || buffer->getNumSamples() < 1)
+                return;
+            const auto start = juce::jlimit<DAW::SamplePosition>(0,
+                (DAW::SamplePosition)buffer->getNumSamples() - 1,
+                (DAW::SamplePosition)juce::jmax<int64_t>(
+                    (int64_t)audio->getSourceOffset(), audio->getSourceStartSample()));
+            const auto end = audio->getSourceEndSample() > 0
+                ? juce::jlimit<DAW::SamplePosition>(start + 1,
+                    (DAW::SamplePosition)buffer->getNumSamples(),
+                    (DAW::SamplePosition)audio->getSourceEndSample())
+                : (DAW::SamplePosition)buffer->getNumSamples();
+            const auto result = m_engineAudioFiles->togglePeakNormalize(
+                audio->getID(), start, end, 0.0f);
+            if (result == DAW::AudioFileManager::NormalizeResult::Applied
+                && m_engineAudioFiles->isPeakNormalized(audio->getID()))
+            {
+                c->gain = 1.0f;
+                audio->setGain(1.0f);
+                m_clipState.updateClip(*c);
+            }
+            if (onEngineClipNormalizeChanged)
+                onEngineClipNormalizeChanged(*audio);
+            if (auto* renderer = findClipRendererFor(c->id))
+                renderer->repaint();
+            repaint();
         };
 
         cb.isClipNormalized = [this](ArrangementClipModel* c) -> bool
@@ -4457,7 +5059,7 @@ namespace ArrangementEditor
                 })
             : std::function<void(ArrangementClipModel*)>{};
 
-        ClipContextMenuCore::show(clip, screenPos, cb, fs);
+        ClipContextMenuCore::show(clip, screenPos, cb, fs, this);
     }
 
     void ArrangementViewCore::showEmptyTrackContextMenu(juce::Point<int> screenPos,
@@ -4469,7 +5071,7 @@ namespace ArrangementEditor
         cb.canPaste   = [this]() { return !m_clipboardClips.empty(); };
         cb.pasteClip  = [this](double t, int tr) { onClipPaste(t, tr); };
 
-        ClipContextMenuCore::showOnEmptyTrack(screenPos, cb);
+        ClipContextMenuCore::showOnEmptyTrack(screenPos, cb, this);
     }
 
     void ArrangementViewCore::onClipVoiceCleaner(ArrangementClipModel* clip)
@@ -5225,12 +5827,49 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::onClipRename(ArrangementClipModel* clip)
     {
-        if (!clip) return;
-        // Simple rename: just use the clip name edit inline via properties window,
-        // or fall back to a basic input dialog via NativeMessageBox workaround.
-        // For now: open properties window focused on name field.
-        if (m_propertiesWindow)
-            m_propertiesWindow->openForClip(clip);
+        if (clip == nullptr)
+            return;
+        // Rename is a small focused dialog, NEVER the old Clip Properties
+        // window. Keep a stable clip identity across the asynchronous action.
+        const auto id = clip->id;
+        auto* dialog = new juce::AlertWindow("Rename Audio Clip",
+            "Enter the new clip name:", juce::MessageBoxIconType::NoIcon);
+        dialog->addTextEditor("clipName", juce::String(clip->clipName), "Name:");
+        dialog->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        dialog->enterModalState(true,
+            juce::ModalCallbackFunction::create([weakOwner, id, dialog](int result)
+            {
+                if (result != 1 || weakOwner == nullptr)
+                    return;
+                const auto nextName = dialog->getTextEditorContents("clipName").trim();
+                if (nextName.isEmpty())
+                    return;
+                auto* existing = weakOwner->m_clipState.findClip(id);
+                if (existing == nullptr || existing->clipName == nextName.toStdString())
+                    return;
+                const auto oldName = existing->clipName;
+                auto apply = [weakOwner, id](const juce::String& name)
+                {
+                    if (weakOwner == nullptr)
+                        return;
+                    if (auto* model = weakOwner->m_clipState.findClip(id))
+                    {
+                        model->clipName = name.toStdString();
+                        model->bumpWaveformVisualVersion();
+                        weakOwner->m_clipState.updateClip(*model);
+                        weakOwner->syncClipToEngine(*model);
+                        if (auto* renderer = weakOwner->findClipRendererFor(id))
+                            renderer->repaint();
+                        weakOwner->repaint();
+                    }
+                };
+                weakOwner->m_undo.executeCommand(
+                    std::make_unique<LambdaArrangementCommand>("Rename Clip",
+                        [apply, nextName]() { apply(nextName); },
+                        [apply, oldName]() { apply(juce::String(oldName)); }));
+            }), true);
     }
 
     void ArrangementViewCore::onClipMute(ArrangementClipModel* clip)
@@ -5413,6 +6052,15 @@ namespace ArrangementEditor
         m_drag.currentMouse = localPos;
         m_drag.pending      = true;
         m_drag.active       = false;
+
+        // Taking ownership of a selected clip invalidates fling velocity
+        // left over from a previous one-finger scroll.
+        m_touchScrollActive = false;
+        m_smoothedTouchValid = false;
+        m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+        if (m_inertiaTimer)
+            m_inertiaTimer->stopTimer();
+        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
 
         appendDebugLog("[startClipDrag end] selectionCount=" + juce::String(m_selection.getSelectionCount())
             + " dragItemCount=" + juce::String((int)m_drag.items.size()));
@@ -5627,6 +6275,35 @@ namespace ArrangementEditor
 
         setMouseCursorForActiveTool();
         rebuildClipRenderers();
+        repaint();
+    }
+
+    void ArrangementViewCore::cancelClipDragForTouchNavigation()
+    {
+        if (!m_drag.pending && !m_drag.active)
+            return;
+
+        // A JUCE touch source can still be captured by ClipRenderCore while
+        // a second finger arrives. The old cancelClipDrag() called
+        // rebuildClipRenderers() immediately, destroying that source's live
+        // component during the touch callback. A cancel before commit needs
+        // only to restore its original local bounds; the engine/state was
+        // never changed by updateClipDrag().
+        if (m_drag.active && !m_drag.duplicate)
+            for (const auto& item : m_drag.items)
+                if (auto* renderer = findClipRendererFor(item.clipId))
+                    renderer->setBounds(item.bounds);
+
+        m_drag.active = false;
+        m_drag.pending = false;
+        m_drag.duplicate = false;
+        m_drag.clipId = {};
+        m_drag.clipIds.clear();
+        m_drag.items.clear();
+        m_drag.anchorOriginalBounds = {};
+        m_pendingExclusiveOnRelease.reset();
+        m_ghostOverlay.setVisible(false);
+        setMouseCursorForActiveTool();
         repaint();
     }
 

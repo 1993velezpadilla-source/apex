@@ -130,6 +130,11 @@ public:
             if (onOpenClipProperties)
                 onOpenClipProperties(clip);
         };
+        core_->onEngineClipNormalizeChanged = [this](Clip& clip)
+        {
+            if (onClipNormalizationChanged)
+                onClipNormalizationChanged(clip);
+        };
         core_->onEngineClipAutomationRequested = [this](Clip& clip)
         {
             if (onOpenClipAutomation)
@@ -269,6 +274,7 @@ trackManager_.addListener(this);
             core_->onEngineClipSelected = nullptr;
             core_->onEngineClipSelectionCleared = nullptr;
             core_->onEngineClipDoubleClicked = nullptr;
+            core_->onEngineClipNormalizeChanged = nullptr;
             core_->onEngineClipAutomationRequested = nullptr;
             core_->onEngineClipVocalTuneRequested = nullptr;
             core_->onEngineClipVocalTuneBypassToggled = nullptr;
@@ -832,6 +838,7 @@ trackManager_.addListener(this);
     std::function<void()> onClipSelectionCleared;
     std::function<void(Clip&)> onOpenClipProperties;
     std::function<void(Clip&)> onOpenClipAutomation;
+    std::function<void(Clip&)> onClipNormalizationChanged;
     std::function<void(Clip&)> onOpenClipVocalTune;
     std::function<void(Clip&)> onToggleClipVocalTuneBypass;
     std::function<bool(const Clip&)> onIsClipVocalTuneBypassed;
@@ -1431,7 +1438,15 @@ void trackPropertyChanged(Track* track) override
         {
             core_->setTempoBpm(transport_.getTempo());
             const double sr = juce::jmax(1.0, core_->m_engineSampleRate);
-            core_->setPlayheadPosition((double)transport_.getPosition() / sr);
+            const double playheadSeconds = (double)transport_.getPosition() / sr;
+            core_->setPlayheadPosition(playheadSeconds);
+            // Stereo peaks are published atomically by the real master audio
+            // thread. Sample on the UI timer only: never allocate/lock or
+            // render waveform objects inside the audio callback.
+            if (auto* master = trackManager_.getMasterTrack())
+                core_->recordMasterOutputPreview(playheadSeconds,
+                    master->getPeakLevelLeft(), master->getPeakLevelRight(),
+                    transport_.isPlaying());
         }
 
         if (automationSyncDirty_)

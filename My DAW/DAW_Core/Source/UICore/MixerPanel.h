@@ -23,6 +23,8 @@
 #include "../InputMonitorCore/TrackMonitoringStateModel.h"
 #include "../PluginHostCore/PluginSlotUI.h"
 #include "TrackSelectionVisualCore.h"
+#include "ApexRadialContextMenu.h"
+#include "BeatMakingFeaturePolicy.h"
 #include "InputTrimFloatingPanel.h"
 #include "ApexPresentationClock.h"
 #include "MixerUiFeaturePolicy.h"
@@ -145,6 +147,16 @@ public:
         if (! listenersAttached_)
             return;
 
+        // If a channel is destroyed/rebuilt while a finger still holds its
+        // fader, close the host/native automation transaction BEFORE the
+        // AutomationParameter is unregistered. Never leave Touch/Write stuck.
+        if (draggingFader_)
+        {
+            draggingFader_ = false;
+            activeFaderPointerIndex_ = -1;
+            if (volumeParameter_ != nullptr)
+                volumeParameter_->endGesture();
+        }
         vu_.clearSource();
         unregisterNativeAutomationParameters();
         if (auto* c = FaderRangeCore::getGlobalInstance())
@@ -845,8 +857,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
 // Mute / Solo / Arm row
         auto btnRow = b.removeFromTop(18).reduced(4, 1);
         const bool isMaster = track_.isMaster();
-        // DISABLED (product decision): the piano roll is a beat-making surface.
-        const bool showPiano = false;
+        // Keep the Piano Roll slot for the later beat-making update.
+        const bool showPiano = BeatMakingFeaturePolicy::kPianoRollEnabled;
         const int buttonCount = isMaster ? 2 : 4;
         const int buttonGap = 2;
         const int buttonWidth = juce::jmax(10, (btnRow.getWidth() - buttonGap * (buttonCount - 1)) / buttonCount);
@@ -858,6 +870,8 @@ BgRole getBubblegumRole() const noexcept   { return bgRole_; }
             return bounds;
         };
 
+        pianoBtn_.setEnabled(showPiano);
+        pianoBtn_.setInterceptsMouseClicks(showPiano, false);
         pianoBtn_.setVisible(showPiano);
         if (showPiano)
             pianoBtn_.setBounds(nextButtonBounds());
@@ -946,6 +960,16 @@ muteBtn_.setBounds(nextButtonBounds());
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        // A different touch may operate another fader, but cannot hijack an
+        // existing channel gesture and corrupt its Undo/automation lifetime.
+        if (draggingFader_ && activeFaderPointerIndex_ >= 0
+            && e.source.getIndex() != activeFaderPointerIndex_)
+            return;
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ >= 0
+            && e.source.getIndex() != touchBodyPointerIndex_)
+            return;
+
         // Quick Send mode takes priority over the normal strip context menu:
         // left-click toggles the send, right-click toggles the sidechain on a
         // non-source strip. When the mode is inactive the regular right-click
@@ -968,12 +992,14 @@ muteBtn_.setBounds(nextButtonBounds());
 
         if (e.mods.isPopupMenu())
         {
+            stripContextScreenPoint_ = e.getScreenPosition();
             notifySelectionForInteraction(e.mods);
             showStripContextMenu();
             return;
         }
         if (e.mods.isRightButtonDown()) return;
-if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
+if (BeatMakingFeaturePolicy::kPianoRollEnabled
+    && pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         {
             if (onClicked) onClicked();
             if (onPianoRollRequested) onPianoRollRequested();
@@ -984,12 +1010,17 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         // click on an existing multi-selected strip is intentionally ignored
         // here so a drag can begin without collapsing the canonical set.
         notifySelectionForInteraction(e.mods);
-        // Fader drag
-        if (getFaderThumbBounds().contains(e.position))
+        // A finger can grab the whole fader lane, not only the tiny thumb.
+        // Mouse keeps its precise original thumb hit-test. Each JUCE touch
+        // source is captured by its own strip, allowing simultaneous faders.
+        const bool isTouch = e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
+        if (getFaderThumbBounds().contains(e.position)
+            || (isTouch && faderTrackBounds_.contains(e.position)))
         {
             dragStartY_           = e.getScreenPosition().y;
             dragStartVolumeDb_     = FaderRangeCore::gainToDb(track_.getVolume());
             dragStartVolumeGain_   = track_.getVolume();
+            activeFaderPointerIndex_ = e.source.getIndex();
             setFaderDragging(true);
             if (volumeParameter_ != nullptr)
             {
@@ -998,9 +1029,25 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         }
         else if (!track_.isMaster())
         {
-            bodyDragging_ = true;
-            if (onBodyDragBegin)
-                onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+            if (isTouch)
+            {
+                // Ordinary touch scrolling/tapping must never immediately
+                // reorder a channel. Long-press, THEN drag to reorder.
+                touchBodyReorderPending_ = true;
+                touchBodyScrollActive_ = false;
+                touchBodyPointerIndex_ = e.source.getIndex();
+                touchBodyDownScreen_ = e.getScreenPosition();
+                // Screen-space anchor: scrolling the viewport repositions
+                // child strips, but cannot change the original swipe delta.
+                if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                    touchBodyScrollStartX_ = viewport->getViewPositionX();
+            }
+            else
+            {
+                bodyDragging_ = true;
+                if (onBodyDragBegin)
+                    onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+            }
         }
     }
 
@@ -1078,11 +1125,64 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
             menu.addItem(del);
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this));
+        ApexRadialContextMenu::show(std::move(menu), this,
+            stripContextScreenPoint_.isOrigin() ? getScreenBounds().getCentre()
+                                                : stripContextScreenPoint_);
     }
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ != e.source.getIndex())
+            return;
+        if (draggingFader_ && activeFaderPointerIndex_ != e.source.getIndex())
+            return;
+
+        if (touchBodyReorderPending_)
+        {
+            const float travel = e.getScreenPosition().toFloat()
+                .getDistanceFrom(touchBodyDownScreen_.toFloat());
+            // An immediate horizontal swipe scrolls the MIXER, never
+            // silently disappears and never becomes a delayed reorder.
+            if (travel > 12.0f && e.getLengthOfMousePress() < 400)
+            {
+                touchBodyReorderPending_ = false;
+                touchBodyScrollActive_ = true;
+            }
+            else if (travel > 24.0f && e.getLengthOfMousePress() >= 400)
+            {
+                // A large swipe before entering intentional reorder mode
+                // remains navigation rather than moving a track.
+                touchBodyReorderPending_ = false;
+                touchBodyScrollActive_ = true;
+            }
+            else if (e.getLengthOfMousePress() < 400 || travel <= 10.0f)
+                return;
+            else
+            {
+                touchBodyReorderPending_ = false;
+                bodyDragging_ = true;
+                if (onBodyDragBegin)
+                    onBodyDragBegin(track_.getID(), e.getEventRelativeTo(getParentComponent()).getPosition());
+                return;
+            }
+        }
+
+        if (touchBodyScrollActive_)
+        {
+            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            {
+                auto* view = viewport->getViewedComponent();
+                const int maxX = view != nullptr
+                    ? juce::jmax(0, view->getWidth() - viewport->getViewWidth()) : 0;
+                const int deltaX = e.getScreenPosition().x - touchBodyDownScreen_.x;
+                viewport->setViewPosition(
+                    juce::jlimit(0, maxX, touchBodyScrollStartX_ - deltaX),
+                    viewport->getViewPositionY());
+            }
+            return;
+        }
+
         if (draggingFader_)
         {
             int dy = dragStartY_ - e.getScreenPosition().y; // up = positive
@@ -1113,8 +1213,11 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
 
         notifySelectionForInteraction(e.mods);
 
-        // Double-click on the fader thumb keeps its reset-to-0dB behaviour.
-        if (getFaderThumbBounds().contains(e.position))
+        // Double-tap anywhere on the fader lane resets it, like a native
+        // touch mixer; desktop double-click remains thumb-only.
+        const bool touchReset = e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && faderTrackBounds_.contains(e.position);
+        if (getFaderThumbBounds().contains(e.position) || touchReset)
         {
             const float oldGain = track_.getVolume();
             const float resetDb = 0.0f;
@@ -1148,7 +1251,12 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
         }
 
         // Double-click on any other EMPTY area of the strip toggles Quick Send
-        // mode with this track as source — same rule as the timeline row:
+        // mode with this track as source — same rule as the timeline row.
+        // But on fingers/Pencil a quick second tap after scrolling must not
+        // silently change routing mode. Explicit touch context commands stay.
+        if (e.source.getType() != juce::MouseInputSource::InputSourceType::mouse)
+            return;
+        // Desktop mouse behaviour is retained exactly:
         // only the empty parts of the strip respond (child buttons such as
         // mute/solo/arm/trim/pan own their own mouse events).
         if (!track_.isMaster() && onQuickSendToggleRequested)
@@ -1157,6 +1265,12 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (draggingFader_ && activeFaderPointerIndex_ != e.source.getIndex())
+            return;
+        if ((touchBodyReorderPending_ || touchBodyScrollActive_)
+            && touchBodyPointerIndex_ != e.source.getIndex())
+            return;
+
         // Guard against this strip being destroyed during the drag-end callback
         // (folder creation/reorder can trigger rebuildStrips() synchronously)
         juce::Component::SafePointer<MixerStrip> safeThis(this);
@@ -1169,6 +1283,9 @@ if (pianoBtn_.isVisible() && pianoBtn_.getBounds().contains(e.getPosition()))
             return;
 
         bodyDragging_ = false;
+        touchBodyReorderPending_ = false;
+        touchBodyScrollActive_ = false;
+        touchBodyPointerIndex_ = -1;
 
         const bool wasFaderDragging = draggingFader_;
         if (wasFaderDragging)
@@ -1213,6 +1330,8 @@ private:
             return;
 
         draggingFader_ = dragging;
+        if (!dragging)
+            activeFaderPointerIndex_ = -1;
         if (onFaderDragStateChanged)
             onFaderDragStateChanged(dragging);
     }
@@ -1764,7 +1883,13 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
 
     juce::Rectangle<float> faderTrackBounds_;
     bool  draggingFader_   = false;
+    int   activeFaderPointerIndex_ = -1;
     bool  bodyDragging_    = false;
+    bool  touchBodyReorderPending_ = false;
+    bool  touchBodyScrollActive_ = false;
+    int   touchBodyPointerIndex_ = -1;
+    int   touchBodyScrollStartX_ = 0;
+    juce::Point<int> touchBodyDownScreen_;
     bool  isFolderBus_     = false;
     bool  folderExpanded_  = true;
     bool  lastSetSelectedValue_       = false;
@@ -1774,6 +1899,7 @@ SmallButton  muteBtn_ { "M", juce::Colour(0xFFFF3333) };
     juce::Colour folderParentColour_ = juce::Colours::transparentBlack;
     int   depth_           = 0;
     int   dragStartY_      = 0;
+    juce::Point<int> stripContextScreenPoint_;
     float dragStartVolumeDb_ = 0.f;
     float dragStartVolumeGain_ = 1.f;
 
@@ -2673,7 +2799,7 @@ private:
                          "Monitor Off records dry; Auto/On prints FX. Playback runs FX again",
                          false, false);
 
-            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(getParentComponent()),
+            ApexRadialContextMenu::show(std::move(menu), this, e.getScreenPosition(),
                                [this, kRecordDry, kRecordPostFader](int result)
                                {
                                    if (result == kRecordDry)
@@ -4143,26 +4269,29 @@ void bindRouting(RoutingGraph* graph, void*)
         menu.addItem(kRescanPlugins, "Rescan Plugins...");
 
         settingsMenuOpen_ = true;
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
-                           [this](int result)
+        juce::Component::SafePointer<MixerPanel> safeThis(this);
+        ApexRadialContextMenu::show(std::move(menu), this,
+                           getScreenBounds().getCentre(), [safeThis](int result)
                            {
-                               settingsMenuOpen_ = false;
+                               if (safeThis == nullptr) return;
+                               auto& panel = *safeThis;
+                               panel.settingsMenuOpen_ = false;
 
                                switch (result)
                                {
-                                   case 1: toggleSidePanel(); break;
-                                   case 2: toggleBrowser(); break;
-                                   case 3: toggleCableForceVisible(); break;
-                                   case 4: toggleOffscreenForceVisible(); break;
+                                   case 1: panel.toggleSidePanel(); break;
+                                   case 2: panel.toggleBrowser(); break;
+                                   case 3: panel.toggleCableForceVisible(); break;
+                                   case 4: panel.toggleOffscreenForceVisible(); break;
                                    case 5:
-                                       if (onRescanPlugins)
-                                           onRescanPlugins();
+                                       if (panel.onRescanPlugins)
+                                           panel.onRescanPlugins();
                                        break;
                                    default:
                                        break;
                                }
 
-                               repaint();
+                               if (safeThis != nullptr) panel.repaint();
                            });
     }
 

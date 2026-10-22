@@ -13,11 +13,12 @@
 #include "ArrangementZoomCore.h"
 #include "PianoRollButtonCore.h"
 #include <memory>
+#include <cstdint>
 #include <mutex>
 
 namespace ArrangementEditor
 {
-    class ClipRenderCore : public juce::Component
+    class ClipRenderCore : public juce::Component, private juce::Timer
     {
     public:
         ClipRenderCore(ArrangementClipModel& model,
@@ -107,6 +108,9 @@ namespace ArrangementEditor
         // Callbacks
     std::function<void(juce::ModifierKeys)> onClick;
     std::function<void()> onDoubleClick;
+    // Reuse the native desktop region context menu for touch: the second
+    // tap on a selected region exposes the same actions as right-click.
+    std::function<void(juce::Point<int>, juce::Point<int>)> onTouchContextMenu;
     std::function<void()> onPianoRollClick;
     // Clicking the pitch/stretch/mode badges toggles the preset curve
     // (clip pitch/stretch automation lane rows) visibility.
@@ -147,6 +151,9 @@ namespace ArrangementEditor
         // A renderer must remain interactive while an edge/fade gesture owns
         // the mouse, even if its bounds temporarily leave the viewport.
         bool isEditGestureActive() const noexcept { return m_activeZone != Zone::None; }
+        // Only the FIRST drag of an unselected region is delegated to touch
+        // navigation. Other presses on this renderer belong to clip editing.
+        bool isTouchPanFromUnselected() const noexcept { return m_touchPanFromUnselected; }
 
         ClipGroupEditCore::Kind getActiveGroupEditKind() const noexcept
         {
@@ -192,6 +199,12 @@ namespace ArrangementEditor
         enum class Zone { None, FadeIn, FadeOut,
                           ResizeLeft, ResizeRight, VolumeBtn, MuteBtn };
         Zone m_activeZone   = Zone::None; // currently being dragged
+        bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
+        bool m_touchMenuPending = false; // armed by either a selected or first-tap clip hold
+        double m_touchMenuDownMs = 0.0;
+        juce::Point<int> m_touchMenuLocalPos;
+        std::uint64_t m_touchMenuGestureEpoch = 0; // multi-touch invalidates pending tap
+        juce::Point<int> m_touchMenuDownScreen;
         Zone m_hoveredZone  = Zone::None; // under cursor (drives cursor + paint)
 
         // Drawn pitch/stretch/mode badge area (local coords), refreshed by
@@ -268,6 +281,7 @@ namespace ArrangementEditor
         void drawVolumeButton(juce::Graphics& g);
         void drawMuteButton(juce::Graphics& g);
         void drawTrimTooltip(juce::Graphics& g);
+        void timerCallback() override;
 
         static juce::Colour fromU32(uint32_t c)
         {
