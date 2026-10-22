@@ -13,6 +13,9 @@ APEX is a Windows/JUCE DAW with an *offline* per-clip Voice Cleaner already inte
 | iZotope RX 12 | Spectral De-noise learns stationary tonal/broadband profiles with adaptive options; Dialogue Isolate helps non-stationary interference. | Detect high-Q cricket frequency ridges, not just broadband level; protect sustained vocal harmonics. |
 | Steinberg SpectraLayers 12 | Improved Unmix Noisy Speech and Voice DeNoise; spectral unmixing useful for stronger, irregular background. | Model-based separation should remain a future optional HQ strategy, not be faked with a gate. |
 | Adobe Enhance Speech | Simple voice and background controls but network/hosted constraints and speech-oriented processing. | Simple UX, do not assume it preserves sung timbre. |
+| FL Studio Edison | Noise Removal with acquired noise profile and Amount; Vocal Denoise/Isolator. Official docs caution that transient/variable bird-like sounds are not suitable for stationary cleanup and recommend Removed Noise audition. | Dedicated cricket model or user-marked noise examples needed when chirps drift; roadmap for "Listen Removed" A/B. |
+| REAPER ReaFIR | Subtract mode learns an explicit background noise profile. | Noise learning should be controllable and reviewed; higher reduction increases artifacts. |
+| Logic Pro for iPad | Noise Gate threshold, attack, hold and release reduces sounds *between* words, not chirps simultaneous with singing. | Do not use a gate as the entire cricket solution; keep vocal tails. |
 | DeepFilterNet (research candidate) | 48-kHz full-band speech enhancement; code dual MIT/Apache 2.0. Offline 48-kHz model path needs Windows packaging, deployment and validation. | Candidate for separately packaged/optional AI HQ model, after licensing/model-weight audit and sung-vocal/cricket comparisons; **not bundled** here. |
 | RNNoise (research candidate) | BSD-3-Clause, RNN noise reduction (48 kHz, frame based). | CPU-light speech-oriented alternative; needs careful sung-vocal testing and multi-sample-rate adapters, not wired into production. |
 
@@ -39,3 +42,6 @@ APEX is a Windows/JUCE DAW with an *offline* per-clip Voice Cleaner already inte
 - Steinberg SpectraLayers 12 release: https://ocl-steinberg-live.steinberg.net/_storage/asset/696230/storage/master/Press%20Release%20-%202025-07-02%20-%20SpectraLayers%2012-%20EN.pdf
 - DeepFilterNet: https://github.com/Rikorose/DeepFilterNet
 - RNNoise: https://github.com/xiph/rnnoise
+- FL Studio Edison Noise Removal: https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/plugins/editortool_clean.htm
+- REAPER ReaFIR guide: https://reaper.fm/guides/ReaEffectsGuide.pdf
+- Logic for iPad Noise Gate: https://support.apple.com/en-gb/guide/logicpro-ipad/lpip6c3a00ab/3.3/ipados/26
