@@ -5546,7 +5546,7 @@ namespace ArrangementEditor
         const auto id = clip->id;
         auto* dialog = new juce::AlertWindow("Rename Audio Clip",
             "Enter the new clip name:", juce::MessageBoxIconType::NoIcon);
-        dialog->addTextEditor("clipName", clip->clipName, "Name:");
+        dialog->addTextEditor("clipName", juce::String(clip->clipName), "Name:");
         dialog->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
         dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
         const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
@@ -5559,7 +5559,7 @@ namespace ArrangementEditor
                 if (nextName.isEmpty())
                     return;
                 auto* existing = weakOwner->m_clipState.findClip(id);
-                if (existing == nullptr || existing->clipName == nextName)
+                if (existing == nullptr || existing->clipName == nextName.toStdString())
                     return;
                 const auto oldName = existing->clipName;
                 auto apply = [weakOwner, id](const juce::String& name)
