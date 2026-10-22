@@ -2988,6 +2988,19 @@ MainComponent::MainComponent()
     stepSequencerWindow_->getStepSequencer().setDrumSampler(drumSamplerEngine_.get());
 
     clipPropertiesWindow_ = std::make_unique<DAW::ClipPropertiesWindow>();
+    // Clip Properties SOLO is a view of the same transient clip audition
+    // authority as the S button on the arrangement header. It never toggles
+    // track Solo or overwrites the stored clip Mute state.
+    clipPropertiesWindow_->getPanel().isClipSoloed = [this](const DAW::Clip& clip)
+    {
+        return arrangement_ && arrangement_->getCore()
+            && arrangement_->getCore()->isClipSoloedByEngineId(clip.getID());
+    };
+    clipPropertiesWindow_->getPanel().onToggleClipSolo = [this](DAW::Clip& clip)
+    {
+        if (arrangement_ && arrangement_->getCore())
+            arrangement_->getCore()->toggleClipSoloByEngineId(clip.getID());
+    };
     clipPropertiesWindow_->setVisible(false);
     clipPropertiesWindow_->onMinimized = [this]
     {
