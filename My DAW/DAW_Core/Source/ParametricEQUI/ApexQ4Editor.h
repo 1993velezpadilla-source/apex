@@ -421,6 +421,8 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        pendingCurveCreate_ = false;
+        hover_.reset();
         if (! graph_.contains (e.getPosition())
             || (selected_ >= 0 && panel_.contains (e.getPosition())))
             return;
@@ -435,40 +437,75 @@ public:
         {
             if (e.mods.isAltDown())
             {
-                toggleParameter (parameterIndex (dragBand_, BandParameterOffset::Bypass));
+                toggleParameter (parameterIndex (dragBand_,
+                    BandParameterOffset::Bypass));
                 select (dragBand_);
                 dragBand_ = -1;
                 return;
             }
             select (dragBand_);
-            auto* hz = param (parameterIndex (dragBand_,
-                                              BandParameterOffset::Frequency));
-            auto* gain = param (parameterIndex (dragBand_,
-                                                BandParameterOffset::Gain));
-            hz->beginChangeGesture(); gain->beginChangeGesture();
-            dragOrigin_ = e.position;
-            dragStartHz_ = hz->getUnitsValue();
-            dragStartGain_ = gain->getUnitsValue();
+            beginNodeGesture (dragBand_, e.position);
             return;
         }
-        if (selected_ >= 0)
+
+        const bool forceCreate = e.mods.isCtrlDown()
+                              || e.mods.isCommandDown();
+        // Manual p.9: one click deselects while other bands are selected;
+        // Ctrl-click adds immediately; dragging the yellow response creates
+        // a band regardless of selected state.
+        if (selected_ >= 0 && ! forceCreate)
         {
+            pendingCurveCreate_ = nearResultCurve (e.position);
+            pendingOrigin_ = e.position;
+            pendingDynamic_ = e.mods.isAltDown();
+            pendingSpectral_ = pendingDynamic_ && e.mods.isShiftDown();
             select (-1);
             return;
         }
-        createBand (e.position);
+        // A normal click on an unselected graph creates a genuine host band.
+        createBand (e.position, e.mods.isAltDown(),
+                    e.mods.isAltDown() && e.mods.isShiftDown());
+        if (selected_ >= 0)
+            beginNodeGesture (selected_, e.position);
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        if (graph_.contains (e.getPosition())
+            && (selected_ < 0 || ! panel_.contains (e.getPosition()))
+            && hitBand (e.position) < 0)
+            hover_ = e.position;
+        else
+            hover_.reset();
+        repaint();
+    }
+
+    void mouseExit (const juce::MouseEvent&) override
+    {
+        hover_.reset();
+        repaint();
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (pendingCurveCreate_)
+        {
+            if (e.position.getDistanceFrom (pendingOrigin_) < 7.0f)
+                return;
+            pendingCurveCreate_ = false;
+            createBand (pendingOrigin_, pendingDynamic_, pendingSpectral_);
+            if (selected_ < 0) return;
+            beginNodeGesture (selected_, pendingOrigin_);
+            createdDuringGesture_ = true;
+        }
         if (dragBand_ < 0) return;
         auto pt = e.position;
-        if (e.mods.isShiftDown())
+        if (e.mods.isShiftDown() && ! createdDuringGesture_)
         {
             pt.x = dragOrigin_.x + (pt.x - dragOrigin_.x) * 0.15f;
             pt.y = dragOrigin_.y + (pt.y - dragOrigin_.y) * 0.15f;
         }
-        if (e.mods.isAltDown())
+        if (e.mods.isAltDown() && ! createdDuringGesture_)
         {
             const float dx = std::abs (pt.x - dragOrigin_.x);
             const float dy = std::abs (pt.y - dragOrigin_.y);
@@ -485,22 +522,27 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        pendingCurveCreate_ = false;
         if (dragBand_ >= 0) finishGestures();
         dragBand_ = -1;
+        createdDuringGesture_ = false;
         sync();
     }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (! graph_.contains (e.getPosition()) || panel_.contains (e.getPosition()))
+        if (! graph_.contains (e.getPosition())
+            || (selected_ >= 0 && panel_.contains (e.getPosition())))
             return;
+        pendingCurveCreate_ = false;
         const int band = hitBand (e.position);
         if (band >= 0)
         {
             select (band);
             return;
         }
-        createBand (e.position);
+        createBand (e.position, e.mods.isAltDown(),
+                    e.mods.isAltDown() && e.mods.isShiftDown());
     }
 
     void mouseWheelMove (const juce::MouseEvent& event,
@@ -761,7 +803,38 @@ private:
         }
         syncing_ = false;
     }
-    void createBand (juce::Point<float> pt)
+    void beginNodeGesture (int band, juce::Point<float> at)
+    {
+        if (band < 0) return;
+        dragBand_ = band;
+        dragOrigin_ = at;
+        createdDuringGesture_ = false;
+        auto* hz = param (parameterIndex (band, BandParameterOffset::Frequency));
+        auto* gain = param (parameterIndex (band, BandParameterOffset::Gain));
+        dragStartHz_ = hz->getUnitsValue();
+        dragStartGain_ = gain->getUnitsValue();
+        hz->beginChangeGesture();
+        gain->beginChangeGesture();
+    }
+    bool nearResultCurve (juce::Point<float> at) const
+    {
+        const auto hz = xToHz (at.x);
+        double gainDb = 0.0;
+        const auto rate = std::max (8000.0, processor_.getSampleRate());
+        const auto mode = param (kDesignModeParameter)->getBool()
+            ? DesignMode::AnalogMatched : DesignMode::Realtime;
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            const auto s = settingsForBand (band);
+            if (! s.enabled || s.bypassed) continue;
+            const auto response = ResponseCore::bandResponse (s, mode, rate, hz);
+            gainDb += 20.0 * std::log10 (std::max (1.0e-8,
+                                                   std::abs (response)));
+        }
+        return std::abs (at.y - dbToY (gainDb)) <= 16.0f;
+    }
+    void createBand (juce::Point<float> pt, bool dynamic = false,
+                     bool spectral = false)
     {
         int slot = -1;
         for (int i = 0; i < kMaxBands; ++i)
@@ -775,9 +848,30 @@ private:
         setUnits (parameterIndex (slot, BandParameterOffset::Gain),
                   static_cast<float> (yToDb (pt.y)));
         setUnits (parameterIndex (slot, BandParameterOffset::Q), 1.0f);
+        // Source manual p.9: filter type follows creation location.
+        // Extremes become cut filters; outer spectral zones are shelves.
+        // The centre remains a Bell until the user chooses another shape.
+        const float ratio = std::clamp (pt.x
+            / static_cast<float> (std::max (1, getWidth())), 0.0f, 1.0f);
+        const auto shape = ratio < 0.045f ? FilterShape::LowCut
+                         : ratio > 0.955f ? FilterShape::HighCut
+                         : ratio < 0.17f ? FilterShape::LowShelf
+                         : ratio > 0.83f ? FilterShape::HighShelf
+                         : FilterShape::Bell;
         setUnits (parameterIndex (slot, BandParameterOffset::Shape),
-                  static_cast<float> (FilterShape::Bell));
+                  static_cast<float> (shape));
         setUnits (parameterIndex (slot, BandParameterOffset::Bypass), 0.0f);
+        // Alt creates a real dynamic band; Alt+Shift creates a spectral
+        // candidate. Spectral PDC remains deferred safely until prepare.
+        if (dynamic && ! spectral)
+        {
+            setUnits (dynamicParameterIndex (
+                slot, DynamicBandOffset::Enable), 1.0f);
+            setUnits (dynamicParameterIndex (
+                slot, DynamicBandOffset::Range), 6.0f);
+        }
+        if (spectral)
+            setUnits (spectralBandParameterIndex (slot), 1.0f);
         setUnits (parameterIndex (slot, BandParameterOffset::Enabled), 1.0f);
         commitHistory();
         curveDirty_ = true;
@@ -1182,6 +1276,10 @@ private:
     ApexQ4SoloHold soloHold_;
     juce::Slider freq_, gain_, q_;
     int selected_ = -1, dragBand_ = -1, rangeIndex_ = 2;
+    bool pendingCurveCreate_ = false, createdDuringGesture_ = false;
+    bool pendingDynamic_ = false, pendingSpectral_ = false;
+    juce::Point<float> pendingOrigin_ {};
+    std::optional<juce::Point<float>> hover_;
     float rangeDb_ = 12.0f;
     bool syncing_ = false, curveDirty_ = true;
     juce::Point<float> dragOrigin_;
