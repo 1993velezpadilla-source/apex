@@ -838,7 +838,7 @@ namespace ArrangementEditor
             m_touchPanFromUnselected = false;
             m_activeZone = Zone::None;
             const auto screen = e.getScreenPosition();
-            const auto* parent = getParentComponent();
+            auto* parent = getParentComponent();
             const auto local = parent != nullptr
                 ? e.getEventRelativeTo(parent).getPosition() : e.getPosition();
             // The parent can rebuild clip renderers when navigation ends.
