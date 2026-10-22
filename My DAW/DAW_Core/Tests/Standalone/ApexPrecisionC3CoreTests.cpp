@@ -219,6 +219,29 @@ int main()
                 && std::isfinite(b[static_cast<std::size_t>(i)]));
         assert(std::isfinite(effect.getGainReductionDb()));
     }
+
+    // Adversarial: Character PRE and POST must be two different *audio* paths,
+    // not a cosmetic state or text-only button.
+    {
+        Parameters p;
+        p.thresholdDb=-27; p.ratio=8; p.kneeDb=6;
+        p.attackMs=1; p.releaseMs=90;
+        p.drive=95; p.character=1;
+        Core before,after;
+        before.prepare(48000);after.prepare(48000);
+        p.characterPre=true;before.setParameters(p);
+        p.characterPre=false;after.setParameters(p);
+        std::vector<float> a(24000),b(24000);
+        for(int i=0;i<24000;++i)
+            a[static_cast<std::size_t>(i)]=b[static_cast<std::size_t>(i)]
+                =static_cast<float>(0.73*std::sin(i*0.019));
+        processConstant(before,a,256);
+        processConstant(after,b,256);
+        double difference=0.0;
+        for(std::size_t i=12000;i<a.size();++i)
+            difference+=std::abs(a[i]-b[i]);
+        assert(difference>1.0); // distinct saturation order changes signal
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
