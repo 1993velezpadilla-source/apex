@@ -2253,6 +2253,8 @@ namespace ArrangementEditor
                     if (m_activeClipEditInfo.isNotEmpty() && preEdit->size() > 1)
                         m_activeClipEditInfo = juce::String((int)preEdit->size())
                             + " CLIPS  |  " + m_activeClipEditInfo;
+                    if (onClipEditInfoChanged)
+                        onClipEditInfoChanged(m_activeClipEditInfo);
                     repaint(m_ruler.getBounds());
                 }
 
@@ -2502,6 +2504,8 @@ namespace ArrangementEditor
         rendererPtr->onEditCommit = [this, preEdit]()
         {
             m_activeClipEditInfo.clear();
+            if (onClipEditInfoChanged)
+                onClipEditInfoChanged({});
             repaint(m_ruler.getBounds());
             if (preEdit->empty()) return;
             const std::vector<ArrangementClipModel> before = *preEdit;
