@@ -270,6 +270,17 @@ public:
                 juce::Colour(k==0?0xffef869f:0xffd7d9f4),px,y,
                 juce::Colour(k==0?0xffb54870:0xff818eaf),px,barBottom,false));
             g.fillRoundedRectangle(px,y,barW,barHeight*fraction,2);
+            // A peak-hold marker is independent of the moving live meter.
+            // RESET clears both held peaks; the next live frame then starts
+            // tracking a new peak rather than leaving a decorative button.
+            const float held=k==0?heldInput_:heldOutput_;
+            if(held>0.0f)
+            {
+                const float heldFraction=juce::jlimit(0.0f,1.0f,(toDb(held)+48.0f)/48.0f);
+                const float heldY=barTop+barHeight*(1.0f-heldFraction);
+                g.setColour(juce::Colour(k==0?0xfff9c0d3:0xfff3f4fe));
+                g.drawLine(px-2.0f,heldY,px+barW+2.0f,heldY,2.0f);
+            }
             label(g,juce::String(value,1),px-10,barBottom+7,47,19,12,0xffe8e5f1,true);
         }
         label(g,"GR",meter.getX()+8,meter.getBottom()-65,28,18,10,0xffe799ad,true);
