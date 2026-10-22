@@ -44,7 +44,7 @@ namespace ArrangementEditor
         static bool contextHoldReady(int durationMs, double x0, double y0,
                                      double x1, double y1) noexcept
         {
-            return durationMs >= 500 && withinTapSlop(x0, y0, x1, y1);
+            return durationMs >= 320 && withinTapSlop(x0, y0, x1, y1);
         }
 
         // Compare to the LAST APPLIED pinch distance, not the last sampled
