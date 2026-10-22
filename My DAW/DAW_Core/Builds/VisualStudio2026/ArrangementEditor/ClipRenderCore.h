@@ -50,6 +50,7 @@ namespace ArrangementEditor
         }
 
         void setSelected(bool selected);
+        void setSoloActive(bool active) { if (m_soloActive != active) { m_soloActive = active; repaint(); } }
         bool isSelected() const { return m_selected; }
         void setAutomationActive(bool active) { if (m_automationActive != active) { m_automationActive = active; repaint(); } }
 
@@ -137,6 +138,7 @@ namespace ArrangementEditor
         std::function<void()> onEditCommit;
         std::function<void()> onVolumeButtonClicked;
         std::function<void()> onMuteButtonClicked;
+    std::function<void()> onSoloButtonClicked;
 
         // TimePitch cache/render status — set from message thread, read in paint()
         // Call these after receiving background render callbacks.
@@ -197,7 +199,7 @@ namespace ArrangementEditor
 
         // Hit-zones for interactive handles inside the clip.
         enum class Zone { None, FadeIn, FadeOut,
-                          ResizeLeft, ResizeRight, VolumeBtn, MuteBtn };
+                          ResizeLeft, ResizeRight, VolumeBtn, MuteBtn, SoloBtn };
         Zone m_activeZone   = Zone::None; // currently being dragged
         bool m_touchPanFromUnselected = false; // finger swipe on unselected clip navigates
         bool m_touchMenuPending = false; // selected clip short-tap only
@@ -246,8 +248,10 @@ namespace ArrangementEditor
         juce::Rectangle<int> rightEdgeRect()     const;
         juce::Rectangle<int> volumeButtonRect()  const;
         juce::Rectangle<int> muteButtonRect()    const;
+        juce::Rectangle<int> soloButtonRect()    const;
 
         bool m_selected        = false;
+        bool m_soloActive      = false;
         bool m_hovered         = false;
         bool m_automationActive = false;
         bool m_renderingStretch = false;
@@ -280,6 +284,7 @@ namespace ArrangementEditor
         void drawClipHandles(juce::Graphics& g);
         void drawVolumeButton(juce::Graphics& g);
         void drawMuteButton(juce::Graphics& g);
+        void drawSoloButton(juce::Graphics& g);
         void drawTrimTooltip(juce::Graphics& g);
         void timerCallback() override;
 
