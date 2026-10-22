@@ -4950,6 +4950,50 @@ namespace ArrangementEditor
             if (m_propertiesWindow) m_propertiesWindow->openForClip(c);
         };
         cb.applyPreset    = [this](ArrangementClipModel* c, const std::string& name) { onClipPreset(c, name); };
+        cb.isTapeStopActive = [this](ArrangementClipModel* c) -> bool
+        {
+            if (c == nullptr || m_automationManager == nullptr || m_engineClipManager == nullptr)
+                return false;
+            const auto mapped = m_uuidToEngineId.find(c->id);
+            if (mapped == m_uuidToEngineId.end()) return false;
+            const auto* engine = m_engineClipManager->getClip(mapped->second);
+            if (engine == nullptr) return false;
+            const auto param = DAW::AutomationLaneCore::makeClipTapeStopParameterId(mapped->second);
+            const auto* lane = m_automationManager->findLane(engine->getTrackID(), param);
+            return lane != nullptr && !lane->points.empty();
+        };
+        cb.toggleTapeStop = [this](ArrangementClipModel* c)
+        {
+            if (c == nullptr || m_automationManager == nullptr || m_engineClipManager == nullptr)
+                return;
+            const auto mapped = m_uuidToEngineId.find(c->id);
+            if (mapped == m_uuidToEngineId.end()) return;
+            const auto* engine = m_engineClipManager->getClip(mapped->second);
+            if (engine == nullptr) return;
+            const auto trackId = engine->getTrackID();
+            const auto param = DAW::AutomationLaneCore::makeClipTapeStopParameterId(mapped->second);
+            const auto* existing = m_automationManager->findLane(trackId, param);
+            if (existing != nullptr && !existing->points.empty())
+            {
+                // Re-selecting Tape Stop removes ONLY this clip's tape lane,
+                // not pitch/stretch/track or other clips' automation.
+                m_automationManager->clearLane(trackId, param);
+                hideAutomationLane(trackId, param);
+            }
+            else
+            {
+                // Audible tape stop over final 0.8s of this clip.
+                const auto first = (int64_t)std::llround(c->startTime * m_engineSampleRate);
+                const auto last = first + juce::jmax<int64_t>(
+                    1, (int64_t)std::llround(c->length * m_engineSampleRate));
+                const auto start = juce::jmax(first,
+                    last - (int64_t)std::llround(0.8 * m_engineSampleRate));
+                m_automationManager->addPoint(trackId, param, first, 0.0f);
+                m_automationManager->addPoint(trackId, param, start, 0.0f);
+                m_automationManager->addPoint(trackId, param, last, 1.0f);
+            }
+            repaint();
+        };
         cb.recolorClip = [this](ArrangementClipModel* c, juce::Colour color, bool explicitOverride)
         {
             if (c == nullptr) return;
