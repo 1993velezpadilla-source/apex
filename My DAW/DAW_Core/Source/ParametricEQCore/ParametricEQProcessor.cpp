@@ -1,5 +1,7 @@
 #include "ParametricEQProcessor.h"
-#include "../ParametricEQUI/ParametricEQEditor.h"
+#include "../ParametricEQUI/ApexQ4Editor.h"
+// Legacy Prism editor still compiles as a regression/rollback fixture, but
+// cannot be instantiated by the APEX plugin factory.
 
 #include <cmath>
 #include <utility>
@@ -995,7 +997,7 @@ Processor::~Processor()
 
 juce::AudioProcessorEditor* Processor::createEditor()
 {
-    return new ParametricEQEditor (*this);
+    return new ApexQ4Editor (*this);
 }
 
 const ParametricEQParameter* Processor::getParametricEQParameter (int index) const noexcept
