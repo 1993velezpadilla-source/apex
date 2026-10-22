@@ -132,6 +132,10 @@ public:
             combo->setColour(juce::ComboBox::outlineColourId,juce::Colour(0xff585155));
             combo->setColour(juce::ComboBox::arrowColourId,juce::Colour(0xffecc15e));
         }
+        style_.setName("C3 STYLE");
+        character_.setName("C3 CHARACTER");
+        preset_.setName("C3 PRESET");
+        triggerSource_.setName("C3 TRIGGER SOURCE");
         style_.setTooltip("Compression topology and voicing");
         for(int i=0;i<14;++i)
             style_.addItem(kStyleNames[static_cast<std::size_t>(i)],i+1);
@@ -150,6 +154,7 @@ public:
         };
         addAndMakeVisible(triggerSource_);
 
+        charPrePost_.setName("C3 CHARACTER ROUTING");
         charPrePost_.setTooltip("Route original character saturation before or after compression");
         charPrePost_.onClick=[this] {
             rememberUndo();
@@ -180,6 +185,7 @@ public:
             addAndMakeVisible(b);
         }
 
+        scToggle_.setName("C3 SIDECHAIN PANEL");
         scToggle_.setButtonText("SIDE CHAIN   ^");
         scToggle_.setTooltip("Open or close detector EQ and stereo linking");
         scToggle_.onClick=[this] {
@@ -190,19 +196,23 @@ public:
         addAndMakeVisible(scToggle_);
         sidechainOpen_=true;
 
+        aB_.setName("C3 A/B");
         aB_.setButtonText("A / B    A");
         aB_.setTooltip("Switch between two editable compressor snapshots");
         aB_.onClick=[this] { swapAB(); };
         addAndMakeVisible(aB_);
+        copy_.setName("C3 COPY");
         copy_.setButtonText("COPY");
         copy_.setTooltip("Copy current A/B state into the other slot");
         copy_.onClick=[this] { snapshots_[1-activeSnapshot_]=snapshot(); };
         addAndMakeVisible(copy_);
+        undo_.setName("C3 UNDO");
         undo_.setButtonText("UNDO");
         undo_.setTooltip("Undo the most recent panel parameter gesture");
         undo_.onClick=[this] { if(hasUndo_) { auto now=snapshot(); apply(undoState_);
             redoState_=now;hasRedo_=true;hasUndo_=false; } };
         addAndMakeVisible(undo_);
+        redo_.setName("C3 REDO");
         redo_.setButtonText("REDO");
         redo_.onClick=[this] { if(hasRedo_) { undoState_=snapshot();apply(redoState_);
             hasUndo_=true;hasRedo_=false; } };
