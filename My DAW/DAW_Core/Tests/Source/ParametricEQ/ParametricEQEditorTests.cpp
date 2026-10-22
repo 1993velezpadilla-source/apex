@@ -294,6 +294,20 @@ private:
                     expect (post > pre + 1.0f,
                         "930 Hz +8 dB band must boost the real WAV 784 Hz"
                         " harmonic in measured POST spectrum");
+                    const float smoothPre =
+                        editor->displayedSpectrumDbForTesting (false, 784.0f);
+                    const float smoothPost =
+                        editor->displayedSpectrumDbForTesting (true, 784.0f);
+                    expect (std::isfinite (smoothPre)
+                            && std::isfinite (smoothPost),
+                        "presentation smoothing stays finite with real PCM");
+                    expect (smoothPost > smoothPre + 0.4f,
+                        "smoothed WAV spectrum retains genuine EQ PRE/POST gain");
+                    expect (smoothPost <=
+                            editor->maximumMeasuredSpectrumDbForTesting (true)
+                            + 0.25f,
+                        "presentation may never invent FFT energy above"
+                        " the measured highest real bin");
                 }
             }
         }
@@ -329,6 +343,21 @@ private:
                     "boot logo may never cover the actual preset control");
             expect (popover.getHeight() <= 136,
                     "no giant inspector covering the entire EQ");
+            // Adversarial critic: geometry-only snapshots previously hid
+            // collisions between tiny SOLOS, MORE, channel and filter icons.
+            const auto controls = editor->contextualHeaderBoundsForTesting();
+            for (std::size_t i = 0; i < controls.size(); ++i)
+            {
+                if (controls[i].isEmpty()) continue;
+                expect (popover.contains (controls[i]),
+                    "all contextual hit targets fit entirely in floating HUD");
+                for (std::size_t j = i + 1; j < controls.size(); ++j)
+                    if (! controls[j].isEmpty())
+                        expect (! controls[i].intersects (controls[j]),
+                            "no contextual filter, dynamic or SOLO targets overlap");
+            }
+            expect (popover.getHeight() <= (size.x < 460 ? 136 : 116),
+                    "contextual strip remains compact across layouts");
 
             juce::Image screenshot (juce::Image::RGB, size.x, size.y, true);
             {
@@ -344,7 +373,7 @@ private:
                     "apex-eq-ui-snapshots");
                 expect (dir.createDirectory().wasOk());
                 const auto file = dir.getChildFile (
-                    "APEX-EQ4-NEW-" + juce::String (size.x) + "x"
+                    "APEX-EQ-REAL-FFT-" + juce::String (size.x) + "x"
                     + juce::String (size.y) + ".png");
                 auto stream = file.createOutputStream();
                 expect (stream != nullptr);
