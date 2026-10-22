@@ -77,6 +77,7 @@ public:
     {
         sampleRate_ = std::isfinite(rate) && rate >= 8000.0 ? rate : 48000.0;
         smoothingCoeff_ = coefficient(0.012);
+        detectorCoeff_ = coefficient(0.010);
         thresholdTrackingCoeff_ = coefficient(1.5);
         reset();
     }
@@ -175,8 +176,8 @@ public:
                 const bool rms = parameters_.style == 2 || parameters_.style == 6
                               || parameters_.style == 9 || parameters_.style == 11;
                 const double energy = filtered * filtered;
-                state.rms = coefficient(0.010) * state.rms
-                          + (1.0 - coefficient(0.010)) * energy;
+                state.rms = detectorCoeff_ * state.rms
+                          + (1.0 - detectorCoeff_) * energy;
                 const double level = rms ? std::sqrt(std::max(0.0, state.rms))
                                          : std::abs(filtered);
                 const double feedback = (parameters_.style == 7 || parameters_.style == 8)
@@ -197,7 +198,7 @@ public:
                 auto& state = channels_[static_cast<std::size_t>(c)];
                 const auto linkedDb = detectorDb[c] + (louder - detectorDb[c]) * link;
                 const double targetDb = desiredReduction(linkedDb, threshold);
-                if (targetDb > state.reductionDb)
+                if (std::abs(targetDb) > std::abs(state.reductionDb))
                 {
                     state.reductionDb = attackCoeff * state.reductionDb
                                       + (1.0 - attackCoeff) * targetDb;
@@ -216,12 +217,13 @@ public:
                     state.reductionDb = release * state.reductionDb
                                       + (1.0 - release) * targetDb;
                 }
-                if (state.reductionDb < 1.0e-9) state.reductionDb = 0.0;
-                gr[c] = std::clamp(state.reductionDb, 0.0, parameters_.rangeDb);
+                if (std::abs(state.reductionDb) < 1.0e-9) state.reductionDb = 0.0;
+                gr[c] = std::clamp(state.reductionDb, -parameters_.rangeDb,
+                                   parameters_.rangeDb);
                 state.lastGain = dbGain(-gr[c]);
             }
             if (!stereo) gr[1] = gr[0];
-            gainReductionDb_ = std::max(gr[0], gr[1]);
+            gainReductionDb_ = std::max(0.0, std::max(gr[0], gr[1]));
             const double makeup = parameters_.autoGain
                 ? std::clamp((-threshold) * (1.0 - 1.0 / parameters_.ratio) * 0.15,
                              0.0, 12.0) : 0.0;
@@ -326,6 +328,7 @@ private:
 
     Parameters parameters_ {};
     double sampleRate_ = 48000.0, smoothingCoeff_ = 0.0;
+    double detectorCoeff_ = 0.0;
     double thresholdTrackingCoeff_ = 0.0, trackedLevelDb_ = -18.0;
     double hpCoeff_ = 0.0, lpCoeff_ = 0.0;
     std::array<Channel,2> channels_ {};
