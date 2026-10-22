@@ -3201,6 +3201,19 @@ private:
                     static_cast<float> (value), 0);
             return juce::String (value, 3);
         };
+        // All three primary sliders store NORMALIZED [0..1] parameters.
+        // Without the inverse text adapter, typing "930 Hz" was parsed
+        // as the raw Slider value 930, clamped to 1.0 and silently set
+        // the frequency to 24 kHz. Use the canonical hosted parser.
+        slider.valueFromTextFunction = [this, &slider] (const juce::String& text)
+        {
+            const int index = parameterForSlider (slider);
+            if (index >= 0)
+                return static_cast<double> (
+                    processor_.getParametricEQParameter (index)
+                        ->getValueForText (text));
+            return text.getDoubleValue();
+        };
     }
 
     int parameterForSlider (const juce::Slider& slider) const
