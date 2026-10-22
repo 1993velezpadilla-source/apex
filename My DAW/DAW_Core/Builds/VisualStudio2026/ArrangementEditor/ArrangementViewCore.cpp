@@ -3206,6 +3206,13 @@ namespace ArrangementEditor
         if (!clip)
             return;
 
+        openClipProperties(clip);
+    }
+
+    void ArrangementViewCore::openClipProperties(ArrangementClipModel* clip)
+    {
+        if (clip == nullptr)
+            return;
         // MIDI clips may open the piano roll/editor on double-click.
         if (m_engineClipManager != nullptr)
         {
@@ -4671,6 +4678,7 @@ namespace ArrangementEditor
         cb.duplicateClip = [this](ArrangementClipModel* c) { onClipDuplicate(c); };
         cb.deleteClip    = [this](ArrangementClipModel* c) { onClipDelete(c);    };
         cb.renameClip    = [this](ArrangementClipModel* c) { onClipRename(c);    };
+        cb.openClipProperties = [this](ArrangementClipModel* c) { openClipProperties(c); };
         cb.muteClip      = [this](ArrangementClipModel* c) { onClipMute(c);      };
         cb.canPaste      = [this]() { return !m_clipboardClips.empty(); };
         cb.pasteClip     = [this](double t, int tr) { onClipPaste(t, tr); };
