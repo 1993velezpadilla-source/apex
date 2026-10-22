@@ -13,6 +13,15 @@
 
 namespace APEX::PrecisionC3
 {
+// Four independently automatable bell bands follow the existing HP and LP.
+// This is six detector filters in total, not a claim of FabFilter's broader
+// Pro-Q-style filter shapes. All processing runs on the detector ONLY.
+struct SidechainBellBand
+{
+    double hz = 1000.0;
+    double gainDb = 0.0;
+    double q = 1.0;
+};
 struct Parameters
 {
     double thresholdDb = -18.0;
@@ -28,6 +37,10 @@ struct Parameters
     double outputDb = 0.0;
     double sidechainHighpassHz = 0.0;  // 0 disables
     double sidechainLowpassHz = 20000.0;
+    std::array<SidechainBellBand,4> sidechainBells {{
+        {130.0,0.0,1.0}, {680.0,0.0,1.0},
+        {2700.0,0.0,1.0}, {9300.0,0.0,1.0}
+    }};
     double stereoLinkPercent = 100.0;
     double drive = 0.0; // 0..100%
     int style = 0;      // see kStyleNames below
@@ -57,6 +70,13 @@ struct Parameters
         p.outputDb = bounded(p.outputDb, -24.0, 24.0, 0.0);
         p.sidechainHighpassHz = bounded(p.sidechainHighpassHz, 0.0, 2000.0, 0.0);
         p.sidechainLowpassHz = bounded(p.sidechainLowpassHz, 100.0, 20000.0, 20000.0);
+        for (std::size_t i=0;i<p.sidechainBells.size();++i)
+        {
+            p.sidechainBells[i].hz = bounded(p.sidechainBells[i].hz, 20.0,20000.0,
+                130.0 * std::pow(4.5,static_cast<double>(i)));
+            p.sidechainBells[i].gainDb = bounded(p.sidechainBells[i].gainDb,-18.0,18.0,0.0);
+            p.sidechainBells[i].q = bounded(p.sidechainBells[i].q,0.15,18.0,1.0);
+        }
         p.stereoLinkPercent = bounded(p.stereoLinkPercent, 0.0, 100.0, 100.0);
         p.drive = bounded(p.drive, 0.0, 100.0, 0.0);
         p.style = std::clamp(p.style, 0, 13);
@@ -110,6 +130,25 @@ public:
         const auto lpf = std::min(parameters_.sidechainLowpassHz, nyquist);
         hpCoeff_ = hpf <= 0.0 ? 0.0 : coefficient(1.0 / (6.283185307179586 * hpf));
         lpCoeff_ = lpf >= nyquist ? 0.0 : coefficient(1.0 / (6.283185307179586 * lpf));
+        // RBJ peaking filters. Coefficients are calculated ONCE per block,
+        // not per audio sample. Caller may automate freq, gain and Q.
+        for (std::size_t i=0;i<bellCoefficients_.size();++i)
+        {
+            const auto& b=parameters_.sidechainBells[i];
+            const double f=std::clamp(b.hz,20.0,sampleRate_*0.45);
+            const double w0=6.2831853071795864769*f/sampleRate_;
+            const double cs=std::cos(w0);
+            const double a=std::pow(10.0,b.gainDb/40.0);
+            const double alpha=std::sin(w0)/(2.0*b.q);
+            const double invA0=1.0/(1.0+alpha/a);
+            auto& c=bellCoefficients_[i];
+            c.b0=(1.0+alpha*a)*invA0;
+            c.b1=(-2.0*cs)*invA0;
+            c.b2=(1.0-alpha*a)*invA0;
+            c.a1=(-2.0*cs)*invA0;
+            c.a2=(1.0-alpha/a)*invA0;
+            c.enabled=std::abs(b.gainDb)>=1.0e-6;
+        }
         if (!initialised_)
         {
             smoothedInput_ = dbGain(parameters_.inputDb);
@@ -190,6 +229,20 @@ public:
                 state.lpLow = lpCoeff_ * state.lpLow + (1.0 - lpCoeff_) * filtered;
                 if (parameters_.sidechainLowpassHz < 19999.0)
                     filtered = state.lpLow;
+                // Four true parametric bells operate ONLY on the detector
+                // path, never the vocal/track audio. No block allocations.
+                for(std::size_t band=0;band<bellCoefficients_.size();++band)
+                {
+                    const auto& coeff=bellCoefficients_[band];
+                    if(!coeff.enabled) continue;
+                    auto& filter=state.bellState[band];
+                    const double out=coeff.b0*filtered+filter.z1;
+                    filter.z1=coeff.b1*filtered-coeff.a1*out+filter.z2;
+                    filter.z2=coeff.b2*filtered-coeff.a2*out;
+                    if(std::abs(filter.z1)<1.0e-25) filter.z1=0.0;
+                    if(std::abs(filter.z2)<1.0e-25) filter.z2=0.0;
+                    filtered=std::isfinite(out) ? std::clamp(out,-100.0,100.0) : 0.0;
+                }
                 // Smooth / opto-like modes use an RMS-ish detector.
                 const bool rms = parameters_.style == 2 || parameters_.style == 6
                               || parameters_.style == 9 || parameters_.style == 11;
@@ -274,10 +327,20 @@ public:
     }
 
 private:
+    struct BellCoefficients
+    {
+        double b0=1.0,b1=0.0,b2=0.0,a1=0.0,a2=0.0;
+        bool enabled=false;
+    };
+    struct BellFilterState
+    {
+        double z1=0.0,z2=0.0;
+    };
     struct Channel
     {
         double hpLow = 0.0, lpLow = 0.0, rms = 0.0;
         double reductionDb = 0.0, lastGain = 1.0;
+        std::array<BellFilterState,4> bellState {};
     };
 
     static double safe (float value) noexcept
@@ -354,6 +417,7 @@ private:
     double thresholdTrackingCoeff_ = 0.0, trackedLevelDb_ = -18.0;
     double hpCoeff_ = 0.0, lpCoeff_ = 0.0;
     std::array<Channel,2> channels_ {};
+    std::array<BellCoefficients,4> bellCoefficients_ {};
     std::array<int,2> holdRemaining_ {};
     double smoothedInput_ = 1.0, smoothedWet_ = 1.0, smoothedOutput_ = 1.0;
     double smoothedDry_ = 0.0, smoothedBypass_ = 1.0, smoothedThreshold_ = -18.0;
