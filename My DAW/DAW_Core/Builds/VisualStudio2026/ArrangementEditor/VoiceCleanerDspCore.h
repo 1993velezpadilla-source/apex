@@ -152,7 +152,12 @@ public:
                                        : settings.focus == Focus::Broadband ? 0.0f
                                        : 1.9f;
                 const float boostedNoise = n * (1.65f + focusScale * tonal);
-                const float subtraction = strength * boostedNoise;
+                // Separate CLEANUP ALGORITHM from the strength knob:
+                // 100%-wet signal is invariant for a chosen noise profile.
+                // The Amount knob performs dry/wet mixing *after* DSP. This
+                // permits quick live playback audition from precomputed wet
+                // audio and matches the exact Apply render at every Amount.
+                const float subtraction = boostedNoise;
                 const float cleanRatio = std::max(0.f, (p - subtraction) /
                                                      std::max(p, 1.0e-12f));
                 // Soft floor preserves breaths, presence and vowel harmonics;
@@ -185,7 +190,9 @@ public:
             const float value = weight[(size_t)i] > 1.e-6f
                 ? overlap[(size_t)i] / weight[(size_t)i]
                 : input[i];
-            output[i] = std::isfinite(value) ? value : input[i];
+            output[i] = std::isfinite(value)
+                ? input[i] + strength * (value - input[i])
+                : input[i];
         }
         return true;
     }
