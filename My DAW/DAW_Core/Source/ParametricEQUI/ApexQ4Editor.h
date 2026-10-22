@@ -47,7 +47,7 @@ public:
             b.setClickingTogglesState (false);
             addAndMakeVisible (b);
         };
-        attach (undo_, "↶"); attach (redo_, "↷");
+        attach (undo_, "UNDO"); attach (redo_, "REDO");
         attach (compare_, "A/B"); attach (copy_, "COPY");
         attach (preset_, "Default Setting");
         attach (phase_, "Zero Latency");
@@ -55,7 +55,7 @@ public:
         attach (displayRange_, "12 dB");
         attach (globalBypass_, "POWER");
         attach (autoGain_, "AUTO GAIN");
-        attach (bandPower_, "●");
+        attach (bandPower_, "ON");
         attach (shape_, "Bell"); attach (slope_, "12 dB/oct");
         attach (placement_, "STEREO");
         attach (dynamic_, "DYN");
@@ -73,8 +73,8 @@ public:
                 auditionHolding_ = false;
             }
         };
-        attach (advanced_, "•••");
-        attach (closeBand_, "×");
+        attach (advanced_, "MORE");
+        attach (closeBand_, "X");
 
         undo_.onClick = [this] { historyStep (-1); };
         redo_.onClick = [this] { historyStep (1); };
@@ -154,7 +154,8 @@ public:
     {
         const int w = getWidth(), h = getHeight();
         const bool phone = w < 670;
-        const int foot = h < 390 ? 40 : 44;
+        const bool narrow = w < 460;
+        const int foot = narrow ? 84 : (h < 390 ? 40 : 44);
         graph_ = { 0, 42, w, std::max (140, h - 42 - foot) };
         const int b = 32;
         undo_.setBounds (w > 620 ? 222 : 137, 5, b, b);
@@ -163,50 +164,105 @@ public:
         copy_.setBounds (w > 620 ? 350 : 254, 5, 50, b);
         preset_.setBounds (w > 620 ? std::max (405, w / 2 - 110) : w - 155,
                            5, w > 620 ? 220 : 135, b);
-        phase_.setBounds (6, h - foot + 5, phone ? 118 : 152, 33);
-        analyzer_.setBounds (phone ? 124 : 160, h - foot + 5,
-                             phone ? 158 : 216, 33);
-        displayRange_.setBounds (phone ? 284 : 380, h - foot + 5,
-                                 phone ? 63 : 70, 33);
-        autoGain_.setBounds (phone ? 352 : std::max (465, w - 255),
-                             h - foot + 5, phone ? 75 : 104, 33);
-        globalBypass_.setBounds (w - (phone ? 51 : 129), h - foot + 5,
-                                 phone ? 49 : 117, 33);
+        for (auto* secondary : { &undo_, &redo_, &compare_, &copy_ })
+            secondary->setVisible (! narrow);
+        if (narrow)
+        {
+            const int y = h - foot + 4;
+            phase_.setBounds (5, y, 97, 35);
+            analyzer_.setBounds (104, y, w - 185, 35);
+            displayRange_.setBounds (w - 79, y, 74, 35);
+            autoGain_.setBounds (5, y + 40, 114, 35);
+            globalBypass_.setBounds (w - 120, y + 40, 115, 35);
+        }
+        else
+        {
+            phase_.setBounds (6, h - foot + 5, phone ? 118 : 152, 33);
+            analyzer_.setBounds (phone ? 124 : 160, h - foot + 5,
+                                 phone ? 158 : 216, 33);
+            displayRange_.setBounds (phone ? 284 : 380, h - foot + 5,
+                                     phone ? 63 : 70, 33);
+            autoGain_.setBounds (phone ? 352 : std::max (465, w - 255),
+                                 h - foot + 5, phone ? 75 : 104, 33);
+            globalBypass_.setBounds (w - (phone ? 51 : 129), h - foot + 5,
+                                     phone ? 49 : 117, 33);
+        }
 
         // Context controls are genuinely floating OVER the frequency display,
         // directly beneath the selected EQ nodes: NO permanent bottom sheet.
         // The canvas does not shrink when switching bands.
         const int controlWidth = std::min (phone ? 456 : 548, w - 18);
-        const int controlHeight = h < 400 ? 112 : 136;
+        const int controlHeight = narrow ? 170 : (h < 400 ? 112 : 136);
         const int baseX = selected_ < 0
             ? (w - controlWidth) / 2
             : juce::jlimit (9, std::max (9, w - controlWidth - 9),
                 nodePoint (selected_).x - controlWidth / 2);
-        const int baseY = graph_.getBottom() - controlHeight - (h < 400 ? 3 : 19);
-        panel_ = { baseX, std::max (graph_.getY() + 6, baseY),
-                   controlWidth, controlHeight };
+        // Anchor by the selected node (Pro-Q editing pattern), never as
+        // a fixed bottom sheet. Score BOTH sides against other active nodes;
+        // the panel must not hide a band even at extremely short heights.
+        const int topLimit = graph_.getY() + 8;
+        const int bottomLimit = std::max (topLimit,
+            graph_.getBottom() - controlHeight - 29);
+        const int nodeY = selected_ < 0 ? graph_.getCentreY()
+                                        : nodePoint (selected_).y;
+        const int below = std::clamp (nodeY + 35, topLimit, bottomLimit);
+        const int above = std::clamp (nodeY - controlHeight - 35,
+                                      topLimit, bottomLimit);
+        const auto penalty = [this, baseX, controlWidth, controlHeight,
+                              nodeY] (int y)
+        {
+            int score = std::abs (y - nodeY) / 8;
+            juce::Rectangle<int> rect (baseX, y, controlWidth, controlHeight);
+            for (int band = 0; band < kMaxBands; ++band)
+            {
+                if (! param (parameterIndex (band, BandParameterOffset::Enabled))
+                           ->getBool())
+                    continue;
+                if (rect.expanded (10).contains (nodePoint (band)))
+                    score += band == selected_ ? 10000 : 2000;
+            }
+            return score;
+        };
+        const int baseY = penalty (below) <= penalty (above) ? below : above;
+        panel_ = { baseX, baseY, controlWidth, controlHeight };
         const int px = panel_.getX(), py = panel_.getY();
-        bandPower_.setBounds (px + 8, py + 9, 31, 30);
-        shape_.setBounds (px + 44, py + 9,
-                          phone ? 83 : 98, 30);
-        slope_.setBounds (px + (phone ? 131 : 147), py + 9,
-                          phone ? 91 : 110, 30);
-        placement_.setBounds (px + controlWidth - (phone ? 146 : 160),
-                              py + 9, phone ? 68 : 80, 30);
-        advanced_.setBounds (px + controlWidth - 79, py + 9, 33, 30);
-        closeBand_.setBounds (px + controlWidth - 41, py + 9, 32, 30);
-        const int sliderY = py + 43;
+        if (narrow)
+        {
+            bandPower_.setBounds (px + 7, py + 7, 34, 30);
+            shape_.setBounds (px + 44, py + 7, 104, 30);
+            slope_.setBounds (px + 7, py + 40, 112, 30);
+            placement_.setBounds (px + 151, py + 7, 75, 30);
+            advanced_.setBounds (px + controlWidth - 73, py + 7, 37, 30);
+            closeBand_.setBounds (px + controlWidth - 34, py + 7, 28, 30);
+            soloHold_.setBounds (px + 123, py + 40, 75, 30);
+            dynamic_.setVisible (false);
+        }
+        else
+        {
+            bandPower_.setBounds (px + 8, py + 9, 31, 30);
+            shape_.setBounds (px + 44, py + 9,
+                              phone ? 83 : 98, 30);
+            slope_.setBounds (px + (phone ? 131 : 147), py + 9,
+                              phone ? 91 : 110, 30);
+            placement_.setBounds (px + controlWidth - (phone ? 146 : 160),
+                                  py + 9, phone ? 68 : 80, 30);
+            advanced_.setBounds (px + controlWidth - 79, py + 9, 33, 30);
+            closeBand_.setBounds (px + controlWidth - 41, py + 9, 32, 30);
+            soloHold_.setBounds (px + (phone ? 232 : 328), py + 9,
+                                 phone ? 64 : 52, 30);
+            dynamic_.setBounds (px + 262, py + 9, 59, 30);
+            dynamic_.setVisible (selected_ >= 0 && ! phone);
+        }
+        const int sliderY = py + (narrow ? 76 : 43);
         const int sliderSpace = controlWidth - 26;
         const int cw = sliderSpace / 3;
-        freq_.setBounds (px + 13, sliderY, cw, controlHeight - 49);
-        gain_.setBounds (px + 13 + cw, sliderY, cw, controlHeight - 49);
+        freq_.setBounds (px + 13, sliderY, cw,
+                         controlHeight - (narrow ? 82 : 49));
+        gain_.setBounds (px + 13 + cw, sliderY, cw,
+                         controlHeight - (narrow ? 82 : 49));
         q_.setBounds (px + 13 + 2 * cw, sliderY,
-                      sliderSpace - 2 * cw, controlHeight - 49);
-        // Touch-safe audition always needs a dedicated hold target.
-        soloHold_.setBounds (px + (phone ? 232 : 328), py + 9,
-                             phone ? 64 : 52, 30);
-        dynamic_.setBounds (px + 262, py + 9, 59, 30);
-        dynamic_.setVisible (selected_ >= 0 && ! phone);
+                      sliderSpace - 2 * cw,
+                      controlHeight - (narrow ? 82 : 49));
         soloHold_.toFront (false);
         curveDirty_ = true;
     }
@@ -626,9 +682,9 @@ private:
         phase_.setButtonText (param (kPhaseModeParameter)->getBool()
                                ? "LINEAR PHASE" : "ZERO LATENCY");
         globalBypass_.setButtonText (param (kGlobalBypassParameter)->getBool()
-                                  ? "BYPASSED" : "POWER ON");
+                                  ? "BYPASS" : (getWidth() < 670 ? "ON" : "POWER ON"));
         autoGain_.setButtonText (param (kOutputAutoGainParameter)->getBool()
-                              ? "AUTO ON" : "AUTO GAIN");
+                              ? "AUTO ON" : (getWidth() < 670 ? "AUTO" : "AUTO GAIN"));
         if (selected_ >= 0)
         {
             freq_.setValue (param (parameterIndex (selected_,
@@ -651,7 +707,7 @@ private:
                     param (placementParameterIndex (selected_))->getChoiceIndex()))));
             const bool by = param (parameterIndex (
                 selected_, BandParameterOffset::Bypass))->getBool();
-            bandPower_.setButtonText (by ? "○" : "●");
+            bandPower_.setButtonText (by ? "OFF" : "ON");
             dynamic_.setButtonText (param (dynamicParameterIndex (
                 selected_, DynamicBandOffset::Enable))->getBool()
                   ? "DYN ON" : "DYN");
