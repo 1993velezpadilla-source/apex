@@ -174,6 +174,74 @@ public:
                                 "apex_precision_c3_real_editor_810x555.png");
                         }
                     }
+                    // Adversarial host integration: this must run through
+                    // the actual JUCE auxiliary stereo bus, NOT the optional
+                    // core pointers that the host might never connect.
+                    beginTest("Precision C3 external sidechain is host-routed and isolated");
+                    {
+                        auto auxLayout=native->getBusesLayout();
+                        const bool hasAux=auxLayout.inputBuses.size()>1;
+                        expect(hasAux, "C3 must publish a real auxiliary input bus");
+                        if(hasAux)
+                        {
+                            auxLayout.inputBuses.set(1,juce::AudioChannelSet::stereo());
+                            expect(native->isBusesLayoutSupported(auxLayout),
+                                   "JUCE should accept enabled stereo auxiliary detector");
+                            const bool assigned=native->setBusesLayout(auxLayout);
+                            expect(assigned, "host can activate external detector bus");
+                            if(assigned)
+                            {
+                                native->getC3Parameter(APEX::PrecisionC3::ExternalSidechain)
+                                    .setValue(1.0f);
+                                native->getC3Parameter(APEX::PrecisionC3::Threshold)
+                                    .setValue(native->getC3Parameter(
+                                        APEX::PrecisionC3::Threshold).toNormalised(-35.0f));
+                                native->getC3Parameter(APEX::PrecisionC3::Ratio)
+                                    .setValue(native->getC3Parameter(
+                                        APEX::PrecisionC3::Ratio).toNormalised(8.0f));
+                                native->getC3Parameter(APEX::PrecisionC3::Knee)
+                                    .setValue(0.0f);
+                                native->reset();
+                                native->prepareToPlay(48000.0,128);
+
+                                juce::AudioBuffer<float> combined(4,128);
+                                for(int block=0;block<256;++block)
+                                {
+                                    for(int sample=0;sample<128;++sample)
+                                    {
+                                        combined.setSample(0,sample,0.6f);
+                                        combined.setSample(1,sample,0.6f);
+                                        combined.setSample(2,sample,0.0001f);
+                                        combined.setSample(3,sample,0.0001f);
+                                    }
+                                    native->processBlock(combined,midi);
+                                }
+                                expect(native->externalSidechainRouted(),
+                                       "GUI indicates external key is actually routed");
+                                expectWithinAbsoluteError(
+                                    (double)combined.getSample(0,127),0.6,1.e-3,
+                                    "silent external key must not compress loud main input");
+                                expectWithinAbsoluteError(
+                                    (double)combined.getSample(2,127),0.0001,1.e-8,
+                                    "auxiliary detector input must remain read-only");
+
+                                native->getC3Parameter(APEX::PrecisionC3::ExternalSidechain)
+                                    .setValue(0.0f);
+                                native->reset();
+                                for(int block=0;block<256;++block)
+                                {
+                                    for(int sample=0;sample<128;++sample)
+                                    {
+                                        combined.setSample(0,sample,0.6f);
+                                        combined.setSample(1,sample,0.6f);
+                                    }
+                                    native->processBlock(combined,midi);
+                                }
+                                expect(combined.getSample(0,127)<0.25f,
+                                       "switching to internal key must reduce main level");
+                            }
+                        }
+                    }
                     native->releaseResources();
                 }
             }
