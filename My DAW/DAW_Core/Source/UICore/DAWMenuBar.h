@@ -5,6 +5,7 @@
 #include "../CommandCore/CommandManager.h"
 #include "../ActionCore/ActionID.h"
 #include "../KeyBindingCore/KeyBindingManager.h"
+#include "ApexContextMenuStyle.h"
 
 namespace DAW {
 
@@ -506,6 +507,20 @@ private:
                 if (item.label == "Reset Project...")
                     continue;
 
+                // Two instantly accessible settings actions, with a live
+                // checkmark reflecting the persisted global context-menu mode.
+                if (item.label.startsWith("Right-click Menu:"))
+                {
+                    juce::PopupMenu::Item pi(item.label);
+                    const auto mode = ApexContextMenuStyle::get().getMode();
+                    pi.isTicked = item.label.endsWith("Radial Wheel")
+                        ? mode == ApexContextMenuStyle::Mode::Radial
+                        : mode == ApexContextMenuStyle::Mode::Classic;
+                    pi.isEnabled = item.action != nullptr;
+                    pi.action = item.action;
+                    pm.addItem(pi);
+                    continue;
+                }
                 if (item.label == "Interface: Standard")
                 {
                     juce::PopupMenu::Item pi("Interface: Standard");
