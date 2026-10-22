@@ -47,6 +47,45 @@ int main()
     assert(voicedOutput > voicedInput * 0.75);
     assert(voicedOutput < voicedInput * 1.25);
 
+    // Focus mode must reduce persistent cricket tones, without introducing
+    // non-finite samples, changing duration, or muting the sung fundamental.
+    // Profile learning is intentionally challenged by a small chorus of
+    // simultaneous high pitched tonal components beneath the same vocal.
+    std::vector<float> mixed(count), focused(count), broad(count), untouched(count);
+    for (int i = 0; i < count; ++i)
+    {
+        const double t = (double)i / sampleRate;
+        const float vocal = t >= 0.4 && t < 1.7
+            ? 0.20f * (float)std::sin(tau * 247.0 * t)
+            : 0.0f;
+        const float insects = 0.025f * (float)std::sin(tau * 4180.0 * t)
+                            + 0.017f * (float)std::sin(tau * 6170.0 * t);
+        mixed[(size_t)i] = vocal + insects;
+    }
+    VoiceCleanerDspCore::Options settings;
+    settings.strength = 0.85f;
+    settings.voiceProtection = 0.82f;
+    settings.focus = VoiceCleanerDspCore::Focus::Crickets;
+    assert(VoiceCleanerDspCore::process(mixed.data(), focused.data(), count,
+                                       sampleRate, settings));
+    settings.focus = VoiceCleanerDspCore::Focus::Broadband;
+    assert(VoiceCleanerDspCore::process(mixed.data(), broad.data(), count,
+                                       sampleRate, settings));
+    settings.strength = 0.0f;
+    assert(VoiceCleanerDspCore::process(mixed.data(), untouched.data(), count,
+                                       sampleRate, settings));
+    assert(untouched == mixed);
+    for (const auto& sample : focused)
+        assert(std::isfinite(sample));
+    // Quiet gap: learned cricket profile suppresses the noise.
+    const double dirtyGap = energy(mixed, 2000, 14500);
+    const double focusGap = energy(focused, 2000, 14500);
+    std::cout << "focused-crickets " << dirtyGap << " -> " << focusGap << "\\n";
+    assert(focusGap < dirtyGap * 0.85);
+    // Speech should remain readily audible even during strong cricket focus.
+    assert(energy(focused, 26000, 50000) >
+           energy(mixed, 26000, 50000) * 0.60);
+
     // Silence, one-sample input, bad args, and non-overrun tail frames.
     std::vector<float> silence(8192, 0.f), result(silence.size(), 99.f);
     assert(VoiceCleanerDspCore::process(silence.data(), result.data(), 8192, sampleRate));
