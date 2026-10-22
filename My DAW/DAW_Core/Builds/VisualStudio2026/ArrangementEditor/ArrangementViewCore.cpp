@@ -5576,13 +5576,18 @@ namespace ArrangementEditor
                 const int version = requestedVersion;
                 const auto base = original;
                 const auto settings = currentOptions();
+                const int key = currentProfileKey();
+                const auto cachedWet = key == wetProfileKey ? wetProfile : nullptr;
                 const juce::Component::SafePointer<VoiceCleanerPanel> safePanel(this);
 
-                // One worker at a time. If the knob changes mid-render, this
-                // result is discarded and the latest settings are processed.
-                std::thread([base, settings, version, safePanel]()
+                // Learn+clean once for a given Focus/Protect profile. Moving
+                // ONLY Amount then blends immutable dry and 100%-wet arrays
+                // on a worker, so touch adjustments do NOT repeat FFT work.
+                // The offline Apply uses the identical dry/wet DSP law.
+                std::thread([base, settings, key, cachedWet, version, safePanel]()
                 {
                     DAW::AudioFileManager::PreparedAudio result;
+                    std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wet = cachedWet;
                     juce::String error;
                     try
                     {
@@ -5593,22 +5598,42 @@ namespace ArrangementEditor
                             error = "Preview source unavailable";
                         else
                         {
-                            auto decoded = std::make_shared<DAW::AudioFileManager::CachedAudio>();
-                            decoded->sampleRate = base->sampleRate;
-                            decoded->buffer.setSize(channels, samples);
-                            for (int ch = 0; ch < channels; ++ch)
+                            if (!wet)
                             {
-                                if (!VoiceCleanerDspCore::process(
-                                        in.getReadPointer(ch),
-                                        decoded->buffer.getWritePointer(ch),
-                                        samples, base->sampleRate, settings))
+                                auto decodedWet = std::make_shared<DAW::AudioFileManager::CachedAudio>();
+                                decodedWet->sampleRate = base->sampleRate;
+                                decodedWet->buffer.setSize(channels, samples);
+                                auto full = settings;
+                                full.strength = 1.0f;
+                                for (int ch = 0; ch < channels; ++ch)
                                 {
-                                    error = "Cannot preview audio";
-                                    break;
+                                    if (!VoiceCleanerDspCore::process(
+                                            in.getReadPointer(ch),
+                                            decodedWet->buffer.getWritePointer(ch),
+                                            samples, base->sampleRate, full))
+                                    {
+                                        error = "Cannot analyze audition";
+                                        break;
+                                    }
                                 }
+                                if (error.isEmpty())
+                                    wet = std::move(decodedWet);
                             }
-                            if (error.isEmpty())
+
+                            if (error.isEmpty() && wet)
                             {
+                                auto decoded = std::make_shared<DAW::AudioFileManager::CachedAudio>();
+                                decoded->sampleRate = base->sampleRate;
+                                decoded->buffer.setSize(channels, samples);
+                                const auto& filtered = wet->getBufferRef();
+                                for (int ch = 0; ch < channels; ++ch)
+                                {
+                                    const float* dry = in.getReadPointer(ch);
+                                    const float* fx = filtered.getReadPointer(ch);
+                                    float* dst = decoded->buffer.getWritePointer(ch);
+                                    for (int i = 0; i < samples; ++i)
+                                        dst[i] = dry[i] + settings.strength * (fx[i] - dry[i]);
+                                }
                                 result.decodedSource = std::move(decoded);
                                 result.result.success = true;
                                 result.result.sampleRate = base->sampleRate;
@@ -5626,12 +5651,20 @@ namespace ArrangementEditor
                         error = "Preview processing failed";
                     }
                     juce::MessageManager::callAsync(
-                        [safePanel, version, result = std::move(result), error]() mutable
+                        [safePanel, version, key, wet = std::move(wet),
+                         result = std::move(result), error]() mutable
                         {
                             if (safePanel != nullptr)
-                                safePanel->finishPreview(version, std::move(result), error);
+                                safePanel->finishPreview(version, key, std::move(wet),
+                                                         std::move(result), error);
                         });
                 }).detach();
+            }
+
+            int currentProfileKey() const
+            {
+                return focus.getSelectedId() * 2
+                    + (protect.getToggleState() ? 1 : 0);
             }
 
             VoiceCleanerDspCore::Options currentOptions() const
@@ -5648,10 +5681,20 @@ namespace ArrangementEditor
                 return options;
             }
 
-            void finishPreview(int version, DAW::AudioFileManager::PreparedAudio prepared,
+            void finishPreview(
+                               int version, int profileKey,
+                               std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wet,
+                               DAW::AudioFileManager::PreparedAudio prepared,
                                const juce::String& error)
             {
                 rendering = false;
+                // A knob-only change can reuse the expensive spectral
+                // analysis even when its audition version went stale.
+                if (wet && profileKey == currentProfileKey())
+                {
+                    wetProfile = std::move(wet);
+                    wetProfileKey = profileKey;
+                }
                 if (version != requestedVersion || bypass.getToggleState()
                     || amount.getValue() <= 0.0)
                 {
@@ -5693,6 +5736,8 @@ namespace ArrangementEditor
             juce::Uuid clipUuid;
             juce::String engineId;
             DAW::AudioFileManager::CachedAudioHandle original, previewPublished;
+            std::shared_ptr<const DAW::AudioFileManager::CachedAudio> wetProfile;
+            int wetProfileKey = -1;
             juce::String previewError;
             int requestedVersion = 0;
             bool previewPending = false;
