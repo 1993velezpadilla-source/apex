@@ -2685,7 +2685,10 @@ namespace ArrangementEditor
                         for (const auto& entry : before)
                             if (auto* c = view.m_clipState.findClip(entry.first))
                             {
-                                c->gain = juce::jlimit(0.0f, 4.0f, entry.second * multiplier);
+                                c->gain = juce::jlimit(0.0f, 4.0f,
+                                    entry.second > 0.0f
+                                        ? entry.second * multiplier
+                                        : juce::Decibels::decibelsToGain((float)knob.getValue(), -60.0f));
                                 c->bumpWaveformVisualVersion();
                                 view.m_clipState.updateClip(*c);
                                 view.syncClipToEngine(*c);
