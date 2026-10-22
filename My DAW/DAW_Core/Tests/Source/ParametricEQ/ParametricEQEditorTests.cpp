@@ -173,6 +173,13 @@ private:
             if (reader != nullptr)
             {
                 expectWithinAbsoluteError (reader->sampleRate, 48000.0, 0.1);
+                // Must EQ the WAV DURING playback, not add nodes after
+                // analyzer recording. This creates a genuine PRE/POST
+                // spectral difference; simply painting purple bins fails.
+                enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+                enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+                processor->setAnalyzerMode (
+                    APEX::Analysis::SpectrumTapMode::Both);
                 juce::AudioBuffer<float> chunk (2, 128);
                 juce::MidiBuffer midi;
                 for (int start = 0; start < totalSamples; start += 128)
@@ -206,6 +213,15 @@ private:
                     expect (editor->maximumMeasuredSpectrumDbForTesting (true)
                                 > -80.0f,
                         "real measured POST bins contain audible EQ audio");
+                    const float pre = editor->measuredSpectrumAtHzForTesting (
+                        false, 784.0f);
+                    const float post = editor->measuredSpectrumAtHzForTesting (
+                        true, 784.0f);
+                    expect (std::isfinite (pre) && std::isfinite (post),
+                            "PRE/POST measured FFT bins are finite");
+                    expect (post > pre + 1.0f,
+                        "930 Hz +8 dB band must boost the real WAV 784 Hz"
+                        " harmonic in measured POST spectrum");
                 }
             }
         }
