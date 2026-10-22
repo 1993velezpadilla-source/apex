@@ -19,10 +19,10 @@ enum ParameterIndex : int
     Character, AutoThreshold, AutoRelease, AutoGain, Bypass, ParameterCount
 };
 
-class HostedParameter final : public juce::AudioProcessorParameterWithID
+class PrecisionC3HostedParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
-    HostedParameter (const char* id, const char* name, float lo, float hi,
+    PrecisionC3HostedParameter (const char* id, const char* name, float lo, float hi,
                      float initial, int steps = 0, const char* unit = "")
         : AudioProcessorParameterWithID (juce::ParameterID (id, 1), name),
           low_(lo), high_(hi), initial_(initial), steps_(steps), unit_(unit)
@@ -180,7 +180,7 @@ public:
     double getTailLengthSeconds() const override { return 0.0; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
-    juce::AudioProcessorParameter* getBypassParameter() const override { return parameters_[Bypass]; }
+    juce::AudioProcessorParameter* getBypassParameter() const override { return precisionParameters_[Bypass]; }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram(int) override {}
@@ -189,7 +189,7 @@ public:
     bool hasEditor() const override { return true; }
     juce::AudioProcessorEditor* createEditor() override;
 
-    HostedParameter& parameter(int index) noexcept { return *parameters_[static_cast<std::size_t>(index)]; }
+    PrecisionC3HostedParameter& getC3Parameter(int index) noexcept { return *precisionParameters_[static_cast<std::size_t>(index)]; }
     float gainReduction() const noexcept { return meterGR_.load(std::memory_order_relaxed); }
     float inputLevel() const noexcept { return meterInput_.load(std::memory_order_relaxed); }
     float outputLevel() const noexcept { return meterOutput_.load(std::memory_order_relaxed); }
@@ -200,7 +200,7 @@ public:
         state.setProperty("schema", 1, nullptr);
         for (int i=0; i<ParameterCount; ++i)
             state.setProperty(juce::Identifier(parameterIds_[static_cast<std::size_t>(i)]),
-                parameters_[static_cast<std::size_t>(i)]->getValue(), nullptr);
+                precisionParameters_[static_cast<std::size_t>(i)]->getValue(), nullptr);
         juce::MemoryOutputStream stream(destination, false);
         state.writeToStream(stream);
     }
@@ -215,23 +215,23 @@ public:
             if (!state.hasProperty(id)) continue;
             const auto normalised=static_cast<float>(state.getProperty(id));
             if (std::isfinite(normalised))
-                parameters_[static_cast<std::size_t>(i)]->setValue(normalised);
+                precisionParameters_[static_cast<std::size_t>(i)]->setValue(normalised);
         }
     }
 private:
     void add (int index, const char* id, const char* name, float lo, float hi,
               float initial, int steps=0, const char* unit="")
     {
-        auto p=std::make_unique<HostedParameter>(id,name,lo,hi,initial,steps,unit);
-        parameters_[static_cast<std::size_t>(index)]=p.get();
-        addHostedParameter(std::move(p));
+        auto p=std::make_unique<PrecisionC3HostedParameter>(id,name,lo,hi,initial,steps,unit);
+        precisionParameters_[static_cast<std::size_t>(index)]=p.get();
+        addPrecisionC3HostedParameter(std::move(p));
     }
     Parameters readParameters() const noexcept
     {
         auto value=[this](int index) noexcept
         {
             return static_cast<double>(
-                parameters_[static_cast<std::size_t>(index)]->getUnits());
+                precisionParameters_[static_cast<std::size_t>(index)]->getUnits());
         };
         Parameters p;
         p.thresholdDb=value(Threshold);
@@ -264,7 +264,7 @@ private:
         "c3.style","c3.character","c3.autothr","c3.autorel",
         "c3.autogain","c3.bypass"
     }};
-    std::array<HostedParameter*,ParameterCount> parameters_ {};
+    std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
     std::atomic<float> meterGR_ {0.0f};
     std::atomic<float> meterInput_ {-120.0f};
