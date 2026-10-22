@@ -245,6 +245,11 @@ namespace ArrangementEditor
         // Any multi-finger navigation invalidates an outstanding selected
         // region tap. Read only from the UI/message thread.
         std::uint64_t getTouchGestureEpoch() const noexcept { return m_touchGestureEpoch; }
+        // ClipRenderCore owns taps on audio regions. Cancel previous inertial
+        // scrolling immediately on DOWN, before selection listeners rebuild
+        // renderers; a stationary selection must never fling the timeline.
+        void stopTouchMomentumOnClipPress() noexcept;
+        void finishUnselectedClipTouchPan() noexcept;
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
         // ── Diagnostics / benchmark access ──────────────────────────────────
