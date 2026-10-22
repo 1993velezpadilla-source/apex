@@ -14,10 +14,10 @@ enum Parameter : int
     TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, Count
 };
 
-class HostedParameter final : public juce::AudioProcessorParameterWithID
+class LimiterHostedParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
-    HostedParameter(juce::ParameterID id, juce::String name,
+    LimiterHostedParameter(juce::ParameterID id, juce::String name,
                     float low, float high, float initial, int steps = 0)
         : juce::AudioProcessorParameterWithID(id,name), low_(low),high_(high),
           default_(initial), steps_(steps), value_(toNormal(initial)) {}
@@ -134,8 +134,8 @@ public:
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
     float meterInput() const noexcept { return peakInput_.load(std::memory_order_relaxed); }
     float meterOutput() const noexcept { return peakOutput_.load(std::memory_order_relaxed); }
-    HostedParameter& parameter(int i) noexcept { return *parameters_[static_cast<size_t>(i)]; }
-    juce::AudioProcessorParameter* getBypassParameter() const override { return parameters_[Bypass]; }
+    LimiterHostedParameter& getLimiterParameter(int i) noexcept { return *limiterParameters_[static_cast<size_t>(i)]; }
+    juce::AudioProcessorParameter* getBypassParameter() const override { return limiterParameters_[Bypass]; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0; }
@@ -153,7 +153,7 @@ public:
         tree.setProperty("version",1,nullptr);
         for (int i=0;i<Count;++i)
             tree.setProperty(juce::Identifier(ids()[static_cast<size_t>(i)]),
-                             parameters_[static_cast<size_t>(i)]->getValue(),nullptr);
+                             limiterParameters_[static_cast<size_t>(i)]->getValue(),nullptr);
         juce::MemoryOutputStream output(data,false);
         tree.writeToStream(output);
     }
@@ -168,7 +168,7 @@ public:
             if (!tree.hasProperty(id)) continue;
             const float v=static_cast<float>(tree.getProperty(id));
             if (std::isfinite(v))
-                parameters_[static_cast<size_t>(i)]->setValue(v);
+                limiterParameters_[static_cast<size_t>(i)]->setValue(v);
         }
     }
 private:
@@ -183,29 +183,29 @@ private:
     }
     void add(int i,const char* id,const char* name,float low,float high,float value,int steps=0)
     {
-        auto p=std::make_unique<HostedParameter>(juce::ParameterID(id,1),name,low,high,value,steps);
-        parameters_[static_cast<size_t>(i)]=p.get();
-        addHostedParameter(std::move(p));
+        auto p=std::make_unique<LimiterHostedParameter>(juce::ParameterID(id,1),name,low,high,value,steps);
+        limiterParameters_[static_cast<size_t>(i)]=p.get();
+        addLimiterHostedParameter(std::move(p));
     }
     Settings readSettings() const noexcept
     {
         Settings s;
-        s.gainDb=parameters_[Gain]->units();
-        s.ceilingDb=parameters_[Ceiling]->units();
-        s.lookaheadMs=parameters_[Lookahead]->units();
-        s.attackMs=parameters_[Attack]->units();
-        s.releaseMs=parameters_[Release]->units();
-        s.channelLink=parameters_[ChannelLink]->units()/100.0;
-        s.style=static_cast<int>(parameters_[LimitingStyle]->units());
-        s.truePeak=parameters_[TruePeak]->units()>0.5f;
-        s.detectorQuality=static_cast<int>(parameters_[DetectorQuality]->units());
-        s.bypass=parameters_[Bypass]->units()>0.5f;
-        s.unityGain=parameters_[UnityGain]->units()>0.5f;
-        s.audition=parameters_[Audition]->units()>0.5f;
-        s.dcFilter=parameters_[DcFilter]->units()>0.5f;
+        s.gainDb=limiterParameters_[Gain]->units();
+        s.ceilingDb=limiterParameters_[Ceiling]->units();
+        s.lookaheadMs=limiterParameters_[Lookahead]->units();
+        s.attackMs=limiterParameters_[Attack]->units();
+        s.releaseMs=limiterParameters_[Release]->units();
+        s.channelLink=limiterParameters_[ChannelLink]->units()/100.0;
+        s.style=static_cast<int>(limiterParameters_[LimitingStyle]->units());
+        s.truePeak=limiterParameters_[TruePeak]->units()>0.5f;
+        s.detectorQuality=static_cast<int>(limiterParameters_[DetectorQuality]->units());
+        s.bypass=limiterParameters_[Bypass]->units()>0.5f;
+        s.unityGain=limiterParameters_[UnityGain]->units()>0.5f;
+        s.audition=limiterParameters_[Audition]->units()>0.5f;
+        s.dcFilter=limiterParameters_[DcFilter]->units()>0.5f;
         return s;
     }
-    std::array<HostedParameter*,Count> parameters_ {};
+    std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
     Core core_;
     std::atomic<float> gainReduction_{0},peakInput_{0},peakOutput_{0};
 };
