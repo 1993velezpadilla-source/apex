@@ -69,6 +69,38 @@ public:
         g.drawLine(from,cy,sliderPos,cy,2.4f);
         g.fillEllipse(sliderPos-3.2f,cy-3.2f,6.4f,6.4f);
     }
+
+    void drawButtonBackground(juce::Graphics& g, juce::Button& b,
+                              const juce::Colour& background,
+                              bool hovered, bool down) override
+    {
+        auto box=b.getLocalBounds().toFloat().reduced(0.6f);
+        const auto base=background.isTransparent()
+            ? juce::Colour(0xff2a272b) : background;
+        g.setColour(hovered ? base.brighter(0.13f) : base);
+        g.fillRoundedRectangle(box,3.0f);
+        g.setColour(down ? juce::Colour(0xffffca65)
+                         : juce::Colour(0xff51494e));
+        g.drawRoundedRectangle(box,3.0f,1.0f);
+    }
+    void drawComboBox(juce::Graphics& g,int width,int height,bool isDown,
+                      int,int,int,int,juce::ComboBox&) override
+    {
+        g.setColour(juce::Colour(0xff302c30));
+        g.fillRoundedRectangle(0.5f,0.5f,(float)width-1.0f,
+                                (float)height-1.0f,4.0f);
+        g.setColour(isDown ? juce::Colour(0xffffca65)
+                           : juce::Colour(0xff5c5154));
+        g.drawRoundedRectangle(0.5f,0.5f,(float)width-1.0f,
+                                (float)height-1.0f,4.0f,1.0f);
+        const float ax=(float)width-19.0f, ay=height*0.5f;
+        juce::Path arrow;
+        arrow.startNewSubPath(ax-5.0f,ay-2.0f);
+        arrow.lineTo(ax,ay+3.0f);
+        arrow.lineTo(ax+5.0f,ay-2.0f);
+        g.setColour(juce::Colour(0xffe4b94e));
+        g.strokePath(arrow,juce::PathStrokeType(1.5f));
+    }
 };
 
 class Editor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -92,6 +124,13 @@ public:
             setupSlider(utilities_[static_cast<std::size_t>(i)],
                         kUtilityParams[static_cast<std::size_t>(i)],false,true);
 
+        for(auto* combo : {&style_,&character_,&preset_})
+        {
+            combo->setColour(juce::ComboBox::textColourId,juce::Colour(0xffebdfc3));
+            combo->setColour(juce::ComboBox::backgroundColourId,juce::Colour(0xff302c30));
+            combo->setColour(juce::ComboBox::outlineColourId,juce::Colour(0xff585155));
+            combo->setColour(juce::ComboBox::arrowColourId,juce::Colour(0xffecc15e));
+        }
         style_.setTooltip("Compression topology and voicing");
         for(int i=0;i<14;++i)
             style_.addItem(kStyleNames[static_cast<std::size_t>(i)],i+1);
@@ -541,6 +580,8 @@ private:
         g.drawText("STEREO LINK",20,548,130,18,juce::Justification::centred);
         g.drawText("HP FREQUENCY",20,631,130,17,juce::Justification::centred);
         g.drawText("LOW-PASS",230,635,160,14,juce::Justification::centred);
+        g.drawText("INPUT TRIM",742,635,145,14,juce::Justification::centred);
+        g.drawText("OUTPUT TRIM",891,635,120,14,juce::Justification::centred);
         g.drawText("CHARACTER",425,627,153,20,juce::Justification::centred);
 
         const float top=539.0f,bottom=639.0f;
@@ -592,7 +633,7 @@ private:
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("LIVE DETECTOR FILTER • DRAG RED HP / GREEN LP",170,523,795,16,
                    juce::Justification::centredLeft);
-        g.drawText("2 FILTERS ACTIVE  /  6-BAND EQ NOT YET IMPLEMENTED",583,670,426,17,
+        g.drawText("2 FILTERS ACTIVE  /  6-BAND EQ NOT YET IMPLEMENTED",580,685,426,15,
                    juce::Justification::centredRight);
     }
 
@@ -602,7 +643,7 @@ private:
         g.setColour(juce::Colour(0xff3b353b));g.drawHorizontalLine(703,0,1080);
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.setColour(juce::Colour(0xffa59aa0));
-        g.drawText("MIDI LEARN • Host automation",16,710,205,21,juce::Justification::left);
+        g.drawText("HOST PARAMETER AUTOMATION",16,710,205,21,juce::Justification::left);
         g.drawText("Oversampling: Off (pending)",242,710,180,21,juce::Justification::left);
         g.drawText("Lookahead: Off (pending)",458,710,183,21,juce::Justification::left);
         g.drawText("PRECISION  /  APEX NATIVE",654,710,236,21,juce::Justification::right);
