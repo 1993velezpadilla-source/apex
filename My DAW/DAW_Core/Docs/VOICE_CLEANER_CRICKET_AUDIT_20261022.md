@@ -26,6 +26,20 @@ APEX is a Windows/JUCE DAW with an *offline* per-clip Voice Cleaner already inte
 - Tonal cricket mode derives a spectral ridge confidence map only from quiet learn frames above 1.1 kHz and emphasizes attenuation in those noise-dominated bins; soft mask floors, frame smoothing and voice-detail preservation avoid hard gating.
 - Source WAV never overwritten. Batch remains all-or-nothing and undoable. 5-minute-per-source safety cap currently retained. This is **not** an APEX real-time native insert or neural model yet.
 
+## Live playback audition (follow-up)
+
+The first PR prototype was *offline-Apply only*. Now the Voice Cleaner callout supports **preview while the DAW plays**: play/stop/seek are owned by the normal APEX transport; the panel neither starts nor interrupts the transport. The Amount knob, Focus and Protect controls re-render/update the in-memory audition of the target clip, and **Bypass / compare dry** temporarily restores the unprocessed cached audio so the user can hear before/after. Closing, cancelling or applying restores the original cached clip first.
+
+### Design and latency
+
+- APEX's existing spectral denoiser is an **offline STFT**, not a low-latency streaming neural VST3. Do **not** execute FFT or allocate buffers in the realtime audio callback.
+- First audition pass builds an immutable **100%-wet noise profile** on a background worker. Moving only the Amount knob then **mixes dry and wet samples on a worker** with bounded 125-ms GUI coalescing; no repeated FFT is needed for knob-only gestures. Changing Focus/Protect regenerates the wet profile. APEX's final Apply uses the exact same dry/wet law and therefore corresponds to the preview setting.
+- Prepared audio is published from the JUCE message thread via `AudioFileManager::publishPreparedForClip`. `AudioEngine` already checks the cache generation at the start of each audio block; it will pick up the new source **without pausing playback**.
+- Previews affect the **anchor clip only** when multiple clips are selected; **Apply** still uses the existing multi-clip, one-Undo transaction. This avoids allocating and publishing N simultaneous full recordings for a 20-clip selection. Show this scope honestly in the UI.
+- The first render may require appreciable time for very long clips, and Amount updates are **not sample-instantaneous**, unlike native realtime Waves Clarity Vx. An authentic streaming denoiser, smooth crossfading at source-cache replacement and physical CPU measurements are separate release milestones. The temporary preview currently supports up to 5-minute mono/stereo sources, consistent with offline Apply.
+- Source WAV, model source path and undo history remain unchanged until **Apply**. The previous AudioFileManager snapshot is restored on Bypass, Cancel, popup dismissal and before Apply. If another edit replaces the clip cache during preview, the panel refuses to overwrite it.
+- Never ship or describe this mode as certified realtime Waves Clarity equivalence without audible no-click/no-dropout Lenovo smoke tests, buffer-size tests (48 kHz / 128), multiple repeated changes during playback, and matching preview-vs-Apply test.
+
 ## Release gates / conservative listening gauntlet
 1. **Compilation:** Windows Release + Debug, Touch portable and plug-in-host regressions green. Verify JUCE CallOutBox on Lenovo.
 2. **Synthetic:** bit-identical 0% bypass; two simultaneous narrow cricket tones mixed under vowel (220–300 Hz); no NaNs; voice energy retained; quiet-gap attenuation significant.
