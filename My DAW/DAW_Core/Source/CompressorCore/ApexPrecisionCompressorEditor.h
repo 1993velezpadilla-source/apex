@@ -150,6 +150,17 @@ public:
         };
         addAndMakeVisible(triggerSource_);
 
+        charPrePost_.setTooltip("Route original character saturation before or after compression");
+        charPrePost_.onClick=[this] {
+            rememberUndo();
+            auto& p=processor_.getC3Parameter(CharacterPre);
+            p.beginChangeGesture();
+            p.setValueNotifyingHost(p.getValue() >= 0.5f ? 0.0f : 1.0f);
+            p.endChangeGesture();
+            updateCharacterRouting();
+        };
+        addAndMakeVisible(charPrePost_);
+
         constexpr std::array<const char*,4> buttonNames {
             "AUTO THRESHOLD","AUTO RELEASE","AUTO GAIN","BYPASS"
         };
@@ -308,6 +319,7 @@ public:
         // Style and Character belong to the center Dynamics control cluster,
         // not inside the detector EQ. Both remain usable if SC is collapsed.
         character_.setBounds(rect(407,420,128,29));
+        charPrePost_.setBounds(rect(407,455,128,26));
         aB_.setBounds(rect(455,9,91,29));
         copy_.setBounds(rect(551,9,59,29));
         undo_.setBounds(rect(349,9,58,29));
@@ -738,6 +750,15 @@ private:
                         on ? juce::Colour(0xffffda7a) : juce::Colour(0xffb6adb0));
         }
     }
+    void updateCharacterRouting()
+    {
+        const bool pre=processor_.getC3Parameter(CharacterPre).getUnits() >= 0.5f;
+        charPrePost_.setButtonText(pre ? "CHARACTER   PRE" : "CHARACTER   POST");
+        charPrePost_.setColour(juce::TextButton::buttonColourId,
+            pre ? juce::Colour(0xff564425) : juce::Colour(0xff302a30));
+        charPrePost_.setColour(juce::TextButton::textColourOffId,
+            pre ? juce::Colour(0xffffd169) : juce::Colour(0xffd2b879));
+    }
     void syncControls()
     {
         for(int i=0;i<6;++i)
@@ -760,6 +781,7 @@ private:
             processor_.getC3Parameter(ExternalSidechain).getUnits()),
             juce::dontSendNotification);
         refreshToggleColours();
+        updateCharacterRouting();
     }
     void timerCallback() override
     {
@@ -786,6 +808,7 @@ private:
             processor_.getC3Parameter(ExternalSidechain).getUnits()),
             juce::dontSendNotification);
         refreshToggleColours();
+        updateCharacterRouting();
         repaint();
     }
 
@@ -795,7 +818,7 @@ private:
     std::array<juce::Slider,4> minis_{};
     std::array<juce::Slider,5> utilities_{};
     std::array<juce::TextButton,4> toggles_{};
-    juce::TextButton scToggle_,aB_,copy_,undo_,redo_;
+    juce::TextButton scToggle_,aB_,copy_,undo_,redo_,charPrePost_;
     juce::ComboBox style_,character_,preset_,triggerSource_;
     std::array<Snapshot,2> snapshots_{};
     Snapshot undoState_{},redoState_{};
