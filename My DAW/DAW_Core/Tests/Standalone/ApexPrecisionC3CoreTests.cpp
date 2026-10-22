@@ -242,6 +242,75 @@ int main()
             difference+=std::abs(a[i]-b[i]);
         assert(difference>1.0); // distinct saturation order changes signal
     }
+
+    // Adversarial side-chain EQ: each of the four bell bands must change
+    // actual gain reduction when detector energy falls in its pass band.
+    // An EQ graph with merely decorative nodes MUST fail this contract.
+    for(int band=0;band<4;++band)
+    {
+        const double frequencies[]={130.0,680.0,2700.0,9300.0};
+        Parameters flat,boost,cut;
+        flat.thresholdDb=-30.0;flat.ratio=8.0;flat.kneeDb=0.0;
+        flat.attackMs=1.0;flat.releaseMs=80.0;
+        boost=flat;cut=flat;
+        boost.sidechainBells[static_cast<std::size_t>(band)].gainDb=15.0;
+        cut.sidechainBells[static_cast<std::size_t>(band)].gainDb=-15.0;
+        boost.sidechainBells[static_cast<std::size_t>(band)].q=3.0;
+        cut.sidechainBells[static_cast<std::size_t>(band)].q=3.0;
+        Core eFlat,eBoost,eCut;
+        eFlat.prepare(48000);eBoost.prepare(48000);eCut.prepare(48000);
+        eFlat.setParameters(flat);eBoost.setParameters(boost);eCut.setParameters(cut);
+        constexpr int chunk=128,total=32768;
+        std::vector<float> dry(total,0.5f),hot(total,0.5f),cold(total,0.5f);
+        std::vector<float> detector(total);
+        for(int i=0;i<total;++i)
+            detector[static_cast<std::size_t>(i)]=static_cast<float>(0.07
+                *std::sin(6.283185307179586*frequencies[band]*i/48000.0));
+        for(int i=0;i<total;i+=chunk)
+        {
+            eFlat.process(dry.data()+i,nullptr,chunk,detector.data()+i);
+            eBoost.process(hot.data()+i,nullptr,chunk,detector.data()+i);
+            eCut.process(cold.data()+i,nullptr,chunk,detector.data()+i);
+        }
+        // Strong positive bell sensitizes detector, negative bell protects it.
+        assert(eBoost.getGainReductionDb()>eFlat.getGainReductionDb()+1.0);
+        assert(eCut.getGainReductionDb()<eFlat.getGainReductionDb()-1.0);
+        assert(std::isfinite(hot.back()) && std::isfinite(cold.back()));
+    }
+    // Six-filter bypass state remains neutral when the four bells are zero.
+    {
+        Parameters normal,zeroed;
+        normal.sidechainHighpassHz=85.0;
+        normal.sidechainLowpassHz=6800.0;
+        zeroed=normal;
+        for(auto& bell:zeroed.sidechainBells)
+        {
+            bell.gainDb=0.0;bell.q=18.0; // Q must not affect zero gain
+        }
+        Core a,b;
+        a.prepare(48000);b.prepare(48000);
+        a.setParameters(normal);b.setParameters(zeroed);
+        std::vector<float> left(4096),right(4096);
+        for(int i=0;i<4096;++i)
+            left[static_cast<std::size_t>(i)]
+                =right[static_cast<std::size_t>(i)]
+                =static_cast<float>(0.21*std::sin(i*.077));
+        processConstant(a,left,64);processConstant(b,right,512);
+        for(std::size_t i=0;i<left.size();++i)
+            assert(std::abs(left[i]-right[i])<1.e-6f);
+    }
+    // Bell parameters must remain finite when automated to hostile values.
+    {
+        Core e;Parameters p;
+        p.sidechainBells[0].hz=std::numeric_limits<double>::quiet_NaN();
+        p.sidechainBells[1].gainDb=std::numeric_limits<double>::infinity();
+        p.sidechainBells[2].q=-500;
+        p.sidechainBells[3]={1.e20,-1.e20,1.e20};
+        e.prepare(8000);e.setParameters(p);
+        std::vector<float> test(4096,0.35f);
+        processConstant(e,test,1);
+        for(float v:test) assert(std::isfinite(v));
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
