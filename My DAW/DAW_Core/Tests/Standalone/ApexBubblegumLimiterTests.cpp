@@ -88,6 +88,21 @@ static void testBlockSizeIndependence()
     for(size_t i=0;i<whole.size();++i)
         assert(std::abs(whole[i]-split[i])<1.0e-6);
 }
+static void testBypassIsTrulyDryAndLatencyAligned()
+{
+    Core core; core.prepare(kRate);
+    Settings p; p.gainDb=25.0; p.ceilingDb=-8.0;
+    p.dcFilter=true; p.bypass=true;
+    core.setSettings(p); core.reset();
+    auto original=signal(12000,0.8), output=original;
+    core.process(output.data(),nullptr,static_cast<int>(output.size()));
+    const int delay=core.latencySamples();
+    for (int i=0;i<static_cast<int>(output.size());++i)
+    {
+        const float expected=i>=delay?original[static_cast<size_t>(i-delay)]:0.0f;
+        assert(std::abs(output[static_cast<size_t>(i)]-expected)<1.0e-6f);
+    }
+}
 static void testParameterSanitisation()
 {
     Settings p;
@@ -95,11 +110,12 @@ static void testParameterSanitisation()
     p.ceilingDb=200;
     p.attackMs=-400;
     p.channelLink=-10;
+    p.releaseLink=42;
     p.style=500;
     p.detectorQuality=100;
     p=Settings::sanitized(p);
     assert(p.gainDb==0 && p.ceilingDb==0);
-    assert(p.attackMs>=0.01 && p.channelLink==0);
+    assert(p.attackMs>=0.01 && p.channelLink==0 && p.releaseLink==1);
     assert(p.style==7 && p.detectorQuality==3);
 }
 static void testReset()
@@ -118,6 +134,7 @@ int main()
     testParameterSanitisation();
     testSilenceAndCorruptInputs();
     testNoUnwantedGainBelowCeiling();
+    testBypassIsTrulyDryAndLatencyAligned();
     testBlockSizeIndependence();
     testReset();
     for (const int block : {1,17,64,128,257,1024})
