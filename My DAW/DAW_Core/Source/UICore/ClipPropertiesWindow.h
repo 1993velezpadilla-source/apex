@@ -1063,6 +1063,10 @@ public:
 
     Clip* getClip() const noexcept { return clip_; }
 
+    // Public message-thread synchronization for external menu-driven edits.
+    // Preserve the current clip and embedded automation state.
+    void refreshFromEngineState() { refresh(); repaint(); }
+
     void setKnownPlugins(const juce::KnownPluginList* list)
     {
         knownPlugins_ = list;
