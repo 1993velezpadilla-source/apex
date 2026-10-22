@@ -1408,7 +1408,7 @@ public:
                 return;
             }
 
-            owner_.selectBand (hit);
+            owner_.selectBand (hit, true);
             dragging_ = true;
             dragBand_ = hit;
             auto* frequency = processor_.getParametricEQParameter (parameterIndex (
@@ -1616,15 +1616,9 @@ public:
                 frequencyParameter->toNormalised (frequency));
             gainParameter->setValueNotifyingHost (
                 gainParameter->toNormalised (gain));
-            // All layout computations are GUI-thread-only. Relocate the
-            // floating HUD at most 30Hz while a node moves so its old
-            // position cannot swallow the next pointer gesture.
-            const auto now = juce::Time::getMillisecondCounter();
-            if (now - lastHudRelayoutMs_ >= 33)
-            {
-                owner_.resized();
-                lastHudRelayoutMs_ = now;
-            }
+            // Keep the graph geometry fixed for the ENTIRE live drag;
+            // the selected-band strip is shown/repositioned on mouseUp.
+            // Analyzer and curve response still repaint at the graph timer.
         }
     }
 
@@ -3409,7 +3403,7 @@ void ParametricEQEditor::setViewMode (int mode)
     graph_->setViewMode (mode);
 }
 
-void ParametricEQEditor::selectBand (int band)
+void ParametricEQEditor::selectBand (int band, bool deferLayoutUntilPointerUp)
 {
     if (band == selectedBand_)
     {
@@ -3420,7 +3414,10 @@ void ParametricEQEditor::selectBand (int band)
         endAuditionGesture();
     selectedBand_ = band;
     inspector_->refresh();
-    applyLayout();
+    // Selecting an EQ node must not resize or shift the graph while the
+    // finger/mouse is down: otherwise the band jumps away mid-drag.
+    if (! deferLayoutUntilPointerUp)
+        applyLayout();
     graph_->repaint();
 }
 
