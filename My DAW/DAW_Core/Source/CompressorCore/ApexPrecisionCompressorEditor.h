@@ -157,7 +157,7 @@ public:
         g.drawText("APEX   /   PRECISION C3",30,18,570,43,juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff7da0a8));
         g.setFont(juce::Font(juce::FontOptions(13.0f)));
-        g.drawText("DYNAMICS   •   BUBBLEGUM ENGINE",32,56,460,20,
+        g.drawText("DYNAMICS   /   BUBBLEGUM ENGINE",32,56,460,20,
                    juce::Justification::centredLeft);
         g.drawText("CLEAN-ROOM DSP  /  PREVIEW",796,30,246,24,
                    juce::Justification::centredRight);
@@ -171,7 +171,7 @@ public:
         g.drawText("SIDECHAIN / LINK",47,547,350,21,juce::Justification::left);
         g.drawText("STYLE",481,556,111,21,juce::Justification::left);
         g.drawText("CHARACTER",725,556,144,21,juce::Justification::left);
-        g.drawText("APEX  •  DIGITAL DYNAMICS",30,706,500,20,juce::Justification::left);
+        g.drawText("APEX  /  DIGITAL DYNAMICS",30,706,500,20,juce::Justification::left);
 
         constexpr std::array<const char*,15> labels {{
             "THRESHOLD","RATIO","KNEE","RANGE","ATTACK","RELEASE",
@@ -263,7 +263,7 @@ private:
         g.setColour(juce::Colour(0xffa8cbd1));
         g.setFont(juce::Font(juce::FontOptions(12.0f)));
         g.drawText("INPUT / OUTPUT TRANSFER",54,91,346,19,juce::Justification::left);
-        g.drawText("−60 dB",54,237,95,17,juce::Justification::left);
+        g.drawText("-60 dB",54,237,95,17,juce::Justification::left);
         g.drawText("0 dB",733,237,64,17,juce::Justification::right);
 
         const auto gr=juce::jlimit(0.0f,36.0f,processor_.gainReduction());
