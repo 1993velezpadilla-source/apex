@@ -1768,7 +1768,8 @@ namespace ArrangementEditor
             // Each playback pass re-evaluates clips: a gain/limiter adjustment
             // can eliminate previously observed clipping. No stale red marks.
             m_masterPreviewBins.clear();
-            m_playbackClippedClipBins.clear();
+            // Keep old red clips until the playhead REVISITS that same bin.
+            // A safe sample at that position erases just that marker.
         }
         m_masterPreviewWasPlaying = true;
         constexpr double kPreviewHz = 25.0;
@@ -1782,7 +1783,8 @@ namespace ArrangementEditor
             if (bin < previous || bin - previous > 2500)
             {
                 m_masterPreviewBins.clear();
-                m_playbackClippedClipBins.clear();
+                // Seeking does not invalidate historical observed clipping.
+                // Replaying the same time bin safely clears the marker.
             }
         }
         const float l = std::isfinite(leftPeak) ? juce::jlimit(0.0f, 8.0f, leftPeak) : 0.0f;
