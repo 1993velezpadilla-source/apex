@@ -69,6 +69,7 @@ public:
     void runTest() override
     {
         testApexQ4CleanRoomProductionEditor();
+        testManualGraphCreationAndModifierModes();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
@@ -89,6 +90,77 @@ public:
     }
 
 private:
+    void testManualGraphCreationAndModifierModes()
+    {
+        beginTest ("Pro-Q manual: deselect / Ctrl-click / Alt dynamic / "
+                   "Alt+Shift spectral / result-curve drag");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        expectEquals (editor->activeBandsForTesting(), 1);
+
+        const auto click = [&] (juce::Point<float> pos,
+                                juce::ModifierKeys keys = {})
+        {
+            editor->injectGraphPointerForTesting (pos, 0, keys);
+            editor->injectGraphPointerForTesting (pos, 2, keys);
+        };
+        // One ordinary click elsewhere does NOT insert an unintended filter
+        // while an active band is selected.
+        click ({ 300.0f, 350.0f });
+        expectEquals (editor->selectedBandForTesting(), -1);
+        expectEquals (editor->activeBandsForTesting(), 1);
+
+        const juce::ModifierKeys ctrl (juce::ModifierKeys::ctrlModifier);
+        const juce::ModifierKeys altCtrl (
+            juce::ModifierKeys::altModifier | juce::ModifierKeys::ctrlModifier);
+        const juce::ModifierKeys spectralKeys (
+            juce::ModifierKeys::altModifier
+            | juce::ModifierKeys::shiftModifier
+            | juce::ModifierKeys::ctrlModifier);
+        // After explicitly re-selecting a band, Ctrl-click creates a NEW
+        // band instead of merely cancelling the selection.
+        editor->selectBandForTesting (0);
+        click ({ 300.0f, 275.0f }, ctrl);
+        expectEquals (editor->activeBandsForTesting(), 2);
+        expectEquals (editor->selectedBandForTesting(), 1);
+
+        click ({ 950.0f, 300.0f }, altCtrl);
+        expectEquals (editor->activeBandsForTesting(), 3);
+        expect (processor->getParametricEQParameter (
+            dynamicParameterIndex (2, DynamicBandOffset::Enable))->getBool(),
+            "Alt+Ctrl creation activates real hosted dynamic band");
+        expect (processor->getParametricEQParameter (
+            dynamicParameterIndex (2, DynamicBandOffset::Range))
+                ->getUnitsValue() >= 1.0f,
+            "Alt-created dynamics must not silently stay at zero range");
+
+        click ({ 590.0f, 360.0f }, spectralKeys);
+        expectEquals (editor->activeBandsForTesting(), 4);
+        expect (processor->getParametricEQParameter (
+            spectralBandParameterIndex (3))->getBool(),
+            "Alt+Shift+Ctrl creation arms native spectral dynamics on band");
+
+        // With band3 still selected, drag the yellow 0dB curve at x=20px
+        // and verify a real LOW CUT is created only once after the drag.
+        editor->injectGraphPointerForTesting ({ 20.0f, 350.0f }, 0);
+        expectEquals (editor->activeBandsForTesting(), 4,
+            "mousedown on yellow curve with a selection must not double-add");
+        editor->injectGraphPointerForTesting ({ 21.0f, 260.0f }, 1);
+        editor->injectGraphPointerForTesting ({ 21.0f, 260.0f }, 2);
+        expectEquals (editor->activeBandsForTesting(), 5,
+            "yellow-curve drag creates exactly one additional hosted band");
+        expectEquals (processor->getParametricEQParameter (
+            parameterIndex (4, BandParameterOffset::Shape))->getChoiceIndex(),
+            static_cast<int> (FilterShape::LowCut),
+            "far-left creation intelligently selects Low Cut shape");
+        expect (! processor->isAuditionHoldingForTesting(),
+            "all normal graph gestures leave band audition inactive");
+    }
+
     void testApexQ4CleanRoomProductionEditor()
     {
         beginTest ("factory launches NEW native EQ4 UI — not legacy Prism editor");
