@@ -2529,100 +2529,201 @@ namespace ArrangementEditor
             auto* anchor = findClipRendererFor(clipUuid);
             if (!anchor) return;
 
-            // Gain popup is a single gesture: selected clips receive the same
-            // dB change, preserving relative levels and one undo/redo step.
-            class QuickGainPopup : public juce::Component, public juce::Slider::Listener
+            // V is a compact controller for the SAME canonical AudioClip
+            // gain shown by Clip Properties. N sits INSIDE V's popup only.
+            // Normalization toggles just the anchor clip, while gain can
+            // preserve the existing multi-selection relative adjustment.
+            class QuickGainPopup : public juce::Component,
+                                   private juce::Slider::Listener,
+                                   private juce::Timer
             {
             public:
                 QuickGainPopup(ArrangementViewCore& v, juce::Uuid anchorId)
                     : view(v), uuid(anchorId)
                 {
-                    setSize(120, 130);
+                    setSize(154, 183);
+                    title.setText("Clip Volume", juce::dontSendNotification);
+                    title.setJustificationType(juce::Justification::centred);
+                    title.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+                    addAndMakeVisible(title);
+
                     knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
-                    knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
+                    knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
                     knob.setRange(-60.0, 12.0, 0.0);
-                    knob.textFromValueFunction = [](double v) { return juce::String(v, 1) + " dB"; };
+                    knob.textFromValueFunction = [](double v)
+                    {
+                        return juce::String(v, 1) + " dB";
+                    };
+                    knob.setDoubleClickReturnValue(true, 0.0);
+                    knob.addListener(this);
+                    addAndMakeVisible(knob);
+
+                    normalizeBtn.setButtonText("N");
+                    normalizeBtn.setTooltip("Normalize / Revert Normalize (synced with Clip Properties)");
+                    normalizeBtn.setColour(juce::TextButton::buttonOnColourId,
+                                           juce::Colour(0xFF2FC58C));
+                    normalizeBtn.setClickingTogglesState(false);
+                    normalizeBtn.onClick = [this]
+                    {
+                        // Finish any in-progress gain gesture before N resets
+                        // clip gain to 1x. An old popup baseline must NEVER
+                        // undo that reset when the popup closes.
+                        commitGainGesture();
+                        view.toggleClipPeakNormalize(uuid);
+                        captureBaseline();
+                        refreshNormalizeButton();
+                    };
+                    addAndMakeVisible(normalizeBtn);
+
+                    normalizeLabel.setJustificationType(juce::Justification::centredLeft);
+                    normalizeLabel.setFont(juce::Font(juce::FontOptions(11.0f)));
+                    addAndMakeVisible(normalizeLabel);
+                    captureBaseline();
+                    refreshNormalizeButton();
+                    startTimerHz(10);
+                }
+
+                ~QuickGainPopup() override
+                {
+                    stopTimer();
+                    knob.removeListener(this);
+                    commitGainGesture();
+                }
+
+                void resized() override
+                {
+                    auto area = getLocalBounds().reduced(6);
+                    title.setBounds(area.removeFromTop(21));
+                    auto footer = area.removeFromBottom(34);
+                    knob.setBounds(area);
+                    normalizeBtn.setBounds(footer.removeFromLeft(31).reduced(1));
+                    normalizeLabel.setBounds(footer.reduced(2, 0));
+                }
+
+            private:
+                void refreshNormalizeButton()
+                {
+                    const bool valid = view.m_engineAudioFiles != nullptr
+                        && view.m_engineClipManager != nullptr
+                        && view.m_clipState.findClip(uuid) != nullptr;
+                    const bool normalized = valid && view.isClipPeakNormalized(uuid);
+                    normalizeBtn.setEnabled(valid);
+                    normalizeBtn.setToggleState(normalized, juce::dontSendNotification);
+                    normalizeLabel.setText(normalized ? "Normalized" : "Normalize",
+                                            juce::dontSendNotification);
+                }
+
+                void captureBaseline()
+                {
+                    before.clear();
                     if (auto* c = view.m_clipState.findClip(uuid))
                     {
-                        initialDb = juce::Decibels::gainToDecibels(c->gain, -60.f);
+                        const float engineGain = view.getCanonicalClipGain(uuid);
+                        initialDb = juce::Decibels::gainToDecibels(engineGain, -60.0f);
                         knob.setValue(initialDb, juce::dontSendNotification);
-                        before.push_back({ uuid, c->gain });
+                        before.emplace_back(uuid, engineGain);
                         if (view.m_selection.isSelected(uuid))
                             for (const auto& id : view.m_selection.getSelectedIds())
                             {
                                 if (id == uuid) continue;
-                                if (auto* other = view.m_clipState.findClip(id))
-                                    before.push_back({ id, other->gain });
+                                if (view.m_clipState.findClip(id) != nullptr)
+                                    before.emplace_back(id, view.getCanonicalClipGain(id));
                             }
                     }
-                    knob.addListener(this);
-                    knob.setDoubleClickReturnValue(true, 0.0);
-                    addAndMakeVisible(knob);
-                    title.setText("Volume", juce::dontSendNotification);
-                    title.setJustificationType(juce::Justification::centred);
-                    title.setFont(juce::Font(11.f, juce::Font::bold));
-                    addAndMakeVisible(title);
+                    gainGestureTouched = false;
                 }
-                ~QuickGainPopup() override
+
+                void commitGainGesture()
                 {
-                    if (before.empty()) return;
+                    if (!gainGestureTouched || before.empty())
+                        return;
                     std::vector<std::pair<juce::Uuid, float>> after;
                     bool changed = false;
                     for (const auto& entry : before)
                     {
-                        if (auto* c = view.m_clipState.findClip(entry.first))
-                        {
-                            after.push_back({entry.first, c->gain});
-                            changed = changed || std::abs(c->gain - entry.second) > 1.0e-5f;
-                        }
-                        else return;
+                        if (view.m_clipState.findClip(entry.first) == nullptr)
+                            return;
+                        const float gain = view.getCanonicalClipGain(entry.first);
+                        after.emplace_back(entry.first, gain);
+                        changed = changed || std::abs(gain - entry.second) > 1.0e-5f;
                     }
                     if (!changed) return;
                     auto apply = [&v = view](const std::vector<std::pair<juce::Uuid, float>>& values)
                     {
-                        juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
-                        for (const auto& [id, gain] : values)
-                            if (auto* c = v.m_clipState.findClip(id))
-                            {
-                                c->gain = gain;
-                                c->bumpWaveformVisualVersion();
-                                v.m_clipState.updateClip(*c);
-                                v.syncClipToEngine(*c);
-                            }
+                        {
+                            juce::ScopedValueSetter<bool> guard(v.m_syncingArrangementToEngine, true);
+                            for (const auto& entry : values)
+                                if (auto* c = v.m_clipState.findClip(entry.first))
+                                {
+                                    c->gain = entry.second;
+                                    c->bumpWaveformVisualVersion();
+                                    v.m_clipState.updateClip(*c);
+                                    v.syncClipToEngine(*c);
+                                    if (auto* renderer = v.findClipRendererFor(entry.first))
+                                        renderer->repaint();
+                                }
+                        }
+                        for (const auto& entry : values)
+                            v.notifyEngineClipPropertiesChanged(entry.first);
                     };
                     view.m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
                         before.size() > 1 ? "Change Selected Clip Gains" : "Change Clip Gain",
                         [apply, after]() { apply(after); },
-                        [apply, values = before]() { apply(values); },
-                        true));
+                        [apply, values = before]() { apply(values); }, true));
+                    gainGestureTouched = false;
                 }
-                void resized() override
+
+                void sliderValueChanged(juce::Slider* slider) override
                 {
-                    auto r = getLocalBounds().reduced(4);
-                    title.setBounds(r.removeFromTop(16));
-                    knob.setBounds(r);
-                }
-                void sliderValueChanged(juce::Slider* s) override
-                {
-                    if (s != &knob) return;
+                    if (slider != &knob || before.empty())
+                        return;
+                    gainGestureTouched = true;
                     const float deltaDb = (float)knob.getValue() - initialDb;
                     const float multiplier = juce::Decibels::decibelsToGain(deltaDb);
-                    juce::ScopedValueSetter<bool> guard(view.m_syncingArrangementToEngine, true);
-                    for (const auto& [id, initialGain] : before)
-                        if (auto* c = view.m_clipState.findClip(id))
-                        {
-                            c->gain = juce::jlimit(0.f, 4.f, initialGain * multiplier);
-                            c->bumpWaveformVisualVersion();
-                            view.m_clipState.updateClip(*c);
-                            view.syncClipToEngine(*c);
-                        }
+                    {
+                        juce::ScopedValueSetter<bool> guard(view.m_syncingArrangementToEngine, true);
+                        for (const auto& entry : before)
+                            if (auto* c = view.m_clipState.findClip(entry.first))
+                            {
+                                c->gain = juce::jlimit(0.0f, 4.0f, entry.second * multiplier);
+                                c->bumpWaveformVisualVersion();
+                                view.m_clipState.updateClip(*c);
+                                view.syncClipToEngine(*c);
+                                if (auto* renderer = view.findClipRendererFor(entry.first))
+                                    renderer->repaint();
+                            }
+                    }
+                    // Refresh the live Clip Properties gain knob, not just the
+                    // renderer model; edits from either surface stay canonical.
+                    for (const auto& entry : before)
+                        view.notifyEngineClipPropertiesChanged(entry.first);
                 }
-            private:
+
+                void timerCallback() override
+                {
+                    if (view.m_clipState.findClip(uuid) == nullptr)
+                    {
+                        stopTimer();
+                        return;
+                    }
+                    refreshNormalizeButton();
+                    // If the Clip Properties gain knob changes while this
+                    // popup is open, mirror it when not editing locally.
+                    if (!gainGestureTouched && !before.empty())
+                    {
+                        const float gain = view.getCanonicalClipGain(uuid);
+                        if (std::abs(gain - before.front().second) > 1.0e-4f)
+                            captureBaseline();
+                    }
+                }
+
                 ArrangementViewCore& view;
                 juce::Uuid uuid;
                 juce::Slider knob;
-                juce::Label title;
-                float initialDb = 0.f;
+                juce::Label title, normalizeLabel;
+                juce::TextButton normalizeBtn;
+                float initialDb = 0.0f;
+                bool gainGestureTouched = false;
                 std::vector<std::pair<juce::Uuid, float>> before;
             };
 
