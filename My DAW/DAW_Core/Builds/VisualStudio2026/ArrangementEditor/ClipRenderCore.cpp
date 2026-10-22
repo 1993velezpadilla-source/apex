@@ -823,8 +823,8 @@ namespace ArrangementEditor
         const bool requestTouchMenu = m_touchMenuPending
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && DAW::ApexPointerPolicy::isDirect(e)
-            && e.getLengthOfMousePress() <= 280
-            && TouchNavigationMath::withinTapSlop(
+            && TouchNavigationMath::selectedSecondTapReady(
+                true, e.getLengthOfMousePress(),
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
             && ! s_viewOnlyMode.load(std::memory_order_relaxed);
