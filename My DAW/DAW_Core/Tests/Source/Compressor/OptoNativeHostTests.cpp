@@ -172,6 +172,97 @@ public:
                                 "apex_precision_c3_real_editor_1080x740.png");
                             renderActualEditor(810,555,
                                 "apex_precision_c3_real_editor_810x555.png");
+
+                            // Adversarial critic #2: controls must be actual
+                            // interactive native JUCE components, not graphics
+                            // that merely look clickable.
+                            beginTest("Precision C3 working editor controls and responsive bounds");
+                            auto findControl=[&](const juce::String& name)->juce::Component*
+                            {
+                                for(int i=0;i<c3Editor->getNumChildComponents();++i)
+                                {
+                                    auto* child=c3Editor->getChildComponent(i);
+                                    if(child!=nullptr && child->getName()==name)
+                                        return child;
+                                }
+                                return nullptr;
+                            };
+                            for(const auto& name : {
+                                    "C3 A/B","C3 COPY","C3 UNDO","C3 REDO",
+                                    "C3 PRESET","C3 STYLE","C3 CHARACTER",
+                                    "C3 TRIGGER SOURCE","C3 CHARACTER ROUTING",
+                                    "C3 SIDECHAIN PANEL"})
+                                expect(findControl(name)!=nullptr,
+                                       juce::String(name)+" must exist as a real clickable component");
+
+                            // Do not accept any control whose hit region escapes
+                            // the window in default or compact mode.
+                            for(const auto size : {juce::Point<int>(1080,740),
+                                                   juce::Point<int>(810,555)})
+                            {
+                                c3Editor->setSize(size.x,size.y);
+                                for(int i=0;i<c3Editor->getNumChildComponents();++i)
+                                {
+                                    const auto* child=c3Editor->getChildComponent(i);
+                                    if(child!=nullptr && child->isVisible())
+                                        expect(c3Editor->getLocalBounds().contains(child->getBounds()),
+                                               child->getName()+" must fit viewport");
+                                }
+                            }
+
+                            if(auto* route=dynamic_cast<juce::TextButton*>(
+                                    findControl("C3 CHARACTER ROUTING")))
+                            {
+                                const auto before=native->getC3Parameter(
+                                    APEX::PrecisionC3::CharacterPre).getValue();
+                                expect(static_cast<bool>(route->onClick),
+                                       "PRE/POST cannot be a cosmetic button");
+                                if(route->onClick)
+                                {
+                                    route->onClick();
+                                    expect(native->getC3Parameter(
+                                        APEX::PrecisionC3::CharacterPre).getValue()!=before,
+                                        "PRE/POST must update host-automatable audio routing");
+                                    route->onClick();
+                                    expectWithinAbsoluteError(
+                                        native->getC3Parameter(
+                                            APEX::PrecisionC3::CharacterPre).getValue(),
+                                        before,1.e-6f);
+                                }
+                            }
+                            if(auto* panel=dynamic_cast<juce::TextButton*>(
+                                    findControl("C3 SIDECHAIN PANEL")))
+                            {
+                                auto* input=findControl("C3 TRIGGER SOURCE");
+                                expect(input!=nullptr);
+                                if(input!=nullptr && panel->onClick)
+                                {
+                                    panel->onClick();
+                                    expect(!input->isVisible(),
+                                           "collapsed sidechain hides interactive trigger selector");
+                                    panel->onClick();
+                                    expect(input->isVisible(),
+                                           "expanded sidechain restores detector controls");
+                                }
+                            }
+                            if(auto* ab=dynamic_cast<juce::TextButton*>(
+                                    findControl("C3 A/B")))
+                            {
+                                auto& ratio=native->getC3Parameter(APEX::PrecisionC3::Ratio);
+                                const float original=ratio.getValue();
+                                ratio.setValue(0.97f);
+                                if(ab->onClick)
+                                {
+                                    ab->onClick();
+                                    expectWithinAbsoluteError(ratio.getValue(),original,1.e-6f,
+                                        "B state restores independent snapshot");
+                                    ab->onClick();
+                                    expectWithinAbsoluteError(ratio.getValue(),0.97f,1.e-6f,
+                                        "A state restores edited compressor ratio");
+                                    ab->onClick(); // B: leave editor and DSP in default state.
+                                }
+                            }
+
                         }
                     }
                     // Adversarial host integration: this must run through
