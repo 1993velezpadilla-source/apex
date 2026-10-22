@@ -203,7 +203,7 @@ public:
         // directly beneath the selected EQ nodes: NO permanent bottom sheet.
         // The canvas does not shrink when switching bands.
         const int controlWidth = std::min (phone ? 456 : 548, w - 18);
-        const int controlHeight = narrow ? 170 : (h < 400 ? 112 : 136);
+        const int controlHeight = narrow ? 136 : (h < 400 ? 112 : 136);
         const int baseX = selected_ < 0
             ? (w - controlWidth) / 2
             : juce::jlimit (9, std::max (9, w - controlWidth - 9),
