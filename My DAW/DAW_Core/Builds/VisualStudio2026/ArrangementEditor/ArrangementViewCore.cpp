@@ -2544,7 +2544,7 @@ namespace ArrangementEditor
                     setSize(154, 183);
                     title.setText("Clip Volume", juce::dontSendNotification);
                     title.setJustificationType(juce::Justification::centred);
-                    title.setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
+                    title.setFont(juce::Font("Segoe UI", 12.0f, juce::Font::bold));
                     addAndMakeVisible(title);
 
                     knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
