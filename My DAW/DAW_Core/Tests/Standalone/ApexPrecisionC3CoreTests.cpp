@@ -144,6 +144,81 @@ int main()
         assert(a.back()<0.3f);
         assert(b.back()<0.08f); // linked GR applied to both channels
     }
+
+    // Adversarial contract: external detector must actually key gain reduction.
+    // Merely drawing a sidechain UI without audio routing would FAIL.
+    {
+        Parameters p;
+        p.thresholdDb=-30;
+        p.ratio=8;
+        p.kneeDb=0;
+        p.attackMs=0.25;
+        p.releaseMs=75;
+        Core normal,external;
+        normal.prepare(48000); external.prepare(48000);
+        normal.setParameters(p); external.setParameters(p);
+        std::vector<float> direct(24000,0.6f), keyed(24000,0.6f);
+        const std::vector<float> silentKey(24000,0.0001f);
+        for(int pos=0;pos<24000;pos+=128)
+        {
+            const int n=std::min(128,24000-pos);
+            normal.process(direct.data()+pos,nullptr,n);
+            external.process(keyed.data()+pos,nullptr,n,
+                             silentKey.data()+pos);
+        }
+        assert(direct.back()<0.20f); // audible compression when self-keyed
+        assert(std::abs(keyed.back()-0.6f)<1.e-5f); // silence must NOT key
+        assert(external.getGainReductionDb()<1.e-4);
+    }
+    // Side-chain high-pass must protect low-frequency content from pumping.
+    {
+        Parameters p;
+        p.thresholdDb=-36; p.ratio=6; p.attackMs=3; p.kneeDb=0;
+        Core bare,filtered;
+        bare.prepare(48000);filtered.prepare(48000);
+        bare.setParameters(p);
+        p.sidechainHighpassHz=450.0;
+        filtered.setParameters(p);
+        std::vector<float> a(48000),b(48000);
+        for(int i=0;i<48000;++i)
+        {
+            const auto v=static_cast<float>(
+                0.68*std::sin(2.0*3.141592653589793*45.0*i/48000.0));
+            a[static_cast<std::size_t>(i)]=v;
+            b[static_cast<std::size_t>(i)]=v;
+        }
+        processConstant(bare,a,128);
+        processConstant(filtered,b,128);
+        assert(filtered.getGainReductionDb()<bare.getGainReductionDb());
+    }
+    // User-accessible styles must NOT produce NaNs at extreme levels/rates.
+    for(int style=0;style<14;++style)
+    {
+        Core effect;
+        Parameters p;
+        p.style=style;
+        p.thresholdDb=-43;
+        p.ratio=40;
+        p.attackMs=0.005;
+        p.releaseMs=5;
+        p.kneeDb=72;
+        effect.prepare(192000);
+        effect.setParameters(p);
+        std::vector<float> a(4096),b(4096);
+        for(int i=0;i<4096;++i)
+        {
+            a[static_cast<std::size_t>(i)]=
+                static_cast<float>(0.85*std::sin(i*0.049));
+            b[static_cast<std::size_t>(i)]=
+                static_cast<float>(0.73*std::cos(i*0.021));
+        }
+        for(int n=0;n<4096;n+=64)
+            effect.process(a.data()+n,b.data()+n,64);
+        for(int i=0;i<4096;++i)
+            assert(std::isfinite(a[static_cast<std::size_t>(i)])
+                && std::isfinite(b[static_cast<std::size_t>(i)]));
+        assert(std::isfinite(effect.getGainReductionDb()));
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
