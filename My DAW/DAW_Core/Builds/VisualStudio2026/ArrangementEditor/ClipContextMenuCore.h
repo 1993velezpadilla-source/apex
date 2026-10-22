@@ -49,6 +49,7 @@ struct ClipContextCallbacks
     std::function<void(ArrangementClipModel*)>    duplicateClip;
     std::function<void(ArrangementClipModel*)>    deleteClip;
     std::function<void(ArrangementClipModel*)>    renameClip;
+    std::function<void(ArrangementClipModel*)>    openClipProperties;
     std::function<void(ArrangementClipModel*)>    muteClip;
     std::function<void(ArrangementClipModel*)>    loopClip;
     std::function<bool()>                         canPaste;
@@ -139,25 +140,14 @@ public:
         menu.addSeparator();
         menu.addItem(kIdMute,  clip->muted ? "Unmute" : "Mute", cb.muteClip != nullptr);
         menu.addItem(kIdRename, juce::String(juce::CharPointer_UTF8("Rename\xe2\x80\xa6")), cb.renameClip != nullptr);
+        menu.addItem(kIdClipProperties, "Clip Properties...", cb.openClipProperties != nullptr);
         menu.addSeparator();
         menu.addItem(kIdDelete, "Delete", cb.deleteClip != nullptr);
         menu.addSeparator();
 
-        // ── Pitch / Time ──────────────────────────────────────────────────
-        menu.addItem(kIdPitchTimePanel, juce::String(juce::CharPointer_UTF8("Pitch / Time\xe2\x80\xa6")),
-                     cb.openTimePitchPanel != nullptr);
-
-        // ── Presets submenu ────────────────────────────────────────────────
-        menu.addSubMenu("Presets", buildPresetsMenu(*clip, cb));
-        menu.addSubMenu("Safe Defaults", buildSafeDefaultsMenu());
-        menu.addItem(kIdReset, "Reset Pitch / Time", cb.resetTimePitch != nullptr);
-        menu.addSeparator();
-
-        // ── Bounce / Freeze ────────────────────────────────────────────────
-        const bool isFrozen = freezeState && freezeState->frozen;
-        menu.addItem(kIdBounce,   "Bounce",   cb.bounceClip   != nullptr && !isFrozen);
-        menu.addItem(kIdFreeze,   "Freeze",   cb.freezeClip   != nullptr && !isFrozen);
-        menu.addItem(kIdUnfreeze, "Unfreeze", cb.unfreezeClip != nullptr && isFrozen);
+        // Pitch/Time, presets, Safe Defaults, Reset Pitch/Time, Freeze and
+        // Bounce are intentionally NOT in the Radial/Classic clip menus.
+        // Double-click/tap (or Clip Properties) owns detailed editing.
         {
             const bool normalized = cb.isClipNormalized ? cb.isClipNormalized(clip) : false;
             juce::PopupMenu::Item normItem;
@@ -228,6 +218,7 @@ private:
         kIdDelete           = 5,
         kIdMute             = 6,
         kIdRename           = 7,
+        kIdClipProperties   = 8,
         kIdPitchTimePanel   = 10,
         kIdBounce           = 11,
         kIdFreeze           = 12,
@@ -369,6 +360,10 @@ private:
         else if (result == kIdRename)
         {
             if (cb.renameClip) cb.renameClip(clip);
+        }
+        else if (result == kIdClipProperties)
+        {
+            if (cb.openClipProperties) cb.openClipProperties(clip);
         }
         else if (result == kIdPitchTimePanel)
         {
