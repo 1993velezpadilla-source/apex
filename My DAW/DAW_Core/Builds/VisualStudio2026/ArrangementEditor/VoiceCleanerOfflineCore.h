@@ -97,11 +97,11 @@ public:
             return result;
         }
         juce::WavAudioFormat wav;
-        const auto options = juce::AudioFormatWriter::Options{}
+        const auto writerOptions = juce::AudioFormatWriter::Options{}
             .withSampleRate(sampleRate)
             .withNumChannels(channels)
             .withBitsPerSample(24);
-        auto writer = wav.createWriterFor(stream, options);
+        auto writer = wav.createWriterFor(stream, writerOptions);
         if (writer == nullptr)
         {
             stream.reset();
