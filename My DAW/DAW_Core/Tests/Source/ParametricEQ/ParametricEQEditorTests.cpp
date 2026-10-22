@@ -487,6 +487,38 @@ private:
                     juce::PNGImageFormat png;
                     expect (png.writeImageToStream (screenshot, *stream));
                 }
+
+                // Also record the TRUE Ctrl-click multi-select visual state
+                // using the same measured WAV FFT frame for user review.
+                if (size.x >= 480)
+                {
+                    const auto band2 = editor->nodeHitAreaForTesting (1)
+                        .getCentre().toFloat();
+                    juce::ModifierKeys control (juce::ModifierKeys::ctrlModifier);
+                    editor->injectGraphPointerForTesting (band2, 0, control);
+                    editor->injectGraphPointerForTesting (band2, 2, control);
+                    expectEquals (editor->selectedBandCountForTesting(), 2,
+                        "native group snapshot has two genuinely selected bands");
+                    juce::Image grouped (juce::Image::RGB,
+                                          size.x, size.y, true);
+                    {
+                        juce::Graphics graphics (grouped);
+                        editor->paintEntireComponent (graphics, false);
+                    }
+                    const auto groupFile = dir.getChildFile (
+                        "APEX-EQ-GROUPED-WAV-FFT-"
+                        + juce::String (size.x) + "x"
+                        + juce::String (size.y) + ".png");
+                    auto groupStream = groupFile.createOutputStream();
+                    expect (groupStream != nullptr);
+                    if (groupStream != nullptr)
+                    {
+                        juce::PNGImageFormat png;
+                        expect (png.writeImageToStream (
+                            grouped, *groupStream));
+                    }
+                    editor->selectBandForTesting (0);
+                }
             }
         }
         // Full range precision: never assume typed UI values are raw 0..1.
