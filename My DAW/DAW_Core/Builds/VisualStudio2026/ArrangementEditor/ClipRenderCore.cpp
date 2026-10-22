@@ -220,8 +220,10 @@ namespace ArrangementEditor
 
         // Layer 11b: Interactive handles (fade corners, edge resize, volume btn)
         drawClipHandles(g);
-        drawVolumeButton(g);
+        // The clip header only carries M and S. Gain is edited through
+        // Clip Properties, avoiding a second unsynchronised gain control.
         drawMuteButton(g);
+        drawSoloButton(g);
         // Drag status is now painted in the pinned ruler by ArrangementViewCore.
         // Never cover waveform pixels with the opaque trim/fade information.
 
@@ -373,18 +375,20 @@ namespace ArrangementEditor
 
     juce::Rectangle<int> ClipRenderCore::muteButtonRect() const
     {
-        // Right after the volume button.
-        const int pad = 2;
-        const int x = pad + kVolBtnSize + pad;
-        return { x, pad, kMuteBtnSize, kNameH - pad * 2 };
+        return { 2, 2, kMuteBtnSize, kNameH - 4 };
+    }
+
+    juce::Rectangle<int> ClipRenderCore::soloButtonRect() const
+    {
+        return { 4 + kMuteBtnSize, 2, kMuteBtnSize, kNameH - 4 };
     }
 
     ClipRenderCore::Zone ClipRenderCore::hitTestZone(juce::Point<int> pos) const
     {
         if (!m_model) return Zone::None;
 
-        if (volumeButtonRect().contains(pos))  return Zone::VolumeBtn;
-        if (muteButtonRect().contains(pos))    return Zone::MuteBtn;
+        if (getWidth() >= 44 && muteButtonRect().contains(pos)) return Zone::MuteBtn;
+        if (getWidth() >= 62 && soloButtonRect().contains(pos)) return Zone::SoloBtn;
 
         // The fade band (header bottom â†’ green divider line) is reserved
         // exclusively for fade in/out. The left half grows fade-in, the right
@@ -409,7 +413,8 @@ namespace ArrangementEditor
             case Zone::ResizeLeft:
             case Zone::ResizeRight: setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::LeftRightResizeCursor)); break;
             case Zone::VolumeBtn:
-            case Zone::MuteBtn:     setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::PointingHandCursor));    break;
+            case Zone::MuteBtn:
+            case Zone::SoloBtn:     setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::PointingHandCursor));    break;
             default:                setMouseCursor(DAW::CursorThemeCore::getStandard(juce::MouseCursor::NormalCursor));          break;
         }
     }
@@ -497,6 +502,12 @@ namespace ArrangementEditor
         {
             if (onMuteButtonClicked) onMuteButtonClicked();
             m_activeZone = Zone::MuteBtn;
+            return;
+        }
+        if (z == Zone::SoloBtn)
+        {
+            if (onSoloButtonClicked) onSoloButtonClicked();
+            m_activeZone = Zone::SoloBtn;
             return;
         }
 
@@ -850,7 +861,8 @@ namespace ArrangementEditor
             return;
         }
 
-        if (m_activeZone == Zone::VolumeBtn || m_activeZone == Zone::MuteBtn)
+        if (m_activeZone == Zone::VolumeBtn || m_activeZone == Zone::MuteBtn
+            || m_activeZone == Zone::SoloBtn)
         {
             // Button gesture already consumed on mouseDown â€” do not forward
             // to the parent (which would deselect / reselect the wrong clip).
@@ -1245,7 +1257,8 @@ namespace ArrangementEditor
         const auto b   = getLocalBounds();
         const int  bx  = b.getX();
         const int  bw  = b.getWidth();
-        const int  textW = bw - 10;
+        const int  textX = bx + (bw >= 62 ? 5 + 2 * (kMuteBtnSize + 2) : 5);
+        const int  textW = bw - (textX - bx) - 5;
 
         if (textW <= 0)
             return;
@@ -1255,7 +1268,7 @@ namespace ArrangementEditor
         auto name = m_model->clipName.empty() ? "(unnamed)" : m_model->clipName;
         g.setColour(juce::Colours::white.withAlpha(0.92f));
         g.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::bold));
-        g.drawText(juce::String(name), bx + 5, 1, textW, kNameH - 2,
+        g.drawText(juce::String(name), textX, 1, textW, kNameH - 2,
                    juce::Justification::centredLeft, true /*ellipsis*/);
     }
 
@@ -1526,7 +1539,7 @@ namespace ArrangementEditor
 
     void ClipRenderCore::drawMuteButton(juce::Graphics& g)
     {
-        if (getWidth() < 66
+        if (getWidth() < 44
             || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
             return; // need room for the second pill and a usable lane height
 
@@ -1544,6 +1557,22 @@ namespace ArrangementEditor
         g.setColour(juce::Colours::white.withAlpha(muted ? 1.0f : (hot ? 0.95f : 0.78f)));
         g.setFont(juce::Font("Segoe UI", (float)(kNameH - 6), juce::Font::bold));
         g.drawText("M", r.toNearestInt(), juce::Justification::centred, false);
+    }
+
+    void ClipRenderCore::drawSoloButton(juce::Graphics& g)
+    {
+        if (getWidth() < 62
+            || !ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
+            return;
+        const auto r = soloButtonRect().toFloat();
+        const bool hot = (m_hoveredZone == Zone::SoloBtn);
+        g.setColour(m_soloActive ? juce::Colour(0xFFFFCC49)
+                                 : juce::Colours::black.withAlpha(hot ? 0.55f : 0.35f));
+        g.fillRoundedRectangle(r, 2.0f);
+        g.setColour(m_soloActive ? juce::Colours::black
+                                 : juce::Colours::white.withAlpha(0.86f));
+        g.setFont(juce::Font("Segoe UI", (float)(kNameH - 6), juce::Font::bold));
+        g.drawText("S", r.toNearestInt(), juce::Justification::centred, false);
     }
 
 } // namespace ArrangementEditor
