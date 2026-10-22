@@ -63,7 +63,7 @@ public:
         for (int i=0; i<15; ++i)
         {
             auto& slider=knobs_[static_cast<std::size_t>(i)];
-            auto& parameter=processor_.parameter(indices[static_cast<std::size_t>(i)]);
+            auto& parameter=processor_.getC3Parameter(indices[static_cast<std::size_t>(i)]);
             const auto low=parameter.fromNormalised(0.0f);
             const auto high=parameter.fromNormalised(1.0f);
             slider.setName(labels[static_cast<std::size_t>(i)]);
@@ -78,20 +78,20 @@ public:
             slider.setDoubleClickReturnValue(true,
                 parameter.fromNormalised(parameter.getDefaultValue()));
             slider.onDragStart=[this,i,indices] {
-                processor_.parameter(indices[static_cast<std::size_t>(i)]).beginChangeGesture();
+                processor_.getC3Parameter(indices[static_cast<std::size_t>(i)]).beginChangeGesture();
             };
             slider.onValueChange=[this,i,indices] {
-                auto& prm=processor_.parameter(indices[static_cast<std::size_t>(i)]);
+                auto& prm=processor_.getC3Parameter(indices[static_cast<std::size_t>(i)]);
                 prm.setValueNotifyingHost(prm.toNormalised(static_cast<float>(
                     knobs_[static_cast<std::size_t>(i)].getValue())));
             };
             slider.onDragEnd=[this,i,indices] {
-                processor_.parameter(indices[static_cast<std::size_t>(i)]).endChangeGesture();
+                processor_.getC3Parameter(indices[static_cast<std::size_t>(i)]).endChangeGesture();
             };
             addAndMakeVisible(slider);
         }
         for (int i=0; i<14; ++i) style_.addItem(kStyleNames[static_cast<std::size_t>(i)],i+1);
-        style_.setSelectedId(static_cast<int>(processor_.parameter(Style).getUnits())+1,
+        style_.setSelectedId(static_cast<int>(processor_.getC3Parameter(Style).getUnits())+1,
                              juce::dontSendNotification);
         style_.setTooltip("Dynamics topology and musical response");
         style_.onChange=[this] { updateChoice(Style,style_.getSelectedId()-1); };
@@ -114,10 +114,10 @@ public:
             auto& button=switches_[static_cast<std::size_t>(i)];
             button.setButtonText(names[static_cast<std::size_t>(i)]);
             button.setColour(juce::ToggleButton::textColourId,juce::Colour(0xffd7e8ec));
-            button.setToggleState(processor_.parameter(toggles[static_cast<std::size_t>(i)])
+            button.setToggleState(processor_.getC3Parameter(toggles[static_cast<std::size_t>(i)])
                                    .getUnits()>0.5f,juce::dontSendNotification);
             button.onClick=[this,i,toggles] {
-                auto& prm=processor_.parameter(toggles[static_cast<std::size_t>(i)]);
+                auto& prm=processor_.getC3Parameter(toggles[static_cast<std::size_t>(i)]);
                 prm.beginChangeGesture();
                 prm.setValueNotifyingHost(switches_[static_cast<std::size_t>(i)]
                                           .getToggleState()?1.0f:0.0f);
@@ -234,9 +234,9 @@ private:
         juce::Path diagonal;
         diagonal.startNewSubPath(originX,originY+areaH);
         diagonal.lineTo(originX+areaW,originY);
-        const float threshold=processor_.parameter(Threshold).getUnits();
-        const float ratio=processor_.parameter(Ratio).getUnits();
-        const float knee=processor_.parameter(Knee).getUnits();
+        const float threshold=processor_.getC3Parameter(Threshold).getUnits();
+        const float ratio=processor_.getC3Parameter(Ratio).getUnits();
+        const float knee=processor_.getC3Parameter(Knee).getUnits();
         juce::Path response;
         for (int i=0; i<=140; ++i)
         {
@@ -305,7 +305,7 @@ private:
     void updateChoice(int index, int value)
     {
         if (value<0) return;
-        auto& prm=processor_.parameter(index);
+        auto& prm=processor_.getC3Parameter(index);
         prm.beginChangeGesture();
         prm.setValueNotifyingHost(prm.toNormalised(static_cast<float>(value)));
         prm.endChangeGesture();
@@ -319,20 +319,20 @@ private:
         for (int i=0; i<15; ++i)
             if (!knobs_[static_cast<std::size_t>(i)].isMouseButtonDown())
                 knobs_[static_cast<std::size_t>(i)].setValue(
-                    processor_.parameter(indices[static_cast<std::size_t>(i)]).getUnits(),
+                    processor_.getC3Parameter(indices[static_cast<std::size_t>(i)]).getUnits(),
                     juce::dontSendNotification);
         if (!style_.isMouseButtonDown())
             style_.setSelectedId(static_cast<int>(std::lround(
-                processor_.parameter(Style).getUnits()))+1,juce::dontSendNotification);
+                processor_.getC3Parameter(Style).getUnits()))+1,juce::dontSendNotification);
         if (!character_.isMouseButtonDown())
             character_.setSelectedId(static_cast<int>(std::lround(
-                processor_.parameter(Character).getUnits()))+1,juce::dontSendNotification);
+                processor_.getC3Parameter(Character).getUnits()))+1,juce::dontSendNotification);
         constexpr std::array<int,4> toggles {{
             AutoThreshold,AutoRelease,AutoGain,Bypass
         }};
         for (int i=0; i<4; ++i)
             switches_[static_cast<std::size_t>(i)].setToggleState(
-                processor_.parameter(toggles[static_cast<std::size_t>(i)]).getUnits() >= 0.5f,
+                processor_.getC3Parameter(toggles[static_cast<std::size_t>(i)]).getUnits() >= 0.5f,
                 juce::dontSendNotification);
         repaint(rect(33,90,1013,170));
     }
