@@ -2758,7 +2758,7 @@ MainComponent::MainComponent()
     {
         if (clipPropertiesWindow_ && clipPropertiesWindow_->isShowingClip(clip.getID()))
         {
-            clipPropertiesWindow_->getPanel().refresh();
+            clipPropertiesWindow_->getPanel().refreshFromEngineState();
             clipPropertiesWindow_->repaint();
         }
     };
