@@ -22,13 +22,13 @@ public:
         style_.addItemList({"Transparent","Punchy","Dynamic","Allround",
                             "Aggressive","Modern","Bus","Safe"},1);
         style_.setTooltip("Eight APEX-original limiting behavior profiles.");
-        style_.setSelectedId(static_cast<int>(processor_.parameter(LimitingStyle).units())+1,
+        style_.setSelectedId(static_cast<int>(processor_.getLimiterParameter(LimitingStyle).units())+1,
                              juce::dontSendNotification);
         style_.onChange=[this]{ changeChoice(LimitingStyle,style_.getSelectedId()-1); };
         addAndMakeVisible(style_);
         quality_.addItemList({"1x","2x","4x","8x"},1);
         quality_.setTooltip("Inter-sample detector interpolation resolution (not linear-phase DSP oversampling).");
-        quality_.setSelectedId(static_cast<int>(processor_.parameter(DetectorQuality).units())+1,
+        quality_.setSelectedId(static_cast<int>(processor_.getLimiterParameter(DetectorQuality).units())+1,
                                juce::dontSendNotification);
         quality_.onChange=[this]{ changeChoice(DetectorQuality,quality_.getSelectedId()-1); };
         addAndMakeVisible(quality_);
@@ -179,14 +179,14 @@ private:
         slider.setColour(juce::Slider::thumbColourId,juce::Colour(0xfff884c5));
         slider.setColour(juce::Slider::textBoxTextColourId,juce::Colour(0xffd9f0fa));
         slider.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff182438));
-        auto& p=processor_.parameter(index);
+        auto& p=processor_.getLimiterParameter(index);
         slider.setValue(p.units(),juce::dontSendNotification);
-        slider.onDragStart=[this,index]{ processor_.parameter(index).beginChangeGesture(); };
+        slider.onDragStart=[this,index]{ processor_.getLimiterParameter(index).beginChangeGesture(); };
         slider.onValueChange=[this,index,&slider] {
-            auto& param=processor_.parameter(index);
+            auto& param=processor_.getLimiterParameter(index);
             param.setValueNotifyingHost(param.toNormal(static_cast<float>(slider.getValue())));
         };
-        slider.onDragEnd=[this,index]{ processor_.parameter(index).endChangeGesture(); };
+        slider.onDragEnd=[this,index]{ processor_.getLimiterParameter(index).endChangeGesture(); };
         addAndMakeVisible(slider);
     }
     void setupToggle(juce::ToggleButton& button,int index,
@@ -194,10 +194,10 @@ private:
     {
         button.setButtonText(title);
         button.setTooltip(hint);
-        button.setToggleState(processor_.parameter(index).units()>0.5f,
+        button.setToggleState(processor_.getLimiterParameter(index).units()>0.5f,
                               juce::dontSendNotification);
         button.onClick=[this,index,&button] {
-            auto& param=processor_.parameter(index);
+            auto& param=processor_.getLimiterParameter(index);
             param.beginChangeGesture();
             param.setValueNotifyingHost(button.getToggleState()?1.0f:0.0f);
             param.endChangeGesture();
@@ -206,7 +206,7 @@ private:
     }
     void changeChoice(int i,int value)
     {
-        auto& p=processor_.parameter(i);
+        auto& p=processor_.getLimiterParameter(i);
         p.beginChangeGesture();
         p.setValueNotifyingHost(p.toNormal(static_cast<float>(value)));
         p.endChangeGesture();
@@ -216,16 +216,16 @@ private:
         // Read host automation back into the editor. No DSP/GUI coupling.
         auto reflect=[this](juce::Slider& s,int i) {
             if (!s.isMouseButtonDown())
-                s.setValue(processor_.parameter(i).units(),juce::dontSendNotification);
+                s.setValue(processor_.getLimiterParameter(i).units(),juce::dontSendNotification);
         };
         reflect(gain_,Gain); reflect(ceiling_,Ceiling); reflect(lookahead_,Lookahead);
         reflect(attack_,Attack); reflect(release_,Release); reflect(link_,ChannelLink);
-        style_.setSelectedId(static_cast<int>(processor_.parameter(LimitingStyle).units())+1,
+        style_.setSelectedId(static_cast<int>(processor_.getLimiterParameter(LimitingStyle).units())+1,
                              juce::dontSendNotification);
-        quality_.setSelectedId(static_cast<int>(processor_.parameter(DetectorQuality).units())+1,
+        quality_.setSelectedId(static_cast<int>(processor_.getLimiterParameter(DetectorQuality).units())+1,
                                juce::dontSendNotification);
         auto update=[this](juce::ToggleButton& b,int i) {
-            b.setToggleState(processor_.parameter(i).units()>0.5f,
+            b.setToggleState(processor_.getLimiterParameter(i).units()>0.5f,
                              juce::dontSendNotification);
         };
         update(tp_,TruePeak);update(bypass_,Bypass);update(unity_,UnityGain);
