@@ -58,7 +58,8 @@ public:
             for(int ch=0;ch<(right?2:1);++ch)
             {
                 const double sample=static_cast<double>(ch==0?left[i]:right[i]);
-                const double input=std::isfinite(sample)?sample:0.0;
+                const double input=std::isfinite(sample) && std::abs(sample)<1.0e8
+                                   ? sample : 0.0;
                 const double a=filter_[ch][0].process(input);
                 const double y=filter_[ch][1].process(a);
                 e+=y*y;
