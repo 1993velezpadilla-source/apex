@@ -57,6 +57,7 @@ public:
         testStateRoundTripAndTolerance();
         testProcessorResponseAndReset();
         testAutomationTransitionAndBlockIndependence();
+        testRapidRealtimeBandEditsNeverMute();
         testBypassContract();
         testOutputStageAndPhase9Abi();
         testRealtimeAllocation();
@@ -397,6 +398,61 @@ private:
         expect (maximumJump < 0.15,
                 "transition contains a click-sized discontinuity: "
                     + juce::String (maximumJump, 6));
+    }
+
+    void testRapidRealtimeBandEditsNeverMute()
+    {
+        beginTest ("rapid audio-rate GUI retargets preserve finite continuous vocals");
+        auto holder = std::make_unique<Processor>();
+        auto& processor = *holder;
+        configureBell (processor, 0, 1000.0f, 6.0f, 3.0f);
+        processor.prepareToPlay (48000.0, 128);
+        juce::MidiBuffer midi;
+
+        double minimumRms = 1.0;
+        double largestAdjacentStep = 0.0;
+        double previous = 0.0;
+        int sampleIndex = 0;
+        for (int blockIndex = 0; blockIndex < 120; ++blockIndex)
+        {
+            // Alternate controls faster than the 10 ms coefficient fade.
+            // No in-flight filter history may be rewritten under its output.
+            setUnits (processor, parameterIndex (
+                0, BandParameterOffset::Frequency),
+                (blockIndex % 2) == 0 ? 240.0f : 6400.0f);
+            setUnits (processor, parameterIndex (
+                0, BandParameterOffset::Gain),
+                (blockIndex % 4) < 2 ? -12.0f : 12.0f);
+
+            juce::AudioBuffer<float> buffer (2, 128);
+            for (int sample = 0; sample < 128; ++sample)
+            {
+                const auto input = static_cast<float> (
+                    0.20 * std::sin (6.283185307179586 * 330.0
+                        * static_cast<double> (sampleIndex++) / 48000.0));
+                buffer.setSample (0, sample, input);
+                buffer.setSample (1, sample, input);
+            }
+            processor.processBlock (buffer, midi);
+            double energy = 0.0;
+            for (int sample = 0; sample < 128; ++sample)
+            {
+                const double output = buffer.getSample (0, sample);
+                expect (std::isfinite (output), "non-finite vocal output");
+                energy += output * output;
+                if (blockIndex > 0 || sample > 0)
+                    largestAdjacentStep = std::max (largestAdjacentStep,
+                                                    std::abs (output - previous));
+                previous = output;
+            }
+            // A live singer's RMS must not collapse to digital silence while
+            // a pointer is held or coefficients are being redesigned.
+            minimumRms = std::min (minimumRms, std::sqrt (energy / 128.0));
+        }
+        expect (minimumRms > 0.005,
+                "continuous vocal must not drop out during rapid retargets");
+        expect (largestAdjacentStep < 0.30,
+                "moving filters must not create a click-sized output step");
     }
 
     void testBypassContract()
