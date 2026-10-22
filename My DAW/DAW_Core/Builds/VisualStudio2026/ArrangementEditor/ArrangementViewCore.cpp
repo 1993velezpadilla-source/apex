@@ -4921,6 +4921,31 @@ namespace ArrangementEditor
             if (m_propertiesWindow) m_propertiesWindow->openForClip(c);
         };
         cb.applyPreset    = [this](ArrangementClipModel* c, const std::string& name) { onClipPreset(c, name); };
+        cb.recolorClip = [this](ArrangementClipModel* c, juce::Colour color, bool explicitOverride)
+        {
+            if (c == nullptr) return;
+            const auto id = c->id;
+            const auto previous = *c;
+            auto apply = [this, id](juce::Colour tint, bool overrideTint)
+            {
+                auto* model = m_clipState.findClip(id);
+                if (model == nullptr) return;
+                model->explicitClipColourOverride = overrideTint;
+                model->colour = overrideTint ? tint : model->trackColour;
+                m_clipState.updateClip(*model);
+                if (auto* renderer = findClipRendererFor(id))
+                    renderer->updateClipData(*model);
+                if (m_engineClipManager != nullptr)
+                    if (auto mapped = m_uuidToEngineId.find(id); mapped != m_uuidToEngineId.end())
+                        if (auto* engine = m_engineClipManager->getClip(mapped->second))
+                            engine->setColor(model->colour);
+                repaint();
+            };
+            m_undo.executeCommand(std::make_unique<LambdaArrangementCommand>(
+                "Recolor Clip",
+                [apply, color, explicitOverride]() { apply(color, explicitOverride); },
+                [apply, previous]() { apply(previous.colour, previous.explicitClipColourOverride); }));
+        };
         cb.bounceClip     = [this](ArrangementClipModel* c) { onClipBounce(c);   };
         cb.freezeClip     = [this](ArrangementClipModel* c) { onClipFreeze(c);   };
         cb.unfreezeClip   = [this](ArrangementClipModel* c) { onClipUnfreeze(c); };
