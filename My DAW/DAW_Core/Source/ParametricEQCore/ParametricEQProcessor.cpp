@@ -1330,6 +1330,18 @@ bool Processor::adoptPublishedParameters (bool bypassTarget) noexcept
     if (! changed)
         return false;
 
+    // A filter being crossfaded is already audible. Re-designing its
+    // coefficients IN PLACE while a pointer is being dragged changes the
+    // waveform mid-transition (zipper/clicks and, on slower machines, DSP
+    // spikes). Keep both runtime engines immutable for the full 10 ms fade.
+    // The latest atomic hosted values are picked up at the next callback
+    // after completeTransitionIfReady() commits the current fade. Fast edits
+    // are deliberately coalesced; none of their intermediate filters can
+    // interrupt the singer's audio. This also bounds coefficient redesign
+    // work to one transition instead of one rebuild per gesture update.
+    if (transitionActive_)
+        return false;
+
     // While fully bypassed, target changes are inaudible. Adopt them directly
     // with cleared histories instead of spending callback time crossfading a
     // hidden path. Un-bypass will warm the wet path under its own dry crossfade.
