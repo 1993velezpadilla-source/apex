@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "ApexLimiterCore.h"
+#include "ApexLimiterLoudness.h"
 #include "../MeteringCore/LufsMeterCore.h"
 #include <algorithm>
 #include <array>
@@ -118,11 +119,14 @@ public:
         core_.prepare(rate);
         lufsLeft_.prepare(rate);
         lufsRight_.prepare(rate);
+        summary_.prepare(rate);
         core_.setSettings(readSettings());
         core_.reset();
         setLatencySamples(core_.latencySamples());
         momentaryLufs_.store(-120.0f,std::memory_order_relaxed);
         shortTermLufs_.store(-120.0f,std::memory_order_relaxed);
+        integratedLufs_.store(-120.0f,std::memory_order_relaxed);
+        loudnessRange_.store(0.0f,std::memory_order_relaxed);
         gainReduction_.store(0,std::memory_order_relaxed);
         peakOutput_.store(0,std::memory_order_relaxed);
         peakInput_.store(0,std::memory_order_relaxed);
@@ -137,7 +141,7 @@ public:
         for (auto& f:displayReduction_) f.store(0,std::memory_order_relaxed);
     }
     void releaseResources() override {}
-    void reset() override { core_.reset(); }
+    void reset() override { core_.reset(); summary_.reset(); }
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override
     {
         if (buffer.getNumChannels() < 1 || buffer.getNumSamples() < 1) return;
@@ -177,6 +181,15 @@ public:
             }
         }
         for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,total);
+        // 400ms overlapping stereo K-weighted integration / gated range.
+        // Rolling state is entirely allocated during prepareToPlay().
+        summary_.process(buffer.getReadPointer(0),
+            buffer.getNumChannels()>1 ? buffer.getReadPointer(1) : nullptr,
+            total);
+        const float integrated=summary_.integratedLufs();
+        integratedLufs_.store(std::isfinite(integrated)?integrated:-120.0f,
+                              std::memory_order_relaxed);
+        loudnessRange_.store(summary_.loudnessRange(),std::memory_order_relaxed);
         // Reuse the APEX K-weighting meter, bounded to its preallocated 8192
         // sample scratch: NO resizing, allocation or locks in the callback.
         for(int base=0;base<buffer.getNumSamples();base+=8192)
@@ -203,6 +216,8 @@ public:
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
     float meterMomentaryLufs() const noexcept { return momentaryLufs_.load(std::memory_order_relaxed); }
     float meterShortTermLufs() const noexcept { return shortTermLufs_.load(std::memory_order_relaxed); }
+    float meterIntegratedLufs() const noexcept { return integratedLufs_.load(std::memory_order_relaxed); }
+    float meterLoudnessRange() const noexcept { return loudnessRange_.load(std::memory_order_relaxed); }
     float meterInput() const noexcept { return peakInput_.load(std::memory_order_relaxed); }
     float meterOutput() const noexcept { return peakOutput_.load(std::memory_order_relaxed); }
     static constexpr size_t kDisplayHistory=512;
@@ -297,8 +312,10 @@ private:
     }
     std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
     Core core_;
+    LoudnessSummary summary_;
     DAW::LufsMeterCore lufsLeft_,lufsRight_;
     std::atomic<float> momentaryLufs_{-120},shortTermLufs_{-120};
+    std::atomic<float> integratedLufs_{-120},loudnessRange_{0};
     std::atomic<float> gainReduction_{0},peakInput_{0},peakOutput_{0};
     std::array<std::atomic<float>,kDisplayHistory> displayInput_{};
     std::array<std::atomic<float>,kDisplayHistory> displayOutput_{};
