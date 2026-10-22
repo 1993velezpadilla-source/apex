@@ -5539,12 +5539,49 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::onClipRename(ArrangementClipModel* clip)
     {
-        if (!clip) return;
-        // Simple rename: just use the clip name edit inline via properties window,
-        // or fall back to a basic input dialog via NativeMessageBox workaround.
-        // For now: open properties window focused on name field.
-        if (m_propertiesWindow)
-            m_propertiesWindow->openForClip(clip);
+        if (clip == nullptr)
+            return;
+        // Rename is a small focused dialog, NEVER the old Clip Properties
+        // window. Keep a stable clip identity across the asynchronous action.
+        const auto id = clip->id;
+        auto* dialog = new juce::AlertWindow("Rename Audio Clip",
+            "Enter the new clip name:", juce::MessageBoxIconType::NoIcon);
+        dialog->addTextEditor("clipName", clip->clipName, "Name:");
+        dialog->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        const juce::Component::SafePointer<ArrangementViewCore> weakOwner(this);
+        dialog->enterModalState(true,
+            juce::ModalCallbackFunction::create([weakOwner, id, dialog](int result)
+            {
+                if (result != 1 || weakOwner == nullptr)
+                    return;
+                const auto nextName = dialog->getTextEditorContents("clipName").trim();
+                if (nextName.isEmpty())
+                    return;
+                auto* existing = weakOwner->m_clipState.findClip(id);
+                if (existing == nullptr || existing->clipName == nextName)
+                    return;
+                const auto oldName = existing->clipName;
+                auto apply = [weakOwner, id](const juce::String& name)
+                {
+                    if (weakOwner == nullptr)
+                        return;
+                    if (auto* model = weakOwner->m_clipState.findClip(id))
+                    {
+                        model->clipName = name.toStdString();
+                        model->bumpWaveformVisualVersion();
+                        weakOwner->m_clipState.updateClip(*model);
+                        weakOwner->syncClipToEngine(*model);
+                        if (auto* renderer = weakOwner->findClipRendererFor(id))
+                            renderer->repaint();
+                        weakOwner->repaint();
+                    }
+                };
+                weakOwner->m_undo.executeCommand(
+                    std::make_unique<LambdaArrangementCommand>("Rename Clip",
+                        [apply, nextName]() { apply(nextName); },
+                        [apply, oldName]() { apply(juce::String(oldName)); }));
+            }), true);
     }
 
     void ArrangementViewCore::onClipMute(ArrangementClipModel* clip)
