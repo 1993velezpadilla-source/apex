@@ -261,5 +261,75 @@ public:
         }
     }
 };
+
+// Screenshot gate: render the ACTUAL compiled APEX Limiter JUCE editor.
+// This is not a mock, generated image, or a drawing reconstructed from code.
+// The graphics tree is rendered via paintEntireComponent, including children.
+class LimiterNativePreviewTests final : public juce::UnitTest
+{
+public:
+    LimiterNativePreviewTests() : juce::UnitTest("BubblegumLimiter.RealGUI", "APEX.LimiterPreview") {}
+
+    void runTest() override
+    {
+        juce::ScopedJuceInitialiser_GUI gui;
+        beginTest("Capture real hosted limiter editor including live JUCE controls");
+        APEX::Limiter::Processor processor;
+        processor.prepareToPlay(48000.0, 128);
+        juce::AudioBuffer<float> block(2, 128);
+        juce::MidiBuffer midi;
+        for (int iteration=0; iteration<300; ++iteration)
+        {
+            for (int i=0; i<block.getNumSamples(); ++i)
+            {
+                const double time=(iteration*128+i)/48000.0;
+                const float wave=static_cast<float>(
+                    0.85*std::sin(2.0*juce::MathConstants<double>::pi*220.0*time)
+                    +0.48*std::sin(2.0*juce::MathConstants<double>::pi*880.0*time));
+                block.setSample(0,i,wave);
+                block.setSample(1,i,wave*0.89f);
+            }
+            processor.processBlock(block,midi);
+        }
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        expect(editor!=nullptr, "actual AudioProcessorEditor is instantiated");
+        if (!editor) return;
+
+        const juce::String overrideDir=juce::SystemStats::getEnvironmentVariable(
+            "APEX_LIMITER_PREVIEW_DIR", {});
+        const juce::File folder=overrideDir.isNotEmpty()
+            ? juce::File(overrideDir)
+            : juce::File::getCurrentWorkingDirectory().getChildFile(
+                "evidence/renderpacks/APEX_LIMITER_NATIVE");
+        expect(folder.createDirectory() || folder.isDirectory(), "can create screenshot directory");
+        // Let timer read real DSP meters onto the real UI (no synthetic UI values).
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(75);
+
+        auto capture=[&](int width,int height,const char* filename)
+        {
+            editor->setSize(width,height);
+            juce::Image image(juce::Image::ARGB,width,height,true);
+            {
+                juce::Graphics graphics(image);
+                editor->paintEntireComponent(graphics,false);
+            }
+            auto destination=folder.getChildFile(filename);
+            destination.deleteFile();
+            juce::FileOutputStream stream(destination);
+            juce::PNGImageFormat png;
+            const bool saved=stream.openedOk() && png.writeImageToStream(image,stream);
+            stream.flush();
+            expect(saved && destination.getSize()>10000,
+                   juce::String("must write actual rendered image: ")+destination.getFullPathName());
+            logMessage("APEX LIMITER REAL JUCE SCREENSHOT: "+destination.getFullPathName()
+                       +" ("+juce::String(width)+"x"+juce::String(height)+")");
+        };
+        capture(1060,640,"01_APEX_Bubblegum_Limiter_REAL_1060x640.png");
+        capture(820,520,"02_APEX_Bubblegum_Limiter_REAL_820x520.png");
+        processor.releaseResources();
+    }
+};
+static LimiterNativePreviewTests limiterNativePreviewTests;
 static DelayNativeHostTests delayNativeHostTests;
 } // namespace
