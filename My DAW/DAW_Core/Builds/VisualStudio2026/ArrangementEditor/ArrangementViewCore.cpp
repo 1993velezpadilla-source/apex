@@ -1439,6 +1439,40 @@ namespace ArrangementEditor
         return true;
     }
 
+    void ArrangementViewCore::stopTouchMomentumOnClipPress() noexcept
+    {
+        // Stop the previous fling as soon as a region takes a new finger.
+        // Simply selecting a clip must not reuse a stale viewport anchor or
+        // keep moving after finger-up (the reported timeline-flying bug).
+        ++m_touchGestureEpoch;
+        if (m_inertiaTimer)
+            m_inertiaTimer->stopTimer();
+        m_touchScrollActive = false;
+        m_smoothedTouchValid = false;
+        m_holdActive = false;
+        m_holdDragging = false;
+        m_skipSlop = false;
+        m_touchPanVelocityX = 0.0;
+        m_touchPanVelocityY = 0.0;
+        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+    }
+
+    void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
+    {
+        // This touch-up is delivered to ClipRenderCore, not its parent.
+        // Close the same navigation transaction that an empty-area gesture
+        // would close, and do not leave an unowned momentum timer running.
+        if (m_touchScrollActive)
+            endTouchPanGesture();
+        else if (!m_twoFingerGestureActive)
+        {
+            m_touchPanVelocityX = 0.0;
+            m_touchPanVelocityY = 0.0;
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+        }
+    }
+
     void ArrangementViewCore::endTouchPanGesture()
     {
         m_touchScrollActive = false;
