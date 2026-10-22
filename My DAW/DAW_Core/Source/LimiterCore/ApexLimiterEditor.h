@@ -124,7 +124,6 @@ public:
 
     void resized() override
     {
-        auto area=getLocalBounds().reduced(22);
         // Fixed control groups leave the visual output display unobstructed.
         const int top=102;
         gain_.setBounds(22,top,75,322);
