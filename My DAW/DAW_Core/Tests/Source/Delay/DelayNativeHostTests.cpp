@@ -28,9 +28,14 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expectEquals(results.size(),5,"G10, Parametric EQ, Opto, Bubblegum Delay and Reverie visible");
+        expectEquals(results.size(),6,"G10, Parametric EQ, Opto, Limiter, Bubblegum Delay and Reverie visible");
+        int limiterMatches=0;
         for(const auto* item:results)
+        {
             expect(item->fileOrIdentifier!="APEX::C4","unfinished C4 is not advertised");
+            if (item->fileOrIdentifier=="APEX::BubblegumLimiter") ++limiterMatches;
+        }
+        expectEquals(limiterMatches,1,"new limiter is advertised exactly once");
         juce::PluginDescription description;
         int matches=0;
         for(const auto* item:results)
