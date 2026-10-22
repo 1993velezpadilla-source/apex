@@ -20,7 +20,8 @@ struct Settings
     double lookaheadMs = 5.0;
     double attackMs = 0.5;
     double releaseMs = 140.0;
-    double channelLink = 1.0; // 0 independent, 1 full stereo link
+    double channelLink = 1.0; // attack / transient stereo link
+    double releaseLink = 1.0; // independent release stereo link
     int style = static_cast<int>(Style::Modern);
     int detectorQuality = 2; // 0=sample peak, 1=2x, 2=4x, 3=8x
     bool truePeak = true;
@@ -37,12 +38,14 @@ struct Settings
         if (!std::isfinite(p.attackMs)) p.attackMs = 0.5;
         if (!std::isfinite(p.releaseMs)) p.releaseMs = 140.0;
         if (!std::isfinite(p.channelLink)) p.channelLink = 1.0;
+        if (!std::isfinite(p.releaseLink)) p.releaseLink = 1.0;
         p.gainDb = std::clamp(p.gainDb, 0.0, 30.0);
         p.ceilingDb = std::clamp(p.ceilingDb, -30.0, 0.0);
         p.lookaheadMs = std::clamp(p.lookaheadMs, 0.1, 20.0);
         p.attackMs = std::clamp(p.attackMs, 0.01, 1000.0);
         p.releaseMs = std::clamp(p.releaseMs, 10.0, 3000.0);
         p.channelLink = std::clamp(p.channelLink, 0.0, 1.0);
+        p.releaseLink = std::clamp(p.releaseLink, 0.0, 1.0);
         p.style = std::clamp(p.style, 0, 7);
         p.detectorQuality = std::clamp(p.detectorQuality, 0, 3);
         return p;
@@ -219,8 +222,10 @@ public:
             for (int ch=0; ch<active; ++ch)
             {
                 auto& c = channel_[static_cast<size_t>(ch)];
-                const double target = (1.0-link)*required[ch] + link*linked;
-                const double coeff = target > c.reduction ? attackCoeff : releaseCoeff;
+                const bool rising=required[ch]>c.reduction;
+                const double stereoLink=rising?link:settings_.releaseLink;
+                const double target=(1.0-stereoLink)*required[ch] + stereoLink*linked;
+                const double coeff=target>c.reduction?attackCoeff:releaseCoeff;
                 c.reduction = coeff*c.reduction + (1.0-coeff)*target;
                 // Last-resort sample guard: attack automation, unexpected
                 // peaks and bypass transitions must never create NaN/Inf.
