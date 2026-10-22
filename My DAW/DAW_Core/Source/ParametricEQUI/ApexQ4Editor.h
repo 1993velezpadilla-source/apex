@@ -209,38 +209,76 @@ public:
             narrow ? 338 : (phone ? 390 : 450), w - 18);
         const int controlHeight = narrow ? 126
                                  : (h < 400 ? 104 : 116);
-        const int baseX = selected_ < 0
-            ? (w - controlWidth) / 2
-            : juce::jlimit (9, std::max (9, w - controlWidth - 9),
-                nodePoint (selected_).x - controlWidth / 2);
-        // Anchor by the selected node (Pro-Q editing pattern), never as
-        // a fixed bottom sheet. Score BOTH sides against other active nodes;
-        // the panel must not hide a band even at extremely short heights.
-        const int topLimit = graph_.getY() + 8;
-        const int bottomLimit = std::max (topLimit,
-            graph_.getBottom() - controlHeight - 29);
-        const int nodeY = selected_ < 0 ? graph_.getCentreY()
-                                        : nodePoint (selected_).y;
-        const int below = std::clamp (nodeY + 35, topLimit, bottomLimit);
-        const int above = std::clamp (nodeY - controlHeight - 35,
-                                      topLimit, bottomLimit);
-        const auto penalty = [this, baseX, controlWidth, controlHeight,
-                              nodeY] (int y)
+        // FabFilter's manual places selected-band controls at the bottom of
+        // the frequency display. Keep them near the selected frequency but
+        // never cover an actual hosted band node or its value tag. This GUI-
+        // thread-only placement critic checks multiple legal positions and
+        // favors the bottom edge, rather than blindly covering the response.
+        const int minX = 9;
+        const int maxX = std::max (minX, w - controlWidth - 9);
+        const int minY = graph_.getY() + 8;
+        const int maxY = std::max (minY, graph_.getBottom()
+                                          - controlHeight - 29);
+        const auto selectedPoint = selected_ < 0
+            ? graph_.getCentre().toFloat()
+            : nodePoint (selected_).toFloat();
+        const int baseX = juce::jlimit (minX, maxX,
+            juce::roundToInt (selectedPoint.x) - controlWidth / 2);
+        const auto clampX = [=] (int x) { return juce::jlimit (minX, maxX, x); };
+        const auto clampY = [=] (int y) { return juce::jlimit (minY, maxY, y); };
+        const std::array<int, 6> positionsX {{
+            baseX,
+            clampX (juce::roundToInt (selectedPoint.x) - controlWidth + 32),
+            clampX (juce::roundToInt (selectedPoint.x) + 32),
+            minX, maxX, clampX ((w - controlWidth) / 2)
+        }};
+        const std::array<int, 7> positionsY {{
+            maxY, clampY (maxY - 48), minY,
+            clampY (juce::roundToInt (selectedPoint.y) + 47),
+            clampY (juce::roundToInt (selectedPoint.y) - controlHeight - 49),
+            clampY (graph_.getY() + graph_.getHeight() / 2
+                    - controlHeight / 2),
+            clampY (graph_.getY() + (graph_.getHeight() * 2) / 3
+                    - controlHeight / 2)
+        }};
+        float bestPenalty = std::numeric_limits<float>::infinity();
+        juce::Rectangle<int> bestPanel { baseX, maxY,
+                                          controlWidth, controlHeight };
+        for (const int y : positionsY)
         {
-            int score = std::abs (y - nodeY) / 8;
-            juce::Rectangle<int> rect (baseX, y, controlWidth, controlHeight);
-            for (int band = 0; band < kMaxBands; ++band)
+            for (const int x : positionsX)
             {
-                if (! param (parameterIndex (band, BandParameterOffset::Enabled))
-                           ->getBool())
-                    continue;
-                if (rect.expanded (10).contains (nodePoint (band)))
-                    score += band == selected_ ? 10000 : 2000;
+                const juce::Rectangle<int> candidate { x, y,
+                    controlWidth, controlHeight };
+                // A predominantly low/bottom contextual HUD is preferred,
+                // provided it does not hide either a selected or other band.
+                float penalty = (maxY - y) * 1.7f
+                    + std::abs (candidate.getCentreX()
+                        - juce::roundToInt (selectedPoint.x)) * 0.11f;
+                for (int band = 0; band < kMaxBands; ++band)
+                {
+                    if (! param (parameterIndex (band,
+                                BandParameterOffset::Enabled))->getBool())
+                        continue;
+                    const auto point = nodePoint (band);
+                    if (candidate.expanded (24).contains (point))
+                        penalty += band == selected_ ? 500000.0f : 250000.0f;
+                    if (band == selected_)
+                    {
+                        const juce::Rectangle<int> valueTag (
+                            point.x - 107, point.y - 37, 214, 22);
+                        if (candidate.expanded (3).intersects (valueTag))
+                            penalty += 120000.0f;
+                    }
+                }
+                if (penalty < bestPenalty)
+                {
+                    bestPenalty = penalty;
+                    bestPanel = candidate;
+                }
             }
-            return score;
-        };
-        const int baseY = penalty (below) <= penalty (above) ? below : above;
-        panel_ = { baseX, baseY, controlWidth, controlHeight };
+        }
+        panel_ = bestPanel;
         const int px = panel_.getX(), py = panel_.getY();
         if (narrow)
         {
@@ -635,6 +673,13 @@ public:
     int selectedBandForTesting() const noexcept { return selected_; }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
+    juce::Rectangle<int> nodeHitAreaForTesting (int band) const
+    {
+        if (band < 0 || band >= kMaxBands)
+            return {};
+        const auto p = nodePoint (band);
+        return { p.x - 22, p.y - 22, 44, 44 };
+    }
     std::array<juce::Rectangle<int>, 8> contextualHeaderBoundsForTesting() const
     {
         // Hidden mobile controls retain historical desktop bounds in JUCE.
