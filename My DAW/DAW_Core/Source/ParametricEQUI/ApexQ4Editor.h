@@ -898,6 +898,15 @@ private:
                 slot = i; break;
             }
         if (slot < 0) return;
+        // Deleted bands leave frozen host parameter slots; explicitly reset
+        // all per-band modes before reuse or stale dynamics could reactivate.
+        setUnits (dynamicParameterIndex (
+            slot, DynamicBandOffset::Enable), 0.0f);
+        setUnits (dynamicParameterIndex (
+            slot, DynamicBandOffset::Range), 0.0f);
+        setUnits (spectralBandParameterIndex (slot), 0.0f);
+        setUnits (placementParameterIndex (slot),
+                  static_cast<float> (ChannelPlacement::Stereo));
         setUnits (parameterIndex (slot, BandParameterOffset::Frequency),
                   static_cast<float> (xToHz (pt.x)));
         setUnits (parameterIndex (slot, BandParameterOffset::Gain),
