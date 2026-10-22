@@ -1257,6 +1257,13 @@ namespace ArrangementEditor
             m_holdActive   = false;
             m_holdDragging = false;
 
+            // A stationary tap or a tiny digitizer jitter must NEVER enter
+            // inertial motion, even though this 60 Hz timer is already active.
+            const double swipeX = m_lastTouchPanPos.x - m_touchPanDownScreenPos.x;
+            const double swipeY = m_lastTouchPanPos.y - m_touchPanDownScreenPos.y;
+            if (swipeX * swipeX + swipeY * swipeY <= 24.0 * 24.0)
+                m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+
             // Fling thresholds, Android-style: below the minimum velocity there
             // is no fling at all, and the release velocity is clamped so a fast
             // flick cannot fly off. (Velocity is px per 60 Hz frame.)
@@ -1489,6 +1496,16 @@ namespace ArrangementEditor
             if (! m_inertiaTimer)
                 m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
             m_inertiaTimer->startTimerHz(60);
+        }
+        else
+        {
+            // The timer may have started on initial touch drag, *before*
+            // mouseUp. Ending with a non-fling must cancel that existing
+            // timer and its velocity, not merely decline to start a new one.
+            m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
+            if (m_inertiaTimer)
+                m_inertiaTimer->stopTimer();
+            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
         }
     }
 
