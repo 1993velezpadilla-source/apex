@@ -1352,12 +1352,12 @@ namespace ArrangementEditor
             const bool still = std::abs(pos.x - m_touchPanDownScreenPos.x) < 10
                             && std::abs(pos.y - m_touchPanDownScreenPos.y) < 10;
 
-            // Long press: a still finger for 500 ms lights the glow pulse under
+            // Fast touch menu: a still finger for 320 ms lights the glow pulse under
             // it. Release at that point = right click; move = marquee.
             if (still && ! m_skipSlop)
             {
                 if (! m_holdActive
-                    && juce::Time::getMillisecondCounterHiRes() - m_holdStartMs >= 500.0)
+                    && juce::Time::getMillisecondCounterHiRes() - m_holdStartMs >= 320.0)
                 {
                     m_holdActive   = true;
                     m_holdLocalPos = local;
@@ -1812,9 +1812,20 @@ namespace ArrangementEditor
         const double pps = m_zoom.getPixelsPerSecond();
 
         g.saveState();
+        // The master is part of the scrollable canvas, but this is painted
+        // above child components. Clip to the visible timeline BELOW both
+        // pinned toolbars so playback peaks never draw across their controls.
+        const int protectedTop = m_viewportScrollY + 80;
+        const int visibleTop = juce::jmax((int)laneY, protectedTop);
+        const int visibleBottom = (int)(laneY + laneH);
+        if (visibleBottom <= visibleTop)
+        {
+            g.restoreState();
+            return;
+        }
         g.reduceClipRegion(juce::Rectangle<int>(
-            visibleLeft, (int)laneY, visibleRight - visibleLeft,
-            juce::jmax(1, (int)laneH)));
+            visibleLeft, visibleTop, visibleRight - visibleLeft,
+            visibleBottom - visibleTop));
         g.setColour(juce::Colour(0xFF5DDAD0).withAlpha(0.28f));
         g.drawHorizontalLine((int)centre, (float)visibleLeft, (float)visibleRight);
 
@@ -3161,9 +3172,8 @@ namespace ArrangementEditor
         m_lastMousePos = e.getPosition();
         m_lastMouseMods = e.mods;
 
-        // Background long-press = the same menu as desktop right-click.
-        // No mouse emulation and no destructive tool operation. The timer
-        // must have observed the stationary finger for >=500 ms.
+        // Background short-hold (320 ms) = native context menu.
+        // No mouse emulation or destructive tool operation.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
             && !m_viewOnlyMode && m_toolState.getActiveTool() == EditorTool::Select
             && m_holdActive && !m_holdDragging
@@ -3178,12 +3188,20 @@ namespace ArrangementEditor
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
             showEmptyTrackContextMenu(e.getScreenPosition(), e.getPosition());
+            repaint(juce::Rectangle<int>(e.x - 48, e.y - 48, 96, 96));
             return;
         }
 
         // Touch pan finished → start the iOS-style momentum (slow stop).
         if (m_touchScrollActive)
+        {
+            const auto oldHoldPos = m_holdLocalPos.toInt();
             endTouchPanGesture();
+            m_holdActive = false;
+            m_holdDragging = false;
+            // A hold ring must disappear immediately after finger-up.
+            repaint(juce::Rectangle<int>(oldHoldPos.x - 48, oldHoldPos.y - 48, 96, 96));
+        }
 
         if (m_middleMousePanActive)
         {
@@ -4411,6 +4429,10 @@ namespace ArrangementEditor
         if (audioClip == nullptr)
             return;
 
+        // Keep the engine's canonical name (and therefore Clip Properties)
+        // synchronized with Radial/Classic Rename and Undo/Redo.
+        if (audioClip->getName() != juce::String(clip.clipName))
+            audioClip->setName(juce::String(clip.clipName));
         audioClip->setStartPosition((DAW::SamplePosition) std::llround(clip.startTime * m_engineSampleRate));
         audioClip->setLength(juce::jmax((DAW::SamplePosition) 1,
                             (DAW::SamplePosition) std::llround(clip.length * m_engineSampleRate)));
@@ -4819,6 +4841,29 @@ namespace ArrangementEditor
         };
 
         cb.openAutomateClipPanel = [this](ArrangementClipModel* c) { onClipOpenAutomationPanel(c); };
+        cb.removeClipAutomation = m_automationManager != nullptr
+            ? std::function<void(ArrangementClipModel*)>([this](ArrangementClipModel* c)
+            {
+                if (c == nullptr || m_automationManager == nullptr)
+                    return;
+                const auto mapped = m_uuidToEngineId.find(c->id);
+                if (mapped == m_uuidToEngineId.end())
+                    return;
+                const juce::String clipId = mapped->second;
+                // Snapshot affected lane keys before removing them. This is
+                // clip-scoped removal; track volume/pan/send lanes survive.
+                std::vector<std::pair<DAW::TrackID, juce::String>> affected;
+                for (const auto& lane : m_automationManager->getLanes())
+                    if (DAW::AutomationLaneCore::tryExtractClipIdFromParameterId(lane.parameterId) == clipId)
+                        affected.emplace_back(lane.trackId, lane.parameterId);
+                if (!m_automationManager->removeClipAutomationForIds({clipId}))
+                    return;
+                for (const auto& lane : affected)
+                    hideAutomationLane(lane.first, lane.second);
+                if (auto* renderer = findClipRendererFor(c->id))
+                    renderer->setAutomationActive(false);
+                repaint();
+            }) : std::function<void(ArrangementClipModel*)>{};
         cb.openVocalTune = [this](ArrangementClipModel* c)
         {
             if (c == nullptr || m_engineClipManager == nullptr || onEngineClipVocalTuneRequested == nullptr)
