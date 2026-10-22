@@ -78,6 +78,24 @@ public:
                         expect(c3Editor != nullptr, "C3 must construct its real editor");
                         if (c3Editor != nullptr)
                         {
+                            // Exercise the REAL DSP with a known pulsed signal
+                            // before capturing its gain-reduction timeline.
+                            // GUI curves will reflect those processed blocks;
+                            // no invented screenshot waveform is drawn.
+                            juce::AudioBuffer<float> meterDrive(2,128);
+                            for(int block=0;block<440;++block)
+                            {
+                                const float amplitude = (block%86)<36 ? .72f : .085f;
+                                for(int sample=0;sample<128;++sample)
+                                {
+                                    const float phase = static_cast<float>(
+                                        (block*128+sample)*6.283185307179586*237.0/48000.0);
+                                    const float value = amplitude*std::sin(phase);
+                                    meterDrive.setSample(0,sample,value);
+                                    meterDrive.setSample(1,sample,value*.80f);
+                                }
+                                native->processBlock(meterDrive,midi);
+                            }
                             const auto outDir = juce::File::getCurrentWorkingDirectory()
                                 .getChildFile("evidence")
                                 .getChildFile("precision_c3_gui");
