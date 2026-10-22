@@ -32,6 +32,7 @@ struct Parameters
     double drive = 0.0; // 0..100%
     int style = 0;      // see kStyleNames below
     int character = 0;  // Off / Tube / Diode / Bright
+    bool characterPre = false; // saturation before detector and compression
     bool autoThreshold = false;
     bool autoRelease = false;
     bool autoGain = false;
@@ -165,9 +166,19 @@ public:
             const double dryR = stereo ? safe(right[i]) : dryL;
             inputPeak = std::max(inputPeak, std::max(std::abs(dryL), std::abs(dryR)));
             const double x[2] = {dryL * smoothedInput_, dryR * smoothedInput_};
+            // True PRE topology: saturate the WET audio before the detector
+            // and gain computer. POST topology (default) colours the output
+            // after compression. Host-routed external key always overrides
+            // the internal detector without colour.
+            const double colouredIn[2] = {
+                parameters_.characterPre
+                    ? colour(x[0],parameters_.character,smoothedDrive_) : x[0],
+                parameters_.characterPre
+                    ? colour(x[1],parameters_.character,smoothedDrive_) : x[1]
+            };
             const double trigger[2] = {
-                sideLeft ? safe(sideLeft[i]) : x[0],
-                sideRight ? safe(sideRight[i]) : (sideLeft ? safe(sideLeft[i]) : x[1])
+                sideLeft ? safe(sideLeft[i]) : colouredIn[0],
+                sideRight ? safe(sideRight[i]) : (sideLeft ? safe(sideLeft[i]) : colouredIn[1])
             };
             double detectorDb[2] {};
             for (int c = 0; c < (stereo ? 2 : 1); ++c)
@@ -237,12 +248,14 @@ public:
                              0.0, 12.0) : 0.0;
             smoothedMakeup_ = smooth(smoothedMakeup_, dbGain(makeup));
             const double wetGain = smoothedWet_ * smoothedMakeup_;
-            double yL = colour(x[0] * dbGain(-gr[0]), parameters_.character,
-                               smoothedDrive_) * wetGain
-                      + x[0] * smoothedDry_;
-            double yR = colour(x[1] * dbGain(-gr[1]), parameters_.character,
-                               smoothedDrive_) * wetGain
-                      + x[1] * smoothedDry_;
+            const double compressedL=colouredIn[0]*dbGain(-gr[0]);
+            const double compressedR=colouredIn[1]*dbGain(-gr[1]);
+            const double saturatedL=parameters_.characterPre ? compressedL
+                : colour(compressedL,parameters_.character,smoothedDrive_);
+            const double saturatedR=parameters_.characterPre ? compressedR
+                : colour(compressedR,parameters_.character,smoothedDrive_);
+            double yL = saturatedL*wetGain + x[0]*smoothedDry_;
+            double yR = saturatedR*wetGain + x[1]*smoothedDry_;
             yL *= smoothedOutput_;
             yR *= smoothedOutput_;
             // Bypass recovers the exact original input, with no discontinuous
