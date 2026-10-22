@@ -637,12 +637,17 @@ public:
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
     std::array<juce::Rectangle<int>, 8> contextualHeaderBoundsForTesting() const
     {
-        return {{ bandPower_.getBounds(), shape_.getBounds(),
-                  slope_.getBounds(), placement_.getBounds(),
-                  soloHold_.getBounds(), advanced_.getBounds(),
-                  closeBand_.getBounds(),
-                  dynamic_.isVisible() ? dynamic_.getBounds()
-                                       : juce::Rectangle<int> {} }};
+        // Hidden mobile controls retain historical desktop bounds in JUCE.
+        // The adversarial critic must test ACTUAL interactive hit regions
+        // only, never stale rectangles from a prior responsive breakpoint.
+        const auto live = [] (const juce::Component& component)
+        {
+            return component.isVisible() ? component.getBounds()
+                                         : juce::Rectangle<int> {};
+        };
+        return {{ live (bandPower_), live (shape_), live (slope_),
+                  live (placement_), live (soloHold_), live (advanced_),
+                  live (closeBand_), live (dynamic_) }};
     }
     juce::Rectangle<int> bootEyeBoundsForTesting() const noexcept
     {
