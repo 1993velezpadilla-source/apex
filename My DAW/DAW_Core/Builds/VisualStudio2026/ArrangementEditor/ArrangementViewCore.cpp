@@ -2297,6 +2297,7 @@ namespace ArrangementEditor
             const auto& rid = (*it)->getClipId();
             if (rid.isNull() || liveClipIds.find(rid) == liveClipIds.end())
             {
+                m_rendererByClipId.erase(rid);
                 removeChildComponent(it->get());
                 it = m_clipRenderers.erase(it);
             }
@@ -2813,6 +2814,7 @@ namespace ArrangementEditor
             && addedRenderer->needsWaveformUpdate())
             addedRenderer->refresh();
         m_clipRenderers.push_back(std::move(renderer));
+        m_rendererByClipId[clipId] = addedRenderer;
 
         // The pinned toolbar + ruler must stay above every clip lane so a
         // vertically-scrolled clip can never draw over them (or swallow the
@@ -4443,10 +4445,8 @@ namespace ArrangementEditor
 
     ClipRenderCore* ArrangementViewCore::findClipRendererFor(const juce::Uuid& clipId) const
     {
-        for (auto& renderer : m_clipRenderers)
-            if (renderer->getClipId() == clipId)
-                return renderer.get();
-        return nullptr;
+        const auto it = m_rendererByClipId.find(clipId);
+        return it != m_rendererByClipId.end() ? it->second : nullptr;
     }
 
     void ArrangementViewCore::refreshAutoCrossfadesForTrack(int trackIndex)
