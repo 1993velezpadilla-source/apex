@@ -1155,7 +1155,7 @@ public:
         const int width = std::max (1, getWidth());
         const int cell = std::clamp (
             (width - 2 * padding) / 4,
-            ParametricEQEditor::kTouchTarget, 132);
+            ParametricEQEditor::kTouchTarget, 92);
         std::array<juce::TextButton*, 4> primary {{
             &sketchButton_, &grabButton_, &matchButton_, &toolsButton_
         }};
@@ -2554,6 +2554,15 @@ public:
         content_.addAndMakeVisible (enableButton_);
         content_.addAndMakeVisible (bypassButton_);
         content_.addAndMakeVisible (closeButton_);
+        content_.addAndMakeVisible (moreButton_);
+        content_.addAndMakeVisible (backButton_);
+        moreButton_.setTitle ("Open complete band editing and dynamics");
+        moreButton_.onClick = [this]
+        {
+            viewport_.setViewPosition (0, advancedStartY_);
+        };
+        backButton_.setTitle ("Return to frequency, gain and Q");
+        backButton_.onClick = [this] { viewport_.setViewPosition (0, 0); };
         content_.addAndMakeVisible (shapeCombo_);
         content_.addAndMakeVisible (frequencySlider_);
         content_.addAndMakeVisible (gainSlider_);
@@ -2768,164 +2777,90 @@ public:
 
     void resized() override
     {
+        // Manual-guided redesign: never place an oversized 400px popover over
+        // the response. The first page is one compact, inline band strip;
+        // every advanced control is still reachable by MORE or scrolling.
         viewport_.setBounds (getLocalBounds());
+        const int width = std::max (1, viewport_.getWidth());
+        const bool shortWindow = owner_.getHeight() < 500;
+        const bool desktop = owner_.getWidth() >= 900 && ! shortWindow;
+        const int quickHeight = shortWindow ? 88 : (desktop ? 112 : 104);
+        const int headerHeight = 48;
+        const int row = 48;
+        content_.setBounds (0, 0, width, 1450);
+        auto frame = content_.getLocalBounds().reduced (8, 6);
 
-        // The inspector content uses touch-sized fixed rows. When the editor
-        // is shorter than the full control stack, the viewport scrolls the
-        // contextual panel instead of shrinking controls into unusability.
-        // Floating inspector uses dense but still >=44px touch targets.
-        // Portrait sheet keeps comfortable full-size 56px control rows.
-        // Floating rotary HUD exists ONLY on >=900px desktop canvases.
-        // 640x400 and 700x500 landscape touch devices use the below-graph
-        // sheet, just like narrow portrait phones. Match applyLayout().
-        const bool floating = owner_.getWidth() >= 900 && owner_.getHeight() >= 500;
-        const int row = floating ? 48 : 56;
         for (auto* slider : { &frequencySlider_, &gainSlider_, &qSlider_ })
         {
-            slider->setSliderStyle (floating
+            slider->setSliderStyle (desktop
                 ? juce::Slider::RotaryHorizontalVerticalDrag
                 : juce::Slider::LinearHorizontal);
-            // On phones, put the editable numeric field UNDER the slider:
-            // all three primary controls can share a full-width quick-edit
-            // strip without squeezing a 64px value box beside a 90px track.
             slider->setTextBoxStyle (juce::Slider::TextBoxBelow,
-                false, floating ? 96 : 86, 22);
+                                    false, desktop ? 94 : 76, 22);
         }
-        constexpr int placementRows = 1;
-        // Approved floating inspector design: one header row, three true
-        // hosted rotary dials, slope, and a single Channel selector.
-        // Dynamic/spectral options are still available by scrolling lower.
-        if (floating)
+
+        const auto positionQuick = [&]
         {
-            constexpr int inset = 14;
-            content_.setBounds (0, 0, std::max (1, viewport_.getWidth()), 1220);
-            auto frame = content_.getLocalBounds().reduced (inset, 12);
-            auto header = frame.removeFromTop (48);
-            enableButton_.setBounds (header.removeFromLeft (48).reduced (2, 2));
-            bandLabel_.setBounds (header.removeFromLeft (108));
-            closeButton_.setBounds (header.removeFromRight (44).reduced (2, 2));
+            auto strip = frame.removeFromTop (quickHeight);
+            const int column = strip.getWidth() / 3;
+            frequencySlider_.setBounds (
+                strip.removeFromLeft (column).reduced (3, 2));
+            gainSlider_.setBounds (
+                strip.removeFromLeft (column).reduced (3, 2));
+            qSlider_.setBounds (strip.reduced (3, 2));
+        };
+
+        const auto positionHeader = [&]
+        {
+            auto header = frame.removeFromTop (headerHeight);
+            const bool tight = width < 540;
+            bandLabel_.setBounds (header.removeFromLeft (
+                tight ? 55 : 102).reduced (1, 2));
+            enableButton_.setBounds (header.removeFromLeft (
+                tight ? 46 : 58).reduced (2, 2));
+            closeButton_.setBounds (header.removeFromRight (44).reduced (1, 2));
+            moreButton_.setBounds (header.removeFromRight (
+                tight ? 57 : 79).reduced (2, 2));
             shapeCombo_.setBounds (header.reduced (2, 2));
-            frame.removeFromTop (10);
-            auto dials = frame.removeFromTop (172);
-            const int dialWidth = dials.getWidth() / 3;
-            frequencySlider_.setBounds (dials.removeFromLeft (dialWidth).reduced (3, 3));
-            gainSlider_.setBounds (dials.removeFromLeft (dialWidth).reduced (3, 3));
-            qSlider_.setBounds (dials.reduced (3, 3));
-            frame.removeFromTop (6);
-            slopeSlider_.setBounds (frame.removeFromTop (50).reduced (2, 2));
-            frame.removeFromTop (10);
-            placementLabel_.setBounds (frame.removeFromTop (20));
-            placementCombo_.setBounds (frame.removeFromTop (45).reduced (2, 0));
-            // Secondary editing never disappears; scrolling exposes it.
-            frame.removeFromTop (28);
-            bypassButton_.setBounds (frame.removeFromTop (48));
-            dynLabel_.setBounds (frame.removeFromTop (24));
-            dynEnableButton_.setBounds (frame.removeFromTop (48));
-            dynFilterButton_.setBounds (frame.removeFromTop (48));
-            dynThresholdSlider_.setBounds (frame.removeFromTop (48));
-            dynRangeSlider_.setBounds (frame.removeFromTop (48));
-            dynAttackSlider_.setBounds (frame.removeFromTop (48));
-            dynReleaseSlider_.setBounds (frame.removeFromTop (48));
-            spectralLabel_.setBounds (frame.removeFromTop (24));
-            spectralArmButton_.setBounds (frame.removeFromTop (48));
-            spectralBandButton_.setBounds (frame.removeFromTop (48));
-            spectralDensitySlider_.setBounds (frame.removeFromTop (48));
-            spectralTiltButton_.setBounds (frame.removeFromTop (48));
-            auditionButton_->setBounds (frame.removeFromTop (48));
-            for (auto& hidden : placementButtons_)
-                hidden->setBounds (0, 0, 44, 44);
-            return;
-        }
-        constexpr int labelHeight = 18;
-        constexpr int auditionHeight = 48;
-        constexpr int contentMargin = 16; // reduced (8, 8)
-        // The audition row must retain its full touch-target height: content
-        // includes the margin plus every fixed row so no row is ever clamped
-        // short by vertical exhaustion. 12 static rows + 1 label +
-        // 1 dynamic label + 6 dynamic rows.
-        const bool shortSheet = ! floating && owner_.getHeight() < 500;
-        // The actual viewport for short landscapes is only ~116 px tall:
-        // 112px + content padding clipped the numeric JUCE text boxes
-        // behind the bottom command dock, even though geometry tests passed.
-        // Shrink only the quick strip (never the 44px action touch targets).
-        const int quickHeight = shortSheet ? 96 : 112;
-        const int contentHeight = contentMargin
-            + (floating ? 14 * row + 134 : 13 * row + 44 + quickHeight)
-            + 3 * labelHeight + placementRows * row + auditionHeight;
-        content_.setBounds (0, 0, std::max (1, viewport_.getWidth()),
-                            std::max (1, contentHeight));
+        };
 
-        // 900x300 has a 108px sheet: reserve full 88px slider hit targets
-        // plus 10px underneath the numeric readouts by trimming 4px of
-        // purely decorative top padding, never the control dimensions.
-        const bool shortSheetPadding = ! floating && owner_.getHeight() < 500;
-        auto bounds = content_.getLocalBounds().reduced (
-            8, shortSheetPadding ? 4 : 8);
-        // In very short landscape windows there is room for the 112px
-        // precision strip OR a heading above it, not both. Give the
-        // actual FREQ / GAIN / Q controls first-viewport priority; the
-        // band label and secondary actions remain accessible by scrolling.
-        if (! shortSheet)
-            bandLabel_.setBounds (bounds.removeFromTop (floating ? row : 44));
-        if (! floating)
+        // In extremely short landscape hosts, FREQ / GAIN / Q stay above
+        // the fold; in regular hosts, shape, ON and MORE form a thin header.
+        if (shortWindow)
         {
-            // Compact-first quick controls: selecting a node immediately
-            // exposes frequency, gain and Q without scrolling past On,
-            // Bypass and shape. Each slider retains a real hosted parameter
-            // with an editable numeric JUCE readout, even at 320px.
-            auto quick = bounds.removeFromTop (quickHeight);
-            const int column = quick.getWidth() / 3;
-            frequencySlider_.setBounds (
-                quick.removeFromLeft (column).reduced (2, 4));
-            gainSlider_.setBounds (
-                quick.removeFromLeft (column).reduced (2, 4));
-            qSlider_.setBounds (quick.reduced (2, 4));
+            positionQuick();
+            positionHeader();
         }
-        if (shortSheet)
-            bandLabel_.setBounds (bounds.removeFromTop (44));
-        auto buttonRow = bounds.removeFromTop (row);
-        const int third = buttonRow.getWidth() / 3;
-        enableButton_.setBounds (buttonRow.removeFromLeft (third).reduced (2, 2));
-        bypassButton_.setBounds (buttonRow.removeFromLeft (third).reduced (2, 2));
-        closeButton_.setBounds (buttonRow.reduced (2, 2));
-
-        shapeCombo_.setBounds (bounds.removeFromTop (row));
-        if (floating)
+        else
         {
-            // Frequency/Gain/Q are the everyday EQ controls, placed together
-            // in one true JUCE rotary strip; secondary settings scroll below.
-            auto dials = bounds.removeFromTop (134);
-            const int columnWidth = dials.getWidth() / 3;
-            frequencySlider_.setBounds (
-                dials.removeFromLeft (columnWidth).reduced (2, 1));
-            gainSlider_.setBounds (
-                dials.removeFromLeft (columnWidth).reduced (2, 1));
-            qSlider_.setBounds (dials.reduced (2, 1));
+            positionHeader();
+            positionQuick();
         }
-        // In compact mode the real FREQ/GAIN/Q sliders already occupy the
-        // pinned first-visible quick strip. Secondary controls still scroll.
-        slopeSlider_.setBounds (bounds.removeFromTop (row));
 
-        placementLabel_.setBounds (bounds.removeFromTop (labelHeight));
-        placementCombo_.setBounds (bounds.removeFromTop (row).reduced (2, 2));
+        frame.removeFromTop (8);
+        advancedStartY_ = frame.getY();
+        backButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        bypassButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        slopeSlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        placementLabel_.setBounds (frame.removeFromTop (23));
+        placementCombo_.setBounds (frame.removeFromTop (row).reduced (2, 2));
         for (auto& hidden : placementButtons_)
             hidden->setBounds (0, 0, 44, 44);
 
-        dynLabel_.setBounds (bounds.removeFromTop (labelHeight));
-        dynEnableButton_.setBounds (bounds.removeFromTop (row));
-        dynFilterButton_.setBounds (bounds.removeFromTop (row));
-        dynThresholdSlider_.setBounds (bounds.removeFromTop (row));
-        dynRangeSlider_.setBounds (bounds.removeFromTop (row));
-        dynAttackSlider_.setBounds (bounds.removeFromTop (row));
-        dynReleaseSlider_.setBounds (bounds.removeFromTop (row));
+        dynLabel_.setBounds (frame.removeFromTop (23));
+        dynEnableButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        dynFilterButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        dynThresholdSlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        dynRangeSlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        dynAttackSlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        dynReleaseSlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
 
-        spectralLabel_.setBounds (bounds.removeFromTop (labelHeight));
-        spectralArmButton_.setBounds (bounds.removeFromTop (row));
-        spectralBandButton_.setBounds (bounds.removeFromTop (row));
-        spectralDensitySlider_.setBounds (bounds.removeFromTop (row));
-        spectralTiltButton_.setBounds (bounds.removeFromTop (row));
-
-        auditionButton_->setBounds (bounds.removeFromTop (auditionHeight));
+        spectralLabel_.setBounds (frame.removeFromTop (23));
+        spectralArmButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        spectralBandButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        spectralDensitySlider_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        spectralTiltButton_.setBounds (frame.removeFromTop (row).reduced (2, 2));
+        auditionButton_->setBounds (frame.removeFromTop (row).reduced (2, 2));
     }
 
     void refresh()
@@ -3196,6 +3131,9 @@ private:
     juce::TextButton enableButton_ { "On" };
     juce::TextButton bypassButton_ { "In Path" };
     juce::TextButton closeButton_ { "X" };
+    juce::TextButton moreButton_ { "MORE" };
+    juce::TextButton backButton_ { "BACK TO EQ" };
+    int advancedStartY_ = 172;
     juce::ComboBox shapeCombo_;
     juce::Slider frequencySlider_;
     juce::Slider gainSlider_;
@@ -3281,7 +3219,6 @@ void ParametricEQEditor::applyLayout()
 {
     const int width = std::max (1, getWidth());
     const int height = std::max (1, getHeight());
-
     if (width >= 1400 && height >= 700)
         layoutMode_ = LayoutMode::LargeDesktop;
     else if (width >= 900 && height >= 600)
@@ -3293,106 +3230,31 @@ void ParametricEQEditor::applyLayout()
     else
         layoutMode_ = LayoutMode::CompactPhone;
 
-    // Immersive, graph-first APEX layout. Pro-Q-style interaction philosophy
-    // but entirely native APEX visuals. A bottom command dock never steals
-    // horizontal space from the response display.
+    // APEX EQ rebuilt against the Pro-Q 4 user manual (workflow reference):
+    // spectrum + EQ graph is the dominant surface, a fixed compact band
+    // controller appears only when selected, and the bottom command bar
+    // never overlaps either. No draggable popover can mute an EQ handle.
     auto workspace = getLocalBounds();
-    // One quiet, touch-safe command dock at ALL viewports. Old 320px mode
-    // burned 104px on an 8-button grid; six grouped controls now fit 44px.
-    const int dockHeight = (width < 650 || height < 500)
-        ? 52 : std::clamp (height / 8, 72, 110);
+    const bool shortWindow = height < 500;
+    const int dockHeight = shortWindow ? 48 : (width < 650 ? 52 : 60);
     topBar_->setBounds (workspace.removeFromBottom (dockHeight));
 
-    // Narrow devices AND short plugin windows use a scrollable touch sheet
-    // BELOW the graph. At 900x300 the floating 340px inspector physically
-    // cannot avoid covering one of two nearby EQ nodes; a touch sheet
-    // preserves editability instead of scoring an impossible HUD position.
-    // The main response remains >=45% of the whole editor.
-    const bool touchSheet = width < 900 || height < 500;
-    if (touchSheet)
-    {
-        const int available = workspace.getHeight();
-        const int minGraph = std::max (140, (height * 45 + 99) / 100);
-        const int desiredSheet = selectedBand_ >= 0
-            ? std::max (120, available * 38 / 100)
-            : std::max (56, height / 12);
-        const int sheet = std::min (desiredSheet,
-                                    std::max (0, available - minGraph));
-        graph_->setBounds (workspace.removeFromTop (available - sheet));
-        inspector_->setBounds (workspace);
-        inspector_->setVisible (true);
-        return;
-    }
-
-    // Landscape / desktop: NO permanently docked side inspector. The graph
-    // receives the entire canvas, and a small scrolling control HUD appears
-    // beside the selected node only when required.
-    graph_->setBounds (workspace);
     if (selectedBand_ < 0 || selectedBand_ >= kMaxBands)
     {
+        graph_->setBounds (workspace);
         inspector_->setVisible (false);
         return;
     }
 
-    const int graphWidth = graph_->getWidth();
-    const int graphHeight = graph_->getHeight();
-    const int cardWidth = std::min (std::max (340, graphWidth / 3), 480);
-    // At short floating plugin heights, a hard 230px minimum could
-    // push the card over the graph and into the bottom dock. Let the
-    // internal viewport scroll instead of letting the overlay escape.
-    const int cardHeight = std::min (410, std::max (1, graphHeight - 94));
-    const auto node = graph_->nodeBounds (selectedBand_).getCentre();
-
-    // A wider premium inspector cannot always fit next to the selected
-    // node (e.g. 900x620, where two active EQ nodes are only ~200px apart).
-    // Add both canvas edges as fallbacks, then rank by unobstructed nodes
-    // BEFORE distance to the selected node. This keeps every EQ handle
-    // accessible when switching bands; no DSP or parameter changes.
-    const int maxX = std::max (12, graphWidth - cardWidth - 12);
-    const int maxY = std::max (0, graphHeight - cardHeight - 12);
-    const int minY = std::min (64, maxY);
-    const std::array<int, 4> xCandidates {{
-        std::clamp (node.x + 42, 12, maxX),
-        std::clamp (node.x - cardWidth - 42, 12, maxX),
-        12, maxX
-    }};
-    const std::array<int, 4> yCandidates {{
-        std::clamp (node.y + 32, minY, maxY),
-        std::clamp (node.y - cardHeight - 32, minY, maxY),
-        std::clamp (node.y - cardHeight / 2, minY, maxY),
-        minY
-    }};
-    juce::Rectangle<int> best;
-    int bestScore = std::numeric_limits<int>::max();
-    for (const int x : xCandidates)
-        for (const int y : yCandidates)
-        {
-            const juce::Rectangle<int> candidate (x, y,
-                                                   cardWidth, cardHeight);
-            // Node occlusion is unacceptable: geometric proximity only
-            // breaks ties after the number of hidden active bands.
-            int score = std::abs (y - (node.y + 32)) / 12
-                      + std::min (300, std::abs (x - node.x) / 12);
-            for (int band = 0; band < kMaxBands; ++band)
-            {
-                const auto* enabled = processor_.getParametricEQParameter (
-                    parameterIndex (band, BandParameterOffset::Enabled));
-                if (! enabled->getBool())
-                    continue;
-                if (candidate.intersects (
-                    graph_->nodeBounds (band).expanded (8)))
-                    score += band == selectedBand_ ? 10000 : 100;
-            }
-            if (score < bestScore)
-            {
-                best = candidate;
-                bestScore = score;
-            }
-        }
-
-    inspector_->setBounds (best);
+    const int requested = shortWindow ? 104
+        : std::clamp (height / 4, 158, 184);
+    // The graph retains >=140px even in the tested 900x300 landscape host.
+    const int strip = std::min (requested,
+                                std::max (0, workspace.getHeight() - 140));
+    graph_->setBounds (workspace.removeFromTop (
+        workspace.getHeight() - strip));
+    inspector_->setBounds (workspace);
     inspector_->setVisible (true);
-    inspector_->toFront (false); // overlay stays interactive, graph stays huge
 }
 
 void ParametricEQEditor::setViewMode (int mode)
