@@ -185,7 +185,7 @@ private:
     {
         auto p=std::make_unique<LimiterHostedParameter>(juce::ParameterID(id,1),name,low,high,value,steps);
         limiterParameters_[static_cast<size_t>(i)]=p.get();
-        addLimiterHostedParameter(std::move(p));
+        addHostedParameter(std::move(p));
     }
     Settings readSettings() const noexcept
     {
