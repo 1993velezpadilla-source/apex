@@ -308,6 +308,21 @@ private:
                             + 0.25f,
                         "presentation may never invent FFT energy above"
                         " the measured highest real bin");
+                    for (const auto width : { 1.0 / 36.0,
+                                              1.0 / 18.0, 1.0 / 9.0 })
+                    {
+                        editor->setSpectrumSmoothingForTesting (width);
+                        const auto db = editor->displayedSpectrumDbForTesting (
+                            true, 784.0f);
+                        expect (std::isfinite (db),
+                            "octave-resolution switching cannot produce NaN");
+                        expect (db <=
+                                editor->maximumMeasuredSpectrumDbForTesting (true)
+                                + 0.25f,
+                            "FFT presentation smoothing cannot boost above"
+                            " any genuinely measured PCM bin");
+                    }
+                    editor->setSpectrumSmoothingForTesting (1.0 / 18.0);
                 }
             }
         }
