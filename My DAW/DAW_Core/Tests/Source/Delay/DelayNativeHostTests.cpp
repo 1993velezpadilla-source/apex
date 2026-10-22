@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace
 {
@@ -273,24 +274,81 @@ public:
     void runTest() override
     {
         juce::ScopedJuceInitialiser_GUI gui;
+        // Verify the visible history is anchored to audio TIME, not the
+        // host's callback block size. Two callbacks sizes must report the
+        // same 100 frames over one second and matching real DSP telemetry.
+        beginTest("Live history is deterministic across 128/1024 sample host blocks");
+        APEX::Limiter::Processor small,large;
+        small.prepareToPlay(48000.0,128);
+        large.prepareToPlay(48000.0,1024);
+        juce::MidiBuffer midi;
+        const auto exercise=[&](APEX::Limiter::Processor& p,int blockSize)
+        {
+            for(int offset=0;offset<48000;offset+=blockSize)
+            {
+                const int n=juce::jmin(blockSize,48000-offset);
+                juce::AudioBuffer<float> input(2,n);
+                for(int i=0;i<n;++i)
+                {
+                    const double time=(offset+i)/48000.0;
+                    const double envelope=0.4+0.5*std::abs(
+                        std::sin(2.0*juce::MathConstants<double>::pi*1.7*time));
+                    const float wave=static_cast<float>(envelope*(
+                        std::sin(2.0*juce::MathConstants<double>::pi*220.0*time)
+                       +0.3*std::sin(2.0*juce::MathConstants<double>::pi*1760.0*time)));
+                    input.setSample(0,i,wave);
+                    input.setSample(1,i,wave*0.72f);
+                }
+                p.processBlock(input,midi);
+            }
+        };
+        exercise(small,128);
+        exercise(large,1024);
+        expectEquals(static_cast<int>(small.displayFramesPublished()),100,
+                     "48kHz / 100 history Hz = exactly 100 frames");
+        expectEquals(static_cast<int>(large.displayFramesPublished()),100,
+                     "larger host blocks must not compress the graph time axis");
+        for(const size_t age:{size_t{0},size_t{1},size_t{9},size_t{34},size_t{99}})
+        {
+            const auto a=small.displayFrame(age),b=large.displayFrame(age);
+            expectWithinAbsoluteError(static_cast<double>(a.input),static_cast<double>(b.input),1e-5,
+                                      "input peak must match across host buffer sizes");
+            expectWithinAbsoluteError(static_cast<double>(a.output),static_cast<double>(b.output),1e-5,
+                                      "output peak must match across host buffer sizes");
+            expectWithinAbsoluteError(static_cast<double>(a.reduction),static_cast<double>(b.reduction),1e-5,
+                                      "gain reduction must match across host buffer sizes");
+        }
+        small.releaseResources();
+        large.releaseResources();
+
         beginTest("Capture real hosted limiter editor including live JUCE controls");
         APEX::Limiter::Processor processor;
         processor.prepareToPlay(48000.0, 128);
         juce::AudioBuffer<float> block(2, 128);
-        juce::MidiBuffer midi;
-        for (int iteration=0; iteration<300; ++iteration)
+        // Six seconds of actual DSP processing: shaped stereo musical tones
+        // and periodic sharp transients, not invented pixels or faked meters.
+        // The screenshot must demonstrate an animated, varied history.
+        for (int iteration=0; iteration<2250; ++iteration)
         {
             for (int i=0; i<block.getNumSamples(); ++i)
             {
                 const double time=(iteration*128+i)/48000.0;
-                const float wave=static_cast<float>(
-                    0.85*std::sin(2.0*juce::MathConstants<double>::pi*220.0*time)
-                    +0.48*std::sin(2.0*juce::MathConstants<double>::pi*880.0*time));
+                const double beat=std::exp(-22.0*std::fmod(time,0.53));
+                const double volume=0.20+0.62*(0.5+0.5*std::sin(
+                    2.0*juce::MathConstants<double>::pi*0.7*time));
+                const double rest=std::fmod(time,2.13)<0.20?0.035:1.0;
+                const float wave=static_cast<float>(rest*(
+                    volume*(0.75*std::sin(2.0*juce::MathConstants<double>::pi*220.0*time)
+                           +0.32*std::sin(2.0*juce::MathConstants<double>::pi*990.0*time))
+                    +beat*1.15*std::sin(2.0*juce::MathConstants<double>::pi*3110.0*time)));
                 block.setSample(0,i,wave);
-                block.setSample(1,i,wave*0.89f);
+                block.setSample(1,i,wave*static_cast<float>(
+                    0.74+0.12*std::sin(2.0*juce::MathConstants<double>::pi*0.3*time)));
             }
             processor.processBlock(block,midi);
         }
+        expectEquals(static_cast<int>(processor.displayFramesPublished()),600,
+                     "six seconds must publish 600 real 10-ms envelope frames");
 
         std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
         expect(editor!=nullptr, "actual AudioProcessorEditor is instantiated");
