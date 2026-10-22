@@ -8,6 +8,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <complex>
 
 namespace APEX::PrecisionC3
 {
@@ -340,33 +341,55 @@ public:
     void mouseDown(const juce::MouseEvent& event) override
     {
         if(!sidechainOpen_)return;
-        const auto x=(event.position.x-shiftX())/scale();
-        const auto y=(event.position.y-shiftY())/scale();
-        if (y>=539.0f && y<=650.0f && x>=170.0f && x<=1010.0f)
-        {
-            const auto hpX=freqX(processor_.getC3Parameter(SidechainHP).getUnits());
-            const auto lpX=freqX(processor_.getC3Parameter(SidechainLP).getUnits());
-            activeEqNode_ = std::abs(x-hpX) <= std::abs(x-lpX)
-                          ? SidechainHP : SidechainLP;
-            rememberUndo();
-            processor_.getC3Parameter(activeEqNode_).beginChangeGesture();
-            dragEqNode(x);
-        }
+        const float x=(event.position.x-shiftX())/scale();
+        const float y=(event.position.y-shiftY())/scale();
+        if(y<539.0f||y>640.0f||x<173.0f||x>1010.0f) return;
+        // Adversarial constraint: clicking an empty EQ region MUST NOT
+        // unexpectedly move an arbitrary HP/LP point. Select an actual node.
+        const int picked=closestDetectorNode(x,y,22.0f);
+        if(picked<0)return;
+        activeEqNode_=picked;
+        rememberUndo();
+        processor_.getC3Parameter(activeEqNode_).beginChangeGesture();
+        if(activeEqNode_>=SC1Freq && activeEqNode_<=SC4Freq)
+            processor_.getC3Parameter(activeEqNode_+1).beginChangeGesture();
+        dragEqNode(x,y);
     }
-
     void mouseDrag(const juce::MouseEvent& event) override
     {
         if(activeEqNode_<0)return;
-        dragEqNode((event.position.x-shiftX())/scale());
+        dragEqNode((event.position.x-shiftX())/scale(),
+                   (event.position.y-shiftY())/scale());
     }
-
     void mouseUp(const juce::MouseEvent&) override
     {
         if(activeEqNode_>=0)
         {
             processor_.getC3Parameter(activeEqNode_).endChangeGesture();
+            if(activeEqNode_>=SC1Freq && activeEqNode_<=SC4Freq)
+                processor_.getC3Parameter(activeEqNode_+1).endChangeGesture();
             activeEqNode_=-1;
         }
+    }
+    void mouseWheelMove(const juce::MouseEvent& event,
+                        const juce::MouseWheelDetails& wheel) override
+    {
+        if(!sidechainOpen_||wheel.deltaY==0.0f)return;
+        const float x=(event.position.x-shiftX())/scale();
+        const float y=(event.position.y-shiftY())/scale();
+        const int picked=closestDetectorNode(x,y,21.0f);
+        if(picked<SC1Freq||picked>SC4Freq)return;
+        const int qIndex=picked+2;
+        auto& param=processor_.getC3Parameter(qIndex);
+        rememberUndo();
+        const float value=param.getUnits();
+        const float next=juce::jlimit(0.15f,18.0f,
+                         value*std::pow(1.14f,wheel.deltaY*5.0f));
+        param.beginChangeGesture();
+        param.setValueNotifyingHost(param.toNormalised(next));
+        param.endChangeGesture();
+        selectedBell_=(picked-SC1Freq)/3;
+        repaint(rect(155,519,851,183));
     }
 
 private:
@@ -591,19 +614,108 @@ private:
     {
         return 20.0f*std::pow(1000.0f,juce::jlimit(0.0f,1.0f,(x-178)/826.0f));
     }
-    void dragEqNode(float x)
+    // Complex z^-1 frequency response matches the *actual* RBJ detector
+    // coefficients and existing one-pole HP/LP stages. GUI cannot substitute
+    // an invented decorative EQ shape for these six real DSP filters.
+    float detectorDbAt(float frequency) const
+    {
+        const double sampleRate=std::max(8000.0,processor_.getSampleRate());
+        const double f=std::clamp((double)frequency,20.0,sampleRate*0.45);
+        const double theta=6.283185307179586*f/sampleRate;
+        const std::complex<double> z=std::polar(1.0,-theta);
+        std::complex<double> response(1.0,0.0);
+        const double hp=processor_.getC3Parameter(SidechainHP).getUnits();
+        const double lp=processor_.getC3Parameter(SidechainLP).getUnits();
+        if(hp>0.0)
+        {
+            const double c=std::exp(-6.283185307179586
+                *std::min(hp,sampleRate*0.499)/sampleRate);
+            response*=c*(1.0-z)/(1.0-c*z);
+        }
+        if(lp<19999.0)
+        {
+            const double c=std::exp(-6.283185307179586
+                *std::min(lp,sampleRate*0.499)/sampleRate);
+            response*=(1.0-c)/(1.0-c*z);
+        }
+        for(int band=0;band<4;++band)
+        {
+            const int start=SC1Freq+3*band;
+            const double gain=processor_.getC3Parameter(start+1).getUnits();
+            if(std::abs(gain)<1.0e-6)continue;
+            const double center=std::clamp(
+                (double)processor_.getC3Parameter(start).getUnits(),
+                20.0,sampleRate*0.45);
+            const double q=processor_.getC3Parameter(start+2).getUnits();
+            const double w=6.283185307179586*center/sampleRate;
+            const double cs=std::cos(w),a=std::pow(10.0,gain/40.0);
+            const double alpha=std::sin(w)/(2.0*q);
+            const double a0=1.0+alpha/a;
+            const double b0=(1.0+alpha*a)/a0;
+            const double b1=(-2.0*cs)/a0;
+            const double b2=(1.0-alpha*a)/a0;
+            const double a1=(-2.0*cs)/a0;
+            const double a2=(1.0-alpha/a)/a0;
+            response*=(b0+b1*z+b2*z*z)/(1.0+a1*z+a2*z*z);
+        }
+        return (float)(20.0*std::log10(std::max(1.0e-12,std::abs(response))));
+    }
+    float nodeY(int index) const
+    {
+        const float middle=589.0f;
+        if(index>=SC1Freq&&index<=SC4Freq)
+            return juce::jlimit(539.0f,639.0f,
+                middle-processor_.getC3Parameter(index+1).getUnits()*2.6f);
+        const float f=index==SidechainHP
+            ? std::max(20.0f,processor_.getC3Parameter(index).getUnits())
+            : processor_.getC3Parameter(index).getUnits();
+        return juce::jlimit(539.0f,639.0f,
+            middle-detectorDbAt(f)*2.8f);
+    }
+    int closestDetectorNode(float x,float y,float radius) const
+    {
+        constexpr std::array<int,6> params {{
+            SidechainHP,SC1Freq,SC2Freq,SC3Freq,SC4Freq,SidechainLP
+        }};
+        int nearest=-1;
+        float best=radius*radius;
+        for(int idx:params)
+        {
+            float f=processor_.getC3Parameter(idx).getUnits();
+            if(idx==SidechainHP&&f<=0.0f)f=20.0f;
+            const float dx=x-freqX(f),dy=y-nodeY(idx);
+            const float d=dx*dx+dy*dy;
+            if(d<=best){best=d;nearest=idx;}
+        }
+        return nearest;
+    }
+    void dragEqNode(float x,float y)
     {
         if(activeEqNode_<0)return;
         float f=freqAtX(x);
         if(activeEqNode_==SidechainHP)
             f=juce::jlimit(0.0f,2000.0f,f);
-        else f=juce::jlimit(100.0f,20000.0f,f);
+        else if(activeEqNode_==SidechainLP)
+            f=juce::jlimit(100.0f,20000.0f,f);
         auto& p=processor_.getC3Parameter(activeEqNode_);
         p.setValueNotifyingHost(p.toNormalised(f));
-        for(int i=0;i<5;++i)
-            if(kUtilityParams[static_cast<std::size_t>(i)]==activeEqNode_)
-                utilities_[static_cast<std::size_t>(i)].setValue(f,juce::dontSendNotification);
-        repaint(rect(155,523,851,169));
+        if(activeEqNode_>=SC1Freq && activeEqNode_<=SC4Freq)
+        {
+            const int band=(activeEqNode_-SC1Freq)/3;
+            selectedBell_=band;
+            const float db=juce::jlimit(-18.0f,18.0f,
+                (589.0f-y)/2.6f);
+            auto& gain=processor_.getC3Parameter(activeEqNode_+1);
+            gain.setValueNotifyingHost(gain.toNormalised(db));
+        }
+        else
+        {
+            for(int i=0;i<5;++i)
+                if(kUtilityParams[static_cast<std::size_t>(i)]==activeEqNode_)
+                    utilities_[static_cast<std::size_t>(i)].setValue(
+                        f,juce::dontSendNotification);
+        }
+        repaint(rect(155,519,851,184));
     }
 
     void paintSidechain(juce::Graphics& g)
