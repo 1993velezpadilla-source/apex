@@ -544,6 +544,26 @@ private:
                 "dynamic panel must close without disabling native DSP");
             expect (editor->primaryHudVisibleForTesting(),
                 "closing compact dynamic editor restores FREQ/GAIN/Q knobs");
+            // PASS 10 RED root cause regression: the previous visibility
+            // helper resurrected phone-hidden controls at their stale desktop
+            // rectangles, outside the active floating HUD. Run this after
+            // OPEN -> CLOSE, not just at initial construction.
+            const auto mainHud = editor->panelBoundsForTesting();
+            const auto buttons = editor->contextualHeaderBoundsForTesting();
+            for (const auto& bounds : buttons)
+                if (! bounds.isEmpty())
+                    expect (mainHud.contains (bounds),
+                        "every VISIBLE responsive HUD control must fit"
+                        " after closing DYNAMIC EQ");
+            if (size.x < 460)
+                expect (buttons[2].isEmpty() && buttons[3].isEmpty()
+                        && buttons[7].isEmpty(),
+                    "narrow portrait must keep slope, placement, DYN hidden"
+                    " after reopening the regular HUD");
+            else if (size.x < 670)
+                expect (buttons[3].isEmpty() && buttons[7].isEmpty(),
+                    "phone landscape/480 width must not resurrect placement"
+                    " and DYN controls at stale desktop coordinates");
         }
 
         editor->setSize (1280, 720);
