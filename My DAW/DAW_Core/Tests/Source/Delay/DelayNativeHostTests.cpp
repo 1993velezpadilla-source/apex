@@ -321,6 +321,76 @@ public:
         processor128.releaseResources();
         processor1024.releaseResources();
 
+        beginTest("True 1x-32x native host mode, fixed PDC, state recall and no realtime resize");
+        // Audio oversampling is deliberately selected at prepare(), not
+        // dynamically on the audio callback; PDC changes require a restart.
+        for(int quality=0;quality<=5;++quality)
+        {
+            APEX::Limiter::Processor hosted;
+            hosted.getLimiterParameter(APEX::Limiter::AudioOversampling)
+                  .setValueNotifyingHost(static_cast<float>(quality)/5.0f);
+            hosted.prepareToPlay(48000.0,128);
+            const int factor=1<<quality;
+            expectEquals(hosted.activeAudioOversampling(),factor,
+                         "real audio oversampling starts at selected factor");
+            expect(!hosted.audioOversamplingChangePending(),
+                   "selected factor becomes active on prepare");
+            const int pdc=hosted.getLatencySamples();
+            expect(pdc>=950 && pdc<=1070,
+                   "host reports approximately 20ms Core + FIR latency");
+            const int frames=3072;
+            std::vector<float> output(static_cast<size_t>(frames),0.0f);
+            for(int offset=0;offset<frames;offset+=73)
+            {
+                const int n=juce::jmin(73,frames-offset);
+                juce::AudioBuffer<float> audio(2,n);
+                for(int k=0;k<n;++k)
+                {
+                    const int frame=offset+k;
+                    const float sine=0.32f*static_cast<float>(std::sin(
+                        2.0*juce::MathConstants<double>::pi*439.0*frame/48000.0));
+                    audio.setSample(0,k,sine);
+                    audio.setSample(1,k,sine*0.7f);
+                }
+                hosted.processBlock(audio,midi);
+                for(int k=0;k<n;++k)
+                {
+                    const auto v=audio.getSample(0,k);
+                    expect(std::isfinite(v) && std::abs(v)<2.0f,
+                           "host-rate processed audio is finite and bounded");
+                    output[static_cast<size_t>(offset+k)]=v;
+                }
+            }
+            float energy=0.0f;
+            for(int i=2400;i<frames;++i)
+                energy+=output[static_cast<size_t>(i)]*
+                        output[static_cast<size_t>(i)];
+            expect(energy>0.02f,"native host executes real high-rate audio path");
+            hosted.releaseResources();
+        }
+        APEX::Limiter::Processor staged;
+        staged.prepareToPlay(48000.0,128);
+        const int originalPdc=staged.getLatencySamples();
+        staged.getLimiterParameter(APEX::Limiter::AudioOversampling)
+              .setValueNotifyingHost(1.0f);
+        expect(staged.audioOversamplingChangePending(),
+               "runtime user change is queued until audio engine restarts");
+        expectEquals(staged.activeAudioOversampling(),1,
+                     "running 1x DSP cannot be reconfigured on audio callback");
+        expectEquals(staged.getLatencySamples(),originalPdc,
+                     "queued selector cannot silently change host PDC");
+        juce::MemoryBlock state;
+        staged.getStateInformation(state);
+        APEX::Limiter::Processor recalled;
+        recalled.setStateInformation(state.getData(),static_cast<int>(state.getSize()));
+        expect(recalled.audioOversamplingChangePending(),
+               "32x choice survived a complete host state roundtrip");
+        recalled.prepareToPlay(48000.0,128);
+        expectEquals(recalled.activeAudioOversampling(),32,
+                     "restored 32x choice activates on prepare");
+        expect(!recalled.audioOversamplingChangePending(),
+               "restored high-rate mode is no longer pending");
+
         beginTest("Capture real hosted limiter editor including live JUCE controls");
         APEX::Limiter::Processor processor;
         processor.prepareToPlay(48000.0, 128);
