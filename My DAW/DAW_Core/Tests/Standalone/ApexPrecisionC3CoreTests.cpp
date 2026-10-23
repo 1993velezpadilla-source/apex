@@ -311,6 +311,28 @@ int main()
         processConstant(e,test,1);
         for(float v:test) assert(std::isfinite(v));
     }
+    // Adversarial parity: Pro-C-style Dry Gain is decibel-based, with
+    // a genuinely muted default. An old beta session's c3.dry percentage
+    // must still recall while the new knob remains at -inf.
+    {
+        auto processDry=[&](double dryDb,double legacyPercent)
+        {
+            Core e;Parameters p;
+            p.ratio=1.0; p.kneeDb=0.0;
+            p.dryPercent=legacyPercent;
+            p.dryGainDb=dryDb;
+            e.prepare(48000);e.setParameters(p);
+            std::vector<float> signal(16384,0.25f);
+            processConstant(e,signal,128);
+            return static_cast<double>(signal.back());
+        };
+        assert(std::abs(processDry(-100.0,0.0)-0.25)<1.e-6);
+        assert(std::abs(processDry(-6.0205999133,0.0)-0.375)<1.e-4);
+        assert(std::abs(processDry(-100.0,50.0)-0.375)<1.e-4);
+        // Once the decibel control is engaged it takes precedence over
+        // the preview-only percentage rather than double summing dry paths.
+        assert(std::abs(processDry(-12.0411998266,50.0)-0.3125)<1.e-4);
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
