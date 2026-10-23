@@ -141,6 +141,12 @@ would miss it.
   overlays simultaneously. Opening Dynamics temporarily hides the
   FREQ/GAIN/Q HUD and its input widgets. Closing Dynamics restores
   normal band editing without changing the DSP/parameters.
+- Additional critic finding on the 900×300 landscape layout: there is
+  insufficient vertical room to avoid the signed DYN tooltip with a
+  346px wide card. The card narrows to 260px ONLY at landscape host
+  heights <260px canvas, retaining >160px dynamic slider hit widths
+  and avoiding the live tooltip when parked on the opposite side.
+  Native gauntlet now explicitly checks tooltip and selected-node access.
 - Expand the native JUCE gauntlet to assert no Dynamic/HUD overlap
   at 480×800, 900×300 and 1280×720. Test compact HUD substitution and
   restoration at 320×568. Generate **real** `APEX-EQ-DYNAMIC-WAV-FFT`
