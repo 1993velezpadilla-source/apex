@@ -394,6 +394,12 @@ public:
                 const auto graph=visual->getGraphRegionForTest();
                 const auto meter=visual->getMeterRegionForTest();
                 const auto knobs=visual->getAdvancedRegionForTest();
+                const auto peakValues=visual->getPeakReadoutRegionForTest();
+                const auto loudness=visual->getLoudnessReadoutRegionForTest();
+                expect(meter.contains(peakValues),"peak values stay inside the meter");
+                expect(meter.contains(loudness),"GR/LUFS/LRA stay inside the meter");
+                expect(!peakValues.intersects(loudness),
+                       "peak readout must not collide with the GR/LUFS summary");
                 expect(!graph.intersects(meter),"waveform graph never intersects meter");
                 expect(!graph.intersects(knobs),"waveform graph never intersects controls");
                 expect(!meter.intersects(knobs),"meters never cover advanced controls");
