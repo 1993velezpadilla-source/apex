@@ -102,7 +102,10 @@ public:
     void prepare(double rate)
     {
         rate_ = std::isfinite(rate) && rate >= 8000.0 ? rate : 48000.0;
-        delaySamples_ = std::max(4, static_cast<int>(std::ceil(rate_ * 0.020)) + 4);
+        // Reserve FIR's 32 input-frame reconstruction guard in the fixed
+        // host-reported latency; the 20ms user lookahead remains available.
+        delaySamples_ = std::max(4, static_cast<int>(std::ceil(rate_ * 0.020))
+                            + kFirHalf + 4);
         const int capacity = delaySamples_ + 8;
         for (auto& c : channel_)
         {
@@ -111,6 +114,7 @@ public:
             c.peak.assign(static_cast<size_t>(capacity), 0.0f);
             c.maximum.prepare(capacity);
         }
+        prepareFIRCoefficients();
         reset();
     }
     void reset() noexcept
@@ -121,7 +125,6 @@ public:
             std::fill(c.dry.begin(), c.dry.end(), 0.0f);
             std::fill(c.peak.begin(), c.peak.end(), 0.0f);
             c.maximum.clear();
-            c.prev = {0,0,0};
             c.dcX = c.dcY = c.reduction = 0.0;
             c.ditherError=0.0;
             c.rng = (&c == &channel_[0]) ? 0x12345678u : 0x91ABCDEFu;
@@ -151,7 +154,8 @@ public:
         const bool stereo = right && right != left;
         const int count = static_cast<int>(channel_[0].input.size());
         const int lookahead = std::clamp(static_cast<int>(std::lround(
-            settings_.lookaheadMs * rate_ / 1000.0)), 1, delaySamples_ - 2);
+            settings_.lookaheadMs * rate_ / 1000.0)), 1,
+            delaySamples_ - kFirHalf - 2);
         if (lookahead != lookaheadSamples_)
         {
             // Re-seed prediction on control changes; output's local
@@ -200,24 +204,40 @@ public:
                 else { c.dcX = x; c.dcY = 0.0; }
                 c.input[static_cast<size_t>(w)] = static_cast<float>(x);
                 c.dry[static_cast<size_t>(w)] = static_cast<float>(raw[ch]);
-                // Cubic reconstruction is an inter-sample *estimate*, not
-                // a certified ITU true-peak reconstruction filter.
-                double peak = std::abs(x);
-                if (settings_.truePeak && settings_.detectorQuality > 0)
+                // Always retain the observed sample peak. With ISP enabled,
+                // reconstruct fractional intersample peaks using windowed-
+                // sinc FIR (64 taps, 2x/4x/8x). This is NOT an ITU-certified
+                // true-peak or full audio-oversampling implementation.
+                c.peak[static_cast<size_t>(w)] = static_cast<float>(std::abs(x));
+                if (settings_.truePeak && settings_.detectorQuality > 0
+                    && index_ >= 2*kFirHalf-1)
                 {
-                    const int factor = 1 << settings_.detectorQuality;
-                    const double a = c.prev[0], b = c.prev[1], d = c.prev[2];
-                    for (int k=1; k<factor; ++k)
+                    // Reconstruction of the interval [n-32,n-31) requires
+                    // inputs through n. Its peak is stored 32 samples back.
+                    // Fixed latency reserves this full FIR lookahead so that
+                    // the peak deque only reads completed measurements.
+                    const int64_t centre=index_ - kFirHalf;
+                    const int peakSlot=static_cast<int>(centre % count);
+                    double reconstructionPeak=c.peak[static_cast<size_t>(peakSlot)];
+                    const int quality=settings_.detectorQuality;
+                    const int factor=1 << quality;
+                    for(int phase=1;phase<factor;++phase)
                     {
-                        const double t = static_cast<double>(k)/factor;
-                        const double spline = 0.5 * ((2.0*b)
-                            +(-a+d)*t +(2.0*a-5.0*b+4.0*d-x)*t*t
-                            +(-a+3.0*b-3.0*d+x)*t*t*t);
-                        peak = std::max(peak,std::abs(spline));
+                        const auto& taps=firCoefficients_[static_cast<size_t>(quality)]
+                                                         [static_cast<size_t>(phase)];
+                        double sample=0.0;
+                        for(int tap=0;tap<kFirTaps;++tap)
+                        {
+                            const int64_t source=centre+tap-(kFirHalf-1);
+                            const int slot=static_cast<int>(source%count);
+                            sample+=taps[static_cast<size_t>(tap)]
+                                   *c.input[static_cast<size_t>(slot)];
+                        }
+                        reconstructionPeak=std::max(reconstructionPeak,std::abs(sample));
                     }
+                    c.peak[static_cast<size_t>(peakSlot)]
+                        =static_cast<float>(reconstructionPeak);
                 }
-                c.prev = {c.prev[1],c.prev[2],x};
-                c.peak[static_cast<size_t>(w)] = static_cast<float>(peak);
                 if (keyIndex >= 0)
                 {
                     const int keySlot = static_cast<int>(keyIndex % count);
@@ -286,6 +306,42 @@ public:
         }
     }
 private:
+    static constexpr int kFirHalf=32;
+    static constexpr int kFirTaps=2*kFirHalf;
+
+    // All FIR coefficients are calculated at prepare(), never from process().
+    // Phases represent fractional samples in the interval immediately after
+    // the stored source sample. DC normalization preserves a unity baseline.
+    void prepareFIRCoefficients() noexcept
+    {
+        constexpr double pi=3.14159265358979323846;
+        for(int quality=1;quality<=3;++quality)
+        {
+            const int factor=1<<quality;
+            for(int phase=1;phase<factor;++phase)
+            {
+                auto& taps=firCoefficients_[static_cast<size_t>(quality)]
+                                           [static_cast<size_t>(phase)];
+                const double fraction=static_cast<double>(phase)/factor;
+                double sum=0.0;
+                for(int tap=0;tap<kFirTaps;++tap)
+                {
+                    const double delta=tap-(kFirHalf-1)-fraction;
+                    const double absDelta=std::abs(delta);
+                    const double sinc=absDelta<1.0e-12 ? 1.0
+                           : std::sin(pi*delta)/(pi*delta);
+                    const double window=absDelta>=kFirHalf ? 0.0
+                        : 0.42+0.5*std::cos(pi*delta/kFirHalf)
+                              +0.08*std::cos(2.0*pi*delta/kFirHalf);
+                    const double coefficient=sinc*window;
+                    taps[static_cast<size_t>(tap)]=coefficient;
+                    sum+=coefficient;
+                }
+                if(std::abs(sum)>1.0e-12)
+                    for(auto& coefficient:taps)coefficient/=sum;
+            }
+        }
+    }
     static double safe(double x) noexcept
     {
         return std::isfinite(x) && std::abs(x) < 1.0e8 ? x : 0.0;
@@ -294,11 +350,11 @@ private:
     {
         std::vector<float> input, dry, peak;
         SlidingPeak maximum;
-        std::array<double,3> prev{0,0,0};
         double dcX=0, dcY=0, reduction=0, ditherError=0;
         uint32_t rng=0x12345678u;
     };
     std::array<Channel,2> channel_;
+    std::array<std::array<std::array<double,kFirTaps>,8>,4> firCoefficients_{};
     Settings settings_;
     double rate_=48000.0, runningGain_=1.0, bypassBlend_=1.0;
     double reductionMeterDb_=0.0, blockReductionMaxDb_=0.0;
