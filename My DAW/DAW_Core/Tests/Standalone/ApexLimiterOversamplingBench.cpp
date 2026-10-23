@@ -57,12 +57,20 @@ double bench(int factor,const std::vector<float>& left,
     p.lookaheadMs=5;
     dsp.setSettings(p);
     auto l=left,r=right;  // Copies outside the timing window.
+    // Collect hard-deadline per-callback timing, not merely average CPU.
+    // Scratch storage belongs to the benchmark, never AudioRateConverter.
+    std::vector<double> blockMs((totalFrames+hostBlock-1)/hostBlock,0.0);
+    size_t blockIndex=0;
     const auto start=std::chrono::steady_clock::now();
     for(int offset=0;offset<totalFrames;offset+=hostBlock)
     {
         const int count=std::min(hostBlock,totalFrames-offset);
+        const auto startBlock=std::chrono::steady_clock::now();
         conversion.process(l.data()+offset,r.data()+offset,count,
                            &dsp,highRateCallback);
+        const auto endBlock=std::chrono::steady_clock::now();
+        blockMs[blockIndex++]=std::chrono::duration<double,std::milli>(
+            endBlock-startBlock).count();
     }
     const auto end=std::chrono::steady_clock::now();
     double sink=0;
@@ -71,10 +79,23 @@ double bench(int factor,const std::vector<float>& left,
     checksum+=sink;
     const double seconds=std::chrono::duration<double>(end-start).count();
     if(!warmup)
+    {
         std::printf("APEX_OS_CPU,%d,%d,%d,%.8f,%.6f,%.6f\n",
                     factor,sampleRate,hostBlock,seconds,
                     seconds/(static_cast<double>(totalFrames)/sampleRate),
                     (static_cast<double>(totalFrames)/sampleRate)/seconds);
+        std::sort(blockMs.begin(),blockMs.begin()+static_cast<std::ptrdiff_t>(blockIndex));
+        const auto percentile=[&](double fraction) noexcept {
+            const auto index=static_cast<size_t>(
+                std::ceil(fraction*static_cast<double>(blockIndex-1)));
+            return blockMs[index];
+        };
+        const double deadline=1000.0*hostBlock/sampleRate;
+        const double worst=blockMs[blockIndex-1];
+        std::printf("APEX_OS_BLOCK,%d,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+                    factor,percentile(0.95),percentile(0.99),worst,
+                    deadline,worst/deadline);
+    }
     return seconds;
 }
 }
@@ -83,6 +104,7 @@ int main()
     const auto left=createSignal(1.0,0.18);
     const auto right=createSignal(0.81,0.92);
     std::puts("label,factor,rate_hz,host_block,processing_seconds,core_fraction,real_time_factor");
+    std::puts("APEX_OS_BLOCK columns: factor,p95_ms,p99_ms,worst_ms,128frame_deadline_ms,worst_divided_by_deadline");
     for(const int factor:{1,2,4,8,16,32})
     {
         (void)bench(factor,left,right,true);
