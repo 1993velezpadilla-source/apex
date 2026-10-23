@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "ApexLimiterCore.h"
 #include "ApexLimiterLoudness.h"
+#include "ApexLimiterOversampling.h"
 #include "../MeteringCore/LufsMeterCore.h"
 #include <algorithm>
 #include <array>
@@ -15,7 +16,7 @@ enum Parameter : int
 {
     Gain, Ceiling, Lookahead, Attack, Release, ChannelLink, LimitingStyle,
     TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, ChannelLinkRelease,
-    DitherMode, DitherBits, Count
+    DitherMode, DitherBits, AudioOversampling, Count
 };
 
 class LimiterHostedParameter final : public juce::AudioProcessorParameterWithID
@@ -96,6 +97,9 @@ public:
         add(ChannelLinkRelease,"lim.link.release","Release Stereo Link",0,100,100);
         add(DitherMode,"lim.dither.mode","Dither Mode",0,2,0,3);
         add(DitherBits,"lim.dither.bits","Dither Bits",0,1,1,2);
+        // Plugin format preserves old parameter IDs by appending this one.
+        // Changes are staged until prepareToPlay() so host PDC stays fixed.
+        add(AudioOversampling,"lim.os.audio","Audio Oversampling (restart engine)",0,5,0,6);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override
@@ -116,13 +120,24 @@ public:
     void prepareToPlay(double rate,int block) override
     {
         setRateAndBufferSizeDetails(rate,block);
-        core_.prepare(rate);
+        const int osIndex=juce::jlimit(0,5,static_cast<int>(
+            limiterParameters_[AudioOversampling]->units()));
+        const int factor=1<<osIndex;
+        oversampler_.prepare(factor,128);
+        core_.prepare(rate*factor);
+        activeOversampling_.store(factor,std::memory_order_release);
         lufsLeft_.prepare(rate);
         lufsRight_.prepare(rate);
         summary_.prepare(rate);
-        core_.setSettings(readSettings());
+        core_.setSettings(effectiveSettings(readSettings()));
         core_.reset();
-        setLatencySamples(core_.latencySamples());
+        oversampler_.reset();
+        // PDC is fixed for each prepare() and never changed on audio thread.
+        // FIR group delay may be fractional in base frames; rounding to
+        // the nearest host sample is experimental and needs calibration.
+        const auto nativeFrames=static_cast<double>(core_.latencySamples())/factor
+                               +oversampler_.nominalFilterDelayFrames();
+        setLatencySamples(juce::roundToInt(nativeFrames));
         momentaryLufs_.store(-120.0f,std::memory_order_relaxed);
         shortTermLufs_.store(-120.0f,std::memory_order_relaxed);
         integratedLufs_.store(-120.0f,std::memory_order_relaxed);
@@ -141,11 +156,11 @@ public:
         for (auto& f:displayReduction_) f.store(0,std::memory_order_relaxed);
     }
     void releaseResources() override {}
-    void reset() override { core_.reset(); summary_.reset(); }
+    void reset() override { core_.reset(); oversampler_.reset(); summary_.reset(); }
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override
     {
         if (buffer.getNumChannels() < 1 || buffer.getNumSamples() < 1) return;
-        core_.setSettings(readSettings());
+        core_.setSettings(effectiveSettings(readSettings()));
         // Segment DSP at persistent sample-count boundaries, not host callback
         // boundaries. This produces one real peak/reduction history frame every
         // ~10 ms at 44.1/48/96 kHz, whether the host uses 64, 128, 1024 or
@@ -155,13 +170,34 @@ public:
         for (int base=0;base<total;)
         {
             const int chunk=juce::jmin(total-base,displayFrameSamples_-displaySamplesCollected_);
-            core_.process(buffer.getWritePointer(0,base),
-                buffer.getNumChannels()>1?buffer.getWritePointer(1,base):nullptr,chunk);
-            const float input=static_cast<float>(core_.inputPeak());
-            const float output=static_cast<float>(core_.outputPeak());
-            // Max over every processed audio sample, never just the last
-            // instantaneous value of an arbitrarily sized host sub-block.
-            const float reduction=static_cast<float>(core_.blockReductionMaxDb());
+            float input=0.0f,output=0.0f,reduction=0.0f;
+            auto* left=buffer.getWritePointer(0,base);
+            auto* right=buffer.getNumChannels()>1
+                  ?buffer.getWritePointer(1,base):nullptr;
+            if(activeOversampling_.load(std::memory_order_relaxed)==1)
+            {
+                // Keep the existing 1x signal path untouched and bit-identical.
+                core_.process(left,right,chunk);
+                input=static_cast<float>(core_.inputPeak());
+                output=static_cast<float>(core_.outputPeak());
+                reduction=static_cast<float>(core_.blockReductionMaxDb());
+            }
+            else
+            {
+                // Stats aggregate ALL high-rate sub-blocks, not just the last
+                // callback's tail. No allocation, lock or host PDC update.
+                HighRateReadout readout{&core_};
+                oversampler_.process(left,right,chunk,&readout,&processHighRate);
+                input=readout.input;
+                reduction=readout.reduction;
+                // Output meters describe the actual host-rate signal after
+                // decimation, not high-frequency pre-filter DSP samples.
+                for(int i=0;i<chunk;++i)
+                {
+                    output=juce::jmax(output,std::abs(left[i]));
+                    if(right) output=juce::jmax(output,std::abs(right[i]));
+                }
+            }
             blockInput=juce::jmax(blockInput,input);
             blockOutput=juce::jmax(blockOutput,output);
             blockReduction=juce::jmax(blockReduction,reduction);
@@ -214,6 +250,14 @@ public:
         gainReduction_.store(blockReduction,std::memory_order_relaxed);
         peakOutput_.store(blockOutput,std::memory_order_relaxed);
         peakInput_.store(blockInput,std::memory_order_relaxed);
+    }
+    int activeAudioOversampling() const noexcept
+    { return activeOversampling_.load(std::memory_order_acquire); }
+    bool audioOversamplingChangePending() const noexcept
+    {
+        const int requested=1<<juce::jlimit(0,5,static_cast<int>(
+            limiterParameters_[AudioOversampling]->units()));
+        return requested!=activeAudioOversampling();
     }
     float meterReduction() const noexcept { return gainReduction_.load(std::memory_order_relaxed); }
     float meterMomentaryLufs() const noexcept { return momentaryLufs_.load(std::memory_order_relaxed); }
@@ -275,13 +319,42 @@ public:
         }
     }
 private:
+    struct HighRateReadout
+    {
+        Core* core=nullptr;
+        float input=0.0f, reduction=0.0f;
+    };
+    static void processHighRate(void* opaque,float* left,float* right,int frames) noexcept
+    {
+        auto& readout=*static_cast<HighRateReadout*>(opaque);
+        readout.core->process(left,right,frames);
+        readout.input=std::max(readout.input,
+            static_cast<float>(readout.core->inputPeak()));
+        readout.reduction=std::max(readout.reduction,
+            static_cast<float>(readout.core->blockReductionMaxDb()));
+    }
+    Settings effectiveSettings(Settings settings) const noexcept
+    {
+        if(activeOversampling_.load(std::memory_order_relaxed)>1)
+        {
+            // High-rate audio already resolves fractional peaks. Additional
+            // detector FIR is redundant and extraordinarily costly at 32x.
+            settings.truePeak=false;
+            settings.detectorQuality=0;
+            // Dither must ultimately happen AFTER host-rate decimation.
+            // Until a post-decimation quantizer is implemented, do not dither
+            // the 32x audio stream (a known mastering correctness issue).
+            settings.ditherMode=0;
+        }
+        return settings;
+    }
     static const std::array<const char*,Count>& ids()
     {
         static const std::array<const char*,Count> values = {{
             "lim.gain","lim.ceiling","lim.lookahead","lim.attack",
             "lim.release","lim.link","lim.style","lim.tp","lim.quality",
             "lim.bypass","lim.unity","lim.audition","lim.dc","lim.link.release",
-            "lim.dither.mode","lim.dither.bits"
+            "lim.dither.mode","lim.dither.bits","lim.os.audio"
         }};
         return values;
     }
@@ -314,6 +387,8 @@ private:
     }
     std::array<LimiterHostedParameter*,Count> limiterParameters_ {};
     Core core_;
+    AudioRateConverter oversampler_;
+    std::atomic<int> activeOversampling_{1};
     LoudnessSummary summary_;
     DAW::LufsMeterCore lufsLeft_,lufsRight_;
     std::atomic<float> momentaryLufs_{-120},shortTermLufs_{-120};
