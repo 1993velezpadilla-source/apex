@@ -404,6 +404,17 @@ float ParametricEQParameter::getValueForText (const juce::String& source) const
             return toNormalised (text.getFloatValue());
         case Kind::Frequency:
             return toNormalised (parseFrequency (text));
+        case Kind::TimeSeconds:
+        {
+            // The canonical host parameter displays milliseconds. Previously
+            // "25 ms" parsed as 25 *seconds* and silently saturated attack
+            // to 5 s; round-trip exact text entry must preserve units.
+            float seconds = text.getFloatValue();
+            if (text.containsIgnoreCase ("ms")
+                || text.containsIgnoreCase ("millisecond"))
+                seconds *= 0.001f;
+            return toNormalised (seconds);
+        }
         case Kind::DesignMode:
             return text.containsIgnoreCase ("analog")
                 || text.getFloatValue() >= 0.5f ? 1.0f : 0.0f;
