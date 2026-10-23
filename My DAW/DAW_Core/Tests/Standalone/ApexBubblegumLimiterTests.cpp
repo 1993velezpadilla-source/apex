@@ -89,6 +89,61 @@ static void testBlockSizeIndependence()
     for(size_t i=0;i<whole.size();++i)
         assert(std::abs(whole[i]-split[i])<1.0e-6);
 }
+
+static void testReductionTelemetryAcrossHostBlocks()
+{
+    // Host boundaries must not affect visual gain-reduction peaks. Test the
+    // same fixed 10ms display windows using 128 and 1024 sample callbacks.
+    std::vector<float> original(48000);
+    for(int i=0;i<48000;++i)
+    {
+        const double t=i/kRate;
+        const double envelope=0.12+0.7*std::abs(std::sin(2*kPi*1.7*t));
+        original[static_cast<size_t>(i)]=static_cast<float>(
+            envelope*(std::sin(2*kPi*220*t)+0.3*std::sin(2*kPi*1760*t)));
+    }
+    const auto capture=[&](int hostSize)
+    {
+        Core core;
+        core.prepare(kRate);
+        Settings settings;
+        settings.gainDb=8.0;
+        settings.ceilingDb=-1.0;
+        core.setSettings(settings);
+        auto buffer=original;
+        std::vector<float> reductions;
+        reductions.reserve(100);
+        int frameFill=0;
+        float frameMax=0.0f;
+        for(int base=0;base<48000;)
+        {
+            const int call=std::min(hostSize,48000-base);
+            int used=0;
+            while(used<call)
+            {
+                const int n=std::min(call-used,480-frameFill);
+                core.process(buffer.data()+base+used,nullptr,n);
+                frameMax=std::max(frameMax,static_cast<float>(core.blockReductionMaxDb()));
+                frameFill+=n;
+                used+=n;
+                if(frameFill==480)
+                {
+                    reductions.push_back(frameMax);
+                    frameFill=0;
+                    frameMax=0;
+                }
+            }
+            base+=call;
+        }
+        assert(reductions.size()==100);
+        return reductions;
+    };
+    const auto smallBuffers=capture(128);
+    const auto largeBuffers=capture(1024);
+    for(size_t i=0;i<smallBuffers.size();++i)
+        assert(std::abs(smallBuffers[i]-largeBuffers[i])<1.0e-5f);
+}
+
 static void testBypassIsTrulyDryAndLatencyAligned()
 {
     Core core; core.prepare(kRate);
@@ -209,6 +264,7 @@ int main()
     testBypassIsTrulyDryAndLatencyAligned();
     testDitherDeterminismAndCeiling();
     testBlockSizeIndependence();
+    testReductionTelemetryAcrossHostBlocks();
     testReset();
     testStereoIntegratedAndLra();
     for (const int block : {1,17,64,128,257,1024})
