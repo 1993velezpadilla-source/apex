@@ -76,6 +76,10 @@ called GREEN. Keep PR #159 as DRAFT and MAIN untouched pending the gates.
   and 1280×720 with linked taps, blank-tap safety, grouped swipe,
   log-frequency/gain balance, one-step undo, unlink, 23px ring drag,
   and checks for accidental SOLO or unwanted gain/frequency changes.
+- CI also exports `APEX-EQ-TOUCH-LINK-REAL-FFT-<size>.png` at five viewport
+  sizes. These are **native JUCE captures** using the same actual processed
+  48 kHz reference WAV PRE/POST FFT as the existing EQ screenshots, with
+  the real grouped nodes and TOUCH LINK badge shown for design approval.
 - Actual Windows precision-touch hardware remains an unverified release
   gate, and the native GUI still requires user visual acceptance. This
   is not proof of full feature or trade-dress parity with Pro-Q 4.
