@@ -33,7 +33,11 @@ struct Parameters
     double holdMs = 0.0;
     double inputDb = 0.0;
     double wetDb = 0.0;
-    double dryPercent = 0.0;
+    double dryPercent = 0.0; // legacy C3 beta session state, 0..100
+    // Separate true Dry Gain in dB per reference dynamics workflow.
+    // -100 = fully muted. When at this default value, preserve the old
+    // beta percentage control for existing session/project recall.
+    double dryGainDb = -100.0;
     double outputDb = 0.0;
     double sidechainHighpassHz = 0.0;  // 0 disables
     double sidechainLowpassHz = 20000.0;
@@ -67,6 +71,7 @@ struct Parameters
         p.inputDb = bounded(p.inputDb, -24.0, 24.0, 0.0);
         p.wetDb = bounded(p.wetDb, -24.0, 24.0, 0.0);
         p.dryPercent = bounded(p.dryPercent, 0.0, 100.0, 0.0);
+        p.dryGainDb = bounded(p.dryGainDb, -100.0, 18.0, -100.0);
         p.outputDb = bounded(p.outputDb, -24.0, 24.0, 0.0);
         p.sidechainHighpassHz = bounded(p.sidechainHighpassHz, 0.0, 2000.0, 0.0);
         p.sidechainLowpassHz = bounded(p.sidechainLowpassHz, 100.0, 20000.0, 20000.0);
@@ -110,7 +115,8 @@ public:
         smoothedInput_ = dbGain(parameters_.inputDb);
         smoothedWet_ = dbGain(parameters_.wetDb);
         smoothedOutput_ = dbGain(parameters_.outputDb);
-        smoothedDry_ = parameters_.dryPercent * 0.01;
+        smoothedDry_ = parameters_.dryGainDb <= -99.5
+            ? parameters_.dryPercent * 0.01 : dbGain(parameters_.dryGainDb);
         smoothedBypass_ = parameters_.bypass ? 0.0 : 1.0;
         smoothedThreshold_ = parameters_.thresholdDb;
         smoothedMakeup_ = 1.0;
@@ -154,7 +160,8 @@ public:
             smoothedInput_ = dbGain(parameters_.inputDb);
             smoothedWet_ = dbGain(parameters_.wetDb);
             smoothedOutput_ = dbGain(parameters_.outputDb);
-            smoothedDry_ = parameters_.dryPercent * 0.01;
+            smoothedDry_ = parameters_.dryGainDb <= -99.5
+            ? parameters_.dryPercent * 0.01 : dbGain(parameters_.dryGainDb);
             smoothedBypass_ = parameters_.bypass ? 0.0 : 1.0;
             smoothedThreshold_ = parameters_.thresholdDb;
             smoothedMakeup_ = 1.0;
@@ -186,7 +193,8 @@ public:
         const auto inputTarget = dbGain(parameters_.inputDb);
         const auto wetTarget = dbGain(parameters_.wetDb);
         const auto outputTarget = dbGain(parameters_.outputDb);
-        const auto dryTarget = parameters_.dryPercent * 0.01;
+        const double dryTarget = parameters_.dryGainDb <= -99.5
+            ? parameters_.dryPercent * 0.01 : dbGain(parameters_.dryGainDb);
         const auto activeTarget = parameters_.bypass ? 0.0 : 1.0;
         const double link = parameters_.stereoLinkPercent * 0.01;
         double inputPeak = 0.0, outputPeak = 0.0;
