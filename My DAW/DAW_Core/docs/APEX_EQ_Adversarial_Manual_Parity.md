@@ -26,3 +26,30 @@ Reference: [FabFilter Pro-Q 4 official user manual](https://www.fabfilter.com/do
 
 ## Release gate
 **Never merge to MAIN solely for a GREEN compiler or a resemblance claim.** Require focused MSVC/JUCE, EQ gauntlet Debug+Release, Windows complete suite, screenshot artifact review, and user approval. This new editor intentionally does NOT replicate FabFilter trade dress, source, DSP, icons or presets.
+
+## PASS 7 — visual-only FFT freeze + measured peak hold (2026-10-23)
+
+- **Freeze measured FFT:** available in the existing Analyzer menu only after an actual
+  FFT snapshot exists. It keeps the last captured PRE/POST bins on screen,
+  while the worker, audio thread, and independently measured dynamic-gain
+  meter continue processing normally. The button displays `FFT FROZEN`;
+  unfreezing fetches a fresh worker frame, not an invented interpolation.
+- **Real per-bin peak hold:** optional dashed overlays for PRE and POST store
+  the maximum **observed worker bin dBFS** since enabling the feature.
+  They share the current analyzer's log-frequency power display smoothing
+  and calibration. Clear resets only the local visual accumulators.
+  Discontinuities and sample-rate/FFT-bin spacing changes invalidate old
+  held peaks. Analyzer mode changes discard stale held frames.
+- **Native WAV gauntlet extensions:** CI replays the same saved 48 kHz WAV
+  through the actual EQ before and during freeze. It checks freeze frame
+  identity, unchanged measured bins, dynamic processing while frozen,
+  fresh-frame acquisition on resume, peak hold >= current true measured
+  POST bin, and clearing/reseeding peaks. The full native screenshots
+  remain real JUCE raster output.
+- **No DSP/host state change:** freeze/peak hold are view-local, do not
+  introduce realtime-thread allocations/locks, and do not claim a full
+  Pro-Q 4 1:1 implementation. Pointer-based Windows touch tests, presets,
+  visual approval, and actual Apollo Solo song playback remain release gates.
+
+**CI state:** PASS 7 must be verified against its latest commit before it is
+called GREEN. Keep PR #159 as DRAFT and MAIN untouched pending the gates.
