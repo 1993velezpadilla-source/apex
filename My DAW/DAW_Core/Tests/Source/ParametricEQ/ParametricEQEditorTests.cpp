@@ -166,6 +166,23 @@ private:
                 dynamicParameterIndex (0, DynamicBandOffset::Threshold))
                 ->getUnitsValue()), -31.0, 0.2,
             "typed detector threshold uses actual -31 dB");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Attack))
+                ->getUnitsValue()), 0.025, 0.002,
+            "25 ms input must become 0.025 seconds, NOT max 5 seconds");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Release))
+                ->getUnitsValue()), 0.160, 0.004,
+            "160 ms release input must become 0.160 seconds");
+        auto* attack = processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Attack));
+        expectWithinAbsoluteError (static_cast<double> (
+            attack->getValueForText (attack->getText (
+                attack->getValue(), 0))),
+            static_cast<double> (attack->getValue()), 0.03,
+            "native attack text must round-trip through hosted parameter");
         expect (! processor->isAuditionHoldingForTesting(),
             "adjusting dynamic EQ never silently solos/mutes the singer");
         editor->expandDynamicForTesting (false);
