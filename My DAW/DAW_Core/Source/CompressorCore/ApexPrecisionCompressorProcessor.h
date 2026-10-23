@@ -102,7 +102,7 @@ class Processor final : public juce::AudioPluginInstance
 {
 public:
     static constexpr int kUniqueId = 0x41504333; // APC3
-    static constexpr const char* kPluginName = "APEX Precision C3";
+    static constexpr const char* kPluginName = "APEX Precision C";
     static constexpr const char* kFormatName = "APEX Native";
     static constexpr const char* kFileOrIdentifier = "APEX::PrecisionC3";
     static constexpr const char* kCategory = "Dynamics";
