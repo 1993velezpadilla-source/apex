@@ -266,7 +266,7 @@ public:
         APEX::Branding::EvoEyeStamp::paint(g,{18.0f,35.0f,30.0f,14.0f});
         g.setColour(juce::Colour(0xffe2d0a0));
         g.setFont(juce::Font(juce::FontOptions(24.0f,juce::Font::bold)));
-        g.drawText("Precision C3",129,8,220,34,juce::Justification::centredLeft);
+        g.drawText("Precision C",129,8,220,34,juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff787177));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
         g.drawText("BUBBLEGUM ENGINE",54,39,188,12,juce::Justification::left);
