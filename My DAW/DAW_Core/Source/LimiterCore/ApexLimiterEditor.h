@@ -139,6 +139,18 @@ public:
     juce::Rectangle<int> getGraphRegionForTest() const noexcept { return chartBounds(); }
     juce::Rectangle<int> getMeterRegionForTest() const noexcept { return meterBounds(); }
     juce::Rectangle<int> getAdvancedRegionForTest() const noexcept { return advancedBounds(); }
+    // Exact pixels occupied by live peak values and the GR/LUFS summary.
+    // Used by Windows JUCE capture tests to prevent label overlap at 820px.
+    juce::Rectangle<int> getPeakReadoutRegionForTest() const noexcept
+    {
+        const auto m=meterBounds();
+        return {m.getX()+17,m.getBottom()-111,m.getWidth()-20,18};
+    }
+    juce::Rectangle<int> getLoudnessReadoutRegionForTest() const noexcept
+    {
+        const auto m=meterBounds();
+        return {m.getX()+6,m.getBottom()-80,m.getWidth()-10,80};
+    }
 
     void paint(juce::Graphics& g) override
     {
@@ -255,7 +267,10 @@ public:
               11,0xffced4e3,true);
         label(g,"INPUT",meter.getX()+10,meter.getY()+31,60,16,10,0xffafb9d4,true);
         label(g,"OUTPUT",meter.getX()+76,meter.getY()+31,61,16,10,0xffafb9d4,true);
-        const float barTop=meter.getY()+78,barBottom=meter.getBottom()-87;
+        // Reserve separate rows for peak numbers, then GR/M/S/I/LRA.
+        // Earlier versions placed peak numbers at precisely the GR baseline
+        // and overprinted them at every supported window size.
+        const float barTop=meter.getY()+78,barBottom=meter.getBottom()-114;
         const float barHeight=juce::jmax(25.0f,barBottom-barTop);
         const float barW=23.0f;
         for(int k=0;k<2;++k)
@@ -281,12 +296,14 @@ public:
                 g.setColour(juce::Colour(k==0?0xfff9c0d3:0xfff3f4fe));
                 g.drawLine(px-2.0f,heldY,px+barW+2.0f,heldY,2.0f);
             }
-            label(g,juce::String(value,1),px-10,barBottom+7,47,19,12,0xffe8e5f1,true);
+            label(g,juce::String(value,1),px-10,barBottom+3,47,18,11,0xffe8e5f1,true);
         }
         // Five truthful level/loudness summaries fit without covering the
         // lower advanced controls even at the touch-safe 820x520 minimum.
         const float lineStep=16.0f;
         const float topLine=meter.getBottom()-80.0f;
+        g.setColour(juce::Colour(0xff697084).withAlpha(0.40f));
+        g.drawLine(meter.getX()+9,topLine-8,meter.getRight()-9,topLine-8,0.75f);
         label(g,"GR",meter.getX()+8,topLine,30,15,10,0xffe799ad,true);
         label(g,juce::String(reduction,1)+" dB",
               meter.getX()+41,topLine,104,15,12,0xfff68f9c,true);
@@ -333,7 +350,7 @@ public:
         label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
         // The ceiling readout is already attached to the top-right slider.
         // Duplicating it here covers the detector selector at 820px wide.
-        label(g,"True-peak certification, 32x oversampling, multichannel and gated integrated LUFS pending",
+        label(g,"True Peak certification, real 32x audio oversampling and multichannel still pending",
               chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
               10,0xffddbac2,false);
     }
