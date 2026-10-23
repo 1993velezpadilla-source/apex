@@ -83,10 +83,25 @@ jobs:
           git add -f -- "$folder/*.png" "$folder/*.png.b64"
           $staged = git diff --cached --name-only
           if ($staged) {
-            git commit -m 'evidence(limiter): store actual JUCE editor captures from Windows CI [skip ci]'
-            if ($LASTEXITCODE -ne 0) { throw 'Screenshot commit failed' }
-            git push origin HEAD:refs/heads/feature/apex-bubblegum-limiter-v1-20261022
-            if ($LASTEXITCODE -ne 0) { throw 'Screenshot push failed; CI artifact remains available' }
+            $target='refs/heads/feature/apex-bubblegum-limiter-v1-20261022'
+            $remote=git ls-remote origin $target
+            if ($LASTEXITCODE -ne 0 -or -not $remote) { throw 'Cannot verify screenshot target head' }
+            $remoteSha=($remote -split '\s+')[0]
+            if ($remoteSha -ne $env:GITHUB_SHA) {
+              Write-Warning "Newer code $remoteSha replaced checked-out $env:GITHUB_SHA; skip stale captures (artifact retained)."
+            } else {
+              git commit -m 'evidence(limiter): store actual JUCE editor captures from Windows CI [skip ci]'
+              if ($LASTEXITCODE -ne 0) { throw 'Screenshot commit failed' }
+              git push origin HEAD:$target
+              if ($LASTEXITCODE -ne 0) {
+                $newHead=git ls-remote origin $target
+                if ($LASTEXITCODE -eq 0 -and $newHead -and (($newHead -split '\s+')[0] -ne $env:GITHUB_SHA)) {
+                  Write-Warning 'Branch advanced during screenshot push; immutable evidence artifact retained.'
+                } else {
+                  throw 'Screenshot push failed for reasons other than concurrent code updates'
+                }
+              }
+            }
           }
       - name: Exercise standard APEX native tests
         run: .\Scripts\run_apex_tests.ps1 -Configuration Release -Seed 0xA9E12026
