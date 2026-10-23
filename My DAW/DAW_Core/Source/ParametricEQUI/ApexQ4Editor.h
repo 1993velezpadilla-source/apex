@@ -647,8 +647,10 @@ public:
         APEX::Branding::EvoEyeStamp::paint (
             g, bootEyeBounds_.toFloat());
 
-        // Thin floating control bar anchored beneath selected EQ point.
-        if (selected_ >= 0)
+        // When opening advanced dynamics at compact portrait widths,
+        // substitute that panel for the three knobs, never paint two
+        // overlays on top of one another.
+        if (selected_ >= 0 && (! dynamicExpanded_ || getWidth() >= 460))
         {
             g.setColour (juce::Colours::black.withAlpha (0.26f));
             g.fillRoundedRectangle (panel_.toFloat().translated (0, 4), 12.0f);
@@ -1107,6 +1109,10 @@ public:
     {
         return dynamicExpanded_ && selected_ >= 0;
     }
+    bool primaryHudVisibleForTesting() const noexcept
+    {
+        return selected_ >= 0 && bandPower_.isVisible();
+    }
     void expandDynamicForTesting (bool show) { setDynamicExpanded (show); }
     std::array<juce::Slider*, 4> dynamicSlidersForTesting()
     {
@@ -1431,32 +1437,83 @@ private:
         const int minY = graph_.getY() + 8;
         const int maxY = std::max (minY, graph_.getBottom()
                                           - panelHeight - 10);
-        // Select a side of the frequency canvas that keeps the selected
-        // filter node unobstructed. On very short windows there may be no
-        // such position: panel remains explicitly user-invoked and closable.
-        std::array<juce::Rectangle<int>, 4> candidates {{
-            { minX, minY, panelWidth, panelHeight },
-            { maxX, minY, panelWidth, panelHeight },
-            { minX, maxY, panelWidth, panelHeight },
-            { maxX, maxY, panelWidth, panelHeight }
+        // PASS 10 screenshot critic: the old four-corner solver put the
+        // DYNAMIC EQ card ON TOP of the frequency/gain/Q HUD at 480x800.
+        // Corners alone cannot find the available middle-height region.
+        // Search fixed, allocation-free candidates along both axes and
+        // consider *actual intersection area*, not a mere corner penalty.
+        //
+        // In portrait below 460px both cards cannot fit touch-safely at once.
+        // The explicitly opened dynamics editor temporarily replaces the
+        // selected-band HUD; closing it restores the ordinary EQ knobs.
+        const bool compactDynamics = w < 460;
+        setSelectedVisible (! compactDynamics);
+        const auto constrainX = [=] (int x) {
+            return juce::jlimit (minX, maxX, x);
+        };
+        const auto constrainY = [=] (int y) {
+            return juce::jlimit (minY, maxY, y);
+        };
+        const int middleX = constrainX ((minX + maxX) / 2);
+        const int middleY = constrainY ((minY + maxY) / 2);
+        const auto node = nodePoint (selected_);
+        const std::array<int, 3> candidateX {{ minX, maxX, middleX }};
+        const std::array<int, 9> candidateY {{
+            minY, maxY, middleY,
+            constrainY (minY + (maxY - minY) / 4),
+            constrainY (minY + (maxY - minY) * 3 / 4),
+            constrainY (panel_.getY() - panelHeight - 8),
+            constrainY (panel_.getBottom() + 8),
+            constrainY (node.y - panelHeight - 32),
+            constrainY (node.y + 32)
         }};
-        auto best = candidates[0];
-        float score = std::numeric_limits<float>::infinity();
-        for (const auto& candidate : candidates)
+        auto best = juce::Rectangle<int> (
+            minX, minY, panelWidth, panelHeight);
+        auto lowestPenalty = std::numeric_limits<double>::infinity();
+        for (const int x : candidateX)
         {
-            // An explicitly opened dynamics card must not cover the main
-            // band's knobs and SOLO button. Prefer the opposite quadrant
-            // before considering any band-node collision penalties.
-            float cost = candidate.intersects (panel_) ? 40000.0f : 0.0f;
-            for (int band = 0; band < kMaxBands; ++band)
+            for (const int y : candidateY)
             {
-                if (! param (parameterIndex (band,
-                        BandParameterOffset::Enabled))->getBool())
-                    continue;
-                if (candidate.expanded (18).contains (nodePoint (band)))
-                    cost += band == selected_ ? 100000.0f : 20000.0f;
+                const juce::Rectangle<int> candidate {
+                    x, y, panelWidth, panelHeight
+                };
+                const auto collision = [] (juce::Rectangle<int> a,
+                                           juce::Rectangle<int> b) {
+                    const auto common = a.getIntersection (b);
+                    return common.isEmpty() ? 0
+                        : common.getWidth() * common.getHeight();
+                };
+                // Protect EVERY control, including SOLO and numeric boxes.
+                // The primary HUD does not paint or receive input in compact
+                // dynamics mode, so it no longer counts as a blocker there.
+                double cost = compactDynamics ? 0.0
+                    : static_cast<double> (collision (
+                          candidate.expanded (3), panel_.expanded (3)))
+                        * 4000.0;
+                // The selected value tag remains visible above its node.
+                // Dynamic controls must never hide actual hosted numbers.
+                cost += static_cast<double> (collision (
+                    candidate.expanded (3), selectedTagBounds (selected_)))
+                    * 1200.0;
+                for (int band = 0; band < kMaxBands; ++band)
+                {
+                    if (! param (parameterIndex (band,
+                            BandParameterOffset::Enabled))->getBool())
+                        continue;
+                    const auto point = nodePoint (band);
+                    if (candidate.expanded (25).contains (point))
+                        cost += band == selected_ ? 3000000.0 : 650000.0;
+                }
+                // Prefer a familiar corner when several candidates clear
+                // all targets. This weak aesthetic score never outranks a
+                // single obscured slider or selected-band control.
+                cost += (maxY - y) * 0.12 + (x - minX) * 0.05;
+                if (cost < lowestPenalty)
+                {
+                    lowestPenalty = cost;
+                    best = candidate;
+                }
             }
-            if (cost < score) { score = cost; best = candidate; }
         }
         dynamicPanel_ = best;
         const int px = best.getX(), py = best.getY(), pw = best.getWidth();
