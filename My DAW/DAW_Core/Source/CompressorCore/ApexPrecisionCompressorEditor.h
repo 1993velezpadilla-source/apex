@@ -427,6 +427,21 @@ private:
         slider.setSliderStyle(linear
             ? juce::Slider::LinearHorizontal : juce::Slider::RotaryVerticalDrag);
         slider.setRange(p.fromNormalised(0.0f),p.fromNormalised(1.0f),0.0);
+        // The previous real Windows screenshot showed 8-decimal floating-point
+        // artifacts (19.99999924 ms, -18.0000000 dB), visually unlike a
+        // professional compressor and impossible to scan at compact size.
+        // Keep full DSP/automation precision while formatting ONLY GUI text.
+        slider.setNumDecimalPlacesToDisplay(1);
+        slider.textFromValueFunction=[this,index](double value)
+        {
+            const int places=(index==Release || index==Dry) ? 0 : 1;
+            return juce::String(value,places)
+                + processor_.getC3Parameter(index).getLabel();
+        };
+        slider.valueFromTextFunction=[](const juce::String& text)
+        {
+            return text.trimStart().getDoubleValue();
+        };
         if(main)
         {
             slider.setTextBoxStyle(juce::Slider::TextBoxBelow,false,92,20);
