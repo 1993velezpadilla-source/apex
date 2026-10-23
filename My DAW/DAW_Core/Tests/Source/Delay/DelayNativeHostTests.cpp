@@ -428,6 +428,50 @@ public:
                    "host PDC matches true DSP+FIR impulse delay within three samples");
         }
 
+        beginTest("Oversampling bypass must null against latency-aligned ORIGINAL audio");
+        // Adversarial test: 20 kHz content is intentionally near the
+        // antialias transition, so a naive up/downsampled bypass would
+        // colour the sound and fail the null test immediately.
+        for(int q=0;q<=5;++q)
+        {
+            APEX::Limiter::Processor pass;
+            pass.getLimiterParameter(APEX::Limiter::AudioOversampling)
+                .setValueNotifyingHost(q/5.0f);
+            pass.getLimiterParameter(APEX::Limiter::Bypass)
+                .setValueNotifyingHost(1.0f);
+            pass.prepareToPlay(48000.0,73);
+            const int frames=4096;
+            const int latency=pass.getLatencySamples();
+            auto sampleAt=[&](int ch,int n) -> float
+            {
+                if(n<0)return 0.0f;
+                const double t=static_cast<double>(n)/48000.0;
+                const double wave=0.43*std::sin(
+                    2.0*juce::MathConstants<double>::pi*20000.0*t)
+                    +0.17*std::sin(
+                    2.0*juce::MathConstants<double>::pi*440.0*t+0.3)
+                    +(n%997==0?0.2:0.0);
+                return static_cast<float>(wave*(ch==0?1.0:0.71));
+            };
+            double worst=0.0;
+            for(int base=0;base<frames;base+=73)
+            {
+                const int n=juce::jmin(73,frames-base);
+                juce::AudioBuffer<float> audio(2,n);
+                for(int i=0;i<n;++i)
+                    for(int ch=0;ch<2;++ch)
+                        audio.setSample(ch,i,sampleAt(ch,base+i));
+                pass.processBlock(audio,midi);
+                for(int i=0;i<n;++i)
+                    for(int ch=0;ch<2;++ch)
+                        worst=std::max(worst,std::abs(static_cast<double>(
+                            audio.getSample(ch,i)-sampleAt(ch,base+i-latency))));
+            }
+            expect(worst<1.0e-6,
+                   "dry bypass remains sample-exact for BOTH channels at "
+                   +juce::String(1<<q)+"x, including 20kHz and transients");
+        }
+
         beginTest("Capture real hosted limiter editor including live JUCE controls");
         APEX::Limiter::Processor processor;
         processor.prepareToPlay(48000.0, 128);
