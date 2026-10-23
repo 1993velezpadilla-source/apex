@@ -597,6 +597,8 @@ private:
                 }
                 expect (editor->hasMeasuredSpectrumForTesting(),
                         "real PRE/POST FFT must publish actual WAV audio");
+                int frozenFftIndex = -1;
+                float frozenPost784 = -120.0f;
                 if (editor->hasMeasuredSpectrumForTesting())
                 {
                     expect (editor->maximumMeasuredSpectrumDbForTesting (false)
@@ -643,6 +645,25 @@ private:
                             " any genuinely measured PCM bin");
                     }
                     editor->setSpectrumSmoothingForTesting (1.0 / 18.0);
+                    // PASS 7: Hold must seed from a REAL 48k PCM/FFT frame,
+                    // without making up peak values or mutating audio.
+                    editor->setPeakHoldForTesting (true);
+                    expect (editor->hasPeakHoldForTesting (false)
+                            && editor->hasPeakHoldForTesting (true),
+                        "PRE and POST hold are seeded by real FFT data");
+                    expectWithinAbsoluteError (
+                        static_cast<double> (editor->heldPeakAtHzForTesting (
+                            true, 784.0f)),
+                        static_cast<double> (
+                            editor->measuredSpectrumAtHzForTesting (
+                                true, 784.0f)), 0.01,
+                        "first held bin equals the actual worker measurement");
+                    editor->setSpectrumFreezeForTesting (true);
+                    expect (editor->spectrumFrozenForTesting(),
+                        "real frame is present before display freeze");
+                    frozenFftIndex = editor->spectrumFrameIndexForTesting();
+                    frozenPost784 = editor->measuredSpectrumAtHzForTesting (
+                        true, 784.0f);
                 }
 
                 // The screenshot must also show REAL dynamic DSP activity.
@@ -679,6 +700,47 @@ private:
                     " ResponseCore gain measured on reference WAV");
                 expect (editor->measuredDynamicDbForTesting (0) < -0.05f,
                     "reference WAV must trigger real native dynamic reduction");
+                if (frozenFftIndex >= 0)
+                {
+                    expect (editor->spectrumFrozenForTesting());
+                    expectEquals (editor->spectrumFrameIndexForTesting(),
+                                  frozenFftIndex,
+                        "freeze must not latch subsequent WAV FFT frames");
+                    expectWithinAbsoluteError (
+                        static_cast<double> (
+                            editor->measuredSpectrumAtHzForTesting (
+                                true, 784.0f)),
+                        static_cast<double> (frozenPost784), 0.01,
+                        "freeze preserves the actual earlier measured bin");
+                    // The dynamics meter above MUST continue during freeze:
+                    // the analyzer UI cannot suspend realtime DSP/metering.
+                    editor->setSpectrumFreezeForTesting (false);
+                    for (int attempt = 0; attempt < 20; ++attempt)
+                    {
+                        editor->refreshMeasuredSpectrumForTesting();
+                        if (editor->spectrumFrameIndexForTesting()
+                            > frozenFftIndex)
+                            break;
+                        juce::Thread::sleep (12);
+                    }
+                    expect (! editor->spectrumFrozenForTesting());
+                    expect (editor->spectrumFrameIndexForTesting()
+                            > frozenFftIndex,
+                        "unfreeze resumes with a NEW published FFT frame");
+                    if (editor->hasMeasuredSpectrumForTesting())
+                        expect (editor->heldPeakAtHzForTesting (true, 784.0f)
+                                + 0.01f >=
+                            editor->measuredSpectrumAtHzForTesting (
+                                true, 784.0f),
+                            "peak-held POST cannot be below latest real POST");
+                    editor->clearHeldPeaksForTesting();
+                    expect (! editor->hasPeakHoldForTesting (false)
+                            && ! editor->hasPeakHoldForTesting (true),
+                        "clear removes obsolete peaks without touching audio");
+                    editor->setPeakHoldForTesting (true);
+                    expect (editor->hasPeakHoldForTesting (true),
+                        "re-enabled peak hold starts from current measured WAV");
+                }
             }
         }
 
