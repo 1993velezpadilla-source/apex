@@ -502,6 +502,13 @@ private:
             expect (editor->graphBoundsForTesting().contains (area),
                 "expanded controls must not obscure header or footer");
             expect (area.getHeight() >= 180);
+            expect (! area.expanded (8).intersects (
+                        editor->nodeHitAreaForTesting (0)),
+                "expanded dynamics must keep the selected frequency node"
+                " visible and touchable at each responsive resolution");
+            expect (! area.intersects (
+                        editor->selectedTagBoundsForTesting()),
+                "Dynamics panel must never hide the live EQ band data tooltip");
             // PASS 10: old four-corner solver silently layered an entire
             // DYNAMIC EQ card over FREQ/GAIN/Q at 480x800. Assert the real
             // layout at every breakpoint instead of trusting a GREEN PNG.
