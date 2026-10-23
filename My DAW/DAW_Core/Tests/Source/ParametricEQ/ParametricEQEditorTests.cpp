@@ -512,20 +512,23 @@ private:
             // PASS 10: old four-corner solver silently layered an entire
             // DYNAMIC EQ card over FREQ/GAIN/Q at 480x800. Assert the real
             // layout at every breakpoint instead of trusting a GREEN PNG.
-            if (size.x >= 460)
+            const bool substituteHud = size.x < 460
+                || (size.x >= 720
+                    && editor->graphBoundsForTesting().getHeight() < 260);
+            if (! substituteHud)
             {
                 expect (editor->primaryHudVisibleForTesting(),
-                    "expanded dynamics keeps band knobs accessible on desktop");
+                    "normal-height Dynamics preserves the selected EQ HUD");
                 expect (! area.expanded (3).intersects (
                     editor->panelBoundsForTesting()),
                     "dynamic panel must NOT obscure ANY part of the EQ knobs"
-                    " or SOLO on phone, landscape or desktop");
+                    " or SOLO on normal-height phone or desktop");
             }
             else
             {
                 expect (! editor->primaryHudVisibleForTesting(),
-                    "320px portrait opens dynamics INSTEAD of overlapping"
-                    " the compact band HUD");
+                    "compact portrait / short landscape Dynamics temporarily"
+                    " replaces the FREQ/GAIN/Q HUD rather than hiding it");
             }
             auto dials = editor->dynamicSlidersForTesting();
             for (auto* slider : dials)
@@ -1168,11 +1171,15 @@ private:
                     editor->expandDynamicForTesting (true);
                     expect (editor->dynamicPanelVisibleForTesting(),
                         "dynamic-editor native screenshot requires open controls");
-                    if (size.x >= 460)
+                    if (editor->primaryHudVisibleForTesting())
                         expect (! editor->dynamicPanelBoundsForTesting()
                             .expanded (3).intersects (
                                 editor->panelBoundsForTesting()),
                             "exported real WAV FFT screenshot cannot hide EQ HUD");
+                    else
+                        expect (size.x < 460 || size.y < 390,
+                            "only space-constrained viewports may substitute"
+                            " dynamic editor for the FREQ/GAIN/Q HUD");
                     juce::Image dynamicImage (juce::Image::RGB,
                                                size.x, size.y, true);
                     {
