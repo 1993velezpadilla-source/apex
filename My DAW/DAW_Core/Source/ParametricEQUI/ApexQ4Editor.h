@@ -191,6 +191,15 @@ public:
         stopTimer();
         if (dragBand_ >= 0)
             finishGestures();
+        // Closing the plugin mid-ring-drag must balance the hosted
+        // automation begin/end pair, even when no mouseUp is delivered.
+        if (rangeDragBand_ >= 0)
+        {
+            param (dynamicParameterIndex (
+                rangeDragBand_, DynamicBandOffset::Range))
+                ->endChangeGesture();
+            rangeDragBand_ = -1;
+        }
         if (auditionHolding_) processor_.endAudition (auditionToken_);
         processor_.cancelAudition();
         if (analyzerAutoStarted_ &&
