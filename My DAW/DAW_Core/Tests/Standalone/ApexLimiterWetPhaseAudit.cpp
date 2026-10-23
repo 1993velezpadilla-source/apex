@@ -66,7 +66,8 @@ std::vector<float> render(int factor,int block,const std::vector<float>& input,
     core.setSettings(p);
     coreLatency=core.latencySamples();
     AudioRateConverter resampler;
-    resampler.prepare(factor,128);
+    // Use the SAME 25 high-rate alignment frames as the JUCE host.
+    resampler.prepare(factor,128,factor>1?25:0);
     firLatency=resampler.nominalFilterDelayFrames();
     auto x=input;
     for(int n=0;n<frames;n+=block)
@@ -114,10 +115,23 @@ int main()
                         factor,static_cast<double>(bin)*rate/period,
                         reported,nominal,magnitude,deltaReport,deltaNominal,
                         measuredDelay);
-            if(!std::isfinite(magnitude)||magnitude<0.02||
-               !std::isfinite(deltaNominal))
+            // A mathematically linear-phase FIR, a pure high-rate
+            // integer delay, and a transparent non-limiting Core must have
+            // an effectively ZERO phase error at 0.5–20 kHz.
+            // This catches the old 0.5..0.97 host-sample PDC defect.
+            if(!std::isfinite(magnitude) ||
+               std::abs(magnitude-1.0)>0.015 ||
+               !std::isfinite(deltaNominal) ||
+               std::abs(deltaNominal)>0.015 ||
+               std::abs(deltaReport)>0.015)
+            {
+                std::fprintf(stderr,
+                    "PDC / wet phase QUALITY GATE failed at %dx %.1fHz: reported %.6f rad, exact %.6f rad, gain %.6f\n",
+                    factor,static_cast<double>(bin)*rate/period,
+                    deltaReport,deltaNominal,magnitude);
                 return EXIT_FAILURE;
+            }
         }
     }
-    std::puts("APEX_WET_PHASE audit completed (not certified).");
+    std::puts("APEX_WET_PHASE strict 0.015-radian/0.015-gain regression PASS (not certified).");
 }
