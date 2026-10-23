@@ -109,6 +109,12 @@ suite, native screenshots and user acceptance pass.
   1280×720 cover linked gain/frequency and fine-step musical intervals,
   one-step deletion undo/redo, escape safety, disabled-band behavior and
   tooltip bounds. Physical touchscreen and user GUI approval remain gates.
+- Undo gap found by critic: preset **Reset to flat**, per-band context
+  **Delete**, **Reset**, and **Shape/Slope/Placement** popup mutations
+  previously omitted history commits. Each now commits after applying real
+  hosted values; preset reset balances Enabled host gestures for all active
+  bands and is reversible with a single Undo. Tests verify true reset/restore.
+
 
 **PASS 9 CI:** latest SHA must pass focused Windows/JUCE compiler, Windows
 complete tests, both Parametric EQ Debug/Release and Flagship EQ Gauntlet,
