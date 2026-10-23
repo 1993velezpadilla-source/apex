@@ -1433,7 +1433,13 @@ private:
         setSelectedVisible (selected_ >= 0 && ! compactDynamics);
         if (! visible) return;
         const int w = getWidth();
-        const int panelWidth = std::min (w - 18, w < 460 ? 302 : 346);
+        // Ultra-wide/short host windows (e.g. 900x300) leave no vertical
+        // escape from a band's value tag. Prefer a narrower, still touch-
+        // accessible 260px card so it can park to the tag's right or left.
+        // Four dynamic sliders still retain >=160px edit targets.
+        const bool shortLandscape = w >= 720 && graph_.getHeight() < 260;
+        const int panelWidth = std::min (
+            w - 18, w < 460 ? 302 : (shortLandscape ? 260 : 346));
         const int panelHeight = std::min (
             272, std::max (180, graph_.getHeight() - 16));
         const int minX = 9;
