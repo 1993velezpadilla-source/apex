@@ -33,6 +33,11 @@ public:
         if (foundC3)
         {
             expectEquals(c3Description.uniqueId, APEX::PrecisionC3::Processor::kUniqueId);
+            // User-facing branding is Precision C; the legacy C3 host
+            // identifier and UID stay unchanged to protect saved sessions.
+            expectEquals(c3Description.name, juce::String("APEX Precision C"));
+            expectEquals(c3Description.fileOrIdentifier,
+                         juce::String("APEX::PrecisionC3"));
             expect(c3Description.uniqueId != OptoProcessor::kUniqueId);
             expect(format.fileMightContainThisPluginType(c3Description.fileOrIdentifier));
             expect(format.doesPluginStillExist(c3Description));
@@ -76,6 +81,7 @@ public:
                     {
                         std::unique_ptr<juce::AudioProcessorEditor> c3Editor(native->createEditor());
                         expect(c3Editor != nullptr, "C3 must construct its real editor");
+                        expectEquals(native->getName(), juce::String("APEX Precision C"));
                         if (c3Editor != nullptr)
                         {
                             // Exercise the REAL DSP with a known pulsed signal
