@@ -87,3 +87,29 @@ called GREEN. Keep PR #159 as DRAFT and MAIN untouched pending the gates.
 **PASS 8 CI:** verify latest SHA before claiming GREEN. Preserve PR #159 as
 DRAFT, no MAIN merge until focused Windows/JUCE, Debug, Release, complete
 suite, native screenshots and user acceptance pass.
+
+## PASS 9 — desktop keyboard authoring and adaptive value tags (2026-10-23)
+
+- EQ graph receives focus after a graph pointer-down (JUCE component focus),
+  allowing hardware keyboard editing without synthetic Windows shortcuts.
+- **Left/Right:** nudge each linked selected band's hosted frequency by
+  ±1 semitone (multiplicative ratio, not linear Hz); **Shift+Left/Right:**
+  ±0.1 semitone. **Up/Down:** ±1 dB; **Shift+Up/Down:** ±0.1 dB.
+  Each key event balances host automation begin/end gestures per parameter.
+- **Delete / Backspace:** remove all selected/link-group bands with one
+  undoable history entry. Releasing an active audition before deletion
+  prevents a stuck solo. Ctrl+Z / Ctrl+Y and Ctrl+Shift+Z: history, redo.
+  **Escape:** exit touch link mode, deselect and close contextual panels.
+  No band selected: arrow keys return unhandled so host can use them.
+- Dynamic EQ value readout uses a graph-constrained 308px tooltip (vs
+  static 224px), replacing a constant 214px width that clipped signed
+  real-DSP DYN metering text. Contextual HUD collision scoring uses these
+  same physical bounds.
+- Adversarial native JUCE callback regression tests at 320×568, 480×800,
+  1280×720 cover linked gain/frequency and fine-step musical intervals,
+  one-step deletion undo/redo, escape safety, disabled-band behavior and
+  tooltip bounds. Physical touchscreen and user GUI approval remain gates.
+
+**PASS 9 CI:** latest SHA must pass focused Windows/JUCE compiler, Windows
+complete tests, both Parametric EQ Debug/Release and Flagship EQ Gauntlet,
+and repository checks. Do not merge PR #159 into MAIN from older GREEN.
