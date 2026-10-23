@@ -316,8 +316,8 @@ public:
         for(int i=0;i<5;++i)
         {
             const std::array<juce::Rectangle<int>,5> utilityBounds {{
-                {27,598,115,27},{27,656,115,27},{228,654,170,28},
-                {750,654,145,28},{898,654,111,28}
+                {27,598,115,27},{27,656,115,27},{186,673,183,20},
+                {749,673,121,20},{887,673,119,20}
             }};
             const auto& b=utilityBounds[static_cast<std::size_t>(i)];
             utilities_[static_cast<std::size_t>(i)].setBounds(
@@ -747,9 +747,17 @@ private:
         g.drawText("TRIGGER INPUT",20,521,130,17,juce::Justification::centred);
         g.drawText("STEREO LINK",20,575,130,18,juce::Justification::centred);
         g.drawText("HP FREQUENCY",20,631,130,17,juce::Justification::centred);
-        g.drawText("LOW-PASS",230,635,160,14,juce::Justification::centred);
-        g.drawText("INPUT TRIM",742,635,145,14,juce::Justification::centred);
-        g.drawText("OUTPUT TRIM",891,635,120,14,juce::Justification::centred);
+        // Controls sit BELOW the EQ frequency axis, never on top of the
+        // response curve. These were overlapping the plot in V4 evidence.
+        g.drawText("LOW PASS   " + juce::String(
+            processor_.getC3Parameter(SidechainLP).getUnits(),0) + " Hz",
+            185,653,185,17,juce::Justification::centred);
+        g.drawText("INPUT   " + juce::String(
+            processor_.getC3Parameter(Input).getUnits(),1) + " dB",
+            747,653,126,17,juce::Justification::centred);
+        g.drawText("OUTPUT   " + juce::String(
+            processor_.getC3Parameter(Output).getUnits(),1) + " dB",
+            884,653,124,17,juce::Justification::centred);
 
         const float top=539.0f,bottom=639.0f;
         g.setColour(juce::Colour(0xff343037));
@@ -818,31 +826,33 @@ private:
         const auto q=processor_.getC3Parameter(selected+2).getUnits();
         g.setColour(juce::Colour(0xffc5b9a9));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("SIX DETECTOR FILTERS   /   DRAG: FREQ + GAIN   /   WHEEL: Q",
-                   170,523,610,16,juce::Justification::centredLeft);
+        g.setFont(juce::Font(juce::FontOptions(12.0f)));
+        g.drawText("DETECTOR EQ   |   DRAG: FREQUENCY + GAIN   |   WHEEL: Q",
+                   170,520,610,20,juce::Justification::centredLeft);
         g.drawText("BAND "+juce::String(selectedBell_+1)+"   "
                    +juce::String(freq,0)+" Hz    "
                    +juce::String(gain,1)+" dB    Q "
                    +juce::String(q,2),
-                   416,671,326,18,juce::Justification::centredRight);
+                   397,674,340,20,juce::Justification::centred);
         const bool wantsExternal=processor_.getC3Parameter(ExternalSidechain).getUnits()>0.5f;
         g.setColour(wantsExternal
             ? (processor_.externalSidechainRouted()
                 ? juce::Colour(0xff99daab) : juce::Colour(0xffffa369))
             : juce::Colour(0xffb0a3a6));
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText(wantsExternal
             ? (processor_.externalSidechainRouted() ? "EXT ROUTED" : "EXT NOT ROUTED")
             : "INTERNAL",
-            795,523,208,17,juce::Justification::centredRight);
+            795,522,208,18,juce::Justification::centredRight);
     }
 
     void paintFooter(juce::Graphics& g)
     {
         g.setColour(juce::Colour(0xff111014)); g.fillRect(0,703,1080,37);
         g.setColour(juce::Colour(0xff3b353b));g.drawHorizontalLine(703,0,1080);
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.setFont(juce::Font(juce::FontOptions(12.0f)));
         g.setColour(juce::Colour(0xffa59aa0));
-        g.drawText("HOST PARAMETER AUTOMATION",16,710,205,21,juce::Justification::left);
+        g.drawText("HOST AUTOMATION",16,710,205,21,juce::Justification::left);
         g.drawText("Oversampling: Off (pending)",242,710,180,21,juce::Justification::left);
         g.drawText("Lookahead: Off (pending)",458,710,183,21,juce::Justification::left);
         g.drawText("PRECISION  /  APEX NATIVE",654,710,236,21,juce::Justification::right);
