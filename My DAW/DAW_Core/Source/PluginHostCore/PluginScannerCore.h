@@ -12,6 +12,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../CompressorCore/ApexPrecisionCompressorProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
 
@@ -39,6 +40,7 @@ public:
         hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativePrecisionC3Entry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
@@ -275,6 +277,7 @@ private:
         hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativePrecisionC3Entry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
 
@@ -333,6 +336,17 @@ private:
     void seedNativeOpto2AEntry()
     {
         APEX::Compressor::OptoProcessor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Register the second compressor in the REAL scanner/cache path, not
+        just the format manager. Both startup AND forced rescan must make the
+        native C3 available in the plugin browser without disturbing Opto 2A. */
+    void seedNativePrecisionC3Entry()
+    {
+        APEX::PrecisionC3::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
