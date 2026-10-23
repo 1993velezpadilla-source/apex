@@ -875,7 +875,15 @@ public:
         return {{ &dynamicSliders_[0], &dynamicSliders_[1],
                   &dynamicSliders_[2], &dynamicSliders_[3] }};
     }
-    void toggleDynamicOnForTesting() { dynToggle_.triggerClick(); }
+    void toggleDynamicOnForTesting()
+    {
+        // JUCE Button::triggerClick() posts a message asynchronously.
+        // Unit assertions run synchronously on this test's message thread;
+        // invoking the ACTUAL production callback avoids a false negative
+        // caused by checking before the queued click was dispatched.
+        if (dynToggle_.onClick)
+            dynToggle_.onClick();
+    }
     juce::Rectangle<int> nodeHitAreaForTesting (int band) const
     {
         if (band < 0 || band >= kMaxBands)
