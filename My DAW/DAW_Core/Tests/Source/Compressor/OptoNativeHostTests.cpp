@@ -277,6 +277,35 @@ public:
                                 }
                             }
 
+                            // Visual adversary: the previous release image showed
+                            // LP/Input/Output sliders painted over the detector plot.
+                            // Inspect actual JUCE hit rectangles at BOTH viewport
+                            // sizes; a clickable slider inside the response plot
+                            // is a layout failure even when audio tests are GREEN.
+                            beginTest("Precision C3 V5 detector EQ must have unobstructed graph");
+                            for (const auto size : {juce::Point<int>(1080,740),
+                                                     juce::Point<int>(810,555)})
+                            {
+                                c3Editor->setSize(size.x,size.y);
+                                const auto scale=size.x/1080.0f;
+                                const juce::Rectangle<int> detectorPlot(
+                                    juce::roundToInt(178.0f*scale),
+                                    juce::roundToInt(539.0f*scale),
+                                    juce::roundToInt(826.0f*scale),
+                                    juce::roundToInt(101.0f*scale));
+                                for(const auto& controlName : {"SC Low-pass","Input","Output",
+                                                                "SC High-pass","Stereo Link"})
+                                {
+                                    auto* control=findControl(controlName);
+                                    expect(control!=nullptr,
+                                           juce::String(controlName)+" must remain user-editable");
+                                    if(control!=nullptr && control->isVisible())
+                                        expect(!control->getBounds().intersects(detectorPlot),
+                                               juce::String(controlName)
+                                               +" must not occlude detector EQ response");
+                                }
+                            }
+
                             for(const auto& name : {
                                     "C3 A/B","C3 COPY","C3 UNDO","C3 REDO",
                                     "C3 PRESET","C3 STYLE","C3 CHARACTER",
