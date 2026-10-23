@@ -570,6 +570,22 @@ public:
             }
         }
 
+        // Touchscreen-friendly group selection: explicitly opt in via MORE.
+        // The badge communicates that node taps LINK/UNLINK rather than
+        // editing frequency/gain. Linked nodes can still be dragged as a group.
+        if (touchMultiSelectMode_)
+        {
+            const auto badge = juce::Rectangle<int> (
+                graph_.getX() + 12, graph_.getY() + 29,
+                std::min (graph_.getWidth() - 24, 277), 23);
+            g.setColour (juce::Colour (0xff272f31).withAlpha (0.96f));
+            g.fillRoundedRectangle (badge.toFloat(), 5.0f);
+            g.setColour (juce::Colour (0xff83d9b7));
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.drawFittedText ("TOUCH LINK ON  |  TAP NODES / DRAG GROUP",
+                badge.reduced (7, 1), juce::Justification::centredLeft, 1);
+        }
+
         // Optional expanded dynamics, only while explicitly requested.
         // Never occupies permanent graph height or changes filter response
         // coordinates. The four editable rows bind directly to the DSP.
@@ -658,6 +674,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         pendingCurveCreate_ = false;
+        touchPendingBand_ = -1;
         rangeDragBand_ = -1;
         hover_.reset();
         if (! graph_.contains (e.getPosition())
@@ -708,6 +725,16 @@ public:
                 dragBand_ = -1;
                 return;
             }
+            if (touchMultiSelectMode_)
+            {
+                // Defer a touch tap until mouseUp, so a swipe can still begin
+                // a proper host automation gesture and move the whole group.
+                // This also avoids changing the band selection on pointer-down.
+                touchPendingBand_ = dragBand_;
+                touchPendingOrigin_ = e.position;
+                dragBand_ = -1;
+                return;
+            }
             const bool keepGroup = selectedMask_[
                 static_cast<std::size_t> (dragBand_)] && selectedCount() > 1;
             select (dragBand_, keepGroup);
@@ -717,6 +744,10 @@ public:
 
         const bool forceCreate = e.mods.isCtrlDown()
                               || e.mods.isCommandDown();
+        // Blank-canvas touch is intentionally inert in LINK mode. Otherwise
+        // an accidental touch while grouping inserts a new EQ band.
+        if (touchMultiSelectMode_ && ! forceCreate)
+            return;
         // Manual p.9: one click deselects while other bands are selected;
         // Ctrl-click adds immediately; dragging the yellow response creates
         // a band regardless of selected state.
@@ -758,6 +789,18 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (touchPendingBand_ >= 0)
+        {
+            if (e.position.getDistanceFrom (touchPendingOrigin_) < 7.0f)
+                return;
+            const int band = touchPendingBand_;
+            const auto origin = touchPendingOrigin_;
+            touchPendingBand_ = -1;
+            // An unlinked band joins before dragging; an already linked
+            // band remains linked. Do not toggle membership on swipe.
+            select (band, true);
+            beginNodeGesture (band, origin);
+        }
         if (rangeDragBand_ >= 0)
         {
             // Up/down on the OUTER dynamic ring changes its signed range
@@ -821,6 +864,14 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (touchPendingBand_ >= 0)
+        {
+            const int band = touchPendingBand_;
+            touchPendingBand_ = -1;
+            toggleSelectedBand (band);
+            // No DSP parameter gesture or undo entry for selection only.
+            return;
+        }
         if (rangeDragBand_ >= 0)
         {
             param (dynamicParameterIndex (
@@ -842,6 +893,7 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (touchMultiSelectMode_) return; // mode is tap-to-link, not add
         if (! graph_.contains (e.getPosition())
             || (selected_ >= 0 && panel_.contains (e.getPosition())))
             return;
@@ -1104,6 +1156,8 @@ public:
         return result;
     }
     void selectBandForTesting (int band) { select (band); }
+    void setTouchMultiSelectForTesting (bool on) { setTouchMultiSelectMode (on); }
+    bool touchMultiSelectForTesting() const noexcept { return touchMultiSelectMode_; }
     void undoForTesting() { historyStep (-1); }
     void redoForTesting() { historyStep (1); }
     void createBandForTesting (juce::Point<float> pt) { createBand (pt); }
@@ -1404,6 +1458,16 @@ private:
         setDynamicControlsVisible (dynamicExpanded_);
         sync(); resized(); repaint();
     }
+    void setTouchMultiSelectMode (bool enabled)
+    {
+        touchPendingBand_ = -1;
+        touchMultiSelectMode_ = enabled;
+        // Exiting explicit link mode always leaves a single primary band.
+        // Otherwise a future ordinary node drag may unexpectedly move all.
+        if (! enabled && selectedCount() > 1)
+            select (selected_);
+        repaint();
+    }
     void toggleSelectedBand (int band)
     {
         if (band < 0 || band >= kMaxBands
@@ -1638,7 +1702,13 @@ private:
         {
             if (! param (parameterIndex (b, BandParameterOffset::Enabled))->getBool())
                 continue;
-            if (pt.getDistanceFrom (nodePoint (b).toFloat()) <= 22.0f)
+            // Range rings visibly extend to ~22.4 px radius. Their 24 px
+            // interaction envelope must not be clipped by a 22 px node hit
+            // test, or the outermost ring taps become impossible.
+            const bool dynamic = param (dynamicParameterIndex (
+                b, DynamicBandOffset::Enable))->getBool();
+            const float radius = dynamic ? 24.0f : 22.0f;
+            if (pt.getDistanceFrom (nodePoint (b).toFloat()) <= radius)
                 return b;
         }
         return -1;
@@ -2002,6 +2072,11 @@ private:
         menu.addItem (5, "Delete band");
         menu.addSeparator();
         menu.addItem (9, "Open dynamic EQ controls...");
+        menu.addSeparator();
+        menu.addItem (10, "Touch multi-select (tap to link bands)", true,
+                      touchMultiSelectMode_);
+        menu.addItem (11, "Unlink other bands", selectedCount() > 1);
+        menu.addSeparator();
         menu.addItem (6, "Filter slope...");
         menu.addItem (7, "Channel placement...");
         menu.addItem (8, "Filter shape...");
@@ -2032,6 +2107,10 @@ private:
                 }
                 else if (id == 9)
                     e->setDynamicExpanded (true);
+                else if (id == 10)
+                    e->setTouchMultiSelectMode (! e->touchMultiSelectMode_);
+                else if (id == 11)
+                    e->select (band);
                 else if (id == 6)
                     e->showSlopeMenu();
                 else if (id == 7)
@@ -2238,6 +2317,11 @@ private:
     std::uint32_t lastDynamicActiveMask_ = 0;
     bool dynamicMeterValid_ = false;
     int rangeDragBand_ = -1;
+    // Explicit touch link mode; tap toggles membership, swipe starts a host
+    // gesture. No allocations/locks or new audio-thread parameters.
+    bool touchMultiSelectMode_ = false;
+    int touchPendingBand_ = -1;
+    juce::Point<float> touchPendingOrigin_ {};
     float rangeDragOriginY_ = 0.0f;
     float rangeDragStartDb_ = 0.0f;
     int selected_ = -1, dragBand_ = -1, rangeIndex_ = 2;
