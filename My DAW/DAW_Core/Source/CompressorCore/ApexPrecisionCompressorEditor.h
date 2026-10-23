@@ -394,7 +394,7 @@ public:
 
 private:
     static constexpr std::array<int,6> kKnobParams {{
-        Threshold,Ratio,Attack,Release,Wet,Dry
+        Threshold,Ratio,Attack,Release,Wet,DryGainDb
     }};
     static constexpr std::array<int,4> kMiniParams {{
         Knee,Range,Hold,Drive
@@ -434,12 +434,16 @@ private:
         slider.setNumDecimalPlacesToDisplay(1);
         slider.textFromValueFunction=[this,index](double value)
         {
-            const int places=(index==Release || index==Dry) ? 0 : 1;
+            if(index==DryGainDb && value<=-99.5) return juce::String("-inf dB");
+            const int places=(index==Release) ? 0 : 1;
             return juce::String(value,places)
                 + processor_.getC3Parameter(index).getLabel();
         };
-        slider.valueFromTextFunction=[](const juce::String& text)
+        slider.valueFromTextFunction=[index](const juce::String& text)
         {
+            if(index==DryGainDb
+               && (text.containsIgnoreCase("inf") || text.trim()=="-100"))
+                return -100.0;
             return text.trimStart().getDoubleValue();
         };
         if(main)
@@ -574,7 +578,7 @@ private:
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
         g.drawText("STYLE",409,337,123,18,juce::Justification::centred);
         g.drawText("WET GAIN",910,394,91,16,juce::Justification::centred);
-        g.drawText("DRY",926,473,65,16,juce::Justification::centred);
+        g.drawText("DRY GAIN",913,473,95,16,juce::Justification::centred);
         g.setColour(juce::Colour(0xffe3c16a));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
         g.drawText("CHARACTER",416,403,113,14,juce::Justification::centred);
