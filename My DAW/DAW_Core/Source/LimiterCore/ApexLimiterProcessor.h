@@ -132,6 +132,7 @@ public:
         core_.setSettings(effectiveSettings(readSettings()));
         core_.reset();
         oversampler_.reset();
+        resetHostDither();
         // PDC is fixed for each prepare() and never changed on audio thread.
         // FIR group delay may be fractional in base frames; rounding to
         // the nearest host sample is experimental and needs calibration.
@@ -156,7 +157,7 @@ public:
         for (auto& f:displayReduction_) f.store(0,std::memory_order_relaxed);
     }
     void releaseResources() override {}
-    void reset() override { core_.reset(); oversampler_.reset(); summary_.reset(); }
+    void reset() override { core_.reset(); oversampler_.reset(); summary_.reset(); resetHostDither(); }
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override
     {
         if (buffer.getNumChannels() < 1 || buffer.getNumSamples() < 1) return;
@@ -219,6 +220,8 @@ public:
             }
         }
         for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,total);
+        if(activeOversampling_.load(std::memory_order_relaxed)>1)
+            finishHostRate(buffer,readSettings());
         // 400ms overlapping stereo K-weighted integration / gated range.
         // Rolling state is entirely allocated during prepareToPlay().
         summary_.process(buffer.getReadPointer(0),
@@ -333,6 +336,54 @@ private:
         readout.reduction=std::max(readout.reduction,
             static_cast<float>(readout.core->blockReductionMaxDb()));
     }
+    struct DitherState
+    {
+        uint32_t rng=0;
+        double error=0.0;
+    };
+    void resetHostDither() noexcept
+    {
+        finalDither_[0]={0x12345678u,0.0};
+        finalDither_[1]={0x91ABCDEFu,0.0};
+    }
+    void finishHostRate(juce::AudioBuffer<float>& audio,Settings settings) noexcept
+    {
+        // The final hard sample ceiling belongs AFTER antialias decimation:
+        // low-pass reconstruction can overshoot a pre-filter ceiling.
+        // It is a sample-peak safety net, NOT a certified true-peak guard.
+        if(settings.bypass || settings.audition || settings.unityGain)return;
+        const double ceiling=std::pow(10.0,settings.ceilingDb/20.0);
+        const bool quantise=settings.ditherMode>0;
+        const double lsb=std::ldexp(1.0,1-settings.ditherBits);
+        for(int ch=0;ch<std::min(2,audio.getNumChannels());++ch)
+        {
+            auto* samples=audio.getWritePointer(ch);
+            auto& state=finalDither_[static_cast<size_t>(ch)];
+            const auto random=[&state]() noexcept
+            {
+                state.rng=state.rng*1664525u+1013904223u;
+                return static_cast<double>(state.rng>>8)/16777216.0;
+            };
+            for(int i=0;i<audio.getNumSamples();++i)
+            {
+                double x=std::clamp(static_cast<double>(samples[i]),-ceiling,ceiling);
+                if(quantise)
+                {
+                    // TPDF noise and optional bounded first-order shaping;
+                    // applied once at actual HOST sample rate, never 32x.
+                    const double triangular=(random()-random())*lsb;
+                    const double shaping=settings.ditherMode==2
+                        ?std::clamp(state.error,-lsb,lsb)*0.85:0.0;
+                    const double candidate=x+triangular+shaping;
+                    const double rounded=std::round(candidate/lsb)*lsb;
+                    state.error=settings.ditherMode==2
+                        ?std::clamp(candidate-rounded,-lsb,lsb):0.0;
+                    x=std::clamp(rounded,-ceiling,ceiling);
+                }
+                samples[i]=static_cast<float>(x);
+            }
+        }
+    }
     Settings effectiveSettings(Settings settings) const noexcept
     {
         if(activeOversampling_.load(std::memory_order_relaxed)>1)
@@ -341,9 +392,8 @@ private:
             // detector FIR is redundant and extraordinarily costly at 32x.
             settings.truePeak=false;
             settings.detectorQuality=0;
-            // Dither must ultimately happen AFTER host-rate decimation.
-            // Until a post-decimation quantizer is implemented, do not dither
-            // the 32x audio stream (a known mastering correctness issue).
+            // 16/24-bit dithering is handled exactly once by finishHostRate()
+            // AFTER the decimation FIR, at the project/native sample rate.
             settings.ditherMode=0;
         }
         return settings;
@@ -389,6 +439,7 @@ private:
     Core core_;
     AudioRateConverter oversampler_;
     std::atomic<int> activeOversampling_{1};
+    std::array<DitherState,2> finalDither_{};
     LoudnessSummary summary_;
     DAW::LufsMeterCore lufsLeft_,lufsRight_;
     std::atomic<float> momentaryLufs_{-120},shortTermLufs_{-120};
