@@ -2,6 +2,7 @@
 #include "../../Source/LimiterCore/ApexLimiterCore.h"
 #include "../../Source/LimiterCore/ApexLimiterLoudness.h"
 #include "ApexLimiterTruePeakReference.h"
+#include "../../Source/LimiterCore/ApexLimiterOversampling.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -346,6 +347,79 @@ static void testOfflineReferenceDetectsRealIntersampleOvershoot()
              <<" (sample-only mode still requires true-peak protection)\n";
 }
 
+static void testRealAudioOversamplerRunsAndRejectsAliasing()
+{
+    using APEX::Limiter::AudioRateConverter;
+    struct Context { int64_t highRateSamples=0; };
+    const auto pass=[](void* opaque,float*,float*,int samples) noexcept
+    {
+        static_cast<Context*>(opaque)->highRateSamples+=samples;
+    };
+    const int frames=4096;
+    auto inputL=signal(frames,0.68);
+    std::vector<float> inputR(static_cast<size_t>(frames));
+    for(int i=0;i<frames;++i)
+        inputR[static_cast<size_t>(i)]=static_cast<float>(
+            0.48*std::sin(2*kPi*2200.0*i/kRate+0.37));
+
+    for(int factor:{1,2,4,8,16,32})
+    {
+        const auto render=[&](int hostBlock)
+        {
+            AudioRateConverter converter;
+            converter.prepare(factor,128);
+            assert(converter.factor()==factor);
+            assert(converter.stages()<=5);
+            auto left=inputL,right=inputR;
+            Context ctx;
+            for(int off=0;off<frames;off+=hostBlock)
+                converter.process(left.data()+off,right.data()+off,
+                    std::min(hostBlock,frames-off),&ctx,pass);
+            assert(ctx.highRateSamples==static_cast<int64_t>(frames)*factor);
+            return std::array<std::vector<float>,2>{std::move(left),std::move(right)};
+        };
+        const auto odd=render(37);
+        const auto large=render(1001);
+        double inputEnergy=0.0,outputEnergy=0.0;
+        for(int i=1200;i<frames;++i)
+        {
+            const auto n=static_cast<size_t>(i);
+            assert(std::isfinite(odd[0][n]) && std::isfinite(odd[1][n]));
+            assert(std::abs(odd[0][n]-large[0][n])<1.0e-5);
+            assert(std::abs(odd[1][n]-large[1][n])<1.0e-5);
+            inputEnergy+=inputL[n]*inputL[n];
+            outputEnergy+=odd[0][n]*odd[0][n];
+        }
+        const double ratio=std::sqrt(outputEnergy/inputEnergy);
+        // Mono/stereo 32x filtering may shift phase but should preserve
+        // a low-frequency programme's RMS without accidental 32x gain.
+        assert(ratio>0.93 && ratio<1.07);
+    }
+
+    // 32x-nyquist-band oscillations must be rejected by the downsampler.
+    // Otherwise extra nonlinear high-rate harmonics would alias into APEX.
+    AudioRateConverter high;
+    high.prepare(32,128);
+    std::vector<float> silence(4096,0.0f);
+    struct Oscillator { int64_t cursor=0; } oscillator;
+    const auto inject=[](void* opaque,float* left,float*,int count) noexcept
+    {
+        auto& source=*static_cast<Oscillator*>(opaque);
+        for(int n=0;n<count;++n,++source.cursor)
+            left[n]=static_cast<float>(std::sin(
+                2.0*3.14159265358979323846*0.36*source.cursor));
+    };
+    for(int offset=0;offset<static_cast<int>(silence.size());offset+=67)
+        high.process(silence.data()+offset,nullptr,
+                     std::min(67,static_cast<int>(silence.size())-offset),
+                     &oscillator,inject);
+    double outEnergy=0.0;
+    for(size_t i=1200;i<silence.size();++i)
+        outEnergy+=static_cast<double>(silence[i])*silence[i];
+    const double rms=std::sqrt(outEnergy/(silence.size()-1200));
+    assert(rms<0.02);
+}
+
 int main()
 {
     testParameterSanitisation();
@@ -359,6 +433,7 @@ int main()
     testStereoIntegratedAndLra();
     testOfflineReferenceDetectsRealIntersampleOvershoot();
     testFIRReconstructionActuallyReducesIntersamplePeak();
+    testRealAudioOversamplerRunsAndRejectsAliasing();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
