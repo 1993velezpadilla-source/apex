@@ -1050,6 +1050,24 @@ public:
     }
     // Never seeds artificial analyser data. Only latches a worker FFT frame.
     void refreshMeasuredSpectrumForTesting() { timerCallback(); }
+    void setSpectrumFreezeForTesting (bool frozen) { setAnalyzerFrozen (frozen); }
+    bool spectrumFrozenForTesting() const noexcept { return analyzerFrozen_; }
+    void setPeakHoldForTesting (bool enabled) { setPeakHoldEnabled (enabled); }
+    bool hasPeakHoldForTesting (bool post) const noexcept
+    {
+        return heldPeakReady_[post ? 1 : 0];
+    }
+    float heldPeakAtHzForTesting (bool post, float frequencyHz) const noexcept
+    {
+        if (! heldPeakReady_[post ? 1 : 0] || spectrumBinHz_ <= 0.0f)
+            return -120.0f;
+        const auto bin = std::clamp (static_cast<int> (
+            std::round (frequencyHz / spectrumBinHz_)), 0,
+            Analysis::SpectrumAnalyzerCore::kSpectrumBins - 1);
+        return heldPeaks_[post ? 1 : 0][static_cast<std::size_t> (bin)];
+    }
+    int spectrumFrameIndexForTesting() const noexcept { return spectrumIndex_; }
+    void clearHeldPeaksForTesting() { clearHeldPeaks(); }
     float measuredSpectrumAtHzForTesting (bool post, float frequencyHz) const noexcept
     {
         if (! spectrumReady_ || ! spectrumShown_[post ? 1 : 0]
@@ -1676,12 +1694,15 @@ private:
         }
         curveDirty_ = false;
     }
-    float displayedSpectrumDb (int mode, double frequencyHz) const noexcept
+    float displayedSpectrumDb (int mode, double frequencyHz,
+                               bool usePeakHold = false) const noexcept
     {
         if (mode < 0 || mode > 1 || spectrumBinHz_ <= 0.0f
             || frequencyHz < 20.0)
             return -120.0f;
-        const auto& measured = spectrum_[static_cast<std::size_t> (mode)];
+        const auto& measured = usePeakHold
+            ? heldPeaks_[static_cast<std::size_t> (mode)]
+            : spectrum_[static_cast<std::size_t> (mode)];
         const int count = Analysis::SpectrumAnalyzerCore::kSpectrumBins;
         const double fractional = frequencyHz / spectrumBinHz_;
         if (fractional > count - 1.0) return -120.0f;
@@ -1761,7 +1782,81 @@ private:
             g.setColour (ink.withAlpha (mode == 0 ? 0.56f : 0.79f));
             g.strokePath (spectrum, juce::PathStrokeType (
                 mode == 0 ? 1.0f : 1.45f));
+            // Peak hold visualizes bin-wise maxima of REAL worker FFT frames.
+            // It never invents sound or infers peaks from the EQ response.
+            if (peakHoldEnabled_ && heldPeakReady_[static_cast<std::size_t> (mode)])
+            {
+                juce::Path peakPath, dashed;
+                bool first = true;
+                for (int sample = 0; sample <= points; ++sample)
+                {
+                    const float x = getWidth() * static_cast<float> (sample)
+                                    / static_cast<float> (points);
+                    const double hz = xToHz (x);
+                    if (hz < 20.0 || hz > spectrumBinHz_ * (count - 1))
+                        continue;
+                    const float db = displayedSpectrumDb (mode, hz, true);
+                    if (! std::isfinite (db)) continue;
+                    const float y = bottom
+                        - (std::clamp (db, -108.0f, -8.0f) + 108.0f)
+                          * (graph_.getHeight() - 49) / 100.0f;
+                    if (first) { peakPath.startNewSubPath (x, y); first = false; }
+                    else peakPath.lineTo (x, y);
+                }
+                if (! first)
+                {
+                    constexpr float dash[] = { 3.0f, 4.0f };
+                    juce::PathStrokeType (1.0f).createDashedStroke (
+                        dashed, peakPath, dash, 2);
+                    g.setColour (ink.withAlpha (mode == 0 ? 0.35f : 0.60f));
+                    g.strokePath (dashed, juce::PathStrokeType (1.0f));
+                }
+            }
         }
+        if (analyzerFrozen_)
+        {
+            g.setColour (juce::Colour (0xffe6c474).withAlpha (0.85f));
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText ("FFT FROZEN", graph_.getX() + 16,
+                        graph_.getY() + 8, 105, 20,
+                        juce::Justification::centredLeft);
+        }
+    }
+
+    void clearHeldPeaks() noexcept
+    {
+        for (auto& bins : heldPeaks_) bins.fill (-120.0f);
+        heldPeakReady_.fill (false);
+    }
+    void collectMeasuredPeaks() noexcept
+    {
+        if (! peakHoldEnabled_ || ! spectrumReady_) return;
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            if (! spectrumShown_[static_cast<std::size_t> (mode)]) continue;
+            auto& held = heldPeaks_[static_cast<std::size_t> (mode)];
+            const auto& bins = spectrum_[static_cast<std::size_t> (mode)];
+            for (std::size_t i = 0; i < bins.size(); ++i)
+                if (std::isfinite (bins[i]))
+                    held[i] = std::max (held[i], bins[i]);
+            heldPeakReady_[static_cast<std::size_t> (mode)] = true;
+        }
+    }
+    void setPeakHoldEnabled (bool enabled)
+    {
+        peakHoldEnabled_ = enabled;
+        clearHeldPeaks();
+        // Seed with the currently visible real frame on first activation.
+        if (enabled) collectMeasuredPeaks();
+        repaint();
+    }
+    void setAnalyzerFrozen (bool freeze)
+    {
+        if (freeze && ! spectrumReady_) return;
+        analyzerFrozen_ = freeze;
+        if (! freeze) spectrumIndex_ = -1; // reacquire latest on resume
+        syncAnalyzerText();
+        repaint();
     }
     void showAnalyzerMenu()
     {
@@ -1782,6 +1877,15 @@ private:
                       && spectrumSmoothingOctaves_ < 1.0 / 13.0);
         menu.addItem (13, "Smooth - 1/9 octave", true,
                       spectrumSmoothingOctaves_ >= 1.0 / 13.0);
+        menu.addSeparator();
+        menu.addSectionHeader ("CAPTURE — DISPLAY ONLY");
+        menu.addItem (21, "Freeze measured FFT", spectrumReady_,
+                      analyzerFrozen_);
+        menu.addItem (22, "Peak hold (real FFT maxima)",
+                      processor_.getAnalyzerMode() != Analysis::SpectrumTapMode::Closed,
+                      peakHoldEnabled_);
+        menu.addItem (23, "Clear held peaks", peakHoldEnabled_
+                      && (heldPeakReady_[0] || heldPeakReady_[1]));
         juce::Component::SafePointer<ApexQ4Editor> safe (this);
         menu.showMenuAsync (juce::PopupMenu::Options()
             .withTargetComponent (&analyzer_), [safe] (int id)
@@ -1794,9 +1898,18 @@ private:
                         static_cast<Analysis::SpectrumTapMode> (id - 1));
                     editor->analyzerAutoStarted_ = false;
                     editor->spectrumReady_ = false;
+                    editor->spectrumShown_.fill (false);
                     editor->spectrumIndex_ = -1;
+                    editor->analyzerFrozen_ = false;
+                    editor->clearHeldPeaks();
+                    if (id == 1) editor->peakHoldEnabled_ = false;
                     editor->syncAnalyzerText();
                 }
+                if (id == 21) editor->setAnalyzerFrozen (
+                    ! editor->analyzerFrozen_);
+                if (id == 22) editor->setPeakHoldEnabled (
+                    ! editor->peakHoldEnabled_);
+                if (id == 23) editor->clearHeldPeaks();
                 if (id >= 11 && id <= 13)
                     editor->spectrumSmoothingOctaves_ =
                         id == 11 ? 1.0 / 36.0
@@ -1811,8 +1924,9 @@ private:
             "ANALYZER OFF", "ANALYZER: PRE", "ANALYZER: POST",
             "ANALYZER: PRE + POST"
         };
-        analyzer_.setButtonText (labels[juce::jlimit (0, 3,
-            static_cast<int> (processor_.getAnalyzerMode()))]);
+        analyzer_.setButtonText (analyzerFrozen_ ? "FFT FROZEN"
+            : labels[juce::jlimit (0, 3,
+                static_cast<int> (processor_.getAnalyzerMode()))]);
     }
     void showShapeMenu()
     {
@@ -2064,9 +2178,15 @@ private:
     void timerCallback() override
     {
         updateMeasuredDynamics();
-        const auto capture = processor_.getAnalyzer().acquireSnapshot();
-        if (capture.isValid() && capture.index() != spectrumIndex_)
+        // Visual freeze must not block the FFT worker or the DSP meter.
+        if (! analyzerFrozen_)
         {
+          const auto capture = processor_.getAnalyzer().acquireSnapshot();
+          if (capture.isValid() && capture.index() != spectrumIndex_)
+          {
+            if (capture.discontinuous()
+                || std::abs (capture.binHz() - spectrumBinHz_) > 0.01f)
+                clearHeldPeaks();
             spectrumIndex_ = capture.index();
             spectrumBinHz_ = std::max (0.1f, capture.binHz());
             spectrumShown_[0] = capture.preActive() && capture.preDb() != nullptr;
@@ -2080,6 +2200,8 @@ private:
                     Analysis::SpectrumAnalyzerCore::kSpectrumBins,
                     spectrum_[1].begin());
             spectrumReady_ = spectrumShown_[0] || spectrumShown_[1];
+            collectMeasuredPeaks();
+          }
         }
         bool changed = false;
         for (int b = 0; b < kMaxBands; ++b)
@@ -2140,6 +2262,11 @@ private:
     float spectrumBinHz_ = 11.71875f;
     int spectrumIndex_ = -1;
     bool spectrumReady_ = false;
+    bool analyzerFrozen_ = false;
+    bool peakHoldEnabled_ = false;
+    std::array<std::array<float, Analysis::SpectrumAnalyzerCore::kSpectrumBins>, 2>
+        heldPeaks_ {};
+    std::array<bool, 2> heldPeakReady_ {{ false, false }};
     double spectrumSmoothingOctaves_ = 1.0 / 18.0;
     Analysis::SpectrumTapMode lastAnalyzerMode_ = Analysis::SpectrumTapMode::Closed;
     bool analyzerAutoStarted_ = false;
