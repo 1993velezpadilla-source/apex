@@ -427,6 +427,16 @@ private:
         slider.setSliderStyle(linear
             ? juce::Slider::LinearHorizontal : juce::Slider::RotaryVerticalDrag);
         slider.setRange(p.fromNormalised(0.0f),p.fromNormalised(1.0f),0.0);
+        // Reference-workflow usability: attack spans 0.005..250 ms, while
+        // release spans 5..3000 ms. A linear rotary mapping makes the first
+        // tens of milliseconds nearly impossible to adjust accurately.
+        // Skew only the on-screen slider position; host parameter values,
+        // automation IDs and serialized normalized values remain unchanged.
+        // This is particularly important on Legion Go / touchscreen.
+        if(index==Attack)         slider.setSkewFactorFromMidPoint(10.0);
+        else if(index==Release)   slider.setSkewFactorFromMidPoint(200.0);
+        else if(index==SidechainHP)slider.setSkewFactorFromMidPoint(160.0);
+        else if(index==SidechainLP)slider.setSkewFactorFromMidPoint(2600.0);
         // The previous real Windows screenshot showed 8-decimal floating-point
         // artifacts (19.99999924 ms, -18.0000000 dB), visually unlike a
         // professional compressor and impossible to scan at compact size.
