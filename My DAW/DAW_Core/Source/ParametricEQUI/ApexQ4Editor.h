@@ -41,6 +41,9 @@ public:
     {
         setOpaque (true);
         setResizable (true, true);
+        // The editor, not an invisible Windows shortcut proxy, receives
+        // keyboard focus after graph gestures for desktop + hardware keys.
+        setWantsKeyboardFocus (true);
         setLookAndFeel (&look_);
 
         auto attach = [this] (juce::TextButton& b, const char* label)
@@ -322,8 +325,7 @@ public:
                         penalty += band == selected_ ? 500000.0f : 250000.0f;
                     if (band == selected_)
                     {
-                        const juce::Rectangle<int> valueTag (
-                            point.x - 107, point.y - 37, 214, 22);
+                        const auto valueTag = selectedTagBounds (band);
                         if (candidate.expanded (3).intersects (valueTag))
                             penalty += 120000.0f;
                     }
@@ -559,9 +561,10 @@ public:
                     label += "   DYN "
                         + juce::String (dynamicGainDbDisplay_[
                             static_cast<std::size_t> (band)], 1) + " dB";
-                auto tag = juce::Rectangle<int> (pt.x - 107, pt.y - 37,
-                                                 214, 22)
-                    .constrainedWithin (graph_.reduced (5));
+                // Long signed DYN readouts previously squeezed into 214px,
+                // obscuring gain/Q values. Use a responsive measured-data tag
+                // without cutting off the audio-derived dynamic gain number.
+                const auto tag = selectedTagBounds (band);
                 g.setColour (juce::Colour (0xff25212c));
                 g.fillRoundedRectangle (tag.toFloat(), 5.0f);
                 g.setColour (juce::Colours::white);
@@ -681,6 +684,9 @@ public:
             || (selected_ >= 0 && panel_.contains (e.getPosition())))
             return;
         dragBand_ = hitBand (e.position);
+        // Keep the keyboard command target on the graph. Do not steal it
+        // from active text boxes while they are being typed into.
+        grabKeyboardFocus();
         if (e.mods.isPopupMenu())
         {
             openGraphContext (dragBand_);
@@ -983,6 +989,47 @@ public:
         curveDirty_ = true;
     }
 
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        const auto modifiers = key.getModifiers();
+        const bool command = modifiers.isCtrlDown()
+                          || modifiers.isCommandDown();
+        const int code = key.getKeyCode();
+        if (command && (code == 'z' || code == 'Z'))
+        {
+            historyStep (modifiers.isShiftDown() ? 1 : -1);
+            return true;
+        }
+        if (command && (code == 'y' || code == 'Y'))
+        {
+            historyStep (1);
+            return true;
+        }
+        if (code == juce::KeyPress::escapeKey)
+        {
+            // ESC must leave no hidden linked group or sticky DYN controls.
+            if (touchMultiSelectMode_)
+                setTouchMultiSelectMode (false);
+            select (-1);
+            return true;
+        }
+        if (selected_ < 0 || command || modifiers.isAltDown())
+            return false;
+        if (code == juce::KeyPress::deleteKey
+            || code == juce::KeyPress::backspaceKey)
+        {
+            deleteSelectedBands();
+            return true;
+        }
+        if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey
+            || code == juce::KeyPress::upKey || code == juce::KeyPress::downKey)
+        {
+            nudgeSelectedBands (code, modifiers.isShiftDown());
+            return true;
+        }
+        return false;
+    }
+
     float measuredDynamicDbForTesting (int band) const noexcept
     {
         return band >= 0 && band < kMaxBands && dynamicMeterValid_
@@ -1044,6 +1091,14 @@ public:
     }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
+    juce::Rectangle<int> selectedTagBoundsForTesting() const noexcept
+    {
+        return selectedTagBounds (selected_);
+    }
+    bool sendKeyboardShortcutForTesting (const juce::KeyPress& key)
+    {
+        return keyPressed (key);
+    }
     juce::Rectangle<int> dynamicPanelBoundsForTesting() const noexcept
     {
         return dynamicPanel_;
@@ -1458,6 +1513,68 @@ private:
         setDynamicControlsVisible (dynamicExpanded_);
         sync(); resized(); repaint();
     }
+    void deleteSelectedBands()
+    {
+        if (selected_ < 0) return;
+        if (auditionHolding_)
+        {
+            processor_.endAudition (auditionToken_);
+            auditionHolding_ = false;
+        }
+        // One deletion command can disable MANY hosted EQ nodes, yet it
+        // creates exactly one history snapshot and balanced host gestures.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            if (! selectedMask_[static_cast<std::size_t> (band)])
+                continue;
+            auto* enabled = param (parameterIndex (
+                band, BandParameterOffset::Enabled));
+            if (! enabled->getBool()) continue;
+            enabled->beginChangeGesture();
+            enabled->setValueNotifyingHost (0.0f);
+            enabled->endChangeGesture();
+        }
+        select (-1);
+        commitHistory();
+        curveDirty_ = true;
+    }
+    void nudgeSelectedBands (int direction, bool fine)
+    {
+        const bool frequency = direction == juce::KeyPress::leftKey
+                            || direction == juce::KeyPress::rightKey;
+        const bool positive = direction == juce::KeyPress::rightKey
+                           || direction == juce::KeyPress::upKey;
+        // Horizontal keys move a SEMITONE on the logarithmic musical axis,
+        // SHIFT fine tune = 0.1 semitone. Vertical keys use 1 / 0.1 dB.
+        const double ratio = std::exp2 (
+            (positive ? 1.0 : -1.0) * (fine ? 0.1 : 1.0) / 12.0);
+        const float gainStep = (positive ? 1.0f : -1.0f)
+                             * (fine ? 0.1f : 1.0f);
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            if (! selectedMask_[static_cast<std::size_t> (band)])
+                continue;
+            if (! param (parameterIndex (
+                band, BandParameterOffset::Enabled))->getBool())
+                continue;
+            auto* parameter = param (parameterIndex (band,
+                frequency ? BandParameterOffset::Frequency
+                          : BandParameterOffset::Gain));
+            const auto current = parameter->getUnitsValue();
+            const auto target = frequency
+                ? static_cast<float> (std::clamp (
+                    current * ratio, 20.0, 30000.0))
+                : current + gainStep;
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost (parameter->toNormalised (target));
+            parameter->endChangeGesture();
+        }
+        commitHistory();
+        curveDirty_ = true;
+        sync();
+        resized();
+        repaint();
+    }
     void setTouchMultiSelectMode (bool enabled)
     {
         touchPendingBand_ = -1;
@@ -1688,6 +1805,18 @@ private:
             * (1.0 - 2.0 * (y - graph_.getY() - 20.0f) / usable);
         return std::clamp (value, -static_cast<double> (rangeDb_),
                                    static_cast<double> (rangeDb_));
+    }
+    juce::Rectangle<int> selectedTagBounds (int band) const noexcept
+    {
+        if (band < 0 || band >= kMaxBands) return {};
+        const auto pt = nodePoint (band);
+        const bool hasDynamics = param (dynamicParameterIndex (
+            band, DynamicBandOffset::Enable))->getBool();
+        const int width = std::min (
+            hasDynamics ? 308 : 224, std::max (20, graph_.getWidth() - 10));
+        return juce::Rectangle<int> (
+            pt.x - width / 2, pt.y - 37, width, 22)
+                .constrainedWithin (graph_.reduced (5));
     }
     juce::Point<int> nodePoint (int band) const
     {
@@ -2072,6 +2201,11 @@ private:
         menu.addItem (5, "Delete band");
         menu.addSeparator();
         menu.addItem (9, "Open dynamic EQ controls...");
+        menu.addSectionHeader ("KEYBOARD — WHEN CANVAS HAS FOCUS");
+        menu.addItem (-21, "Arrow keys: freq (semi) / gain (dB)", false);
+        menu.addItem (-22, "Shift+arrows: fine adjustments", false);
+        menu.addItem (-23, "Delete: remove selected / linked bands", false);
+        menu.addItem (-24, "Ctrl+Z / Ctrl+Y: undo / redo", false);
         menu.addSeparator();
         menu.addItem (10, "Touch multi-select (tap to link bands)", true,
                       touchMultiSelectMode_);
