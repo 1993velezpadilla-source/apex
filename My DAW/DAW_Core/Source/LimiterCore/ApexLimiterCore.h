@@ -131,12 +131,17 @@ public:
         runningGain_ = 1.0;
         bypassBlend_ = settings_.bypass ? 0.0 : 1.0;
         reductionMeterDb_ = 0.0;
+        blockReductionMaxDb_ = 0.0;
         peakInput_ = peakOutput_ = 0.0;
     }
     void setSettings(Settings p) noexcept { settings_ = Settings::sanitized(p); }
     const Settings& getSettings() const noexcept { return settings_; }
     int latencySamples() const noexcept { return delaySamples_; }
     double reductionDb() const noexcept { return reductionMeterDb_; }
+    // Maximum instantaneous gain reduction observed in the last process()
+    // span. Unlike the end-of-chunk reading, this is invariant to host
+    // callback segmentation when accumulated on fixed-time display frames.
+    double blockReductionMaxDb() const noexcept { return blockReductionMaxDb_; }
     double inputPeak() const noexcept { return peakInput_; }
     double outputPeak() const noexcept { return peakOutput_; }
 
@@ -169,6 +174,7 @@ public:
         const double link = settings_.channelLink;
         const double desiredBlend = settings_.bypass ? 0.0 : 1.0;
         peakInput_ = peakOutput_ = 0.0;
+        blockReductionMaxDb_ = 0.0;
         for (int i=0; i<frames; ++i, ++index_)
         {
             runningGain_ = smooth * runningGain_ + (1.0-smooth) * targetGain;
@@ -276,6 +282,7 @@ public:
             }
             reductionMeterDb_ = std::max(channel_[0].reduction,
                                         stereo ? channel_[1].reduction : 0.0);
+            blockReductionMaxDb_ = std::max(blockReductionMaxDb_,reductionMeterDb_);
         }
     }
 private:
@@ -294,7 +301,8 @@ private:
     std::array<Channel,2> channel_;
     Settings settings_;
     double rate_=48000.0, runningGain_=1.0, bypassBlend_=1.0;
-    double reductionMeterDb_=0.0, peakInput_=0.0, peakOutput_=0.0;
+    double reductionMeterDb_=0.0, blockReductionMaxDb_=0.0;
+    double peakInput_=0.0, peakOutput_=0.0;
     int delaySamples_=0, lookaheadSamples_=-1;
     int64_t index_=0;
 };
