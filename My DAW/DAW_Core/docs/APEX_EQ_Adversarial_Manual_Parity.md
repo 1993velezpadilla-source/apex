@@ -182,3 +182,14 @@ Actual test diagnostics from run 40025466359:
 
 These failures are genuine and documented; the corrective HEAD still
 requires an entirely new full GitHub Actions GREEN. MAIN remains untouched.
+
+### PASS 10 targeted regression strengthening — Dynamics OPEN → CLOSE
+
+Post-correction adversarial test now repeats the full native responsive
+geometry check **after** the Dynamic EQ panel is opened then closed for
+320×568, 480×800, 900×300 and 1280×720. Every *visible* contextual
+button must be entirely inside the selected-band HUD, and the narrow
+breakpoints must keep Slope / Placement / Dynamic buttons hidden according
+to design. This directly guards the five original PASS 10 CI failures
+against a future visibility regression. All latest-SHA Windows CI gates,
+real native PNG review and explicit user approval remain required.
