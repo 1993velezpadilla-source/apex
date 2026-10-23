@@ -72,6 +72,7 @@ public:
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testExpandedDynamicPanelAndHostAutomation();
+        testAltWheelDynamicRangeAndReverseGainTrade();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
@@ -92,6 +93,60 @@ public:
     }
 
 private:
+    void testAltWheelDynamicRangeAndReverseGainTrade()
+    {
+        beginTest ("manual: Alt-wheel dynamics, Alt+Ctrl reverse gain,"
+                   " linked band scaling and no implicit SOLO");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+        enableBell (*processor, 1, 2200.0f, -3.0f, 1.6f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        const juce::ModifierKeys ctrl (juce::ModifierKeys::ctrlModifier);
+        const juce::ModifierKeys alt (juce::ModifierKeys::altModifier);
+        auto pt = editor->nodeHitAreaForTesting (1).getCentre().toFloat();
+        editor->injectGraphPointerForTesting (pt, 0, ctrl);
+        editor->injectGraphPointerForTesting (pt, 2, ctrl);
+        expectEquals (editor->selectedBandCountForTesting(), 2);
+        pt = editor->nodeHitAreaForTesting (0).getCentre().toFloat();
+        editor->injectGraphWheelForTesting (pt, 1.0f, alt);
+        for (int b = 0; b < 2; ++b)
+        {
+            expect (processor->getParametricEQParameter (
+                dynamicParameterIndex (b, DynamicBandOffset::Enable))
+                    ->getBool(), "Alt wheel activates REAL native dynamics");
+            expectWithinAbsoluteError (
+                static_cast<double> (processor->getParametricEQParameter (
+                    dynamicParameterIndex (b, DynamicBandOffset::Range))
+                        ->getUnitsValue()), 2.0, 0.2,
+                "two selected bands receive +2 dB dynamic range");
+        }
+        const juce::ModifierKeys linked (
+            juce::ModifierKeys::altModifier
+            | juce::ModifierKeys::ctrlModifier);
+        editor->injectGraphWheelForTesting (pt, 1.0f, linked);
+        for (int b = 0; b < 2; ++b)
+            expectWithinAbsoluteError (
+                static_cast<double> (processor->getParametricEQParameter (
+                    dynamicParameterIndex (b, DynamicBandOffset::Range))
+                        ->getUnitsValue()), 4.0, 0.2,
+                "Alt+Ctrl wheel further increases hosted dynamic range");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                    ->getUnitsValue()), 4.0, 0.2,
+            "Alt+Ctrl reverse-linked trade reduces static gain by 2 dB");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Gain))
+                    ->getUnitsValue()), -5.0, 0.2,
+            "grouped reverse trade also changes second band's gain");
+        expect (! processor->isAuditionHoldingForTesting(),
+            "mousewheel dynamic gestures must not mute the vocal");
+    }
+
     void testExpandedDynamicPanelAndHostAutomation()
     {
         beginTest ("manual dynamic EQ: real touch-adjustable threshold, range,"
