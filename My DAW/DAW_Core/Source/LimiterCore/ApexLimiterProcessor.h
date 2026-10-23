@@ -139,6 +139,16 @@ public:
         const auto nativeFrames=static_cast<double>(core_.latencySamples())/factor
                                +oversampler_.nominalFilterDelayFrames();
         setLatencySamples(juce::roundToInt(nativeFrames));
+        // Dry host-rate lane bypasses the AUDIO oversampling filters entirely.
+        // Preallocate enough samples to write a whole 100Hz history chunk
+        // without overwriting the delayed dry samples read after the DSP.
+        const int dryCapacity=getLatencySamples()
+                            +juce::jlimit(64,8192,juce::roundToInt(rate/100.0))+8;
+        for(auto& ch:hostDry_)
+            ch.assign(static_cast<size_t>(dryCapacity),0.0f);
+        hostDryFrames_=0;
+        hostBypassBlend_=readSettings().bypass?1.0:0.0;
+        hostBypassCoeff_=std::exp(-1.0/(0.003*rate));
         momentaryLufs_.store(-120.0f,std::memory_order_relaxed);
         shortTermLufs_.store(-120.0f,std::memory_order_relaxed);
         integratedLufs_.store(-120.0f,std::memory_order_relaxed);
@@ -157,11 +167,18 @@ public:
         for (auto& f:displayReduction_) f.store(0,std::memory_order_relaxed);
     }
     void releaseResources() override {}
-    void reset() override { core_.reset(); oversampler_.reset(); summary_.reset(); resetHostDither(); }
+    void reset() override
+    {
+        core_.reset(); oversampler_.reset(); summary_.reset(); resetHostDither();
+        for(auto& ch:hostDry_)std::fill(ch.begin(),ch.end(),0.0f);
+        hostDryFrames_=0;
+        hostBypassBlend_=readSettings().bypass?1.0:0.0;
+    }
     void processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuffer&) override
     {
         if (buffer.getNumChannels() < 1 || buffer.getNumSamples() < 1) return;
-        core_.setSettings(effectiveSettings(readSettings()));
+        const Settings hostSettings=readSettings();
+        core_.setSettings(effectiveSettings(hostSettings));
         // Segment DSP at persistent sample-count boundaries, not host callback
         // boundaries. This produces one real peak/reduction history frame every
         // ~10 ms at 44.1/48/96 kHz, whether the host uses 64, 128, 1024 or
@@ -187,16 +204,21 @@ public:
             {
                 // Stats aggregate ALL high-rate sub-blocks, not just the last
                 // callback's tail. No allocation, lock or host PDC update.
+                const int64_t dryStart=hostDryFrames_;
+                captureDry(left,right,chunk);
                 HighRateReadout readout{&core_};
                 oversampler_.process(left,right,chunk,&readout,&processHighRate);
                 input=readout.input;
                 reduction=readout.reduction;
-                // Output meters describe the actual host-rate signal after
-                // decimation, not high-frequency pre-filter DSP samples.
+                // Final sample clamp and dither happen at the host rate.
+                // A dry sample is then mixed from a separate delay-only lane:
+                // bypassed audio never traverses the OS antialias filters.
+                finishHostRate(left,right,chunk,hostSettings);
+                blendDelayedDry(left,right,chunk,dryStart,hostSettings.bypass);
                 for(int i=0;i<chunk;++i)
                 {
                     output=juce::jmax(output,std::abs(left[i]));
-                    if(right) output=juce::jmax(output,std::abs(right[i]));
+                    if(right)output=juce::jmax(output,std::abs(right[i]));
                 }
             }
             blockInput=juce::jmax(blockInput,input);
@@ -220,8 +242,8 @@ public:
             }
         }
         for (int ch=2; ch<buffer.getNumChannels(); ++ch) buffer.clear(ch,0,total);
-        if(activeOversampling_.load(std::memory_order_relaxed)>1)
-            finishHostRate(buffer,readSettings());
+        // Each high-rate chunk is already post-decimation processed and
+        // mixed with the sample-exact host dry lane above.
         // 400ms overlapping stereo K-weighted integration / gated range.
         // Rolling state is entirely allocated during prepareToPlay().
         summary_.process(buffer.getReadPointer(0),
@@ -346,25 +368,24 @@ private:
         finalDither_[0]={0x12345678u,0.0};
         finalDither_[1]={0x91ABCDEFu,0.0};
     }
-    void finishHostRate(juce::AudioBuffer<float>& audio,Settings settings) noexcept
+    void finishHostRate(float* left,float* right,int frames,Settings settings) noexcept
     {
-        // The final hard sample ceiling belongs AFTER antialias decimation:
-        // low-pass reconstruction can overshoot a pre-filter ceiling.
-        // It is a sample-peak safety net, NOT a certified true-peak guard.
-        if(settings.bypass || settings.audition || settings.unityGain)return;
+        // After the FIR, clamp/quantize WET only. The delayed dry bypass
+        // never clips or adds noise. Sample peak != certified true peak.
+        if(settings.audition || settings.unityGain)return;
         const double ceiling=std::pow(10.0,settings.ceilingDb/20.0);
         const bool quantise=settings.ditherMode>0;
         const double lsb=std::ldexp(1.0,1-settings.ditherBits);
-        for(int ch=0;ch<std::min(2,audio.getNumChannels());++ch)
+        for(int ch=0;ch<(right?2:1);++ch)
         {
-            auto* samples=audio.getWritePointer(ch);
+            auto* samples=ch==0?left:right;
             auto& state=finalDither_[static_cast<size_t>(ch)];
             const auto random=[&state]() noexcept
             {
                 state.rng=state.rng*1664525u+1013904223u;
                 return static_cast<double>(state.rng>>8)/16777216.0;
             };
-            for(int i=0;i<audio.getNumSamples();++i)
+            for(int i=0;i<frames;++i)
             {
                 double x=std::clamp(static_cast<double>(samples[i]),-ceiling,ceiling);
                 if(quantise)
@@ -384,6 +405,44 @@ private:
             }
         }
     }
+    void captureDry(const float* left,const float* right,int frames) noexcept
+    {
+        const auto capacity=static_cast<int64_t>(hostDry_[0].size());
+        if(capacity<=0)return;
+        for(int i=0;i<frames;++i,++hostDryFrames_)
+        {
+            const size_t slot=static_cast<size_t>(hostDryFrames_%capacity);
+            hostDry_[0][slot]=std::isfinite(left[i])?left[i]:0.0f;
+            if(right)hostDry_[1][slot]=std::isfinite(right[i])?right[i]:0.0f;
+        }
+    }
+    void blendDelayedDry(float* left,float* right,int frames,
+                         int64_t start,bool bypass) noexcept
+    {
+        const auto capacity=static_cast<int64_t>(hostDry_[0].size());
+        if(capacity<=0)return;
+        const int delay=getLatencySamples();
+        const double target=bypass?1.0:0.0;
+        for(int i=0;i<frames;++i)
+        {
+            hostBypassBlend_=hostBypassCoeff_*hostBypassBlend_
+                             +(1.0-hostBypassCoeff_)*target;
+            const double dryWeight=hostBypassBlend_;
+            if(dryWeight<1.0e-9)continue;
+            const int64_t readIndex=start+i-delay;
+            const auto dry=[&](int channel) noexcept -> float
+            {
+                return readIndex<0 ? 0.0f
+                     : hostDry_[static_cast<size_t>(channel)]
+                               [static_cast<size_t>(readIndex%capacity)];
+            };
+            left[i]=static_cast<float>(left[i]*(1.0-dryWeight)
+                                       +dry(0)*dryWeight);
+            if(right)right[i]=static_cast<float>(right[i]*(1.0-dryWeight)
+                                                +dry(1)*dryWeight);
+        }
+    }
+
     Settings effectiveSettings(Settings settings) const noexcept
     {
         if(activeOversampling_.load(std::memory_order_relaxed)>1)
@@ -392,6 +451,9 @@ private:
             // detector FIR is redundant and extraordinarily costly at 32x.
             settings.truePeak=false;
             settings.detectorQuality=0;
+            // The oversampled Core always processes WET so host dry can
+            // crossfade without forcing audio through interpolation filters.
+            settings.bypass=false;
             // 16/24-bit dithering is handled exactly once by finishHostRate()
             // AFTER the decimation FIR, at the project/native sample rate.
             settings.ditherMode=0;
@@ -440,6 +502,9 @@ private:
     AudioRateConverter oversampler_;
     std::atomic<int> activeOversampling_{1};
     std::array<DitherState,2> finalDither_{};
+    std::array<std::vector<float>,2> hostDry_{};
+    int64_t hostDryFrames_=0;
+    double hostBypassBlend_=0.0,hostBypassCoeff_=0.0;
     LoudnessSummary summary_;
     DAW::LufsMeterCore lufsLeft_,lufsRight_;
     std::atomic<float> momentaryLufs_{-120},shortTermLufs_{-120};
