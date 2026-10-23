@@ -502,6 +502,24 @@ private:
             expect (editor->graphBoundsForTesting().contains (area),
                 "expanded controls must not obscure header or footer");
             expect (area.getHeight() >= 180);
+            // PASS 10: old four-corner solver silently layered an entire
+            // DYNAMIC EQ card over FREQ/GAIN/Q at 480x800. Assert the real
+            // layout at every breakpoint instead of trusting a GREEN PNG.
+            if (size.x >= 460)
+            {
+                expect (editor->primaryHudVisibleForTesting(),
+                    "expanded dynamics keeps band knobs accessible on desktop");
+                expect (! area.expanded (3).intersects (
+                    editor->panelBoundsForTesting()),
+                    "dynamic panel must NOT obscure ANY part of the EQ knobs"
+                    " or SOLO on phone, landscape or desktop");
+            }
+            else
+            {
+                expect (! editor->primaryHudVisibleForTesting(),
+                    "320px portrait opens dynamics INSTEAD of overlapping"
+                    " the compact band HUD");
+            }
             auto dials = editor->dynamicSlidersForTesting();
             for (auto* slider : dials)
             {
@@ -514,6 +532,8 @@ private:
             editor->expandDynamicForTesting (false);
             expect (! editor->dynamicPanelVisibleForTesting(),
                 "dynamic panel must close without disabling native DSP");
+            expect (editor->primaryHudVisibleForTesting(),
+                "closing compact dynamic editor restores FREQ/GAIN/Q knobs");
         }
 
         editor->setSize (1280, 720);
@@ -1134,11 +1154,18 @@ private:
                     }
                     editor->selectBandForTesting (0);
                 }
-                if (size.x == 480 || size.x == 1280)
+                // PASS 10: native visual evidence at EVERY responsive
+                // breakpoint, not just the already-easy desktop geometry.
+                if (size.x >= 320)
                 {
                     editor->expandDynamicForTesting (true);
                     expect (editor->dynamicPanelVisibleForTesting(),
                         "dynamic-editor native screenshot requires open controls");
+                    if (size.x >= 460)
+                        expect (! editor->dynamicPanelBoundsForTesting()
+                            .expanded (3).intersects (
+                                editor->panelBoundsForTesting()),
+                            "exported real WAV FFT screenshot cannot hide EQ HUD");
                     juce::Image dynamicImage (juce::Image::RGB,
                                                size.x, size.y, true);
                     {
