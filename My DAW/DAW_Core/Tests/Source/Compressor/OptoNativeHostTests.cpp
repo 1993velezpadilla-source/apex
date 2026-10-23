@@ -250,7 +250,7 @@ public:
                                   std::pair<const char*,double>{"Threshold",-18.0},
                                   {"Ratio",4.0}, {"Attack",10.0},
                                   {"Release",120.0}, {"Wet Gain",0.0},
-                                  {"Dry",0.0}
+                                  {"Dry Gain",-100.0}
                                 })
                             {
                                 juce::Slider* control=nullptr;
@@ -265,6 +265,9 @@ public:
                                 if(control!=nullptr)
                                 {
                                     const auto formatted=control->getTextFromValue(caseValue.second);
+                                    if(juce::String(caseValue.first)=="Dry Gain")
+                                        expect(formatted.containsIgnoreCase("inf"),
+                                               "Default dry parallel knob must display -inf dB");
                                     expect(formatted.length()<13,
                                            juce::String(caseValue.first)+" must not show eight decimal places: "+formatted);
                                     expect(!formatted.contains("000000"),
