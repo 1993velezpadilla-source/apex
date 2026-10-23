@@ -777,8 +777,11 @@ public:
                 // unexpectedly when moving the cursor over them.
                 if (! enabled->getBool()
                     && std::abs (range->getUnitsValue()) > 0.001f)
-                    toggleParameter (dynamicParameterIndex (
-                        b, DynamicBandOffset::Enable));
+                {
+                    enabled->beginChangeGesture();
+                    enabled->setValueNotifyingHost (1.0f);
+                    enabled->endChangeGesture();
+                }
                 if (tradeGain)
                 {
                     gain->setValueNotifyingHost (
