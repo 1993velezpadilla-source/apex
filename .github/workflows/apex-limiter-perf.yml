@@ -3,12 +3,14 @@ on:
   push:
     paths:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterWetPhaseAudit.cpp"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
       - ".github/workflows/apex-limiter-perf.yml"
   pull_request:
     paths:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterWetPhaseAudit.cpp"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
       - ".github/workflows/apex-limiter-perf.yml"
@@ -34,6 +36,15 @@ jobs:
         run: |
           "$RUNNER_TEMP/apex-limiter-os-bench" | tee "$RUNNER_TEMP/apex-limiter-os-perf.csv"
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-perf.csv"
+      - name: Compile actual wet audio phase / PDC probe
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math Tests/Standalone/ApexLimiterWetPhaseAudit.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-wet-phase"
+      - name: Measure five-band wet-path phase, attenuation and PDC
+        run: |
+          "$RUNNER_TEMP/apex-limiter-wet-phase" | tee "$RUNNER_TEMP/apex-limiter-wet-phase.csv"
+          grep '^APEX_WET_PHASE,32,' "$RUNNER_TEMP/apex-limiter-wet-phase.csv"
       - name: Write non-certifying benchmark summary
         if: always()
         run: |
@@ -51,12 +62,25 @@ jobs:
             else
               echo 'Benchmark data missing; see job logs.'
             fi
+            echo ''
+            echo '### Wet-path phase / PDC diagnostic'
+            echo 'Actual Core + 1x-32x audio converter; multitone sine lock-in at 504 Hz, 4/8/16/20 kHz.'
+            echo 'A green diagnostic run is NOT proof of zero phase error or certified PDC.'
+            if test -f "$RUNNER_TEMP/apex-limiter-wet-phase.csv"; then
+              echo '\`\`\`'
+              cat "$RUNNER_TEMP/apex-limiter-wet-phase.csv"
+              echo '\`\`\`'
+            else
+              echo 'Wet phase measurements unavailable.'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Retain measured CPU CSV for adversarial QA
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apex-limiter-1x-32x-measured-cpu
-          path: ${{ runner.temp }}/apex-limiter-os-perf.csv
+          path: |
+            ${{ runner.temp }}/apex-limiter-os-perf.csv
+            ${{ runner.temp }}/apex-limiter-wet-phase.csv
           retention-days: 30
           if-no-files-found: warn
