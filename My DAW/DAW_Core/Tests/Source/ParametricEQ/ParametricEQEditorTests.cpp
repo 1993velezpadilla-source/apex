@@ -205,6 +205,20 @@ private:
             expectWithinAbsoluteError (
                 static_cast<double> (f0->getUnitsValue()),
                 static_cast<double> (afterEscape), 0.01);
+
+            // The preset menu's RESET TO FLAT must behave as one atomic
+            // undoable operation; it previously bypassed history entirely.
+            editor->resetAllBandsForTesting();
+            expectEquals (editor->activeBandsForTesting(), 0,
+                "reset to flat disables all hosted EQ bands");
+            expect (press ('z',
+                juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)));
+            expectEquals (editor->activeBandsForTesting(), 2,
+                "one Undo restores every band after preset reset");
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                static_cast<double> (afterEscape), 0.5,
+                "reset/undo keeps the actual hosted musical frequency");
         }
     }
 
