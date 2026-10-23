@@ -483,6 +483,54 @@ public:
                            pt.y - (band == selected_ ? 6.0f : 4.5f),
                            band == selected_ ? 12.0f : 9.0f,
                            band == selected_ ? 12.0f : 9.0f);
+            if (param (dynamicParameterIndex (
+                    band, DynamicBandOffset::Enable))->getBool()
+                && ! s.bypassed)
+            {
+                const float maxRange = std::abs (param (
+                    dynamicParameterIndex (band, DynamicBandOffset::Range))
+                        ->getUnitsValue());
+                // Outer range arc is tied to the REAL hosted parameter.
+                // A second, thinner arc represents the last coherent
+                // audio-thread ResponseFrame gain, never a fake meter.
+                const float maxAngle = juce::MathConstants<float>::pi
+                                       * 2.0f * std::clamp (
+                                           maxRange / 24.0f, 0.0f, 1.0f);
+                if (maxAngle > 0.003f)
+                {
+                    juce::Path rangeArc;
+                    const float startAngle =
+                        juce::MathConstants<float>::pi * 0.25f;
+                    rangeArc.addCentredArc (static_cast<float> (pt.x),
+                        static_cast<float> (pt.y), 17.0f, 17.0f, 0.0f,
+                        startAngle, startAngle + maxAngle, true);
+                    g.setColour (bandColour (band).withAlpha (0.77f));
+                    g.strokePath (rangeArc, juce::PathStrokeType (2.2f));
+                }
+                if (dynamicMeterValid_
+                    && (lastDynamicActiveMask_ & (1u << band)) != 0)
+                {
+                    const float measuredDb = dynamicGainDbDisplay_[
+                        static_cast<std::size_t> (band)];
+                    const float gr = std::abs (measuredDb);
+                    if (gr >= 0.1f)
+                    {
+                        juce::Path actualArc;
+                        const float radians = juce::MathConstants<float>::pi
+                            * 2.0f * std::clamp (gr / 24.0f, 0.0f, 1.0f);
+                        const float start =
+                            juce::MathConstants<float>::pi * 0.25f;
+                        actualArc.addCentredArc (
+                            static_cast<float> (pt.x),
+                            static_cast<float> (pt.y), 21.0f, 21.0f, 0.0f,
+                            start, start + radians, true);
+                        g.setColour (measuredDb < 0.0f
+                            ? juce::Colour (0xffee8e65)
+                            : juce::Colour (0xff78d5af));
+                        g.strokePath (actualArc, juce::PathStrokeType (2.7f));
+                    }
+                }
+            }
             if (selectedMask_[static_cast<std::size_t> (band)])
             {
                 // Multiple selected bands remain visibly linked while only
@@ -494,9 +542,14 @@ public:
             if (band == selected_)
             {
                 g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-                const auto label = juce::String (s.frequencyHz, 0) + " Hz   "
+                auto label = juce::String (s.frequencyHz, 0) + " Hz   "
                     + juce::String (s.gainDb, 2) + " dB   Q "
                     + juce::String (s.q, 2);
+                if (dynamicMeterValid_
+                    && (lastDynamicActiveMask_ & (1u << band)) != 0)
+                    label += "   DYN "
+                        + juce::String (dynamicGainDbDisplay_[
+                            static_cast<std::size_t> (band)], 1) + " dB";
                 auto tag = juce::Rectangle<int> (pt.x - 107, pt.y - 37,
                                                  214, 22)
                     .constrainedWithin (graph_.reduced (5));
@@ -530,6 +583,22 @@ public:
             g.drawText ("DYNAMIC EQ", dynamicPanel_.getX() + 10,
                         dynamicPanel_.getY() + 5, 118, 22,
                         juce::Justification::centredLeft);
+            // Display actual DSP gain sampled from the lock-free ResponseCore.
+            // This is a signed number because APEX supports upward as well
+            // as downward dynamics; never label synthetic values as GR.
+            const auto db = dynamicGainDbDisplay_[
+                static_cast<std::size_t> (selected_)];
+            const auto metering = dynamicMeterValid_
+                && (lastDynamicActiveMask_ & (1u << selected_)) != 0;
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.setColour (juce::Colour (0xffe8dfe5));
+            const auto readout = metering
+                ? juce::String (db >= 0.0f ? "+" : "")
+                    + juce::String (db, 1) + " dB"
+                : juce::String ("— dB");
+            g.drawFittedText (readout, dynamicPanel_.getRight() - 133,
+                dynamicPanel_.getY() + 6, 75, 22,
+                juce::Justification::centredRight, 1);
         }
 
         // Small unobtrusive header — *not* the old Prism blue toolbar.
@@ -580,6 +649,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         pendingCurveCreate_ = false;
+        rangeDragBand_ = -1;
         hover_.reset();
         if (! graph_.contains (e.getPosition())
             || (selected_ >= 0 && panel_.contains (e.getPosition())))
@@ -607,6 +677,25 @@ public:
                 toggleParameter (parameterIndex (dragBand_,
                     BandParameterOffset::Bypass));
                 select (dragBand_);
+                dragBand_ = -1;
+                return;
+            }
+            const auto ringCentre = nodePoint (dragBand_).toFloat();
+            const auto radius = e.position.getDistanceFrom (ringCentre);
+            if (radius >= 13.0f && radius <= 24.0f
+                && param (dynamicParameterIndex (
+                    dragBand_, DynamicBandOffset::Enable))->getBool())
+            {
+                const int band = dragBand_;
+                const bool keepGroup = selectedMask_[
+                    static_cast<std::size_t> (band)] && selectedCount() > 1;
+                select (band, keepGroup);
+                rangeDragBand_ = band;
+                rangeDragOriginY_ = e.position.y;
+                auto* range = param (dynamicParameterIndex (
+                    band, DynamicBandOffset::Range));
+                rangeDragStartDb_ = range->getUnitsValue();
+                range->beginChangeGesture();
                 dragBand_ = -1;
                 return;
             }
@@ -660,6 +749,18 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (rangeDragBand_ >= 0)
+        {
+            // Up/down on the OUTER dynamic ring changes its signed range
+            // in decibels with host automation, never frequency or gain.
+            const float multiplier = e.mods.isShiftDown() ? 0.035f : 0.15f;
+            setUnits (dynamicParameterIndex (
+                rangeDragBand_, DynamicBandOffset::Range),
+                rangeDragStartDb_
+                    + (rangeDragOriginY_ - e.position.y) * multiplier);
+            repaint();
+            return;
+        }
         if (pendingCurveCreate_)
         {
             if (e.position.getDistanceFrom (pendingOrigin_) < 7.0f)
@@ -711,6 +812,14 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (rangeDragBand_ >= 0)
+        {
+            param (dynamicParameterIndex (
+                rangeDragBand_, DynamicBandOffset::Range))
+                ->endChangeGesture();
+            rangeDragBand_ = -1;
+            commitHistory();
+        }
         pendingCurveCreate_ = false;
         if (dragBand_ >= 0) finishGestures();
         dragBand_ = -1;
@@ -812,6 +921,19 @@ public:
         commitHistory();
         curveDirty_ = true;
     }
+
+    float measuredDynamicDbForTesting (int band) const noexcept
+    {
+        return band >= 0 && band < kMaxBands && dynamicMeterValid_
+            ? dynamicGainDbDisplay_[static_cast<std::size_t> (band)]
+            : 0.0f;
+    }
+    bool hasMeasuredDynamicFrameForTesting (int band) const noexcept
+    {
+        return dynamicMeterValid_ && band >= 0 && band < kMaxBands
+            && (lastDynamicActiveMask_ & (1u << band)) != 0;
+    }
+    void refreshMeasuredDynamicsForTesting() { updateMeasuredDynamics(); }
 
     // Native mouse event injection for CI adversarial gesture tests.
     // Production callbacks are invoked, rather than simulating parameters.
@@ -1907,8 +2029,32 @@ private:
             }
         });
     }
+    void updateMeasuredDynamics()
+    {
+        // The audio thread publishes gain reduction in a coherent fixed-size
+        // SPSC ResponseFrame. Never read audio-owned doubles directly!
+        ResponseFrame frame;
+        if (! processor_.getResponseCore().consumeLatest (frame))
+            return;
+        lastDynamicActiveMask_ = frame.dynamicActiveMask;
+        dynamicMeterValid_ = true;
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            const auto index = static_cast<std::size_t> (band);
+            const double value = (lastDynamicActiveMask_ & (1u << band)) != 0
+                && std::isfinite (frame.dynamicGainDb[index])
+                ? std::clamp (frame.dynamicGainDb[index], -24.0, 24.0)
+                : 0.0;
+            // Motion smoothing only applies to the visual meter. The
+            // audio/DSP values and original ResponseFrame remain untouched.
+            const float incoming = static_cast<float> (value);
+            dynamicGainDbDisplay_[index] = 0.35f * incoming
+                + 0.65f * dynamicGainDbDisplay_[index];
+        }
+    }
     void timerCallback() override
     {
+        updateMeasuredDynamics();
         const auto capture = processor_.getAnalyzer().acquireSnapshot();
         if (capture.isValid() && capture.index() != spectrumIndex_)
         {
@@ -1957,6 +2103,12 @@ private:
     std::array<juce::Label, 4> dynamicNames_ {};
     juce::TextButton dynToggle_, dynSpectral_, dynFilter_, dynClose_;
     bool dynamicExpanded_ = false;
+    std::array<float, kMaxBands> dynamicGainDbDisplay_ {};
+    std::uint32_t lastDynamicActiveMask_ = 0;
+    bool dynamicMeterValid_ = false;
+    int rangeDragBand_ = -1;
+    float rangeDragOriginY_ = 0.0f;
+    float rangeDragStartDb_ = 0.0f;
     int selected_ = -1, dragBand_ = -1, rangeIndex_ = 2;
     bool pendingCurveCreate_ = false, createdDuringGesture_ = false;
     bool pendingDynamic_ = false, pendingSpectral_ = false;
