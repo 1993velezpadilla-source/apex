@@ -1,11 +1,12 @@
-# APEX Precision C3 — reference contract and release gates
+# APEX Precision C — reference contract and release gates
 
 Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/help/ffproc3-manual.pdf) (47 pages). This document audits product **capabilities and operating workflow**, not copyrighted artwork or proprietary signal processing.
 
 ## Product boundary
 
 - APEX Opto 2A (`APEX::Opto2A`, unique ID `0x4F503241`) remains intact, openable by old projects.
-- APEX Precision C3 (`APEX::PrecisionC3`, unique ID `0x41504333`) is a second distinct native plugin, hosted by the existing sole `APEX Native` format.
+- **Public name: APEX Precision C** (without a numeral). This is the second distinct native compressor, hosted by the existing sole `APEX Native` format.
+- **Backward compatibility:** keep internal namespace `APEX::PrecisionC3`, persistent plugin identifier `APEX::PrecisionC3`, unique ID `0x41504333`, preset/session state tag, all `c3.*` automation parameter IDs, source filenames and CI labels. Those are implementation identifiers, **not** displayed product branding. Never migrate/remove them just to change the title; otherwise pre-existing APEX projects may fail to recall their inserts.
 - New code is clean-room original. It must **not** be advertised as a FabFilter binary-compatible or sonically 1:1 clone without a matched measurement suite.
 
 ## Current source state (experimental PR)
