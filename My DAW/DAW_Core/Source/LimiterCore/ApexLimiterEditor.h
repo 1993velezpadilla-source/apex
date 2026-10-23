@@ -86,11 +86,17 @@ public:
 
         // This is inter-sample DETECTOR quality, not full audio oversampling.
         detector_.addItemList({"1x","2x","4x","8x"},1);
-        detector_.setTooltip("Peak detector interpolation; full audio oversampling is not yet implemented.");
+        detector_.setTooltip("ISP detector only (1x–8x). AUDIO OS is a separate experimental high-rate DSP path.");
         detector_.setSelectedId(static_cast<int>(param(DetectorQuality).units())+1,
                                 juce::dontSendNotification);
         detector_.onChange=[this] { selectParameter(DetectorQuality,detector_.getSelectedId()-1); };
         addAndMakeVisible(detector_);
+        audioOs_.addItemList({"1x","2x","4x","8x","16x","32x"},1);
+        audioOs_.setTooltip("Experimental REAL audio oversampling. Requires audio engine/plugin restart to apply (PDC cannot change inside playback). At >1x, dither is temporarily disabled until post-filter dither is qualified.");
+        audioOs_.setSelectedId(static_cast<int>(param(AudioOversampling).units())+1,
+                               juce::dontSendNotification);
+        audioOs_.onChange=[this] {selectParameter(AudioOversampling,audioOs_.getSelectedId()-1);};
+        addAndMakeVisible(audioOs_);
         dither_.addItemList({"Off","TPDF","Shaped"},1);
         dither_.setTooltip("Final 16/24-bit triangular dither or bounded first-order noise shaping.");
         dither_.setSelectedId(static_cast<int>(param(DitherMode).units())+1,juce::dontSendNotification);
@@ -348,10 +354,18 @@ public:
         label(g,"Powered by Bubblegum Engine",13,footerY+7,176,19,
               10,0xffb3a2b1,false);
         label(g,"ISP DETECTOR",w-302,footerY+8,93,19,10,0xffb9bdc9,true);
+        label(g,"OS",w-145,footerY+8,35,19,10,0xffb9bdc9,true);
         // The ceiling readout is already attached to the top-right slider.
         // Duplicating it here covers the detector selector at 820px wide.
-        label(g,"True Peak certification, real 32x audio oversampling and multichannel still pending",
-              chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
+        const auto osFactor=processor_.activeAudioOversampling();
+        juce::String osStatus="AUDIO OS "+juce::String(osFactor)+"x EXPERIMENTAL";
+        if(processor_.audioOversamplingChangePending())
+            osStatus+="  |  restart audio engine to apply";
+        else if(osFactor>1)
+            osStatus+="  |  dither suspended  |  TP/PDC not certified";
+        else
+            osStatus+="  |  TP not certified";
+        label(g,osStatus,chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
               10,0xffddbac2,false);
     }
 
@@ -378,6 +392,7 @@ public:
 
         const int footerY=getHeight()-37;
         detector_.setBounds(getWidth()-206,footerY+4,53,27);
+        audioOs_.setBounds(getWidth()-104,footerY+4,85,27);
         dither_.setBounds(getWidth()-326,22,94,26);
         bits_.setBounds(getWidth()-354,footerY+4,46,27);
         tp_.setBounds(195,footerY+3,59,29);
@@ -531,6 +546,8 @@ private:
                             juce::dontSendNotification);
         detector_.setSelectedId(static_cast<int>(param(DetectorQuality).units())+1,
                                 juce::dontSendNotification);
+        audioOs_.setSelectedId(static_cast<int>(param(AudioOversampling).units())+1,
+                               juce::dontSendNotification);
         auto reflectToggle=[this](juce::ToggleButton& b,int i){
             b.setToggleState(param(i).units()>0.5f,juce::dontSendNotification);
         };
@@ -543,7 +560,7 @@ private:
     Processor& processor_;
     LimiterLookAndFeel skin_;
     juce::Slider gain_,ceiling_,lookahead_,attack_,release_,link_,releaseLink_;
-    juce::ComboBox style_,detector_,dither_,bits_;
+    juce::ComboBox style_,detector_,audioOs_,dither_,bits_;
     juce::ToggleButton tp_,bypass_,unity_,audition_,dc_;
     juce::TextButton bankA_,bankB_,copy_,resetMeter_,advanced_;
     std::array<Snapshot,2> banks_{};
