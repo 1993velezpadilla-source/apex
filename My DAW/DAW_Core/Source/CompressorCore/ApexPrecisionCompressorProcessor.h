@@ -21,6 +21,7 @@ enum ParameterIndex : int
     ExternalSidechain, CharacterPre,
     SC1Freq,SC1Gain,SC1Q,SC2Freq,SC2Gain,SC2Q,
     SC3Freq,SC3Gain,SC3Q,SC4Freq,SC4Gain,SC4Q,
+    DryGainDb, // appended; legacy c3.dry percent remains recall-compatible
     ParameterCount
 };
 
@@ -152,6 +153,7 @@ public:
         add(SC4Freq,"c3.sc4.freq","SC Bell 4 Frequency",20,20000,9300,0," Hz");
         add(SC4Gain,"c3.sc4.gain","SC Bell 4 Gain",-18,18,0,0," dB");
         add(SC4Q,"c3.sc4.q","SC Bell 4 Q",0.15f,18,1);
+        add(DryGainDb,"c3.drygain","Dry Gain",-100,18,-100,0," dB");
     }
 
     const juce::String getName() const override { return kPluginName; }
@@ -323,6 +325,7 @@ private:
         p.inputDb=value(Input);
         p.wetDb=value(Wet);
         p.dryPercent=value(Dry);
+        p.dryGainDb=value(DryGainDb);
         p.outputDb=value(Output);
         p.sidechainHighpassHz=value(SidechainHP);
         p.sidechainLowpassHz=value(SidechainLP);
@@ -356,7 +359,8 @@ private:
         "c3.sc1.freq","c3.sc1.gain","c3.sc1.q",
         "c3.sc2.freq","c3.sc2.gain","c3.sc2.q",
         "c3.sc3.freq","c3.sc3.gain","c3.sc3.q",
-        "c3.sc4.freq","c3.sc4.gain","c3.sc4.q"
+        "c3.sc4.freq","c3.sc4.gain","c3.sc4.q",
+        "c3.drygain"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
