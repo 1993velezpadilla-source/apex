@@ -743,17 +743,70 @@ public:
     {
         const int band = hitBand (event.position);
         if (band < 0 || std::abs (wheel.deltaY) < 1.0e-6f) return;
+        const bool fine = event.mods.isShiftDown();
+        if (event.mods.isAltDown())
+        {
+            // Official manual: Alt-wheel adjusts the hosted dynamic range;
+            // Alt+Ctrl/Cmd reversely links gain and range (musical trade-off).
+            // Unlike static wheel/Q, this always operates in actual dB
+            // units, independent of log-scaled hosted parameter widths.
+            const bool tradeGain = event.mods.isCtrlDown()
+                                   || event.mods.isCommandDown();
+            const bool grouped = selectedCount() > 1
+                && selectedMask_[static_cast<std::size_t> (band)];
+            const float amountDb = wheel.deltaY * (fine ? 0.35f : 2.0f);
+            for (int b = 0; b < kMaxBands; ++b)
+            {
+                if (grouped ? ! selectedMask_[static_cast<std::size_t> (b)]
+                            : b != band)
+                    continue;
+                auto* range = param (dynamicParameterIndex (
+                    b, DynamicBandOffset::Range));
+                auto* enabled = param (dynamicParameterIndex (
+                    b, DynamicBandOffset::Enable));
+                auto* gain = param (parameterIndex (
+                    b, BandParameterOffset::Gain));
+                range->beginChangeGesture();
+                if (tradeGain) gain->beginChangeGesture();
+                const auto targetRange =
+                    range->getUnitsValue() + amountDb;
+                range->setValueNotifyingHost (
+                    range->toNormalised (targetRange));
+                // Range defaults to zero (static). Enabling dynamics only
+                // after a NONZERO adjustment never changes static bands
+                // unexpectedly when moving the cursor over them.
+                if (! enabled->getBool()
+                    && std::abs (range->getUnitsValue()) > 0.001f)
+                    toggleParameter (dynamicParameterIndex (
+                        b, DynamicBandOffset::Enable));
+                if (tradeGain)
+                {
+                    gain->setValueNotifyingHost (
+                        gain->toNormalised (gain->getUnitsValue()
+                                            - amountDb));
+                    gain->endChangeGesture();
+                }
+                range->endChangeGesture();
+            }
+            if (selected_ < 0 || ! grouped)
+                select (band);
+            commitHistory();
+            curveDirty_ = true;
+            sync();
+            repaint();
+            return;
+        }
         const int idx = parameterIndex (band,
-                            event.mods.isCtrlDown()
-                              ? BandParameterOffset::Gain
-                              : BandParameterOffset::Q);
+            (event.mods.isCtrlDown() || event.mods.isCommandDown())
+                ? BandParameterOffset::Gain : BandParameterOffset::Q);
         auto* p = param (idx);
         p->beginChangeGesture();
         p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f,
             p->getValue() + wheel.deltaY
-              * (event.mods.isShiftDown() ? 0.012f : 0.055f)));
+              * (fine ? 0.012f : 0.055f)));
         p->endChangeGesture();
         select (band);
+        commitHistory();
         curveDirty_ = true;
     }
 
@@ -778,6 +831,21 @@ public:
         if (action == 1) mouseDrag (event);
         if (action == 2) mouseUp (event);
         if (action == 3) mouseDoubleClick (event);
+    }
+
+    void injectGraphWheelForTesting (juce::Point<float> pt, float deltaY,
+                                      juce::ModifierKeys modifiers)
+    {
+        auto* mouse = juce::Desktop::getInstance().getMouseSource (0);
+        if (mouse == nullptr) return;
+        const auto now = juce::Time::getCurrentTime();
+        const juce::MouseEvent event (
+            *mouse, pt, modifiers, 1.0f,
+            0.0f, 0.0f, 0.0f, 0.0f, this, this,
+            now, pt, now, 1, false);
+        juce::MouseWheelDetails wheel;
+        wheel.deltaY = deltaY;
+        mouseWheelMove (event, wheel);
     }
 
     // Exact native-offscreen snapshot test (not a generated concept image).
