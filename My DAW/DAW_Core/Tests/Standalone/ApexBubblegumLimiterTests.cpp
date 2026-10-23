@@ -420,6 +420,60 @@ static void testRealAudioOversamplerRunsAndRejectsAliasing()
     assert(rms<0.02);
 }
 
+
+static void testReal32xProcessedLimiterAttenuatesTruePeaks()
+{
+    using APEX::Limiter::AudioRateConverter;
+    using APEX::Limiter::TruePeakReference;
+    // Actual high-rate DSP, unlike detector-only 32x peak measurement:
+    // 32 fresh audio samples enter Core for every one host audio sample,
+    // and a real antialias FIR reconstructs the host-rate output.
+    constexpr int frames=8192;
+    std::vector<float> source(static_cast<size_t>(frames));
+    for(int i=0;i<frames;++i)
+        source[static_cast<size_t>(i)]=static_cast<float>(
+            std::sin(0.5*kPi*i+0.25*kPi));
+    Settings s;
+    s.truePeak=false; // avoid double FIR detection at 32x DSP rate
+    s.detectorQuality=0;
+    s.ceilingDb=-1.0;
+    s.gainDb=0.0;
+    s.lookaheadMs=5.0;
+    s.attackMs=0.01;
+    s.releaseMs=50.0;
+    Core sampleRateDSP;
+    sampleRateDSP.prepare(kRate);
+    sampleRateDSP.setSettings(s);
+    auto native=source;
+    for(int i=0;i<frames;i+=127)
+        sampleRateDSP.process(native.data()+i,nullptr,std::min(127,frames-i));
+    const auto nativePeak=TruePeakReference::analyze(
+        native.data(),frames,32);
+
+    AudioRateConverter oversample;
+    oversample.prepare(32,128);
+    Core highRateDSP;
+    highRateDSP.prepare(32*kRate);
+    highRateDSP.setSettings(s);
+    const auto callback=[](void* opaque,float* l,float* r,int n) noexcept
+    {
+        static_cast<Core*>(opaque)->process(l,r,n);
+    };
+    auto oversampled=source;
+    for(int i=0;i<frames;i+=173)
+        oversample.process(oversampled.data()+i,nullptr,
+                           std::min(173,frames-i),&highRateDSP,callback);
+    const auto highRatePeak=TruePeakReference::analyze(
+        oversampled.data(),frames,32);
+    assert(nativePeak.reconstructedPeak>0.98);
+    assert(std::isfinite(highRatePeak.reconstructedPeak));
+    assert(highRatePeak.reconstructedPeak<nativePeak.reconstructedPeak*0.98);
+    std::cout<<"APEX ACTUAL 32x audio DSP sample-only TP="
+             <<nativePeak.reconstructedPeak
+             <<" -> processed+antialiased TP="<<highRatePeak.reconstructedPeak
+             <<"; this is a directional test, NOT certified true peak or latency\n";
+}
+
 int main()
 {
     testParameterSanitisation();
@@ -434,6 +488,7 @@ int main()
     testOfflineReferenceDetectsRealIntersampleOvershoot();
     testFIRReconstructionActuallyReducesIntersamplePeak();
     testRealAudioOversamplerRunsAndRejectsAliasing();
+    testReal32xProcessedLimiterAttenuatesTruePeaks();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
