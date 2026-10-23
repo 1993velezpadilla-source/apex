@@ -72,6 +72,7 @@ public:
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testTouchModeGroupLinkingAndOuterDynamicRing();
+        testKeyboardGroupedEditingAndDynamicTooltip();
         testExpandedDynamicPanelAndHostAutomation();
         testRealAudioDynamicMeterAndDirectRangeRing();
         testAltWheelDynamicRangeAndReverseGainTrade();
@@ -95,6 +96,118 @@ public:
     }
 
 private:
+    void testKeyboardGroupedEditingAndDynamicTooltip()
+    {
+        beginTest ("PASS 9 real JUCE keyboard: grouped arrow editing,"
+                   " single-step delete/undo/redo and long dynamic readouts");
+        for (const auto size : { juce::Point<int> { 320, 568 },
+                                 juce::Point<int> { 480, 800 },
+                                 juce::Point<int> { 1280, 720 } })
+        {
+            auto processor = std::make_unique<Processor>();
+            processor->prepareToPlay (48000.0, 128);
+            enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+            enableBell (*processor, 1, 2100.0f, -3.0f, 2.0f);
+            auto editor = std::make_unique<ApexQ4Editor> (*processor);
+            editor->setSize (size.x, size.y);
+            editor->selectBandForTesting (0);
+            auto* f0 = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency));
+            auto* f1 = processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Frequency));
+            auto* g0 = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain));
+            auto* g1 = processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Gain));
+            const auto originalTag = editor->selectedTagBoundsForTesting();
+            expect (editor->graphBoundsForTesting().contains (originalTag));
+            setUnits (*processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Enable), 1.0f);
+            editor->refreshForTesting();
+            const auto dynamicTag = editor->selectedTagBoundsForTesting();
+            expect (editor->graphBoundsForTesting().contains (dynamicTag),
+                "signed Dynamic EQ readout must fit within the graph");
+            expect (dynamicTag.getWidth() > originalTag.getWidth(),
+                "Dynamic gain readout must receive actual extra label width");
+            setUnits (*processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Enable), 0.0f);
+            editor->refreshForTesting();
+
+            editor->setTouchMultiSelectForTesting (true);
+            const auto second = editor->nodeHitAreaForTesting (1)
+                .getCentre().toFloat();
+            editor->injectGraphPointerForTesting (second, 0);
+            editor->injectGraphPointerForTesting (second, 2);
+            expectEquals (editor->selectedBandCountForTesting(), 2);
+            const auto press = [&] (int code,
+                                    juce::ModifierKeys modifier = {})
+            {
+                return editor->sendKeyboardShortcutForTesting (
+                    juce::KeyPress (code, modifier, 0));
+            };
+            expect (press (juce::KeyPress::upKey),
+                "arrow up is handled by the real editor callback");
+            expectWithinAbsoluteError (
+                static_cast<double> (g0->getUnitsValue()), 7.0, 0.06,
+                "arrow up adds 1 dB to first linked band");
+            expectWithinAbsoluteError (
+                static_cast<double> (g1->getUnitsValue()), -2.0, 0.06,
+                "arrow up adds 1 dB to second linked band");
+
+            expect (press (juce::KeyPress::leftKey));
+            const double oneSemitone = std::exp2 (-1.0 / 12.0);
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                930.0 * oneSemitone, 3.0);
+            expectWithinAbsoluteError (
+                static_cast<double> (f1->getUnitsValue()),
+                2100.0 * oneSemitone, 5.0);
+            expect (press (juce::KeyPress::rightKey,
+                juce::ModifierKeys (juce::ModifierKeys::shiftModifier)));
+            const double fineFrequency = std::exp2 (0.1 / 12.0);
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                930.0 * oneSemitone * fineFrequency, 4.0,
+                "shift+right uses a fine logarithmic pitch step");
+            expect (press (juce::KeyPress::downKey,
+                juce::ModifierKeys (juce::ModifierKeys::shiftModifier)));
+            expectWithinAbsoluteError (
+                static_cast<double> (g0->getUnitsValue()), 6.9, 0.06,
+                "shift+down uses 0.1 dB instead of 1 dB");
+
+            const float beforeDeleteHz = f0->getUnitsValue();
+            expect (press (juce::KeyPress::deleteKey));
+            expectEquals (editor->activeBandsForTesting(), 0,
+                "Delete disables all linked hosted EQ bands together");
+            expect (press ('z',
+                juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)));
+            expectEquals (editor->activeBandsForTesting(), 2,
+                "one Ctrl+Z restores ALL deleted linked bands");
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                static_cast<double> (beforeDeleteHz), 1.0);
+            expect (press ('y',
+                juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)));
+            expectEquals (editor->activeBandsForTesting(), 0,
+                "Ctrl+Y reapplies grouped deletion");
+            expect (press ('z',
+                juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)));
+            editor->selectBandForTesting (0);
+            editor->setTouchMultiSelectForTesting (true);
+            expect (press (juce::KeyPress::escapeKey));
+            expect (! editor->touchMultiSelectForTesting(),
+                "Escape explicitly exits the touch link mode");
+            expectEquals (editor->selectedBandCountForTesting(), 0,
+                "Escape clears all selection state");
+            const float afterEscape = f0->getUnitsValue();
+            expect (! press (juce::KeyPress::upKey),
+                "arrows without a selected band are not stolen from host");
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                static_cast<double> (afterEscape), 0.01);
+        }
+    }
+
     void testTouchModeGroupLinkingAndOuterDynamicRing()
     {
         beginTest ("PASS 8 touch-first group: tap link/unlink, swipe drag,"
