@@ -77,6 +77,58 @@ public:
         };
         attach (advanced_, "MORE");
         attach (closeBand_, "X");
+        // Dynamic EQ controls are contextual: no permanently visible sheet.
+        // All values go to the existing APEX canonical hosted parameters,
+        // preserving automation, project serialization and DSP behavior.
+        attach (dynToggle_, "DYN ON");
+        attach (dynSpectral_, "SPECTRAL");
+        attach (dynFilter_, "BAND DETECTOR");
+        attach (dynClose_, "CLOSE");
+        constexpr const char* names[] = {
+            "THRESHOLD", "RANGE", "ATTACK", "RELEASE"
+        };
+        constexpr DynamicBandOffset offsets[] = {
+            DynamicBandOffset::Threshold, DynamicBandOffset::Range,
+            DynamicBandOffset::Attack, DynamicBandOffset::Release
+        };
+        for (int i = 0; i < 4; ++i)
+        {
+            dynamicNames_[static_cast<std::size_t> (i)].setText (
+                names[i], juce::dontSendNotification);
+            dynamicNames_[static_cast<std::size_t> (i)].setColour (
+                juce::Label::textColourId, juce::Colour (0xffd4cbd5));
+            dynamicNames_[static_cast<std::size_t> (i)].setJustificationType (
+                juce::Justification::centredLeft);
+            addAndMakeVisible (dynamicNames_[static_cast<std::size_t> (i)]);
+            setupDynamicSlider (
+                dynamicSliders_[static_cast<std::size_t> (i)], offsets[i]);
+        }
+        dynToggle_.onClick = [this]
+        {
+            if (selected_ >= 0)
+            {
+                toggleParameter (dynamicParameterIndex (
+                    selected_, DynamicBandOffset::Enable));
+                sync();
+            }
+        };
+        dynSpectral_.onClick = [this]
+        {
+            if (selected_ >= 0)
+            {
+                toggleParameter (spectralBandParameterIndex (selected_));
+                sync();
+            }
+        };
+        dynFilter_.onClick = [this]
+        {
+            if (selected_ >= 0)
+            {
+                toggleParameter (dynamicFilterParameterIndex (selected_));
+                sync();
+            }
+        };
+        dynClose_.onClick = [this] { setDynamicExpanded (false); };
 
         undo_.onClick = [this] { historyStep (-1); };
         redo_.onClick = [this] { historyStep (1); };
@@ -111,13 +163,7 @@ public:
         shape_.onClick = [this] { showShapeMenu(); };
         slope_.onClick = [this] { showSlopeMenu(); };
         placement_.onClick = [this] { showPlacementMenu(); };
-        dynamic_.onClick = [this]
-        {
-            if (selected_ >= 0)
-                toggleParameter (dynamicParameterIndex (
-                    selected_, DynamicBandOffset::Enable));
-            sync();
-        };
+        dynamic_.onClick = [this] { setDynamicExpanded (! dynamicExpanded_); };
         advanced_.onClick = [this] { showAdvancedMenu(); };
         closeBand_.onClick = [this] { select (-1); };
 
@@ -125,6 +171,7 @@ public:
         setupDial (gain_, BandParameterOffset::Gain, "GAIN");
         setupDial (q_, BandParameterOffset::Q, "Q");
         setSelectedVisible (false);
+        setDynamicControlsVisible (false);
 
         lastAnalyzerMode_ = processor_.getAnalyzerMode();
         if (lastAnalyzerMode_ == Analysis::SpectrumTapMode::Closed)
@@ -326,6 +373,7 @@ public:
         q_.setBounds (px + 9 + 2 * cw, sliderY,
                       sliderSpace - 2 * cw, sliderHeight);
         soloHold_.toFront (false);
+        layoutDynamicControls();
         curveDirty_ = true;
     }
 
@@ -458,6 +506,30 @@ public:
                 g.drawFittedText (label, tag.reduced (4, 1),
                                   juce::Justification::centred, 1);
             }
+        }
+
+        // Optional expanded dynamics, only while explicitly requested.
+        // Never occupies permanent graph height or changes filter response
+        // coordinates. The four editable rows bind directly to the DSP.
+        if (dynamicExpanded_ && selected_ >= 0)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.39f));
+            g.fillRoundedRectangle (
+                dynamicPanel_.toFloat().translated (0, 3), 9.0f);
+            g.setGradientFill (juce::ColourGradient (
+                juce::Colour (0xff39313e),
+                dynamicPanel_.getX(), dynamicPanel_.getY(),
+                juce::Colour (0xff211d28),
+                dynamicPanel_.getX(), dynamicPanel_.getBottom(), false));
+            g.fillRoundedRectangle (dynamicPanel_.toFloat(), 9.0f);
+            g.setColour (juce::Colour (0xff8b728f).withAlpha (0.75f));
+            g.drawRoundedRectangle (
+                dynamicPanel_.toFloat().reduced (0.5f), 9.0f, 1.0f);
+            g.setColour (juce::Colour (0xfff4ce70));
+            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.drawText ("DYNAMIC EQ", dynamicPanel_.getX() + 10,
+                        dynamicPanel_.getY() + 5, 118, 22,
+                        juce::Justification::centredLeft);
         }
 
         // Small unobtrusive header — *not* the old Prism blue toolbar.
@@ -718,6 +790,21 @@ public:
     }
     juce::Rectangle<int> graphBoundsForTesting() const noexcept { return graph_; }
     juce::Rectangle<int> panelBoundsForTesting() const noexcept { return panel_; }
+    juce::Rectangle<int> dynamicPanelBoundsForTesting() const noexcept
+    {
+        return dynamicPanel_;
+    }
+    bool dynamicPanelVisibleForTesting() const noexcept
+    {
+        return dynamicExpanded_ && selected_ >= 0;
+    }
+    void expandDynamicForTesting (bool show) { setDynamicExpanded (show); }
+    std::array<juce::Slider*, 4> dynamicSlidersForTesting()
+    {
+        return {{ &dynamicSliders_[0], &dynamicSliders_[1],
+                  &dynamicSliders_[2], &dynamicSliders_[3] }};
+    }
+    void toggleDynamicOnForTesting() { dynToggle_.triggerClick(); }
     juce::Rectangle<int> nodeHitAreaForTesting (int band) const
     {
         if (band < 0 || band >= kMaxBands)
@@ -924,6 +1011,137 @@ private:
         };
         addAndMakeVisible (slider);
     }
+    void setupDynamicSlider (juce::Slider& slider,
+                             DynamicBandOffset offset)
+    {
+        slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 83, 26);
+        slider.setRange (0.0, 1.0);
+        slider.onDragStart = [this, offset]
+        {
+            if (selected_ >= 0)
+                param (dynamicParameterIndex (
+                    selected_, offset))->beginChangeGesture();
+        };
+        slider.onDragEnd = [this, offset]
+        {
+            if (selected_ >= 0)
+                param (dynamicParameterIndex (
+                    selected_, offset))->endChangeGesture();
+            commitHistory();
+        };
+        slider.onValueChange = [this, &slider, offset]
+        {
+            if (selected_ >= 0 && ! syncing_)
+            {
+                param (dynamicParameterIndex (
+                    selected_, offset))->setValueNotifyingHost (
+                        static_cast<float> (slider.getValue()));
+                if (! slider.isMouseButtonDown())
+                    commitHistory();
+                repaint();
+            }
+        };
+        slider.textFromValueFunction = [this, offset] (double value)
+        {
+            if (selected_ < 0) return juce::String (value, 2);
+            return param (dynamicParameterIndex (
+                selected_, offset))->getText (
+                    static_cast<float> (value), 0);
+        };
+        slider.valueFromTextFunction = [this, offset] (
+            const juce::String& text)
+        {
+            if (selected_ < 0) return 0.0;
+            return static_cast<double> (
+                param (dynamicParameterIndex (
+                    selected_, offset))->getValueForText (text));
+        };
+        addAndMakeVisible (slider);
+    }
+    void setDynamicControlsVisible (bool visible)
+    {
+        const std::array<juce::Component*, 4> buttons {{
+            &dynToggle_, &dynSpectral_, &dynFilter_, &dynClose_
+        }};
+        for (auto* widget : buttons)
+            widget->setVisible (visible);
+        for (int i = 0; i < 4; ++i)
+        {
+            dynamicNames_[static_cast<std::size_t> (i)].setVisible (visible);
+            dynamicSliders_[static_cast<std::size_t> (i)].setVisible (visible);
+        }
+    }
+    void setDynamicExpanded (bool expanded)
+    {
+        dynamicExpanded_ = expanded && selected_ >= 0;
+        setDynamicControlsVisible (dynamicExpanded_);
+        resized();
+        repaint();
+    }
+    void layoutDynamicControls()
+    {
+        const bool visible = dynamicExpanded_ && selected_ >= 0;
+        setDynamicControlsVisible (visible);
+        if (! visible) return;
+        const int w = getWidth();
+        const int panelWidth = std::min (w - 18, w < 460 ? 302 : 346);
+        const int panelHeight = std::min (
+            272, std::max (180, graph_.getHeight() - 16));
+        const int minX = 9;
+        const int maxX = std::max (minX, w - panelWidth - 9);
+        const int minY = graph_.getY() + 8;
+        const int maxY = std::max (minY, graph_.getBottom()
+                                          - panelHeight - 10);
+        // Select a side of the frequency canvas that keeps the selected
+        // filter node unobstructed. On very short windows there may be no
+        // such position: panel remains explicitly user-invoked and closable.
+        std::array<juce::Rectangle<int>, 4> candidates {{
+            { minX, minY, panelWidth, panelHeight },
+            { maxX, minY, panelWidth, panelHeight },
+            { minX, maxY, panelWidth, panelHeight },
+            { maxX, maxY, panelWidth, panelHeight }
+        }};
+        auto best = candidates[0];
+        float score = std::numeric_limits<float>::infinity();
+        for (const auto& candidate : candidates)
+        {
+            float cost = 0.0f;
+            for (int band = 0; band < kMaxBands; ++band)
+            {
+                if (! param (parameterIndex (band,
+                        BandParameterOffset::Enabled))->getBool())
+                    continue;
+                if (candidate.expanded (18).contains (nodePoint (band)))
+                    cost += band == selected_ ? 100000.0f : 20000.0f;
+            }
+            if (cost < score) { score = cost; best = candidate; }
+        }
+        dynamicPanel_ = best;
+        const int px = best.getX(), py = best.getY(), pw = best.getWidth();
+        dynClose_.setBounds (px + pw - 59, py + 5, 51, 31);
+        dynToggle_.setBounds (px + 9, py + 38, 72, 35);
+        dynSpectral_.setBounds (px + 84, py + 38, 89, 35);
+        dynFilter_.setBounds (px + 176, py + 38, pw - 185, 35);
+        const int rowTop = py + 81;
+        const int rowHeight = std::max (24,
+            (best.getHeight() - 88) / 4);
+        for (int row = 0; row < 4; ++row)
+        {
+            const int yy = rowTop + row * rowHeight;
+            dynamicNames_[static_cast<std::size_t> (row)].setBounds (
+                px + 9, yy, 80, rowHeight - 2);
+            dynamicSliders_[static_cast<std::size_t> (row)].setBounds (
+                px + 89, yy + 1, pw - 98, rowHeight - 3);
+        }
+        // These controls must remain accessible when the main band HUD
+        // occupies another part of the graph.
+        for (auto* widget : { &dynClose_, &dynToggle_,
+                              &dynSpectral_, &dynFilter_ })
+            widget->toFront (false);
+        for (auto& slider : dynamicSliders_)
+            slider.toFront (false);
+    }
     void setSelectedVisible (bool visible)
     {
         const std::array<juce::Component*, 11> widgets {{
@@ -950,6 +1168,9 @@ private:
         if (index >= 0)
             selectedMask_[static_cast<std::size_t> (index)] = true;
         setSelectedVisible (selected_ >= 0);
+        if (selected_ < 0)
+            dynamicExpanded_ = false;
+        setDynamicControlsVisible (dynamicExpanded_);
         sync(); resized(); repaint();
     }
     void toggleSelectedBand (int band)
@@ -970,6 +1191,9 @@ private:
                     selected_ = other;
         }
         setSelectedVisible (selected_ >= 0);
+        if (selected_ < 0)
+            dynamicExpanded_ = false;
+        setDynamicControlsVisible (dynamicExpanded_);
         sync(); resized(); repaint();
     }
     void finishGestures()
@@ -1019,9 +1243,25 @@ private:
             const bool by = param (parameterIndex (
                 selected_, BandParameterOffset::Bypass))->getBool();
             bandPower_.setButtonText (by ? "OFF" : "ON");
-            dynamic_.setButtonText (param (dynamicParameterIndex (
-                selected_, DynamicBandOffset::Enable))->getBool()
-                  ? "DYN ON" : "DYN");
+            const bool isDynamic = param (dynamicParameterIndex (
+                selected_, DynamicBandOffset::Enable))->getBool();
+            dynamic_.setButtonText (isDynamic ? "DYN EDIT" : "DYN");
+            dynToggle_.setButtonText (isDynamic ? "DYN ON" : "DYN OFF");
+            dynSpectral_.setButtonText (
+                param (spectralBandParameterIndex (selected_))->getBool()
+                    ? "SPECTRAL ON" : "SPECTRAL");
+            dynFilter_.setButtonText (
+                param (dynamicFilterParameterIndex (selected_))->getBool()
+                    ? "FILTER ON" : "BAND DETECTOR");
+            constexpr DynamicBandOffset offsets[] = {
+                DynamicBandOffset::Threshold, DynamicBandOffset::Range,
+                DynamicBandOffset::Attack, DynamicBandOffset::Release
+            };
+            for (int i = 0; i < 4; ++i)
+                dynamicSliders_[static_cast<std::size_t> (i)].setValue (
+                    param (dynamicParameterIndex (
+                        selected_, offsets[i]))->getValue(),
+                    juce::dontSendNotification);
         }
         syncing_ = false;
     }
@@ -1434,6 +1674,7 @@ private:
         menu.addItem (4, "Reset selected band");
         menu.addItem (5, "Delete band");
         menu.addSeparator();
+        menu.addItem (9, "Open dynamic EQ controls...");
         menu.addItem (6, "Filter slope...");
         menu.addItem (7, "Channel placement...");
         menu.addItem (8, "Filter shape...");
@@ -1462,6 +1703,8 @@ private:
                         BandParameterOffset::Enabled), 0.0f);
                     e->select (-1);
                 }
+                else if (id == 9)
+                    e->setDynamicExpanded (true);
                 else if (id == 6)
                     e->showSlopeMenu();
                 else if (id == 7)
@@ -1620,13 +1863,18 @@ private:
 
     Processor& processor_;
     EQ4Look look_;
-    juce::Rectangle<int> graph_ {}, panel_ {}, bootEyeBounds_ {};
+    juce::Rectangle<int> graph_ {}, panel_ {}, dynamicPanel_ {},
+                         bootEyeBounds_ {};
     juce::TextButton undo_, redo_, compare_, copy_, preset_, phase_,
         analyzer_, displayRange_, globalBypass_, autoGain_;
     juce::TextButton bandPower_, shape_, slope_, placement_, dynamic_,
         advanced_, closeBand_;
     ApexQ4SoloHold soloHold_;
     juce::Slider freq_, gain_, q_;
+    std::array<juce::Slider, 4> dynamicSliders_ {};
+    std::array<juce::Label, 4> dynamicNames_ {};
+    juce::TextButton dynToggle_, dynSpectral_, dynFilter_, dynClose_;
+    bool dynamicExpanded_ = false;
     int selected_ = -1, dragBand_ = -1, rangeIndex_ = 2;
     bool pendingCurveCreate_ = false, createdDuringGesture_ = false;
     bool pendingDynamic_ = false, pendingSpectral_ = false;
