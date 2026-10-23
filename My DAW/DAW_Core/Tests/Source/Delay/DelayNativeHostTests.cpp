@@ -28,7 +28,13 @@ public:
         DAW::ApexNativePluginFormat native;
         juce::OwnedArray<juce::PluginDescription> results;
         native.findAllTypesForFile(results,{});
-        expectEquals(results.size(),5,"G10, Parametric EQ, Opto, Bubblegum Delay and Reverie visible");
+        expectEquals(results.size(),6,
+                     "G10, Parametric EQ, Opto, Precision C3, Bubblegum Delay and Reverie visible");
+        int c3Count=0;
+        for(const auto* item:results)
+            if(item->fileOrIdentifier == "APEX::PrecisionC3")
+                ++c3Count;
+        expectEquals(c3Count,1,"new compressor has one distinct native identity");
         for(const auto* item:results)
             expect(item->fileOrIdentifier!="APEX::C4","unfinished C4 is not advertised");
         juce::PluginDescription description;
