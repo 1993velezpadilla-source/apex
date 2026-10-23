@@ -647,10 +647,10 @@ public:
         APEX::Branding::EvoEyeStamp::paint (
             g, bootEyeBounds_.toFloat());
 
-        // When opening advanced dynamics at compact portrait widths,
-        // substitute that panel for the three knobs, never paint two
-        // overlays on top of one another.
-        if (selected_ >= 0 && (! dynamicExpanded_ || getWidth() >= 460))
+        // In narrow portraits and low-height landscape host windows there
+        // isn't space for BOTH editing cards at once. Show the requested
+        // dynamics controls alone and restore FREQ/GAIN/Q when closed.
+        if (selected_ >= 0 && ! hideBandHudForDynamics())
         {
             g.setColour (juce::Colours::black.withAlpha (0.26f));
             g.fillRoundedRectangle (panel_.toFloat().translated (0, 4), 12.0f);
@@ -1429,7 +1429,7 @@ private:
         setDynamicControlsVisible (visible);
         // Must run on both OPEN and CLOSE. Otherwise the mobile FREQ/GAIN/Q
         // controls remained hidden after closing the Dynamics overlay.
-        const bool compactDynamics = visible && getWidth() < 460;
+        const bool compactDynamics = hideBandHudForDynamics();
         setSelectedVisible (selected_ >= 0 && ! compactDynamics);
         if (! visible) return;
         const int w = getWidth();
@@ -1548,14 +1548,34 @@ private:
         for (auto& slider : dynamicSliders_)
             slider.toFront (false);
     }
+    bool hideBandHudForDynamics() const noexcept
+    {
+        // The selected strip is 450px wide while the dynamics card is at
+        // least 260px wide. At <=300px host height, keeping BOTH overlays
+        // visible cannot be reliably collision-free across band positions.
+        return dynamicExpanded_ && selected_ >= 0
+            && (getWidth() < 460
+                || (getWidth() >= 720 && graph_.getHeight() < 260));
+    }
     void setSelectedVisible (bool visible)
     {
+        // CRITIC FIX: visibility is breakpoint-specific. Calling the old
+        // blanket "visible=true" inside layoutDynamicControls() incorrectly
+        // re-enabled hidden mobile controls using stale desktop coordinates.
+        // That put five hit targets OUTSIDE the real contextual panel.
         const std::array<juce::Component*, 11> widgets {{
             &bandPower_, &shape_, &slope_, &placement_, &dynamic_,
             &advanced_, &closeBand_, &soloHold_, &freq_, &gain_, &q_
         }};
         for (auto* widget : widgets)
             widget->setVisible (visible);
+        if (visible && getWidth() < 670)
+        {
+            placement_.setVisible (false);
+            dynamic_.setVisible (false);
+            if (getWidth() < 460)
+                slope_.setVisible (false);
+        }
     }
     int selectedCount() const noexcept
     {
