@@ -111,6 +111,8 @@ private:
     static constexpr int kTaps=63;
     static constexpr int kHistory=64;
     static constexpr int kPhaseTaps=32;
+    static constexpr int kCentreTap=(kTaps-1)/2; // 31
+    static constexpr int kOddCentreTap=(kCentreTap-1)/2; // 15
     struct UpHistory
     {
         std::array<double,kHistory> samples{};
@@ -151,7 +153,14 @@ private:
             sum+=lowpass_[static_cast<size_t>(k)];
         }
         if(std::abs(sum)<1.0e-12)sum=1.0;
-        for(auto& v:lowpass_)v/=sum;
+        // Ideal halfband has every odd tap zero except the centre.
+        // Remove tiny floating-point sin(pi*N) residuals so the realtime
+        // decoder can skip 30 provably-zero multiplies per output sample.
+        for(auto& v:lowpass_)
+        {
+            v/=sum;
+            if(std::abs(v)<1.0e-14)v=0.0;
+        }
         for(int phase=0;phase<2;++phase)
         {
             double phaseSum=0.0;
@@ -171,17 +180,22 @@ private:
         for(int i=0;i<count;++i)
         {
             state.samples[static_cast<size_t>(state.cursor)]=src[i];
-            for(int phase=0;phase<2;++phase)
+            // Even polyphase: all 32 meaningful sinc taps.
+            double even=0.0;
+            const auto& weights=polyphase_[0];
+            for(int tap=0;tap<kPhaseTaps;++tap)
             {
-                double output=0.0;
-                for(int tap=0;tap<kPhaseTaps;++tap)
-                {
-                    const int index=(state.cursor+kHistory-tap)%kHistory;
-                    output+=state.samples[static_cast<size_t>(index)]
-                        *polyphase_[static_cast<size_t>(phase)][static_cast<size_t>(tap)];
-                }
-                dst[2*i+phase]=static_cast<float>(output);
+                const int index=(state.cursor+kHistory-tap)%kHistory;
+                even+=state.samples[static_cast<size_t>(index)]
+                        *weights[static_cast<size_t>(tap)];
             }
+            dst[2*i]=static_cast<float>(even);
+            // Odd polyphase: only k=15 (the 63-tap halfband centre) is
+            // nonzero after DC normalisation. An EXACT delayed sample,
+            // with no kernel loop or frame-dependent interpolation drift.
+            dst[2*i+1]=static_cast<float>(
+                state.samples[static_cast<size_t>(
+                    (state.cursor+kHistory-kOddCentreTap)%kHistory)]);
             state.cursor=(state.cursor+1)%kHistory;
         }
     }
@@ -194,12 +208,16 @@ private:
             if(state.phase==1)
             {
                 double value=0.0;
-                for(int tap=0;tap<kTaps;++tap)
+                // Exact halfband sparse FIR: 32 even taps plus one centre.
+                for(int tap=0;tap<kTaps;tap+=2)
                 {
                     const int index=(state.cursor+kHistory-tap)%kHistory;
                     value+=state.samples[static_cast<size_t>(index)]
                             *lowpass_[static_cast<size_t>(tap)];
                 }
+                value+=state.samples[static_cast<size_t>(
+                            (state.cursor+kHistory-kCentreTap)%kHistory)]
+                           *lowpass_[static_cast<size_t>(kCentreTap)];
                 dst[output++]=static_cast<float>(value);
             }
             state.phase^=1;
