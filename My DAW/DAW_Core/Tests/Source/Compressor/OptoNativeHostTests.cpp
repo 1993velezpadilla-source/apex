@@ -242,6 +242,38 @@ public:
                                 }
                                 return nullptr;
                             };
+                            // Critic gate: screenshot V3 exposed 8-digit float garbage
+                            // on Threshold, Ratio, Attack, Release. Every main knob
+                            // must publish concise, editable engineering units.
+                            beginTest("Precision C3 numeric GUI reads professionally");
+                            for(const auto& caseValue : {
+                                  std::pair<const char*,double>{"Threshold",-18.0},
+                                  {"Ratio",4.0}, {"Attack",10.0},
+                                  {"Release",120.0}, {"Wet Gain",0.0},
+                                  {"Dry",0.0}
+                                })
+                            {
+                                juce::Slider* control=nullptr;
+                                for(int component=0;component<c3Editor->getNumChildComponents();++component)
+                                {
+                                    auto* child=c3Editor->getChildComponent(component);
+                                    if(child!=nullptr && child->getName()==caseValue.first)
+                                        control=dynamic_cast<juce::Slider*>(child);
+                                }
+                                expect(control!=nullptr,
+                                       juce::String(caseValue.first)+" must be a real JUCE slider");
+                                if(control!=nullptr)
+                                {
+                                    const auto formatted=control->getTextFromValue(caseValue.second);
+                                    expect(formatted.length()<13,
+                                           juce::String(caseValue.first)+" must not show eight decimal places: "+formatted);
+                                    expect(!formatted.contains("000000"),
+                                           juce::String(caseValue.first)+" must not leak floating point artifacts");
+                                    expectWithinAbsoluteError(control->getValueFromText(formatted),
+                                                              caseValue.second,0.11);
+                                }
+                            }
+
                             for(const auto& name : {
                                     "C3 A/B","C3 COPY","C3 UNDO","C3 REDO",
                                     "C3 PRESET","C3 STYLE","C3 CHARACTER",
