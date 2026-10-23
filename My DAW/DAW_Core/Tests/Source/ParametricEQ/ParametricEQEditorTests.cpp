@@ -945,6 +945,37 @@ private:
                     expect (png.writeImageToStream (screenshot, *stream));
                 }
 
+                // PASS 8 review evidence: the same genuine WAV-derived PRE/
+                // POST spectrum, this time with TWO touch-linked nodes and
+                // an explicit interactive mode badge. Never fabricate FFT.
+                editor->setTouchMultiSelectForTesting (true);
+                const auto touchNode = editor->nodeHitAreaForTesting (1)
+                    .getCentre().toFloat();
+                editor->injectGraphPointerForTesting (touchNode, 0);
+                editor->injectGraphPointerForTesting (touchNode, 2);
+                expectEquals (editor->selectedBandCountForTesting(), 2,
+                    "PASS 8 screenshot has real touch-linked EQ nodes");
+                juce::Image touchScreenshot (juce::Image::RGB,
+                                              size.x, size.y, true);
+                {
+                    juce::Graphics graphics (touchScreenshot);
+                    editor->paintEntireComponent (graphics, false);
+                }
+                const auto touchFile = dir.getChildFile (
+                    "APEX-EQ-TOUCH-LINK-REAL-FFT-"
+                    + juce::String (size.x) + "x"
+                    + juce::String (size.y) + ".png");
+                auto touchStream = touchFile.createOutputStream();
+                expect (touchStream != nullptr);
+                if (touchStream != nullptr)
+                {
+                    juce::PNGImageFormat png;
+                    expect (png.writeImageToStream (
+                        touchScreenshot, *touchStream));
+                }
+                editor->setTouchMultiSelectForTesting (false);
+                editor->selectBandForTesting (0);
+
                 // Also record the TRUE Ctrl-click multi-select visual state
                 // using the same measured WAV FFT frame for user review.
                 if (size.x >= 480)
