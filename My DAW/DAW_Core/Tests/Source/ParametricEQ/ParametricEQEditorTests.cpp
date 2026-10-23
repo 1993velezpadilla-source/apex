@@ -71,6 +71,8 @@ public:
         testApexQ4CleanRoomProductionEditor();
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
+        testExpandedDynamicPanelAndHostAutomation();
+        testAltWheelDynamicRangeAndReverseGainTrade();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
         testStaticEvoEyeStamp();
@@ -91,6 +93,159 @@ public:
     }
 
 private:
+    void testAltWheelDynamicRangeAndReverseGainTrade()
+    {
+        beginTest ("manual: Alt-wheel dynamics, Alt+Ctrl reverse gain,"
+                   " linked band scaling and no implicit SOLO");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+        enableBell (*processor, 1, 2200.0f, -3.0f, 1.6f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        const juce::ModifierKeys ctrl (juce::ModifierKeys::ctrlModifier);
+        const juce::ModifierKeys alt (juce::ModifierKeys::altModifier);
+        auto pt = editor->nodeHitAreaForTesting (1).getCentre().toFloat();
+        editor->injectGraphPointerForTesting (pt, 0, ctrl);
+        editor->injectGraphPointerForTesting (pt, 2, ctrl);
+        expectEquals (editor->selectedBandCountForTesting(), 2);
+        pt = editor->nodeHitAreaForTesting (0).getCentre().toFloat();
+        editor->injectGraphWheelForTesting (pt, 1.0f, alt);
+        for (int b = 0; b < 2; ++b)
+        {
+            expect (processor->getParametricEQParameter (
+                dynamicParameterIndex (b, DynamicBandOffset::Enable))
+                    ->getBool(), "Alt wheel activates REAL native dynamics");
+            expectWithinAbsoluteError (
+                static_cast<double> (processor->getParametricEQParameter (
+                    dynamicParameterIndex (b, DynamicBandOffset::Range))
+                        ->getUnitsValue()), 2.0, 0.2,
+                "two selected bands receive +2 dB dynamic range");
+        }
+        const juce::ModifierKeys linked (
+            juce::ModifierKeys::altModifier
+            | juce::ModifierKeys::ctrlModifier);
+        editor->injectGraphWheelForTesting (pt, 1.0f, linked);
+        for (int b = 0; b < 2; ++b)
+            expectWithinAbsoluteError (
+                static_cast<double> (processor->getParametricEQParameter (
+                    dynamicParameterIndex (b, DynamicBandOffset::Range))
+                        ->getUnitsValue()), 4.0, 0.2,
+                "Alt+Ctrl wheel further increases hosted dynamic range");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                    ->getUnitsValue()), 4.0, 0.2,
+            "Alt+Ctrl reverse-linked trade reduces static gain by 2 dB");
+        expectWithinAbsoluteError (
+            static_cast<double> (processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Gain))
+                    ->getUnitsValue()), -5.0, 0.2,
+            "grouped reverse trade also changes second band's gain");
+        expect (! processor->isAuditionHoldingForTesting(),
+            "mousewheel dynamic gestures must not mute the vocal");
+    }
+
+    void testExpandedDynamicPanelAndHostAutomation()
+    {
+        beginTest ("manual dynamic EQ: real touch-adjustable threshold, range,"
+                   " attack, release, bypass/filter/spectral hosted values");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 6.0f, 2.4f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        for (auto size : std::array<juce::Point<int>, 4> {{
+               { 320, 568 }, { 480, 800 },
+               { 900, 300 }, { 1280, 720 } }})
+        {
+            editor->setSize (size.x, size.y);
+            editor->selectBandForTesting (0);
+            editor->expandDynamicForTesting (true);
+            expect (editor->dynamicPanelVisibleForTesting(),
+                "a selected band can open its dynamic controls");
+            const auto area = editor->dynamicPanelBoundsForTesting();
+            expect (editor->getLocalBounds().contains (area),
+                "dynamic controls stay within window on desktop and mobile");
+            expect (editor->graphBoundsForTesting().contains (area),
+                "expanded controls must not obscure header or footer");
+            expect (area.getHeight() >= 180);
+            auto dials = editor->dynamicSlidersForTesting();
+            for (auto* slider : dials)
+            {
+                expect (slider->isVisible(), "all four controls accessible");
+                expect (area.contains (slider->getBounds()),
+                    "each dynamic slider must fit within open panel");
+                expect (slider->getWidth() >= 160);
+                expect (slider->getHeight() >= 20);
+            }
+            editor->expandDynamicForTesting (false);
+            expect (! editor->dynamicPanelVisibleForTesting(),
+                "dynamic panel must close without disabling native DSP");
+        }
+
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        editor->expandDynamicForTesting (true);
+        editor->toggleDynamicOnForTesting();
+        expect (processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
+            "dynamic enable is the REAL hosted processor parameter");
+        auto dials = editor->dynamicSlidersForTesting();
+        constexpr DynamicBandOffset offsets[] = {
+            DynamicBandOffset::Threshold, DynamicBandOffset::Range,
+            DynamicBandOffset::Attack, DynamicBandOffset::Release
+        };
+        const juce::String values[] = { "-31 dB", "+7.5 dB",
+                                         "25 ms", "160 ms" };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto& slider = *dials[static_cast<std::size_t> (i)];
+            slider.setValue (slider.valueFromTextFunction (values[i]),
+                             juce::sendNotificationSync);
+            const int paramIndex = dynamicParameterIndex (0, offsets[i]);
+            const float actual = processor->getParametricEQParameter (
+                paramIndex)->getValue();
+            expectWithinAbsoluteError (
+                static_cast<double> (slider.getValue()),
+                static_cast<double> (actual), 1.0e-6,
+                "real UI slider and hosted DSP parameter must agree");
+        }
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range))
+                ->getUnitsValue()), 7.5, 0.2,
+            "typed dynamic range uses dB units, not normalized 0..1");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Threshold))
+                ->getUnitsValue()), -31.0, 0.2,
+            "typed detector threshold uses actual -31 dB");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Attack))
+                ->getUnitsValue()), 0.025, 0.002,
+            "25 ms input must become 0.025 seconds, NOT max 5 seconds");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Release))
+                ->getUnitsValue()), 0.160, 0.004,
+            "160 ms release input must become 0.160 seconds");
+        auto* attack = processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Attack));
+        expectWithinAbsoluteError (static_cast<double> (
+            attack->getValueForText (attack->getText (
+                attack->getValue(), 0))),
+            static_cast<double> (attack->getValue()), 0.03,
+            "native attack text must round-trip through hosted parameter");
+        expect (! processor->isAuditionHoldingForTesting(),
+            "adjusting dynamic EQ never silently solos/mutes the singer");
+        editor->expandDynamicForTesting (false);
+        expect (processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool(),
+            "closing dynamic controls never erases active dynamic processing");
+    }
+
     void testNativeMultiSelectionRelativeGroupedDragAndHistory()
     {
         beginTest ("manual multi-select: Ctrl-click two real bands, octave"
@@ -518,6 +673,31 @@ private:
                             grouped, *groupStream));
                     }
                     editor->selectBandForTesting (0);
+                }
+                if (size.x == 480 || size.x == 1280)
+                {
+                    editor->expandDynamicForTesting (true);
+                    expect (editor->dynamicPanelVisibleForTesting(),
+                        "dynamic-editor native screenshot requires open controls");
+                    juce::Image dynamicImage (juce::Image::RGB,
+                                               size.x, size.y, true);
+                    {
+                        juce::Graphics graphics (dynamicImage);
+                        editor->paintEntireComponent (graphics, false);
+                    }
+                    const auto dynamicFile = dir.getChildFile (
+                        "APEX-EQ-DYNAMIC-WAV-FFT-"
+                        + juce::String (size.x) + "x"
+                        + juce::String (size.y) + ".png");
+                    auto dynamicStream = dynamicFile.createOutputStream();
+                    expect (dynamicStream != nullptr);
+                    if (dynamicStream != nullptr)
+                    {
+                        juce::PNGImageFormat png;
+                        expect (png.writeImageToStream (
+                            dynamicImage, *dynamicStream));
+                    }
+                    editor->expandDynamicForTesting (false);
                 }
             }
         }
