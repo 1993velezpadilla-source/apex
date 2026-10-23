@@ -157,3 +157,28 @@ would miss it.
 
 Keep PR #159 in DRAFT; do not merge MAIN without all latest-head CI
 GREEN, visually confirmed screenshots and explicit user approval.
+
+### PASS 10 adversarial CI failure and corrective iteration (2026-10-23)
+
+Commit `52938141` compiled on Windows but **FAILED** the Windows Complete
+Tests and Debug/Release Flagship EQ Gauntlet. Do not represent this run as GREEN.
+
+Actual test diagnostics from run 40025466359:
+- Five `all contextual hit targets fit entirely in floating HUD`
+  assertions failed; root cause: the PASS 10 dynamics layout helper called
+  `setSelectedVisible(true)` and re-enabled mobile-only hidden `slope_`,
+  `placement_` or `dynamic_` controls whose inactive desktop rectangles
+  were outside the compact HUD. Fix: force per-breakpoint visibility inside
+  `setSelectedVisible` after applying global selection visibility.
+- One `dynamic panel must NOT obscure ANY part of the EQ knobs or SOLO`
+  assertion failed; screenshot review and geometry audit show short 900×300
+  windows cannot always place two overlays without collision for every
+  possible band point. Fix: treat short landscape windows the same as compact
+  portrait, temporarily substituting the dynamic editing card for the
+  selected-band controls. Close restores FREQ/GAIN/Q. At ordinary desktop/
+  mobile heights, **both remain visible** with zero-area overlap.
+- The tests now explicitly distinguish visibility substitution from a
+  collision, and forbid substitution at normal-height responsive widths.
+
+These failures are genuine and documented; the corrective HEAD still
+requires an entirely new full GitHub Actions GREEN. MAIN remains untouched.
