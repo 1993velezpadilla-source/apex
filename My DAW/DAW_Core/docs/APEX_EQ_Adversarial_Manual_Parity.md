@@ -53,3 +53,33 @@ Reference: [FabFilter Pro-Q 4 official user manual](https://www.fabfilter.com/do
 
 **CI state:** PASS 7 must be verified against its latest commit before it is
 called GREEN. Keep PR #159 as DRAFT and MAIN untouched pending the gates.
+
+## PASS 8 — touch-first linked EQ authoring (2026-10-23)
+
+- **Explicit Touch Multi-Select mode** under the selected band's **MORE**
+  contextual menu. A highlighted graph badge indicates when taps will
+  LINK/UNLINK EQ handles. No desktop Ctrl/Cmd key is required.
+- While link mode is active, a normal **tap** toggles band membership;
+  a **swipe** on any linked node preserves membership and initiates
+  normal begin/end host parameter gestures to edit group frequency
+  (log-frequency ratios) and gain (dB differences). Unlinked swiped
+  nodes join before movement; there is no accidental solo.
+- An accidental tap on blank graph in this mode **never inserts** a
+  new filter or destroys the current group. Exit from the mode clears
+  links to all except the currently primary band so a later ordinary
+  gesture will not unexpectedly move the previous group.
+- **Dynamic ring dead-zone correction:** the painted outer GR arc extends
+  to ~22.4 px; hit testing now accepts a 24px radius for enabled dynamic
+  bands. The 13–24px ring drag zone is reachable in full without
+  hijacking the centre drag. Static bands retain the old 22px hit target.
+- Native JUCE adversarial tests run real callbacks at 320×568, 480×800,
+  and 1280×720 with linked taps, blank-tap safety, grouped swipe,
+  log-frequency/gain balance, one-step undo, unlink, 23px ring drag,
+  and checks for accidental SOLO or unwanted gain/frequency changes.
+- Actual Windows precision-touch hardware remains an unverified release
+  gate, and the native GUI still requires user visual acceptance. This
+  is not proof of full feature or trade-dress parity with Pro-Q 4.
+
+**PASS 8 CI:** verify latest SHA before claiming GREEN. Preserve PR #159 as
+DRAFT, no MAIN merge until focused Windows/JUCE, Debug, Release, complete
+suite, native screenshots and user acceptance pass.
