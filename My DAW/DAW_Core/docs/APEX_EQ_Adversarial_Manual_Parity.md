@@ -119,3 +119,35 @@ suite, native screenshots and user acceptance pass.
 **PASS 9 CI:** latest SHA must pass focused Windows/JUCE compiler, Windows
 complete tests, both Parametric EQ Debug/Release and Flagship EQ Gauntlet,
 and repository checks. Do not merge PR #159 into MAIN from older GREEN.
+
+
+## PASS 10 — screenshot-driven dynamic panel occlusion fix (2026-10-23)
+
+Actual `APEX-EQ-DYNAMIC-WAV-FFT-480x800.png` downloaded from PASS 9
+Release run 39990858105 exposes a **severe visual defect** that previous
+geometry/green CI missed: dynamic slider values and four rows visibly
+paint *over* the floating FREQ/GAIN/Q HUD and SOLO. The screenshot at
+1280x720 does not show this failure, proving a desktop-only smoke test
+would miss it.
+
+- Replace the 4-corner-only floating dynamic-panel placement solver with
+  an allocation-free 3×9 candidate search (corners, central positions,
+  just above/below the selected band and existing contextual HUD).
+- Penalize actual intersecting **area** with the primary band controls,
+  value tooltip and hosted band-node points instead of assigning
+  insufficient constant collision penalties. Preserve enabled nodes
+  and signed dynamic metering visibility.
+- Under 460px wide, there is inadequate room for two large floating
+  overlays simultaneously. Opening Dynamics temporarily hides the
+  FREQ/GAIN/Q HUD and its input widgets. Closing Dynamics restores
+  normal band editing without changing the DSP/parameters.
+- Expand the native JUCE gauntlet to assert no Dynamic/HUD overlap
+  at 480×800, 900×300 and 1280×720. Test compact HUD substitution and
+  restoration at 320×568. Generate **real** `APEX-EQ-DYNAMIC-WAV-FFT`
+  images at all five viewport sizes to allow direct human visual review.
+- The review uses genuine prior PNGs, not generated mockups; release CI
+  on the latest HEAD and examination of NEW native screenshots remain
+  pending. No claim of commercial product visual parity is made.
+
+Keep PR #159 in DRAFT; do not merge MAIN without all latest-head CI
+GREEN, visually confirmed screenshots and explicit user approval.
