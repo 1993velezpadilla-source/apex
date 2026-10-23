@@ -24,16 +24,22 @@ public:
     static constexpr int kMaxFactor=32;
     static constexpr int kMaxStages=5;
 
-    void prepare(int factor,int maxBaseFrames)
+    // extraHighRateDelay is an EXACT integer delay at the highest sample
+    // rate. This compensates fractional host-frame FIR group delay with no
+    // interpolation coloration or per-sample fractional delay filter.
+    void prepare(int factor,int maxBaseFrames,int extraHighRateDelay=0)
     {
         // prepare() must not be invoked from the audio processing thread.
         factor_=std::max(1,std::min(kMaxFactor,factor));
         if((factor_ & (factor_-1))!=0)factor_=1;
         stages_=0;
         for(int f=factor_;f>1;f>>=1)++stages_;
+        extraHighRateDelay_=std::clamp(extraHighRateDelay,0,kMaxHighRateDelay);
+        if(factor_==1)extraHighRateDelay_=0;
         baseChunk_=std::max(1,std::min(512,maxBaseFrames));
         prepareFilter();
         for(auto& stage:stagesState_)stage.reset();
+        for(auto& c:alignmentDelay_)c.reset();
         for(int index=0;index<=kMaxStages;++index)
         {
             // Each 2x stage writes to its own preallocated float buffers.
@@ -45,21 +51,25 @@ public:
     void reset() noexcept
     {
         for(auto& stage:stagesState_)stage.reset();
+        for(auto& c:alignmentDelay_)c.reset();
     }
     int factor() const noexcept {return factor_;}
     int stages() const noexcept {return stages_;}
     int maxChunkFrames() const noexcept {return baseChunk_;}
 
-    // Approximate FIR roundtrip group delay at base rate, excluding the
-    // high-rate processor. An exact integer PDC must be established by the
-    // host integration gauntlet; do not publish this as certified latency.
+    // Measured/derived group delay. At each 2x stage, interpolation adds
+    // (kTaps-1)/2=31 HIGH samples and the downsampler's odd output phase
+    // advances the cascade by ONE high sample. Therefore a stage roundtrip
+    // is 61 high frames, or 30.5 host frames at the first 2x level.
+    // Earlier code reported 62 and was wrong by 1-1/factor native frames.
     double nominalFilterDelayFrames() const noexcept
     {
-        double delay=0.0;
-        for(int level=0;level<stages_;++level)
-            delay+=static_cast<double>(kTaps-1)/(1<<level)/2.0;
-        return delay;
+        if(factor_<=1)return 0.0;
+        constexpr double roundtripHigh=static_cast<double>(kTaps-2);
+        return roundtripHigh*(1.0-1.0/factor_)
+                +static_cast<double>(extraHighRateDelay_)/factor_;
     }
+    int alignmentDelayAtHighRate() const noexcept{return extraHighRateDelay_;}
 
     void process(float* left,float* right,int frames,void* ctx,
                  ProcessHighRateFn callback) noexcept
@@ -90,6 +100,13 @@ public:
             const int highCount=count*factor_;
             auto& high=work_[static_cast<size_t>(stages_)];
             callback(ctx,high[0].data(),stereo?high[1].data():nullptr,highCount);
+            // Delay the actual high-rate wet audio by an integer number of
+            // OVERSAMPLED samples. At 32x, 25 high samples add exactly
+            // 25/32 of one host sample, unlike a coloured fractional FIR.
+            if(extraHighRateDelay_>0)
+                for(int ch=0;ch<(stereo?2:1);++ch)
+                    delayHighRate(alignmentDelay_[static_cast<size_t>(ch)],
+                                  high[static_cast<size_t>(ch)].data(),highCount);
 
             // True filtering *after* the DSP prevents its ultrasonic content
             // from aliasing when decimating. Stateful across host callbacks.
@@ -111,6 +128,7 @@ private:
     static constexpr int kTaps=63;
     static constexpr int kHistory=64;
     static constexpr int kPhaseTaps=32;
+    static constexpr int kMaxHighRateDelay=63;
     static constexpr int kCentreTap=(kTaps-1)/2; // 31
     static constexpr int kOddCentreTap=(kCentreTap-1)/2; // 15
     struct UpHistory
@@ -124,6 +142,12 @@ private:
         std::array<double,kHistory> samples{};
         int cursor=0,phase=0;
         void reset() noexcept {samples.fill(0.0);cursor=0;phase=0;}
+    };
+    struct HighRateDelay
+    {
+        std::array<float,kMaxHighRateDelay+1> history{};
+        int cursor=0;
+        void reset() noexcept {history.fill(0.0f);cursor=0;}
     };
     struct Stage
     {
@@ -199,6 +223,18 @@ private:
             state.cursor=(state.cursor+1)%kHistory;
         }
     }
+    void delayHighRate(HighRateDelay& state,float* samples,int frames) noexcept
+    {
+        constexpr int size=kMaxHighRateDelay+1;
+        for(int i=0;i<frames;++i)
+        {
+            const int read=(state.cursor+size-extraHighRateDelay_)%size;
+            const float original=samples[i];
+            samples[i]=state.history[static_cast<size_t>(read)];
+            state.history[static_cast<size_t>(state.cursor)]=original;
+            state.cursor=(state.cursor+1)%size;
+        }
+    }
     void decimate(DownHistory& state,const float* src,float* dst,int outputCount) noexcept
     {
         int output=0;
@@ -224,7 +260,8 @@ private:
             state.cursor=(state.cursor+1)%kHistory;
         }
     }
-    int factor_=1,stages_=0,baseChunk_=128;
+    int factor_=1,stages_=0,baseChunk_=128,extraHighRateDelay_=0;
+    std::array<HighRateDelay,2> alignmentDelay_{};
     std::array<double,kTaps> lowpass_{};
     std::array<std::array<double,kPhaseTaps>,2> polyphase_{};
     std::array<Stage,kMaxStages> stagesState_{};
