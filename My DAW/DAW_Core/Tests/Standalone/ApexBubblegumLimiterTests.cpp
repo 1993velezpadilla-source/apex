@@ -37,7 +37,9 @@ static void runCeiling(int block,int style,int quality)
     Settings p; p.ceilingDb = -1.0; p.gainDb=24.0; p.style=style;
     p.lookaheadMs=5; p.detectorQuality=quality;
     core.setSettings(p);
-    auto l=signal(24000,0.91),r=signal(24000,0.73);
+    // 6k frames > 20ms fixed latency, while bounding the FIR 8x DSP
+    // sanitizer matrix (6 blocks x 8 styles x 4 detector resolutions).
+    auto l=signal(6000,0.91),r=signal(6000,0.73);
     for (int offset=0;offset<static_cast<int>(l.size());offset+=block)
     {
         const int n=std::min(block,static_cast<int>(l.size())-offset);
@@ -257,6 +259,47 @@ static void testStereoIntegratedAndLra()
     assert(mono.loudnessRange()>=0.0f);
 }
 
+
+static void testFIRReconstructionActuallyReducesIntersamplePeak()
+{
+    using APEX::Limiter::TruePeakReference;
+    // Use a phase-shifted Nyquist-adjacent sine with hidden overshoots.
+    const int frames=8192;
+    std::vector<float> source(static_cast<size_t>(frames));
+    for(int i=0;i<frames;++i)
+        source[static_cast<size_t>(i)]=static_cast<float>(
+            std::sin(kPi*0.5*i+kPi*0.25));
+    const auto render=[&](bool isp,int quality)
+    {
+        Core core;
+        core.prepare(kRate);
+        Settings p;
+        p.gainDb=0.0;
+        p.ceilingDb=-1.0;
+        p.lookaheadMs=5.0;
+        p.truePeak=isp;
+        p.detectorQuality=quality;
+        core.setSettings(p);
+        auto samples=source;
+        for(int offset=0;offset<frames;offset+=127)
+            core.process(samples.data()+offset,nullptr,
+                         std::min(127,frames-offset));
+        return TruePeakReference::analyze(samples.data(),frames,32);
+    };
+    const auto samplesOnly=render(false,0);
+    const auto reconstructed4=render(true,2);
+    const double ceiling=std::pow(10.0,-1.0/20.0);
+    assert(samplesOnly.samplePeak<ceiling);
+    assert(samplesOnly.reconstructedPeak>ceiling*1.08);
+    // This is a directional quality regression, NOT TP certification.
+    assert(reconstructed4.reconstructedPeak <
+           samplesOnly.reconstructedPeak*0.98);
+    std::cout<<"APEX FIR ISP audit: sample-only reconstructed peak "
+             <<samplesOnly.reconstructedPeak
+             <<", enabled 4x FIR reconstructed peak "
+             <<reconstructed4.reconstructedPeak<<"\n";
+}
+
 static void testOfflineReferenceDetectsRealIntersampleOvershoot()
 {
     // An adversarial 12 kHz sine sampled at +45 degrees has 0.707 sample
@@ -315,6 +358,7 @@ int main()
     testReset();
     testStereoIntegratedAndLra();
     testOfflineReferenceDetectsRealIntersampleOvershoot();
+    testFIRReconstructionActuallyReducesIntersamplePeak();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
