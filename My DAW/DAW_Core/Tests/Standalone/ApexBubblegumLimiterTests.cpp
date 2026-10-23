@@ -1,6 +1,7 @@
 // APEX limiter — portable C++17 realtime/DSP regression suite.
 #include "../../Source/LimiterCore/ApexLimiterCore.h"
 #include "../../Source/LimiterCore/ApexLimiterLoudness.h"
+#include "ApexLimiterTruePeakReference.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -256,6 +257,52 @@ static void testStereoIntegratedAndLra()
     assert(mono.loudnessRange()>=0.0f);
 }
 
+static void testOfflineReferenceDetectsRealIntersampleOvershoot()
+{
+    // An adversarial 12 kHz sine sampled at +45 degrees has 0.707 sample
+    // peaks but an almost 1.0 reconstructed peak: a sample peak limiter
+    // with -1 dBFS ceiling cannot identify the gap by sample values alone.
+    using APEX::Limiter::TruePeakReference;
+    std::vector<float> phaseShifted(4096);
+    for(int i=0;i<static_cast<int>(phaseShifted.size());++i)
+        phaseShifted[static_cast<size_t>(i)]=static_cast<float>(
+            std::sin(kPi*i*0.5 + kPi*0.25));
+    const auto r32=TruePeakReference::analyze(
+        phaseShifted.data(),static_cast<int>(phaseShifted.size()),32);
+    const auto r4=TruePeakReference::analyze(
+        phaseShifted.data(),static_cast<int>(phaseShifted.size()),4);
+    assert(r32.samplePeak>0.70 && r32.samplePeak<0.72);
+    assert(r32.reconstructedPeak>0.98 && r32.reconstructedPeak<1.02);
+    assert(std::abs(r32.reconstructedPeak-r4.reconstructedPeak)<0.01);
+
+    std::vector<float> silence(256,0.0f);
+    const auto quiet=TruePeakReference::analyze(
+        silence.data(),static_cast<int>(silence.size()),32);
+    assert(quiet.samplePeak==0.0 && quiet.reconstructedPeak==0.0);
+
+    // Deliberate diagnostic of the existing SAMPLE-only mode: reveal the
+    // missing true-peak guard instead of misreporting 'certified' limiting.
+    Core sampleOnly;
+    sampleOnly.prepare(kRate);
+    Settings cfg;
+    cfg.truePeak=false;
+    cfg.detectorQuality=0;
+    cfg.ceilingDb=-1.0;
+    cfg.gainDb=0.0;
+    sampleOnly.setSettings(cfg);
+    auto output=phaseShifted;
+    sampleOnly.process(output.data(),nullptr,static_cast<int>(output.size()));
+    const auto actual=TruePeakReference::analyze(
+        output.data(),static_cast<int>(output.size()),32);
+    const double ceiling=std::pow(10.0,cfg.ceilingDb/20.0);
+    assert(actual.samplePeak<ceiling);
+    assert(actual.reconstructedPeak>ceiling*1.08);
+    std::cout<<"APEX TP audit: sample peak "<<actual.samplePeak
+             <<", reconstructed 32x peak "<<actual.reconstructedPeak
+             <<", -1 dBFS ceiling "<<ceiling
+             <<" (sample-only mode still requires true-peak protection)\n";
+}
+
 int main()
 {
     testParameterSanitisation();
@@ -267,6 +314,7 @@ int main()
     testReductionTelemetryAcrossHostBlocks();
     testReset();
     testStereoIntegratedAndLra();
+    testOfflineReferenceDetectsRealIntersampleOvershoot();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
