@@ -644,6 +644,41 @@ private:
                     }
                     editor->setSpectrumSmoothingForTesting (1.0 / 18.0);
                 }
+
+                // The screenshot must also show REAL dynamic DSP activity.
+                // Replay the SAME WAV that is packaged with the artifact,
+                // enabling hosted dynamics only AFTER validating static EQ's
+                // PRE/POST difference above. No external/mock render data.
+                setUnits (*processor, dynamicParameterIndex (
+                    0, DynamicBandOffset::Enable), 1.0f);
+                setUnits (*processor, dynamicParameterIndex (
+                    0, DynamicBandOffset::Threshold), -48.0f);
+                setUnits (*processor, dynamicParameterIndex (
+                    0, DynamicBandOffset::Range), 9.0f);
+                setUnits (*processor, dynamicParameterIndex (
+                    0, DynamicBandOffset::Attack), 0.003f);
+                setUnits (*processor, dynamicParameterIndex (
+                    0, DynamicBandOffset::Release), 0.090f);
+                for (int start = 0; start < 512 * 128; start += 128)
+                {
+                    chunk.clear();
+                    expect (reader->read (&chunk, 0, 128,
+                                           static_cast<juce::int64> (start),
+                                           true, true),
+                            "replay SAME WAV through real dynamic EQ");
+                    processor->processBlock (chunk, midi);
+                    if ((start / 128) % 5 == 0)
+                        editor->refreshMeasuredDynamicsForTesting();
+                    if ((start / 128) % 9 == 0)
+                        juce::Thread::sleep (2);
+                }
+                editor->refreshMeasuredDynamicsForTesting();
+                editor->refreshMeasuredSpectrumForTesting();
+                expect (editor->hasMeasuredDynamicFrameForTesting (0),
+                    "native dynamic screenshot derives from coherent"
+                    " ResponseCore gain measured on reference WAV");
+                expect (editor->measuredDynamicDbForTesting (0) < -0.05f,
+                    "reference WAV must trigger real native dynamic reduction");
             }
         }
 
