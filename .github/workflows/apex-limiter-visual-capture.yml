@@ -65,8 +65,27 @@ jobs:
           git add -f -- 'My DAW/DAW_Core/evidence/renderpacks/APEX_LIMITER_NATIVE/*.png' 'My DAW/DAW_Core/evidence/renderpacks/APEX_LIMITER_NATIVE/*.png.b64'
           $files=git diff --cached --name-only
           if ($files) {
+            # Screenshots are valid only for the exact compiled source SHA.
+            # Another AI/code/CI job can advance this branch while a 30+
+            # minute Windows build is running. Keep the immutable artifact,
+            # NEVER force-push stale screenshots over newer code.
+            $target='refs/heads/feature/apex-bubblegum-limiter-v1-20261022'
+            $remote=git ls-remote origin $target
+            if ($LASTEXITCODE -ne 0 -or -not $remote) { throw 'Cannot verify remote head' }
+            $remoteSha=($remote -split '\s+')[0]
+            if ($remoteSha -ne $env:GITHUB_SHA) {
+              Write-Warning "Branch advanced from $env:GITHUB_SHA to $remoteSha; skip stale screenshot commit (Actions artifact retained)."
+              exit 0
+            }
             git commit -m 'evidence(limiter): capture REAL compiled JUCE GUI [skip ci]'
             if ($LASTEXITCODE -ne 0) { throw 'Evidence commit failed' }
-            git push origin HEAD:refs/heads/feature/apex-bubblegum-limiter-v1-20261022
-            if ($LASTEXITCODE -ne 0) { throw 'Evidence upload failed; see CI artifact' }
+            git push origin HEAD:$target
+            if ($LASTEXITCODE -ne 0) {
+              $newHead=git ls-remote origin $target
+              if ($LASTEXITCODE -eq 0 -and $newHead -and (($newHead -split '\s+')[0] -ne $env:GITHUB_SHA)) {
+                Write-Warning 'Branch changed during screenshot push; immutable Actions artifact preserved.'
+                exit 0
+              }
+              throw 'Evidence push failed for a reason other than branch advancement'
+            }
           }
