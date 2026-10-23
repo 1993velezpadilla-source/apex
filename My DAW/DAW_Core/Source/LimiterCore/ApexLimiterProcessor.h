@@ -123,7 +123,13 @@ public:
         const int osIndex=juce::jlimit(0,5,static_cast<int>(
             limiterParameters_[AudioOversampling]->units()));
         const int factor=1<<osIndex;
-        oversampler_.prepare(factor,128);
+        // Core adds 36 high-rate guard samples and the 63-tap
+        // polyphase roundtrip contributes 61*(factor-1) high frames.
+        // An additional EXACT 25 high-rate samples yields
+        // [ceil(20ms*rate*factor) + 36 + 61*(factor-1) + 25]
+        // / factor == 20ms*rate + 61 at 44.1/48/96 kHz.
+        // No fractional host-rate resampling or wet/dry phase compromise.
+        oversampler_.prepare(factor,128,factor>1?25:0);
         core_.prepare(rate*factor);
         activeOversampling_.store(factor,std::memory_order_release);
         lufsLeft_.prepare(rate);
@@ -134,8 +140,10 @@ public:
         oversampler_.reset();
         resetHostDither();
         // PDC is fixed for each prepare() and never changed on audio thread.
-        // FIR group delay may be fractional in base frames; rounding to
-        // the nearest host sample is experimental and needs calibration.
+        // The extra 25 high-rate frames align the WET signal to a whole
+        // host-frame delay at standard sample rates; the independent dry
+        // delay lane now has the same integer target.
+        // Still requires cross-device low-latency and TP certification.
         const auto nativeFrames=static_cast<double>(core_.latencySamples())/factor
                                +oversampler_.nominalFilterDelayFrames();
         setLatencySamples(juce::roundToInt(nativeFrames));
