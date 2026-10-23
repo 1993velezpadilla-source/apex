@@ -71,6 +71,7 @@ public:
         testApexQ4CleanRoomProductionEditor();
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
+        testTouchModeGroupLinkingAndOuterDynamicRing();
         testExpandedDynamicPanelAndHostAutomation();
         testRealAudioDynamicMeterAndDirectRangeRing();
         testAltWheelDynamicRangeAndReverseGainTrade();
@@ -94,6 +95,121 @@ public:
     }
 
 private:
+    void testTouchModeGroupLinkingAndOuterDynamicRing()
+    {
+        beginTest ("PASS 8 touch-first group: tap link/unlink, swipe drag,"
+                   " accidental insertion guard and outer 23px ring");
+        // Synthetic events reach the real production JUCE callbacks. Actual
+        // touchscreen hardware acceptance is a SEPARATE release gate.
+        for (const auto viewport : { juce::Point<int> { 320, 568 },
+                                     juce::Point<int> { 480, 800 },
+                                     juce::Point<int> { 1280, 720 } })
+        {
+            auto processor = std::make_unique<Processor>();
+            processor->prepareToPlay (48000.0, 128);
+            enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+            enableBell (*processor, 1, 2100.0f, -3.0f, 2.0f);
+            auto editor = std::make_unique<ApexQ4Editor> (*processor);
+            editor->setSize (viewport.x, viewport.y);
+            editor->selectBandForTesting (0);
+            editor->setTouchMultiSelectForTesting (true);
+            expect (editor->touchMultiSelectForTesting(),
+                    "MORE touch-link mode can activate at each viewport");
+            const auto tap = [&] (juce::Point<float> pt)
+            {
+                editor->injectGraphPointerForTesting (pt, 0);
+                editor->injectGraphPointerForTesting (pt, 2);
+            };
+
+            const auto one = editor->nodeHitAreaForTesting (1)
+                .getCentre().toFloat();
+            tap (one);
+            expectEquals (editor->selectedBandCountForTesting(), 2,
+                "tap links the second band without Ctrl/Cmd on touchscreen");
+            expect (editor->isBandSelectedForTesting (0)
+                    && editor->isBandSelectedForTesting (1));
+            const int before = editor->activeBandsForTesting();
+            tap ({ 22.0f, static_cast<float> (
+                editor->graphBoundsForTesting().getY() + 85) });
+            expectEquals (editor->activeBandsForTesting(), before,
+                "blank graph touch in LINK mode must not create filter");
+            expectEquals (editor->selectedBandCountForTesting(), 2,
+                "blank graph touch must not unlink already selected bands");
+
+            const auto zero = editor->nodeHitAreaForTesting (0)
+                .getCentre().toFloat();
+            editor->injectGraphPointerForTesting (zero, 0);
+            editor->injectGraphPointerForTesting (
+                { zero.x + 19.0f, zero.y - 12.0f }, 1);
+            editor->injectGraphPointerForTesting (
+                { zero.x + 19.0f, zero.y - 12.0f }, 2);
+            auto* f0 = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency));
+            auto* f1 = processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Frequency));
+            auto* g0 = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain));
+            auto* g1 = processor->getParametricEQParameter (
+                parameterIndex (1, BandParameterOffset::Gain));
+            expect (f0->getUnitsValue() > 930.0f
+                    && f1->getUnitsValue() > 2100.0f,
+                "swiping a linked node edits both real hosted frequencies");
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()) / 930.0,
+                static_cast<double> (f1->getUnitsValue()) / 2100.0, 0.03,
+                "linked touch move preserves logarithmic frequency intervals");
+            expectWithinAbsoluteError (
+                static_cast<double> (g0->getUnitsValue() - 6.0f),
+                static_cast<double> (g1->getUnitsValue() + 3.0f), 0.1,
+                "linked touch move preserves dB offsets");
+            expect (! processor->isAuditionHoldingForTesting(),
+                "touch group swipe never accidentally starts SOLO");
+            editor->undoForTesting();
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()), 930.0, 3.0,
+                "one undo restores primary touch drag");
+            expectWithinAbsoluteError (
+                static_cast<double> (f1->getUnitsValue()), 2100.0, 5.0,
+                "one undo restores all linked bands");
+            tap (editor->nodeHitAreaForTesting (1).getCentre().toFloat());
+            expectEquals (editor->selectedBandCountForTesting(), 1,
+                "second tap unlinks a band but leaves primary selected");
+            editor->setTouchMultiSelectForTesting (false);
+            expect (! editor->touchMultiSelectForTesting());
+            expectEquals (editor->selectedBandCountForTesting(), 1);
+
+            setUnits (*processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Enable), 1.0f);
+            setUnits (*processor, dynamicParameterIndex (
+                0, DynamicBandOffset::Range), 4.0f);
+            editor->selectBandForTesting (0);
+            const auto ringCentre = editor->nodeHitAreaForTesting (0)
+                .getCentre().toFloat();
+            const auto outer = ringCentre + juce::Point<float> { 23.0f, 0.0f };
+            const float oldFrequency = f0->getUnitsValue();
+            const float oldGain = g0->getUnitsValue();
+            auto* range = processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range));
+            editor->injectGraphPointerForTesting (outer, 0);
+            editor->injectGraphPointerForTesting (
+                outer + juce::Point<float> { 0.0f, -29.0f }, 1);
+            editor->injectGraphPointerForTesting (
+                outer + juce::Point<float> { 0.0f, -29.0f }, 2);
+            expect (range->getUnitsValue() > 7.0f,
+                "outer ring 23px radius remains editable, not a dead zone");
+            expectWithinAbsoluteError (
+                static_cast<double> (f0->getUnitsValue()),
+                static_cast<double> (oldFrequency), 0.1,
+                "ring swipe never moves static EQ frequency");
+            expectWithinAbsoluteError (
+                static_cast<double> (g0->getUnitsValue()),
+                static_cast<double> (oldGain), 0.01,
+                "ring swipe never changes static band gain");
+            expect (! processor->isAuditionHoldingForTesting(),
+                "outer ring must not trigger vocal mute/SOLO");
+        }
+    }
+
     void testAltWheelDynamicRangeAndReverseGainTrade()
     {
         beginTest ("manual: Alt-wheel dynamics, Alt+Ctrl reverse gain,"
