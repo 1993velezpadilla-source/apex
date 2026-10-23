@@ -1216,6 +1216,7 @@ public:
     void undoForTesting() { historyStep (-1); }
     void redoForTesting() { historyStep (1); }
     void createBandForTesting (juce::Point<float> pt) { createBand (pt); }
+    void resetAllBandsForTesting() { resetToFlat(); }
     void refreshForTesting() { curveDirty_ = true; sync(); repaint(); }
 
 private:
@@ -1512,6 +1513,28 @@ private:
             dynamicExpanded_ = false;
         setDynamicControlsVisible (dynamicExpanded_);
         sync(); resized(); repaint();
+    }
+    void resetToFlat()
+    {
+        // Preset reset previously skipped the editor's undo stack.
+        // Treat it as ONE host-automated command across all active bands.
+        if (auditionHolding_)
+        {
+            processor_.endAudition (auditionToken_);
+            auditionHolding_ = false;
+        }
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            auto* enabled = param (parameterIndex (
+                band, BandParameterOffset::Enabled));
+            if (! enabled->getBool()) continue;
+            enabled->beginChangeGesture();
+            enabled->setValueNotifyingHost (0.0f);
+            enabled->endChangeGesture();
+        }
+        select (-1);
+        commitHistory();
+        curveDirty_ = true;
     }
     void deleteSelectedBands()
     {
@@ -2147,6 +2170,7 @@ private:
             {
                 e->setUnits (parameterIndex (e->selected_,
                     BandParameterOffset::Shape), static_cast<float> (id - 1));
+                e->commitHistory();
                 e->curveDirty_ = true; e->sync(); e->repaint();
             }
         });
@@ -2167,6 +2191,7 @@ private:
                 e->setUnits (parameterIndex (e->selected_,
                     BandParameterOffset::Slope), static_cast<float> (
                         slopes[id - 1]));
+                e->commitHistory();
                 e->curveDirty_ = true; e->sync(); e->repaint();
             }
         });
@@ -2186,6 +2211,7 @@ private:
             {
                 e->setUnits (placementParameterIndex (e->selected_),
                               static_cast<float> (id - 1));
+                e->commitHistory();
                 e->curveDirty_ = true; e->sync(); e->repaint();
             }
         });
@@ -2232,12 +2258,14 @@ private:
                         BandParameterOffset::Gain), 0.0f);
                     e->setUnits (parameterIndex (band,
                         BandParameterOffset::Q), 1.0f);
+                    e->commitHistory();
                 }
                 else if (id == 5)
                 {
                     e->setUnits (parameterIndex (band,
                         BandParameterOffset::Enabled), 0.0f);
                     e->select (-1);
+                    e->commitHistory();
                 }
                 else if (id == 9)
                     e->setDynamicExpanded (true);
@@ -2279,6 +2307,7 @@ private:
                     e->setUnits (parameterIndex (band,
                         BandParameterOffset::Enabled), 0.0f);
                     e->select (-1);
+                    e->commitHistory();
                 }
                 if (band >= 0 && id == 3)
                     e->toggleParameter (dynamicParameterIndex (
@@ -2355,12 +2384,7 @@ private:
                 if (id == 1) e->copySnapshot();
                 if (id == 2) e->switchCompare();
                 if (id == 3)
-                {
-                    for (int b = 0; b < kMaxBands; ++b)
-                        e->setUnits (parameterIndex (b,
-                            BandParameterOffset::Enabled), 0.0f);
-                    e->select (-1);
-                }
+                    e->resetToFlat();
                 e->curveDirty_ = true; e->repaint();
             }
         });
