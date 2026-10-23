@@ -481,6 +481,32 @@ public:
         capture(1060,640,"01_APEX_Bubblegum_Limiter_REAL_1060x640.png");
         capture(820,520,"02_APEX_Bubblegum_Limiter_REAL_820x520.png");
         capture(1440,800,"03_APEX_Bubblegum_Limiter_REAL_1440x800.png");
+        // This fourth real JUCE capture uses the *actual* live 32x DSP,
+        // not a mockup or detector-only fake selector. Reprepare on the
+        // test/message thread, then stream audio and read atomics.
+        beginTest("Capture actual native 32x oversampling state and PDC");
+        processor.getLimiterParameter(APEX::Limiter::AudioOversampling)
+                 .setValueNotifyingHost(1.0f);
+        expect(processor.audioOversamplingChangePending(),
+               "OS parameter change is staged before engine restart");
+        processor.prepareToPlay(48000.0,128);
+        expectEquals(processor.activeAudioOversampling(),32,
+                     "32x audio path is running in actual JUCE editor");
+        for(int iteration=0;iteration<120;++iteration)
+        {
+            for(int i=0;i<block.getNumSamples();++i)
+            {
+                const double t=(iteration*128+i)/48000.0;
+                const float wave=static_cast<float>(
+                    0.45*std::sin(2.0*juce::MathConstants<double>::pi*880.0*t)
+                    +0.15*std::sin(2.0*juce::MathConstants<double>::pi*1760.0*t));
+                block.setSample(0,i,wave);
+                block.setSample(1,i,wave*0.73f);
+            }
+            processor.processBlock(block,midi);
+        }
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(75);
+        capture(1060,640,"04_APEX_Bubblegum_Limiter_REAL_32x_1060x640.png");
         processor.releaseResources();
     }
 };
