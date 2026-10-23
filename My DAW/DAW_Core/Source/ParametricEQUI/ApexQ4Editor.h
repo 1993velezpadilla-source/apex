@@ -1177,7 +1177,10 @@ private:
         float score = std::numeric_limits<float>::infinity();
         for (const auto& candidate : candidates)
         {
-            float cost = 0.0f;
+            // An explicitly opened dynamics card must not cover the main
+            // band's knobs and SOLO button. Prefer the opposite quadrant
+            // before considering any band-node collision penalties.
+            float cost = candidate.intersects (panel_) ? 40000.0f : 0.0f;
             for (int band = 0; band < kMaxBands; ++band)
             {
                 if (! param (parameterIndex (band,
