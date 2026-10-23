@@ -2202,10 +2202,10 @@ private:
         menu.addSeparator();
         menu.addItem (9, "Open dynamic EQ controls...");
         menu.addSectionHeader ("KEYBOARD — WHEN CANVAS HAS FOCUS");
-        menu.addItem (-21, "Arrow keys: freq (semi) / gain (dB)", false);
-        menu.addItem (-22, "Shift+arrows: fine adjustments", false);
-        menu.addItem (-23, "Delete: remove selected / linked bands", false);
-        menu.addItem (-24, "Ctrl+Z / Ctrl+Y: undo / redo", false);
+        menu.addItem (31, "Arrow keys: freq (semi) / gain (dB)", false);
+        menu.addItem (32, "Shift+arrows: fine adjustments", false);
+        menu.addItem (33, "Delete: remove selected / linked bands", false);
+        menu.addItem (34, "Ctrl+Z / Ctrl+Y: undo / redo", false);
         menu.addSeparator();
         menu.addItem (10, "Touch multi-select (tap to link bands)", true,
                       touchMultiSelectMode_);
