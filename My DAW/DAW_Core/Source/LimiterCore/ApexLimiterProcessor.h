@@ -159,7 +159,9 @@ public:
                 buffer.getNumChannels()>1?buffer.getWritePointer(1,base):nullptr,chunk);
             const float input=static_cast<float>(core_.inputPeak());
             const float output=static_cast<float>(core_.outputPeak());
-            const float reduction=static_cast<float>(core_.reductionDb());
+            // Max over every processed audio sample, never just the last
+            // instantaneous value of an arbitrarily sized host sub-block.
+            const float reduction=static_cast<float>(core_.blockReductionMaxDb());
             blockInput=juce::jmax(blockInput,input);
             blockOutput=juce::jmax(blockOutput,output);
             blockReduction=juce::jmax(blockReduction,reduction);
