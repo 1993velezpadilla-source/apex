@@ -72,6 +72,7 @@ public:
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testExpandedDynamicPanelAndHostAutomation();
+        testRealAudioDynamicMeterAndDirectRangeRing();
         testAltWheelDynamicRangeAndReverseGainTrade();
         testResponsiveLayoutMatrix();
         testAdversarialCriticBandSwitches();
@@ -145,6 +146,94 @@ private:
             "grouped reverse trade also changes second band's gain");
         expect (! processor->isAuditionHoldingForTesting(),
             "mousewheel dynamic gestures must not mute the vocal");
+    }
+
+    void testRealAudioDynamicMeterAndDirectRangeRing()
+    {
+        beginTest ("real DSP dynamic meter: coherent audio snapshot and"
+                   " touch range ring without frequency/gain corruption");
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 6.0f, 2.0f);
+        setUnits (*processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Enable), 1.0f);
+        setUnits (*processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Threshold), -48.0f);
+        setUnits (*processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Range), 12.0f);
+        setUnits (*processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Attack), 0.001f);
+        setUnits (*processor, dynamicParameterIndex (
+            0, DynamicBandOffset::Release), 0.040f);
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        juce::AudioBuffer<float> chunk (2, 128);
+        juce::MidiBuffer midi;
+        double phase = 0.0;
+        constexpr double increment =
+            juce::MathConstants<double>::twoPi * 930.0 / 48000.0;
+        // Stream genuine PCM through processBlock, then the lock-free
+        // ResponseCore queue; never inject arbitrary gain readouts.
+        for (int block = 0; block < 200; ++block)
+        {
+            for (int sample = 0; sample < 128; ++sample)
+            {
+                const auto v = static_cast<float> (
+                    0.35 * std::sin (phase));
+                phase += increment;
+                if (phase >= juce::MathConstants<double>::twoPi)
+                    phase -= juce::MathConstants<double>::twoPi;
+                chunk.setSample (0, sample, v);
+                chunk.setSample (1, sample, v);
+            }
+            processor->processBlock (chunk, midi);
+            if ((block % 6) == 0)
+                editor->refreshMeasuredDynamicsForTesting();
+        }
+        editor->refreshMeasuredDynamicsForTesting();
+        expect (editor->hasMeasuredDynamicFrameForTesting (0),
+            "visible dynamic meter must originate from actual audio thread");
+        const auto measured = editor->measuredDynamicDbForTesting (0);
+        expect (std::isfinite (measured));
+        expect (measured < -0.15f,
+            "positive cut range under loud audio must report real reduction");
+        expect (std::abs (measured) <= 24.01f,
+            "GUI meter cannot exceed hosted permitted range");
+        expect (! editor->hasMeasuredDynamicFrameForTesting (1),
+            "inactive bands may not display invented audio gain");
+
+        auto* range = processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Range));
+        const float oldRange = range->getUnitsValue();
+        const auto* hz = processor->getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Frequency));
+        const auto* gain = processor->getParametricEQParameter (
+            parameterIndex (0, BandParameterOffset::Gain));
+        const float oldHz = hz->getUnitsValue();
+        const float oldGain = gain->getUnitsValue();
+        const auto origin = editor->nodeHitAreaForTesting (0)
+            .getCentre().toFloat() + juce::Point<float> { 18.0f, 0.0f };
+        editor->injectGraphPointerForTesting (origin, 0);
+        editor->injectGraphPointerForTesting (
+            origin + juce::Point<float> { 0.0f, -28.0f }, 1);
+        editor->injectGraphPointerForTesting (
+            origin + juce::Point<float> { 0.0f, -28.0f }, 2);
+        expect (range->getUnitsValue() > oldRange + 3.0f,
+            "dragging outer dynamic ring must increase REAL range parameter");
+        expectWithinAbsoluteError (static_cast<double> (hz->getUnitsValue()),
+                                   static_cast<double> (oldHz), 0.1,
+            "ring gesture must never drag the EQ frequency node");
+        expectWithinAbsoluteError (static_cast<double> (gain->getUnitsValue()),
+                                   static_cast<double> (oldGain), 0.01,
+            "ring gesture must never change static band gain");
+        expect (! processor->isAuditionHoldingForTesting(),
+            "dynamic ring editing cannot trigger SOLO or mute the vocal");
+        editor->undoForTesting();
+        expectWithinAbsoluteError (
+            static_cast<double> (range->getUnitsValue()),
+            static_cast<double> (oldRange), 0.2,
+            "range ring edit is one reversible host parameter transaction");
     }
 
     void testExpandedDynamicPanelAndHostAutomation()
