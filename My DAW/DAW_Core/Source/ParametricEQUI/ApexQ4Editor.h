@@ -1427,6 +1427,10 @@ private:
     {
         const bool visible = dynamicExpanded_ && selected_ >= 0;
         setDynamicControlsVisible (visible);
+        // Must run on both OPEN and CLOSE. Otherwise the mobile FREQ/GAIN/Q
+        // controls remained hidden after closing the Dynamics overlay.
+        const bool compactDynamics = visible && getWidth() < 460;
+        setSelectedVisible (selected_ >= 0 && ! compactDynamics);
         if (! visible) return;
         const int w = getWidth();
         const int panelWidth = std::min (w - 18, w < 460 ? 302 : 346);
@@ -1446,8 +1450,6 @@ private:
         // In portrait below 460px both cards cannot fit touch-safely at once.
         // The explicitly opened dynamics editor temporarily replaces the
         // selected-band HUD; closing it restores the ordinary EQ knobs.
-        const bool compactDynamics = w < 460;
-        setSelectedVisible (! compactDynamics);
         const auto constrainX = [=] (int x) {
             return juce::jlimit (minX, maxX, x);
         };
