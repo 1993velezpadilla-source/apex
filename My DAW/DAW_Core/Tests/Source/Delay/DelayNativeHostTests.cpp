@@ -391,6 +391,43 @@ public:
         expect(!recalled.audioOversamplingChangePending(),
                "restored high-rate mode is no longer pending");
 
+        beginTest("Host PDC reports the actual sample delay of OS bypass impulses");
+        // Run an impulse through every filtered high-rate path, with the
+        // limiter's dry bypass turned on BEFORE preparing the DSP.
+        // A wrong PDC offset causes misaligned mastering and audible phasing.
+        for(const int quality:{0,1,2,3,4,5})
+        {
+            APEX::Limiter::Processor impulseHost;
+            impulseHost.getLimiterParameter(APEX::Limiter::AudioOversampling)
+                       .setValueNotifyingHost(static_cast<float>(quality)/5.0f);
+            impulseHost.getLimiterParameter(APEX::Limiter::Bypass)
+                       .setValueNotifyingHost(1.0f);
+            impulseHost.prepareToPlay(48000.0,113);
+            constexpr int frames=4096;
+            int position=0;
+            float peak=0.0f;
+            for(int offset=0;offset<frames;offset+=113)
+            {
+                const int n=juce::jmin(113,frames-offset);
+                juce::AudioBuffer<float> pulse(2,n);
+                pulse.clear();
+                if(offset==0)
+                {
+                    pulse.setSample(0,0,0.5f);
+                    pulse.setSample(1,0,0.3f);
+                }
+                impulseHost.processBlock(pulse,midi);
+                for(int i=0;i<n;++i)
+                {
+                    const float sample=std::abs(pulse.getSample(0,i));
+                    if(sample>peak){peak=sample;position=offset+i;}
+                }
+            }
+            expect(peak>0.10f,"dry impulse exits audio converter");
+            expect(std::abs(position-impulseHost.getLatencySamples())<=3,
+                   "host PDC matches true DSP+FIR impulse delay within three samples");
+        }
+
         beginTest("Capture real hosted limiter editor including live JUCE controls");
         APEX::Limiter::Processor processor;
         processor.prepareToPlay(48000.0, 128);
