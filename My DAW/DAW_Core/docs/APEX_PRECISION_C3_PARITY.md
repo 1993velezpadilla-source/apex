@@ -28,7 +28,7 @@ Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/he
 | Sidechain EQ | Up to six bands, sophisticated shapes | 1 internal HP + 1 LP | 6-band EQ and band editor |
 | Character | Off/Tube/Diode/Bright; Drive and pre/post | Original mode/drive with functional PRE and POST DSP routing; not analog-calibrated | Harmonics measurements and oversampling |
 | Lookahead/PDC | Configurable 0–20 ms | Implemented six real steps (0/1/2/5/10/20 ms): preallocated 2-channel delayed audio, undelayed detector, both bypass and dry aligned, exact PDC on prepare and message-thread timer updates. No callback allocation/host notifications. | Fresh Windows real-host PDC, zero-mode tracking, transient and block invariance tests; changes while playing may briefly desynchronise host PDC |
-| Oversampling | Up to 32× | Not implemented | Anti-alias engine + CPU/load limits |
+| Oversampling | Up to 32× | **New independent 2x bandlimited FIR saturator lab** (97 taps, Kaiser β8, 48-sample host-rate delay) + spectral alias/unit/ASAN tests; NOT yet in the hosted compressor or shown as an active GUI control | Require spectral benchmark GREEN, integrate 2x wet/dry/bypass PDC & actual audio routing, CPU budget, 4×/8×/16×/32× and higher sample rate validation |
 | Input/output and GR metering | Accurate peak/loudness + dynamic graph | Lock-free histories of actual per-block input/output/GR values; reference-hierarchy GUI with scrolling meter graph | Meter ballistics / true-peak & loudness still missing |
 | Surround | Up to immersive 9.1.6 | Mono/stereo only | Multi-bus and channel policies |
 | Presets / A-B / undo | Browser, tags and editing | Four real parameter presets, A/B snapshots, Copy and single-level Undo/Redo; no full preset browser | GUI interaction, undo depth and migration tests |
@@ -127,6 +127,36 @@ These verdicts are **fail-until-demonstrated**; passing C++ compilation alone is
   oversampling control may be drawn before its actual antialiasing DSP and
   compensated wet/dry latency are implemented. Reference-sonic A/B blind
   tests and real visual overlay parity are outstanding.
+
+## Adversarial critic V9 — independent 2x anti-aliasing research
+
+- Added `ApexPrecisionCharacterOversamplingCore.h`: an actual 2×
+  interpolation -> nonlinear character -> FIR decimation primitive,
+  implemented with 97-tap normalized Kaiser-windowed sinc filters. The
+  interpolation and reconstruction filters are distinct and stateful.
+  Anti-alias cutoff: 0.22 cycles per **2×-rate** sample; 48 samples of
+  exact *base sample rate* linear-phase group delay. A double-precision
+  saturation stage is evaluated twice per incoming sample. Processing
+  is streaming C++17, no allocations, no locks, no JUCE calls in `process()`.
+- The independent standalone test checks: DC unity, stationary nonlinear
+  DC mapping, impulse delay/group peak, >30 dB reduction of the folded
+  18kHz harmonic from a 10kHz test tone at 48kHz (versus naive raw-rate
+  tanh saturation), <0.5 dB fundamental amplitude deviation, channel
+  isolation, non-finite inputs and state continuity.
+- GitHub's portable Precision C workflow builds/runs it with
+  `-Wall -Wextra -Wpedantic -Werror`, ASAN and UBSAN, alongside the
+  existing compressor regression.
+- **STRICT RED RELEASE GATE:** This isolated FIR prototype is **not yet
+  connected** to the production `Core::colour()` audio path or exposed in
+  the plug-in GUI. We will not claim Precision C has active oversampling
+  until live hosted path integrates lookahead+oversampling delay coherently,
+  ring buffers/parallel dry align, host PDC and track/sends pass at 48k/128,
+  no phase/latency glitches during quality switches, and CPU is measured.
+  Saturation voicing remains independently designed, *not* FabFilter code
+  or a certified Pro-C 3 sonically equivalent curve.
+- The existing `MasterOversamplingCore` averages high-rate samples and
+  is not suitable as proof of nonlinear anti-alias rejection. Its reuse
+  without spectral validation is specifically rejected.
 
 ## Engineering gates before merge to main
 
