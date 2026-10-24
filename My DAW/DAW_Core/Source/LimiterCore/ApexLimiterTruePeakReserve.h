@@ -7,6 +7,17 @@
 // algorithm; the numbers are provisional until broader ISP test coverage.
 namespace APEX { namespace Limiter {
 
+// Highest-precision *native 1x* FIR detector remains experimental. In
+// adversarial 44.1/48/96kHz test material, the unreserved 8x detector
+// permitted +0.03211dBTP after the sample ceiling. A 0.06dB ceiling
+// allowance is a conservative initial synthetic-test guard, NOT a general
+// intersample-peak or BS.1770 guarantee. Only enable for quality=8x (3):
+// lower FIR detector qualities are not yet calibrated.
+inline double native1xTruePeakReserveDb(int detectorQuality,bool enabled) noexcept
+{
+    return enabled && detectorQuality==3 ? 0.06 : 0.0;
+}
+
 inline double audioTruePeakReserveDb(int factor,bool enabled) noexcept
 {
     if(!enabled || factor<=1)return 0.0;
