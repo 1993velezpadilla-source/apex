@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <vector>
 
 using APEX::Limiter::AudioRateConverter;
@@ -99,6 +100,67 @@ double bench(int factor,const std::vector<float>& left,
     }
     return seconds;
 }
+
+// Adversarial single realtime thread: multiple *full* native plugin DSP
+// instances compete for the very SAME 128-frame audio deadline.
+// All state and buffers are allocated/prepared before entering the timer.
+void benchMulti(int factor,int instances,const std::vector<float>& left,
+                const std::vector<float>& right)
+{
+    struct Instance
+    {
+        AudioRateConverter conversion;
+        Core dsp;
+        std::vector<float> left,right;
+        Instance(int factor,const std::vector<float>& l,
+                 const std::vector<float>& r):left(l),right(r)
+        {
+            conversion.prepare(factor,hostBlock,factor>1?57:0);
+            dsp.prepare(sampleRate*factor);
+            Settings p;
+            p.truePeak=false;
+            p.detectorQuality=0;
+            p.gainDb=6;
+            p.ceilingDb=-1;
+            p.attackMs=0.25;
+            p.releaseMs=120;
+            p.lookaheadMs=5;
+            dsp.setSettings(p);
+        }
+    };
+    std::vector<std::unique_ptr<Instance>> paths;
+    paths.reserve(static_cast<size_t>(instances));
+    for(int i=0;i<instances;++i)
+        paths.emplace_back(std::make_unique<Instance>(factor,left,right));
+    std::vector<double> blockMs;
+    blockMs.reserve(static_cast<size_t>((totalFrames+hostBlock-1)/hostBlock));
+    const double deadline=1000.0*hostBlock/sampleRate;
+    int deadlineMisses=0;
+    for(int offset=0;offset<totalFrames;offset+=hostBlock)
+    {
+        const int count=std::min(hostBlock,totalFrames-offset);
+        const auto begin=std::chrono::steady_clock::now();
+        for(auto& path:paths)
+            path->conversion.process(path->left.data()+offset,
+                                     path->right.data()+offset,count,
+                                     &path->dsp,highRateCallback);
+        const auto end=std::chrono::steady_clock::now();
+        const double elapsed=std::chrono::duration<double,std::milli>(
+            end-begin).count();
+        if(elapsed>deadline)++deadlineMisses;
+        blockMs.push_back(elapsed);
+    }
+    std::sort(blockMs.begin(),blockMs.end());
+    const size_t n=blockMs.size();
+    const double p99=blockMs[static_cast<size_t>(
+        std::ceil(0.99*static_cast<double>(n-1)))];
+    const double worst=blockMs.back();
+    for(const auto& path:paths)
+        checksum+=path->left[static_cast<size_t>(totalFrames-113)]
+                 +path->right[static_cast<size_t>(totalFrames-113)];
+    std::printf("APEX_OS_MULTI,%d,%d,%d,%.6f,%.6f,%d,%zu,%.6f\n",
+                factor,instances,hostBlock,p99,worst,deadlineMisses,n,deadline);
+}
 }
 int main()
 {
@@ -113,6 +175,13 @@ int main()
         const double b=bench(factor,left,right,false);
         if(!std::isfinite(a)||!std::isfinite(b)||a<=0.0||b<=0.0)return EXIT_FAILURE;
     }
+    // Multi-instance GAUNTLET deliberately does NOT hard-fail: this is
+    // the evidence that should determine default 32x behavior and safety
+    // warnings on the user's actual Windows/Lenovo hardware.
+    std::puts("APEX_OS_MULTI columns: factor,instances,block,p99_ms,worst_ms,deadline_misses,blocks,deadline_ms");
+    for(const int factor:{8,16,32})
+        for(const int instances:{2,4})
+            benchMulti(factor,instances,left,right);
     // Volatile checksum makes the actual completed signal observable.
     std::printf("APEX_OS_CHECKSUM,%.6f\n",checksum);
 }
