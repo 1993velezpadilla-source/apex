@@ -126,7 +126,7 @@ public:
             setupSlider(utilities_[static_cast<std::size_t>(i)],
                         kUtilityParams[static_cast<std::size_t>(i)],false,true);
 
-        for(auto* combo : {&style_,&character_,&preset_,&triggerSource_,&lookahead_})
+        for(auto* combo : {&style_,&character_,&preset_,&triggerSource_,&lookahead_,&oversampling_})
         {
             combo->setColour(juce::ComboBox::textColourId,juce::Colour(0xffebdfc3));
             combo->setColour(juce::ComboBox::backgroundColourId,juce::Colour(0xff302c30));
@@ -138,6 +138,7 @@ public:
         preset_.setName("C3 PRESET");
         triggerSource_.setName("C3 TRIGGER SOURCE");
         lookahead_.setName("PRECISION LOOKAHEAD");
+        oversampling_.setName("PRECISION OVERSAMPLING");
         style_.setTooltip("Compression topology and voicing");
         for(int i=0;i<14;++i)
             style_.addItem(kStyleNames[static_cast<std::size_t>(i)],i+1);
@@ -166,6 +167,14 @@ public:
             setDiscrete(LookaheadMode,lookahead_.getSelectedId()-1);
         };
         addAndMakeVisible(lookahead_);
+
+        oversampling_.addItem("Off",1);
+        oversampling_.addItem("2x",2);
+        oversampling_.setTooltip("True 2x bandlimited character processing; adds 48 host samples of latency even with Lookahead off.");
+        oversampling_.onChange=[this] {
+            setDiscrete(Oversampling2x,oversampling_.getSelectedId()-1);
+        };
+        addAndMakeVisible(oversampling_);
 
         charPrePost_.setName("C3 CHARACTER ROUTING");
         charPrePost_.setTooltip("Route original character saturation before or after compression");
@@ -349,6 +358,7 @@ public:
         redo_.setBounds(rect(409,9,45,29));
         preset_.setBounds(rect(639,9,253,29));
         lookahead_.setBounds(rect(541,707,111,27));
+        oversampling_.setBounds(rect(344,707,96,27));
     }
 
     void mouseDown(const juce::MouseEvent& event) override
@@ -876,7 +886,7 @@ private:
         g.setFont(juce::Font(juce::FontOptions(12.0f)));
         g.setColour(juce::Colour(0xffa59aa0));
         g.drawText("HOST AUTOMATION",16,710,205,21,juce::Justification::left);
-        g.drawText("Oversampling: Off (pending)",242,710,180,21,juce::Justification::left);
+        g.drawText("OVERSAMPLING",232,710,111,21,juce::Justification::left);
         g.drawText("LOOKAHEAD",453,710,87,21,juce::Justification::left);
         g.drawText("PRECISION  /  APEX NATIVE",654,710,236,21,juce::Justification::right);
     }
@@ -980,6 +990,9 @@ private:
         lookahead_.setSelectedId(1+(int)std::lround(
             processor_.getC3Parameter(LookaheadMode).getUnits()),
             juce::dontSendNotification);
+        oversampling_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(Oversampling2x).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
         updateCharacterRouting();
     }
@@ -1010,6 +1023,9 @@ private:
         lookahead_.setSelectedId(1+(int)std::lround(
             processor_.getC3Parameter(LookaheadMode).getUnits()),
             juce::dontSendNotification);
+        oversampling_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(Oversampling2x).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
         updateCharacterRouting();
         repaint();
@@ -1022,7 +1038,7 @@ private:
     std::array<juce::Slider,5> utilities_{};
     std::array<juce::TextButton,4> toggles_{};
     juce::TextButton scToggle_,aB_,copy_,undo_,redo_,charPrePost_;
-    juce::ComboBox style_,character_,preset_,triggerSource_,lookahead_;
+    juce::ComboBox style_,character_,preset_,triggerSource_,lookahead_,oversampling_;
     std::array<Snapshot,2> snapshots_{};
     Snapshot undoState_{},redoState_{};
     bool hasUndo_=false,hasRedo_=false;
