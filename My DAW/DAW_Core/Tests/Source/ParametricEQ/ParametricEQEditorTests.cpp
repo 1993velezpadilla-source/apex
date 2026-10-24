@@ -72,6 +72,7 @@ public:
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testTouchModeGroupLinkingAndOuterDynamicRing();
+        testPopoverFollowsSelectedNodeWithoutOccludingSpectrum();
         testKeyboardGroupedEditingAndDynamicTooltip();
         testExpandedDynamicPanelAndHostAutomation();
         testRealAudioDynamicMeterAndDirectRangeRing();
@@ -96,6 +97,65 @@ public:
     }
 
 private:
+    void testPopoverFollowsSelectedNodeWithoutOccludingSpectrum()
+    {
+        beginTest ("PASS 11 true contextual control placement: near the"
+                   " selected node, never bottom-docked or occluding bands");
+        for (const auto size : { juce::Point<int> { 480, 800 },
+                                 juce::Point<int> { 640, 400 },
+                                 juce::Point<int> { 1280, 720 },
+                                 juce::Point<int> { 1920, 1080 } })
+        {
+            auto processor = std::make_unique<Processor>();
+            processor->prepareToPlay (48000.0, 128);
+            enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+            enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+            auto editor = std::make_unique<ApexQ4Editor> (*processor);
+            editor->setSize (size.x, size.y);
+            for (int selected = 0; selected < 2; ++selected)
+            {
+                editor->selectBandForTesting (selected);
+                const auto node = editor->nodeHitAreaForTesting (selected)
+                    .getCentre();
+                const auto panel = editor->panelBoundsForTesting();
+                expect (editor->graphBoundsForTesting().contains (panel),
+                    "contextual panel stays inside graph on every viewport");
+                const int verticalDistance = std::abs (
+                    panel.getCentreY() - node.y);
+                expect (verticalDistance <= 210,
+                    "FREQ/GAIN/Q controls belong near the selected node,"
+                    " not hundreds of pixels away at the canvas bottom");
+                for (int band = 0; band < 2; ++band)
+                    expect (! panel.intersects (
+                        editor->nodeHitAreaForTesting (band)),
+                        "near-node HUD must not hide either filter handle");
+                expect (! panel.intersects (
+                    editor->selectedTagBoundsForTesting()),
+                    "near-node HUD must not hide selected value tooltip");
+            }
+        }
+        // When expanded Dynamics needs space on a medium phone, preserve
+        // visibility of BOTH cards and keep every hit target unobstructed.
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, 8.0f, 2.4f);
+        enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
+        ApexQ4Editor editor (*processor);
+        editor.setSize (480, 800);
+        editor.selectBandForTesting (0);
+        editor.expandDynamicForTesting (true);
+        expect (editor.primaryHudVisibleForTesting());
+        expect (! editor.panelBoundsForTesting().intersects (
+            editor.dynamicPanelBoundsForTesting()),
+            "opened Dynamics and contextual band card cannot overlap");
+        editor.expandDynamicForTesting (false);
+        const auto selectedNode = editor.nodeHitAreaForTesting (0)
+            .getCentre();
+        expect (std::abs (editor.panelBoundsForTesting().getCentreY()
+                         - selectedNode.y) <= 210,
+            "closing Dynamics restores local, node-following HUD placement");
+    }
+
     void testKeyboardGroupedEditingAndDynamicTooltip()
     {
         beginTest ("PASS 9 real JUCE keyboard: grouped arrow editing,"
