@@ -586,7 +586,7 @@ public:
                     }
                     beginTest("Precision C V15 real hosted Upward action reaches GUI metering");
                     {
-                        auto set=[this,native](int idx,float units)
+                        auto set=[native](int idx,float units)
                         {
                             auto& p=native->getC3Parameter(idx);
                             p.setValue(p.toNormalised(units));
