@@ -126,7 +126,7 @@ public:
             setupSlider(utilities_[static_cast<std::size_t>(i)],
                         kUtilityParams[static_cast<std::size_t>(i)],false,true);
 
-        for(auto* combo : {&style_,&character_,&preset_,&triggerSource_})
+        for(auto* combo : {&style_,&character_,&preset_,&triggerSource_,&lookahead_})
         {
             combo->setColour(juce::ComboBox::textColourId,juce::Colour(0xffebdfc3));
             combo->setColour(juce::ComboBox::backgroundColourId,juce::Colour(0xff302c30));
@@ -137,6 +137,7 @@ public:
         character_.setName("C3 CHARACTER");
         preset_.setName("C3 PRESET");
         triggerSource_.setName("C3 TRIGGER SOURCE");
+        lookahead_.setName("PRECISION LOOKAHEAD");
         style_.setTooltip("Compression topology and voicing");
         for(int i=0;i<14;++i)
             style_.addItem(kStyleNames[static_cast<std::size_t>(i)],i+1);
@@ -154,6 +155,17 @@ public:
             setDiscrete(ExternalSidechain,triggerSource_.getSelectedId()-1);
         };
         addAndMakeVisible(triggerSource_);
+
+        constexpr std::array<const char*,5> aheadChoices {
+            "Off","1 ms","2 ms","5 ms","10 ms"
+        };
+        for(int i=0;i<5;++i)
+            lookahead_.addItem(aheadChoices[static_cast<std::size_t>(i)],i+1);
+        lookahead_.setTooltip("Real feed-forward lookahead. Changes during playback reconfigure host latency.");
+        lookahead_.onChange=[this] {
+            setDiscrete(LookaheadMode,lookahead_.getSelectedId()-1);
+        };
+        addAndMakeVisible(lookahead_);
 
         charPrePost_.setName("C3 CHARACTER ROUTING");
         charPrePost_.setTooltip("Route original character saturation before or after compression");
@@ -336,6 +348,7 @@ public:
         undo_.setBounds(rect(349,9,58,29));
         redo_.setBounds(rect(409,9,45,29));
         preset_.setBounds(rect(639,9,253,29));
+        lookahead_.setBounds(rect(541,707,111,27));
     }
 
     void mouseDown(const juce::MouseEvent& event) override
@@ -864,7 +877,7 @@ private:
         g.setColour(juce::Colour(0xffa59aa0));
         g.drawText("HOST AUTOMATION",16,710,205,21,juce::Justification::left);
         g.drawText("Oversampling: Off (pending)",242,710,180,21,juce::Justification::left);
-        g.drawText("Lookahead: Off (pending)",458,710,183,21,juce::Justification::left);
+        g.drawText("LOOKAHEAD",453,710,87,21,juce::Justification::left);
         g.drawText("PRECISION  /  APEX NATIVE",654,710,236,21,juce::Justification::right);
     }
 
@@ -964,6 +977,9 @@ private:
         triggerSource_.setSelectedId(1+(int)std::lround(
             processor_.getC3Parameter(ExternalSidechain).getUnits()),
             juce::dontSendNotification);
+        lookahead_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(LookaheadMode).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
         updateCharacterRouting();
     }
@@ -991,6 +1007,9 @@ private:
         triggerSource_.setSelectedId(1+(int)std::lround(
             processor_.getC3Parameter(ExternalSidechain).getUnits()),
             juce::dontSendNotification);
+        lookahead_.setSelectedId(1+(int)std::lround(
+            processor_.getC3Parameter(LookaheadMode).getUnits()),
+            juce::dontSendNotification);
         refreshToggleColours();
         updateCharacterRouting();
         repaint();
@@ -1003,7 +1022,7 @@ private:
     std::array<juce::Slider,5> utilities_{};
     std::array<juce::TextButton,4> toggles_{};
     juce::TextButton scToggle_,aB_,copy_,undo_,redo_,charPrePost_;
-    juce::ComboBox style_,character_,preset_,triggerSource_;
+    juce::ComboBox style_,character_,preset_,triggerSource_,lookahead_;
     std::array<Snapshot,2> snapshots_{};
     Snapshot undoState_{},redoState_{};
     bool hasUndo_=false,hasRedo_=false;
