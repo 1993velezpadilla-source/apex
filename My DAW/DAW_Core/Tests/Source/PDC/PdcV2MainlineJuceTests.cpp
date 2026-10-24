@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include "../../../Source/AudioEngineCore/AudioEngine.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
+#include "../../../Source/CompressorCore/ApexPrecisionCompressorProcessor.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -194,7 +195,221 @@ public:
             expect(engine.getGraphPdcPreflightCounters().renderedBlocks>0);
         }
 
+        // V8: the ACTUAL Precision C insert, not a synthetic delay fixture,
+        // must stage the same track+bus PDC that the other hosted plugins use.
+        // This remains a test-only programme renderer; shipping graph PDC
+        // is deliberately separately gated until live-device validation.
+        beginTest("Precision C 0-5-20ms lookahead aligns real Track Send and Bus routes");
+        for(const int frames:{64,128,256})
+        {
+            DAW::TrackManager tracks;
+            auto* voice=tracks.createTrack("Precision C PDC voice");
+            auto* aux=tracks.createTrack("Precision C PDC bus");
+            aux->setRole(DAW::TrackRole::Bus);
+            DAW::RoutingGraph routing;
+            auto* voiceNode=routing.addNode("precision-pdc-voice",
+                                             DAW::RoutingNodeType::Track,voice->getID());
+            auto* auxNode=routing.addNode("precision-pdc-bus",
+                                           DAW::RoutingNodeType::Bus,aux->getID());
+            auto* send=routing.connect(voiceNode->id,auxNode->id,
+                                       DAW::ConnectionType::Send);
+            expect(send!=nullptr);
+            if(send==nullptr)continue;
+            auto chain=std::make_shared<DAW::PluginChainCore>();
+            chain->prepare(48000.0,frames);
+            auto precision=std::make_unique<APEX::PrecisionC3::Processor>();
+            auto* hosted=precision.get();
+            hosted->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.0f);
+            auto& ahead=hosted->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+            ahead.setValue(ahead.toNormalised(3.0f)); // 5ms / 240 samples
+            expectEquals(chain->appendPluginInstanceForTesting(std::move(precision)),0);
+            expectEquals(chain->totalLatencySamples(),240);
+            DAW::AudioEngine engine;
+            engine.setSubsystems(&tracks,nullptr,nullptr,&routing);
+            engine.prepare(48000.0,frames);
+            auto chains=std::make_shared<DAW::AudioEngine::PluginChainSnapshotMap>();
+            (*chains)[aux->getID()]=chain;
+            engine.publishPluginChainsSnapshot(chains);
+            const auto publish=[&]()
+            {
+                auto latencies=std::make_shared<DAW::AudioEngine::ChainLatencyMap>();
+                (*latencies)[voice->getID()]=0;
+                (*latencies)[aux->getID()]=chain->totalLatencySamples();
+                engine.publishChainLatencies(latencies);
+                return latencies;
+            };
+            auto latencyMap=publish();
+            const auto stage=[&]()
+            {
+                auto snap=routing.getSnapshotPublisher().get();
+                return snap && engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    *snap,latencyMap.get(),2,48000.0);
+            };
+            expect(stage());
+            struct Source {std::int64_t pos=0,impulse=333;};
+            Source source;
+            engine.setGraphPdcTrackInputForTests(
+                &source,[](void* ptr,const DAW::TrackID&,
+                           juce::AudioBuffer<float>& output,int n) noexcept
+                {
+                    auto& state=*static_cast<Source*>(ptr);
+                    for(int i=0;i<n;++i)
+                        if(state.pos++==state.impulse)
+                        {
+                            output.setSample(0,i,.3f);
+                            output.setSample(1,i,-.15f);
+                        }
+                });
+            engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+            const auto verify=[&](std::int64_t stop,int expectedDelay)
+            {
+                int found=0;
+                while(source.pos<stop)
+                {
+                    const auto begin=source.pos;
+                    const int n=(int)std::min<std::int64_t>(frames,stop-begin);
+                    juce::AudioBuffer<float> result(2,n);
+                    result.clear();
+                    expect(engine.renderOfflineBlock(result,n,begin),
+                           "real PDC graph should produce offline result");
+                    for(int i=0;i<n;++i)
+                    {
+                        const auto timestamp=begin+i;
+                        const float l=result.getSample(0,i);
+                        const float r=result.getSample(1,i);
+                        if(timestamp==source.impulse+expectedDelay)
+                        {
+                            ++found;
+                            expect(l>.08f && r<-.04f,
+                                   "direct voice and Precision C bus must align");
+                        }
+                        else
+                        {
+                            expectWithinAbsoluteError((double)l,0.0,2.e-5);
+                            expectWithinAbsoluteError((double)r,0.0,2.e-5);
+                        }
+                    }
+                }
+                expectEquals(found,1,"every impulse must have one compensated output");
+            };
+            verify(1200,240);
+
+            // Reprepare on the CONTROL thread; unlike automating inside a
+            // running audio callback, this synchronously publishes PDC.
+            ahead.setValue(ahead.toNormalised(5.0f)); // 20ms / 960 samples
+            chain->prepare(48000.0,frames);
+            expectEquals(hosted->getLatencySamples(),960);
+            expectEquals(chain->totalLatencySamples(),960);
+            latencyMap=publish();
+            auto stale=routing.getSnapshotPublisher().get();
+            juce::AudioBuffer<float> probe(2,1);
+            probe.clear();
+            expect(!engine.renderOnePreparedGraphEdgeForTests(*stale,0,probe),
+                   "host latency change must reject stale PDC routing");
+            expect(stage());
+            source.impulse=1500;
+            verify(2800,960);
+
+            // Live voice monitoring mode must be able to return to 0ms PDC.
+            ahead.setValue(0.0f);
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),0);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=3000;
+            verify(3800,0);
+
+            // V10 real 2x anti-alias stage: check the extra FIR group delay
+            // through the SAME voice->Send->bus->master graph, then compound
+            // with 5ms lookahead. A host that omits 48 samples must fail.
+            auto& os=hosted->getC3Parameter(APEX::PrecisionC3::Oversampling2x);
+            os.setValue(1.0f);
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),48);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=3900;
+            verify(4800,48);
+
+            ahead.setValue(ahead.toNormalised(3.f)); // 5ms + 48 = 288
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),288);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=5000;
+            verify(6100,288);
+        }
+
 #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        beginTest("Real Precision C slot and chain parallel dry/wet align at 5ms and 20ms");
+        for(const double sampleRate:{48000.0,96000.0})
+        {
+            DAW::PluginChainCore chain;
+            chain.prepare(sampleRate,128);
+            auto precision=std::make_unique<APEX::PrecisionC3::Processor>();
+            auto* hosted=precision.get();
+            auto& look=hosted->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+            look.setValue(look.toNormalised(3.0f));
+            hosted->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.f);
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(precision)),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            // The ideal parallel gain is the same regardless of plugin PDC:
+            // (dry + wet*.70710678) at the SAME delayed sample.
+            constexpr double parallelGain=1.0+0.7071067811865475244;
+            const auto impulse=[&](int delay)
+            {
+                chain.reset();
+                const double sample=.25;
+                float found=0.f;
+                const int end=128+delay+512;
+                for(int base=0;base<end;base+=128)
+                {
+                    juce::AudioBuffer<float> b(2,128);
+                    b.clear();
+                    if(base==128)
+                    {
+                        b.setSample(0,0,(float)sample);
+                        b.setSample(1,0,(float)-sample);
+                    }
+                    chain.processBlock(b,128);
+                    for(int i=0;i<128 && base+i<end;++i)
+                    {
+                        const int at=base+i;
+                        const double want=at==128+delay
+                            ?sample*parallelGain:0.0;
+                        expectWithinAbsoluteError((double)b.getSample(0,i),
+                                                   want,6.e-5);
+                        expectWithinAbsoluteError((double)b.getSample(1,i),
+                                                   -want,6.e-5);
+                        if(at==128+delay)found=b.getSample(0,i);
+                    }
+                }
+                return found;
+            };
+            const int first=(int)std::lround(sampleRate*.005);
+            expectEquals(chain.totalLatencySamples(),first);
+            const float firstAmplitude=impulse(first);
+            look.setValue(look.toNormalised(5.f)); // 20 ms
+            hosted->prepareToPlay(sampleRate,128);  // control-thread prepare
+            const int second=(int)std::lround(sampleRate*.020);
+            expectEquals(chain.totalLatencySamples(),second);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread(),
+                   "real C3 latency change must restage BOTH slot/chain dry PDC");
+            const float secondAmplitude=impulse(second);
+            expectWithinAbsoluteError((double)firstAmplitude,
+                                      (double)secondAmplitude,6.e-5,
+                "changing C3 lookahead must not create dry/wet comb filtering");
+            look.setValue(0.f);
+            hosted->prepareToPlay(sampleRate,128);
+            expectEquals(chain.totalLatencySamples(),0);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread());
+            const float zeroAmplitude=impulse(0);
+            expectWithinAbsoluteError((double)zeroAmplitude,
+                                      (double)firstAmplitude,6.e-5,
+                "Precision C 0ms monitoring should return to aligned dry/wet");
+        }
+
         beginTest("Live JUCE hosted latency 16->32 aligns slot and chain Dry/Wet");
         for(const double sampleRate:{44100.0,48000.0}) {
             DAW::PluginChainCore chain;

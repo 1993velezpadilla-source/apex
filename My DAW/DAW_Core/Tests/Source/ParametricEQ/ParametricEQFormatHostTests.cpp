@@ -84,7 +84,7 @@ private:
 
     void testUnifiedFamilyPath()
     {
-        beginTest ("one native format discovers five visible processors");
+        beginTest ("one native format discovers six visible processors");
         DAW::PluginScanFormatsCore formats;
         int nativeFormatCount = 0;
         for (const auto& name : formats.getRegisteredFormatNames())
@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 5,
-                      "G10/EQ/Opto/Delay/Reverie visible, unfinished C4 hidden");
-        if (descriptions.size() == 5)
+        expectEquals (descriptions.size(), 6,
+                      "G10/EQ/Opto/C3/Delay/Reverie visible, unfinished C4 hidden");
+        if (descriptions.size() == 6)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -110,10 +110,14 @@ private:
             expectEquals (descriptions[2]->fileOrIdentifier,
                           juce::String ("APEX::Opto2A"));
             expectEquals (descriptions[3]->fileOrIdentifier,
-                          juce::String ("APEX::BubblegumDelay"));
+                          juce::String ("APEX::PrecisionC3"));
             expectEquals (descriptions[4]->fileOrIdentifier,
+                          juce::String ("APEX::BubblegumDelay"));
+            expectEquals (descriptions[5]->fileOrIdentifier,
                           juce::String ("APEX::ReverieReverb"));
         }
+        for (const auto* desc : descriptions)
+            expect (desc->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
 
         juce::String error;
         auto instance = formats.getManager().createPluginInstance (
