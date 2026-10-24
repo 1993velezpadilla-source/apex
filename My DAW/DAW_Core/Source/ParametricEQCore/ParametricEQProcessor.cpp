@@ -1825,10 +1825,13 @@ void Processor::computeDynamicGains (int numberOfChannels,
             // direction rule compares magnitudes (|target| vs |state|), so a
             // target of the opposite sign moves the state THROUGH zero
             // continuously. Range sign crossings therefore cannot jump.
-            // Signal-driven AUTO threshold; does not rewrite automation.
-            auto effective = parameters;
+            // The common/manual path executes the exact legacy law;
+            // do not copy a DynamicBandParameters struct every sample when
+            // AUTO is OFF (the default, including all old sessions).
+            double target = dynamicGainDbForLevel (levelDb, parameters);
             if (dynamicAutoThresholdEnabled_[static_cast<std::size_t> (band)])
             {
+                auto effective = parameters;
                 auto& baseline = dynamicAutoBaselineDb_[
                     static_cast<std::size_t> (band)];
                 const double finiteLevel = std::clamp (
@@ -1844,8 +1847,8 @@ void Processor::computeDynamicGains (int numberOfChannels,
                 effective.thresholdDb = std::clamp (
                     baseline + (parameters.rangeDb >= 0.0 ? 8.0 : -8.0),
                     -60.0, 0.0);
+                target = dynamicGainDbForLevel (levelDb, effective);
             }
-            const auto target = dynamicGainDbForLevel (levelDb, effective);
             auto state = dynamicSmoothedGainDb_[static_cast<std::size_t> (band)];
             const bool engaging = std::abs (target) > std::abs (state);
             const auto coefficient = engaging ? envelope.attackCoefficient()
