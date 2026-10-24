@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include "ApexPrecisionCharacterOversamplingCore.h"
 
 namespace APEX::PrecisionC3
@@ -81,10 +82,15 @@ struct Parameters
         p.outputDb = bounded(p.outputDb, -24.0, 24.0, 0.0);
         p.sidechainHighpassHz = bounded(p.sidechainHighpassHz, 0.0, 2000.0, 0.0);
         p.sidechainLowpassHz = bounded(p.sidechainLowpassHz, 100.0, 20000.0, 20000.0);
+        // Fixed non-finite fallback values: do not call pow() four times
+        // per host block just to form a rarely-used sanitisation default.
+        constexpr std::array<double,4> fallbackHz {{
+            130.0,585.0,2632.5,11846.25
+        }};
         for (std::size_t i=0;i<p.sidechainBells.size();++i)
         {
             p.sidechainBells[i].hz = bounded(p.sidechainBells[i].hz, 20.0,20000.0,
-                130.0 * std::pow(4.5,static_cast<double>(i)));
+                fallbackHz[i]);
             p.sidechainBells[i].gainDb = bounded(p.sidechainBells[i].gainDb,-18.0,18.0,0.0);
             p.sidechainBells[i].q = bounded(p.sidechainBells[i].q,0.15,18.0,1.0);
         }
@@ -140,6 +146,10 @@ public:
     void prepare (double rate) noexcept
     {
         sampleRate_ = std::isfinite(rate) && rate >= 8000.0 ? rate : 48000.0;
+        // Filter coefficients depend on sample rate, not only host params.
+        // A prepare at a different rate MUST invalidate all cached taps.
+        detectorFilterCacheValid_ = false;
+        detectorCoefficientRebuilds_ = 0;
         smoothingCoeff_ = coefficient(0.012);
         detectorCoeff_ = coefficient(0.010);
         thresholdTrackingCoeff_ = coefficient(1.5);
@@ -187,13 +197,32 @@ public:
         const auto nyquist = 0.499 * sampleRate_;
         const auto hpf = std::min(parameters_.sidechainHighpassHz, nyquist);
         const auto lpf = std::min(parameters_.sidechainLowpassHz, nyquist);
-        hpCoeff_ = hpf <= 0.0 ? 0.0 : coefficient(1.0 / (6.283185307179586 * hpf));
-        lpCoeff_ = lpf >= nyquist ? 0.0 : coefficient(1.0 / (6.283185307179586 * lpf));
-        // RBJ peaking filters. Coefficients are calculated ONCE per block,
-        // not per audio sample. Caller may automate freq, gain and Q.
+        // The JUCE wrapper calls setParameters EVERY audio block. For unchanged
+        // sidechain bands, expensive sin/cos/pow/exp were unnecessarily
+        // recalculated even while the detector was not automated.
+        if(!detectorFilterCacheValid_ || hpf != cachedHpHz_)
+        {
+            hpCoeff_ = hpf <= 0.0 ? 0.0
+                : coefficient(1.0 / (6.283185307179586 * hpf));
+            cachedHpHz_ = hpf;
+            ++detectorCoefficientRebuilds_;
+        }
+        if(!detectorFilterCacheValid_ || lpf != cachedLpHz_)
+        {
+            lpCoeff_ = lpf >= nyquist ? 0.0
+                : coefficient(1.0 / (6.283185307179586 * lpf));
+            cachedLpHz_ = lpf;
+            ++detectorCoefficientRebuilds_;
+        }
+        // All four peaking bands remain host-automatable. Recalculate ONLY
+        // the changed band and preserve every coefficient when unchanged.
         for (std::size_t i=0;i<bellCoefficients_.size();++i)
         {
             const auto& b=parameters_.sidechainBells[i];
+            auto& cached=cachedBellSettings_[i];
+            if(detectorFilterCacheValid_ && b.hz==cached.hz
+                 && b.gainDb==cached.gainDb && b.q==cached.q)
+                continue;
             const double f=std::clamp(b.hz,20.0,sampleRate_*0.45);
             const double w0=6.2831853071795864769*f/sampleRate_;
             const double cs=std::cos(w0);
@@ -207,7 +236,10 @@ public:
             c.a1=(-2.0*cs)*invA0;
             c.a2=(1.0-alpha/a)*invA0;
             c.enabled=std::abs(b.gainDb)>=1.0e-6;
+            cached=b;
+            ++detectorCoefficientRebuilds_;
         }
+        detectorFilterCacheValid_ = true;
         if (!initialised_)
         {
             smoothedInput_ = dbGain(parameters_.inputDb);
@@ -227,6 +259,10 @@ public:
     double getGainReductionDb() const noexcept { return gainReductionDb_; }
     double getInputPeakDb() const noexcept { return inputPeakDb_; }
     double getOutputPeakDb() const noexcept { return outputPeakDb_; }
+    // Test-only observability: # HP/LP/bell coefficient recomputations since
+    // prepare(). Read from the same thread that processes audio.
+    std::uint64_t detectorCoefficientRebuilds() const noexcept
+    { return detectorCoefficientRebuilds_; }
     // With lookahead ON, this is the exact sample delay of BOTH wet and dry
     // paths (including bypass). It must be reported to the plugin host.
     int latencySamples() const noexcept {
@@ -248,6 +284,10 @@ public:
         const double releaseScale = styleReleaseScale(parameters_.style);
         const double attackCoeff = coefficient(parameters_.attackMs * 0.001 * attackScale);
         const double baseRelease = parameters_.releaseMs * 0.001 * releaseScale;
+        // Auto Release OFF is the ordinary path. An exp() per sample AND
+        // channel was wasted despite the release coefficient being constant
+        // for the entire block. Auto Release ON keeps its old adaptive curve.
+        const double fixedReleaseCoeff=coefficient(baseRelease);
         const auto inputTarget = dbGain(parameters_.inputDb);
         const auto wetTarget = dbGain(parameters_.wetDb);
         const auto outputTarget = dbGain(parameters_.outputDb);
@@ -421,7 +461,8 @@ public:
                     // all host block sizes (the state advances per sample).
                     const double adaptive = parameters_.autoRelease
                         ? (1.0 + std::clamp(state.reductionDb / 12.0, 0.0, 3.0)) : 1.0;
-                    const double release = coefficient(baseRelease * adaptive);
+                    const double release = parameters_.autoRelease
+                        ? coefficient(baseRelease * adaptive) : fixedReleaseCoeff;
                     state.reductionDb = release * state.reductionDb
                                       + (1.0 - release) * targetDb;
                 }
@@ -563,6 +604,10 @@ private:
     double hpCoeff_ = 0.0, lpCoeff_ = 0.0;
     std::array<Channel,2> channels_ {};
     std::array<BellCoefficients,4> bellCoefficients_ {};
+    std::array<SidechainBellBand,4> cachedBellSettings_ {};
+    double cachedHpHz_ = 0.0, cachedLpHz_ = 0.0;
+    std::uint64_t detectorCoefficientRebuilds_ = 0;
+    bool detectorFilterCacheValid_ = false;
     // Preallocated per-channel ring: ~64 KiB. No dynamic allocation in
     // prepare(), setParameters() or process() (RT-safe, block invariant).
     static constexpr std::size_t kLookaheadCapacity = 8192;
