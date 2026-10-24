@@ -762,6 +762,45 @@ private:
             expect (! area.intersects (
                         editor->selectedTagBoundsForTesting()),
                 "Dynamics panel must never hide the live EQ band data tooltip");
+            if (size.x == 1280)
+            {
+                // PASS 15: the old 346x272 distant second sheet must become
+                // ONE actual native JUCE control card, 804x180. Component
+                // rectangles remain separate for hit testing, while their
+                // shared outer visual surface covers both.
+                expect (editor->unifiedDynamicVisibleForTesting(),
+                    "desktop selected band has one shared floating surface");
+                const auto shell = editor->unifiedDynamicBoundsForTesting();
+                const auto hud = editor->panelBoundsForTesting();
+                expect (editor->graphBoundsForTesting().contains (shell),
+                    "whole unified card stays inside the actual FFT graph");
+                expect (shell.contains (hud) && shell.contains (area),
+                    "both static and Dynamic EQ controls belong to one shell");
+                expectEquals (shell.getHeight(), 180,
+                    "unified desktop card is compact rather than 272px high");
+                expect (shell.getWidth() >= 780 && shell.getWidth() <= 825,
+                    "unified card hosts all original interactive band controls");
+                expect (! shell.intersects (
+                    editor->selectedTagBoundsForTesting()),
+                    "the whole continuous shell cannot cover the selected"
+                    " band's LIVE frequency/gain/Q tooltip");
+                expect (! shell.expanded (8).intersects (
+                    editor->nodeHitAreaForTesting (0)),
+                    "the unified shell must not cover selected EQ drag handle");
+                // Decorative card padding is not an invisible touch-through
+                // that creates new filters behind the painted surface.
+                const int bandsBefore = editor->activeBandsForTesting();
+                const auto emptyShell = juce::Point<float> {
+                    static_cast<float> (shell.getX() + 12),
+                    static_cast<float> (shell.getBottom() - 7) };
+                editor->injectGraphPointerForTesting (emptyShell, 0);
+                editor->injectGraphPointerForTesting (emptyShell, 2);
+                expectEquals (editor->activeBandsForTesting(), bandsBefore,
+                    "tapping the one-piece card padding never inserts bands");
+            }
+            else
+                expect (! editor->unifiedDynamicVisibleForTesting(),
+                    "small-screen layout retains safe separate touch panels");
             // PASS 10: old four-corner solver silently layered an entire
             // DYNAMIC EQ card over FREQ/GAIN/Q at 480x800. Assert the real
             // layout at every breakpoint instead of trusting a GREEN PNG.
