@@ -797,18 +797,41 @@ public:
         // coordinates. The four editable rows bind directly to the DSP.
         if (dynamicExpanded_ && selected_ >= 0)
         {
+            const bool unified = isWideUnifiedDynamics()
+                && ! unifiedDynamicBounds_.isEmpty();
+            const auto background = unified ? unifiedDynamicBounds_
+                                            : dynamicPanel_;
             g.setColour (juce::Colours::black.withAlpha (0.39f));
             g.fillRoundedRectangle (
-                dynamicPanel_.toFloat().translated (0, 3), 9.0f);
+                background.toFloat().translated (0, 3),
+                unified ? 14.0f : 9.0f);
             g.setGradientFill (juce::ColourGradient (
                 juce::Colour (0xff39313e),
-                dynamicPanel_.getX(), dynamicPanel_.getY(),
+                background.getX(), background.getY(),
                 juce::Colour (0xff211d28),
-                dynamicPanel_.getX(), dynamicPanel_.getBottom(), false));
-            g.fillRoundedRectangle (dynamicPanel_.toFloat(), 9.0f);
+                background.getX(), background.getBottom(), false));
+            g.fillRoundedRectangle (background.toFloat(),
+                                    unified ? 14.0f : 9.0f);
             g.setColour (juce::Colour (0xff8b728f).withAlpha (0.75f));
             g.drawRoundedRectangle (
-                dynamicPanel_.toFloat().reduced (0.5f), 9.0f, 1.0f);
+                background.toFloat().reduced (0.5f),
+                unified ? 14.0f : 9.0f, 1.0f);
+            if (unified)
+            {
+                // The band and dynamic controls share a single container:
+                // separator is decorative, not a detached second card.
+                const int seamX = panel_.getRight() + 4;
+                g.setColour (juce::Colour (0xff6b5a70).withAlpha (0.68f));
+                g.drawVerticalLine (seamX,
+                    static_cast<float> (background.getY() + 13),
+                    static_cast<float> (background.getBottom() - 13));
+                g.setColour (bandColour (selected_).withAlpha (0.90f));
+                g.fillRoundedRectangle (
+                    static_cast<float> (background.getX() + 10),
+                    static_cast<float> (background.getY() + 6),
+                    static_cast<float> (panel_.getWidth() - 20),
+                    2.0f, 1.0f);
+            }
             g.setColour (juce::Colour (0xfff4ce70));
             g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
             g.drawText ("DYNAMIC EQ", dynamicPanel_.getX() + 10,
@@ -853,7 +876,8 @@ public:
         // In narrow portraits and low-height landscape host windows there
         // isn't space for BOTH editing cards at once. Show the requested
         // dynamics controls alone and restore FREQ/GAIN/Q when closed.
-        if (selected_ >= 0 && ! hideBandHudForDynamics())
+        if (selected_ >= 0 && ! hideBandHudForDynamics()
+            && ! isWideUnifiedDynamics())
         {
             g.setColour (juce::Colours::black.withAlpha (0.26f));
             g.fillRoundedRectangle (panel_.toFloat().translated (0, 4), 12.0f);
@@ -886,7 +910,9 @@ public:
         rangeDragBand_ = -1;
         hover_.reset();
         if (! graph_.contains (e.getPosition())
-            || (selected_ >= 0 && panel_.contains (e.getPosition())))
+            || (selected_ >= 0 && panel_.contains (e.getPosition()))
+            || (isWideUnifiedDynamics()
+                && unifiedDynamicBounds_.contains (e.getPosition())))
             return;
         dragBand_ = hitBand (e.position);
         // Keep the keyboard command target on the graph. Do not steal it
@@ -1106,7 +1132,9 @@ public:
     {
         if (touchMultiSelectMode_) return; // mode is tap-to-link, not add
         if (! graph_.contains (e.getPosition())
-            || (selected_ >= 0 && panel_.contains (e.getPosition())))
+            || (selected_ >= 0 && panel_.contains (e.getPosition()))
+            || (isWideUnifiedDynamics()
+                && unifiedDynamicBounds_.contains (e.getPosition())))
             return;
         pendingCurveCreate_ = false;
         const int band = hitBand (e.position);
