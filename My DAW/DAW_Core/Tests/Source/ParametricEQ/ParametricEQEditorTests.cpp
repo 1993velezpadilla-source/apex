@@ -620,6 +620,14 @@ private:
         expect (editor->hasMeasuredDynamicFrameForTesting (0),
             "visible dynamic meter must originate from actual audio thread");
         const auto measured = editor->measuredDynamicDbForTesting (0);
+        editor->refreshForTesting();
+        expect (editor->gainRingMeterValidForTesting(),
+            "GAIN dial inner yellow arc is authorised ONLY after real DSP"
+            " ResponseFrame from audio, never synthetic visual animation");
+        expectWithinAbsoluteError (
+            static_cast<double> (editor->gainRingMeasuredDbForTesting()),
+            static_cast<double> (measured), 0.005,
+            "GAIN dial actual dB meter equals coherent DSP display frame");
         expect (std::isfinite (measured));
         expect (measured < -0.15f,
             "positive cut range under loud audio must report real reduction");
