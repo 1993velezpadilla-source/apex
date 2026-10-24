@@ -220,3 +220,29 @@ sheet, and the selected band must remain understandable during live audio.
 **Not yet certified:** CI must execute on PASS 11 HEAD and the new native
 WAV-based GUI screenshots must be visually reviewed. No claim of Pro-Q 4
 visual or feature 1:1 parity; PR #159 stays DRAFT and MAIN untouched.
+
+
+### PASS 11 failed CI (Oct 24 UTC) and exact 640×400 remediation
+
+Latest original PASS 11 commit `cf982d3` compiled and passed policy
+checks, but **failed** both Flagship EQ Debug/Release and full Windows
+test suite (runs 40048693044, 40048693189). All failing jobs agreed:
+`near-node HUD must not hide selected value tooltip`.
+
+The repro is **640×400, band #1 (5200 Hz, -5 dB)**. The old band
+popover reserves an unnecessary 29px above the footer, clamping its
+lowest candidate to y=211 where it intersects the selected value tag
+(y≈208–230). The popover's alternate high position obscures another
+enabled EQ node. The candidate scorer therefore chose the *less*
+penalized tooltip collision, correctly caught by the new adversarial test.
+
+- Keep full 29px reserve for ordinary-height windows. At viewport height
+  <=420px, use an 8px reserve from the graph bottom; the footer remains
+  outside the canvas. At 640×400 this permits y=232, which sits below the
+  selected value tag and leaves 8px below the 116px contextual panel.
+- Pin a targeted regression for the exact 640×400, selected band #1
+  case, checking the readout, graph bounds and 8px footer clearance.
+  Include the viewport/band name in future failing assertions.
+- **Do not claim success** until all four CI workflows complete GREEN on
+  the latest commit, followed by visual verification of real screenshots.
+  PR #159 remains DRAFT, MAIN unmodified.
