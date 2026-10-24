@@ -4,6 +4,8 @@ on:
     paths:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp"
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterWetPhaseAudit.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakStress.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakReference.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
       - ".github/workflows/apex-limiter-perf.yml"
@@ -11,6 +13,8 @@ on:
     paths:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp"
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterWetPhaseAudit.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakStress.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakReference.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
       - ".github/workflows/apex-limiter-perf.yml"
@@ -45,6 +49,15 @@ jobs:
         run: |
           "$RUNNER_TEMP/apex-limiter-wet-phase" | tee "$RUNNER_TEMP/apex-limiter-wet-phase.csv"
           grep '^APEX_WET_PHASE,32,' "$RUNNER_TEMP/apex-limiter-wet-phase.csv"
+      - name: Compile independently reconstructed ISP stress audit
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math Tests/Standalone/ApexLimiterTruePeakStress.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-truepeak-stress"
+      - name: Measure actual nonlinear gain reduction and 32x ISP overshoots
+        run: |
+          "$RUNNER_TEMP/apex-limiter-truepeak-stress" | tee "$RUNNER_TEMP/apex-limiter-truepeak.csv"
+          grep '^APEX_TRUEPEAK_SUMMARY,' "$RUNNER_TEMP/apex-limiter-truepeak.csv"
       - name: Write non-certifying benchmark summary
         if: always()
         run: |
@@ -73,6 +86,16 @@ jobs:
             else
               echo 'Wet phase measurements unavailable.'
             fi
+            echo ''
+            echo '### Nonlinear 44.1/48/96 kHz true-peak stress (independent offline 32x comparator)'
+            echo 'This probe reports TP OVERshoots instead of hiding them behind a green executable. No BS.1770 certification.'
+            if test -f "$RUNNER_TEMP/apex-limiter-truepeak.csv"; then
+              echo '\`\`\`'
+              cat "$RUNNER_TEMP/apex-limiter-truepeak.csv"
+              echo '\`\`\`'
+            else
+              echo 'TP stress data missing.'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Retain measured CPU CSV for adversarial QA
         if: always()
@@ -82,5 +105,6 @@ jobs:
           path: |
             ${{ runner.temp }}/apex-limiter-os-perf.csv
             ${{ runner.temp }}/apex-limiter-wet-phase.csv
+            ${{ runner.temp }}/apex-limiter-truepeak.csv
           retention-days: 30
           if-no-files-found: warn
