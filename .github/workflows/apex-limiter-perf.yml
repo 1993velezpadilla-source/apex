@@ -8,6 +8,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakReference.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
+      - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterTruePeakReserve.h"
       - ".github/workflows/apex-limiter-perf.yml"
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - "My DAW/DAW_Core/Tests/Standalone/ApexLimiterTruePeakReference.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h"
       - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h"
+      - "My DAW/DAW_Core/Source/LimiterCore/ApexLimiterTruePeakReserve.h"
       - ".github/workflows/apex-limiter-perf.yml"
   workflow_dispatch:
 permissions:
@@ -89,6 +91,7 @@ jobs:
             echo ''
             echo '### Nonlinear 44.1/48/96 kHz true-peak stress (independent offline 32x comparator)'
             echo 'This probe reports TP OVERshoots instead of hiding them behind a green executable. No BS.1770 certification.'
+            echo 'Audio TP ON applies a factor-specific experimental guard band before upsampled limiting. Final sample ceiling remains user-selected.'
             if test -f "$RUNNER_TEMP/apex-limiter-truepeak.csv"; then
               echo '\`\`\`'
               cat "$RUNNER_TEMP/apex-limiter-truepeak.csv"
