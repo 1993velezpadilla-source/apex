@@ -35,11 +35,11 @@ jobs:
           if errorlevel 1 exit /b 1
           cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise Tests\Standalone\ApexLimiterOversamplingBench.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cpu-fast.exe"
           if errorlevel 1 exit /b 1
-          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE Tests\Standalone\ApexLimiterOversamplingBench.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cpu-decimator-reference.exe"
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE /DAPEX_LIMITER_REFERENCE_HIGH_RATE_DRY Tests\Standalone\ApexLimiterOversamplingBench.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cpu-decimator-reference.exe"
           if errorlevel 1 exit /b 1
           cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise Tests\Standalone\ApexLimiterPeakCacheAudit.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cache-fast.exe"
           if errorlevel 1 exit /b 1
-          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE /DAPEX_LIMITER_REFERENCE_PEAK_LOG Tests\Standalone\ApexLimiterPeakCacheAudit.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cache-reference.exe"
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE /DAPEX_LIMITER_REFERENCE_PEAK_LOG /DAPEX_LIMITER_REFERENCE_HIGH_RATE_DRY Tests\Standalone\ApexLimiterPeakCacheAudit.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cache-reference.exe"
           if errorlevel 1 exit /b 1
       - name: Enforce 81,920-row precise mono stereo automation parity on Windows
         shell: pwsh
