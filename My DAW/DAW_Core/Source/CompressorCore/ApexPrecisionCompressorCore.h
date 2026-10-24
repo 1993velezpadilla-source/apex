@@ -396,6 +396,10 @@ public:
             const double wetGain = smoothedWet_ * smoothedMakeup_;
             const double compressedL=colouredIn[0]*dbGain(-gr[0]);
             const double compressedR=colouredIn[1]*dbGain(-gr[1]);
+            // Always maintain neutral tap history when switching character
+            // modes so mode Off cannot reveal an old/empty 48-sample tail.
+            const double neutralWetL=delayNeutralWet(0,compressedL);
+            const double neutralWetR=delayNeutralWet(1,compressedR);
             const double saturatedL=parameters_.characterPre ? compressedL
                 : (osEnabled ? (colourEnabled
                     ? oversamplingPost_[0].processColour(compressedL,
@@ -410,9 +414,9 @@ public:
             // while leaving it unfiltered. Preserve a separate post wet
             // history for this neutral route (including time-varying GR).
             const double postNeutralL = osEnabled && !parameters_.characterPre
-                && !colourEnabled ? delayNeutralWet(0,compressedL) : saturatedL;
+                && !colourEnabled ? neutralWetL : saturatedL;
             const double postNeutralR = osEnabled && !parameters_.characterPre
-                && !colourEnabled ? delayNeutralWet(1,compressedR) : saturatedR;
+                && !colourEnabled ? neutralWetR : saturatedR;
             double yL = postNeutralL*wetGain + alignedX[0]*smoothedDry_;
             double yR = postNeutralR*wetGain + alignedX[1]*smoothedDry_;
             yL *= smoothedOutput_;
