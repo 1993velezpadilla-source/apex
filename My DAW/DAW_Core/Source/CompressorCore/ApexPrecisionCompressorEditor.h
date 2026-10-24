@@ -705,7 +705,7 @@ private:
         g.drawText(signedAction < -0.05f ? "UP" : "GR",1018,62,22,17,
                    juce::Justification::centred);
         g.drawText("OUT",1042,62,30,17,juce::Justification::centred);
-        g.drawText((signedAction < -0.05f ? "+" : "-")
+        g.drawText(juce::String(signedAction < -0.05f ? "+" : "-")
                    +juce::String(std::abs(signedAction),1),
                    1010,444,36,18,juce::Justification::centred);
         g.drawText(juce::String(output,1),1044,444,32,18,juce::Justification::centred);
