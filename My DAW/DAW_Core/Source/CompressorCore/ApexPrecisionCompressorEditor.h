@@ -562,26 +562,25 @@ private:
         g.drawText("LEVEL HISTORY   /   INPUT + OUTPUT + RED GAIN REDUCTION",34,62,610,18,
                    juce::Justification::left);
 
-        // Real threshold/ratio/knee transfer computed from hosted parameters.
-        // This overlay corresponds to input vs processed level, not an EQ.
-        const float thresh=processor_.getC3Parameter(Threshold).getUnits();
-        const float ratio=processor_.getC3Parameter(Ratio).getUnits();
-        const float knee=processor_.getC3Parameter(Knee).getUnits();
-        const float range=processor_.getC3Parameter(Range).getUnits();
+        // V13: render the EXACT static gain-computer transfer expression
+        // shared with actual DSP. Upward/TTM (approximate broadband), Vocal,
+        // Vari-Mu and soft-knee styles must not draw a generic false curve.
+        // Envelope history and Auto Threshold are dynamic, not depicted.
+        Parameters graphParams;
+        graphParams.thresholdDb=processor_.getC3Parameter(Threshold).getUnits();
+        graphParams.ratio=processor_.getC3Parameter(Ratio).getUnits();
+        graphParams.kneeDb=processor_.getC3Parameter(Knee).getUnits();
+        graphParams.rangeDb=processor_.getC3Parameter(Range).getUnits();
+        graphParams.style=static_cast<int>(std::lround(
+            processor_.getC3Parameter(Style).getUnits()));
         juce::Path transfer;
         for(int i=0;i<=120;++i)
         {
-            float db=-60.0f+60.0f*i/120.0f;
-            float over=db-thresh;
-            float slope=1.0f-1.0f/juce::jmax(1.0f,ratio);
-            float reduce=0.0f;
-            if(knee<0.01f)reduce=slope*juce::jmax(0.0f,over);
-            else if(over>=knee*0.5f) reduce=slope*over;
-            else if(over>-knee*0.5f)
-                reduce=slope*(over+knee*0.5f)*(over+knee*0.5f)/(2.0f*knee);
-            reduce=juce::jlimit(0.0f,range,reduce);
+            const float db=-60.0f+60.0f*i/120.0f;
+            const double reduce=precisionStaticReductionDb(
+                db,graphParams.thresholdDb,graphParams);
             const float x=28.0f+(520.0f*i/120.0f);
-            const float y=bottom-(db-reduce+60.0f)/60.0f*208.0f;
+            const float y=bottom-(db-static_cast<float>(reduce)+60.0f)/60.0f*208.0f;
             if(i==0)transfer.startNewSubPath(x,y);
             else transfer.lineTo(x,y);
         }
