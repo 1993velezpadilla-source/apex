@@ -5,6 +5,7 @@
 // Do not allow a successful diagnostic run to claim a 0 dBTP release guard.
 #include "../../Source/LimiterCore/ApexLimiterCore.h"
 #include "../../Source/LimiterCore/ApexLimiterOversampling.h"
+#include "../../Source/LimiterCore/ApexLimiterTruePeakReserve.h"
 #include "ApexLimiterTruePeakReference.h"
 #include <algorithm>
 #include <array>
@@ -21,7 +22,7 @@ namespace {
 constexpr double pi=3.14159265358979323846;
 constexpr int frames=4096;
 constexpr std::array<int,3> rates{{44100,48000,96000}};
-constexpr std::array<int,4> factors{{1,4,16,32}};
+constexpr std::array<int,6> factors{{1,2,4,8,16,32}};
 constexpr double ceilingDb=-1.0;
 constexpr double ceiling=0.8912509381337456;
 
@@ -55,17 +56,21 @@ std::vector<float> programme(int rate,int profile)
     return x;
 }
 std::vector<float> render(int rate,int factor,const std::vector<float>& source,
-                          bool& reductionObserved)
+                          bool requestTruePeak,bool& reductionObserved)
 {
     Core core;
     core.prepare(static_cast<double>(rate)*factor);
     Settings p;
     p.gainDb=12.0;
-    p.ceilingDb=ceilingDb;
+    p.ceilingDb=ceilingDb-APEX::Limiter::audioTruePeakReserveDb(
+        factor,requestTruePeak);
     p.attackMs=0.01;
     p.releaseMs=55.0;
     p.lookaheadMs=5.0;
     p.detectorQuality=0;
+    // The original 1x sample-only baseline is retained as a known red
+    // diagnostic. Above 1x, the host resolves peaks using full-rate audio
+    // plus an optional empirical ceiling reserve, not a duplicate FIR.
     p.truePeak=false;
     p.ditherMode=0;
     core.setSettings(p);
@@ -95,7 +100,7 @@ int main()
 {
     std::puts("APEX_TRUEPEAK columns: rate,factor,profile,sample_peak,reconstructed_32x_peak,ceiling,overshoot_dbTP,limiting_active");
     double maximumOvershoot=-1000.0;
-    int overshootCases=0;
+    int overshootCases=0,totalCases=0;
     for(const int rate:rates)
         for(const int profile:{0,1,2})
         {
@@ -103,7 +108,8 @@ int main()
             for(const int factor:factors)
             {
                 bool limited=false;
-                const auto out=render(rate,factor,original,limited);
+                const auto out=render(rate,factor,original,true,limited);
+                ++totalCases;
                 const auto tp=TruePeakReference::analyze(out.data(),frames,32);
                 const double overshoot=20.0*std::log10(
                     std::max(1.0e-12,tp.reconstructedPeak)/ceiling);
@@ -121,25 +127,43 @@ int main()
                 }
                 maximumOvershoot=std::max(maximumOvershoot,overshoot);
                 if(overshoot>0.02)++overshootCases;
-                // A diagnostic safety REGRESSION gate, not certification:
-                // at the highest 32x DSP rate the independent 32x
-                // reconstructed peak must remain within +0.10 dB of the
-                // user-selected sample ceiling for THIS adversarial matrix.
-                // APEX still does not guarantee 0 dBTP or BS.1770 accuracy.
-                if(factor==32 && overshoot>0.10)
+                // User-facing TP ON must now stay within +0.01 dB of
+                // the selected ceiling at 32x on this adversarial matrix.
+                // The reference is independent 32x windowed-sinc, not an
+                // ITU/EBU certificate. The 1x sample-only baseline is RED.
+                if(factor==32 && overshoot>0.01)
                 {
                     std::fprintf(stderr,
                         "APEX 32x TP REGRESSION: %dHz profile %d exceeded "
-                        "+0.10 dB tolerance: %+0.5f dBTP\n",
+                        "+0.01 dB tolerance: %+0.5f dBTP\n",
                         rate,profile,overshoot);
                     return EXIT_FAILURE;
                 }
             }
         }
-    std::printf("APEX_TRUEPEAK_SUMMARY,max_overshoot_db=%.5f,overshoot_cases=%d/36\n",
-                maximumOvershoot,overshootCases);
+    std::printf("APEX_TRUEPEAK_SUMMARY,max_overshoot_db=%.5f,overshoot_cases=%d/%d\n",
+                maximumOvershoot,overshootCases,totalCases);
+    // Explicit A/B: switching TP OFF must remove the headroom reserve.
+    // This also guards against permanently attenuating the mix when
+    // the user turns off TP, audition or bypass.
+    {
+        const auto source=programme(48000,1);
+        bool onReduction=false,offReduction=false;
+        const auto on=render(48000,32,source,true,onReduction);
+        const auto off=render(48000,32,source,false,offReduction);
+        const double tpOn=TruePeakReference::analyze(on.data(),frames,32).reconstructedPeak;
+        const double tpOff=TruePeakReference::analyze(off.data(),frames,32).reconstructedPeak;
+        const double deltaDb=20.0*std::log10(tpOff/std::max(1.0e-12,tpOn));
+        std::printf("APEX_TRUEPEAK_TOGGLE,32,48000,%.6f,%.6f,%.6f\\n",
+                    tpOn,tpOff,deltaDb);
+        if(!onReduction || !offReduction || deltaDb<0.02)
+        {
+            std::fprintf(stderr,"TP toggle failed to restore nonreserved audio\\n");
+            return EXIT_FAILURE;
+        }
+    }
     if(overshootCases)
-        std::puts("APEX_TRUEPEAK_WARNING: post-OS sample ceiling has NOT met the 32x offline true-peak ceiling on every case; retain release block.");
+        std::puts("APEX_TRUEPEAK_WARNING: some ISP cases (especially 1x sample-only) exceed the ceiling; this stress matrix is NOT certification.");
     else
         std::puts("APEX_TRUEPEAK_WARNING: directional 32x windowed-sinc probe does NOT certify BS.1770 or all transient cases.");
 }
