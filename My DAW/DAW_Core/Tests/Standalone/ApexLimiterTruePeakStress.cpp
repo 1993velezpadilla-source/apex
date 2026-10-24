@@ -121,6 +121,19 @@ int main()
                 }
                 maximumOvershoot=std::max(maximumOvershoot,overshoot);
                 if(overshoot>0.02)++overshootCases;
+                // A diagnostic safety REGRESSION gate, not certification:
+                // at the highest 32x DSP rate the independent 32x
+                // reconstructed peak must remain within +0.10 dB of the
+                // user-selected sample ceiling for THIS adversarial matrix.
+                // APEX still does not guarantee 0 dBTP or BS.1770 accuracy.
+                if(factor==32 && overshoot>0.10)
+                {
+                    std::fprintf(stderr,
+                        "APEX 32x TP REGRESSION: %dHz profile %d exceeded "
+                        "+0.10 dB tolerance: %+0.5f dBTP\n",
+                        rate,profile,overshoot);
+                    return EXIT_FAILURE;
+                }
             }
         }
     std::printf("APEX_TRUEPEAK_SUMMARY,max_overshoot_db=%.5f,overshoot_cases=%d/36\n",
