@@ -517,6 +517,45 @@ int main()
             assert(br[static_cast<std::size_t>(i)]==0.f);
         }
     }
+    // V11 adversarial parallel-mix regression: 2x OFF is the reference,
+    // 2x ON must equal the same audio delayed by precisely 48 samples.
+    // Automating INPUT gain exposes a wet/dry comb mismatch if the delay
+    // history stores only the raw input but reapplies the CURRENT gain.
+    for(const double lookaheadMs:{0.0,5.0})
+    {
+        Parameters p;
+        p.ratio=1;p.character=0;p.drive=0;
+        p.dryPercent=100;p.lookaheadMs=lookaheadMs;
+        p.oversampling2x=false;
+        Core reference,oversampled;
+        reference.prepare(48000);oversampled.prepare(48000);
+        reference.setParameters(p);
+        p.oversampling2x=true;
+        oversampled.setParameters(p);
+        assert(oversampled.latencySamples()-reference.latencySamples()==48);
+        constexpr int frames=2048, block=128, extra=48;
+        std::vector<float> normal(frames),filtered(frames);
+        for(int i=0;i<frames;++i)
+            normal[static_cast<std::size_t>(i)]
+                =filtered[static_cast<std::size_t>(i)]
+                =static_cast<float>(0.17*std::sin(i*.094)
+                                  +0.07*std::cos(i*.022));
+        for(int i=0;i<frames;i+=block)
+        {
+            if(i==256 || i==896 || i==1408)
+            {
+                p.inputDb=(i==256?17.0:(i==896?-14.0:6.0));
+                Parameters unfiltered=p;unfiltered.oversampling2x=false;
+                reference.setParameters(unfiltered);
+                oversampled.setParameters(p);
+            }
+            reference.process(normal.data()+i,nullptr,block);
+            oversampled.process(filtered.data()+i,nullptr,block);
+        }
+        for(int i=extra;i<frames;++i)
+            assert(std::abs(filtered[static_cast<std::size_t>(i)]
+                -normal[static_cast<std::size_t>(i-extra)])<5.e-6f);
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
