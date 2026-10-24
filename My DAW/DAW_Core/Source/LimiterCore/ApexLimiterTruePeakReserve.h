@@ -12,7 +12,7 @@ inline double audioTruePeakReserveDb(int factor,bool enabled) noexcept
     if(!enabled || factor<=1)return 0.0;
     switch(factor)
     {
-        case 2: return 0.75;
+        case 2: return 0.35; // measured 2x ISP guard leaves ~0.11dB reserve
         case 4: return 0.25;
         case 8: return 0.15;
         case 16:return 0.085;
