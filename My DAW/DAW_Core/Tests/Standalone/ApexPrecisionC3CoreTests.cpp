@@ -333,6 +333,93 @@ int main()
         // the preview-only percentage rather than double summing dry paths.
         assert(std::abs(processDry(-12.0411998266,50.0)-0.3125)<1.e-4);
     }
+
+    // New real lookahead: at zero milliseconds remain sample-transparent
+    // and introduce no hidden DAW monitoring latency.
+    {
+        Core normal; Parameters p; p.ratio=1; p.lookaheadMs=0;
+        normal.prepare(48000);normal.setParameters(p);
+        assert(normal.latencySamples()==0);
+        std::vector<float> input(4096);
+        for(int i=0;i<4096;++i)
+            input[static_cast<std::size_t>(i)]=static_cast<float>(.24*std::sin(i*.11));
+        const auto original=input;
+        processConstant(normal,input,128);
+        for(std::size_t i=0;i<input.size();++i)assert(input[i]==original[i]);
+    }
+    // At 5ms/48k, EXACTLY 240 samples of delayed MAIN output,
+    // including dry parallel and plugin bypass. Host PDC must report 240.
+    for(const bool bypass:{false,true})
+    {
+        Core delayed;Parameters p;p.lookaheadMs=5;p.ratio=1;
+        p.kneeDb=0;p.bypass=bypass;
+        delayed.prepare(48000);delayed.setParameters(p);
+        assert(delayed.latencySamples()==240);
+        std::vector<float> impulse(1024,0.f);
+        impulse[0]=0.8f;
+        processConstant(delayed,impulse,128);
+        for(int i=0;i<1024;++i)
+            assert(std::abs(impulse[static_cast<std::size_t>(i)]
+                             -(i==240?0.8f:0.0f))<1.e-6f);
+    }
+    // The external sidechain sees current key signal while main output
+    // is delayed. Thus a key transient at input sample zero can compress
+    // the target sample at output sample 240; a non-lookahead attack cannot
+    // anticipate the delayed target with a positive attack constant.
+    {
+        Parameters p;p.thresholdDb=-24;p.ratio=15;p.kneeDb=0;
+        p.attackMs=0.1;p.lookaheadMs=5;p.releaseMs=400;
+        Core effect;effect.prepare(48000);effect.setParameters(p);
+        const int delay=effect.latencySamples();
+        std::vector<float> main(2048,0.0f),key(2048,0.f);
+        main[0]=.8f;key[0]=.8f;
+        for(int i=1;i<512;++i)key[static_cast<std::size_t>(i)]=.8f;
+        for(int i=0;i<2048;i+=128)
+            effect.process(main.data()+i,nullptr,128,key.data()+i);
+        assert(std::isfinite(main[static_cast<std::size_t>(delay)]));
+        assert(main[static_cast<std::size_t>(delay)]<0.8f);
+    }
+    // Lookahead must be independent of block partitioning and preserve
+    // stereo channels, with no aliasing of the host's key bus.
+    {
+        Parameters p;p.lookaheadMs=10;p.thresholdDb=-27;p.ratio=6;
+        p.attackMs=.05;p.releaseMs=125;p.kneeDb=5;
+        Core a,b;a.prepare(96000);b.prepare(96000);
+        a.setParameters(p);b.setParameters(p);
+        assert(a.latencySamples()==960);
+        std::vector<float> la(4096),lb(4096),ra(4096),rb(4096);
+        for(int i=0;i<4096;++i)
+        {
+            la[static_cast<std::size_t>(i)]=lb[static_cast<std::size_t>(i)]
+                =static_cast<float>(.7*std::sin(i*.087));
+            ra[static_cast<std::size_t>(i)]=rb[static_cast<std::size_t>(i)]
+                =static_cast<float>(.31*std::cos(i*.064));
+        }
+        for(int i=0;i<4096;++i)
+            a.process(la.data()+i,ra.data()+i,1);
+        for(int i=0;i<4096;i+=128)
+            b.process(lb.data()+i,rb.data()+i,128);
+        for(int i=0;i<4096;++i)
+        {
+            assert(std::abs(la[static_cast<std::size_t>(i)]
+                             -lb[static_cast<std::size_t>(i)])<1.e-6f);
+            assert(std::abs(ra[static_cast<std::size_t>(i)]
+                             -rb[static_cast<std::size_t>(i)])<1.e-6f);
+        }
+        assert(std::abs(la.back()-ra.back())>1.e-4f);
+    }
+    // Defend the preallocated ring against exotic rates and nonfinite
+    // automation: clipping the requested delay to allocated memory
+    // preserves an EXACT report, never a mismatched PDC value.
+    {
+        Parameters p;p.lookaheadMs=std::numeric_limits<double>::infinity();
+        Core e;e.prepare(192000);e.setParameters(p);
+        assert(e.latencySamples()==0);
+        p.lookaheadMs=10;e.setParameters(p);
+        assert(e.latencySamples()==1920);
+        p.lookaheadMs=5000;e.setParameters(p);
+        assert(e.latencySamples()==1920);
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
