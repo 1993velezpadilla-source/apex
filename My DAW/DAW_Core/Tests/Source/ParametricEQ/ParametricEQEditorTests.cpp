@@ -971,6 +971,38 @@ private:
                 float frozenPost784 = -120.0f;
                 if (editor->hasMeasuredSpectrumForTesting())
                 {
+                    // PASS 12 real screenshot critic: at 48k/128 the canvas
+                    // extends to 30 kHz, but FFT data ends below 24 kHz.
+                    // The old filled path incorrectly closed at x=width,
+                    // showing a fictional diagonal triangle over frequencies
+                    // above actual Nyquist. Both PRE and POST now share the
+                    // same measured x-domain; the unmeasured strip is EMPTY.
+                    for (const auto size : {
+                            juce::Point<int> { 320, 568 },
+                            juce::Point<int> { 480, 800 },
+                            juce::Point<int> { 1280, 720 } })
+                    {
+                        editor->setSize (size.x, size.y);
+                        const auto spectrumX =
+                            editor->measuredSpectrumDomainXForTesting();
+                        expectWithinAbsoluteError (
+                            static_cast<double> (spectrumX.getStart()),
+                            0.0, 1.0,
+                            "measured spectrum starts at 20 Hz");
+                        expect (spectrumX.getEnd() >
+                                    size.x * 0.90f
+                                && spectrumX.getEnd() <
+                                    size.x * 0.99f,
+                            "48 kHz FFT ends at genuine ~24 kHz Nyquist,"
+                            " NOT at the graph's 30 kHz right edge");
+                        expectWithinAbsoluteError (
+                            static_cast<double> (
+                                editor->displayedSpectrumDbForTesting (
+                                    true, 29000.0f)),
+                            -120.0, 0.001,
+                            "display MUST NOT extrapolate POST energy into"
+                            " the unmeasured >24 kHz spectrum region");
+                    }
                     expect (editor->maximumMeasuredSpectrumDbForTesting (false)
                                 > -70.0f,
                         "real measured PRE bins contain strong audible energy");
