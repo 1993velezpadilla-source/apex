@@ -864,6 +864,31 @@ private:
                 ->getUnitsValue()), -7.5, 0.2,
             "typed +7.5 dB expansion maps to legacy host -7.5 dB"
             " without changing saved VST3 automation IDs");
+        auto& rangeDial = *dials[1];
+        expect (rangeDial.textFromValueFunction (
+            rangeDial.getValue()).startsWith ("+7.5"),
+            "expanded RANGE UI must SHOW +7.5 dB expansion, not -7.5");
+        // PASS 14 RED regression: the original signed-normalization
+        // adapter accidentally cancelled itself, writing HOST +7.5.
+        // Validate both directions of manual-style typed signed dB.
+        rangeDial.setValue (rangeDial.valueFromTextFunction ("-9.0 dB"),
+                            juce::sendNotificationSync);
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range))
+                ->getUnitsValue()), +9.0, 0.01,
+            "typed -9 dB compression must write HOST +9 dB");
+        expect (rangeDial.textFromValueFunction (
+            rangeDial.getValue()).startsWith ("-9.0"),
+            "RANGE textFromValue must display signed compression");
+        rangeDial.setValue (rangeDial.valueFromTextFunction ("+7.5 dB"),
+                            juce::sendNotificationSync);
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range))
+                ->getUnitsValue()), -7.5, 0.01,
+            "compression to expansion sign reversal round-trips"
+            " through GUI text without corrupting original host ABI");
         expectWithinAbsoluteError (static_cast<double> (
             processor->getParametricEQParameter (
                 dynamicParameterIndex (0, DynamicBandOffset::Threshold))
