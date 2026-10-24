@@ -252,12 +252,27 @@ private:
     void decimate(DownHistory& state,const float* src,float* dst,int outputCount) noexcept
     {
         int output=0;
+#if !defined(APEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE)
+        // Decimation always begins at phase zero: reset() sets zero and
+        // every process call supplies exactly 2*outputCount samples.
+        // Consume an input pair with one accumulator instead of a phase
+        // branch for each high-rate sample. Output phase and FIR taps
+        // remain identical to the original reference loop.
+        for(int i=0;i<outputCount;++i)
+        {
+            state.samples[static_cast<size_t>(state.cursor)]=src[2*i];
+            state.cursor=(state.cursor+1)%kHistory;
+            state.samples[static_cast<size_t>(state.cursor)]=src[2*i+1];
+            {
+                double value=0.0;
+#else
         for(int i=0;i<2*outputCount;++i)
         {
             state.samples[static_cast<size_t>(state.cursor)]=src[i];
             if(state.phase==1)
             {
                 double value=0.0;
+#endif
                 // Sparse symmetric halfband: mirror the 48 nonzero
                 // even taps into 24 exact-value pairs; centre unchanged.
                 // This conserves FIR length, stop-band and PDC.
@@ -283,7 +298,9 @@ private:
                            *lowpass_[static_cast<size_t>(kCentreTap)];
                 dst[output++]=static_cast<float>(value);
             }
+#if defined(APEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE)
             state.phase^=1;
+#endif
             state.cursor=(state.cursor+1)%kHistory;
         }
     }
