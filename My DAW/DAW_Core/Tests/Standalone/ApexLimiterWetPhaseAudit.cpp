@@ -75,8 +75,8 @@ std::vector<float> render(int rate,int factor,int block,const std::vector<float>
     core.setSettings(p);
     coreLatency=core.latencySamples();
     AudioRateConverter resampler;
-    // Use the SAME 25 high-rate alignment frames as the JUCE host.
-    resampler.prepare(factor,128,factor>1?25:0);
+    // Use the SAME 57 high-rate alignment frames as the JUCE host.
+    resampler.prepare(factor,128,factor>1?57:0);
     firLatency=resampler.nominalFilterDelayFrames();
     auto x=input;
     for(int n=0;n<frames;n+=block)
