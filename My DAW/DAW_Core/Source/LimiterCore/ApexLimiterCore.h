@@ -259,7 +259,14 @@ public:
                 }
                 const double future = c.maximum.maximum();
                 const double over = future / std::max(1.0e-12,ceiling);
+#if defined(APEX_LIMITER_REFERENCE_DB_MATH)
                 required[ch] = over > 1.0 ? 20.0*std::log10(over) : 0.0;
+#else
+                // Exact analytic dB conversion. log(x) avoids a log10
+                // implementation call at *every* oversampled peak.
+                static constexpr double kNeperToDb = 8.68588963806503655;
+                required[ch] = over > 1.0 ? kNeperToDb*std::log(over) : 0.0;
+#endif
                 if (outputIndex >= 0)
                 {
                     int read=w-delaySamples_;
@@ -280,7 +287,15 @@ public:
                 c.reduction = coeff*c.reduction + (1.0-coeff)*target;
                 // Last-resort sample guard: attack automation, unexpected
                 // peaks and bypass transitions must never create NaN/Inf.
+#if defined(APEX_LIMITER_REFERENCE_DB_MATH)
                 const double reductionGain = std::pow(10.0,-c.reduction/20.0);
+#else
+                // exp(-ln(10)/20 * reductionDb) is mathematically identical
+                // to pow(10, -reductionDb/20), with bounded floating-point
+                // differences. Reference code remains selectable for A/B.
+                static constexpr double kDbGainExponent=-0.1151292546497022842;
+                const double reductionGain=std::exp(kDbGainExponent*c.reduction);
+#endif
                 double processed = delayed[ch] * reductionGain;
                 if (std::abs(processed) > ceiling)
                     processed = std::copysign(ceiling,processed);
