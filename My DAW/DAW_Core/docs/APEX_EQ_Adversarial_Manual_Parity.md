@@ -276,3 +276,45 @@ This is a visual integrity defect, not a DSP bug.
   screenshot review.
 
 PR #159 remains DRAFT; do not merge MAIN without user approval.
+
+
+## PASS 13 — real screenshot color hierarchy and analyzer provenance (2026-10-24)
+
+Adversarial critic inspected **actual PASS 12 Release native JUCE PNGs**,
+including the 1280×720 and 480×800 real WAV spectra. Although PASS 12
+was fully GREEN, its dense *POST FFT* was drawn warm yellow, almost
+indistinguishable from the equally yellow overall EQ transfer function.
+The screenshots make it hard to know whether a peak is measured incoming/
+outgoing audio or the frequency response of a user-adjusted filter.
+The selected band nodes are individually colored, but their FREQ/GAIN/Q
+rotary rings remained yellow too, further weakening visual hierarchy.
+
+### Changes, deliberately restricted to GUI paint and selection styling
+
+1. Keep the **overall EQ response in gold** (warm), while displaying true
+   audio FFT **PRE in muted lilac** and **POST in cool teal**. Peak-hold
+   dashed traces inherit their corresponding measured audio color.
+   Reduce FFT fill opacity so the actual response remains legible under
+   dense harmonic material; do not synthesize/massage analyzer values.
+2. Add a compact PRE/POST key inside the top-left of the graph. Only
+   draw entries for *actual* active real worker data. The legend is not
+   displayed for a missing or disabled analyzer, and it never implies
+   spectral data when the audio worker has none.
+3. Match FREQ/GAIN/Q knob rings to the selected **band node's own color**.
+   Changing band selection updates all three rings while the global
+   response retains its separate gold identity.
+4. Extend the native 48 kHz PCM→EQ→worker FFT gauntlet at 320×568,
+   480×800 and 1280×720: verify real PRE/POST measurement is present,
+   color identities are visibly distinct, the legend fits the graph,
+   and POST is teal while the EQ response stays warm. Additional
+   breakpoint/selection geometry tests assert that the three band dials
+   agree with each other, differ from the gold response, and switch
+   accents whenever the selected band changes.
+5. Existing screenshots are produced **natively** by the Windows JUCE
+   gauntlet from real WAV audio; nothing is generated or faked. Compare
+   the PASS 13 screenshot artifacts visually to PASS 12 after CI.
+
+**No DSP filters, parameter IDs, automation storage, threading or audio
+calculations changed.** No visual 1:1 parity claim; keep PR #159 DRAFT
+and MAIN unchanged until all latest-head CI checks and native image
+inspection are complete, plus explicit user approval.
