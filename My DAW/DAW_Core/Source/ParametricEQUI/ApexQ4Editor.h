@@ -38,7 +38,7 @@ public:
 class ApexQ4DynamicGainDial final : public juce::Slider
 {
 public:
-    std::function<void()> onRangeBegin, onRangeEnd;
+    std::function<void()> onRangeBegin, onRangeEnd, onRangeClear;
     std::function<void(float)> onRangeDelta;
     bool ringEditable = false, rangeEnabled = false, meterValid = false;
     float rangeDb = 0.0f, measuredDb = 0.0f;
@@ -86,6 +86,35 @@ public:
             return;
         }
         juce::Slider::mouseUp (e);
+    }
+    void mouseWheelMove (const juce::MouseEvent& e,
+                         const juce::MouseWheelDetails& wheel) override
+    {
+        if (isOnRangeRing (e.position)
+            && std::abs (wheel.deltaY) > 1.0e-6f)
+        {
+            if (onRangeBegin) onRangeBegin();
+            if (onRangeDelta)
+                onRangeDelta (wheel.deltaY * (
+                    e.mods.isShiftDown() ? 0.25f : 1.5f));
+            if (onRangeEnd) onRangeEnd();
+            return;
+        }
+        juce::Slider::mouseWheelMove (e, wheel);
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (isOnRangeRing (e.position))
+        {
+            if (rangeDragging_)
+            {
+                rangeDragging_ = false;
+                if (onRangeEnd) onRangeEnd();
+            }
+            if (onRangeClear) onRangeClear();
+            return;
+        }
+        juce::Slider::mouseDoubleClick (e);
     }
     void cancelRangeDrag() noexcept { rangeDragging_ = false; }
     bool isRangeDragging() const noexcept { return rangeDragging_; }
@@ -239,6 +268,7 @@ public:
             dragGainRingRange (deltaDb);
         };
         gain_.onRangeEnd = [this] { endGainRingGesture(); };
+        gain_.onRangeClear = [this] { clearSelectedDynamics(); };
         setSelectedVisible (false);
         setDynamicControlsVisible (false);
 
@@ -1478,6 +1508,19 @@ private:
                             g.strokePath (measuredStroke,
                                           juce::PathStrokeType (2.5f));
                         }
+                    }
+                    if (h >= 65 && gainDial->rangeEnabled
+                        && std::abs (gainDial->rangeDb) > 0.01f)
+                    {
+                        g.setColour (juce::Colour (0xffe7d9e2));
+                        g.setFont (juce::FontOptions (9.2f,
+                                                     juce::Font::bold));
+                        g.drawFittedText (
+                            "DYN " + juce::String (
+                                gainDial->rangeDb >= 0.0f ? "+" : "")
+                                + juce::String (gainDial->rangeDb, 1),
+                            x + 10, y + h - 30, w - 20, 14,
+                            juce::Justification::centred, 1);
                     }
                 }
             }
