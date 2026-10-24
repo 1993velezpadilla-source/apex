@@ -1706,23 +1706,40 @@ private:
         slider.textFromValueFunction = [this, offset] (double uiValue)
         {
             if (selected_ < 0) return juce::String (uiValue, 2);
-            // Signed Pro-Q-style range display is the inverse of the
-            // legacy APEX host range. Apply the same map to formatted text.
-            const float hostValue = static_cast<float> (
-                offset == DynamicBandOffset::Range
-                    ? 1.0 - uiValue : uiValue);
-            return param (dynamicParameterIndex (
-                selected_, offset))->getText (hostValue, 0);
+            auto* parameter = param (dynamicParameterIndex (
+                selected_, offset));
+            if (offset == DynamicBandOffset::Range)
+            {
+                // APEX ABI: HOST +dB = compression, HOST -dB = expansion.
+                // Display the OPPOSITE signed number familiar from the
+                // reference, without changing any saved automation value.
+                const auto displayDb = -parameter->fromNormalised (
+                    static_cast<float> (1.0 - uiValue));
+                return juce::String (displayDb >= 0.0f ? "+" : "")
+                    + juce::String (displayDb, 1) + " dB";
+            }
+            return parameter->getText (static_cast<float> (uiValue), 0);
         };
         slider.valueFromTextFunction = [this, offset] (
             const juce::String& text)
         {
             if (selected_ < 0) return 0.0;
-            const double hostValue = static_cast<double> (
-                param (dynamicParameterIndex (
-                    selected_, offset))->getValueForText (text));
-            return offset == DynamicBandOffset::Range
-                ? 1.0 - hostValue : hostValue;
+            auto* parameter = param (dynamicParameterIndex (
+                selected_, offset));
+            if (offset == DynamicBandOffset::Range)
+            {
+                // Parse the USER signed dB first, negate in UNITS, then
+                // normalize the legacy hosted range. Merely reversing the
+                // normalized result of getValueForText(text) cancels out
+                // with the onValueChange inversion and writes +7.5 rather
+                // than -7.5 for typed +7.5 dB expansion.
+                const float displayedDb = text.getFloatValue();
+                const float hostNormalised = parameter->toNormalised (
+                    -displayedDb);
+                return static_cast<double> (1.0f - hostNormalised);
+            }
+            return static_cast<double> (
+                parameter->getValueForText (text));
         };
         addAndMakeVisible (slider);
     }
