@@ -1179,6 +1179,10 @@ public:
     {
         return spectrumReady_ && spectrumShown_[0] && spectrumShown_[1];
     }
+    juce::Range<float> measuredSpectrumDomainXForTesting() const noexcept
+    {
+        return measuredSpectrumDomainX();
+    }
     // Never seeds artificial analyser data. Only latches a worker FFT frame.
     void refreshMeasuredSpectrumForTesting() { timerCallback(); }
     void setSpectrumFreezeForTesting (bool frozen) { setAnalyzerFrozen (frozen); }
@@ -2065,9 +2069,24 @@ private:
         return measured[static_cast<std::size_t> (nearest)];
     }
 
+    juce::Range<float> measuredSpectrumDomainX() const noexcept
+    {
+        // The EQ graph always spans 20 Hz–30 kHz, but at 48 kHz a REAL
+        // FFT contains audio only to Nyquist (~24 kHz). Never extend its
+        // filled shape to the unmeasured 30 kHz side of the canvas.
+        const double highestMeasuredHz = std::clamp (
+            static_cast<double> (spectrumBinHz_)
+                * (Analysis::SpectrumAnalyzerCore::kSpectrumBins - 1),
+            20.0, 30000.0);
+        return { hzToX (20.0), hzToX (highestMeasuredHz) };
+    }
     void drawSpectrum (juce::Graphics& g)
     {
         if (! spectrumReady_) return;
+        const auto measuredDomain = measuredSpectrumDomainX();
+        const float firstMeasuredX = measuredDomain.getStart();
+        const float lastMeasuredX = measuredDomain.getEnd();
+        if (lastMeasuredX <= firstMeasuredX) return;
         const int count = Analysis::SpectrumAnalyzerCore::kSpectrumBins;
         for (int mode = 0; mode < 2; ++mode)
         {
@@ -2076,13 +2095,20 @@ private:
             bool begun = false;
             const float bottom = static_cast<float> (graph_.getBottom() - 25);
             const int points = std::clamp (getWidth() / 2, 160, 950);
+            float firstDrawnX = firstMeasuredX, lastDrawnX = firstMeasuredX;
             for (int sample = 0; sample <= points; ++sample)
             {
-                const float x = getWidth() * static_cast<float> (sample)
-                                / static_cast<float> (points);
+                // Integrate PRE and POST only over the ACTUALLY measured
+                // frequency domain (and end at precisely the final FFT bin).
+                // The previous implementation sampled the full 30 kHz EQ
+                // canvas, then closed the spectrum fill at 30 kHz, creating
+                // a large fabricated triangular area above Nyquist.
+                const float x = firstMeasuredX
+                    + (lastMeasuredX - firstMeasuredX)
+                       * static_cast<float> (sample)
+                       / static_cast<float> (points);
                 const double hz = xToHz (x);
-                const float maxMeasuredHz = spectrumBinHz_ * (count - 1);
-                if (hz > maxMeasuredHz || hz < 20.0) continue;
+                if (hz < 20.0) continue;
                 // Log-frequency power integration of ACTUAL FFT bins.
                 // Raw PRE/POST values remain untouched and testable.
                 const float db = displayedSpectrumDb (mode, hz);
@@ -2090,15 +2116,21 @@ private:
                 const float y = bottom
                     - (std::clamp (db, -108.0f, -8.0f) + 108.0f)
                       * (graph_.getHeight() - 49) / 100.0f;
-                if (! begun) { spectrum.startNewSubPath (x, y); begun = true; }
+                if (! begun)
+                {
+                    spectrum.startNewSubPath (x, y);
+                    firstDrawnX = x;
+                    begun = true;
+                }
                 else spectrum.lineTo (x, y);
+                lastDrawnX = x;
             }
             if (! begun) continue;
             // A translucent filled measured spectrum beneath subtle strokes.
             // PRE stays muted gray, POST warm gold, both always distinguishable.
             juce::Path fill (spectrum);
-            fill.lineTo (static_cast<float> (getWidth()), bottom);
-            fill.lineTo (0.0f, bottom);
+            fill.lineTo (lastDrawnX, bottom);
+            fill.lineTo (firstDrawnX, bottom);
             fill.closeSubPath();
             const auto ink = mode == 0 ? juce::Colour (0xffa6a2af)
                                        : juce::Colour (0xffe5ba65);
@@ -2115,11 +2147,12 @@ private:
                 bool first = true;
                 for (int sample = 0; sample <= points; ++sample)
                 {
-                    const float x = getWidth() * static_cast<float> (sample)
-                                    / static_cast<float> (points);
+                    const float x = firstMeasuredX
+                        + (lastMeasuredX - firstMeasuredX)
+                           * static_cast<float> (sample)
+                           / static_cast<float> (points);
                     const double hz = xToHz (x);
-                    if (hz < 20.0 || hz > spectrumBinHz_ * (count - 1))
-                        continue;
+                    if (hz < 20.0) continue;
                     const float db = displayedSpectrumDb (mode, hz, true);
                     if (! std::isfinite (db)) continue;
                     const float y = bottom
