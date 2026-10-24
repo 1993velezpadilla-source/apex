@@ -226,7 +226,6 @@ public:
                     // inputs through n. Its peak is stored 32 samples back.
                     // Fixed latency reserves this full FIR lookahead so that
                     // the peak deque only reads completed measurements.
-                    const int64_t centre=index_ - kFirHalf;
                     int peakSlot=w-kFirHalf;
                     if (peakSlot < 0) peakSlot += count;
                     double reconstructionPeak=c.peak[static_cast<size_t>(peakSlot)];
@@ -239,7 +238,6 @@ public:
                         double sample=0.0;
                         for(int tap=0;tap<kFirTaps;++tap)
                         {
-                            const int64_t source=centre+tap-(kFirHalf-1);
                             // source=index_+tap-(2*kFirHalf-1).
                             // With fixed lookahead capacity, wrap at most once.
                             int slot=w+tap-(2*kFirHalf-1);
