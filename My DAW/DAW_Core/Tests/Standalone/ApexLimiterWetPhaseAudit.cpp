@@ -1,7 +1,7 @@
 // APEX Bubblegum Limiter — wet signal phase, magnitude and PDC audit.
 // Actual AUDIO oversampling and limiter Core, not a mocked detector.
 // No JUCE dependency. Diagnostic until we prove sample-accurate wet PDC.
-// C++17, 48 kHz, 8 kHz high-frequency anti-alias transition also covered.
+// C++17, 44.1/48/96 kHz, 0.5-20 kHz bands and antialias region covered.
 #include "../../Source/LimiterCore/ApexLimiterCore.h"
 #include "../../Source/LimiterCore/ApexLimiterOversampling.h"
 #include <algorithm>
@@ -14,11 +14,20 @@
 
 namespace {
 constexpr double pi=3.14159265358979323846;
-constexpr int rate=48000;
+constexpr std::array<int,3> rates{{44100,48000,96000}};
 constexpr int frames=8192;
 constexpr int analysisStart=4096;
 constexpr int period=frames-analysisStart;
-constexpr std::array<int,5> bins{{43,341,683,1365,1707}};
+constexpr std::array<int,5> frequencies{{500,4000,8000,16000,20000}};
+using Bins=std::array<int,5>;
+Bins chooseBins(int rate)
+{
+    Bins bins{};
+    for(size_t i=0;i<bins.size();++i)
+        bins[i]=static_cast<int>(std::lround(
+            static_cast<double>(frequencies[i])*period/rate));
+    return bins;
+}
 // Separate exact FFT bins avoid window leakage and let us measure multiple
 // frequencies using ONE simultaneous musical multi-tone per factor.
 using APEX::Limiter::Core;
@@ -29,7 +38,7 @@ void coreCallback(void* ctx,float* left,float* right,int count) noexcept
 {
     static_cast<Core*>(ctx)->process(left,right,count);
 }
-std::vector<float> reference()
+std::vector<float> reference(const Bins& bins)
 {
     std::vector<float> x(static_cast<size_t>(frames),0.0f);
     for(int n=0;n<frames;++n)
@@ -52,7 +61,7 @@ std::complex<double> component(const std::vector<float>& x,int bin)
     }
     return sum;
 }
-std::vector<float> render(int factor,int block,const std::vector<float>& input,
+std::vector<float> render(int rate,int factor,int block,const std::vector<float>& input,
                           int& coreLatency,double& firLatency)
 {
     Core core;
@@ -78,16 +87,19 @@ std::vector<float> render(int factor,int block,const std::vector<float>& input,
 }
 int main()
 {
-    const auto input=reference();
-    std::puts("APEX_WET_PHASE columns: factor,frequency_hz,reported_pdc,exact_nominal_delay,amplitude_ratio,phase_error_reported_rad,phase_error_exact_rad,measured_delay_modulo_period");
-    for(const int factor:{1,2,4,8,16,32})
+    std::puts("APEX_WET_PHASE columns: factor,frequency_hz,reported_pdc,exact_nominal_delay,amplitude_ratio,phase_error_reported_rad,phase_error_exact_rad,measured_delay_modulo_period,host_rate_hz");
+    for(const int rate:rates)
     {
+      const auto bins=chooseBins(rate);
+      const auto input=reference(bins);
+      for(const int factor:{1,2,4,8,16,32})
+      {
         int coreLatency=0;
         double firLatency=0;
-        const auto output=render(factor,73,input,coreLatency,firLatency);
+        const auto output=render(rate,factor,73,input,coreLatency,firLatency);
         int compareLatency=0;
         double compareFir=0;
-        const auto split=render(factor,1024,input,compareLatency,compareFir);
+        const auto split=render(rate,factor,1024,input,compareLatency,compareFir);
         double maximumDifference=0.0;
         for(int n=0;n<frames;++n)
             maximumDifference=std::max(maximumDifference,std::abs(
@@ -111,10 +123,10 @@ int main()
             const double deltaReport=std::remainder(phase+omega*reported,2*pi);
             const double deltaNominal=std::remainder(phase+omega*nominal,2*pi);
             const double measuredDelay=std::remainder(-phase,2*pi)/omega;
-            std::printf("APEX_WET_PHASE,%d,%.3f,%d,%.6f,%.8f,%+.8f,%+.8f,%.6f\n",
+            std::printf("APEX_WET_PHASE,%d,%.3f,%d,%.6f,%.8f,%+.8f,%+.8f,%.6f,%d\n",
                         factor,static_cast<double>(bin)*rate/period,
                         reported,nominal,magnitude,deltaReport,deltaNominal,
-                        measuredDelay);
+                        measuredDelay,rate);
             // A mathematically linear-phase FIR, a pure high-rate
             // integer delay, and a transparent non-limiting Core must have
             // an effectively ZERO phase error at 0.5–20 kHz.
@@ -126,12 +138,13 @@ int main()
                std::abs(deltaReport)>0.015)
             {
                 std::fprintf(stderr,
-                    "PDC / wet phase QUALITY GATE failed at %dx %.1fHz: reported %.6f rad, exact %.6f rad, gain %.6f\n",
-                    factor,static_cast<double>(bin)*rate/period,
+                    "PDC / wet phase QUALITY GATE failed at %dHz, %dx %.1fHz: reported %.6f rad, exact %.6f rad, gain %.6f\n",
+                    rate,factor,static_cast<double>(bin)*rate/period,
                     deltaReport,deltaNominal,magnitude);
                 return EXIT_FAILURE;
             }
         }
+      }
     }
-    std::puts("APEX_WET_PHASE strict 0.015-radian/0.015-gain regression PASS (not certified).");
+    std::puts("APEX_WET_PHASE 44.1/48/96k strict 0.015-radian/0.015-gain regression PASS (not certified).");
 }
