@@ -1,0 +1,35 @@
+name: APEX Limiter peak cache parity
+on:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - '.github/workflows/apex-limiter-peak-cache-audit.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - '.github/workflows/apex-limiter-peak-cache-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cache-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile reference and optimized DSP variants
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -fno-fast-math Tests/Standalone/ApexLimiterPeakCacheAudit.cpp -o /tmp/apex-cache
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_REFERENCE_PEAK_LOG Tests/Standalone/ApexLimiterPeakCacheAudit.cpp -o /tmp/apex-reference
+      - name: Require exact stereo audio parity with automated controls
+        run: |
+          /tmp/apex-cache > /tmp/apex-cache.csv
+          /tmp/apex-reference > /tmp/apex-reference.csv
+          cmp /tmp/apex-cache.csv /tmp/apex-reference.csv
+          wc -l /tmp/apex-cache.csv
+          echo APEX_PEAK_CACHE_PARITY_GREEN
