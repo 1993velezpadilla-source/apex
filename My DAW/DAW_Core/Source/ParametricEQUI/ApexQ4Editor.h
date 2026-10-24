@@ -453,6 +453,82 @@ public:
             }
         }
         panel_ = bestPanel;
+        // PASS 15: on roomy desktop the expanded Dynamic EQ is an integral
+        // part of ONE floating control surface (main dials left, dynamics
+        // right), not a remotely positioned, tall secondary sheet.
+        // Keep the graph and selected tooltip authoritative when choosing
+        // where the whole 804x180 card may sit.
+        if (isWideUnifiedDynamics())
+        {
+            constexpr int spacing = 8, dynamicsWidth = 346;
+            constexpr int unitedHeight = 180;
+            const int unitedWidth = controlWidth + spacing + dynamicsWidth;
+            const int leftMax = std::max (9, w - unitedWidth - 9);
+            const int topMin = graph_.getY() + 8;
+            const int topMax = std::max (topMin,
+                graph_.getBottom() - unitedHeight - 8);
+            const auto clipX = [=] (int x) {
+                return juce::jlimit (9, leftMax, x);
+            };
+            const auto clipY = [=] (int y) {
+                return juce::jlimit (topMin, topMax, y);
+            };
+            const std::array<int, 6> xs {{
+                clipX (juce::roundToInt (selectedPoint.x) - unitedWidth / 2),
+                clipX (juce::roundToInt (selectedPoint.x) - unitedWidth + 60),
+                clipX (juce::roundToInt (selectedPoint.x) - 60),
+                9, leftMax, clipX ((w - unitedWidth) / 2)
+            }};
+            const int desiredBelow = clipY (
+                juce::roundToInt (selectedPoint.y) + 54);
+            const int desiredAbove = clipY (
+                juce::roundToInt (selectedPoint.y) - unitedHeight - 54);
+            const std::array<int, 7> ys {{
+                desiredBelow, desiredAbove, topMin, topMax,
+                clipY (desiredBelow - 45), clipY (desiredAbove + 45),
+                clipY ((topMin + topMax) / 2)
+            }};
+            double leastCost = std::numeric_limits<double>::infinity();
+            juce::Rectangle<int> best { xs[0], ys[0],
+                                         unitedWidth, unitedHeight };
+            for (const int x : xs)
+            {
+                for (const int y : ys)
+                {
+                    const juce::Rectangle<int> candidate {
+                        x, y, unitedWidth, unitedHeight
+                    };
+                    double cost = std::min (
+                        std::abs (y - desiredBelow),
+                        std::abs (y - desiredAbove) + 30) * 2.0;
+                    cost += std::abs (candidate.getCentreX()
+                                - juce::roundToInt (selectedPoint.x)) * 0.13;
+                    for (int band = 0; band < kMaxBands; ++band)
+                    {
+                        if (! param (parameterIndex (band,
+                              BandParameterOffset::Enabled))->getBool())
+                            continue;
+                        const auto point = nodePoint (band);
+                        if (candidate.expanded (25).contains (point))
+                            cost += band == selected_ ? 3000000.0 : 900000.0;
+                    }
+                    const auto tag = selectedTagBounds (selected_);
+                    const auto crossing = candidate.expanded (3)
+                        .getIntersection (tag);
+                    if (! crossing.isEmpty())
+                        cost += crossing.getWidth()
+                              * crossing.getHeight() * 1200.0;
+                    if (cost < leastCost)
+                    {
+                        leastCost = cost;
+                        best = candidate;
+                    }
+                }
+            }
+            panel_ = { best.getX(), best.getY()
+                + (unitedHeight - controlHeight) / 2,
+                controlWidth, controlHeight };
+        }
         const int px = panel_.getX(), py = panel_.getY();
         if (narrow)
         {
@@ -1246,6 +1322,14 @@ public:
     {
         return dynamicPanel_;
     }
+    juce::Rectangle<int> unifiedDynamicBoundsForTesting() const noexcept
+    {
+        return unifiedDynamicBounds_;
+    }
+    bool unifiedDynamicVisibleForTesting() const noexcept
+    {
+        return isWideUnifiedDynamics() && ! unifiedDynamicBounds_.isEmpty();
+    }
     bool dynamicPanelVisibleForTesting() const noexcept
     {
         return dynamicExpanded_ && selected_ >= 0;
@@ -1823,15 +1907,35 @@ private:
         resized();
         repaint();
     }
+    bool isWideUnifiedDynamics() const noexcept
+    {
+        return dynamicExpanded_ && selected_ >= 0
+            && getWidth() >= 1280 && graph_.getHeight() >= 460;
+    }
     void layoutDynamicControls()
     {
         const bool visible = dynamicExpanded_ && selected_ >= 0;
+        unifiedDynamicBounds_ = {};
         setDynamicControlsVisible (visible);
         // Must run on both OPEN and CLOSE. Otherwise the mobile FREQ/GAIN/Q
         // controls remained hidden after closing the Dynamics overlay.
         const bool compactDynamics = hideBandHudForDynamics();
         setSelectedVisible (selected_ >= 0 && ! compactDynamics);
         if (! visible) return;
+        if (isWideUnifiedDynamics())
+        {
+            constexpr int dynamicsWidth = 346;
+            constexpr int unitedHeight = 180;
+            dynamicPanel_ = { panel_.getRight() + 8,
+                panel_.getCentreY() - unitedHeight / 2,
+                dynamicsWidth, unitedHeight };
+            unifiedDynamicBounds_ = {
+                panel_.getX(), dynamicPanel_.getY(),
+                panel_.getWidth() + 8 + dynamicsWidth, unitedHeight
+            };
+        }
+        else
+        {
         const int w = getWidth();
         // Ultra-wide/short host windows (e.g. 900x300) leave no vertical
         // escape from a band's value tag. Prefer a narrower, still touch-
@@ -1954,7 +2058,9 @@ private:
             }
         }
         dynamicPanel_ = best;
-        const int px = best.getX(), py = best.getY(), pw = best.getWidth();
+        } // legacy phone/tablet/short-height non-overlap placement
+        const int px = dynamicPanel_.getX(), py = dynamicPanel_.getY();
+        const int pw = dynamicPanel_.getWidth();
         dynClose_.setBounds (px + pw - 59, py + 5, 51, 31);
         // Compact variant exposes reset inside KEY/MORE menu instead of
         // squeezing a sub-44px button over the live threshold readout.
@@ -1965,7 +2071,7 @@ private:
         dynFilter_.setBounds (px + 176, py + 38, pw - 185, 35);
         const int rowTop = py + 81;
         const int rowHeight = std::max (24,
-            (best.getHeight() - 88) / 4);
+            (dynamicPanel_.getHeight() - 88) / 4);
         for (int row = 0; row < 4; ++row)
         {
             const int yy = rowTop + row * rowHeight;
@@ -3136,7 +3242,7 @@ private:
     Processor& processor_;
     EQ4Look look_;
     juce::Rectangle<int> graph_ {}, panel_ {}, dynamicPanel_ {},
-                         bootEyeBounds_ {};
+                         unifiedDynamicBounds_ {}, bootEyeBounds_ {};
     juce::TextButton undo_, redo_, compare_, copy_, preset_, phase_,
         analyzer_, displayRange_, globalBypass_, autoGain_;
     juce::TextButton bandPower_, shape_, slope_, placement_, dynamic_,
