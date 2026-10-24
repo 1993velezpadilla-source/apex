@@ -326,6 +326,12 @@ This happened because the existing readout deliberately used
   to zero. Windows native-host tests additionally exercise real
   `AudioBuffer` processing and read the GUI's atomically stored
   signed history, not mock meter data.
+- Compiled production JUCE editor is also captured in **Upward mode**
+  with actual processed 48 kHz audio into
+  `apex_precision_c_real_upward_1080x740.png`. An adversarial pixel
+  assertion requires real GREEN samples inside the gain-history plot.
+  Image artifact availability and visual acceptance remain unverified
+  until Windows CI completes.
 
 **Remaining limit:** This is the gain computer's single summary sample at
 the end of each audio block; a signed peak action timeline is not a
