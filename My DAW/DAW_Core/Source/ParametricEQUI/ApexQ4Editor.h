@@ -1824,13 +1824,27 @@ private:
         const int middleX = constrainX ((minX + maxX) / 2);
         const int middleY = constrainY ((minY + maxY) / 2);
         const auto node = nodePoint (selected_);
-        const std::array<int, 3> candidateX {{ minX, maxX, middleX }};
+        // A single contextual stack is easier to scan than two detached
+        // overlays. On desktop prefer attaching the dynamics extension
+        // directly BELOW (or above) the selected band's GAIN/Q strip,
+        // when actual nodes and value tags leave enough free room.
+        // The existing collision critic always overrules this preference.
+        const bool preferAttached = w >= 900
+            && graph_.getHeight() >= 460 && ! compactDynamics;
+        const int attachedLeft = constrainX (panel_.getX());
+        const int attachedRight = constrainX (
+            panel_.getRight() - panelWidth);
+        const int attachBelow = constrainY (panel_.getBottom() + 8);
+        const int attachAbove = constrainY (
+            panel_.getY() - panelHeight - 8);
+        const std::array<int, 5> candidateX {{
+            minX, maxX, middleX, attachedLeft, attachedRight
+        }};
         const std::array<int, 9> candidateY {{
             minY, maxY, middleY,
             constrainY (minY + (maxY - minY) / 4),
             constrainY (minY + (maxY - minY) * 3 / 4),
-            constrainY (panel_.getY() - panelHeight - 8),
-            constrainY (panel_.getBottom() + 8),
+            attachAbove, attachBelow,
             constrainY (node.y - panelHeight - 32),
             constrainY (node.y + 32)
         }};
@@ -1871,9 +1885,25 @@ private:
                     if (candidate.expanded (25).contains (point))
                         cost += band == selected_ ? 3000000.0 : 650000.0;
                 }
-                // Prefer a familiar corner when several candidates clear
-                // all targets. This weak aesthetic score never outranks a
-                // single obscured slider or selected-band control.
+                if (preferAttached)
+                {
+                    // Source-manual workflow: dynamic parameters expand
+                    // from the same floating band strip, not a remote card.
+                    // A small 8px gutter passes the expanded(3px) critic.
+                    const double leftDistance =
+                        std::abs (x - attachedLeft);
+                    const double rightDistance =
+                        std::abs (x - attachedRight);
+                    const double belowDistance =
+                        std::abs (y - attachBelow);
+                    const double aboveDistance =
+                        std::abs (y - attachAbove) + 35.0;
+                    cost += 12.0 * (
+                        std::min (leftDistance, rightDistance)
+                        + std::min (belowDistance, aboveDistance));
+                }
+                // On phones and cramped landscapes keep the original
+                // non-occluding corner preference.
                 cost += (maxY - y) * 0.12 + (x - minX) * 0.05;
                 if (cost < lowestPenalty)
                 {
