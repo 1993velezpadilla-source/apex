@@ -1718,10 +1718,10 @@ private:
         const float target = std::clamp (gainRingInitialDb_ - deltaDb,
                                          -24.0f, 24.0f);
         range->setValueNotifyingHost (range->toNormalised (target));
+        auto* enabled = param (dynamicParameterIndex (
+            gainRingGestureBand_, DynamicBandOffset::Enable));
         if (std::abs (range->getUnitsValue()) > 0.001f)
         {
-            auto* enabled = param (dynamicParameterIndex (
-                gainRingGestureBand_, DynamicBandOffset::Enable));
             if (! enabled->getBool())
             {
                 // Only newly enabled dynamics receives the band-limited key
@@ -1732,6 +1732,14 @@ private:
                 enabled->setValueNotifyingHost (1.0f);
                 enabled->endChangeGesture();
             }
+        }
+        else if (enabled->getBool())
+        {
+            // Manual zero-ring semantics: range 0 restores a static band,
+            // not an armed but inaudible dynamic processor.
+            enabled->beginChangeGesture();
+            enabled->setValueNotifyingHost (0.0f);
+            enabled->endChangeGesture();
         }
         sync();
         repaint();
