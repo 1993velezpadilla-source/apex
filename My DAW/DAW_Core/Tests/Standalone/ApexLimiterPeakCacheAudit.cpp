@@ -25,7 +25,7 @@ int main()
         AudioRateConverter converter;
         converter.prepare(factor,128,57);
         Core core;
-        core.prepare(rate*factor,true);
+        core.prepare(rate*factor,true,true);
         std::vector<float> left(length),right(length);
         for(int n=0;n<length;++n)
         {
