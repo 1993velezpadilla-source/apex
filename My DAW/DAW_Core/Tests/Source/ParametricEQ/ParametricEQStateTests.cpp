@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -51,7 +52,8 @@ private:
         beginTest ("AUTO threshold is audible on real program, off is"
                    " legacy-neutral, state and automation remain canonical");
         auto render = [] (bool useAuto) {
-            Processor processor;
+            auto processorStorage = std::make_unique<Processor>();
+            auto& processor = *processorStorage;
             const int band = 0;
             setUnits (processor, parameterIndex (
                 band, BandParameterOffset::Enabled), 1.0f);
@@ -102,7 +104,8 @@ private:
             "default manual 0 dB threshold has no false compression");
         expect (automatic.first < -.5,
             "real detector-driven AUTO threshold reacts to signal changes");
-        Processor restored;
+        auto restoredStorage = std::make_unique<Processor>();
+        auto& restored = *restoredStorage;
         restored.setStateInformation (automatic.second.getData(),
             static_cast<int> (automatic.second.getSize()));
         expect (restored.getParametricEQParameter (
