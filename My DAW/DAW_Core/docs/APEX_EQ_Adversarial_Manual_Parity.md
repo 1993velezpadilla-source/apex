@@ -416,3 +416,44 @@ The Dynamic EQ advanced panel gains a genuine RESET button when >=330px
 wide, with a popup-menu reset path for narrow touch layouts.
 Screenshots must be inspected for actual hitbox sizes and occlusion
 **after** all four HEAD-specific CI workflows complete.
+
+
+### PASS 14-C — independent adversarial CI follow-up and integrated workflow
+
+**First full PASS 14 CI on HEAD `cd42f744` was RED**:
+repository checks GREEN but focused JUCE compile, Windows build,
+Debug EQ and Release EQ all failed from the same MSVC `C3535` at
+`ApexQ4Editor.h:1965`: `std::initializer_list` cannot infer a
+common type from `&freq_`, `&gain_` (now a derived
+`ApexQ4DynamicGainDial`), and `&q_`. The precise compile correction
+uses `std::array<juce::Slider*, 3>` with the GAIN dial explicitly
+cast to its parent Slider type. **Focused compile** on corrective
+commit `aec273fa` and `9e7a7a88` was GREEN. Superseded full
+test jobs were cancelled by later pushes (not claimed green).
+
+A second independent source audit caught inverted-range conversion
+incorrectly omitted for the advanced RANGE **numeric text input**.
+That is now mapped in both directions: UI-text <-> UI normalized
+value <-> original hosted normalized value. Typed +7.5 dB expansion
+must produce host -7.5 dB while preserving frozen plugin state.
+
+Another GUI-only pass adds **attached-stack placement** on roomy desktop
+hosts: the advanced dynamic card is preferentially immediately below
+(or above) the selected band's main FREQ/GAIN/Q/Gain-Range card.
+The established anti-overlap solver still takes priority over this
+visual preference, so graph nodes, SOLO, numeric boxes and the
+selected value tag remain unobscured. Phones retain their original
+safe responsive mode. This improves continuity but is **NOT** yet
+the manual's exact single curved widget.
+
+Interaction completeness: Alt-wheel refuses to create dynamics on cut
+and non-gain bands, and disables Dynamics at zero range. The selected
+node's outer arc now matches the signed red-compression/magenta-expansion
+GAIN annulus. **Clear Dynamics** now applies to *all selected linked
+bands* as a single undoable host-automated operation, and regression
+tests assert both reset and restore correctly.
+
+**Audit state:** latest head needs NEW four-workflow Windows CI and
+actual unmodified native JUCE screenshots; do NOT declare PASS 14 green
+or visual 1:1 prematurely. APEX saved session ABI and audio DSP remain
+unchanged; PR #159 DRAFT / MAIN untouched.
