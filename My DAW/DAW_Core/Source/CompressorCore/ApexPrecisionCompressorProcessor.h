@@ -280,6 +280,7 @@ public:
         auto* right=channels>1 ? main.getWritePointer(1) : nullptr;
         const int samples=main.getNumSamples();
         constexpr double kScale=0.70710678118654752440;
+        double inputStereoPeak=0.0, outputStereoPeak=0.0;
         if (midSide)
         {
             // Energy-normalised orthogonal transform (L/R -> Mid/Side).
@@ -289,6 +290,8 @@ public:
             for(int i=0;i<samples;++i)
             {
                 const double l=left[i], r=right[i];
+                inputStereoPeak=std::max(inputStereoPeak,
+                    std::max(std::abs(l),std::abs(r)));
                 left[i]=static_cast<float>((l+r)*kScale);
                 right[i]=static_cast<float>((l-r)*kScale);
             }
@@ -328,14 +331,28 @@ public:
             for(int i=0;i<samples;++i)
             {
                 const double m=left[i], side=right[i];
-                left[i]=static_cast<float>((m+side)*kScale);
-                right[i]=static_cast<float>((m-side)*kScale);
+                const auto l=static_cast<float>((m+side)*kScale);
+                const auto r=static_cast<float>((m-side)*kScale);
+                left[i]=l;
+                right[i]=r;
+                outputStereoPeak=std::max(outputStereoPeak,
+                    std::max(std::abs(static_cast<double>(l)),
+                             std::abs(static_cast<double>(r))));
             }
         }
-        meterInput_.store(static_cast<float>(engine_.getInputPeakDb()),
-                          std::memory_order_relaxed);
-        meterOutput_.store(static_cast<float>(engine_.getOutputPeakDb()),
-                           std::memory_order_relaxed);
+        // Meter the actual original/output L/R bus in M/S mode, NOT the
+        // encoded Mid/Side domain. Otherwise strongly correlated stereo
+        // material can display a 3dB false peak in the host GUI.
+        const auto peakDb=[](double linear) noexcept {
+            return static_cast<float>(20.0*std::log10(
+                std::max(linear,1.e-6)));
+        };
+        meterInput_.store(midSide ? peakDb(inputStereoPeak)
+            : static_cast<float>(engine_.getInputPeakDb()),
+            std::memory_order_relaxed);
+        meterOutput_.store(midSide ? peakDb(outputStereoPeak)
+            : static_cast<float>(engine_.getOutputPeakDb()),
+            std::memory_order_relaxed);
         meterGR_.store(static_cast<float>(engine_.getGainReductionDb()),
                        std::memory_order_relaxed);
         meterSignedAction_.store(static_cast<float>(engine_.getSignedGainActionDb()),
