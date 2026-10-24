@@ -248,6 +248,30 @@ A visual footer displays **STOP TO APPLY LATENCY CHANGE** when pending.
    screenshot/interaction tests on this V12 commit before any GREEN claim.
    Hardware ASIO 48k/128, CPU and blind listening remain outstanding.
 
+## Adversarial critic V13 — transfer history is no longer a generic illusion
+
+The live history input/output/GR traces already originate from DSP. However,
+the OVERLAID static transfer curve previously applied only a generic
+downward threshold/ratio/knee equation even when `Upward`, broadband `TTM`,
+`Vari-Mu` or `Vocal` were selected. That contradicted the current gain
+computer: a highly misleading GUI for a reference-driven dynamics processor.
+
+- Extracted the DSP's **same** static transfer law into the original, pure,
+  JUCE-free `precisionStaticReductionDb` function.
+- Actual compressor gain computer and the GUI overlay both call that shared
+  function. No duplicate synthetic approximation in the GUI.
+- Added portable adversarial tests for Clean transfer, Upward negative
+  reduction, two-way broadband TTM, Vocal ratio floor, Vari-Mu curve,
+  Range limit and non-finite input.
+- Only the **static** transfer curve is depicted. Envelope timing,
+  program-dependent gain tracking, detector EQ, wet/dry, saturation and
+  makeup alter real audio beyond this idealised static drawing.
+  Do not claim full style-calibrated 1:1 accuracy from this improvement.
+
+**Release HOLD:** fresh portable sanitizers, Windows tests, authentic
+compiled-editor screenshot and human visual comparison must pass at the
+latest head. `main` remains protected.
+
 ## Engineering gates before merge to main
 
 1. Windows Debug + Release builds, host unit tests and portable C++17 sanitizer tests GREEN.
