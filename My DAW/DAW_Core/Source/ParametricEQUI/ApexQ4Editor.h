@@ -1484,8 +1484,10 @@ private:
                                              start, end, true);
                     g.setColour (juce::Colour (0xff77717f).withAlpha (0.45f));
                     g.strokePath (rangeTrack, juce::PathStrokeType (3.7f));
+                    // Visual UI sign follows the manual; preserved host
+                    // engine still clips the original ±24 dB parameter.
                     const float rangeRatio = std::clamp (
-                        std::abs (gainDial->rangeDb) / 30.0f, 0.0f, 1.0f);
+                        std::abs (gainDial->rangeDb) / 24.0f, 0.0f, 1.0f);
                     if (gainDial->rangeEnabled && rangeRatio > 0.001f)
                     {
                         rangeStroke.addCentredArc (cx, cy, outer, outer, 0.0f,
@@ -1498,7 +1500,7 @@ private:
                             && std::abs (gainDial->measuredDb) > 0.05f)
                         {
                             const float meteredRatio = std::clamp (
-                                std::abs (gainDial->measuredDb) / 30.0f,
+                                std::abs (gainDial->measuredDb) / 24.0f,
                                 0.0f, rangeRatio);
                             measuredStroke.addCentredArc (
                                 cx, cy, outer - 3.0f, outer - 3.0f, 0.0f,
@@ -1668,7 +1670,10 @@ private:
             {
                 param (dynamicParameterIndex (
                     selected_, offset))->setValueNotifyingHost (
-                        static_cast<float> (slider.getValue()));
+                        static_cast<float> (
+                            offset == DynamicBandOffset::Range
+                                ? 1.0 - slider.getValue()
+                                : slider.getValue()));
                 if (! slider.isMouseButtonDown())
                     commitHistory();
                 repaint();
@@ -1706,8 +1711,12 @@ private:
         if (gainRingGestureBand_ < 0) return;
         auto* range = param (dynamicParameterIndex (
             gainRingGestureBand_, DynamicBandOffset::Range));
-        const float target = std::clamp (gainRingInitialDb_ + deltaDb,
-                                         -30.0f, 30.0f);
+        // The original APEX hosted ABI uses POSITIVE range for downward
+        // compression. The Pro-Q-style USER ring is negative for downward
+        // compression, positive for upward expansion. Reverse only this UI
+        // gesture: preserve every stored VST3 automation value/session.
+        const float target = std::clamp (gainRingInitialDb_ - deltaDb,
+                                         -24.0f, 24.0f);
         range->setValueNotifyingHost (range->toNormalised (target));
         if (std::abs (range->getUnitsValue()) > 0.001f)
         {
@@ -2129,7 +2138,7 @@ private:
                 || shapeId == static_cast<int> (FilterShape::HighShelf)
                 || shapeId == static_cast<int> (FilterShape::FlatTilt));
             gain_.rangeEnabled = isDynamic;
-            gain_.rangeDb = param (dynamicParameterIndex (
+            gain_.rangeDb = -param (dynamicParameterIndex (
                 selected_, DynamicBandOffset::Range))->getUnitsValue();
             gain_.meterValid = dynamicMeterValid_
                 && (lastDynamicActiveMask_ & (1u << selected_)) != 0;
@@ -2152,10 +2161,15 @@ private:
                 DynamicBandOffset::Attack, DynamicBandOffset::Release
             };
             for (int i = 0; i < 4; ++i)
+            {
+                const auto host = param (dynamicParameterIndex (
+                    selected_, offsets[i]))->getValue();
+                // UI representation of signed range reverses the old ABI
+                // direction; the underlying session/automation is unchanged.
                 dynamicSliders_[static_cast<std::size_t> (i)].setValue (
-                    param (dynamicParameterIndex (
-                        selected_, offsets[i]))->getValue(),
+                    offsets[i] == DynamicBandOffset::Range ? 1.0f - host : host,
                     juce::dontSendNotification);
+            }
         }
         syncing_ = false;
     }
