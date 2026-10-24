@@ -144,6 +144,9 @@ public:
             c.maximum.clear();
             c.dcX = c.dcY = c.reduction = 0.0;
             c.ditherError=0.0;
+            c.cachedPeak=-1.0;
+            c.cachedCeiling=-1.0;
+            c.cachedRequiredDb=0.0;
             c.rng = (&c == &channel_[0]) ? 0x12345678u : 0x91ABCDEFu;
         }
         index_ = 0;
@@ -269,15 +272,34 @@ public:
                         c.peak[static_cast<size_t>(keySlot)], outputIndex);
                 }
                 const double future = c.maximum.maximum();
-                const double over = future / std::max(1.0e-12,ceiling);
-#if defined(APEX_LIMITER_REFERENCE_DB_MATH)
-                required[ch] = over > 1.0 ? 20.0*std::log10(over) : 0.0;
-#else
-                // Exact analytic dB conversion. log(x) avoids a log10
-                // implementation call at *every* oversampled peak.
-                static constexpr double kNeperToDb = 8.68588963806503655;
-                required[ch] = over > 1.0 ? kNeperToDb*std::log(over) : 0.0;
+                // The SlidingPeak queue returns the identical maximum
+                // across many oversampled frames. Reuse only an EXACT peak
+                // and ceiling match: no approximation, no tolerance and no
+                // change in the one-times legacy processing path.
+                // A new user ceiling automatically invalidates this cache.
+#if !defined(APEX_LIMITER_REFERENCE_PEAK_LOG)
+                if(useHighRateGainTable_ && c.cachedPeak==future
+                   && c.cachedCeiling==ceiling)
+                {
+                    required[ch]=c.cachedRequiredDb;
+                }
+                else
 #endif
+                {
+                    const double over=future/std::max(1.0e-12,ceiling);
+#if defined(APEX_LIMITER_REFERENCE_DB_MATH)
+                    required[ch]=over>1.0 ? 20.0*std::log10(over) : 0.0;
+#else
+                    static constexpr double kNeperToDb=8.68588963806503655;
+                    required[ch]=over>1.0 ? kNeperToDb*std::log(over) : 0.0;
+#endif
+                    if(useHighRateGainTable_)
+                    {
+                        c.cachedPeak=future;
+                        c.cachedCeiling=ceiling;
+                        c.cachedRequiredDb=required[ch];
+                    }
+                }
                 if (outputIndex >= 0)
                 {
                     int read=w-delaySamples_;
@@ -416,6 +438,7 @@ private:
         std::vector<float> input, dry, peak;
         SlidingPeak maximum;
         double dcX=0, dcY=0, reduction=0, ditherError=0;
+        double cachedPeak=-1.0, cachedCeiling=-1.0, cachedRequiredDb=0.0;
         uint32_t rng=0x12345678u;
     };
     std::array<Channel,2> channel_;
