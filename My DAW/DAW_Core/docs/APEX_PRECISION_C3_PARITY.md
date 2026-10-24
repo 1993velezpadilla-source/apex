@@ -333,6 +333,20 @@ This happened because the existing readout deliberately used
   Image artifact availability and visual acceptance remain unverified
   until Windows CI completes.
 
+**V15 Windows adversarial failure / corrected at next head:**
+The first V15 attempt was **7/9 GREEN, 2/9 RED** (Windows
+application and Windows compressor integration). The compiled JUCE editor
+could render authentic signed gain; however the V15 curve used
+`actionZero = 125` in the scope, which placed substantial negative
+Upward boost near or above the scope's upper boundary. The screenshot
+test scanning the visible history region correctly rejected the missing
+GREEN curve. Corrected the signed trace neutral line to
+`actionZero = 185`: -24 dB upward gain now lands at y=122.6,
+and +36 dB attenuation at y=278.6, both inside the real graph
+(y=53..304). Retain the strict GREEN-pixel Windows image gate; do not
+water it down. Recheck real Windows Debug/Release CI against the new
+commit before declaring V15 GREEN.
+
 **Remaining limit:** This is the gain computer's single summary sample at
 the end of each audio block; a signed peak action timeline is not a
 sample-accurate multichannel GR history. Compressor styles, waveform
