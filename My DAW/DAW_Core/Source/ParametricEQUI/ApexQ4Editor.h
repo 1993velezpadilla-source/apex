@@ -3023,6 +3023,9 @@ private:
         menu.addItem (9, "Open dynamic EQ controls...");
         menu.addItem (12, "Dynamic trigger / sidechain...");
         menu.addItem (13, "Clear selected band's dynamics");
+        menu.addItem (14, "AUTO dynamic threshold (signal-adaptive)",
+                      true, param (dynamicAutoThresholdParameterIndex (
+                          selected_))->getBool());
         menu.addSectionHeader ("KEYBOARD — WHEN CANVAS HAS FOCUS");
         menu.addItem (31, "Arrow keys: freq (semi) / gain (dB)", false);
         menu.addItem (32, "Shift+arrows: fine adjustments", false);
@@ -3069,6 +3072,12 @@ private:
                     e->showDynamicsTriggerMenu();
                 else if (id == 13)
                     e->clearSelectedDynamics();
+                else if (id == 14)
+                {
+                    e->toggleParameter (dynamicAutoThresholdParameterIndex (
+                        band));
+                    e->commitHistory();
+                }
                 else if (id == 10)
                     e->setTouchMultiSelectMode (! e->touchMultiSelectMode_);
                 else if (id == 11)
