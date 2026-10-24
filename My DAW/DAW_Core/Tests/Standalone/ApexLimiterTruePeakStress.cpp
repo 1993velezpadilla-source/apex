@@ -70,7 +70,7 @@ std::vector<float> render(int rate,int factor,const std::vector<float>& source,
     p.ditherMode=0;
     core.setSettings(p);
     AudioRateConverter converter;
-    converter.prepare(factor,128,factor>1?25:0);
+    converter.prepare(factor,128,factor>1?57:0);
     auto output=source;
     reductionObserved=false;
     // Deliberately odd-sized callbacks: the converter must carry its
