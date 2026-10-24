@@ -321,6 +321,75 @@ public:
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
+        beginTest("Real Precision C slot and chain parallel dry/wet align at 5ms and 20ms");
+        for(const double sampleRate:{48000.0,96000.0})
+        {
+            DAW::PluginChainCore chain;
+            chain.prepare(sampleRate,128);
+            auto precision=std::make_unique<APEX::PrecisionC3::Processor>();
+            auto* hosted=precision.get();
+            auto& look=hosted->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+            look.setValue(look.toNormalised(3.0f));
+            hosted->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.f);
+            expectEquals(chain.appendPluginInstanceForTesting(std::move(precision)),0);
+            chain.setSlotMix(0,.5f);
+            chain.setChainOutputMix(.5f);
+            // The ideal parallel gain is the same regardless of plugin PDC:
+            // (dry + wet*.70710678) at the SAME delayed sample.
+            constexpr double parallelGain=1.0+0.7071067811865475244;
+            const auto impulse=[&](int delay)
+            {
+                chain.reset();
+                const double sample=.25;
+                float found=0.f;
+                const int end=128+delay+512;
+                for(int base=0;base<end;base+=128)
+                {
+                    juce::AudioBuffer<float> b(2,128);
+                    b.clear();
+                    if(base==128)
+                    {
+                        b.setSample(0,0,(float)sample);
+                        b.setSample(1,0,(float)-sample);
+                    }
+                    chain.processBlock(b,128);
+                    for(int i=0;i<128 && base+i<end;++i)
+                    {
+                        const int at=base+i;
+                        const double want=at==128+delay
+                            ?sample*parallelGain:0.0;
+                        expectWithinAbsoluteError((double)b.getSample(0,i),
+                                                   want,6.e-5);
+                        expectWithinAbsoluteError((double)b.getSample(1,i),
+                                                   -want,6.e-5);
+                        if(at==128+delay)found=b.getSample(0,i);
+                    }
+                }
+                return found;
+            };
+            const int first=(int)std::lround(sampleRate*.005);
+            expectEquals(chain.totalLatencySamples(),first);
+            const float firstAmplitude=impulse(first);
+            look.setValue(look.toNormalised(5.f)); // 20 ms
+            hosted->prepareToPlay(sampleRate,128);  // control-thread prepare
+            const int second=(int)std::lround(sampleRate*.020);
+            expectEquals(chain.totalLatencySamples(),second);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread(),
+                   "real C3 latency change must restage BOTH slot/chain dry PDC");
+            const float secondAmplitude=impulse(second);
+            expectWithinAbsoluteError((double)firstAmplitude,
+                                      (double)secondAmplitude,6.e-5,
+                "changing C3 lookahead must not create dry/wet comb filtering");
+            look.setValue(0.f);
+            hosted->prepareToPlay(sampleRate,128);
+            expectEquals(chain.totalLatencySamples(),0);
+            expect(chain.refreshResearchHostDryPdcForChangedLatencyOnControlThread());
+            const float zeroAmplitude=impulse(0);
+            expectWithinAbsoluteError((double)zeroAmplitude,
+                                      (double)firstAmplitude,6.e-5,
+                "Precision C 0ms monitoring should return to aligned dry/wet");
+        }
+
         beginTest("Live JUCE hosted latency 16->32 aligns slot and chain Dry/Wet");
         for(const double sampleRate:{44100.0,48000.0}) {
             DAW::PluginChainCore chain;
