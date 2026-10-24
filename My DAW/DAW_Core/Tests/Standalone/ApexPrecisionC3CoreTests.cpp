@@ -613,6 +613,32 @@ int main()
         d=gate.evaluate({0,true},false,true,0);
         assert(!d.pendingStop && d.effective==Mode({0,true}));
     }
+    // V13: static GUI transfer shape and compressor gain computer share
+    // one deterministic function. Upward/TTM/Vocal must not render the
+    // generic downward-only curve.
+    {
+        using APEX::PrecisionC3::precisionStaticReductionDb;
+        Parameters p;
+        p.thresholdDb=-18.0;p.ratio=4.0;p.kneeDb=0.0;
+        p.style=0;
+        assert(std::abs(precisionStaticReductionDb(-10.0,-18.0,p)-6.0)<1.e-9);
+        assert(precisionStaticReductionDb(-40.0,-18.0,p)==0.0);
+        p.style=4; // Upward: quiet source is amplified
+        assert(precisionStaticReductionDb(-40.0,-18.0,p)<-16.0);
+        assert(precisionStaticReductionDb(-10.0,-18.0,p)==0.0);
+        p.style=5; // Approximate broadband TTM hybrid
+        assert(precisionStaticReductionDb(-40.0,-18.0,p)<-5.0);
+        assert(precisionStaticReductionDb(-10.0,-18.0,p)>5.0);
+        p.style=10;p.ratio=1.1; // Vocal forces ratio>=3
+        assert(precisionStaticReductionDb(-10.0,-18.0,p)>5.0);
+        p.style=7;p.ratio=4;
+        const auto reduced=precisionStaticReductionDb(-10.0,-18.0,p);
+        assert(reduced>0.0 && reduced<6.0);
+        p.style=0;p.rangeDb=2;
+        assert(std::abs(precisionStaticReductionDb(-1.0,-18.0,p)-2.0)<1.e-9);
+        assert(precisionStaticReductionDb(
+            std::numeric_limits<double>::quiet_NaN(),-18.0,p)==0.0);
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
