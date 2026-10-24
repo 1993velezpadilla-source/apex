@@ -112,9 +112,23 @@ private:
             enableBell (*processor, 1, 5200.0f, -5.0f, 3.0f);
             auto editor = std::make_unique<ApexQ4Editor> (*processor);
             editor->setSize (size.x, size.y);
+            juce::Colour firstBandInk;
             for (int selected = 0; selected < 2; ++selected)
             {
                 editor->selectBandForTesting (selected);
+                // PASS 13: controls now follow the actual selected band
+                // color, not the gold aggregate transfer curve. On screen
+                // this removes the ambiguity between band gain dials and
+                // the overall EQ response during live FFT monitoring.
+                const auto dialInk = editor->bandDialColourForTesting (0);
+                expect (dialInk == editor->bandDialColourForTesting (1)
+                        && dialInk == editor->bandDialColourForTesting (2),
+                    "FREQ / GAIN / Q accents match the selected filter node");
+                expect (dialInk != editor->eqTransferColourForTesting(),
+                    "individual EQ band is visually distinct from overall EQ");
+                if (selected == 0) firstBandInk = dialInk;
+                else expect (dialInk != firstBandInk,
+                    "changing the selected band must change all knob accents");
                 const auto node = editor->nodeHitAreaForTesting (selected)
                     .getCentre();
                 const auto panel = editor->panelBoundsForTesting();
