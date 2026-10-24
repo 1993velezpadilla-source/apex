@@ -64,7 +64,9 @@ std::vector<float> render(int rate,int factor,const std::vector<float>& source,
     Settings p;
     p.gainDb=12.0;
     p.ceilingDb=ceilingDb-APEX::Limiter::audioTruePeakReserveDb(
-        factor,requestTruePeak);
+        factor,requestTruePeak)
+        -APEX::Limiter::native1xTruePeakReserveDb(
+            enableNative1xDetector?3:0,requestTruePeak);
     p.attackMs=0.01;
     p.releaseMs=55.0;
     p.lookaheadMs=5.0;
@@ -172,7 +174,8 @@ int main()
                         rate,profile,offPeak.reconstructedPeak,
                         onPeak.reconstructedPeak,overshoot,maxDelta,reducedOn?1:0);
             if(!reducedOff||!reducedOn||!std::isfinite(overshoot)||
-               !std::isfinite(maxDelta)||onPeak.samplePeak>ceiling+1.0e-6)
+               !std::isfinite(maxDelta)||onPeak.samplePeak>ceiling+1.0e-6 ||
+               overshoot>0.01)
             {
                 std::fprintf(stderr,"Native 1x TP detector regression at %dHz profile %d\n",
                              rate,profile);
