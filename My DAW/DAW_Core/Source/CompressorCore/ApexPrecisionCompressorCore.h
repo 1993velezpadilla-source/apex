@@ -102,6 +102,38 @@ static constexpr std::array<const char*, 14> kStyleNames {{
     "Bus", "Pumping"
 }};
 
+// Pure static gain-computer curve. DSP and the GUI's transfer overlay
+// MUST use this same function. Envelope timing, Auto Threshold tracking and
+// makeup gain are time-varying and intentionally not represented here.
+inline double precisionStaticReductionDb(double levelDb, double threshold,
+                                         const Parameters& parameters) noexcept
+{
+    if (!std::isfinite(levelDb) || !std::isfinite(threshold)) return 0.0;
+    const int style=std::clamp(parameters.style,0,13);
+    double ratio=std::clamp(parameters.ratio,1.0,40.0);
+    if(style==10) ratio=std::max(ratio,3.0); // Vocal assist
+    if(style==7) ratio=1.0+(ratio-1.0)
+        *(0.5+0.5*std::tanh((levelDb-threshold)*0.08));
+    const double amount=1.0-1.0/ratio;
+    double knee=std::clamp(parameters.kneeDb,0.0,72.0);
+    if(style==9 || style==6) knee=std::max(knee,24.0);
+    const double range=std::clamp(parameters.rangeDb,0.0,60.0);
+    const double above=levelDb-threshold;
+    const auto transfer=[amount,knee](double over) noexcept
+    {
+        if(knee<=0.0) return amount*std::max(0.0,over);
+        if(over<=-knee*0.5) return 0.0;
+        if(over>=knee*0.5) return amount*over;
+        const double x=over+knee*0.5;
+        return amount*x*x/(2.0*knee);
+    };
+    if(style==4) return -std::min(range,transfer(-above));
+    if(style==5) return std::clamp(transfer(above)-0.35*transfer(-above),
+                                  -range,range);
+    return std::min(range,transfer(above));
+}
+
+
 class Core final
 {
 public:
@@ -509,29 +541,7 @@ private:
     }
     double desiredReduction (double levelDb, double threshold) const noexcept
     {
-        double ratio = parameters_.ratio;
-        if (parameters_.style == 10) ratio = std::max(ratio, 3.0); // vocal assist
-        if (parameters_.style == 7) ratio = 1.0 + (ratio - 1.0)
-            * (0.5 + 0.5 * std::tanh((levelDb - threshold) * 0.08));
-        const double amount = 1.0 - 1.0 / ratio;
-        double knee = parameters_.kneeDb;
-        if (parameters_.style == 9 || parameters_.style == 6)
-            knee = std::max(knee, 24.0);
-        const double above = levelDb - threshold;
-        auto transfer = [amount, knee](double over) noexcept
-        {
-            if (knee <= 0.0) return amount * std::max(0.0, over);
-            if (over <= -knee * 0.5) return 0.0;
-            if (over >= knee * 0.5) return amount * over;
-            const double x = over + knee * 0.5;
-            return amount * x * x / (2.0 * knee);
-        };
-        if (parameters_.style == 4) // upward: boost quiet material, don't attenuate loud
-            return -std::min(parameters_.rangeDb, transfer(-above));
-        if (parameters_.style == 5) // broadband upward/downward hybrid; NOT FabFilter multiband TTM
-            return std::clamp(transfer(above) - 0.35 * transfer(-above),
-                              -parameters_.rangeDb, parameters_.rangeDb);
-        return std::min(parameters_.rangeDb, transfer(above));
+        return precisionStaticReductionDb(levelDb,threshold,parameters_);
     }
     static double colour (double input, int mode, double drive) noexcept
     {
