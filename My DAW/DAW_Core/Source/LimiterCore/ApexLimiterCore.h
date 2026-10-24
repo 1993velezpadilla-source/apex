@@ -71,18 +71,24 @@ public:
         const auto capacity = static_cast<int>(nodes_.size());
         while (count_ && nodes_[static_cast<size_t>(front_)].index < oldest)
         {
-            front_ = (front_ + 1) % capacity;
+            if (++front_ == capacity) front_ = 0;
             --count_;
         }
         while (count_)
         {
-            const int tail = (front_ + count_ - 1) % capacity;
+            int tail = front_ + count_ - 1;
+            if (tail >= capacity) tail -= capacity;
             if (nodes_[static_cast<size_t>(tail)].value > value) break;
             --count_;
         }
         // Window never exceeds the preallocated lookahead ring.
-        if (count_ == capacity) { front_ = (front_ + 1) % capacity; --count_; }
-        const int target = (front_ + count_) % capacity;
+        if (count_ == capacity)
+        {
+            if (++front_ == capacity) front_ = 0;
+            --count_;
+        }
+        int target = front_ + count_;
+        if (target >= capacity) target -= capacity;
         nodes_[static_cast<size_t>(target)] = {index, value};
         ++count_;
     }
@@ -130,6 +136,7 @@ public:
             c.rng = (&c == &channel_[0]) ? 0x12345678u : 0x91ABCDEFu;
         }
         index_ = 0;
+        writeSlot_ = 0;
         lookaheadSamples_ = -1;
         runningGain_ = 1.0;
         bypassBlend_ = settings_.bypass ? 0.0 : 1.0;
@@ -183,7 +190,10 @@ public:
         {
             runningGain_ = smooth * runningGain_ + (1.0-smooth) * targetGain;
             bypassBlend_ = bypassSmooth * bypassBlend_ + (1.0-bypassSmooth) * desiredBlend;
-            const int w = static_cast<int>(index_ % count);
+            // The audio ring writes sequentially. Avoid a 64-bit integer
+            // remainder on every high-rate sample (1.536M/s at 32x/48k).
+            const int w = writeSlot_;
+            if (++writeSlot_ == count) writeSlot_ = 0;
             const int64_t outputIndex = index_ - delaySamples_;
             const int64_t keyIndex = outputIndex + lookahead;
             double raw[2] = {safe(left[i]), stereo ? safe(right[i]) : 0.0};
@@ -217,7 +227,8 @@ public:
                     // Fixed latency reserves this full FIR lookahead so that
                     // the peak deque only reads completed measurements.
                     const int64_t centre=index_ - kFirHalf;
-                    const int peakSlot=static_cast<int>(centre % count);
+                    int peakSlot=w-kFirHalf;
+                    if (peakSlot < 0) peakSlot += count;
                     double reconstructionPeak=c.peak[static_cast<size_t>(peakSlot)];
                     const int quality=settings_.detectorQuality;
                     const int factor=1 << quality;
@@ -229,7 +240,10 @@ public:
                         for(int tap=0;tap<kFirTaps;++tap)
                         {
                             const int64_t source=centre+tap-(kFirHalf-1);
-                            const int slot=static_cast<int>(source%count);
+                            // source=index_+tap-(2*kFirHalf-1).
+                            // With fixed lookahead capacity, wrap at most once.
+                            int slot=w+tap-(2*kFirHalf-1);
+                            if (slot < 0) slot += count;
                             sample+=taps[static_cast<size_t>(tap)]
                                    *c.input[static_cast<size_t>(slot)];
                         }
@@ -240,7 +254,8 @@ public:
                 }
                 if (keyIndex >= 0)
                 {
-                    const int keySlot = static_cast<int>(keyIndex % count);
+                    int keySlot=w+lookahead-delaySamples_;
+                    if (keySlot < 0) keySlot += count;
                     c.maximum.add(keyIndex,
                         c.peak[static_cast<size_t>(keySlot)], outputIndex);
                 }
@@ -249,7 +264,8 @@ public:
                 required[ch] = over > 1.0 ? 20.0*std::log10(over) : 0.0;
                 if (outputIndex >= 0)
                 {
-                    const int read = static_cast<int>(outputIndex % count);
+                    int read=w-delaySamples_;
+                    if (read < 0) read += count;
                     delayed[ch] = c.input[static_cast<size_t>(read)];
                     dryDelayed[ch] = c.dry[static_cast<size_t>(read)];
                 }
@@ -361,6 +377,7 @@ private:
     double peakInput_=0.0, peakOutput_=0.0;
     int delaySamples_=0, lookaheadSamples_=-1;
     int64_t index_=0;
+    int writeSlot_=0;
 };
 
 }} // namespace APEX::Limiter
