@@ -523,7 +523,7 @@ static void testExternalHostDryLanePreserves32xWetAudio()
     assert(reference[0].size()==external[0].size());
     assert(reference[0]==external[0] && reference[1]==external[1]);
     std::cout<<"APEX 32x external-host dry bypass: bit-exact wet stereo, "
-             <<frames*2<<" samples under automation\\n";
+             <<frames*2<<" samples under automation"<<std::endl;
 }
 
 int main()
