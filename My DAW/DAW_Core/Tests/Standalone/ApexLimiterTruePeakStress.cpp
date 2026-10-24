@@ -154,11 +154,11 @@ int main()
         const double tpOn=TruePeakReference::analyze(on.data(),frames,32).reconstructedPeak;
         const double tpOff=TruePeakReference::analyze(off.data(),frames,32).reconstructedPeak;
         const double deltaDb=20.0*std::log10(tpOff/std::max(1.0e-12,tpOn));
-        std::printf("APEX_TRUEPEAK_TOGGLE,32,48000,%.6f,%.6f,%.6f\\n",
+        std::printf("APEX_TRUEPEAK_TOGGLE,32,48000,%.6f,%.6f,%.6f\n",
                     tpOn,tpOff,deltaDb);
         if(!onReduction || !offReduction || deltaDb<0.02)
         {
-            std::fprintf(stderr,"TP toggle failed to restore nonreserved audio\\n");
+            std::fprintf(stderr,"TP toggle failed to restore nonreserved audio\n");
             return EXIT_FAILURE;
         }
     }
