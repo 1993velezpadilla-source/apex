@@ -17,7 +17,7 @@ enum Parameter : int
 {
     Gain, Ceiling, Lookahead, Attack, Release, ChannelLink, LimitingStyle,
     TruePeak, DetectorQuality, Bypass, UnityGain, Audition, DcFilter, ChannelLinkRelease,
-    DitherMode, DitherBits, AudioOversampling, Count
+    DitherMode, DitherBits, AudioOversampling, AutoRelease, Count
 };
 
 class LimiterHostedParameter final : public juce::AudioProcessorParameterWithID
@@ -101,6 +101,7 @@ public:
         // Plugin format preserves old parameter IDs by appending this one.
         // Changes are staged until prepareToPlay() so host PDC stays fixed.
         add(AudioOversampling,"lim.os.audio","Audio Oversampling (restart engine)",0,5,0,6);
+        add(AutoRelease,"lim.release.auto","Adaptive Auto Release",0,1,0,2);
     }
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription(juce::PluginDescription& d) const override
@@ -350,7 +351,15 @@ public:
         for (int i=0;i<Count;++i)
         {
             const juce::Identifier id(ids()[static_cast<size_t>(i)]);
-            if (!tree.hasProperty(id)) continue;
+            if (!tree.hasProperty(id))
+            {
+                // Reused plugin loading an older project defaults new AUTO
+                // feature OFF instead of leaking previous-session state.
+                if (i == AutoRelease)
+                    limiterParameters_[AutoRelease]->setValue(
+                        limiterParameters_[AutoRelease]->getDefaultValue());
+                continue;
+            }
             const float v=static_cast<float>(tree.getProperty(id));
             if (std::isfinite(v))
                 limiterParameters_[static_cast<size_t>(i)]->setValue(v);
@@ -501,7 +510,8 @@ private:
             "lim.gain","lim.ceiling","lim.lookahead","lim.attack",
             "lim.release","lim.link","lim.style","lim.tp","lim.quality",
             "lim.bypass","lim.unity","lim.audition","lim.dc","lim.link.release",
-            "lim.dither.mode","lim.dither.bits","lim.os.audio"
+            "lim.dither.mode","lim.dither.bits","lim.os.audio",
+            "lim.release.auto"
         }};
         return values;
     }
@@ -519,6 +529,7 @@ private:
         s.lookaheadMs=limiterParameters_[Lookahead]->units();
         s.attackMs=limiterParameters_[Attack]->units();
         s.releaseMs=limiterParameters_[Release]->units();
+        s.autoRelease=limiterParameters_[AutoRelease]->units()>0.5f;
         s.channelLink=limiterParameters_[ChannelLink]->units()/100.0;
         s.releaseLink=limiterParameters_[ChannelLinkRelease]->units()/100.0;
         s.style=static_cast<int>(limiterParameters_[LimitingStyle]->units());
