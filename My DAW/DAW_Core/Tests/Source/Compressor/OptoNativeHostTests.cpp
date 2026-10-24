@@ -4,6 +4,7 @@
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
 #include "../../../Source/PluginHostCore/HostPlayheadCore.h"
 #include <cmath>
+#include <array>
 
 class OptoNativeHostTests final : public juce::UnitTest
 {
@@ -180,13 +181,16 @@ public:
                             expect(outDir.createDirectory().wasOk(), "create C3 screenshot directory");
 
                             auto renderActualEditor = [&](int width, int height,
-                                                          const juce::String& filename)
+                                                          const juce::String& filename,
+                                                           juce::AudioProcessorEditor* selectedEditor=nullptr)
                             {
-                                c3Editor->setSize(width,height);
+                                auto* actualEditor=selectedEditor!=nullptr
+                                    ? selectedEditor : c3Editor.get();
+                                actualEditor->setSize(width,height);
                                 juce::Image image(juce::Image::ARGB,width,height,true,
                                                   juce::SoftwareImageType{});
                                 juce::Graphics graphics(image);
-                                c3Editor->paint(graphics);
+                                actualEditor->paint(graphics);
                                 // Headless CI has no window peer. The previous
                                 // renderer painted only direct children, which
                                 // dropped Slider value Labels, ComboBox selected
@@ -213,8 +217,25 @@ public:
                                         child->paintOverChildren(g);
                                     }
                                 };
-                                paintDescendants(paintDescendants,*c3Editor,graphics);
-                                c3Editor->paintOverChildren(graphics);
+                                paintDescendants(paintDescendants,*actualEditor,graphics);
+                                actualEditor->paintOverChildren(graphics);
+                                if(filename.containsIgnoreCase("upward"))
+                                {
+                                    // Green segments must originate from the
+                                    // production JUCE paint() and DSP history.
+                                    int greenPixels=0;
+                                    for(int y=85;y<283;++y)
+                                        for(int x=55;x<940;++x)
+                                        {
+                                            const auto pixel=image.getPixelAt(x,y);
+                                            if(pixel.getGreen()>pixel.getRed()+45
+                                               && pixel.getGreen()>pixel.getBlue()+25
+                                               && pixel.getGreen()>140)
+                                                ++greenPixels;
+                                        }
+                                    expect(greenPixels>12,
+                                        "Real Upward DSP history must paint GREEN pixels");
+                                }
                                 expect(image.getPixelAt(40,35).getAlpha() > 0,
                                        "C3 production background must be painted");
                                 expect(image.getPixelAt(width/2,height/2).getAlpha() > 0,
@@ -234,6 +255,59 @@ public:
                                 "apex_precision_c3_real_editor_1080x740.png");
                             renderActualEditor(810,555,
                                 "apex_precision_c3_real_editor_810x555.png");
+
+                            // Authentic V15 UPWARD screenshot, not a mock.
+                            // Restore ALL parameter IDs afterwards to keep
+                            // the remainder of the native-host gate isolated.
+                            {
+                                std::array<float,APEX::PrecisionC3::ParameterCount>
+                                    originalParameters {};
+                                for(int i=0;i<APEX::PrecisionC3::ParameterCount;++i)
+                                    originalParameters[static_cast<std::size_t>(i)]
+                                        =native->getC3Parameter(i).getValue();
+                                auto set=[native](int idx,float value)
+                                {
+                                    auto& param=native->getC3Parameter(idx);
+                                    param.setValue(param.toNormalised(value));
+                                };
+                                set(APEX::PrecisionC3::Style,4.f);
+                                set(APEX::PrecisionC3::Threshold,-18.f);
+                                set(APEX::PrecisionC3::Ratio,4.f);
+                                set(APEX::PrecisionC3::Knee,0.f);
+                                set(APEX::PrecisionC3::Attack,.1f);
+                                set(APEX::PrecisionC3::DryGainDb,-100.f);
+                                set(APEX::PrecisionC3::Bypass,0.f);
+                                set(APEX::PrecisionC3::Character,0.f);
+                                set(APEX::PrecisionC3::AutoThreshold,0.f);
+                                set(APEX::PrecisionC3::AutoGain,0.f);
+                                set(APEX::PrecisionC3::Oversampling2x,0.f);
+                                set(APEX::PrecisionC3::LookaheadMode,0.f);
+                                native->prepareToPlay(48000.0,128);
+                                juce::AudioBuffer<float> upwardProbe(2,128);
+                                for(int block=0;block<375;++block)
+                                {
+                                    for(int i=0;i<128;++i)
+                                    {
+                                        upwardProbe.setSample(0,i,.01f);
+                                        upwardProbe.setSample(1,i,.01f);
+                                    }
+                                    native->processBlock(upwardProbe,midi);
+                                }
+                                expect(native->signedGainAction()<-10.f,
+                                    "Upward screenshot must use genuine DSP boost");
+                                std::unique_ptr<juce::AudioProcessorEditor>
+                                    upwardEditor(native->createEditor());
+                                expect(upwardEditor!=nullptr);
+                                if(upwardEditor!=nullptr)
+                                    renderActualEditor(1080,740,
+                                        "apex_precision_c_real_upward_1080x740.png",
+                                        upwardEditor.get());
+                                upwardEditor.reset();
+                                for(int i=0;i<APEX::PrecisionC3::ParameterCount;++i)
+                                    native->getC3Parameter(i).setValue(
+                                        originalParameters[static_cast<std::size_t>(i)]);
+                                native->prepareToPlay(48000.0,128);
+                            }
 
                             // Adversarial critic #2: controls must be actual
                             // interactive native JUCE components, not graphics
