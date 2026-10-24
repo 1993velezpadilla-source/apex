@@ -1192,6 +1192,11 @@ public:
     {
         return responseCurveColour();
     }
+    juce::Colour bandDialColourForTesting (int dial) const
+    {
+        const auto* slider = dial == 0 ? &freq_ : dial == 1 ? &gain_ : &q_;
+        return slider->findColour (juce::Slider::rotarySliderFillColourId);
+    }
     juce::Rectangle<int> spectrumLegendBoundsForTesting() const noexcept
     {
         return spectrumLegendBounds();
@@ -1269,6 +1274,8 @@ private:
     {
         EQ4Look()
         {
+            setColour (juce::Slider::rotarySliderFillColourId,
+                       juce::Colour (0xffefca65));
             setColour (juce::Slider::textBoxTextColourId, juce::Colours::white);
             setColour (juce::Slider::textBoxBackgroundColourId,
                        juce::Colour (0xff27232c));
@@ -1311,7 +1318,12 @@ private:
                                start, start + value * (end - start), true);
             g.setColour (juce::Colour (0xff56505f));
             g.strokePath (track, juce::PathStrokeType (3.0f));
-            g.setColour (juce::Colour (0xffefca65));
+            // PASS 13: matching the selected band colour across the node
+            // and its three interactive controls makes the active filter
+            // legible without confusing its controls with the GOLD overall
+            // response and the cool-colored measured PRE/POST audio.
+            g.setColour (slider.findColour (
+                juce::Slider::rotarySliderFillColourId));
             g.strokePath (arc, juce::PathStrokeType (3.1f));
             const float angle = start + value * (end - start);
             g.setColour (juce::Colour (0xff292531));
@@ -1677,6 +1689,13 @@ private:
         selected_ = index;
         if (index >= 0)
             selectedMask_[static_cast<std::size_t> (index)] = true;
+        // Keep the three dial rings coherent with the currently selected
+        // band node. This is GUI-only: never changes hosted parameter values
+        // or the frequency response. Sync runs after the recoloring.
+        const auto dialInk = selected_ >= 0
+            ? bandColour (selected_) : juce::Colour (0xffefca65);
+        for (auto* dial : { &freq_, &gain_, &q_ })
+            dial->setColour (juce::Slider::rotarySliderFillColourId, dialInk);
         setSelectedVisible (selected_ >= 0);
         if (selected_ < 0)
             dynamicExpanded_ = false;
