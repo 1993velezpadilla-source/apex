@@ -204,6 +204,50 @@ oversampling or lookahead DURING playback can click and briefly mismatch PDC
 until the JUCE message-thread timer publishes new latency; this is a RED
 production UX gate. The user should leave both OFF while tracking vocals.
 
+## Adversarial critic V12 — transport-gated latency-mode changes (2026-10-24)
+
+**Real defect / motivation:** changing `c3.oversampling` or
+`c3.lookahead` during PLAY changes the physical delay of the compressor
+before JUCE can notify the host. The old immediate-switch behaviour can click
+or create a temporary send/bus PDC mismatch. An audio-path fade ALONE does not
+solve the host PDC race.
+
+**Implementation:** new JUCE-independent `ApexPrecisionLatencyModeGuard.h`
+runs allocation-free on the audio thread. When a host supplies a valid
+`AudioPlayHead::PositionInfo`, changes to either latency mode requested
+during playback are preserved as host parameters/session state but deferred
+in the *effective DSP*. On STOP the guard stages the selected mode, the
+message-thread timer reports the requested latency to JUCE, and the guard
+commits only after its PDC acknowledgment. If a user resumes before the
+acknowledgment, the previous DSP mode continues. A mode armed during STOP
+can commit on the first subsequent PLAY block if PDC was already reported.
+A visual footer displays **STOP TO APPLY LATENCY CHANGE** when pending.
+
+- Changes to all other parameters retain their regular real-time automation.
+- Default Off/Off is still **zero latency** for recording.
+- `Oversampling 2x` still adds **48 samples**, plus lookahead.
+- Standalone portable adversarial tests assert pending status, STOP staging,
+  PDC acknowledgment, early resume, the same-latency topology case, and the
+  legacy no-transport fallback.
+- The original parameter IDs, state schema, Opto 2A ID and `main` are unchanged.
+
+**LIMITATIONS / RED release gates:**
+
+1. APEX/third-party host must actually provide valid playhead state. Hosts
+   with no `getPosition()` continue historical immediate switching; they
+   **are not protected** against clicks or PDC races. Verify APEX transport
+   propagation under Windows while the project plays/records.
+2. The state gate prevents mode switching during known playback but does NOT
+   promise sample-perfect zero-discontinuity behavior under every rapid
+   stop/restart sequence or unusual automation pattern. Test repeated
+   ON/OFF bursts and cancel/pending transitions, especially at 48k/128.
+3. Host `setLatencySamples` may not imply the host's full parallel-route
+   PDC rebuild has completed. A future host-level explicit PDC handshake
+   or graph epoch is needed for a strict proof.
+4. Run actual Windows JUCE Debug/Release, VST3, sends/parallel and GUI
+   screenshot/interaction tests on this V12 commit before any GREEN claim.
+   Hardware ASIO 48k/128, CPU and blind listening remain outstanding.
+
 ## Engineering gates before merge to main
 
 1. Windows Debug + Release builds, host unit tests and portable C++17 sanitizer tests GREEN.
