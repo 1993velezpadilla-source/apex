@@ -983,6 +983,36 @@ private:
                             juce::Point<int> { 1280, 720 } })
                     {
                         editor->setSize (size.x, size.y);
+                        // PASS 13: native screenshot hierarchy must keep
+                        // the measured analyzer (PRE lilac / POST teal)
+                        // perceptually different from the GOLD EQ transfer.
+                        // This is tested with actual 48 kHz WAV FFT frames,
+                        // not synthesized paint-only preview data.
+                        const auto preInk =
+                            editor->spectrumTraceColourForTesting (false);
+                        const auto postInk =
+                            editor->spectrumTraceColourForTesting (true);
+                        const auto eqInk =
+                            editor->eqTransferColourForTesting();
+                        expect (preInk != postInk && preInk != eqInk
+                                && postInk != eqInk,
+                            "PRE/POST real measured FFT and the EQ response"
+                            " MUST have three distinct visual identities");
+                        expect (postInk.getGreen() > postInk.getRed()
+                                && postInk.getBlue() > postInk.getRed(),
+                            "POST FFT should stay teal, not gold like EQ");
+                        expect (eqInk.getRed() > eqInk.getBlue(),
+                            "EQ transfer curve retains its warm gold color");
+                        const auto legend =
+                            editor->spectrumLegendBoundsForTesting();
+                        expect (! legend.isEmpty(),
+                            "live measured PRE+POST spectrum has a key");
+                        expect (editor->graphBoundsForTesting().contains (legend),
+                            "PRE/POST legend stays in FFT graph at mobile"
+                            " and desktop aspect ratios");
+                        expect (legend.getWidth() >= 120
+                                && legend.getHeight() >= 20,
+                            "both measured PRE and POST have readable keys");
                         const auto spectrumX =
                             editor->measuredSpectrumDomainXForTesting();
                         expectWithinAbsoluteError (
