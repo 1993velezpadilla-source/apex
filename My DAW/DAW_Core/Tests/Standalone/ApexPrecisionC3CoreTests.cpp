@@ -422,6 +422,101 @@ int main()
         p.lookaheadMs=5000;e.setParameters(p);
         assert(e.latencySamples()==3840);
     }
+
+    // V10: the same REAL 2x FIR filter must now run inside our compressor.
+    // OFF remains transparent at zero lookahead, and ON adds exactly 48
+    // samples even when character is OFF, wet and bypass included.
+    for(const bool bypass:{false,true})
+    {
+        Parameters p;p.oversampling2x=true;p.ratio=1;p.kneeDb=0;p.bypass=bypass;
+        Core e;e.prepare(48000);e.setParameters(p);
+        assert(e.latencySamples()==48);
+        std::vector<float> impulse(1024,0.f);
+        impulse[0]=.8f;
+        processConstant(e,impulse,128);
+        for(int i=0;i<1024;++i)
+            assert(std::abs(impulse[static_cast<std::size_t>(i)]
+                -(i==48?.8f:0.0f))<1.e-6f);
+    }
+    // Lookahead and the FIR's group delay must compose, never accidentally
+    // subtract or double-count PDC in a bypassed/parallel chain.
+    {
+        Parameters p;p.lookaheadMs=5;p.oversampling2x=true;
+        p.ratio=1;p.bypass=true;
+        Core e;e.prepare(48000);e.setParameters(p);
+        assert(e.latencySamples()==288);
+        std::vector<float> impulse(2048,0.f);
+        impulse[0]=0.65f;
+        processConstant(e,impulse,128);
+        for(int i=0;i<2048;++i)
+            assert(std::abs(impulse[static_cast<std::size_t>(i)]
+                -(i==288?0.65f:0.0f))<1.e-6f);
+    }
+    // Character 2x mode should REDUCE alias frequencies at actual compressor
+    // output, not merely run a disconnected oversampling utility test.
+    {
+        constexpr double pi=3.14159265358979323846;
+        constexpr int roll=4800,frames=4800,total=roll+frames;
+        Parameters p;p.oversampling2x=false;p.ratio=1;p.kneeDb=0;
+        p.character=1;p.drive=100;
+        Core raw,filtered;
+        raw.prepare(48000);filtered.prepare(48000);
+        raw.setParameters(p);
+        p.oversampling2x=true;filtered.setParameters(p);
+        assert(filtered.latencySamples()==48);
+        std::vector<float> a(total),b(total);
+        for(int i=0;i<total;++i)
+            a[static_cast<std::size_t>(i)]=
+                b[static_cast<std::size_t>(i)]=
+                static_cast<float>(.85*std::sin(2*pi*10000*i/48000.0));
+        processConstant(raw,a,128);processConstant(filtered,b,128);
+        const auto harmonic=[&](const std::vector<float>& data,int hz)
+        {
+            double real=0.0,imag=0.0;
+            for(int i=0;i<frames;++i)
+            {
+                const double phase=2*pi*hz*i/48000.0;
+                const double v=data[static_cast<std::size_t>(roll+i)];
+                real+=v*std::cos(phase);
+                imag+=v*std::sin(phase);
+            }
+            return 2.0*std::hypot(real,imag)/frames;
+        };
+        const double rawAlias=harmonic(a,18000);
+        const double cleanAlias=harmonic(b,18000);
+        const double suppressed=20*std::log10(rawAlias/std::max(1e-15,cleanAlias));
+        std::cout<<"Precision C actual 2x alias suppression: "
+                 <<suppressed<<" dB\n";
+        assert(suppressed>25);
+        const double rawFund=harmonic(a,10000),newFund=harmonic(b,10000);
+        assert(std::abs(20*std::log10(newFund/rawFund))<0.65);
+    }
+    // 2x character in both PRE/POST routing modes must be finite,
+    // stereo-isolated and independent of the host's block partition.
+    for(const bool pre:{false,true})
+    {
+        Parameters p;p.oversampling2x=true;p.characterPre=pre;
+        p.character=2;p.drive=75;p.ratio=6;p.thresholdDb=-30;
+        p.attackMs=.25;p.releaseMs=100;
+        Core a,b;a.prepare(48000);b.prepare(48000);
+        a.setParameters(p);b.setParameters(p);
+        std::vector<float> al(8192),ar(8192,0.f),bl(8192),br(8192,0.f);
+        for(int i=0;i<8192;++i)
+            al[static_cast<std::size_t>(i)]=bl[static_cast<std::size_t>(i)]
+                =static_cast<float>(.65*std::sin(i*.075));
+        for(int i=0;i<8192;++i)
+            a.process(al.data()+i,ar.data()+i,1);
+        for(int i=0;i<8192;i+=128)
+            b.process(bl.data()+i,br.data()+i,128);
+        for(int i=0;i<8192;++i)
+        {
+            assert(std::isfinite(al[static_cast<std::size_t>(i)]));
+            assert(std::abs(al[static_cast<std::size_t>(i)]
+                    -bl[static_cast<std::size_t>(i)])<1.e-6f);
+            assert(ar[static_cast<std::size_t>(i)]==0.f);
+            assert(br[static_cast<std::size_t>(i)]==0.f);
+        }
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
