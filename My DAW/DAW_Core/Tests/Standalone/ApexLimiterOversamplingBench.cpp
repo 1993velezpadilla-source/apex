@@ -48,7 +48,7 @@ double bench(int factor,const std::vector<float>& left,
     // Benchmark the SAME phase-aligned audio path enabled in the native host.
     conversion.prepare(factor,hostBlock,factor>1?57:0);
     Core dsp;
-    dsp.prepare(sampleRate*factor,factor>1);
+    dsp.prepare(sampleRate*factor,factor>1,factor>1);
     Settings p;
     p.truePeak=false;      // The actual 32x path detects full-rate samples.
     p.detectorQuality=0;   // No redundant cubic/FIR peak detector.
@@ -119,7 +119,7 @@ void benchMulti(int factor,int instances,const std::vector<float>& left,
             // Mirror the actual native JUCE processor's prepare() path.
             // Previously multi-instance benchmarks silently disabled the
             // high-rate gain table, overstating 32x multi-instance CPU cost.
-            dsp.prepare(sampleRate*factor,factor>1);
+            dsp.prepare(sampleRate*factor,factor>1,factor>1);
             Settings p;
             p.truePeak=false;
             p.detectorQuality=0;
