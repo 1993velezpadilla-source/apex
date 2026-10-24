@@ -45,7 +45,7 @@ double bench(int factor,const std::vector<float>& left,
 {
     AudioRateConverter conversion;
     // Benchmark the SAME phase-aligned audio path enabled in the native host.
-    conversion.prepare(factor,hostBlock,factor>1?25:0);
+    conversion.prepare(factor,hostBlock,factor>1?57:0);
     Core dsp;
     dsp.prepare(sampleRate*factor);
     Settings p;
