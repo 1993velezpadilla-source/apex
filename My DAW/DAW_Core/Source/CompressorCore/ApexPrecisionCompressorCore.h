@@ -33,7 +33,7 @@ struct Parameters
     double holdMs = 0.0;
     // Delays the MAIN/WET/DRY/BYPASS audio while the detector reads the
     // current input. This is feed-forward lookahead with real host PDC.
-    double lookaheadMs = 0.0; // 0..10 ms, 0 preserves live tracking latency
+    double lookaheadMs = 0.0; // 0..20 ms, 0 preserves live tracking latency
     double inputDb = 0.0;
     double wetDb = 0.0;
     double dryPercent = 0.0; // legacy C3 beta session state, 0..100
@@ -71,7 +71,7 @@ struct Parameters
         p.attackMs = bounded(p.attackMs, 0.005, 250.0, 10.0);
         p.releaseMs = bounded(p.releaseMs, 5.0, 3000.0, 120.0);
         p.holdMs = bounded(p.holdMs, 0.0, 500.0, 0.0);
-        p.lookaheadMs = bounded(p.lookaheadMs, 0.0, 10.0, 0.0);
+        p.lookaheadMs = bounded(p.lookaheadMs, 0.0, 20.0, 0.0);
         p.inputDb = bounded(p.inputDb, -24.0, 24.0, 0.0);
         p.wetDb = bounded(p.wetDb, -24.0, 24.0, 0.0);
         p.dryPercent = bounded(p.dryPercent, 0.0, 100.0, 0.0);
