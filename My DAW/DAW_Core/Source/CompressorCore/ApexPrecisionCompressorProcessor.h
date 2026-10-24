@@ -61,9 +61,9 @@ public:
             ? juce::jlimit(0, steps_ - 1,
                 static_cast<int>(std::lround(normal * (steps_ - 1)))) : 0;
         if (steps_ == 14) return kStyleNames[static_cast<std::size_t>(index)];
-        if (steps_ == 5)
+        if (steps_ == 6)
         {
-            constexpr const char* times[] {"0 ms","1 ms","2 ms","5 ms","10 ms"};
+            constexpr const char* times[] {"0 ms","1 ms","2 ms","5 ms","10 ms","20 ms"};
             return times[index];
         }
         if (steps_ == 4)
@@ -86,14 +86,14 @@ public:
             for (int i = 0; i < 4; ++i)
                 if (value.equalsIgnoreCase(names[i])) return i / 3.0f;
         }
-        if (steps_ == 5)
+        if (steps_ == 6)
         {
-            constexpr float times[] {0.0f,1.0f,2.0f,5.0f,10.0f};
+            constexpr float times[] {0.0f,1.0f,2.0f,5.0f,10.0f,20.0f};
             const float ms = value.getFloatValue();
             int selected=0;
-            for(int i=1;i<5;++i)
+            for(int i=1;i<6;++i)
                 if(std::abs(ms-times[i])<std::abs(ms-times[selected]))selected=i;
-            return selected*0.25f;
+            return selected*0.2f;
         }
         return toNormalised(value.getFloatValue());
     }
@@ -169,7 +169,7 @@ public:
         add(SC4Gain,"c3.sc4.gain","SC Bell 4 Gain",-18,18,0,0," dB");
         add(SC4Q,"c3.sc4.q","SC Bell 4 Q",0.15f,18,1);
         add(DryGainDb,"c3.drygain","Dry Gain",-100,18,-100,0," dB");
-        add(LookaheadMode,"c3.lookahead","Lookahead",0,4,0,5," ms");
+        add(LookaheadMode,"c3.lookahead","Lookahead",0,5,0,6," ms");
         // JUCE setLatencySamples() can notify the host and is not RT safe.
         // Poll only the atomic requested value from the message thread.
         // The audio callback never posts messages, locks or allocates.
@@ -359,8 +359,8 @@ private:
         p.attackMs=value(Attack);
         p.releaseMs=value(Release);
         p.holdMs=value(Hold);
-        constexpr double lookaheadTimes[] {0,1,2,5,10};
-        const int mode=juce::jlimit(0,4,(int)std::lround(value(LookaheadMode)));
+        constexpr double lookaheadTimes[] {0,1,2,5,10,20};
+        const int mode=juce::jlimit(0,5,(int)std::lround(value(LookaheadMode)));
         p.lookaheadMs=lookaheadTimes[mode];
         p.inputDb=value(Input);
         p.wetDb=value(Wet);
