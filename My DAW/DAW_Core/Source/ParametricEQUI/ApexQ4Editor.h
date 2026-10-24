@@ -150,6 +150,11 @@ public:
         attach (dynSpectral_, "SPECTRAL");
         attach (dynFilter_, "BAND DETECTOR");
         attach (dynClose_, "CLOSE");
+        attach (dynClear_, "RESET");
+        dynClear_.setTooltip (
+            "Clear the selected band's dynamic range, leaving the static"
+            " frequency, gain and Q unchanged");
+        dynClear_.onClick = [this] { clearSelectedDynamics(); };
         constexpr const char* names[] = {
             "THRESHOLD", "RANGE", "ATTACK", "RELEASE"
         };
@@ -1298,6 +1303,11 @@ public:
     {
         clearSelectedDynamics();
     }
+    juce::Rectangle<int> dynamicResetBoundsForTesting() const noexcept
+    {
+        return dynClear_.isVisible() ? dynClear_.getBounds()
+                                     : juce::Rectangle<int>();
+    }
     juce::Range<float> measuredSpectrumDomainXForTesting() const noexcept
     {
         return measuredSpectrumDomainX();
@@ -1687,8 +1697,9 @@ private:
     }
     void setDynamicControlsVisible (bool visible)
     {
-        const std::array<juce::Component*, 4> buttons {{
-            &dynToggle_, &dynSpectral_, &dynFilter_, &dynClose_
+        const std::array<juce::Component*, 5> buttons {{
+            &dynToggle_, &dynSpectral_, &dynFilter_, &dynClose_,
+            &dynClear_
         }};
         for (auto* widget : buttons)
             widget->setVisible (visible);
@@ -1808,6 +1819,10 @@ private:
         dynamicPanel_ = best;
         const int px = best.getX(), py = best.getY(), pw = best.getWidth();
         dynClose_.setBounds (px + pw - 59, py + 5, 51, 31);
+        // Compact variant exposes reset inside KEY/MORE menu instead of
+        // squeezing a sub-44px button over the live threshold readout.
+        dynClear_.setBounds (px + 128, py + 5, 69, 31);
+        dynClear_.setVisible (pw >= 330);
         dynToggle_.setBounds (px + 9, py + 38, 72, 35);
         dynSpectral_.setBounds (px + 84, py + 38, 89, 35);
         dynFilter_.setBounds (px + 176, py + 38, pw - 185, 35);
@@ -1825,8 +1840,8 @@ private:
         // These controls must remain accessible when the main band HUD
         // occupies another part of the graph.
         for (auto* widget : { &dynClose_, &dynToggle_,
-                              &dynSpectral_, &dynFilter_ })
-            widget->toFront (false);
+                              &dynSpectral_, &dynFilter_, &dynClear_ })
+            if (widget->isVisible()) widget->toFront (false);
         for (auto& slider : dynamicSliders_)
             slider.toFront (false);
     }
@@ -2980,7 +2995,8 @@ private:
     ApexQ4DynamicGainDial gain_;
     std::array<juce::Slider, 4> dynamicSliders_ {};
     std::array<juce::Label, 4> dynamicNames_ {};
-    juce::TextButton dynToggle_, dynSpectral_, dynFilter_, dynClose_;
+    juce::TextButton dynToggle_, dynSpectral_, dynFilter_, dynClose_,
+                     dynClear_;
     bool dynamicExpanded_ = false;
     std::array<float, kMaxBands> dynamicGainDbDisplay_ {};
     std::uint32_t lastDynamicActiveMask_ = 0;
