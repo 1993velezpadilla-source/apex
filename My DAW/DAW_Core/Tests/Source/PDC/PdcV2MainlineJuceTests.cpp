@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include "../../../Source/AudioEngineCore/AudioEngine.h"
 #include "../../../Source/PDCCore/ProgrammeRoutePdcSnapshotHandoffResearchCore.h"
+#include "../../../Source/CompressorCore/ApexPrecisionCompressorProcessor.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -192,6 +193,131 @@ public:
                                       static_cast<double>(second),.02,
                                       "changing VST3-like latency must preserve wet/dry amplitude");
             expect(engine.getGraphPdcPreflightCounters().renderedBlocks>0);
+        }
+
+        // V8: the ACTUAL Precision C insert, not a synthetic delay fixture,
+        // must stage the same track+bus PDC that the other hosted plugins use.
+        // This remains a test-only programme renderer; shipping graph PDC
+        // is deliberately separately gated until live-device validation.
+        beginTest("Precision C 0-5-20ms lookahead aligns real Track Send and Bus routes");
+        for(const int frames:{64,128,256})
+        {
+            DAW::TrackManager tracks;
+            auto* voice=tracks.createTrack("Precision C PDC voice");
+            auto* aux=tracks.createTrack("Precision C PDC bus");
+            aux->setRole(DAW::TrackRole::Bus);
+            DAW::RoutingGraph routing;
+            auto* voiceNode=routing.addNode("precision-pdc-voice",
+                                             DAW::RoutingNodeType::Track,voice->getID());
+            auto* auxNode=routing.addNode("precision-pdc-bus",
+                                           DAW::RoutingNodeType::Bus,aux->getID());
+            auto* send=routing.connect(voiceNode->id,auxNode->id,
+                                       DAW::ConnectionType::Send);
+            expect(send!=nullptr);
+            if(send==nullptr)continue;
+            auto chain=std::make_shared<DAW::PluginChainCore>();
+            chain->prepare(48000.0,frames);
+            auto precision=std::make_unique<APEX::PrecisionC3::Processor>();
+            auto* hosted=precision.get();
+            hosted->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.0f);
+            auto& ahead=hosted->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+            ahead.setValue(ahead.toNormalised(3.0f)); // 5ms / 240 samples
+            expectEquals(chain->appendPluginInstanceForTesting(std::move(precision)),0);
+            expectEquals(chain->totalLatencySamples(),240);
+            DAW::AudioEngine engine;
+            engine.setSubsystems(&tracks,nullptr,nullptr,&routing);
+            engine.prepare(48000.0,frames);
+            auto chains=std::make_shared<DAW::AudioEngine::PluginChainSnapshotMap>();
+            (*chains)[aux->getID()]=chain;
+            engine.publishPluginChainsSnapshot(chains);
+            const auto publish=[&]()
+            {
+                auto latencies=std::make_shared<DAW::AudioEngine::ChainLatencyMap>();
+                (*latencies)[voice->getID()]=0;
+                (*latencies)[aux->getID()]=chain->totalLatencySamples();
+                engine.publishChainLatencies(latencies);
+                return latencies;
+            };
+            auto latencyMap=publish();
+            const auto stage=[&]()
+            {
+                auto snap=routing.getSnapshotPublisher().get();
+                return snap && engine.stageProgrammeGraphPdcPreflightOnControlThread(
+                    *snap,latencyMap.get(),2,48000.0);
+            };
+            expect(stage());
+            struct Source {std::int64_t pos=0,impulse=333;};
+            Source source;
+            engine.setGraphPdcTrackInputForTests(
+                &source,[](void* ptr,const DAW::TrackID&,
+                           juce::AudioBuffer<float>& output,int n) noexcept
+                {
+                    auto& state=*static_cast<Source*>(ptr);
+                    for(int i=0;i<n;++i)
+                        if(state.pos++==state.impulse)
+                        {
+                            output.setSample(0,i,.3f);
+                            output.setSample(1,i,-.15f);
+                        }
+                });
+            engine.setExperimentalGraphPdcRenderEnabledForTests(true);
+            const auto verify=[&](std::int64_t stop,int expectedDelay)
+            {
+                int found=0;
+                while(source.pos<stop)
+                {
+                    const auto begin=source.pos;
+                    const int n=(int)std::min<std::int64_t>(frames,stop-begin);
+                    juce::AudioBuffer<float> result(2,n);
+                    result.clear();
+                    expect(engine.renderOfflineBlock(result,n,begin),
+                           "real PDC graph should produce offline result");
+                    for(int i=0;i<n;++i)
+                    {
+                        const auto timestamp=begin+i;
+                        const float l=result.getSample(0,i);
+                        const float r=result.getSample(1,i);
+                        if(timestamp==source.impulse+expectedDelay)
+                        {
+                            ++found;
+                            expect(l>.08f && r<-.04f,
+                                   "direct voice and Precision C bus must align");
+                        }
+                        else
+                        {
+                            expectWithinAbsoluteError((double)l,0.0,2.e-5);
+                            expectWithinAbsoluteError((double)r,0.0,2.e-5);
+                        }
+                    }
+                }
+                expectEquals(found,1,"every impulse must have one compensated output");
+            };
+            verify(1200,240);
+
+            // Reprepare on the CONTROL thread; unlike automating inside a
+            // running audio callback, this synchronously publishes PDC.
+            ahead.setValue(ahead.toNormalised(5.0f)); // 20ms / 960 samples
+            chain->prepare(48000.0,frames);
+            expectEquals(hosted->getLatencySamples(),960);
+            expectEquals(chain->totalLatencySamples(),960);
+            latencyMap=publish();
+            auto stale=routing.getSnapshotPublisher().get();
+            juce::AudioBuffer<float> probe(2,1);
+            probe.clear();
+            expect(!engine.renderOnePreparedGraphEdgeForTests(*stale,0,probe),
+                   "host latency change must reject stale PDC routing");
+            expect(stage());
+            source.impulse=1500;
+            verify(2800,960);
+
+            // Live voice monitoring mode must be able to return to 0ms PDC.
+            ahead.setValue(0.0f);
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),0);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=3000;
+            verify(3800,0);
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
