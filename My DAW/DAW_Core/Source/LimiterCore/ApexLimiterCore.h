@@ -105,8 +105,20 @@ private:
 class Core final
 {
 public:
-    void prepare(double rate,bool useHighRateGainTable=false)
+    void prepare(double rate,bool useHighRateGainTable=false,
+                 bool externalDryBypass=false)
     {
+        // When an external host-rate dry lane owns bypass, high-rate Core
+        // operates permanently WET. Never allocate or write a duplicate dry
+        // ring at 2x..32x. Caller must handle bypass outside Core, AFTER
+        // decimation and with correct host-rate latency compensation.
+        // Legacy stand-alone Core behavior is unchanged by default.
+#if defined(APEX_LIMITER_REFERENCE_EXTERNAL_DRY)
+        (void)externalDryBypass;
+        externalDryBypass_=false;
+#else
+        externalDryBypass_=externalDryBypass;
+#endif
         // Enabled ONLY for the separately prepared >1x audio-rate DSP.
         // Legacy 1x Core stays bit-identical. No table work in process().
         useHighRateGainTable_=useHighRateGainTable;
@@ -127,7 +139,8 @@ public:
         for (auto& c : channel_)
         {
             c.input.assign(static_cast<size_t>(capacity), 0.0f);
-            c.dry.assign(static_cast<size_t>(capacity), 0.0f);
+            if(externalDryBypass_) c.dry.clear();
+            else c.dry.assign(static_cast<size_t>(capacity), 0.0f);
             c.peak.assign(static_cast<size_t>(capacity), 0.0f);
             c.maximum.prepare(capacity);
         }
@@ -205,10 +218,10 @@ public:
         // internal bypass can still transition correctly next callback.
         // Keep the 1x and all in-flight bypass crossfades unchanged.
 #if defined(APEX_LIMITER_REFERENCE_HIGH_RATE_DRY)
-        constexpr bool skipHighRateDryBlend=false;
+        const bool skipHighRateDryBlend=externalDryBypass_;
 #else
-        const bool skipHighRateDryBlend=useHighRateGainTable_
-            && !settings_.bypass && bypassBlend_==1.0;
+        const bool skipHighRateDryBlend=externalDryBypass_
+            || (useHighRateGainTable_ && !settings_.bypass && bypassBlend_==1.0);
 #endif
         peakInput_ = peakOutput_ = 0.0;
         blockReductionMaxDb_ = 0.0;
@@ -240,7 +253,8 @@ public:
                 }
                 else { c.dcX = x; c.dcY = 0.0; }
                 c.input[static_cast<size_t>(w)] = static_cast<float>(x);
-                c.dry[static_cast<size_t>(w)] = static_cast<float>(raw[ch]);
+                if(!externalDryBypass_)
+                    c.dry[static_cast<size_t>(w)] = static_cast<float>(raw[ch]);
                 // Always retain the observed sample peak. With ISP enabled,
                 // reconstruct fractional intersample peaks using windowed-
                 // sinc FIR (64 taps, 2x/4x/8x). This is NOT an ITU-certified
@@ -457,6 +471,7 @@ private:
     };
     std::array<Channel,2> channel_;
     bool useHighRateGainTable_=false;
+    bool externalDryBypass_=false;
     std::vector<double> reductionGainTable_;
     std::array<std::array<std::array<double,kFirTaps>,8>,4> firCoefficients_{};
     Settings settings_;
