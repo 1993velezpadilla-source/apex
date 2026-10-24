@@ -548,7 +548,11 @@ private:
                 // Signed gain-computer output: +dB reduction goes DOWN
                 // (red); -dB reduction represents Upward BOOST (green).
                 // Both are live DSP values, not a decorative waveform.
-                constexpr float actionZero=125.0f;
+                // Zero must sit far enough from BOTH scope boundaries for
+                // +36 dB attenuation and -24 dB upward boost. V15 used
+                // y=125; -20 dB upward action was painted near y=73,
+                // outside the screenshot's valid history inspection ROI.
+                constexpr float actionZero=185.0f;
                 const float gy=actionZero
                     +juce::jlimit(-24.0f,36.0f,gr)*2.6f;
                 if(i==0)
