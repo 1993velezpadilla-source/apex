@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include "ApexPrecisionCharacterOversamplingCore.h"
 
 namespace APEX::PrecisionC3
 {
@@ -34,6 +35,7 @@ struct Parameters
     // Delays the MAIN/WET/DRY/BYPASS audio while the detector reads the
     // current input. This is feed-forward lookahead with real host PDC.
     double lookaheadMs = 0.0; // 0..20 ms, 0 preserves live tracking latency
+    bool oversampling2x = false; // opt-in real 2x filtered character stage
     double inputDb = 0.0;
     double wetDb = 0.0;
     double dryPercent = 0.0; // legacy C3 beta session state, 0..100
@@ -109,6 +111,8 @@ public:
         smoothingCoeff_ = coefficient(0.012);
         detectorCoeff_ = coefficient(0.010);
         thresholdTrackingCoeff_ = coefficient(1.5);
+        for(auto& core:oversamplingPre_)core.prepare();
+        for(auto& core:oversamplingPost_)core.prepare();
         reset();
     }
 
@@ -117,7 +121,13 @@ public:
         for (auto& s : channels_) s = {};
         for (auto& h : holdRemaining_) h = 0;
         for (auto& ring : lookaheadHistory_) ring.fill(0.0f);
+        for (auto& ring : oversamplingDryHistory_) ring.fill(0.0f);
+        for (auto& stage : oversamplingPre_) stage.reset();
+        for (auto& stage : oversamplingPost_) stage.reset();
         lookaheadWrite_ = 0;
+        oversamplingDryWrite_ = 0;
+        for(auto& history:neutralWetHistory_)history.fill(0.0);
+        neutralWetWrite_.fill(0);
         smoothedInput_ = dbGain(parameters_.inputDb);
         smoothedWet_ = dbGain(parameters_.wetDb);
         smoothedOutput_ = dbGain(parameters_.outputDb);
@@ -186,7 +196,10 @@ public:
     double getOutputPeakDb() const noexcept { return outputPeakDb_; }
     // With lookahead ON, this is the exact sample delay of BOTH wet and dry
     // paths (including bypass). It must be reported to the plugin host.
-    int latencySamples() const noexcept { return lookaheadSamples_; }
+    int latencySamples() const noexcept {
+        return lookaheadSamples_ + (parameters_.oversampling2x
+            ? CharacterOversampling2x::kLatencySamples : 0);
+    }
 
     // Separate SC pointers are optional and must be valid for the whole block.
     // The native wrapper currently uses the internal path. This port is ready
@@ -237,25 +250,61 @@ public:
             const double dryR = lookaheadSamples_ == 0
                 ? inputR : lookaheadHistory_[1][readIndex];
             lookaheadWrite_ = (lookaheadWrite_ + 1) % kLookaheadCapacity;
+
+            // The FIR color path adds EXACTLY 48 host-rate samples. Keep a
+            // second, shared stereo tap on the dry/bypass path; this is not
+            // an unaligned parallel wet/dry mix. With 2x OFF, untouched
+            // preview behaviour and zero-latency monitoring are preserved.
+            oversamplingDryHistory_[0][oversamplingDryWrite_] =
+                static_cast<float>(dryL);
+            oversamplingDryHistory_[1][oversamplingDryWrite_] =
+                static_cast<float>(dryR);
+            constexpr std::size_t extraDelay = CharacterOversampling2x::kLatencySamples;
+            const auto alignedIndex=(oversamplingDryWrite_+kOversamplingDryCapacity
+                -extraDelay)%kOversamplingDryCapacity;
+            const double alignedDryL=parameters_.oversampling2x
+                ? oversamplingDryHistory_[0][alignedIndex] : dryL;
+            const double alignedDryR=parameters_.oversampling2x
+                ? oversamplingDryHistory_[1][alignedIndex] : dryR;
+            oversamplingDryWrite_=(oversamplingDryWrite_+1)%kOversamplingDryCapacity;
+
             const double x[2] = {dryL * smoothedInput_, dryR * smoothedInput_};
+            const double alignedX[2] = {
+                alignedDryL*smoothedInput_, alignedDryR*smoothedInput_
+            };
+            const bool osEnabled=parameters_.oversampling2x;
+            const bool colourEnabled=parameters_.character!=0
+                && smoothedDrive_>1.e-9;
             // True PRE topology: saturate the WET audio before the detector
             // and gain computer. POST topology (default) colours the output
             // after compression. Host-routed external key always overrides
             // the internal detector without colour.
             const double colouredIn[2] = {
                 parameters_.characterPre
-                    ? colour(x[0],parameters_.character,smoothedDrive_) : x[0],
+                    ? (osEnabled
+                        ? (colourEnabled
+                            ? oversamplingPre_[0].processColour(x[0],
+                                parameters_.character,smoothedDrive_)
+                            : alignedX[0])
+                        : colour(x[0],parameters_.character,smoothedDrive_))
+                    : x[0],
                 parameters_.characterPre
-                    ? colour(x[1],parameters_.character,smoothedDrive_) : x[1]
+                    ? (osEnabled
+                        ? (colourEnabled
+                            ? oversamplingPre_[1].processColour(x[1],
+                                parameters_.character,smoothedDrive_)
+                            : alignedX[1])
+                        : colour(x[1],parameters_.character,smoothedDrive_))
+                    : x[1]
             };
             // Detector sees input at t, but the actual output below is the
             // stored input at t-lookaheadSamples_, giving it time to react.
             // At lookahead=0, preserve the prior C3 detector bit for bit.
-            const double triggerL = lookaheadSamples_ == 0
+            const double triggerL = lookaheadSamples_ == 0 && !osEnabled
                 ? colouredIn[0] : (parameters_.characterPre
                     ? colour(inputL*smoothedInput_,parameters_.character,smoothedDrive_)
                     : inputL*smoothedInput_);
-            const double triggerR = lookaheadSamples_ == 0
+            const double triggerR = lookaheadSamples_ == 0 && !osEnabled
                 ? colouredIn[1] : (parameters_.characterPre
                     ? colour(inputR*smoothedInput_,parameters_.character,smoothedDrive_)
                     : inputR*smoothedInput_);
@@ -348,17 +397,30 @@ public:
             const double compressedL=colouredIn[0]*dbGain(-gr[0]);
             const double compressedR=colouredIn[1]*dbGain(-gr[1]);
             const double saturatedL=parameters_.characterPre ? compressedL
-                : colour(compressedL,parameters_.character,smoothedDrive_);
+                : (osEnabled ? (colourEnabled
+                    ? oversamplingPost_[0].processColour(compressedL,
+                         parameters_.character,smoothedDrive_)
+                    : compressedL) : colour(compressedL,parameters_.character,smoothedDrive_));
             const double saturatedR=parameters_.characterPre ? compressedR
-                : colour(compressedR,parameters_.character,smoothedDrive_);
-            double yL = saturatedL*wetGain + x[0]*smoothedDry_;
-            double yR = saturatedR*wetGain + x[1]*smoothedDry_;
+                : (osEnabled ? (colourEnabled
+                    ? oversamplingPost_[1].processColour(compressedR,
+                         parameters_.character,smoothedDrive_)
+                    : compressedR) : colour(compressedR,parameters_.character,smoothedDrive_));
+            // For disabled character, 2x must still delay wet by 48 samples
+            // while leaving it unfiltered. Preserve a separate post wet
+            // history for this neutral route (including time-varying GR).
+            const double postNeutralL = osEnabled && !parameters_.characterPre
+                && !colourEnabled ? delayNeutralWet(0,compressedL) : saturatedL;
+            const double postNeutralR = osEnabled && !parameters_.characterPre
+                && !colourEnabled ? delayNeutralWet(1,compressedR) : saturatedR;
+            double yL = postNeutralL*wetGain + alignedX[0]*smoothedDry_;
+            double yR = postNeutralR*wetGain + alignedX[1]*smoothedDry_;
             yL *= smoothedOutput_;
             yR *= smoothedOutput_;
             // Bypass recovers the exact original input, with no discontinuous
             // replacement of a playing waveform on button press.
-            yL = dryL + (yL - dryL) * smoothedBypass_;
-            yR = dryR + (yR - dryR) * smoothedBypass_;
+            yL = alignedDryL + (yL - alignedDryL) * smoothedBypass_;
+            yR = alignedDryR + (yR - alignedDryR) * smoothedBypass_;
             if (!std::isfinite(yL)) yL = 0.0;
             if (!std::isfinite(yR)) yR = 0.0;
             left[i] = static_cast<float>(std::clamp(yL, -32.0, 32.0));
@@ -386,6 +448,20 @@ private:
         double reductionDb = 0.0, lastGain = 1.0;
         std::array<BellFilterState,4> bellState {};
     };
+
+    double delayNeutralWet(int channel,double sample) noexcept
+    {
+        // Processing happens left then right, so track each channel's
+        // own write pointer. All samples preserve exact 48-frame delay.
+        const auto c=static_cast<std::size_t>(channel);
+        auto& write=neutralWetWrite_[c];
+        neutralWetHistory_[c][write]=sample;
+        const auto read=(write+kOversamplingDryCapacity
+              -CharacterOversampling2x::kLatencySamples)%kOversamplingDryCapacity;
+        const double delayed=neutralWetHistory_[c][read];
+        write=(write+1)%kOversamplingDryCapacity;
+        return delayed;
+    }
 
     static double safe (float value) noexcept
     {
@@ -468,6 +544,13 @@ private:
     std::array<std::array<float,kLookaheadCapacity>,2> lookaheadHistory_ {};
     std::size_t lookaheadWrite_ = 0;
     int lookaheadSamples_ = 0;
+    static constexpr std::size_t kOversamplingDryCapacity = 64;
+    std::array<std::array<float,kOversamplingDryCapacity>,2> oversamplingDryHistory_ {};
+    std::size_t oversamplingDryWrite_ = 0;
+    std::array<std::array<double,kOversamplingDryCapacity>,2> neutralWetHistory_ {};
+    std::array<std::size_t,2> neutralWetWrite_ {};
+    std::array<CharacterOversampling2x,2> oversamplingPre_ {};
+    std::array<CharacterOversampling2x,2> oversamplingPost_ {};
     std::array<int,2> holdRemaining_ {};
     double smoothedInput_ = 1.0, smoothedWet_ = 1.0, smoothedOutput_ = 1.0;
     double smoothedDry_ = 0.0, smoothedBypass_ = 1.0, smoothedThreshold_ = -18.0;
