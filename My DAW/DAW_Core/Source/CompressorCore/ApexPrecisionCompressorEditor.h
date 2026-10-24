@@ -1,8 +1,7 @@
 #pragma once
-// APEX Precision C3. Reference-driven hierarchy based on Pro-C 3's published
-// manual (NOT FabFilter source/artwork). These are real JUCE controls connected
-// to APEX host parameters. The meters draw only live DSP data. Unimplemented
-// oversampling, lookahead and 6-band SC are deliberately NOT misrepresented.
+// APEX Precision C. Original JUCE hierarchy informed by published dynamics
+// workflows (NOT FabFilter artwork/source). Real host controls, true DSP
+// input/output history, and signed downward/upward gain-action metering.
 #include <JuceHeader.h>
 #include "../PluginHostCore/ApexEvoEyeStamp.h"
 #include <array>
@@ -532,7 +531,8 @@ private:
         const auto count=processor_.meterHistoryCount();
         const auto frames=std::min<std::uint32_t>(
             count,(std::uint32_t)Processor::kMeterHistoryLength);
-        juce::Path inPath,outPath,grPath;
+        juce::Path inPath,outPath,attenuationPath,boostPath;
+        float lastX_=0.0f,lastAction_=0.0f;
         if(frames>1)
         {
             for(std::uint32_t i=0;i<frames;++i)
@@ -545,21 +545,64 @@ private:
                         top+(0.0f-db)/66.0f*(bottom-top));
                 };
                 const float iy=levelY(in),oy=levelY(out);
-                const float gy=top+8.0f+juce::jlimit(0.0f,36.0f,gr)*2.6f;
-                if (i==0) {inPath.startNewSubPath(x,iy);outPath.startNewSubPath(x,oy);
-                            grPath.startNewSubPath(x,gy);}
-                else {inPath.lineTo(x,iy);outPath.lineTo(x,oy);grPath.lineTo(x,gy);}
+                // Signed gain-computer output: +dB reduction goes DOWN
+                // (red); -dB reduction represents Upward BOOST (green).
+                // Both are live DSP values, not a decorative waveform.
+                constexpr float actionZero=125.0f;
+                const float gy=actionZero
+                    +juce::jlimit(-24.0f,36.0f,gr)*2.6f;
+                if(i==0)
+                {
+                    inPath.startNewSubPath(x,iy);
+                    outPath.startNewSubPath(x,oy);
+                }
+                else
+                {
+                    inPath.lineTo(x,iy);
+                    outPath.lineTo(x,oy);
+                    if(std::abs(lastAction_)>0.025f || std::abs(gr)>0.025f)
+                    {
+                        const float lastY=actionZero
+                            +juce::jlimit(-24.0f,36.0f,lastAction_)*2.6f;
+                        const bool crossed=(lastAction_<0.0f&&gr>0.0f)
+                            || (lastAction_>0.0f&&gr<0.0f);
+                        if(crossed)
+                        {
+                            const float t=std::abs(lastAction_)
+                                /(std::abs(lastAction_)+std::abs(gr));
+                            const float atZero=lastX_+(x-lastX_)*t;
+                            auto& before=lastAction_>0.0f
+                                ? attenuationPath : boostPath;
+                            auto& after=gr>0.0f ? attenuationPath : boostPath;
+                            before.startNewSubPath(lastX_,lastY);
+                            before.lineTo(atZero,actionZero);
+                            after.startNewSubPath(atZero,actionZero);
+                            after.lineTo(x,gy);
+                        }
+                        else
+                        {
+                            auto& path=(lastAction_>=0.0f&&gr>=0.0f)
+                                ? attenuationPath : boostPath;
+                            path.startNewSubPath(lastX_,lastY);
+                            path.lineTo(x,gy);
+                        }
+                    }
+                }
+                lastX_=x;
+                lastAction_=gr;
             }
             g.setColour(juce::Colour(0xff66666b).withAlpha(0.55f));
             g.strokePath(inPath,juce::PathStrokeType(1.4f));
             g.setColour(juce::Colour(0xffc4c2c2).withAlpha(0.87f));
             g.strokePath(outPath,juce::PathStrokeType(1.65f));
             g.setColour(juce::Colour(0xfff07171));
-            g.strokePath(grPath,juce::PathStrokeType(2.0f));
+            g.strokePath(attenuationPath,juce::PathStrokeType(2.0f));
+            g.setColour(juce::Colour(0xff77d6ab));
+            g.strokePath(boostPath,juce::PathStrokeType(2.0f));
         }
         g.setColour(juce::Colour(0xff878188));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("LEVEL HISTORY   /   INPUT + OUTPUT + RED GAIN REDUCTION",34,62,610,18,
+        g.drawText("LIVE DSP   /   INPUT + OUTPUT   /   RED: DOWN   GREEN: UP",34,62,610,18,
                    juce::Justification::left);
 
         // V13: render the EXACT static gain-computer transfer expression
@@ -638,20 +681,33 @@ private:
     void paintMeter(juce::Graphics& g)
     {
         g.setColour(juce::Colour(0xff151418));g.fillRect(1010,51,70,438);
-        const float output=processor_.outputLevel(), gr=processor_.gainReduction();
+        const float output=processor_.outputLevel();
+        const float signedAction=processor_.signedGainAction();
         const float level=juce::jlimit(0.0f,1.0f,(output+66.0f)/72.0f);
-        const float reduction=juce::jlimit(0.0f,1.0f,gr/30.0f);
+        const float reduction=juce::jlimit(0.0f,1.0f,std::abs(signedAction)/30.0f);
         g.setColour(juce::Colour(0xff4e494c));
         g.fillRect(1022,84,11,350);g.fillRect(1048,84,11,350);
         g.setColour(juce::Colour(0xffa5ac50));
         g.fillRect(1048.0f,84+350*(1-level),11.0f,350*level);
-        g.setColour(juce::Colour(0xffe77470));
-        g.fillRect(1022.0f,84.0f,11.0f,350*reduction);
+        // Center-zero meter: downward attenuation climbs in RED, upward
+        // gain action fills below center in GREEN. In bypass this value
+        // follows the DSP's smoothed wet activation back toward zero.
+        constexpr float actionCenter=259.0f;
+        const float actionExtent=175.0f*reduction;
+        g.setColour(signedAction>=0.0f ? juce::Colour(0xffe77470)
+                                       : juce::Colour(0xff77d6ab));
+        g.fillRect(1022.0f,signedAction>=0.0f
+            ? actionCenter-actionExtent : actionCenter,11.0f,actionExtent);
+        g.setColour(juce::Colour(0xff8f878a));
+        g.drawHorizontalLine(static_cast<int>(actionCenter),1020,1035);
         g.setColour(juce::Colour(0xffbcb2b3));
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("GR",1018,62,22,17,juce::Justification::centred);
+        g.drawText(signedAction < -0.05f ? "UP" : "GR",1018,62,22,17,
+                   juce::Justification::centred);
         g.drawText("OUT",1042,62,30,17,juce::Justification::centred);
-        g.drawText(juce::String(gr,1),1015,444,27,18,juce::Justification::centred);
+        g.drawText((signedAction < -0.05f ? "+" : "-")
+                   +juce::String(std::abs(signedAction),1),
+                   1010,444,36,18,juce::Justification::centred);
         g.drawText(juce::String(output,1),1044,444,32,18,juce::Justification::centred);
         g.drawText("dB",1032,462,22,16,juce::Justification::centred);
     }
