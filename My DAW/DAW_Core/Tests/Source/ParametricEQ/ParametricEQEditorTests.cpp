@@ -720,6 +720,15 @@ private:
                     "compact portrait / short landscape Dynamics temporarily"
                     " replaces the FREQ/GAIN/Q HUD rather than hiding it");
             }
+            const auto reset = editor->dynamicResetBoundsForTesting();
+            if (! reset.isEmpty())
+            {
+                expect (area.contains (reset),
+                    "RESET action lives INSIDE expanded dynamic card");
+                expect (reset.getWidth() >= 60
+                        && reset.getHeight() >= 30,
+                    "RESET is never a clipped tiny touch target");
+            }
             auto dials = editor->dynamicSlidersForTesting();
             for (auto* slider : dials)
             {
