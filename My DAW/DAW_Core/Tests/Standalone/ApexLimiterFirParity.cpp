@@ -46,7 +46,7 @@ int main()
                 AudioRateConverter converter;
                 converter.prepare(factor,512,factor>1?57:0);
                 Core core;
-                core.prepare(rate*factor);
+                core.prepare(rate*factor,factor>1);
                 Settings settings;
                 settings.gainDb=11.0;
                 settings.ceilingDb=-1.0;
