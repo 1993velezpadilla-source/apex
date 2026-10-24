@@ -1058,6 +1058,9 @@ public:
                 if (grouped ? ! selectedMask_[static_cast<std::size_t> (b)]
                             : b != band)
                     continue;
+                if (! supportsDynamicShape (param (parameterIndex (
+                        b, BandParameterOffset::Shape))->getChoiceIndex()))
+                    continue;
                 auto* range = param (dynamicParameterIndex (
                     b, DynamicBandOffset::Range));
                 auto* enabled = param (dynamicParameterIndex (
@@ -1082,6 +1085,13 @@ public:
                     setUnits (dynamicFilterParameterIndex (b), 1.0f);
                     enabled->beginChangeGesture();
                     enabled->setValueNotifyingHost (1.0f);
+                    enabled->endChangeGesture();
+                }
+                else if (enabled->getBool()
+                         && std::abs (range->getUnitsValue()) <= 0.001f)
+                {
+                    enabled->beginChangeGesture();
+                    enabled->setValueNotifyingHost (0.0f);
                     enabled->endChangeGesture();
                 }
                 if (tradeGain)
@@ -1576,6 +1586,13 @@ private:
                         juce::Justification::centredLeft);
             x += 61;
         }
+    }
+    static bool supportsDynamicShape (int shapeId) noexcept
+    {
+        return shapeId == static_cast<int> (FilterShape::Bell)
+            || shapeId == static_cast<int> (FilterShape::LowShelf)
+            || shapeId == static_cast<int> (FilterShape::HighShelf)
+            || shapeId == static_cast<int> (FilterShape::FlatTilt);
     }
     static juce::Colour bandColour (int index)
     {
@@ -2180,10 +2197,7 @@ private:
             // Pro-Q-style dynamic ring is only meaningful for gain-bearing
             // Bell / shelving / Flat Tilt bands. No nonfunctional rings
             // on cut filters, notch or all-pass.
-            gain_.ringEditable = (shapeId == static_cast<int> (FilterShape::Bell)
-                || shapeId == static_cast<int> (FilterShape::LowShelf)
-                || shapeId == static_cast<int> (FilterShape::HighShelf)
-                || shapeId == static_cast<int> (FilterShape::FlatTilt));
+            gain_.ringEditable = supportsDynamicShape (shapeId);
             gain_.rangeEnabled = isDynamic;
             gain_.rangeDb = -param (dynamicParameterIndex (
                 selected_, DynamicBandOffset::Range))->getUnitsValue();
