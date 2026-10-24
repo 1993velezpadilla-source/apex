@@ -20,6 +20,7 @@ struct Settings
     double lookaheadMs = 5.0;
     double attackMs = 0.5;
     double releaseMs = 140.0;
+    bool autoRelease = false; // music-dependent decay, off preserves old DSP
     double channelLink = 1.0; // attack / transient stereo link
     double releaseLink = 1.0; // independent release stereo link
     int style = static_cast<int>(Style::Modern);
@@ -209,6 +210,15 @@ public:
             settings_.attackMs * 0.001 * rate_ * attackScale[style]));
         const double releaseCoeff = std::exp(-1.0 / std::max(1.0,
             settings_.releaseMs * 0.001 * rate_ * releaseScale[style]));
+        // Auto Release OFF remains bit-identical to existing sessions.
+        // When enabled, deeper ongoing GR receives a longer recovery,
+        // interpolated per sample between two PRECOMPUTED coefficients.
+        // Unlike calling exp() per high-rate sample, this is suitable for
+        // 8x/16x/32x processing without a new transcendental hot path.
+        const double slowReleaseCoeff = settings_.autoRelease
+            ? std::exp(-1.0 / std::max(1.0,
+                settings_.releaseMs * 0.004 * rate_ * releaseScale[style]))
+            : releaseCoeff;
         const double link = settings_.channelLink;
         const double desiredBlend = settings_.bypass ? 0.0 : 1.0;
         // High-rate JUCE hosting has its OWN phase-aligned dry bypass lane.
@@ -344,7 +354,12 @@ public:
                 const bool rising=required[ch]>c.reduction;
                 const double stereoLink=rising?link:settings_.releaseLink;
                 const double target=(1.0-stereoLink)*required[ch] + stereoLink*linked;
-                const double coeff=target>c.reduction?attackCoeff:releaseCoeff;
+                const double adaptiveReleaseCoeff = settings_.autoRelease
+                    ? releaseCoeff + (slowReleaseCoeff-releaseCoeff)
+                        * std::clamp(c.reduction/18.0,0.0,1.0)
+                    : releaseCoeff;
+                const double coeff=target>c.reduction
+                    ? attackCoeff : adaptiveReleaseCoeff;
                 c.reduction = coeff*c.reduction + (1.0-coeff)*target;
                 // Last-resort sample guard: attack automation, unexpected
                 // peaks and bypass transitions must never create NaN/Inf.
