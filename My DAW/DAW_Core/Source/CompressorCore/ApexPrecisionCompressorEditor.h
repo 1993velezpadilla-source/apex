@@ -156,10 +156,10 @@ public:
         };
         addAndMakeVisible(triggerSource_);
 
-        constexpr std::array<const char*,5> aheadChoices {
-            "Off","1 ms","2 ms","5 ms","10 ms"
+        constexpr std::array<const char*,6> aheadChoices {
+            "Off","1 ms","2 ms","5 ms","10 ms","20 ms"
         };
-        for(int i=0;i<5;++i)
+        for(int i=0;i<6;++i)
             lookahead_.addItem(aheadChoices[static_cast<std::size_t>(i)],i+1);
         lookahead_.setTooltip("Real feed-forward lookahead. Changes during playback reconfigure host latency.");
         lookahead_.onChange=[this] {
