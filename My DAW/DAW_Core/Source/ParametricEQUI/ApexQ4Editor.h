@@ -1962,7 +1962,10 @@ private:
         // or the frequency response. Sync runs after the recoloring.
         const auto dialInk = selected_ >= 0
             ? bandColour (selected_) : juce::Colour (0xffefca65);
-        for (auto* dial : { &freq_, &gain_, &q_ })
+        // gain_ derives from juce::Slider, unlike freq_ and q_. An
+        // explicit common-base array avoids MSVC C3535 in initializer lists.
+        for (juce::Slider* dial : std::array<juce::Slider*, 3> {{
+                 &freq_, static_cast<juce::Slider*> (&gain_), &q_ }})
             dial->setColour (juce::Slider::rotarySliderFillColourId, dialInk);
         setSelectedVisible (selected_ >= 0);
         if (selected_ < 0)
