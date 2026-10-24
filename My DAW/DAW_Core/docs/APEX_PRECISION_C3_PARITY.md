@@ -28,7 +28,7 @@ Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/he
 | Sidechain EQ | Up to six bands, sophisticated shapes | 1 internal HP + 1 LP | 6-band EQ and band editor |
 | Character | Off/Tube/Diode/Bright; Drive and pre/post | Original mode/drive with functional PRE and POST DSP routing; not analog-calibrated | Harmonics measurements and oversampling |
 | Lookahead/PDC | Configurable 0–20 ms | Implemented six real steps (0/1/2/5/10/20 ms): preallocated 2-channel delayed audio, undelayed detector, both bypass and dry aligned, exact PDC on prepare and message-thread timer updates. No callback allocation/host notifications. | Fresh Windows real-host PDC, zero-mode tracking, transient and block invariance tests; changes while playing may briefly desynchronise host PDC |
-| Oversampling | Up to 32× | **New independent 2x bandlimited FIR saturator lab** (97 taps, Kaiser β8, 48-sample host-rate delay) + spectral alias/unit/ASAN tests; NOT yet in the hosted compressor or shown as an active GUI control | Require spectral benchmark GREEN, integrate 2x wet/dry/bypass PDC & actual audio routing, CPU budget, 4×/8×/16×/32× and higher sample rate validation |
+| Oversampling | Up to 32× | **Real hosted 2× mode now wired into Precision C**, appended host parameter `c3.oversampling`, GUI Off/2×, 97-tap FIR pre/post character, aligned 48-sample wet/dry/bypass, combined lookahead +48 PDC | Fresh sanitizer, real Windows JUCE bus/track/sends tests, live 48k/128 CPU+ASIO; 4×/8×/16×/32× still absent; additional modes and reference matching outstanding |
 | Input/output and GR metering | Accurate peak/loudness + dynamic graph | Lock-free histories of actual per-block input/output/GR values; reference-hierarchy GUI with scrolling meter graph | Meter ballistics / true-peak & loudness still missing |
 | Surround | Up to immersive 9.1.6 | Mono/stereo only | Multi-bus and channel policies |
 | Presets / A-B / undo | Browser, tags and editing | Four real parameter presets, A/B snapshots, Copy and single-level Undo/Redo; no full preset browser | GUI interaction, undo depth and migration tests |
@@ -157,6 +157,52 @@ These verdicts are **fail-until-demonstrated**; passing C++ compilation alone is
 - The existing `MasterOversamplingCore` averages high-rate samples and
   is not suitable as proof of nonlinear anti-alias rejection. Its reuse
   without spectral validation is specifically rejected.
+
+## Adversarial critic V10 — real hosted 2× oversampling, still gated
+
+**This iteration is different from V9**: the FIR stage is no longer
+isolated. It is now wired to the actual APEX Precision C audio processor,
+PRE and POST character modes, triggered from a REAL automatable "Off / 2x"
+JUCE editor selector. It is **OFF by default** for zero-latency monitoring.
+The host UID, public Precision C name, and all earlier parameter IDs are
+preserved. New append-only ID: \`c3.oversampling\`.
+
+Audio path contract (48k example):
+
+- Lookahead Off, 2x Off => **0 host samples**.
+- Lookahead Off, 2x On => **48 host samples (1 ms)**.
+- Lookahead 5 ms, 2x On => **288 host samples (6 ms)**.
+- Lookahead 20 ms, 2x On => **1008 host samples (21 ms)**.
+- The FIR code runs at twice the host sample rate, filters before and
+  after saturation, and owns per-channel filter state. Two separate wet
+  routing choices (PRE/POST) are supported.
+- Dry and bypass histories receive the **same 48-sample extra delay**
+  as active wet coloration. If Character is Off, the plugin delays the
+  uncoloured signal **exactly** 48 samples rather than forcing it through
+  a potentially dulling low-pass. Total plugin host latency equals lookahead
+  plus this fixed FIR group delay.
+- The original built-in Character PRE detector uses instantaneous,
+  equivalent *single-rate* colour detection while its actual wet PRE colour
+  is oversampled and FIR-delayed. This anticipatory detector differs from
+  FabFilter's unobservable internal detector and remains a reference
+  calibration RED gate.
+
+Added adversarial portable audio tests for actual plugin 2× alias reduction,
+main/dry/bypass impulse timing, combined lookahead latency, 2× PRE/POST
+block invariance and stereo isolation. Added Windows JUCE host integration
+for the new parameter, fixed host latency, and graphical control; also
+extended the actual Track → Send → Bus PDC graph to assert Off / 48 /
+288-sample transitions with 2× active.
+
+**Strict HOLD:** These are newly committed tests, *not passing results*
+until the new CI completes. This first production-integrated 2× implementation
+must be rejected if spectral tests, Windows host routing, or any existing
+regressions fail; do not enable in main. Full Pro-C 3 parity still requires
+higher modes, performance validation, factory presets, visual matching,
+harmonic calibration, third-party comparison and transient stress. Switching
+oversampling or lookahead DURING playback can click and briefly mismatch PDC
+until the JUCE message-thread timer publishes new latency; this is a RED
+production UX gate. The user should leave both OFF while tracking vocals.
 
 ## Engineering gates before merge to main
 
