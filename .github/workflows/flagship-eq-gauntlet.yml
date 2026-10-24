@@ -150,11 +150,16 @@ jobs:
 
       # Real PNG frames from the JUCE software renderer, not a stylized
       # mock-up. Retained even while the whole-DAW link is in progress.
-      - name: Upload APEX Prism GUI screenshots
+      - name: Upload APEX EQ real WAV and native PRE POST FFT screenshots
+        # Keep adversarial visual evidence even when a GUI assertion fails.
+        # A failed test must never masquerade as GREEN; the ZIP is for review.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: APEX-Prism-GUI-${{ matrix.configuration }}-${{ github.run_id }}
-          path: apex-eq-ui-snapshots/*.png
+          name: APEX-EQ-WAV-Spectrum-${{ matrix.configuration }}-${{ github.run_id }}
+          path: |
+            apex-eq-ui-snapshots/*.png
+            apex-eq-ui-snapshots/*.wav
           if-no-files-found: error
           retention-days: 14
 
