@@ -23,6 +23,7 @@ enum ParameterIndex : int
     SC3Freq,SC3Gain,SC3Q,SC4Freq,SC4Gain,SC4Q,
     DryGainDb, // appended; legacy c3.dry percent remains recall-compatible
     LookaheadMode, // append-only index; public Precision C, legacy c3 IDs
+    Oversampling2x, // disabled by default, adds exactly 48 samples of PDC
     ParameterCount
 };
 
@@ -170,6 +171,7 @@ public:
         add(SC4Q,"c3.sc4.q","SC Bell 4 Q",0.15f,18,1);
         add(DryGainDb,"c3.drygain","Dry Gain",-100,18,-100,0," dB");
         add(LookaheadMode,"c3.lookahead","Lookahead",0,5,0,6," ms");
+        add(Oversampling2x,"c3.oversampling","Oversampling 2x",0,1,0,2);
         // JUCE setLatencySamples() can notify the host and is not RT safe.
         // Poll only the atomic requested value from the message thread.
         // The audio callback never posts messages, locks or allocates.
@@ -362,6 +364,7 @@ private:
         constexpr double lookaheadTimes[] {0,1,2,5,10,20};
         const int mode=juce::jlimit(0,5,(int)std::lround(value(LookaheadMode)));
         p.lookaheadMs=lookaheadTimes[mode];
+        p.oversampling2x=value(Oversampling2x)>=0.5;
         p.inputDb=value(Input);
         p.wetDb=value(Wet);
         p.dryPercent=value(Dry);
@@ -400,7 +403,7 @@ private:
         "c3.sc2.freq","c3.sc2.gain","c3.sc2.q",
         "c3.sc3.freq","c3.sc3.gain","c3.sc3.q",
         "c3.sc4.freq","c3.sc4.gain","c3.sc4.q",
-        "c3.drygain","c3.lookahead"
+        "c3.drygain","c3.lookahead","c3.oversampling"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
