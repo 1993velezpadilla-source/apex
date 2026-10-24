@@ -2,6 +2,7 @@
 #include "../../../Source/PluginHostCore/ApexNativePluginFormat.h"
 #include "../../../Source/CompressorCore/ApexOptoLevelerProcessor.h"
 #include "../../../Source/PluginHostCore/PluginChainCore.h"
+#include "../../../Source/PluginHostCore/HostPlayheadCore.h"
 #include <cmath>
 
 class OptoNativeHostTests final : public juce::UnitTest
@@ -541,17 +542,14 @@ public:
                         // Actual hosted JUCE processor, not only the
                         // portable guard fixture. Prove that a mode request
                         // during PLAY does not jump latency or bypass timing.
-                        struct TestPlayHead final : juce::AudioPlayHead
-                        {
-                            bool running=true;
-                            juce::Optional<PositionInfo> getPosition() const override
-                            {
-                                PositionInfo position;
-                                position.setIsPlaying(running);
-                                position.setIsRecording(false);
-                                return position;
-                            }
-                        } playhead;
+                        // Use the SAME atomic transport snapshot and real
+                        // HostPlayheadCore that APEX PluginChainCore attaches
+                        // to native inserts, not a synthetic playhead stub.
+                        DAW::HostPlayheadCore playhead;
+                        DAW::PluginTransportSnapshot transport;
+                        transport.sampleRate=48000.0;
+                        transport.isPlaying=true;
+                        playhead.updateSnapshot(transport);
                         auto& os=native->getC3Parameter(APEX::PrecisionC3::Oversampling2x);
                         auto& look=native->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
                         os.setValue(0.f);
@@ -572,7 +570,8 @@ public:
                                      "Host PDC must stay unchanged during PLAY");
                         expectWithinAbsoluteError(audio.getSample(0,0),0.45f,1.e-6f,
                             "Existing zero-latency path must not jump 48 samples");
-                        playhead.running=false;
+                        transport.isPlaying=false;
+                        playhead.updateSnapshot(transport);
                         audio.clear();
                         native->processBlock(audio,midi);
                         expect(native->isLatencyModePendingStop(),
