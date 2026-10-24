@@ -32,6 +32,69 @@ public:
     }
 };
 
+// APEX-native version of the quick dynamic range ring surrounding Gain.
+// Drag the OUTER ring to write the existing hosted per-band Range parameter;
+// drag the inner knob normally to change static gain. No audio-thread calls.
+class ApexQ4DynamicGainDial final : public juce::Slider
+{
+public:
+    std::function<void()> onRangeBegin, onRangeEnd;
+    std::function<void(float)> onRangeDelta;
+    bool ringEditable = false, rangeEnabled = false, meterValid = false;
+    float rangeDb = 0.0f, measuredDb = 0.0f;
+
+    bool isOnRangeRing (juce::Point<float> at) const noexcept
+    {
+        if (! ringEditable) return false;
+        const float diameter = static_cast<float> (
+            std::min (getWidth() - 12, getHeight() - 39));
+        const float radius = std::max (12.0f, diameter * 0.5f);
+        const float cx = getWidth() * 0.5f;
+        const float cy = std::max (17.0f, radius + 2.0f);
+        const float d = at.getDistanceFrom ({ cx, cy });
+        // The outermost annulus is reserved for dynamics. The inner arc
+        // and center preserve all ordinary static-gain edit gestures.
+        return d >= radius + 2.0f && d <= radius + 12.5f;
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (isOnRangeRing (e.position))
+        {
+            rangeDragging_ = true;
+            originY_ = e.position.y;
+            if (onRangeBegin) onRangeBegin();
+            return;
+        }
+        juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (rangeDragging_)
+        {
+            if (onRangeDelta)
+                onRangeDelta ((originY_ - e.position.y) * 0.22f);
+            return;
+        }
+        juce::Slider::mouseDrag (e);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (rangeDragging_)
+        {
+            rangeDragging_ = false;
+            if (onRangeEnd) onRangeEnd();
+            return;
+        }
+        juce::Slider::mouseUp (e);
+    }
+    void cancelRangeDrag() noexcept { rangeDragging_ = false; }
+    bool isRangeDragging() const noexcept { return rangeDragging_; }
+
+private:
+    bool rangeDragging_ = false;
+    float originY_ = 0.0f;
+};
+
 class ApexQ4Editor final : public juce::AudioProcessorEditor,
                            private juce::Timer
 {
@@ -173,6 +236,11 @@ public:
         setupDial (freq_, BandParameterOffset::Frequency, "FREQ");
         setupDial (gain_, BandParameterOffset::Gain, "GAIN");
         setupDial (q_, BandParameterOffset::Q, "Q");
+        gain_.onRangeBegin = [this] { beginGainRingGesture(); };
+        gain_.onRangeDelta = [this] (float deltaDb) {
+            dragGainRingRange (deltaDb);
+        };
+        gain_.onRangeEnd = [this] { endGainRingGesture(); };
         setSelectedVisible (false);
         setDynamicControlsVisible (false);
 
@@ -203,6 +271,7 @@ public:
                 ->endChangeGesture();
             rangeDragBand_ = -1;
         }
+        endGainRingGesture();
         if (auditionHolding_) processor_.endAudition (auditionToken_);
         processor_.cancelAudition();
         if (analyzerAutoStarted_ &&
@@ -1201,6 +1270,33 @@ public:
     {
         return spectrumLegendBounds();
     }
+    bool gainRingEditableForTesting() const noexcept
+    {
+        return gain_.ringEditable;
+    }
+    float gainRingRangeForTesting() const noexcept { return gain_.rangeDb; }
+    bool gainRingMeterValidForTesting() const noexcept
+    {
+        return gain_.meterValid;
+    }
+    float gainRingMeasuredDbForTesting() const noexcept
+    {
+        return gain_.measuredDb;
+    }
+    bool gainRingTouchTargetForTesting (juce::Point<float> p) const noexcept
+    {
+        return gain_.isOnRangeRing (p);
+    }
+    juce::Rectangle<int> gainKnobBoundsForTesting() const noexcept
+    {
+        return gain_.getBounds();
+    }
+    void dragGainRangeForTesting (float deltaDb)
+    {
+        beginGainRingGesture();
+        dragGainRingRange (deltaDb);
+        endGainRingGesture();
+    }
     juce::Range<float> measuredSpectrumDomainXForTesting() const noexcept
     {
         return measuredSpectrumDomainX();
@@ -1332,6 +1428,48 @@ private:
             g.setColour (juce::Colour (0xfff1eaf2));
             g.drawLine (cx, cy, cx + std::sin (angle) * (radius - 8),
                         cy - std::cos (angle) * (radius - 8), 2.0f);
+
+            // Visible on the selected GAIN knob: editable DYN range ring
+            // (red attenuation / magenta expansion) + a yellow *measured*
+            // gain-change needle. The yellow meter NEVER runs without a
+            // valid coherent audio-thread ResponseFrame.
+            if (auto* gainDial = dynamic_cast<ApexQ4DynamicGainDial*> (&slider))
+            {
+                if (gainDial->ringEditable)
+                {
+                    const float outer = radius + 7.0f;
+                    juce::Path rangeTrack, rangeStroke, measuredStroke;
+                    rangeTrack.addCentredArc (cx, cy, outer, outer, 0.0f,
+                                             start, end, true);
+                    g.setColour (juce::Colour (0xff77717f).withAlpha (0.45f));
+                    g.strokePath (rangeTrack, juce::PathStrokeType (3.7f));
+                    const float rangeRatio = std::clamp (
+                        std::abs (gainDial->rangeDb) / 30.0f, 0.0f, 1.0f);
+                    if (gainDial->rangeEnabled && rangeRatio > 0.001f)
+                    {
+                        rangeStroke.addCentredArc (cx, cy, outer, outer, 0.0f,
+                            start, start + rangeRatio * (end - start), true);
+                        g.setColour (gainDial->rangeDb < 0.0f
+                            ? juce::Colour (0xffec6f80)
+                            : juce::Colour (0xffdb76d1));
+                        g.strokePath (rangeStroke, juce::PathStrokeType (4.0f));
+                        if (gainDial->meterValid
+                            && std::abs (gainDial->measuredDb) > 0.05f)
+                        {
+                            const float meteredRatio = std::clamp (
+                                std::abs (gainDial->measuredDb) / 30.0f,
+                                0.0f, rangeRatio);
+                            measuredStroke.addCentredArc (
+                                cx, cy, outer - 3.0f, outer - 3.0f, 0.0f,
+                                start, start + meteredRatio * (end - start),
+                                true);
+                            g.setColour (juce::Colour (0xfff4ce55));
+                            g.strokePath (measuredStroke,
+                                          juce::PathStrokeType (2.5f));
+                        }
+                    }
+                }
+            }
             g.setFont (juce::FontOptions (10.0f));
             g.drawFittedText (slider.getTitle(), x, y + h - 15, w, 14,
                               juce::Justification::centred, 1);
@@ -1498,6 +1636,49 @@ private:
                     selected_, offset))->getValueForText (text));
         };
         addAndMakeVisible (slider);
+    }
+    void beginGainRingGesture()
+    {
+        if (selected_ < 0 || ! gain_.ringEditable) return;
+        endGainRingGesture();
+        gainRingGestureBand_ = selected_;
+        auto* range = param (dynamicParameterIndex (
+            gainRingGestureBand_, DynamicBandOffset::Range));
+        gainRingInitialDb_ = range->getUnitsValue();
+        range->beginChangeGesture();
+    }
+    void dragGainRingRange (float deltaDb)
+    {
+        if (gainRingGestureBand_ < 0) return;
+        auto* range = param (dynamicParameterIndex (
+            gainRingGestureBand_, DynamicBandOffset::Range));
+        const float target = std::clamp (gainRingInitialDb_ + deltaDb,
+                                         -30.0f, 30.0f);
+        range->setValueNotifyingHost (range->toNormalised (target));
+        if (std::abs (range->getUnitsValue()) > 0.001f)
+        {
+            auto* enabled = param (dynamicParameterIndex (
+                gainRingGestureBand_, DynamicBandOffset::Enable));
+            if (! enabled->getBool())
+            {
+                enabled->beginChangeGesture();
+                enabled->setValueNotifyingHost (1.0f);
+                enabled->endChangeGesture();
+            }
+        }
+        sync();
+        repaint();
+    }
+    void endGainRingGesture()
+    {
+        if (gainRingGestureBand_ < 0) return;
+        param (dynamicParameterIndex (
+            gainRingGestureBand_, DynamicBandOffset::Range))
+            ->endChangeGesture();
+        gainRingGestureBand_ = -1;
+        commitHistory();
+        sync();
+        repaint();
     }
     void setDynamicControlsVisible (bool visible)
     {
@@ -1686,6 +1867,13 @@ private:
             index = -1;
         if (! retainGroup)
             selectedMask_.fill (false);
+        // Selection changes can occur while touching the ring on mobile.
+        // Balance the old hosted gesture before switching its parameter ID.
+        if (index != selected_ && gainRingGestureBand_ >= 0)
+        {
+            gain_.cancelRangeDrag();
+            endGainRingGesture();
+        }
         selected_ = index;
         if (index >= 0)
             selectedMask_[static_cast<std::size_t> (index)] = true;
@@ -1868,6 +2056,22 @@ private:
             bandPower_.setButtonText (by ? "OFF" : "ON");
             const bool isDynamic = param (dynamicParameterIndex (
                 selected_, DynamicBandOffset::Enable))->getBool();
+            const auto shapeId = param (parameterIndex (
+                selected_, BandParameterOffset::Shape))->getChoiceIndex();
+            // Pro-Q-style dynamic ring is only meaningful for gain-bearing
+            // Bell / shelving / Flat Tilt bands. No nonfunctional rings
+            // on cut filters, notch or all-pass.
+            gain_.ringEditable = (shapeId == static_cast<int> (FilterShape::Bell)
+                || shapeId == static_cast<int> (FilterShape::LowShelf)
+                || shapeId == static_cast<int> (FilterShape::HighShelf)
+                || shapeId == static_cast<int> (FilterShape::FlatTilt));
+            gain_.rangeEnabled = isDynamic;
+            gain_.rangeDb = param (dynamicParameterIndex (
+                selected_, DynamicBandOffset::Range))->getUnitsValue();
+            gain_.meterValid = dynamicMeterValid_
+                && (lastDynamicActiveMask_ & (1u << selected_)) != 0;
+            gain_.measuredDb = dynamicGainDbDisplay_[
+                static_cast<std::size_t> (selected_)];
             dynamic_.setButtonText (isDynamic ? "DYN EDIT" : "DYN");
             dynToggle_.setButtonText (isDynamic ? "DYN ON" : "DYN OFF");
             dynSpectral_.setButtonText (
@@ -2671,6 +2875,16 @@ private:
         }
         if (changed) curveDirty_ = true;
         if (selected_ >= 0 && dragBand_ < 0) sync();
+        // Refresh measured response without polling audio-owned state
+        // from the GUI paint path. The visuals are never synthetic.
+        if (selected_ >= 0)
+        {
+            gain_.meterValid = dynamicMeterValid_
+                && (lastDynamicActiveMask_ & (1u << selected_)) != 0;
+            gain_.measuredDb = dynamicGainDbDisplay_[
+                static_cast<std::size_t> (selected_)];
+            gain_.repaint();
+        }
         syncAnalyzerText();
         repaint();
     }
@@ -2684,7 +2898,8 @@ private:
     juce::TextButton bandPower_, shape_, slope_, placement_, dynamic_,
         advanced_, closeBand_;
     ApexQ4SoloHold soloHold_;
-    juce::Slider freq_, gain_, q_;
+    juce::Slider freq_, q_;
+    ApexQ4DynamicGainDial gain_;
     std::array<juce::Slider, 4> dynamicSliders_ {};
     std::array<juce::Label, 4> dynamicNames_ {};
     juce::TextButton dynToggle_, dynSpectral_, dynFilter_, dynClose_;
@@ -2693,6 +2908,8 @@ private:
     std::uint32_t lastDynamicActiveMask_ = 0;
     bool dynamicMeterValid_ = false;
     int rangeDragBand_ = -1;
+    int gainRingGestureBand_ = -1;
+    float gainRingInitialDb_ = 0.0f;
     // Explicit touch link mode; tap toggles membership, swipe starts a host
     // gesture. No allocations/locks or new audio-thread parameters.
     bool touchMultiSelectMode_ = false;
