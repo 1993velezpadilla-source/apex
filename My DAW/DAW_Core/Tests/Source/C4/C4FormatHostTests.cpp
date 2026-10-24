@@ -202,18 +202,21 @@ private:
             juce::OwnedArray<juce::PluginDescription> found;
             formats.findFormatByName ("APEX Native")->findAllTypesForFile (
                 found, "APEX::C4");
-            expectEquals (found.size(), 6,
-                          "discover G10, Parametric EQ, Opto 2A, Limiter, Bubblegum Delay and Reverie");
-            if (found.size() == 6)
+            expectEquals (found.size(), 7,
+                          "discover G10, EQ, Opto 2A, Precision C, Limiter, Delay and Reverie");
+            if (found.size() == 7)
             {
                 expectEquals (found[0]->fileOrIdentifier, juce::String ("APEX::G10"));
                 expectEquals (found[1]->fileOrIdentifier, juce::String (
                     APEX::ParametricEQ::Processor::kFileOrIdentifier));
                 expectEquals (found[2]->fileOrIdentifier, juce::String ("APEX::Opto2A"));
-                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::BubblegumLimiter"));
-                expectEquals (found[4]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
-                expectEquals (found[5]->fileOrIdentifier, juce::String ("APEX::ReverieReverb"));
+                expectEquals (found[3]->fileOrIdentifier, juce::String ("APEX::PrecisionC3"));
+                expectEquals (found[4]->fileOrIdentifier, juce::String ("APEX::BubblegumLimiter"));
+                expectEquals (found[5]->fileOrIdentifier, juce::String ("APEX::BubblegumDelay"));
+                expectEquals (found[6]->fileOrIdentifier, juce::String ("APEX::ReverieReverb"));
             }
+            for (const auto* item : found)
+                expect (item->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
         }
 
         // Foreign identifiers still resolve to a clean error, never a crash.

@@ -4,7 +4,9 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <set>
+#include <utility>
 
 namespace
 {
@@ -36,6 +38,7 @@ public:
     {
         testPrismReplacesNativeEntryWithoutChangingSessionIdentity();
         testFrozenAbiAndAppendedPlacements();
+        testAutoThresholdProcessesRealAudioAndMigratesLegacyState();
         testPlacementParameterContract();
         testVersionTwoRoundTrip();
         testVersionOneMigrationDefaultsPlacementsToStereo();
@@ -44,6 +47,86 @@ public:
     }
 
 private:
+    void testAutoThresholdProcessesRealAudioAndMigratesLegacyState()
+    {
+        beginTest ("AUTO threshold is audible on real program, off is"
+                   " legacy-neutral, state and automation remain canonical");
+        auto render = [] (bool useAuto) {
+            auto processorStorage = std::make_unique<Processor>();
+            auto& processor = *processorStorage;
+            const int band = 0;
+            setUnits (processor, parameterIndex (
+                band, BandParameterOffset::Enabled), 1.0f);
+            setUnits (processor, parameterIndex (
+                band, BandParameterOffset::Shape),
+                static_cast<float> (FilterShape::Bell));
+            setUnits (processor, parameterIndex (
+                band, BandParameterOffset::Frequency), 1000.0f);
+            setUnits (processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Enable), 1.0f);
+            setUnits (processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Threshold), 0.0f);
+            setUnits (processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Range), 18.0f);
+            setUnits (processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Attack), .001f);
+            setUnits (processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Release), .03f);
+            setUnits (processor,dynamicAutoThresholdParameterIndex (band),
+                      useAuto ? 1.0f : 0.0f);
+            processor.prepareToPlay (48000.0, 128);
+            juce::AudioBuffer<float> audio (2, 128);
+            juce::MidiBuffer midi;
+            double phase = 0.0;
+            for (int block = 0; block < 300; ++block)
+            {
+                const double amplitude = block < 160 ? .02 : .20;
+                for (int sample = 0; sample < 128; ++sample)
+                {
+                    const auto value = static_cast<float> (
+                        amplitude * std::sin (phase));
+                    phase += juce::MathConstants<double>::twoPi
+                           * 1000.0 / 48000.0;
+                    audio.setSample (0, sample, value);
+                    audio.setSample (1, sample, value);
+                }
+                processor.processBlock (audio, midi);
+            }
+            const auto measured = processor.getDynamicGainDbForTesting (band);
+            juce::MemoryBlock state;
+            processor.getStateInformation (state);
+            return std::pair<double, juce::MemoryBlock> {
+                measured, std::move (state) };
+        };
+        const auto manual = render (false);
+        const auto automatic = render (true);
+        expect (std::abs (manual.first) < .1,
+            "default manual 0 dB threshold has no false compression");
+        expect (automatic.first < -.5,
+            "real detector-driven AUTO threshold reacts to signal changes");
+        auto restoredStorage = std::make_unique<Processor>();
+        auto& restored = *restoredStorage;
+        restored.setStateInformation (automatic.second.getData(),
+            static_cast<int> (automatic.second.getSize()));
+        expect (restored.getParametricEQParameter (
+            dynamicAutoThresholdParameterIndex (0))->getBool(),
+            "AUTO threshold survives actual full project state roundtrip");
+        auto legacy = juce::ValueTree::readFromData (
+            automatic.second.getData(), automatic.second.getSize());
+        for (int band = 0; band < kMaxBands; ++band)
+            legacy.removeProperty (juce::Identifier (Processor::getParameterId (
+                dynamicAutoThresholdParameterIndex (band))), nullptr);
+        juce::MemoryBlock olderData;
+        juce::MemoryOutputStream out (olderData, false);
+        legacy.writeToStream (out);
+        restored.setStateInformation (olderData.getData(),
+            static_cast<int> (olderData.getSize()));
+        expect (! restored.getParametricEQParameter (
+            dynamicAutoThresholdParameterIndex (0))->getBool(),
+            "legacy sessions force AUTO off even after another session"
+            " had it enabled in a reused plugin instance");
+    }
+
     void testPrismReplacesNativeEntryWithoutChangingSessionIdentity()
     {
         beginTest ("Prism replaces the old native EQ without a duplicate or broken session ID");
@@ -72,11 +155,11 @@ private:
 
     void testFrozenAbiAndAppendedPlacements()
     {
-        beginTest ("Phase 10 spectral extension: all 375 hosted parameter IDs pinned");
+        beginTest ("Phase 11 AUTO threshold: 375 frozen IDs plus 24 append-only IDs");
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         expectEquals (processor.getParameters().size(), kNumParameters);
-        expectEquals (kNumParameters, 375);
+        expectEquals (kNumParameters, 399);
 
         std::set<std::string> ids;
         for (int index = 0; index < kNumParameters; ++index)
@@ -144,6 +227,11 @@ private:
                 expected = "peq.spectral.density";
             else if (index == kSpectralTiltParameter)
                 expected = "peq.spectral.tilt";
+            else if (index >= kFirstDynamicAutoThresholdParameter)
+                expected = "peq.band"
+                    + juce::String (index - kFirstDynamicAutoThresholdParameter + 1)
+                        .paddedLeft ('0', 2)
+                    + ".dynamic.autoThreshold";
             else
             {
                 const int band = index / 7;
@@ -166,7 +254,7 @@ private:
             expect (parameter->isStorageLockFree(),
                     "atomic storage must be lock-free: " + parameter->paramID);
         }
-        expectEquals (ids.size(), static_cast<std::size_t> (375));
+        expectEquals (ids.size(), static_cast<std::size_t> (399));
         expectEquals (Processor::getParameterId (170),
                       juce::String ("peq.band01.placement"));
         expectEquals (Processor::getParameterId (193),

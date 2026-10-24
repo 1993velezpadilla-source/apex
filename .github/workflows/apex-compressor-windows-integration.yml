@@ -60,6 +60,7 @@ jobs:
           path: |
             My DAW/DAW_Core/evidence/runs/
             My DAW/DAW_Core/evidence/opto2a_gui/*.png
+            My DAW/DAW_Core/evidence/precision_c3_gui/*.png
           if-no-files-found: warn
       - name: Preserve unsigned test build
         if: success()

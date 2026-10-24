@@ -58,7 +58,15 @@ constexpr int kSpectralBandParameterCount = kMaxBands;
 constexpr int kSpectralDensityParameter = kFirstSpectralBandParameter
                                         + kSpectralBandParameterCount;
 constexpr int kSpectralTiltParameter = kSpectralDensityParameter + 1;
-constexpr int kNumParameters = kSpectralTiltParameter + 1;
+// Append-only Phase 11: per-band AUTO threshold. No old VST3 identity moves.
+constexpr int kFirstDynamicAutoThresholdParameter = kSpectralTiltParameter + 1;
+constexpr int kDynamicAutoThresholdParameterCount = kMaxBands;
+constexpr int kNumParameters = kFirstDynamicAutoThresholdParameter
+                             + kDynamicAutoThresholdParameterCount;
+constexpr int dynamicAutoThresholdParameterIndex (int band) noexcept
+{
+    return kFirstDynamicAutoThresholdParameter + band;
+}
 constexpr int spectralBandParameterIndex (int band) noexcept
 {
     return kFirstSpectralBandParameter + band;
@@ -114,8 +122,10 @@ static_assert (kFirstDynamicFilterParameter == 319,
                "Phase 8 appends per-band detector filters after peq.character");
 static_assert (kOutputGainParameter == 343,
                "Phase 9 output controls must append after Phase 8");
-static_assert (kSpectralArmParameter == 348 && kNumParameters == 375,
-               "Phase 10 must append to frozen indices 0..347");
+static_assert (kSpectralArmParameter == 348
+               && kFirstDynamicAutoThresholdParameter == 375
+               && kNumParameters == 399,
+               "Phase 11 must only append after all 375 frozen parameters");
 
 class ParametricEQParameter final : public juce::AudioProcessorParameterWithID
 {
@@ -376,6 +386,12 @@ private:
     std::array<double, kMaxBands> dynamicKeyFilterFrequencyHz_ {};
     std::array<double, kMaxBands> dynamicKeyFilterQ_ {};
     std::array<double, kMaxBands> dynamicSmoothedGainDb_ {};
+    // AUTO threshold is a real signal-derived, allocation-free baseline,
+    // not a GUI switch masquerading as fixed threshold automation.
+    std::array<bool, kMaxBands> dynamicAutoThresholdEnabled_ {};
+    std::array<double, kMaxBands> dynamicAutoBaselineDb_ {};
+    double dynamicAutoRiseCoefficient_ = 0.0;
+    double dynamicAutoFallCoefficient_ = 0.0;
     std::uint32_t dynamicActiveMask_ = 0;
     bool dynamicAnyActive_ = false;
     APEX::Dynamics::DetectorMode dynamicDetectorMode_
