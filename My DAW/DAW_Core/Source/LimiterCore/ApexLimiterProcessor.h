@@ -203,7 +203,9 @@ public:
                   ?buffer.getWritePointer(1,base):nullptr;
             if(activeOversampling_.load(std::memory_order_relaxed)==1)
             {
-                // Keep the existing 1x signal path untouched and bit-identical.
+                // Preserve the native 1x DSP topology. The 8x FIR TP
+                // quality setting now optionally includes a small ISP
+                // allowance (effectiveSettings), not a certified TP guard.
                 core_.process(left,right,chunk);
                 input=static_cast<float>(core_.inputPeak());
                 output=static_cast<float>(core_.outputPeak());
@@ -454,6 +456,19 @@ private:
 
     Settings effectiveSettings(Settings settings) const noexcept
     {
+        if(activeOversampling_.load(std::memory_order_relaxed)==1)
+        {
+            // The experimental native 8x FIR detector can reconstruct
+            // intersample peaks but cannot directly constrain the final
+            // interpolated WET waveform. Only while TP is enabled, reserve
+            // a small provisional 0.06dB. Quiet input/bypass/unity remain
+            // unaffected. 2x/4x detector variants remain uncalibrated.
+            if(settings.truePeak && !settings.bypass &&
+               !settings.audition && !settings.unityGain)
+                settings.ceilingDb-=native1xTruePeakReserveDb(
+                    settings.detectorQuality,true);
+            return settings;
+        }
         if(activeOversampling_.load(std::memory_order_relaxed)>1)
         {
             // High-rate audio already resolves fractional peaks. Additional
