@@ -353,11 +353,12 @@ public:
             const juce::Identifier id(ids()[static_cast<size_t>(i)]);
             if (!tree.hasProperty(id))
             {
-                // Reused plugin loading an older project defaults new AUTO
-                // feature OFF instead of leaking previous-session state.
-                if (i == AutoRelease)
-                    limiterParameters_[AutoRelease]->setValue(
-                        limiterParameters_[AutoRelease]->getDefaultValue());
+                // Append-only features absent from legacy projects must NOT
+                // inherit the reused plugin's previous 32x / AUTO state.
+                // Preserve legacy 1x audio, PDC and release semantics.
+                if (i == AutoRelease || i == AudioOversampling)
+                    limiterParameters_[static_cast<size_t>(i)]->setValue(
+                        limiterParameters_[static_cast<size_t>(i)]->getDefaultValue());
                 continue;
             }
             const float v=static_cast<float>(tree.getProperty(id));
