@@ -1,4 +1,5 @@
 #include "../../Source/CompressorCore/ApexPrecisionCompressorCore.h"
+#include "../../Source/CompressorCore/ApexPrecisionLatencyModeGuard.h"
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -555,6 +556,62 @@ int main()
         for(int i=extra;i<frames;++i)
             assert(std::abs(filtered[static_cast<std::size_t>(i)]
                 -normal[static_cast<std::size_t>(i-extra)])<5.e-6f);
+    }
+    // V12 adversarial transport/PDC handshake. Never switch 48-frame
+    // oversampling or lookahead under a known running playhead, even if a
+    // stale reported latency coincidentally equals the desired mode.
+    {
+        using Guard=APEX::PrecisionC3::LatencyModeGuard;
+        using Mode=Guard::Mode;
+        Guard gate;
+        gate.reset(48000.0,Mode{0,false});
+        assert(gate.latency({0,false})==0);
+        assert(gate.latency({0,true})==48);
+        assert(gate.latency({3,true})==288);
+        assert(gate.latency({5,true})==1008);
+
+        auto d=gate.evaluate({0,true},true,true,0);
+        assert(d.pendingStop && d.effective==Mode({0,false}));
+        assert(d.requestedLatency==0);
+        // No arming during PLAY even if host PDC is coincidentally 48.
+        d=gate.evaluate({0,true},true,true,48);
+        assert(d.pendingStop && d.effective==Mode({0,false}));
+        d=gate.evaluate({0,true},true,false,0);
+        assert(d.pendingStop && d.requestedLatency==48);
+        // The host hasn't applied new PDC yet: still no DSP switch.
+        d=gate.evaluate({0,true},true,false,0);
+        assert(d.pendingStop && d.effective==Mode({0,false}));
+        // Message thread has now acknowledged 48 samples.
+        d=gate.evaluate({0,true},true,false,48);
+        assert(!d.pendingStop && d.effective==Mode({0,true}));
+        assert(d.requestedLatency==48);
+
+        d=gate.evaluate({3,true},true,true,48);
+        assert(d.pendingStop && d.requestedLatency==48);
+        d=gate.evaluate({3,true},true,false,48);
+        assert(d.pendingStop && d.requestedLatency==288);
+        // Fast resume before acknowledgment does not change audio mode.
+        d=gate.evaluate({3,true},true,true,48);
+        assert(d.pendingStop && d.effective==Mode({0,true}));
+        d=gate.evaluate({3,true},true,false,48);
+        assert(d.pendingStop && d.requestedLatency==288);
+        // First play block after a stopped PDC acknowledgment is allowed.
+        d=gate.evaluate({3,true},true,true,288);
+        assert(!d.pendingStop && d.effective==Mode({3,true}));
+
+        // Same physical PDC doesn't permit changing the audio topology in
+        // the middle of playback (Off+2x vs 1ms+Off both report 48).
+        gate.reset(48000.0,{0,true});
+        d=gate.evaluate({1,false},true,true,48);
+        assert(d.pendingStop && d.effective==Mode({0,true}));
+        d=gate.evaluate({1,false},true,false,48);
+        assert(!d.pendingStop && d.effective==Mode({1,false}));
+
+        // Hosts without a transport position keep existing live-switch
+        // semantics; they cannot be advertised as glitch-proof.
+        gate.reset(48000.0,{0,false});
+        d=gate.evaluate({0,true},false,true,0);
+        assert(!d.pendingStop && d.effective==Mode({0,true}));
     }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
