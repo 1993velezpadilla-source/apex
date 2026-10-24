@@ -272,6 +272,35 @@ computer: a highly misleading GUI for a reference-driven dynamics processor.
 compiled-editor screenshot and human visual comparison must pass at the
 latest head. `main` remains protected.
 
+## Adversarial critic V14 — audio-thread CPU budget (2026-10-24)
+
+**Measured by code-path inspection, not invented benchmark numbers:** the
+original `Core::setParameters()` regenerated all six detector-filter
+coefficient groups every host block, even with no parameter automation.
+Each pass included expensive trig, exponential and power operations. The
+release envelope also called `exp()` every sample per channel even when
+Auto Release was OFF; sanitisation computed four fallback powers per block.
+
+**Change:** reuse cached HP/LP and all four bell coefficients until their
+own frequency/gain/Q actually change. The cache is invalidated on
+`prepare(sampleRate)` so switching from 44.1 to 48 or 96 kHz recomputes
+the correct taps. Changed detector parameters still update at the
+beginning of the next processed audio block. Constant release now uses
+one coefficient per block; Auto Release's adaptive coefficient remains
+sample-based as before. Sanitisation defaults use fixed exact values.
+
+**Adversarial tests:** verify six initial coefficient builds, zero new
+builds over 200 identical parameter sets, one rebuild per automated
+filter change, zero rebuilds when only non-detector controls move,
+invalidations across 48/96/44.1 kHz, and sample-equivalent stereo
+audio with repeated versus one-time parameter submission.
+
+The work eliminates redundant computations, but **does not quantify CPU
+savings** until actual profiler data on the target laptop/Legion Go
+48kHz/128 and the Windows Release executable. No allocation or locks
+have been added on the audio thread. The exact 1:1 look/feature/sound
+review and physical ASIO validation remain BLOCKING. Keep PR draft.
+
 ## Engineering gates before merge to main
 
 1. Windows Debug + Release builds, host unit tests and portable C++17 sanitizer tests GREEN.
