@@ -657,6 +657,16 @@ Processor::Processor()
     add (kSpectralTiltParameter, ParametricEQParameter::Kind::Toggle,
          "Spectral Tilt +3dB/oct", 0.0f, 1.0f, 1.0f);
 
+    // Append-only AUTO threshold: OFF by default, preserving all earlier
+    // saved sessions and the exact legacy manual threshold DSP output.
+    for (int band = 0; band < kMaxBands; ++band)
+    {
+        const auto number = juce::String (band + 1).paddedLeft ('0', 2);
+        add (dynamicAutoThresholdParameterIndex (band),
+             ParametricEQParameter::Kind::Toggle,
+             "Band " + number + " Dynamic Auto Threshold", 0.0f, 1.0f, 0.0f);
+    }
+
     jassert (getParameters().size() == kNumParameters);
 }
 
@@ -728,6 +738,10 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     setLatencySamples ((linearRequested ? kLinearPhaseLatencySamples : 0)
         + (spectralPreparedEnabled_
             ? SpectralAlignedBlend::kLatencySamples : 0));
+    // Precompute detector baseline smoothing: zero per-sample allocations.
+    dynamicAutoRiseCoefficient_ = std::exp (-1.0 / (rate * 0.5));
+    dynamicAutoFallCoefficient_ = std::exp (-1.0 / (rate * 1.2));
+    dynamicAutoBaselineDb_.fill (-144.0);
     for (int band = 0; band < kMaxBands; ++band)
     {
         dynamicDetectors_[static_cast<std::size_t> (band)].prepare (rate);
@@ -776,6 +790,7 @@ void Processor::releaseResources()
             state.reset();
     publishedDynamicGainDb_.fill (0.0);
     dynamicSmoothedGainDb_.fill (0.0);
+    dynamicAutoBaselineDb_.fill (-144.0);
     externalKeyValid_ = false;
     spectralBlend_.reset();
     spectralAnyBandActive_ = false;
@@ -1070,6 +1085,12 @@ juce::String Processor::getParameterId (int index)
         return "peq.spectral.density";
     if (index == kSpectralTiltParameter)
         return "peq.spectral.tilt";
+    if (index >= kFirstDynamicAutoThresholdParameter
+        && index < kNumParameters)
+        return "peq.band"
+            + juce::String (index - kFirstDynamicAutoThresholdParameter + 1)
+                .paddedLeft ('0', 2)
+            + ".dynamic.autoThreshold";
     if (index < 0 || index >= kBandParameterCount)
         return {};
 
@@ -1605,7 +1626,14 @@ void Processor::adoptDynamicParameters() noexcept
                 band, DynamicBandOffset::Release))]->getUnitsValue());
         next.sidechainFilter = parameters_[static_cast<std::size_t> (
             dynamicFilterParameterIndex (band))]->getBool();
+        const bool autoThreshold = parameters_[static_cast<std::size_t> (
+            dynamicAutoThresholdParameterIndex (band))]->getBool();
         next = DynamicBandParameters::sanitised (next);
+        if (autoThreshold != dynamicAutoThresholdEnabled_[
+                static_cast<std::size_t> (band)])
+            dynamicAutoBaselineDb_[static_cast<std::size_t> (band)] = -144.0;
+        dynamicAutoThresholdEnabled_[static_cast<std::size_t> (band)]
+            = autoThreshold;
 
         const auto& previous = dynamicParameters_[static_cast<std::size_t> (band)];
         const auto& detectorBand = targetSettings_[static_cast<std::size_t> (band)];
@@ -1674,6 +1702,7 @@ void Processor::adoptDynamicParameters() noexcept
             dynamicDetectors_[static_cast<std::size_t> (band)].reset();
             dynamicEnvelopes_[static_cast<std::size_t> (band)].reset();
             dynamicSmoothedGainDb_[static_cast<std::size_t> (band)] = 0.0;
+            dynamicAutoBaselineDb_[static_cast<std::size_t> (band)] = -144.0;
         }
         if (next.attackSeconds != previous.attackSeconds
             || next.releaseSeconds != previous.releaseSeconds
@@ -1796,7 +1825,27 @@ void Processor::computeDynamicGains (int numberOfChannels,
             // direction rule compares magnitudes (|target| vs |state|), so a
             // target of the opposite sign moves the state THROUGH zero
             // continuously. Range sign crossings therefore cannot jump.
-            const auto target = dynamicGainDbForLevel (levelDb, parameters);
+            // Signal-driven AUTO threshold; does not rewrite automation.
+            auto effective = parameters;
+            if (dynamicAutoThresholdEnabled_[static_cast<std::size_t> (band)])
+            {
+                auto& baseline = dynamicAutoBaselineDb_[
+                    static_cast<std::size_t> (band)];
+                const double finiteLevel = std::clamp (
+                    std::isfinite (levelDb) ? levelDb : -144.0,
+                    -144.0, 12.0);
+                if (baseline <= -140.0 && finiteLevel > -140.0)
+                    baseline = finiteLevel; // no long silence warmup
+                const double coefficient = finiteLevel > baseline
+                    ? dynamicAutoRiseCoefficient_
+                    : dynamicAutoFallCoefficient_;
+                baseline = std::clamp (coefficient * baseline
+                    + (1.0 - coefficient) * finiteLevel, -144.0, 12.0);
+                effective.thresholdDb = std::clamp (
+                    baseline + (parameters.rangeDb >= 0.0 ? 8.0 : -8.0),
+                    -60.0, 0.0);
+            }
+            const auto target = dynamicGainDbForLevel (levelDb, effective);
             auto state = dynamicSmoothedGainDb_[static_cast<std::size_t> (band)];
             const bool engaging = std::abs (target) > std::abs (state);
             const auto coefficient = engaging ? envelope.attackCoefficient()
