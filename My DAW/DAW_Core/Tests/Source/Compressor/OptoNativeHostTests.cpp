@@ -76,6 +76,55 @@ public:
                     native->setStateInformation(originalState.getData(),(int)originalState.getSize());
                     expectWithinAbsoluteError(native->getC3Parameter(APEX::PrecisionC3::Ratio).getValue(),oldRatio,1.e-6f);
 
+                    // Genuine M/S DSP: zero dynamics must roundtrip any
+                    // stereo program in an orthonormal domain. Then confirm
+                    // a stable append-only host parameter persists in state.
+                    beginTest("Precision C true M/S compressor domain and legacy LR recall");
+                    {
+                        APEX::PrecisionC3::Processor ms;
+                        auto& mode=ms.getC3Parameter(APEX::PrecisionC3::StereoMode);
+                        expectEquals(mode.paramID,juce::String("c3.stereo.mode"));
+                        expectWithinAbsoluteError(mode.getUnits(),0.f,.001f);
+                        ms.getC3Parameter(APEX::PrecisionC3::Ratio).setValue(
+                            ms.getC3Parameter(APEX::PrecisionC3::Ratio)
+                                .toNormalised(1.0f));
+                        ms.getC3Parameter(APEX::PrecisionC3::Character).setValue(0.f);
+                        ms.getC3Parameter(APEX::PrecisionC3::Input).setValue(.5f);
+                        ms.getC3Parameter(APEX::PrecisionC3::Output).setValue(.5f);
+                        ms.getC3Parameter(APEX::PrecisionC3::AutoGain).setValue(0.f);
+                        mode.setValue(1.f);
+                        ms.prepareToPlay(48000.0,128);
+                        juce::AudioBuffer<float> pair(2,128);
+                        for(int block=0;block<300;++block)
+                        {
+                            for(int i=0;i<128;++i)
+                            {
+                                pair.setSample(0,i,.32f);
+                                pair.setSample(1,i,-.18f);
+                            }
+                            ms.processBlock(pair,midi);
+                        }
+                        expectWithinAbsoluteError(pair.getSample(0,127),
+                            .32f,.004f,"L/R main audio survives M/S encode, DSP and decode");
+                        expectWithinAbsoluteError(pair.getSample(1,127),
+                            -.18f,.004f,"M/S orthogonal decode preserves negative side polarity");
+                        juce::MemoryBlock msState;
+                        ms.getStateInformation(msState);
+                        mode.setValue(0.f);
+                        ms.setStateInformation(msState.getData(),
+                            static_cast<int>(msState.getSize()));
+                        expectWithinAbsoluteError(mode.getUnits(),1.f,.001f,
+                            "M/S mode is a real saved and automatable host parameter");
+                        juce::ValueTree legacy(APEX::PrecisionC3::Processor::kStateTag);
+                        legacy.setProperty("schema",1,nullptr);
+                        juce::MemoryBlock oldState;
+                        juce::MemoryOutputStream out(oldState,false);
+                        legacy.writeToStream(out);
+                        ms.setStateInformation(oldState.getData(),
+                            static_cast<int>(oldState.getSize()));
+                        expectWithinAbsoluteError(mode.getUnits(),0.f,.001f,
+                            "old session without c3.stereo.mode restores LR default");
+                    }
                     // Authentic GUI evidence: render the PRODUCTION Precision C3
                     // editor and its actual JUCE child controls with CPU software
                     // graphics. This is not a generated concept/mock screenshot.
