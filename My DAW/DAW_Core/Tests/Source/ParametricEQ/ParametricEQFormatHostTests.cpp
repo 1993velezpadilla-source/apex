@@ -99,9 +99,9 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> descriptions;
         format->findAllTypesForFile (descriptions, Processor::kFileOrIdentifier);
-        expectEquals (descriptions.size(), 6,
-                      "G10/EQ/Opto/Limiter/Delay/Reverie visible, unfinished C4 hidden");
-        if (descriptions.size() == 6)
+        expectEquals (descriptions.size(), 7,
+                      "G10/EQ/Opto/Precision C/Limiter/Delay/Reverie visible; C4 hidden");
+        if (descriptions.size() == 7)
         {
             expectEquals (descriptions[0]->fileOrIdentifier,
                           juce::String ("APEX::G10"));
@@ -110,12 +110,16 @@ private:
             expectEquals (descriptions[2]->fileOrIdentifier,
                           juce::String ("APEX::Opto2A"));
             expectEquals (descriptions[3]->fileOrIdentifier,
-                          juce::String ("APEX::BubblegumLimiter"));
+                          juce::String ("APEX::PrecisionC3"));
             expectEquals (descriptions[4]->fileOrIdentifier,
-                          juce::String ("APEX::BubblegumDelay"));
+                          juce::String ("APEX::BubblegumLimiter"));
             expectEquals (descriptions[5]->fileOrIdentifier,
+                          juce::String ("APEX::BubblegumDelay"));
+            expectEquals (descriptions[6]->fileOrIdentifier,
                           juce::String ("APEX::ReverieReverb"));
         }
+        for (const auto* desc : descriptions)
+            expect (desc->fileOrIdentifier != "APEX::C4", "unfinished C4 remains hidden");
 
         juce::String error;
         auto instance = formats.getManager().createPluginInstance (

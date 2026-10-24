@@ -228,6 +228,8 @@ public:
                     "scanner seeded Parametric EQ into the cache");
             expect (scanner.getCache().hasCachedEntry ("APEX::Opto2A"),
                     "scanner seeded Opto 2A into the cache/browser");
+            expect (scanner.getCache().hasCachedEntry ("APEX::PrecisionC3"),
+                    "scanner seeded Precision C into cache/browser");
             expect (scanner.getCache().hasCachedEntry ("APEX::BubblegumLimiter"),
                     "scanner seeded Bubblegum Limiter into the cache/browser");
             expect (scanner.getCache().hasCachedEntry ("APEX::BubblegumDelay"),
@@ -238,9 +240,9 @@ public:
             for (const auto& c : scanner.getCache().getAll())
                 if (c.format.equalsIgnoreCase ("APEX Native"))
                     ++apexNativeCount;
-            expectEquals (apexNativeCount, 6,
-                          "six visible native effects: G10/EQ/Opto/Limiter/Delay/Reverie");
-            expect (scanner.getCache().getCount() >= 6, "other cached entries preserved");
+            expectEquals (apexNativeCount, 7,
+                          "seven visible native effects: G10/EQ/Opto/C3/Limiter/Delay/Reverie");
+            expect (scanner.getCache().getCount() >= 7, "other cached entries preserved");
         }
     }
 
