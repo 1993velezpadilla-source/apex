@@ -198,12 +198,25 @@ public:
             settings_.releaseMs * 0.001 * rate_ * releaseScale[style]));
         const double link = settings_.channelLink;
         const double desiredBlend = settings_.bypass ? 0.0 : 1.0;
+        // High-rate JUCE hosting has its OWN phase-aligned dry bypass lane.
+        // With the internal bypass blend already exactly WET, reading the
+        // Core's high-rate dry ring and updating the blend is redundant.
+        // Continue to WRITE dry history so automation that enables the
+        // internal bypass can still transition correctly next callback.
+        // Keep the 1x and all in-flight bypass crossfades unchanged.
+#if defined(APEX_LIMITER_REFERENCE_HIGH_RATE_DRY)
+        constexpr bool skipHighRateDryBlend=false;
+#else
+        const bool skipHighRateDryBlend=useHighRateGainTable_
+            && !settings_.bypass && bypassBlend_==1.0;
+#endif
         peakInput_ = peakOutput_ = 0.0;
         blockReductionMaxDb_ = 0.0;
         for (int i=0; i<frames; ++i, ++index_)
         {
             runningGain_ = smooth * runningGain_ + (1.0-smooth) * targetGain;
-            bypassBlend_ = bypassSmooth * bypassBlend_ + (1.0-bypassSmooth) * desiredBlend;
+            if(!skipHighRateDryBlend)
+                bypassBlend_ = bypassSmooth * bypassBlend_ + (1.0-bypassSmooth) * desiredBlend;
             // The audio ring writes sequentially. Avoid a 64-bit integer
             // remainder on every high-rate sample (1.536M/s at 32x/48k).
             const int w = writeSlot_;
@@ -305,7 +318,8 @@ public:
                     int read=w-delaySamples_;
                     if (read < 0) read += count;
                     delayed[ch] = c.input[static_cast<size_t>(read)];
-                    dryDelayed[ch] = c.dry[static_cast<size_t>(read)];
+                    if(!skipHighRateDryBlend)
+                        dryDelayed[ch] = c.dry[static_cast<size_t>(read)];
                 }
                 peakInput_ = std::max(peakInput_,std::abs(raw[ch]));
             }
@@ -361,8 +375,8 @@ public:
                         ? std::clamp(candidate-quantized,-lsb,lsb) : 0.0;
                     processed=std::clamp(quantized,-ceiling,ceiling);
                 }
-                const double out = dryDelayed[ch]*(1.0-bypassBlend_)
-                                   + processed*bypassBlend_;
+                const double out = skipHighRateDryBlend ? processed
+                    : dryDelayed[ch]*(1.0-bypassBlend_) + processed*bypassBlend_;
                 const float result = static_cast<float>(safe(out));
                 if (ch == 0) left[i] = result;
                 else right[i] = result;
