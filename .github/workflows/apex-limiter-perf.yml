@@ -44,15 +44,31 @@ jobs:
             -fno-fast-math -DAPEX_LIMITER_OS_REFERENCE_FIR \
             Tests/Standalone/ApexLimiterOversamplingBench.cpp \
             -o "$RUNNER_TEMP/apex-limiter-os-bench-reference"
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math -DAPEX_LIMITER_REFERENCE_DB_MATH \
+            Tests/Standalone/ApexLimiterOversamplingBench.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-os-bench-reference-db"
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math -DAPEX_LIMITER_REFERENCE_DB_MATH -DAPEX_LIMITER_OS_REFERENCE_FIR \
+            Tests/Standalone/ApexLimiterOversamplingBench.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-os-bench-legacy"
       - name: Measure real CPU cost at 48 kHz stereo
         run: |
           "$RUNNER_TEMP/apex-limiter-os-bench" | tee "$RUNNER_TEMP/apex-limiter-os-perf.csv"
           "$RUNNER_TEMP/apex-limiter-os-bench-reference" > "$RUNNER_TEMP/apex-limiter-os-reference.csv"
+          "$RUNNER_TEMP/apex-limiter-os-bench-reference-db" > "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
+          "$RUNNER_TEMP/apex-limiter-os-bench-legacy" > "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
           echo '--- 32x reference FIR vs optimized FIR (shared CI: diagnostic only) ---'
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-perf.csv"
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-reference.csv"
           grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-perf.csv"
           grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-reference.csv"
+          echo '--- 32x original dB (slow pow/log10) against optimized natural-log math ---'
+          grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
+          grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
+          echo '--- 32x full baseline: original FIR and original dB ---'
+          grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
+          grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
       - name: Build numerical FIR A/B sample parity harness
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
@@ -62,36 +78,44 @@ jobs:
             -fno-fast-math -DAPEX_LIMITER_OS_REFERENCE_FIR \
             Tests/Standalone/ApexLimiterFirParity.cpp \
             -o "$RUNNER_TEMP/apex-limiter-fir-reference"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math -DAPEX_LIMITER_REFERENCE_DB_MATH \
+            Tests/Standalone/ApexLimiterFirParity.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-db-reference"
       - name: Prove symmetric FIR output parity against original reference
         run: |
           "$RUNNER_TEMP/apex-limiter-fir-optimized" > "$RUNNER_TEMP/apex-fir-optimized.csv"
           "$RUNNER_TEMP/apex-limiter-fir-reference" > "$RUNNER_TEMP/apex-fir-reference.csv"
-          python3 - "$RUNNER_TEMP/apex-fir-reference.csv" "$RUNNER_TEMP/apex-fir-optimized.csv" <<'PY'
+          "$RUNNER_TEMP/apex-limiter-db-reference" > "$RUNNER_TEMP/apex-db-reference.csv"
+          python3 - "$RUNNER_TEMP/apex-fir-reference.csv" "$RUNNER_TEMP/apex-fir-optimized.csv" "$RUNNER_TEMP/apex-db-reference.csv" <<'PY'
           import itertools, math, sys
-          rows=0
-          maximum=0.0
-          with open(sys.argv[1], encoding="utf-8") as reference, open(sys.argv[2], encoding="utf-8") as optimized:
-              for rows,(old,new) in enumerate(itertools.zip_longest(reference,optimized),1):
-                  if old is None or new is None:
-                      raise SystemExit("APEX FIR parity: output row count mismatch")
-                  a=old.strip().split(",")
-                  b=new.strip().split(",")
-                  if len(a)!=6 or len(b)!=6 or a[:4]!=b[:4]:
-                      raise SystemExit(f"APEX FIR parity: metadata mismatch at row {rows}")
-                  for channel in (4,5):
-                      x,y=float(a[channel]),float(b[channel])
-                      if not (math.isfinite(x) and math.isfinite(y)):
-                          raise SystemExit(f"APEX FIR parity: nonfinite output at row {rows}")
-                      delta=abs(x-y)
-                      maximum=max(maximum,delta)
-                      if delta>5e-6:
-                          raise SystemExit(f"APEX FIR parity regression: row={rows} channel={channel} delta={delta}")
-          if rows!=6*3*2*4096:
-              raise SystemExit(f"APEX FIR parity: unexpected row count {rows}")
-          report=f"APEX_FIR_PARITY_OK,rows={rows},max_absolute_difference={maximum:.9g}"
-          print(report)
+          reports=[]
+          for label,reference_path in (("FIR",sys.argv[1]),("DB_MATH",sys.argv[3])):
+              rows=0
+              maximum=0.0
+              with open(reference_path, encoding="utf-8") as reference, open(sys.argv[2], encoding="utf-8") as optimized:
+                  for rows,(old,new) in enumerate(itertools.zip_longest(reference,optimized),1):
+                      if old is None or new is None:
+                          raise SystemExit(f"APEX {label} parity: output row count mismatch")
+                      a=old.strip().split(",")
+                      b=new.strip().split(",")
+                      if len(a)!=6 or len(b)!=6 or a[:4]!=b[:4]:
+                          raise SystemExit(f"APEX {label} parity: metadata mismatch at row {rows}")
+                      for channel in (4,5):
+                          x,y=float(a[channel]),float(b[channel])
+                          if not (math.isfinite(x) and math.isfinite(y)):
+                              raise SystemExit(f"APEX {label} parity: nonfinite output at row {rows}")
+                          delta=abs(x-y)
+                          maximum=max(maximum,delta)
+                          if delta>5e-6:
+                              raise SystemExit(f"APEX {label} parity regression: row={rows} channel={channel} delta={delta}")
+              if rows!=6*3*2*4096:
+                  raise SystemExit(f"APEX {label} parity: unexpected row count {rows}")
+              report=f"APEX_{label}_PARITY_OK,rows={rows},max_absolute_difference={maximum:.9g}"
+              print(report)
+              reports.append(report)
           with open(sys.argv[2].replace("optimized.csv","parity-summary.txt"),"w",encoding="utf-8") as out:
-              out.write(report+"\\n")
+              out.write("\\n".join(reports)+"\\n")
           PY
       - name: Compile actual wet audio phase / PDC probe
         run: |
@@ -130,6 +154,17 @@ jobs:
               echo '\`\`\`'
               cat "$RUNNER_TEMP/apex-limiter-os-reference.csv"
               echo '\`\`\`'
+              echo ''
+              echo '### Reference DB pow/log10 with optimized FIR (isolates dB math cost)'
+              echo '\`\`\`'
+              cat "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
+              echo '\`\`\`'
+              echo ''
+              echo '### Both original FIR and dB math (before optimizations)'
+              echo '\`\`\`'
+              cat "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
+              echo '\`\`\`'
+              echo ''
               cat "$RUNNER_TEMP/apex-fir-parity-summary.txt" 2>/dev/null || true
             else
               echo 'Benchmark data missing; see job logs.'
@@ -165,6 +200,8 @@ jobs:
           path: |
             ${{ runner.temp }}/apex-limiter-os-perf.csv
             ${{ runner.temp }}/apex-limiter-os-reference.csv
+            ${{ runner.temp }}/apex-limiter-os-reference-db.csv
+            ${{ runner.temp }}/apex-limiter-os-legacy.csv
             ${{ runner.temp }}/apex-fir-parity-summary.txt
             ${{ runner.temp }}/apex-limiter-wet-phase.csv
             ${{ runner.temp }}/apex-limiter-truepeak.csv
