@@ -72,6 +72,7 @@ public:
         testManualGraphCreationAndModifierModes();
         testNativeMultiSelectionRelativeGroupedDragAndHistory();
         testTouchModeGroupLinkingAndOuterDynamicRing();
+        testGainDialDynamicRingAndBandLimitedTriggerWorkflow();
         testPopoverFollowsSelectedNodeWithoutOccludingSpectrum();
         testKeyboardGroupedEditingAndDynamicTooltip();
         testExpandedDynamicPanelAndHostAutomation();
@@ -97,6 +98,96 @@ public:
     }
 
 private:
+    void testGainDialDynamicRingAndBandLimitedTriggerWorkflow()
+    {
+        beginTest ("manual dynamic GAIN ring: drag creates real hosted"
+                   " compression/expansion and band-key detector, CLEAR"
+                   " resets; non-gain filter types never expose range ring");
+        for (const auto size : { juce::Point<int> { 320, 568 },
+                                 juce::Point<int> { 480, 800 },
+                                 juce::Point<int> { 900, 300 },
+                                 juce::Point<int> { 1280, 720 } })
+        {
+            auto processor = std::make_unique<Processor>();
+            processor->prepareToPlay (48000.0, 128);
+            enableBell (*processor, 0, 880.0f, 4.0f, 2.0f);
+            auto editor = std::make_unique<ApexQ4Editor> (*processor);
+            editor->setSize (size.x, size.y);
+            editor->selectBandForTesting (0);
+            auto* range = processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Range));
+            auto* enabled = processor->getParametricEQParameter (
+                dynamicParameterIndex (0, DynamicBandOffset::Enable));
+            auto* detector = processor->getParametricEQParameter (
+                dynamicFilterParameterIndex (0));
+            const auto* freq = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Frequency));
+            const auto* gain = processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain));
+            const float initialHz = freq->getUnitsValue();
+            const float initialGain = gain->getUnitsValue();
+
+            expect (editor->gainRingEditableForTesting(),
+                "Bell selected => outer gain dial dynamic ring is interactive");
+            const auto gainBounds = editor->gainKnobBoundsForTesting();
+            const float diameter = static_cast<float> (
+                std::min (gainBounds.getWidth() - 12,
+                          gainBounds.getHeight() - 39));
+            const float radius = std::max (12.0f, diameter * 0.5f);
+            expect (editor->gainRingTouchTargetForTesting ({
+                    gainBounds.getWidth() * 0.5f + radius + 7.0f,
+                    std::max (17.0f, radius + 2.0f) }),
+                "real mouse hit-test catches the OUTER annulus separately"
+                " from normal static gain knob at each tested viewport");
+            expect (! editor->gainRingTouchTargetForTesting ({
+                    gainBounds.getWidth() * 0.5f,
+                    std::max (17.0f, radius + 2.0f) }),
+                "inner static GAIN drag is not captured by dynamic ring");
+
+            editor->dragGainRangeForTesting (-7.0f);
+            expect (enabled->getBool(),
+                "dragging a static band's GAIN outer ring activates DSP");
+            expect (detector->getBool(),
+                "new dynamics defaults to real per-band bandpass key");
+            expectWithinAbsoluteError (
+                static_cast<double> (range->getUnitsValue()), -7.0, 0.03,
+                "ring drag writes signed hosted compression range");
+            expectWithinAbsoluteError (
+                static_cast<double> (editor->gainRingRangeForTesting()),
+                -7.0, 0.03,
+                "GUI ring follows hosted range after automation");
+            expectWithinAbsoluteError (
+                static_cast<double> (gain->getUnitsValue()),
+                static_cast<double> (initialGain), 0.005,
+                "dynamic ring does not move inner static GAIN");
+            expectWithinAbsoluteError (
+                static_cast<double> (freq->getUnitsValue()),
+                static_cast<double> (initialHz), 0.005,
+                "dynamic ring does not move selected frequency");
+            expect (! processor->isAuditionHoldingForTesting(),
+                "dynamic GAIN ring never triggers solo/audition");
+
+            editor->clearSelectedDynamicsForTesting();
+            expect (! enabled->getBool(),
+                "Clear Dynamics actually disables real hosted DSP");
+            expectWithinAbsoluteError (
+                static_cast<double> (range->getUnitsValue()), 0.0, 0.01,
+                "Clear Dynamics returns hosted range to neutral");
+
+            setUnits (*processor, parameterIndex (
+                0, BandParameterOffset::Shape),
+                static_cast<float> (FilterShape::LowCut));
+            editor->refreshForTesting();
+            expect (! editor->gainRingEditableForTesting(),
+                "cut filters must not expose an invalid dynamics range");
+            editor->dragGainRangeForTesting (5.0f);
+            expect (! enabled->getBool(),
+                "disabled cut filter ring cannot enable dynamics");
+            expectWithinAbsoluteError (
+                static_cast<double> (range->getUnitsValue()), 0.0, 0.01);
+        }
+    }
+
     void testPopoverFollowsSelectedNodeWithoutOccludingSpectrum()
     {
         beginTest ("PASS 11 true contextual control placement: near the"
