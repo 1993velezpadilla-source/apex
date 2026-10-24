@@ -468,7 +468,7 @@ public:
         g.setColour (juce::Colour (0xfff6c53e).withAlpha (0.19f));
         g.strokePath (response_, juce::PathStrokeType (5.0f,
             juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        g.setColour (juce::Colour (0xfff4ce55));
+        g.setColour (responseCurveColour());
         g.strokePath (response_, juce::PathStrokeType (2.0f,
             juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         // Official workflow: a subtle EQ response preview appears on hover,
@@ -590,6 +590,11 @@ public:
                                   juce::Justification::centred, 1);
             }
         }
+
+        // PASS 13 visual critic: this explains the origin of plotted data.
+        // PRE/POST are measured audio, unlike the warm gold DSP transfer
+        // function. Rendering it after the curves keeps the caption legible.
+        drawSpectrumLegend (g);
 
         // Touchscreen-friendly group selection: explicitly opt in via MORE.
         // The badge communicates that node taps LINK/UNLINK rather than
@@ -1179,6 +1184,18 @@ public:
     {
         return spectrumReady_ && spectrumShown_[0] && spectrumShown_[1];
     }
+    juce::Colour spectrumTraceColourForTesting (bool post) const noexcept
+    {
+        return spectrumTraceColour (post ? 1 : 0);
+    }
+    juce::Colour eqTransferColourForTesting() const noexcept
+    {
+        return responseCurveColour();
+    }
+    juce::Rectangle<int> spectrumLegendBoundsForTesting() const noexcept
+    {
+        return spectrumLegendBounds();
+    }
     juce::Range<float> measuredSpectrumDomainXForTesting() const noexcept
     {
         return measuredSpectrumDomainX();
@@ -1309,6 +1326,51 @@ private:
         }
     };
 
+    // Separate audio (cool slate + teal) from the filter response (gold).
+    // PASS 12's real FFT spectrum was rendered in nearly the same yellow
+    // as the EQ transfer curve, making two independent signals look like
+    // one and obscuring the actual shape while monitoring dense material.
+    static juce::Colour spectrumTraceColour (int mode) noexcept
+    {
+        return mode == 0 ? juce::Colour (0xff9d93b2)
+                         : juce::Colour (0xff69c5bf);
+    }
+    static juce::Colour responseCurveColour() noexcept
+    {
+        return juce::Colour (0xfff4ce55);
+    }
+    juce::Rectangle<int> spectrumLegendBounds() const noexcept
+    {
+        if (! spectrumReady_) return {};
+        const int count = static_cast<int> (spectrumShown_[0])
+                        + static_cast<int> (spectrumShown_[1]);
+        if (count == 0) return {};
+        return { graph_.getX() + 12, graph_.getY() + 6,
+                 14 + count * 61, 21 };
+    }
+    void drawSpectrumLegend (juce::Graphics& g) const
+    {
+        const auto area = spectrumLegendBounds();
+        if (area.isEmpty()) return;
+        g.setColour (juce::Colour (0xff24202a).withAlpha (0.91f));
+        g.fillRoundedRectangle (area.toFloat(), 5.0f);
+        g.setColour (juce::Colour (0xff5c535f).withAlpha (0.70f));
+        g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 5.0f, 0.7f);
+        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        int x = area.getX() + 8;
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            if (! spectrumShown_[static_cast<std::size_t> (mode)]) continue;
+            g.setColour (spectrumTraceColour (mode));
+            g.fillEllipse (static_cast<float> (x),
+                           static_cast<float> (area.getCentreY() - 3), 7.0f, 7.0f);
+            g.setColour (juce::Colour (0xffe5dfe9));
+            g.drawText (mode == 0 ? "PRE" : "POST", x + 11,
+                        area.getY() + 2, 43, 17,
+                        juce::Justification::centredLeft);
+            x += 61;
+        }
+    }
     static juce::Colour bandColour (int index)
     {
         constexpr std::array<juce::uint32, 10> hex {{
@@ -2126,17 +2188,18 @@ private:
                 lastDrawnX = x;
             }
             if (! begun) continue;
-            // A translucent filled measured spectrum beneath subtle strokes.
-            // PRE stays muted gray, POST warm gold, both always distinguishable.
+            // PASS 13: tinted cool FFT traces distinguish REAL measured
+            // audio from the warmer gold EQ transfer curve at a glance.
+            // Muted lilac PRE and teal POST remain distinguishable even
+            // under dense harmonic audio without claiming synthetic data.
             juce::Path fill (spectrum);
             fill.lineTo (lastDrawnX, bottom);
             fill.lineTo (firstDrawnX, bottom);
             fill.closeSubPath();
-            const auto ink = mode == 0 ? juce::Colour (0xffa6a2af)
-                                       : juce::Colour (0xffe5ba65);
-            g.setColour (ink.withAlpha (mode == 0 ? 0.07f : 0.12f));
+            const auto ink = spectrumTraceColour (mode);
+            g.setColour (ink.withAlpha (mode == 0 ? 0.045f : 0.085f));
             g.fillPath (fill);
-            g.setColour (ink.withAlpha (mode == 0 ? 0.56f : 0.79f));
+            g.setColour (ink.withAlpha (mode == 0 ? 0.52f : 0.79f));
             g.strokePath (spectrum, juce::PathStrokeType (
                 mode == 0 ? 1.0f : 1.45f));
             // Peak hold visualizes bin-wise maxima of REAL worker FFT frames.
@@ -2166,7 +2229,7 @@ private:
                     constexpr float dash[] = { 3.0f, 4.0f };
                     juce::PathStrokeType (1.0f).createDashedStroke (
                         dashed, peakPath, dash, 2);
-                    g.setColour (ink.withAlpha (mode == 0 ? 0.35f : 0.60f));
+                    g.setColour (ink.withAlpha (mode == 0 ? 0.33f : 0.60f));
                     g.strokePath (dashed, juce::PathStrokeType (1.0f));
                 }
             }
