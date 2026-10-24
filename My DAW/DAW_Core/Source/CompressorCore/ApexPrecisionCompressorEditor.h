@@ -162,7 +162,7 @@ public:
         };
         for(int i=0;i<6;++i)
             lookahead_.addItem(aheadChoices[static_cast<std::size_t>(i)],i+1);
-        lookahead_.setTooltip("Real feed-forward lookahead. Changes during playback reconfigure host latency.");
+        lookahead_.setTooltip("Feed-forward lookahead. With transport timing available, changes are queued until STOP and host PDC acknowledgment.");
         lookahead_.onChange=[this] {
             setDiscrete(LookaheadMode,lookahead_.getSelectedId()-1);
         };
@@ -170,7 +170,7 @@ public:
 
         oversampling_.addItem("Off",1);
         oversampling_.addItem("2x",2);
-        oversampling_.setTooltip("True 2x bandlimited character processing; adds 48 host samples of latency even with Lookahead off.");
+        oversampling_.setTooltip("Real 2x bandlimited character (+48 samples). With host transport info, switching during PLAY waits for STOP and PDC acknowledgment.");
         oversampling_.onChange=[this] {
             setDiscrete(Oversampling2x,oversampling_.getSelectedId()-1);
         };
@@ -888,7 +888,10 @@ private:
         g.drawText("HOST AUTOMATION",16,710,205,21,juce::Justification::left);
         g.drawText("OVERSAMPLING",232,710,111,21,juce::Justification::left);
         g.drawText("LOOKAHEAD",453,710,87,21,juce::Justification::left);
-        g.drawText("PRECISION  /  APEX NATIVE",654,710,236,21,juce::Justification::right);
+        g.drawText(processor_.isLatencyModePendingStop()
+            ? "STOP TO APPLY LATENCY CHANGE"
+            : "PRECISION  /  APEX NATIVE",
+            654,710,236,21,juce::Justification::right);
     }
 
     void setDiscrete(int idx,int value)
