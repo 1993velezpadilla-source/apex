@@ -200,6 +200,55 @@ private:
             expectWithinAbsoluteError (
                 static_cast<double> (range->getUnitsValue()), 0.0, 0.01);
         }
+
+        // Official manual: clear dynamics applies to ALL selected bands,
+        // not only the active primary band. Confirm one undo restores
+        // both canonical hosted parameter sets together.
+        auto processor = std::make_unique<Processor>();
+        processor->prepareToPlay (48000.0, 128);
+        enableBell (*processor, 0, 930.0f, +5.0f, 1.5f);
+        enableBell (*processor, 1, 2700.0f, -4.0f, 2.0f);
+        for (int band = 0; band < 2; ++band)
+        {
+            setUnits (*processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Enable), 1.0f);
+            setUnits (*processor, dynamicParameterIndex (
+                band, DynamicBandOffset::Range),
+                band == 0 ? +6.0f : -4.0f);
+        }
+        auto editor = std::make_unique<ApexQ4Editor> (*processor);
+        editor->setSize (1280, 720);
+        editor->selectBandForTesting (0);
+        const juce::ModifierKeys ctrl (juce::ModifierKeys::ctrlModifier);
+        const auto secondNode = editor->nodeHitAreaForTesting (1)
+            .getCentre().toFloat();
+        editor->injectGraphPointerForTesting (secondNode, 0, ctrl);
+        editor->injectGraphPointerForTesting (secondNode, 2, ctrl);
+        expectEquals (editor->selectedBandCountForTesting(), 2);
+        editor->clearSelectedDynamicsForTesting();
+        for (int band = 0; band < 2; ++band)
+        {
+            expect (! processor->getParametricEQParameter (
+                dynamicParameterIndex (
+                    band, DynamicBandOffset::Enable))->getBool(),
+                "RESET disables BOTH linked hosted dynamic bands");
+            expectWithinAbsoluteError (static_cast<double> (
+                processor->getParametricEQParameter (
+                    dynamicParameterIndex (
+                        band, DynamicBandOffset::Range))->getUnitsValue()),
+                0.0, 0.01, "RESET clears all linked range settings");
+        }
+        editor->undoForTesting();
+        expect (processor->getParametricEQParameter (
+            dynamicParameterIndex (0, DynamicBandOffset::Enable))->getBool()
+            && processor->getParametricEQParameter (
+                dynamicParameterIndex (1, DynamicBandOffset::Enable))->getBool(),
+            "ONE undo restores dynamics on BOTH linked bands");
+        expectWithinAbsoluteError (static_cast<double> (
+            processor->getParametricEQParameter (
+                parameterIndex (0, BandParameterOffset::Gain))
+                ->getUnitsValue()), 5.0, 0.01,
+            "group RESET and undo never corrupt static band gain");
     }
 
     void testPopoverFollowsSelectedNodeWithoutOccludingSpectrum()
