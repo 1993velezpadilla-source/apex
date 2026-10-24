@@ -417,8 +417,10 @@ int main()
         assert(e.latencySamples()==0);
         p.lookaheadMs=10;e.setParameters(p);
         assert(e.latencySamples()==1920);
+        p.lookaheadMs=20;e.setParameters(p);
+        assert(e.latencySamples()==3840);
         p.lookaheadMs=5000;e.setParameters(p);
-        assert(e.latencySamples()==1920);
+        assert(e.latencySamples()==3840);
     }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
