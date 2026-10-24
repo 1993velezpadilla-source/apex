@@ -2791,17 +2791,26 @@ private:
     void clearSelectedDynamics()
     {
         if (selected_ < 0) return;
-        const int band = selected_;
-        auto* range = param (dynamicParameterIndex (
-            band, DynamicBandOffset::Range));
-        auto* enabled = param (dynamicParameterIndex (
-            band, DynamicBandOffset::Enable));
-        range->beginChangeGesture();
-        range->setValueNotifyingHost (range->toNormalised (0.0f));
-        range->endChangeGesture();
-        enabled->beginChangeGesture();
-        enabled->setValueNotifyingHost (0.0f);
-        enabled->endChangeGesture();
+        // The official selected-band workflow clears ALL linked bands in
+        // one undo step, while touching no static EQ gain/frequency/Q.
+        // A zero-range band remains a valid static EQ node.
+        for (int band = 0; band < kMaxBands; ++band)
+        {
+            if (! selectedMask_[static_cast<std::size_t> (band)]
+                || ! param (parameterIndex (
+                    band, BandParameterOffset::Enabled))->getBool())
+                continue;
+            auto* range = param (dynamicParameterIndex (
+                band, DynamicBandOffset::Range));
+            auto* enabled = param (dynamicParameterIndex (
+                band, DynamicBandOffset::Enable));
+            range->beginChangeGesture();
+            range->setValueNotifyingHost (range->toNormalised (0.0f));
+            range->endChangeGesture();
+            enabled->beginChangeGesture();
+            enabled->setValueNotifyingHost (0.0f);
+            enabled->endChangeGesture();
+        }
         commitHistory();
         sync();
         repaint();
