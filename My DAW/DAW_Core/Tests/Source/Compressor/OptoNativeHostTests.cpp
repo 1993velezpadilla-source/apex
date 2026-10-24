@@ -316,7 +316,7 @@ public:
                                     "C3 A/B","C3 COPY","C3 UNDO","C3 REDO",
                                     "C3 PRESET","C3 STYLE","C3 CHARACTER",
                                     "C3 TRIGGER SOURCE","C3 CHARACTER ROUTING",
-                                    "C3 SIDECHAIN PANEL"})
+                                    "C3 SIDECHAIN PANEL","PRECISION LOOKAHEAD"})
                                 expect(findControl(name)!=nullptr,
                                        juce::String(name)+" must exist as a real clickable component");
 
@@ -457,6 +457,56 @@ public:
                                        "switching to internal key must reduce main level");
                             }
                         }
+                    }
+                    // Host-level contract for actual delay compensation:
+                    // the plugin reports exactly 5ms at 48k, and both
+                    // bypassed and active outputs delay the source by 240
+                    // samples. 0ms mode must restore 0 PDC for live vocals.
+                    beginTest("Precision C lookahead actual samples and latency compensation");
+                    {
+                        auto& look=native->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+                        expectEquals(look.paramID,juce::String("c3.lookahead"));
+                        expectEquals(look.getText(.75f,80),juce::String("5 ms"));
+                        look.setValue(look.toNormalised(3.0f)); // 5 ms
+                        native->getC3Parameter(APEX::PrecisionC3::Ratio)
+                            .setValue(native->getC3Parameter(
+                                APEX::PrecisionC3::Ratio).toNormalised(1.0f));
+                        native->getC3Parameter(APEX::PrecisionC3::Input).setValue(.5f);
+                        native->getC3Parameter(APEX::PrecisionC3::Output).setValue(.5f);
+                        native->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.0f);
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),240,
+                                     "Host must receive exact 5ms PDC before playback");
+                        juce::AudioBuffer<float> pulse(4,128);
+                        int foundDelay=-1;
+                        for(int block=0;block<5;++block)
+                        {
+                            pulse.clear();
+                            if(block==0)
+                                for(int ch=0;ch<2;++ch)
+                                    pulse.setSample(ch,0,0.5f);
+                            native->processBlock(pulse,midi);
+                            for(int i=0;i<128;++i)
+                                if(std::abs(pulse.getSample(0,i))>.01f)
+                                {
+                                    if(foundDelay<0)foundDelay=block*128+i;
+                                    expectEquals(block*128+i,240,
+                                        "bypass must retain exact host-compensated delay");
+                                    expectWithinAbsoluteError(pulse.getSample(0,i),.5f,1.e-6f);
+                                }
+                        }
+                        expectEquals(foundDelay,240);
+                        juce::MemoryBlock state;
+                        native->getStateInformation(state);
+                        look.setValue(0.0f);
+                        native->setStateInformation(state.getData(),(int)state.getSize());
+                        expectWithinAbsoluteError(look.getValue(),.75f,1.e-6f,
+                            "Saved sessions must recall requested lookahead mode");
+                        look.setValue(0.0f);
+                        native->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(0.0f);
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),0,
+                                     "0ms mode must impose no monitoring delay");
                     }
                     native->releaseResources();
                 }
