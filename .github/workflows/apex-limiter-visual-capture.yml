@@ -1,0 +1,91 @@
+name: APEX Limiter REAL JUCE UI screenshot (focused)
+on:
+  push:
+    branches:
+      - feature/apex-bubblegum-limiter-v1-20261022
+    paths:
+      - 'My DAW/DAW_Core/Tests/Source/Delay/DelayNativeHostTests.cpp'
+      - 'My DAW/DAW_Core/Source/LimiterCore/**'
+      - '.github/workflows/apex-limiter-visual-capture.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  capture-real-editor:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+        shell: pwsh
+    steps:
+      - name: Checkout exact APEX source (no mockups)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: true
+      - name: Prepare pinned JUCE 8 Windows dependencies
+        run: .\Scripts\prepare_ci.ps1
+      - name: Build actual APEXTests runner / JUCE editor (without rebuilding full DAW)
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -version '[18.0,19.0)' -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Visual Studio 18 unavailable' }
+          $msbuild = Join-Path $vs 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+          & $msbuild '.\Tests\Builds\VisualStudio2026\APEXTests.sln' '/t:Build' '/p:Configuration=Release' '/p:Platform=x64' '/m' '/nr:false' '/nologo' '/v:minimal'
+          if ($LASTEXITCODE -ne 0) { throw 'Actual JUCE C++ test application did not compile' }
+      - name: Run REAL APEX limiter JUCE editor and capture its pixels
+        run: |
+          $exe = '.\Tests\Builds\VisualStudio2026\x64\Release\ConsoleApp\APEXTests.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw 'Missing test executable' }
+          & $exe --category=APEX.LimiterPreview --seed=0xA9E12026
+          if ($LASTEXITCODE -ne 0) { throw 'Actual limiter editor rendering test failed' }
+          $folder='evidence/renderpacks/APEX_LIMITER_NATIVE'
+          foreach ($name in @('01_APEX_Bubblegum_Limiter_REAL_1060x640.png','02_APEX_Bubblegum_Limiter_REAL_820x520.png','03_APEX_Bubblegum_Limiter_REAL_1440x800.png','04_APEX_Bubblegum_Limiter_REAL_32x_1060x640.png')) {
+            $file=Join-Path $folder $name
+            if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -lt 10000) { throw "Real JUCE screenshot is missing or invalid: $file" }
+            $base64=[Convert]::ToBase64String([System.IO.File]::ReadAllBytes($file))
+            [System.IO.File]::WriteAllText(($file+'.b64'),$base64)
+            Write-Host "VERIFIED real C++/JUCE screenshot: $file"
+          }
+      - name: Store proof of the real rendering
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-limiter-actual-compiled-juce-real-png
+          path: My DAW/DAW_Core/evidence/renderpacks/APEX_LIMITER_NATIVE/*
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Commit EXACT screenshot to feature branch
+        if: ${{ success() && github.event_name == 'push' }}
+        working-directory: .
+        run: |
+          git config user.name 'APEX Actual UI Capture'
+          git config user.email 'apex-ui-evidence@users.noreply.github.com'
+          git add -f -- 'My DAW/DAW_Core/evidence/renderpacks/APEX_LIMITER_NATIVE/*.png' 'My DAW/DAW_Core/evidence/renderpacks/APEX_LIMITER_NATIVE/*.png.b64'
+          $files=git diff --cached --name-only
+          if ($files) {
+            # Screenshots are valid only for the exact compiled source SHA.
+            # Another AI/code/CI job can advance this branch while a 30+
+            # minute Windows build is running. Keep the immutable artifact,
+            # NEVER force-push stale screenshots over newer code.
+            $target='refs/heads/feature/apex-bubblegum-limiter-v1-20261022'
+            $remote=git ls-remote origin $target
+            if ($LASTEXITCODE -ne 0 -or -not $remote) { throw 'Cannot verify remote head' }
+            $remoteSha=($remote -split '\s+')[0]
+            if ($remoteSha -ne $env:GITHUB_SHA) {
+              Write-Warning "Branch advanced from $env:GITHUB_SHA to $remoteSha; skip stale screenshot commit (Actions artifact retained)."
+              exit 0
+            }
+            git commit -m 'evidence(limiter): capture REAL compiled JUCE GUI [skip ci]'
+            if ($LASTEXITCODE -ne 0) { throw 'Evidence commit failed' }
+            git push origin HEAD:$target
+            if ($LASTEXITCODE -ne 0) {
+              $newHead=git ls-remote origin $target
+              if ($LASTEXITCODE -eq 0 -and $newHead -and (($newHead -split '\s+')[0] -ne $env:GITHUB_SHA)) {
+                Write-Warning 'Branch changed during screenshot push; immutable Actions artifact preserved.'
+                exit 0
+              }
+              throw 'Evidence push failed for a reason other than branch advancement'
+            }
+          }
