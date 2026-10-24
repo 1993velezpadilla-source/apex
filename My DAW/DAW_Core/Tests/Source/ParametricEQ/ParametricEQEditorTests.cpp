@@ -131,7 +131,23 @@ private:
                         "near-node HUD must not hide either filter handle");
                 expect (! panel.intersects (
                     editor->selectedTagBoundsForTesting()),
-                    "near-node HUD must not hide selected value tooltip");
+                    "near-node HUD must not hide selected value tooltip"
+                    " at " + juce::String (size.x) + "x"
+                    + juce::String (size.y) + " selected band "
+                    + juce::String (selected));
+                if (size.x == 640 && size.y == 400 && selected == 1)
+                {
+                    // Real PASS 11 CI failure: the former 29px bottom
+                    // reserve forced one card to hide the selected tooltip.
+                    // The new tight 8px reserve must preserve BOTH the
+                    // tooltip above and the footer below the card.
+                    expect (panel.getBottom() <=
+                        editor->graphBoundsForTesting().getBottom() - 8,
+                        "short-height popover never enters the footer");
+                    expect (panel.getY() >=
+                        editor->selectedTagBoundsForTesting().getBottom(),
+                        "640x400 selected band #1 remains below its readout");
+                }
             }
         }
         // When expanded Dynamics needs space on a medium phone, preserve
