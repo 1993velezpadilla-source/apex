@@ -116,7 +116,10 @@ void benchMulti(int factor,int instances,const std::vector<float>& left,
                  const std::vector<float>& r):left(l),right(r)
         {
             conversion.prepare(factor,hostBlock,factor>1?57:0);
-            dsp.prepare(sampleRate*factor);
+            // Mirror the actual native JUCE processor's prepare() path.
+            // Previously multi-instance benchmarks silently disabled the
+            // high-rate gain table, overstating 32x multi-instance CPU cost.
+            dsp.prepare(sampleRate*factor,factor>1);
             Settings p;
             p.truePeak=false;
             p.detectorQuality=0;
