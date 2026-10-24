@@ -150,8 +150,9 @@ private:
             expect (detector->getBool(),
                 "new dynamics defaults to real per-band bandpass key");
             expectWithinAbsoluteError (
-                static_cast<double> (range->getUnitsValue()), -7.0, 0.03,
-                "ring drag writes signed hosted compression range");
+                static_cast<double> (range->getUnitsValue()), +7.0, 0.03,
+                "manual-style -7 dB compression UI maps to the positive"
+                " original APEX hosted range, preserving old automation");
             expectWithinAbsoluteError (
                 static_cast<double> (editor->gainRingRangeForTesting()),
                 -7.0, 0.03,
@@ -789,14 +790,18 @@ private:
                 paramIndex)->getValue();
             expectWithinAbsoluteError (
                 static_cast<double> (slider.getValue()),
-                static_cast<double> (actual), 1.0e-6,
-                "real UI slider and hosted DSP parameter must agree");
+                static_cast<double> (
+                    offsets[i] == DynamicBandOffset::Range
+                        ? 1.0f - actual : actual), 1.0e-6,
+                "range UI sign maps to original host normalized parameter"
+                " without rewriting the frozen parameter ABI");
         }
         expectWithinAbsoluteError (static_cast<double> (
             processor->getParametricEQParameter (
                 dynamicParameterIndex (0, DynamicBandOffset::Range))
-                ->getUnitsValue()), 7.5, 0.2,
-            "typed dynamic range uses dB units, not normalized 0..1");
+                ->getUnitsValue()), -7.5, 0.2,
+            "typed +7.5 dB expansion maps to legacy host -7.5 dB"
+            " without changing saved VST3 automation IDs");
         expectWithinAbsoluteError (static_cast<double> (
             processor->getParametricEQParameter (
                 dynamicParameterIndex (0, DynamicBandOffset::Threshold))
