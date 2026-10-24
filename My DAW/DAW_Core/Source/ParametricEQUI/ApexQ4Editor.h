@@ -269,11 +269,13 @@ public:
             narrow ? 338 : (phone ? 390 : 450), w - 18);
         const int controlHeight = narrow ? 126
                                  : (h < 400 ? 104 : 116);
-        // FabFilter's manual places selected-band controls at the bottom of
-        // the frequency display. Keep them near the selected frequency but
-        // never cover an actual hosted band node or its value tag. This GUI-
-        // thread-only placement critic checks multiple legal positions and
-        // favors the bottom edge, rather than blindly covering the response.
+        // PASS 11 screenshot review: at 480x800 and 1280x720 the old
+        // placement scoring forced the band controls to the very BOTTOM
+        // of the graph, hundreds of pixels from the selected EQ point.
+        // Prioritize a compact contextual panel directly below the band,
+        // then above if necessary. Keep the old bottom placement only while
+        // the expanded mobile Dynamic EQ panel needs its own free region.
+        // All placement decisions stay on the message thread.
         const int minX = 9;
         const int maxX = std::max (minX, w - controlWidth - 9);
         const int minY = graph_.getY() + 8;
@@ -292,17 +294,19 @@ public:
             clampX (juce::roundToInt (selectedPoint.x) + 32),
             minX, maxX, clampX ((w - controlWidth) / 2)
         }};
-        const std::array<int, 7> positionsY {{
-            maxY, clampY (maxY - 48), minY,
-            clampY (juce::roundToInt (selectedPoint.y) + 47),
-            clampY (juce::roundToInt (selectedPoint.y) - controlHeight - 49),
-            clampY (graph_.getY() + graph_.getHeight() / 2
-                    - controlHeight / 2),
-            clampY (graph_.getY() + (graph_.getHeight() * 2) / 3
-                    - controlHeight / 2)
+        const int belowNodeY = clampY (
+            juce::roundToInt (selectedPoint.y) + 49);
+        const int aboveNodeY = clampY (
+            juce::roundToInt (selectedPoint.y) - controlHeight - 49);
+        const std::array<int, 9> positionsY {{
+            belowNodeY, aboveNodeY,
+            clampY (belowNodeY + 28), clampY (belowNodeY - 28),
+            clampY (aboveNodeY + 28), clampY (aboveNodeY - 28),
+            maxY, clampY (maxY - 48), minY
         }};
+        const bool reserveDynamicRoom = dynamicExpanded_ && phone && ! narrow;
         float bestPenalty = std::numeric_limits<float>::infinity();
-        juce::Rectangle<int> bestPanel { baseX, maxY,
+        juce::Rectangle<int> bestPanel { baseX, belowNodeY,
                                           controlWidth, controlHeight };
         for (const int y : positionsY)
         {
@@ -310,11 +314,18 @@ public:
             {
                 const juce::Rectangle<int> candidate { x, y,
                     controlWidth, controlHeight };
-                // A predominantly low/bottom contextual HUD is preferred,
-                // provided it does not hide either a selected or other band.
-                float penalty = (maxY - y) * 1.7f
-                    + std::abs (candidate.getCentreX()
-                        - juce::roundToInt (selectedPoint.x)) * 0.11f;
+                // Contextual placement wins over historical bottom-docking.
+                // Only when mobile Dynamics is OPEN, retain the lower band
+                // strip so the taller dynamics card can occupy upper space.
+                const float distanceBelow = static_cast<float> (
+                    std::abs (y - belowNodeY));
+                const float distanceAbove = static_cast<float> (
+                    std::abs (y - aboveNodeY)) + 37.0f;
+                float penalty = reserveDynamicRoom
+                    ? static_cast<float> (maxY - y) * 2.5f
+                    : std::min (distanceBelow, distanceAbove) * 2.2f;
+                penalty += std::abs (candidate.getCentreX()
+                    - juce::roundToInt (selectedPoint.x)) * 0.12f;
                 for (int band = 0; band < kMaxBands; ++band)
                 {
                     if (! param (parameterIndex (band,
