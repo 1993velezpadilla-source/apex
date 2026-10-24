@@ -204,15 +204,29 @@ private:
         for(int i=0;i<count;++i)
         {
             state.samples[static_cast<size_t>(state.cursor)]=src[i];
-            // Even polyphase: all 48 meaningful sinc taps.
+            // The 48 even-phase taps are mirror-symmetric about 23.5.
+            // Pair inputs before multiplying: 24 FIR multiplies instead
+            // of 48, with unchanged linear phase and group delay.
             double even=0.0;
             const auto& weights=polyphase_[0];
+#if defined(APEX_LIMITER_OS_REFERENCE_FIR)
+            // Retained for A/B numerical and CPU comparisons in CI.
             for(int tap=0;tap<kPhaseTaps;++tap)
             {
                 const int index=(state.cursor+kHistory-tap)%kHistory;
                 even+=state.samples[static_cast<size_t>(index)]
                         *weights[static_cast<size_t>(tap)];
             }
+#else
+            for(int tap=0;tap<kPhaseTaps/2;++tap)
+            {
+                const int nearIndex=(state.cursor+kHistory-tap)%kHistory;
+                const int farIndex=(state.cursor+kHistory-(kPhaseTaps-1-tap))%kHistory;
+                even+=(state.samples[static_cast<size_t>(nearIndex)]
+                      +state.samples[static_cast<size_t>(farIndex)])
+                      *weights[static_cast<size_t>(tap)];
+            }
+#endif
             dst[2*i]=static_cast<float>(even);
             // Odd polyphase: only k=23 (the 95-tap halfband centre) is
             // nonzero after DC normalisation. An EXACT delayed sample,
@@ -244,13 +258,26 @@ private:
             if(state.phase==1)
             {
                 double value=0.0;
-                // Exact halfband sparse FIR: 48 even taps plus one centre.
+                // Sparse symmetric halfband: mirror the 48 nonzero
+                // even taps into 24 exact-value pairs; centre unchanged.
+                // This conserves FIR length, stop-band and PDC.
+#if defined(APEX_LIMITER_OS_REFERENCE_FIR)
                 for(int tap=0;tap<kTaps;tap+=2)
                 {
                     const int index=(state.cursor+kHistory-tap)%kHistory;
                     value+=state.samples[static_cast<size_t>(index)]
                             *lowpass_[static_cast<size_t>(tap)];
                 }
+#else
+                for(int tap=0;tap<kCentreTap;tap+=2)
+                {
+                    const int nearIndex=(state.cursor+kHistory-tap)%kHistory;
+                    const int farIndex=(state.cursor+kHistory-(kTaps-1-tap))%kHistory;
+                    value+=(state.samples[static_cast<size_t>(nearIndex)]
+                           +state.samples[static_cast<size_t>(farIndex)])
+                           *lowpass_[static_cast<size_t>(tap)];
+                }
+#endif
                 value+=state.samples[static_cast<size_t>(
                             (state.cursor+kHistory-kCentreTap)%kHistory)]
                            *lowpass_[static_cast<size_t>(kCentreTap)];
