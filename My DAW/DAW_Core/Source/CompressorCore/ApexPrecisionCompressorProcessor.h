@@ -22,6 +22,7 @@ enum ParameterIndex : int
     SC1Freq,SC1Gain,SC1Q,SC2Freq,SC2Gain,SC2Q,
     SC3Freq,SC3Gain,SC3Q,SC4Freq,SC4Gain,SC4Q,
     DryGainDb, // appended; legacy c3.dry percent remains recall-compatible
+    LookaheadMode, // append-only index; public Precision C, legacy c3 IDs
     ParameterCount
 };
 
@@ -60,6 +61,11 @@ public:
             ? juce::jlimit(0, steps_ - 1,
                 static_cast<int>(std::lround(normal * (steps_ - 1)))) : 0;
         if (steps_ == 14) return kStyleNames[static_cast<std::size_t>(index)];
+        if (steps_ == 5)
+        {
+            constexpr const char* times[] {"0 ms","1 ms","2 ms","5 ms","10 ms"};
+            return times[index];
+        }
         if (steps_ == 4)
         {
             constexpr const char* names[] {"Off", "Tube", "Diode", "Bright"};
@@ -80,6 +86,15 @@ public:
             for (int i = 0; i < 4; ++i)
                 if (value.equalsIgnoreCase(names[i])) return i / 3.0f;
         }
+        if (steps_ == 5)
+        {
+            constexpr float times[] {0.0f,1.0f,2.0f,5.0f,10.0f};
+            const float ms = value.getFloatValue();
+            int selected=0;
+            for(int i=1;i<5;++i)
+                if(std::abs(ms-times[i])<std::abs(ms-times[selected]))selected=i;
+            return selected*0.25f;
+        }
         return toNormalised(value.getFloatValue());
     }
     int getNumSteps() const override
@@ -98,7 +113,7 @@ private:
 static_assert(std::atomic<float>::is_always_lock_free,
               "APEX Precision C3 requires lock-free hosted parameter reads");
 
-class Processor final : public juce::AudioPluginInstance
+class Processor final : public juce::AudioPluginInstance, private juce::Timer
 {
 public:
     static constexpr int kUniqueId = 0x41504333; // APC3
@@ -154,7 +169,14 @@ public:
         add(SC4Gain,"c3.sc4.gain","SC Bell 4 Gain",-18,18,0,0," dB");
         add(SC4Q,"c3.sc4.q","SC Bell 4 Q",0.15f,18,1);
         add(DryGainDb,"c3.drygain","Dry Gain",-100,18,-100,0," dB");
+        add(LookaheadMode,"c3.lookahead","Lookahead",0,4,0,5," ms");
+        // JUCE setLatencySamples() can notify the host and is not RT safe.
+        // Poll only the atomic requested value from the message thread.
+        // The audio callback never posts messages, locks or allocates.
+        startTimerHz(20);
     }
+
+    ~Processor() override { stopTimer(); }
 
     const juce::String getName() const override { return kPluginName; }
     void fillInPluginDescription (juce::PluginDescription& d) const override
@@ -189,11 +211,14 @@ public:
         setRateAndBufferSizeDetails(sampleRate, blockSize);
         engine_.prepare(sampleRate);
         engine_.setParameters(readParameters());
+        requestedLatency_.store(engine_.latencySamples(),std::memory_order_relaxed);
+        setLatencySamples(engine_.latencySamples());
         meterInput_.store(-120.0f, std::memory_order_relaxed);
         meterOutput_.store(-120.0f, std::memory_order_relaxed);
         meterGR_.store(0.0f, std::memory_order_relaxed);
         meterHistoryCounter_.store(0, std::memory_order_release);
-        setLatencySamples(0); // no hidden lookahead/PDC in this preview
+        // Reporting is performed above after engine is prepared; at the
+        // 0 ms default the native insert is truly zero latency.
     }
     void releaseResources() override {}
     void reset() override { engine_.reset(); }
@@ -211,6 +236,9 @@ public:
             && getBus(true,1)!=nullptr && getBus(true,1)->isEnabled();
         externalSidechainRouted_.store(routed,std::memory_order_relaxed);
         engine_.setParameters(readParameters());
+        // No PDC notification from the audio callback; the GUI/message
+        // thread timer applies changed latency outside the real-time thread.
+        requestedLatency_.store(engine_.latencySamples(),std::memory_order_release);
         if(routed)
         {
             auto sc=getBusBuffer(buffer,true,1);
@@ -300,6 +328,15 @@ public:
         }
     }
 private:
+    void timerCallback() override
+    {
+        // This is intentionally message-thread-only. setLatencySamples()
+        // can call host listeners, which must NEVER happen in processBlock.
+        const int requested=requestedLatency_.load(std::memory_order_acquire);
+        if(getLatencySamples()!=requested)
+            setLatencySamples(requested);
+    }
+
     void add (int index, const char* id, const char* name, float lo, float hi,
               float initial, int steps=0, const char* unit="")
     {
@@ -322,6 +359,9 @@ private:
         p.attackMs=value(Attack);
         p.releaseMs=value(Release);
         p.holdMs=value(Hold);
+        constexpr double lookaheadTimes[] {0,1,2,5,10};
+        const int mode=juce::jlimit(0,4,(int)std::lround(value(LookaheadMode)));
+        p.lookaheadMs=lookaheadTimes[mode];
         p.inputDb=value(Input);
         p.wetDb=value(Wet);
         p.dryPercent=value(Dry);
@@ -360,7 +400,7 @@ private:
         "c3.sc2.freq","c3.sc2.gain","c3.sc2.q",
         "c3.sc3.freq","c3.sc3.gain","c3.sc3.q",
         "c3.sc4.freq","c3.sc4.gain","c3.sc4.q",
-        "c3.drygain"
+        "c3.drygain","c3.lookahead"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
@@ -372,6 +412,7 @@ private:
     std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryGr_ {};
     std::atomic<std::uint32_t> meterHistoryCounter_ {0};
     std::atomic<bool> externalSidechainRouted_ {false};
+    std::atomic<int> requestedLatency_ {0};
 };
 } // namespace APEX::PrecisionC3
 
