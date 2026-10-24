@@ -131,8 +131,9 @@ private:
                         "near-node HUD must not hide either filter handle");
                 expect (! panel.intersects (
                     editor->selectedTagBoundsForTesting()),
-                    "near-node HUD must not hide selected value tooltip"
-                    " at " + juce::String (size.x) + "x"
+                    juce::String ("near-node HUD must not hide selected"
+                                  " value tooltip at ")
+                    + juce::String (size.x) + "x"
                     + juce::String (size.y) + " selected band "
                     + juce::String (selected));
                 if (size.x == 640 && size.y == 400 && selected == 1)
