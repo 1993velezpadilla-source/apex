@@ -394,6 +394,34 @@ public:
         expect(!recalled.audioOversamplingChangePending(),
                "restored high-rate mode is no longer pending");
 
+        beginTest("Legacy limiter state cannot leak previous 32x or Auto Release");
+        // APEX sessions saved before these two append-only parameter IDs
+        // must reopen using safe defaults even when this Processor previously
+        // hosted a high-rate/auto-release preset. No old automation IDs move.
+        recalled.getLimiterParameter(APEX::Limiter::AutoRelease)
+                .setValueNotifyingHost(1.0f);
+        auto legacyTree=juce::ValueTree::readFromData(
+            state.getData(),state.getSize());
+        expect(legacyTree.isValid(),"recent snapshot deserializes to a tree");
+        legacyTree.removeProperty(juce::Identifier("lim.os.audio"),nullptr);
+        legacyTree.removeProperty(juce::Identifier("lim.release.auto"),nullptr);
+        juce::MemoryBlock legacyState;
+        {
+            juce::MemoryOutputStream stream(legacyState,false);
+            legacyTree.writeToStream(stream);
+        }
+        recalled.setStateInformation(legacyState.getData(),
+                                    static_cast<int>(legacyState.getSize()));
+        expectEquals(recalled.getLimiterParameter(APEX::Limiter::AudioOversampling).units(),
+                     0.0f,"legacy session must restore 1x, never stale 32x");
+        expectEquals(recalled.getLimiterParameter(APEX::Limiter::AutoRelease).units(),
+                     0.0f,"legacy session must restore manual release");
+        expect(recalled.audioOversamplingChangePending(),
+               "legacy switch to 1x stays staged until engine prepare");
+        recalled.prepareToPlay(48000.0,128);
+        expectEquals(recalled.activeAudioOversampling(),1,
+                     "new engine prepare activates legacy-safe 1x");
+
         beginTest("Host PDC reports the actual sample delay of OS bypass impulses");
         // Run an impulse through every filtered high-rate path, with the
         // limiter's dry bypass turned on BEFORE preparing the DSP.
