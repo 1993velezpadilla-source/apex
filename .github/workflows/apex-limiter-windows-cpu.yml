@@ -67,6 +67,50 @@ jobs:
           '=== WINDOWS ORIGINAL DECIMATOR, 32x ==='
           Get-Content "$env:RUNNER_TEMP\apex-windows-cpu-reference.csv" | Select-String '^APEX_OS_CPU,32,|^APEX_OS_MULTI,32,'
           'WARNING: shared Windows runner != Lenovo Legion Go. CPU-only DSP benchmark != full JUCE/plugin/driver deadline.'
+      - name: Package a local Windows x64 CPU probe for the Lenovo Legion Go
+        shell: pwsh
+        run: |
+          $script = @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          echo APEX Limiter hardware CPU audit - 48 kHz, 128 samples, stereo.
+          echo This runs the standalone CPU-only DSP, not the full DAW or driver.
+          "%~dp0apex-windows-cpu-fast.exe" > "%~dp0APEX_THIS_PC_CPU.csv"
+          if errorlevel 1 (
+            echo Benchmark failed.
+            pause
+            exit /b 1
+          )
+          findstr /B "APEX_OS_CPU,32, APEX_OS_MULTI,32," "%~dp0APEX_THIS_PC_CPU.csv"
+          echo.
+          echo Save APEX_THIS_PC_CPU.csv and share its contents for analysis.
+          echo No automatic oversampling fallback or realtime claim.
+          pause
+          '@
+          Set-Content -LiteralPath "$env:RUNNER_TEMP\Run_APEX_CPU_on_Windows.cmd" -Value $script -Encoding ascii
+          $readme = @'
+          APEX Bubblegum Limiter experimental CPU-only x64 test.
+          For Windows 11 / Lenovo Legion Go: extract ALL files to one folder
+          and double-click Run_APEX_CPU_on_Windows.cmd.
+          It creates APEX_THIS_PC_CPU.csv in that folder.
+          The 48 kHz / 128-frame budget is 2.6667 milliseconds.
+          A passing 375/375 deadline test on this standalone benchmark
+          does not guarantee no audio dropouts in JUCE, ASIO, or VST3 chains.
+          Do not run through an audio session; the benchmark uses CPU only.
+          Source: Tests/Standalone/ApexLimiterOversamplingBench.cpp in APEX.
+          '@
+          Set-Content -LiteralPath "$env:RUNNER_TEMP\APEX_CPU_ReadMe.txt" -Value $readme -Encoding ascii
+      - name: Publish executable Windows hardware probe (unsigned diagnostic)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-limiter-run-on-your-windows-pc
+          path: |
+            ${{ runner.temp }}/apex-windows-cpu-fast.exe
+            ${{ runner.temp }}/Run_APEX_CPU_on_Windows.cmd
+            ${{ runner.temp }}/APEX_CPU_ReadMe.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve reproducible Windows x64 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
