@@ -168,6 +168,19 @@ private:
             expect (! processor->isAuditionHoldingForTesting(),
                 "dynamic GAIN ring never triggers solo/audition");
 
+            // The manual explicitly makes range=0 static again. Exercise
+            // that by dragging the ring back through its existing value
+            // rather than invoking the separate RESET command.
+            editor->dragGainRangeForTesting (+7.0f);
+            expectWithinAbsoluteError (
+                static_cast<double> (range->getUnitsValue()), 0.0, 0.03,
+                "GAIN ring dragged to UI zero resets the host range");
+            expect (! enabled->getBool(),
+                "GAIN ring zero also disables dynamic processing");
+            editor->dragGainRangeForTesting (-5.0f);
+            expect (enabled->getBool(),
+                "ring can reactivate dynamics after returning to zero");
+
             editor->clearSelectedDynamicsForTesting();
             expect (! enabled->getBool(),
                 "Clear Dynamics actually disables real hosted DSP");
