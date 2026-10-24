@@ -246,3 +246,33 @@ penalized tooltip collision, correctly caught by the new adversarial test.
 - **Do not claim success** until all four CI workflows complete GREEN on
   the latest commit, followed by visual verification of real screenshots.
   PR #159 remains DRAFT, MAIN unmodified.
+
+
+## PASS 12 — genuine FFT display domain versus unmeasured 30 kHz (2026-10-24)
+
+**Visual finding in native PASS 11 Release PNG:** the PRE/POST FFT fills
+formed a conspicuous right-hand slanted wedge / cliff at the far edge of
+the EQ graph. The GUI frequency canvas correctly spans 20–30,000 Hz,
+but the WAV input is **48 kHz sampled**, so worker FFT data ends below
+24 kHz. Prior `drawSpectrum` correctly ignored invalid bins for its
+line stroke but closed the filled path to `x = getWidth()` (30 kHz),
+painting a false triangle over frequencies where audio wasn't measured.
+This is a visual integrity defect, not a DSP bug.
+
+- A single derived, native-frequency `measuredSpectrumDomainX()` takes
+  the actual FFT bin spacing and last worker bin into account, capped to
+  the graph maximum of 30 kHz.
+- PRE and POST strokes, held-peak overlays and semi-transparent FFT fill
+  now integrate only over that measured domain. A filled spectrum closes
+  vertically at the *last successfully plotted real bin* rather than
+  extrapolating to either artificial x-boundary.
+- Tests use genuine 48 kHz WAV-derived worker FFT frames and assert the
+  displayed domain stops inside the 30 kHz canvas (about 97% of the
+  width) for desktop and mobile. An unmeasured 29 kHz reading must remain
+  at the no-data floor, not contain invented energy.
+- Both DSP and host parameter automation are completely unchanged.
+  PASS 11 was GREEN on HEAD `46b207b9`, but PASS 12 **MUST NOT**
+  be marked GREEN without its *own* four-workflow CI and native
+  screenshot review.
+
+PR #159 remains DRAFT; do not merge MAIN without user approval.
