@@ -60,7 +60,7 @@ std::vector<float> render(int rate,int factor,const std::vector<float>& source,
                           bool enableNative1xDetector=false)
 {
     Core core;
-    core.prepare(static_cast<double>(rate)*factor,factor>1);
+    core.prepare(static_cast<double>(rate)*factor,factor>1,factor>1);
     Settings p;
     p.gainDb=12.0;
     p.ceilingDb=ceilingDb-APEX::Limiter::audioTruePeakReserveDb(
