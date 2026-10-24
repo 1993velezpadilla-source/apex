@@ -225,6 +225,7 @@ public:
         meterInput_.store(-120.0f, std::memory_order_relaxed);
         meterOutput_.store(-120.0f, std::memory_order_relaxed);
         meterGR_.store(0.0f, std::memory_order_relaxed);
+        meterSignedAction_.store(0.0f, std::memory_order_relaxed);
         meterHistoryCounter_.store(0, std::memory_order_release);
         // Reporting is performed above after engine is prepared; at the
         // 0 ms default the native insert is truly zero latency.
@@ -290,12 +291,15 @@ public:
                            std::memory_order_relaxed);
         meterGR_.store(static_cast<float>(engine_.getGainReductionDb()),
                        std::memory_order_relaxed);
+        meterSignedAction_.store(static_cast<float>(engine_.getSignedGainActionDb()),
+                                 std::memory_order_relaxed);
         // One atomic frame per processed buffer. No allocation or locking.
         const auto write = meterHistoryCounter_.load(std::memory_order_relaxed);
         const auto cell = static_cast<std::size_t>(write % kMeterHistoryLength);
         meterHistoryInput_[cell].store(inputLevel(), std::memory_order_relaxed);
         meterHistoryOutput_[cell].store(outputLevel(), std::memory_order_relaxed);
-        meterHistoryGr_[cell].store(gainReduction(), std::memory_order_relaxed);
+        // Positive attenuation / negative boost from actual gain computer.
+        meterHistoryGr_[cell].store(signedGainAction(), std::memory_order_relaxed);
         meterHistoryCounter_.store(write + 1, std::memory_order_release);
     }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -312,6 +316,8 @@ public:
 
     PrecisionC3HostedParameter& getC3Parameter(int index) noexcept { return *precisionParameters_[static_cast<std::size_t>(index)]; }
     float gainReduction() const noexcept { return meterGR_.load(std::memory_order_relaxed); }
+    float signedGainAction() const noexcept
+    { return meterSignedAction_.load(std::memory_order_relaxed); }
     float inputLevel() const noexcept { return meterInput_.load(std::memory_order_relaxed); }
     float outputLevel() const noexcept { return meterOutput_.load(std::memory_order_relaxed); }
     bool externalSidechainRouted() const noexcept
@@ -454,6 +460,7 @@ private:
     Core engine_;
     LatencyModeGuard latencyGuard_;
     std::atomic<float> meterGR_ {0.0f};
+    std::atomic<float> meterSignedAction_ {0.0f};
     std::atomic<float> meterInput_ {-120.0f};
     std::atomic<float> meterOutput_ {-120.0f};
     std::array<std::atomic<float>,kMeterHistoryLength> meterHistoryInput_ {};
