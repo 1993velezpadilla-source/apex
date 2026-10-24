@@ -25,6 +25,7 @@ enum ParameterIndex : int
     DryGainDb, // appended; legacy c3.dry percent remains recall-compatible
     LookaheadMode, // append-only index; public Precision C, legacy c3 IDs
     Oversampling2x, // disabled by default, adds exactly 48 samples of PDC
+    StereoMode,     // append-only L/R or true M/S domain compression
     ParameterCount
 };
 
@@ -173,6 +174,7 @@ public:
         add(DryGainDb,"c3.drygain","Dry Gain",-100,18,-100,0," dB");
         add(LookaheadMode,"c3.lookahead","Lookahead",0,5,0,6," ms");
         add(Oversampling2x,"c3.oversampling","Oversampling 2x",0,1,0,2);
+        add(StereoMode,"c3.stereo.mode","Stereo Processing (L/R or M/S)",0,1,0,2);
         // JUCE setLatencySamples() can notify the host and is not RT safe.
         // Poll only the atomic requested value from the message thread.
         // The audio callback never posts messages, locks or allocates.
@@ -272,19 +274,64 @@ public:
         // Only the JUCE message-thread timer calls setLatencySamples().
         requestedLatency_.store(decision.requestedLatency,
                                 std::memory_order_release);
+        const bool midSide = channels >= 2
+            && getC3Parameter(StereoMode).getUnits() >= 0.5f;
+        auto* left=main.getWritePointer(0);
+        auto* right=channels>1 ? main.getWritePointer(1) : nullptr;
+        const int samples=main.getNumSamples();
+        constexpr double kScale=0.70710678118654752440;
+        if (midSide)
+        {
+            // Energy-normalised orthogonal transform (L/R -> Mid/Side).
+            // The existing two DSP detectors compress the TRUE M and S
+            // channels, optionally linked using the existing 0-100% link.
+            // No additional PDC, and stereo output is decoded after DSP.
+            for(int i=0;i<samples;++i)
+            {
+                const double l=left[i], r=right[i];
+                left[i]=static_cast<float>((l+r)*kScale);
+                right[i]=static_cast<float>((l-r)*kScale);
+            }
+        }
         if(routed)
         {
             auto sc=getBusBuffer(buffer,true,1);
-            engine_.process(main.getWritePointer(0),
-                channels>1 ? main.getWritePointer(1) : nullptr,
-                main.getNumSamples(),
-                sc.getNumChannels()>0 ? sc.getReadPointer(0) : nullptr,
-                sc.getNumChannels()>1 ? sc.getReadPointer(1) : nullptr);
+            const auto* keyL=sc.getNumChannels()>0
+                ? sc.getReadPointer(0) : nullptr;
+            const auto* keyR=sc.getNumChannels()>1
+                ? sc.getReadPointer(1) : nullptr;
+            if(midSide && keyL!=nullptr)
+            {
+                // Route external key to the SAME domain as main audio.
+                // A mono external key has no Side component (zero).
+                for(int offset=0;offset<samples;offset+=kStereoKeyChunk)
+                {
+                    const int n=std::min(kStereoKeyChunk,samples-offset);
+                    for(int i=0;i<n;++i)
+                    {
+                        const double l=keyL[offset+i];
+                        const double r=keyR?keyR[offset+i]:l;
+                        midKeyScratch_[static_cast<std::size_t>(i)]
+                            =static_cast<float>((l+r)*kScale);
+                        sideKeyScratch_[static_cast<std::size_t>(i)]
+                            =static_cast<float>((l-r)*kScale);
+                    }
+                    engine_.process(left+offset,right+offset,n,
+                        midKeyScratch_.data(),sideKeyScratch_.data());
+                }
+            }
+            else engine_.process(left,right,samples,keyL,keyR);
         }
-        else
-            engine_.process(main.getWritePointer(0),
-                channels>1 ? main.getWritePointer(1) : nullptr,
-                main.getNumSamples());
+        else engine_.process(left,right,samples);
+        if(midSide)
+        {
+            for(int i=0;i<samples;++i)
+            {
+                const double m=left[i], side=right[i];
+                left[i]=static_cast<float>((m+side)*kScale);
+                right[i]=static_cast<float>((m-side)*kScale);
+            }
+        }
         meterInput_.store(static_cast<float>(engine_.getInputPeakDb()),
                           std::memory_order_relaxed);
         meterOutput_.store(static_cast<float>(engine_.getOutputPeakDb()),
@@ -363,7 +410,13 @@ public:
         for (int i=0; i<ParameterCount; ++i)
         {
             const auto id=juce::Identifier(parameterIds_[static_cast<std::size_t>(i)]);
-            if (!state.hasProperty(id)) continue;
+            if (!state.hasProperty(id))
+            {
+                if (i == StereoMode) // loading legacy LR session into reused instance
+                    precisionParameters_[StereoMode]->setValue(
+                        precisionParameters_[StereoMode]->getDefaultValue());
+                continue;
+            }
             const auto normalised=static_cast<float>(state.getProperty(id));
             if (std::isfinite(normalised))
                 precisionParameters_[static_cast<std::size_t>(i)]->setValue(normalised);
@@ -454,10 +507,16 @@ private:
         "c3.sc2.freq","c3.sc2.gain","c3.sc2.q",
         "c3.sc3.freq","c3.sc3.gain","c3.sc3.q",
         "c3.sc4.freq","c3.sc4.gain","c3.sc4.q",
-        "c3.drygain","c3.lookahead","c3.oversampling"
+        "c3.drygain","c3.lookahead","c3.oversampling",
+        "c3.stereo.mode"
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
+    // A fixed-size external M/S detector key is prepared as a processor
+    // member. No vector growth, malloc, lock or coefficients on audio thread.
+    static constexpr int kStereoKeyChunk = 1024;
+    std::array<float,kStereoKeyChunk> midKeyScratch_ {};
+    std::array<float,kStereoKeyChunk> sideKeyScratch_ {};
     LatencyModeGuard latencyGuard_;
     std::atomic<float> meterGR_ {0.0f};
     std::atomic<float> meterSignedAction_ {0.0f};
