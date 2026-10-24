@@ -5,6 +5,7 @@
 // APEX automation. Editor is compiled inline at the bottom of this header.
 #include <JuceHeader.h>
 #include "ApexPrecisionCompressorCore.h"
+#include "ApexPrecisionLatencyModeGuard.h"
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -212,9 +213,15 @@ public:
     {
         setRateAndBufferSizeDetails(sampleRate, blockSize);
         engine_.prepare(sampleRate);
+        latencyGuard_.reset(sampleRate, modeFromHost());
         engine_.setParameters(readParameters());
-        requestedLatency_.store(engine_.latencySamples(),std::memory_order_relaxed);
-        setLatencySamples(engine_.latencySamples());
+        const int preparedLatency=engine_.latencySamples();
+        requestedLatency_.store(preparedLatency,std::memory_order_relaxed);
+        setLatencySamples(preparedLatency);
+        acknowledgedLatency_.store(preparedLatency,std::memory_order_release);
+        transportKnown_.store(false,std::memory_order_relaxed);
+        transportPlaying_.store(false,std::memory_order_relaxed);
+        pendingTransportChange_.store(false,std::memory_order_relaxed);
         meterInput_.store(-120.0f, std::memory_order_relaxed);
         meterOutput_.store(-120.0f, std::memory_order_relaxed);
         meterGR_.store(0.0f, std::memory_order_relaxed);
@@ -237,10 +244,33 @@ public:
         const bool routed=wantExternal && getBusCount(true)>1
             && getBus(true,1)!=nullptr && getBus(true,1)->isEnabled();
         externalSidechainRouted_.store(routed,std::memory_order_relaxed);
-        engine_.setParameters(readParameters());
-        // No PDC notification from the audio callback; the GUI/message
-        // thread timer applies changed latency outside the real-time thread.
-        requestedLatency_.store(engine_.latencySamples(),std::memory_order_release);
+        bool knownTransport=false, playing=false;
+        if(auto* playHead=getPlayHead())
+        {
+            if(const auto position=playHead->getPosition())
+            {
+                knownTransport=true;
+                playing=position->getIsPlaying() || position->getIsRecording();
+            }
+        }
+        transportKnown_.store(knownTransport,std::memory_order_relaxed);
+        transportPlaying_.store(playing,std::memory_order_release);
+        // User automation/state records the DESIRED mode, while the audio
+        // engine uses the EFFECTIVE mode. With host transport info, changing
+        // latency during PLAY is held until STOP and host PDC acknowledgment.
+        const auto decision=latencyGuard_.evaluate(modeFromHost(),
+            knownTransport,playing,
+            acknowledgedLatency_.load(std::memory_order_acquire));
+        auto effective=readParameters();
+        constexpr double aheadMs[] {0.0,1.0,2.0,5.0,10.0,20.0};
+        effective.lookaheadMs=aheadMs[decision.effective.lookaheadIndex];
+        effective.oversampling2x=decision.effective.oversampling2x;
+        engine_.setParameters(effective);
+        pendingTransportChange_.store(decision.pendingStop,
+                                      std::memory_order_release);
+        // Only the JUCE message-thread timer calls setLatencySamples().
+        requestedLatency_.store(decision.requestedLatency,
+                                std::memory_order_release);
         if(routed)
         {
             auto sc=getBusBuffer(buffer,true,1);
@@ -288,6 +318,10 @@ public:
     {
         return externalSidechainRouted_.load(std::memory_order_relaxed);
     }
+    bool isLatencyModePendingStop() const noexcept
+    {
+        return pendingTransportChange_.load(std::memory_order_acquire);
+    }
 
     // Read-only GUI history of the ACTUAL compressor DSP meters. Each atomic
     // cell can be read without blocking the audio callback.
@@ -334,9 +368,14 @@ private:
     {
         // This is intentionally message-thread-only. setLatencySamples()
         // can call host listeners, which must NEVER happen in processBlock.
+        if(transportKnown_.load(std::memory_order_acquire)
+           && transportPlaying_.load(std::memory_order_acquire))
+            return; // Never notify/rebuild host PDC while transport runs.
         const int requested=requestedLatency_.load(std::memory_order_acquire);
         if(getLatencySamples()!=requested)
             setLatencySamples(requested);
+        acknowledgedLatency_.store(getLatencySamples(),
+                                   std::memory_order_release);
     }
 
     void add (int index, const char* id, const char* name, float lo, float hi,
@@ -345,6 +384,12 @@ private:
         auto p=std::make_unique<PrecisionC3HostedParameter>(id,name,lo,hi,initial,steps,unit);
         precisionParameters_[static_cast<std::size_t>(index)]=p.get();
         addHostedParameter(std::move(p));
+    }
+    LatencyModeGuard::Mode modeFromHost() noexcept
+    {
+        return {juce::jlimit(0,5,static_cast<int>(std::lround(
+                    getC3Parameter(LookaheadMode).getUnits()))),
+                getC3Parameter(Oversampling2x).getUnits()>=0.5f};
     }
     Parameters readParameters() const noexcept
     {
@@ -407,6 +452,7 @@ private:
     }};
     std::array<PrecisionC3HostedParameter*,ParameterCount> precisionParameters_ {};
     Core engine_;
+    LatencyModeGuard latencyGuard_;
     std::atomic<float> meterGR_ {0.0f};
     std::atomic<float> meterInput_ {-120.0f};
     std::atomic<float> meterOutput_ {-120.0f};
@@ -416,6 +462,10 @@ private:
     std::atomic<std::uint32_t> meterHistoryCounter_ {0};
     std::atomic<bool> externalSidechainRouted_ {false};
     std::atomic<int> requestedLatency_ {0};
+    std::atomic<int> acknowledgedLatency_ {0};
+    std::atomic<bool> transportKnown_ {false};
+    std::atomic<bool> transportPlaying_ {false};
+    std::atomic<bool> pendingTransportChange_ {false};
 };
 } // namespace APEX::PrecisionC3
 
