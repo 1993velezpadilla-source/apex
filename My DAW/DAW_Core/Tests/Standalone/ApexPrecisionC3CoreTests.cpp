@@ -730,6 +730,37 @@ int main()
                            -cb[static_cast<std::size_t>(i)])<1.e-6f);
         }
     }
+    // V15: the previous positive-only GR meter stayed at 0 dB while
+    // Upward audio was audibly amplified. Report SIGNED DSP action without
+    // changing the legacy positive attenuation-only getter.
+    {
+        Core engine;
+        Parameters p;
+        p.style=4; // actual upward compressor
+        p.thresholdDb=-18.0;p.ratio=4.0;p.kneeDb=0.0;
+        p.attackMs=0.1;p.releaseMs=100.0;
+        engine.prepare(48000.0);
+        engine.setParameters(p);
+        std::vector<float> quiet(48000,0.01f);
+        processConstant(engine,quiet,128);
+        assert(quiet.back()>0.03f);
+        assert(engine.getSignedGainActionDb()<-10.0);
+        assert(std::abs(engine.getGainReductionDb())<1.e-6);
+        // Restore downward behavior and use a strong signal above threshold.
+        p.style=0;p.thresholdDb=-28.0;
+        engine.setParameters(p);
+        std::vector<float> loud(48000,0.50f);
+        processConstant(engine,loud,128);
+        assert(engine.getSignedGainActionDb()>8.0);
+        assert(engine.getGainReductionDb()>8.0);
+        // A bypassed plugin is not allowed to display phantom gain action.
+        p.bypass=true;
+        engine.setParameters(p);
+        std::vector<float> tail(48000,0.50f);
+        processConstant(engine,tail,128);
+        assert(std::abs(engine.getSignedGainActionDb())<0.01);
+        assert(std::isfinite(engine.getSignedGainActionDb()));
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
