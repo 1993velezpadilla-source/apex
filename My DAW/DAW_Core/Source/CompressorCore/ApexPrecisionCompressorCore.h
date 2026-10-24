@@ -183,6 +183,7 @@ public:
         smoothedAutoCorrection_ = 0.0;
         trackedLevelDb_ = -18.0;
         gainReductionDb_ = 0.0;
+        signedGainActionDb_ = 0.0;
         inputPeakDb_ = outputPeakDb_ = -120.0;
         initialised_ = false;
     }
@@ -256,7 +257,12 @@ public:
     }
 
     Parameters getParameters() const noexcept { return parameters_; }
+    // Compatibility: positive attenuation-only GR used by older test gates.
     double getGainReductionDb() const noexcept { return gainReductionDb_; }
+    // Signed gain-computer action, same sign convention as the engine:
+    // positive = downward attenuation, negative = upward boost.
+    // It reflects DSP action rather than inventing a nonzero Upward meter.
+    double getSignedGainActionDb() const noexcept { return signedGainActionDb_; }
     double getInputPeakDb() const noexcept { return inputPeakDb_; }
     double getOutputPeakDb() const noexcept { return outputPeakDb_; }
     // Test-only observability: # HP/LP/bell coefficient recomputations since
@@ -473,6 +479,12 @@ public:
             }
             if (!stereo) gr[1] = gr[0];
             gainReductionDb_ = std::max(0.0, std::max(gr[0], gr[1]));
+            // The legacy positive-only GR meter is silent in Upward mode,
+            // even though the DSP is actually boosting the audio. Preserve
+            // its old API, but expose a separately measured signed meter.
+            const double dominantGr = std::abs(gr[0])>=std::abs(gr[1])
+                ? gr[0] : gr[1];
+            signedGainActionDb_ = dominantGr * smoothedBypass_;
             const double makeup = parameters_.autoGain
                 ? std::clamp((-threshold) * (1.0 - 1.0 / parameters_.ratio) * 0.15,
                              0.0, 12.0) : 0.0;
@@ -626,7 +638,8 @@ private:
     double smoothedInput_ = 1.0, smoothedWet_ = 1.0, smoothedOutput_ = 1.0;
     double smoothedDry_ = 0.0, smoothedBypass_ = 1.0, smoothedThreshold_ = -18.0;
     double smoothedMakeup_ = 1.0, smoothedDrive_ = 0.0, smoothedAutoCorrection_ = 0.0;
-    double gainReductionDb_ = 0.0, inputPeakDb_ = -120.0, outputPeakDb_ = -120.0;
+    double gainReductionDb_ = 0.0, signedGainActionDb_ = 0.0;
+    double inputPeakDb_ = -120.0, outputPeakDb_ = -120.0;
     bool initialised_ = false;
 };
 } // namespace APEX::PrecisionC3
