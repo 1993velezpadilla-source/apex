@@ -318,6 +318,26 @@ public:
             expect(stage());
             source.impulse=3000;
             verify(3800,0);
+
+            // V10 real 2x anti-alias stage: check the extra FIR group delay
+            // through the SAME voice->Send->bus->master graph, then compound
+            // with 5ms lookahead. A host that omits 48 samples must fail.
+            auto& os=hosted->getC3Parameter(APEX::PrecisionC3::Oversampling2x);
+            os.setValue(1.0f);
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),48);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=3900;
+            verify(4800,48);
+
+            ahead.setValue(ahead.toNormalised(3.f)); // 5ms + 48 = 288
+            chain->prepare(48000.0,frames);
+            expectEquals(chain->totalLatencySamples(),288);
+            latencyMap=publish();
+            expect(stage());
+            source.impulse=5000;
+            verify(6100,288);
         }
 
 #if defined(APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC) && APEX_ENABLE_EXPERIMENTAL_HOST_DRY_PDC
