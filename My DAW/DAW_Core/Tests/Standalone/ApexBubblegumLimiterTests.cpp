@@ -526,8 +526,52 @@ static void testExternalHostDryLanePreserves32xWetAudio()
              <<frames*2<<" samples under automation"<<std::endl;
 }
 
+static void testAdaptiveAutoRelease()
+{
+    // True audio DSP feature (not a cosmetic selector): deep reduction
+    // releases more slowly. All computations remain sample-continuous
+    // even when the DAW uses different callback block sizes.
+    Settings s;
+    s.gainDb=22.0; s.ceilingDb=-10.0;
+    s.lookaheadMs=5.0; s.releaseMs=60.0;
+    s.truePeak=false; s.detectorQuality=0; s.style=0;
+    std::vector<float> program(36000,0.0f);
+    for(int i=0;i<18000;++i)
+        program[static_cast<size_t>(i)]
+            =static_cast<float>(0.82*std::sin(2*kPi*317.0*i/kRate));
+    for(int i=18000;i<36000;++i)
+        program[static_cast<size_t>(i)]
+            =static_cast<float>(.008*std::sin(2*kPi*317.0*i/kRate));
+    auto render=[&](bool adaptive,int block)
+    {
+        Core c;
+        c.prepare(kRate);
+        auto params=s;
+        params.autoRelease=adaptive;
+        c.setSettings(params);
+        auto data=program;
+        for(int i=0;i<(int)data.size();i+=block)
+            c.process(data.data()+i,nullptr,
+                std::min(block,(int)data.size()-i));
+        return data;
+    };
+    const auto oldRelease=render(false,36000);
+    const auto autoWhole=render(true,36000);
+    const auto autoSplit=render(true,73);
+    assert(autoWhole==autoSplit
+        && "AUTO release envelope must be invariant to callback size");
+    assert(maxAbs(autoWhole)<=std::pow(10.0,s.ceilingDb/20.0)+1.e-5);
+    assert(maxAbs(oldRelease)<=std::pow(10.0,s.ceilingDb/20.0)+1.e-5);
+    double different=0.0;
+    for(std::size_t i=20500;i<30000;++i)
+        different+=std::abs(autoWhole[i]-oldRelease[i]);
+    assert(different>1.e-4
+        && "AUTO release must perform real audio gain shaping");
+}
+
 int main()
 {
+    testAdaptiveAutoRelease();
     testParameterSanitisation();
     testSilenceAndCorruptInputs();
     testNoUnwantedGainBelowCeiling();
