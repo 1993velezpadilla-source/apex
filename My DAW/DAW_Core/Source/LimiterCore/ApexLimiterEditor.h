@@ -73,6 +73,9 @@ public:
         setup(lookahead_,Lookahead,"LOOKAHEAD",0.1,20,0.1,false);
         setup(attack_,Attack,"ATTACK",0.01,1000,0.01,false);
         setup(release_,Release,"RELEASE",10,3000,1,false);
+        release_.setTooltip("Right-click RELEASE to enable/disable real"
+                            " signal-adaptive Auto Release (host-automatable).");
+        release_.addMouseListener(this,false);
         setup(link_,ChannelLink,"TRANSIENT LINK",0,100,1,false);
         setup(releaseLink_,ChannelLinkRelease,"RELEASE LINK",0,100,1,false);
 
@@ -529,6 +532,22 @@ private:
         p.beginChangeGesture();
         p.setValueNotifyingHost(p.toNormal(static_cast<float>(value)));
         p.endChangeGesture();
+    }
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if(e.eventComponent!=&release_ || !e.mods.isPopupMenu())
+            return;
+        juce::PopupMenu menu;
+        menu.addItem(1,"Adaptive AUTO Release",true,
+            param(AutoRelease).units()>0.5f);
+        juce::Component::SafePointer<Editor> safe(this);
+        menu.showMenuAsync(juce::PopupMenu::Options()
+            .withTargetComponent(&release_),[safe](int id)
+        {
+            if(auto* editor=safe.getComponent();editor && id==1)
+                editor->selectParameter(AutoRelease,
+                    editor->param(AutoRelease).units()>0.5f ? 0.0 : 1.0);
+        });
     }
     void timerCallback() override
     {
