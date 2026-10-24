@@ -830,7 +830,10 @@ private:
         auto processorStorage = std::make_unique<Processor>();
         auto& processor = *processorStorage;
         processor.prepareToPlay (48000.0, 128);
-        expectEquals (kNumParameters, 375);
+        expectEquals (kFirstDynamicAutoThresholdParameter, 375,
+                      "original Phase 10 ABI ends at index 374");
+        expectEquals (kNumParameters, 399,
+                      "Phase 11 appends exactly 24 AUTO threshold IDs");
         expectEquals (processor.getLatencySamples(), 0,
                       "existing sessions never inherit spectral lookahead");
         expect (! processor.isSpectralModeArmedForTesting());
