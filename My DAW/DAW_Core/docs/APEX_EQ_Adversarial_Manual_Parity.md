@@ -318,3 +318,72 @@ rotary rings remained yellow too, further weakening visual hierarchy.
 calculations changed.** No visual 1:1 parity claim; keep PR #159 DRAFT
 and MAIN unchanged until all latest-head CI checks and native image
 inspection are complete, plus explicit user approval.
+
+
+## PASS 14 — FabFilter Pro-Q 4 Dynamic EQ band-controls workflow (2026-10-24)
+
+**Requested reference:** https://www.fabfilter.com/help/pro-q/using/dynamic-eq
+and the user-provided zoomed official manual image (curved floating band
+card containing FREQ, GAIN, Q, gain-range annulus, threshold bar, key
+trigger, attack and release controls). **Strict source discipline:** model
+the user-facing interaction with wholly APEX-owned C++/JUCE components,
+not copied FabFilter artwork, logos, proprietary DSP or fonts.
+
+### Committed to feature branch, user-visible source behavior
+
+- Introduce `ApexQ4DynamicGainDial`, a real JUCE Slider subtype; the
+  **outer annulus** around GAIN has a separate drag hit test from the
+  **inner static gain knob**. Drag writes actual signed dB Range through
+  `beginChangeGesture`/`setValueNotifyingHost`/`endChangeGesture`,
+  automatically activating hosted Dynamic Enable only after moving away
+  from zero. Handles pointer-up, selection change and destruction
+  without leaving automation gestures dangling.
+- The outer ring expresses the actual signed per-band hosted range as
+  red compression or magenta expansion. A small gold inner mark shows
+  the **last coherent audio-thread measured dynamic gain** from
+  `ResponseFrame`, not generated animation. No measured frame means
+  no gold gain-reduction mark. Ring is present only for Bell/Low Shelf/
+  High Shelf/Flat Tilt, not cut, notch or phase-only filters.
+- Preserve existing native threshold/range/attack/release sliders in
+  contextual advanced Dynamics panel and the genuine DSP-driven control
+  values; accessible through MORE on very narrow touch viewports.
+- Make newly created Dynamic EQ bands (Alt-create, Alt-wheel activate,
+  or first gain-ring drag) default to a **band-limited internal trigger**;
+  this changes only the explicit new-band activation path, **not**
+  existing session migration/default legacy source settings.
+- Replace misleading Filter toggle with a **real trigger selector**
+  (Band-limited linked key vs Full-band/wideband key), plus
+  **Internal vs External Sidechain** options using the existing
+  *global shared* host-sidechain parameter. It is explicitly labelled
+  **SHARED ACROSS BANDS**, not claimed as per-band FabFilter behavior.
+  A reset action clears per-band Dynamic Range to zero and disables
+  Dynamic Enable with balanced host automation notifications; it does
+  not silently alter static frequency/gain/Q.
+- New JUCE tests at 320×568, 480×800, 900×300 and 1280×720 verify
+  ring hit geometry, independent static vs dynamic knob gestures,
+  negative dB range, newly enabled band key, no accidental audition,
+  disallowed shapes, clear/reset, and GUI ring meter fidelity to a
+  *real* PCM→DSP ResponseFrame. Run all existing flagship EQ and Windows
+  integration tests after the pass.
+
+### Adversarial parity gap matrix — do NOT call this 1:1 yet
+
+| Manual behavior | APEX status after PASS 14 |
+| --- | --- |
+| Dynamic range ring around GAIN; independent static gain | **Implemented** with actual hosted automation and touch |
+| Signed range, compression vs expansion | **Implemented** in APEX DSP limit **±24 dB** |
+| Yellow current reduction inside ring | **Implemented** from actual coherent DSP frame |
+| Band-limited default trigger for newly dynamic bands | **Implemented** without rewriting saved sessions |
+| Trigger on band or wideband, internal/external source | **Implemented**, external source **shared global** |
+| Threshold/attack/release custom control | Existing hosted DSP and editable advanced panel |
+| Reset range to static band | **Implemented** using existing host parameter notifications |
+| FabFilter ±30 dB exact range | **NOT implemented**. APEX saved normalized automation and DSP range are ±24 dB; changing the old host parameter ABI requires explicit compatibility and regression work |
+| FabFilter adaptive AUTO threshold/attack/release | **NOT implemented**. APEX has user-adjustable fixed threshold and time parameters; labelling fixed behavior AUTO would mislead users |
+| FabFilter editable *Free* high/low trigger cutoff frequencies | **NOT implemented**. APEX only has bandpass-linked or unfiltered wideband trigger |
+| FabFilter per-band external sidechain source | **NOT implemented**. APEX sidechain source is one shared parameter |
+| Reproduction of exact original widget artwork/shape | **NOT claimed**. UX-inspired original APEX skin, responsive geometry |
+
+**Critical:** The new commits are not GREEN merely because PASS 13 was
+GREEN. The exact PASS 14 HEAD needs new debug/release EQ, Windows
+integration, focused compile and policy checks and real WAV-native
+screenshots. No MAIN changes; PR #159 remains DRAFT pending approval.
