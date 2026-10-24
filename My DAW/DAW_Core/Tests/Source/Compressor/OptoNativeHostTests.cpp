@@ -466,7 +466,7 @@ public:
                     {
                         auto& look=native->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
                         expectEquals(look.paramID,juce::String("c3.lookahead"));
-                        expectEquals(look.getText(.75f,80),juce::String("5 ms"));
+                        expectEquals(look.getText(.6f,80),juce::String("5 ms"));
                         look.setValue(look.toNormalised(3.0f)); // 5 ms
                         native->getC3Parameter(APEX::PrecisionC3::Ratio)
                             .setValue(native->getC3Parameter(
@@ -500,7 +500,7 @@ public:
                         native->getStateInformation(state);
                         look.setValue(0.0f);
                         native->setStateInformation(state.getData(),(int)state.getSize());
-                        expectWithinAbsoluteError(look.getValue(),.75f,1.e-6f,
+                        expectWithinAbsoluteError(look.getValue(),.6f,1.e-6f,
                             "Saved sessions must recall requested lookahead mode");
                         look.setValue(0.0f);
                         native->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(0.0f);
