@@ -474,6 +474,58 @@ static void testReal32xProcessedLimiterAttenuatesTruePeaks()
              <<"; this is a directional test, NOT certified true peak or latency\n";
 }
 
+// The JUCE >1x host owns dry bypass at project rate. Switching the high-
+// rate Core to WET-only must never change processed signal samples compared
+// with the pre-optimization implementation, even during parameter automation.
+// Legacy 1x Core bypass is separately exercised above.
+static void testExternalHostDryLanePreserves32xWetAudio()
+{
+    using APEX::Limiter::AudioRateConverter;
+    constexpr int frames=4096, factor=32;
+    auto sourceL=signal(frames,0.72);
+    std::vector<float> sourceR(static_cast<size_t>(frames));
+    for(int i=0;i<frames;++i)
+        sourceR[static_cast<size_t>(i)]=static_cast<float>(
+            0.44*std::sin(2.0*kPi*1709.0*i/kRate+0.2));
+    const auto render=[&](bool hostOwnsBypass)
+    {
+        Core core;
+        core.prepare(kRate*factor,true,hostOwnsBypass);
+        AudioRateConverter os;
+        os.prepare(factor,128,57);
+        auto l=sourceL,r=sourceR;
+        const auto high=[](void* ctx,float* left,float* right,int size) noexcept
+        {
+            static_cast<Core*>(ctx)->process(left,right,size);
+        };
+        int base=0,step=0;
+        while(base<frames)
+        {
+            Settings p;
+            p.gainDb=(step%3==0)?0.0:((step%3==1)?8.0:19.0);
+            p.ceilingDb=(step%2==0)?-1.0:-6.0;
+            p.lookaheadMs=(step%2==0)?5.0:0.5;
+            p.releaseMs=(step%3==0)?55.0:200.0;
+            p.attackMs=(step%2==0)?0.05:1.0;
+            p.truePeak=false;
+            p.detectorQuality=0;
+            p.bypass=false; // host handles external dry/bypass, not the Core
+            core.setSettings(p);
+            const int count=std::min(frames-base,step%2==0?37:113);
+            os.process(l.data()+base,r.data()+base,count,&core,high);
+            base+=count;
+            ++step;
+        }
+        return std::array<std::vector<float>,2>{std::move(l),std::move(r)};
+    };
+    const auto reference=render(false);
+    const auto external=render(true);
+    assert(reference[0].size()==external[0].size());
+    assert(reference[0]==external[0] && reference[1]==external[1]);
+    std::cout<<"APEX 32x external-host dry bypass: bit-exact wet stereo, "
+             <<frames*2<<" samples under automation\\n";
+}
+
 int main()
 {
     testParameterSanitisation();
@@ -489,6 +541,7 @@ int main()
     testFIRReconstructionActuallyReducesIntersamplePeak();
     testRealAudioOversamplerRunsAndRejectsAliasing();
     testReal32xProcessedLimiterAttenuatesTruePeaks();
+    testExternalHostDryLanePreserves32xWetAudio();
     for (const int block : {1,17,64,128,257,1024})
         for(int style=0;style<8;++style)
             for(int quality=0;quality<4;++quality)
