@@ -49,7 +49,12 @@ jobs:
             Tests/Standalone/ApexLimiterOversamplingBench.cpp \
             -o "$RUNNER_TEMP/apex-limiter-os-bench-reference-db"
           g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math -DAPEX_LIMITER_REFERENCE_GAIN_EXP \
+            Tests/Standalone/ApexLimiterOversamplingBench.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-os-bench-gain-exp"
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror \
             -fno-fast-math -DAPEX_LIMITER_REFERENCE_DB_MATH -DAPEX_LIMITER_OS_REFERENCE_FIR \
+            -DAPEX_LIMITER_REFERENCE_GAIN_EXP \
             Tests/Standalone/ApexLimiterOversamplingBench.cpp \
             -o "$RUNNER_TEMP/apex-limiter-os-bench-legacy"
       - name: Measure real CPU cost at 48 kHz stereo
@@ -58,6 +63,7 @@ jobs:
           "$RUNNER_TEMP/apex-limiter-os-bench-reference" > "$RUNNER_TEMP/apex-limiter-os-reference.csv"
           "$RUNNER_TEMP/apex-limiter-os-bench-reference-db" > "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
           "$RUNNER_TEMP/apex-limiter-os-bench-legacy" > "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
+          "$RUNNER_TEMP/apex-limiter-os-bench-gain-exp" > "$RUNNER_TEMP/apex-limiter-os-gain-exp.csv"
           echo '--- 32x reference FIR vs optimized FIR (shared CI: diagnostic only) ---'
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-perf.csv"
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-reference.csv"
@@ -66,7 +72,10 @@ jobs:
           echo '--- 32x original dB (slow pow/log10) against optimized natural-log math ---'
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
           grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-reference-db.csv"
-          echo '--- 32x full baseline: original FIR and original dB ---'
+          echo '--- 32x reference gain exp vs lookup ---'
+          grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-gain-exp.csv"
+          grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-gain-exp.csv"
+          echo '--- 32x full baseline: original FIR, original gain exp and original dB ---'
           grep '^APEX_OS_CPU,32,' "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
           grep '^APEX_OS_MULTI,32,' "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
       - name: Build numerical FIR A/B sample parity harness
@@ -82,15 +91,20 @@ jobs:
             -fno-fast-math -DAPEX_LIMITER_REFERENCE_DB_MATH \
             Tests/Standalone/ApexLimiterFirParity.cpp \
             -o "$RUNNER_TEMP/apex-limiter-db-reference"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -fno-fast-math -DAPEX_LIMITER_REFERENCE_GAIN_EXP \
+            Tests/Standalone/ApexLimiterFirParity.cpp \
+            -o "$RUNNER_TEMP/apex-limiter-gain-reference"
       - name: Prove symmetric FIR output parity against original reference
         run: |
           "$RUNNER_TEMP/apex-limiter-fir-optimized" > "$RUNNER_TEMP/apex-fir-optimized.csv"
           "$RUNNER_TEMP/apex-limiter-fir-reference" > "$RUNNER_TEMP/apex-fir-reference.csv"
           "$RUNNER_TEMP/apex-limiter-db-reference" > "$RUNNER_TEMP/apex-db-reference.csv"
-          python3 - "$RUNNER_TEMP/apex-fir-reference.csv" "$RUNNER_TEMP/apex-fir-optimized.csv" "$RUNNER_TEMP/apex-db-reference.csv" <<'PY'
+          "$RUNNER_TEMP/apex-limiter-gain-reference" > "$RUNNER_TEMP/apex-gain-reference.csv"
+          python3 - "$RUNNER_TEMP/apex-fir-reference.csv" "$RUNNER_TEMP/apex-fir-optimized.csv" "$RUNNER_TEMP/apex-db-reference.csv" "$RUNNER_TEMP/apex-gain-reference.csv" <<'PY'
           import itertools, math, sys
           reports=[]
-          for label,reference_path in (("FIR",sys.argv[1]),("DB_MATH",sys.argv[3])):
+          for label,reference_path in (("FIR",sys.argv[1]),("DB_MATH",sys.argv[3]),("GAIN_LOOKUP",sys.argv[4])):
               rows=0
               maximum=0.0
               with open(reference_path, encoding="utf-8") as reference, open(sys.argv[2], encoding="utf-8") as optimized:
@@ -165,6 +179,11 @@ jobs:
               cat "$RUNNER_TEMP/apex-limiter-os-legacy.csv"
               echo '\`\`\`'
               echo ''
+              echo '### Precomputed gain-table vs slow exponential (isolates gain lookup cost)'
+              echo '\`\`\`'
+              cat "$RUNNER_TEMP/apex-limiter-os-gain-exp.csv"
+              echo '\`\`\`'
+              echo ''
               cat "$RUNNER_TEMP/apex-fir-parity-summary.txt" 2>/dev/null || true
             else
               echo 'Benchmark data missing; see job logs.'
@@ -202,6 +221,7 @@ jobs:
             ${{ runner.temp }}/apex-limiter-os-reference.csv
             ${{ runner.temp }}/apex-limiter-os-reference-db.csv
             ${{ runner.temp }}/apex-limiter-os-legacy.csv
+            ${{ runner.temp }}/apex-limiter-os-gain-exp.csv
             ${{ runner.temp }}/apex-fir-parity-summary.txt
             ${{ runner.temp }}/apex-limiter-wet-phase.csv
             ${{ runner.temp }}/apex-limiter-truepeak.csv
