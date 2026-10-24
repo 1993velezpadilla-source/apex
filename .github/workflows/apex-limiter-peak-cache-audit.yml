@@ -3,12 +3,16 @@ on:
   push:
     paths:
       - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h'
       - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp'
       - '.github/workflows/apex-limiter-peak-cache-audit.yml'
   pull_request:
     paths:
       - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h'
       - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp'
       - '.github/workflows/apex-limiter-peak-cache-audit.yml'
   workflow_dispatch:
 permissions:
@@ -26,22 +30,30 @@ jobs:
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -fno-fast-math Tests/Standalone/ApexLimiterPeakCacheAudit.cpp -o /tmp/apex-cache
           g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_REFERENCE_PEAK_LOG Tests/Standalone/ApexLimiterPeakCacheAudit.cpp -o /tmp/apex-reference
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE Tests/Standalone/ApexLimiterPeakCacheAudit.cpp -o /tmp/apex-decimate-reference
       - name: Require exact stereo audio parity with automated controls
         run: |
           /tmp/apex-cache > /tmp/apex-cache.csv
           /tmp/apex-reference > /tmp/apex-reference.csv
+          /tmp/apex-decimate-reference > /tmp/apex-decimate-reference.csv
           cmp /tmp/apex-cache.csv /tmp/apex-reference.csv
+          cmp /tmp/apex-cache.csv /tmp/apex-decimate-reference.csv
           wc -l /tmp/apex-cache.csv
           echo APEX_PEAK_CACHE_PARITY_GREEN
       - name: Benchmark 32x cached versus reference DSP on same runner
         run: |
           g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror -fno-fast-math Tests/Standalone/ApexLimiterOversamplingBench.cpp -o /tmp/apex-cache-bench
           g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_REFERENCE_PEAK_LOG Tests/Standalone/ApexLimiterOversamplingBench.cpp -o /tmp/apex-log-bench
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE Tests/Standalone/ApexLimiterOversamplingBench.cpp -o /tmp/apex-pair-reference-bench
           /tmp/apex-cache-bench > /tmp/apex-cache-perf.csv
           /tmp/apex-log-bench > /tmp/apex-log-perf.csv
+          /tmp/apex-pair-reference-bench > /tmp/apex-pair-reference-perf.csv
           echo '=== CACHED 32x (shared runner, NOT device validation) ==='
           grep 'APEX_OS_CPU,32,' /tmp/apex-cache-perf.csv
           grep 'APEX_OS_MULTI,32,' /tmp/apex-cache-perf.csv
           echo '=== UNCACHED 32x CONTROL ==='
           grep 'APEX_OS_CPU,32,' /tmp/apex-log-perf.csv
           grep 'APEX_OS_MULTI,32,' /tmp/apex-log-perf.csv
+          echo '=== ORIGINAL PER-SAMPLE DECIMATOR (same DSP) ==='
+          grep 'APEX_OS_CPU,32,' /tmp/apex-pair-reference-perf.csv
+          grep 'APEX_OS_MULTI,32,' /tmp/apex-pair-reference-perf.csv
