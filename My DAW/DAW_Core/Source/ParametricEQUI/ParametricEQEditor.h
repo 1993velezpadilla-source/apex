@@ -62,11 +62,14 @@ public:
     juce::Rectangle<int> getNodeBoundsForTesting (int band) const;
     juce::TextButton& getAuditionButtonForTesting();
     juce::TextButton& getPhaseButtonForTesting();
+    void applyPresetForTesting (int presetId);
+    float analyzerYForTesting (float db) const;
     juce::TextButton& getSketchButtonForTesting();
     juce::TextButton& getGrabButtonForTesting();
     juce::TextButton& getCopyButtonForTesting();
     juce::TextButton& getPasteButtonForTesting();
     juce::TextButton& getMatchButtonForTesting();
+    juce::TextButton& getToolsButtonForTesting();
     juce::TextButton& getMatchSaveButtonForTesting();
     juce::TextButton& getMatchLoadButtonForTesting();
     void feedMatchSpectrumForTesting (const float* db, int bins, double binHz);
@@ -74,6 +77,7 @@ public:
     juce::Rectangle<int> getGrabPeakBoundsForTesting (int index) const;
     const std::vector<std::unique_ptr<juce::TextButton>>&
         getPlacementButtonsForTesting() const;
+    juce::ComboBox& getPlacementComboForTesting();
     juce::TextButton& getDynEnableButtonForTesting();
     juce::TextButton& getDynFilterButtonForTesting();
     juce::TextButton& getSpectralArmButtonForTesting();
@@ -101,6 +105,7 @@ public:
 
 private:
     void selectBand (int band);
+    void setViewMode (int mode);
     void applyLayout();
     bool isCompactLayout() const noexcept;
 
