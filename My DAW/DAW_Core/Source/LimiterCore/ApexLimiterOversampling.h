@@ -60,8 +60,8 @@ public:
     // Measured/derived group delay. At each 2x stage, interpolation adds
     // (kTaps-1)/2=31 HIGH samples and the downsampler's odd output phase
     // advances the cascade by ONE high sample. Therefore a stage roundtrip
-    // is 61 high frames, or 30.5 host frames at the first 2x level.
-    // Earlier code reported 62 and was wrong by 1-1/factor native frames.
+    // is 93 high frames, or 30.5 host frames at the first 2x level.
+    // The downsampler's odd output phase must be accounted for exactly.
     double nominalFilterDelayFrames() const noexcept
     {
         if(factor_<=1)return 0.0;
@@ -101,8 +101,8 @@ public:
             auto& high=work_[static_cast<size_t>(stages_)];
             callback(ctx,high[0].data(),stereo?high[1].data():nullptr,highCount);
             // Delay the actual high-rate wet audio by an integer number of
-            // OVERSAMPLED samples. At 32x, 25 high samples add exactly
-            // 25/32 of one host sample, unlike a coloured fractional FIR.
+            // OVERSAMPLED samples. At 32x, 57 high samples add exactly
+            // 57/32 host samples to offset the Core/FIR fractional PDC.
             if(extraHighRateDelay_>0)
                 for(int ch=0;ch<(stereo?2:1);++ch)
                     delayHighRate(alignmentDelay_[static_cast<size_t>(ch)],
@@ -125,12 +125,12 @@ public:
         }
     }
 private:
-    static constexpr int kTaps=63;
-    static constexpr int kHistory=64;
-    static constexpr int kPhaseTaps=32;
+    static constexpr int kTaps=95;
+    static constexpr int kHistory=128;
+    static constexpr int kPhaseTaps=48;
     static constexpr int kMaxHighRateDelay=63;
-    static constexpr int kCentreTap=(kTaps-1)/2; // 31
-    static constexpr int kOddCentreTap=(kCentreTap-1)/2; // 15
+    static constexpr int kCentreTap=(kTaps-1)/2; // 47
+    static constexpr int kOddCentreTap=(kCentreTap-1)/2; // 23
     struct UpHistory
     {
         std::array<double,kHistory> samples{};
@@ -162,7 +162,7 @@ private:
     void prepareFilter() noexcept
     {
         // Real windowed-sinc antialias LPF with a halfband cutoff (0.25
-        // high-rate cycles/sample). 63-tap Blackman smooths the transition.
+        // high-rate cycles/sample). 95-tap Blackman smooths the transition.
         // DC is normalized independently for the two interpolation phases.
         constexpr double pi=3.14159265358979323846;
         double sum=0.0;
@@ -204,7 +204,7 @@ private:
         for(int i=0;i<count;++i)
         {
             state.samples[static_cast<size_t>(state.cursor)]=src[i];
-            // Even polyphase: all 32 meaningful sinc taps.
+            // Even polyphase: all 48 meaningful sinc taps.
             double even=0.0;
             const auto& weights=polyphase_[0];
             for(int tap=0;tap<kPhaseTaps;++tap)
@@ -214,7 +214,7 @@ private:
                         *weights[static_cast<size_t>(tap)];
             }
             dst[2*i]=static_cast<float>(even);
-            // Odd polyphase: only k=15 (the 63-tap halfband centre) is
+            // Odd polyphase: only k=15 (the 95-tap halfband centre) is
             // nonzero after DC normalisation. An EXACT delayed sample,
             // with no kernel loop or frame-dependent interpolation drift.
             dst[2*i+1]=static_cast<float>(
@@ -244,7 +244,7 @@ private:
             if(state.phase==1)
             {
                 double value=0.0;
-                // Exact halfband sparse FIR: 32 even taps plus one centre.
+                // Exact halfband sparse FIR: 48 even taps plus one centre.
                 for(int tap=0;tap<kTaps;tap+=2)
                 {
                     const int index=(state.cursor+kHistory-tap)%kHistory;
