@@ -127,16 +127,17 @@ int main()
                 }
                 maximumOvershoot=std::max(maximumOvershoot,overshoot);
                 if(overshoot>0.02)++overshootCases;
-                // User-facing TP ON must now stay within +0.01 dB of
-                // the selected ceiling at 32x on this adversarial matrix.
-                // The reference is independent 32x windowed-sinc, not an
-                // ITU/EBU certificate. The 1x sample-only baseline is RED.
-                if(factor==32 && overshoot>0.01)
+                // True Peak ON with 2x–32x real AUDIO oversampling must
+                // respect the +0.01 dB ISP regression tolerance for every
+                // fixed synthetic stress case, not just high-quality 32x.
+                // 1x sample-only is an intentionally exposed legacy RED
+                // baseline; this does not certify a BS.1770 meter/limiter.
+                if(factor>1 && overshoot>0.01)
                 {
                     std::fprintf(stderr,
-                        "APEX 32x TP REGRESSION: %dHz profile %d exceeded "
+                        "APEX %dx TP REGRESSION: %dHz profile %d exceeded "
                         "+0.01 dB tolerance: %+0.5f dBTP\n",
-                        rate,profile,overshoot);
+                        factor,rate,profile,overshoot);
                     return EXIT_FAILURE;
                 }
             }
