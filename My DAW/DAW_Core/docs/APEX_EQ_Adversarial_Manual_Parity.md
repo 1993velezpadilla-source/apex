@@ -193,3 +193,30 @@ breakpoints must keep Slope / Placement / Dynamic buttons hidden according
 to design. This directly guards the five original PASS 10 CI failures
 against a future visibility regression. All latest-SHA Windows CI gates,
 real native PNG review and explicit user approval remain required.
+
+
+## PASS 11 — contextual band popover follows the active EQ node (2026-10-23)
+
+**Real screenshot visual finding:** PASS 10 native Release PNGs at 480×800
+and 1280×720 show the active-band FREQ/GAIN/Q popover docked near the
+bottom of the canvas, conspicuously separated from the selected EQ handle.
+The GUI should behave as a small contextual control rather than a bottom
+sheet, and the selected band must remain understandable during live audio.
+
+- Replace old `(maxY - y) * 1.7` bottom-docking preference with selection-
+  anchored placement. Prefer 49 px **below** the selected node, then above
+  with a small bias when the lower position is blocked or constrained.
+  Compare candidate positions near the node as well as safe edges.
+- Retain strict band handle and value-tag occlusion penalties; full-width
+  frequency graph remains intact. No new DSP allocation or audio work.
+- On 460–669px medium phones **while Dynamics is expanded**, deliberately
+  favor a lower band HUD so both separate cards have room. Closing the
+  Dynamics panel resumes the node-following behavior.
+- Add native JUCE callback/geometry tests at 480×800, 640×400,
+  1280×720 and 1920×1080 for both EQ node selections. Assert the
+  contextual HUD remains within 210px of the selected node, covers no
+  active node or value tag, and remains disjoint from expanded Dynamics.
+
+**Not yet certified:** CI must execute on PASS 11 HEAD and the new native
+WAV-based GUI screenshots must be visually reviewed. No claim of Pro-Q 4
+visual or feature 1:1 parity; PR #159 stays DRAFT and MAIN untouched.
