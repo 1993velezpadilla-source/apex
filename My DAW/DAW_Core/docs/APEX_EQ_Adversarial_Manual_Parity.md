@@ -457,3 +457,49 @@ tests assert both reset and restore correctly.
 actual unmodified native JUCE screenshots; do NOT declare PASS 14 green
 or visual 1:1 prematurely. APEX saved session ABI and audio DSP remain
 unchanged; PR #159 DRAFT / MAIN untouched.
+
+
+## PASS 15 — one physical floating desktop Dynamic EQ band card (2026-10-24)
+
+**Reference:** user-provided official Pro-Q 4 Dynamic EQ screenshot, with the
+band's shape controls, frequency, main/dynamic GAIN ring, Q, detector,
+threshold, attack/release and numeric values in one floating surface.
+Previous PASS 14 Release *native* 1280×720 WAV screenshot was GREEN
+functionally but revealed a large, detached 346×272 dynamics sheet.
+
+**APEX-owned clean-room JUCE change:**
+- Only in genuinely roomy desktop editors (width >=1280 and graph height
+  >=460), opening Dynamic EQ now creates ONE shared **804×180** curved
+  floating container. The existing 450px band-controls row sits at its
+  left, and the real hosted dynamic controls live on its right. The
+  8px inter-component gutter receives a single continuous painted
+  background, outline and subtle seam rather than two separate cards.
+  No widgets or labels are rasterised/static screenshots; all stay
+  real JUCE children with actual host automation, numeric input and
+  keyboard/mouse/touch access.
+- The whole wide surface is positioned **as a unit**, rather than moving
+  two unrelated windows. The deterministic candidate search penalises
+  overlap with all enabled EQ node handles and the selected band's
+  numeric value tag and clips the full surface inside the graph. It
+  prefers below or above the selected band.
+- Paint draws a single original APEX purple/dark gradient card with
+  softly rounded border, selected-band accent and separator. It no
+  longer draws two floating rounded rectangles while unified mode is
+  active. Its decorative padding blocks accidental click-through band
+  creation.
+- Short desktop landscapes and phones deliberately retain the
+  preexisting collision-tested separate/compact Dynamics editor;
+  forcing an 804px control bar into 320px would break touch accessibility.
+- Geometry and touch adversarial tests assert the WHOLE control surface
+  sits inside the frequency graph, both subcomponent zones belong to
+  it, the united height is 180px (vs prior detached 272px), graph
+  nodes/selected tag remain touchable, and tapping painted padding
+  cannot create EQ nodes.
+
+**Limits:** Although the desktop presentation is now a physically
+single floating surface, the individual APEX controls are not pixel
+identical to proprietary FabFilter artwork. The old automation ABI
+supports ±24dB, not ±30dB; Auto adaptive behavior, Free detector
+cutoffs, per-band external source remain unimplemented. DSP untouched.
+**Latest PASS 15 HEAD requires four fresh CI checks and real Windows
+JUCE screenshot review before saying GREEN.** PR #159 DRAFT; MAIN untouched.
