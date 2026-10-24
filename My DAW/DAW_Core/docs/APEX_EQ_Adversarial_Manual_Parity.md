@@ -387,3 +387,32 @@ not copied FabFilter artwork, logos, proprietary DSP or fonts.
 GREEN. The exact PASS 14 HEAD needs new debug/release EQ, Windows
 integration, focused compile and policy checks and real WAV-native
 screenshots. No MAIN changes; PR #159 remains DRAFT pending approval.
+
+
+### PASS 14-B — signed dynamic controls & close-to-reference gestures
+
+The original DSP in `ParametricEQTypes.h` explicitly defines
+**hosted** `rangeDb > 0` as cutting above threshold, and
+`rangeDb < 0` as boosting below threshold. The Pro-Q 4 manual uses
+the opposite **visible UI signed range** convention: *negative UI*
+for compression, *positive UI* for expansion.
+
+To reproduce familiar **editing behavior without destroying existing
+APEX automation**, the GAIN annulus now maps
+`displayedDynamicRangeDb = -hostedRangeDb`. Dragging the GAIN
+outer annulus writes the inverse into the untouched hosted parameter.
+The explicit RANGE slider in the expanded Dynamics editor also uses
+`uiNormalized = 1 - hostedNormalized`, including text entry,
+dragging and parameter synchronisation. All old saved host values and
+DSP mapping stay unchanged; unit tests prove that UI -7 dB corresponds
+to legacy host +7 dB, while typed UI +7.5 dB corresponds to legacy
+host -7.5 dB. This is only a GUI-adapter mapping, not a DSP
+compatibility rewrite.
+
+The GAIN outer ring additionally handles mouse wheel, Shift+wheel for
+fine adjustment, and double-click to reset; its signed dB readout is
+drawn alongside the existing measured dynamic gain ring.
+The Dynamic EQ advanced panel gains a genuine RESET button when >=330px
+wide, with a popup-menu reset path for narrow touch layouts.
+Screenshots must be inspected for actual hitbox sizes and occlusion
+**after** all four HEAD-specific CI workflows complete.
