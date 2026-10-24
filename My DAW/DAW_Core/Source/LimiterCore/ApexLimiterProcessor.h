@@ -131,7 +131,7 @@ public:
         // / factor == 20ms*rate + 93 at 44.1/48/96 kHz.
         // No fractional host-rate resampling or wet/dry phase compromise.
         oversampler_.prepare(factor,128,factor>1?57:0);
-        core_.prepare(rate*factor);
+        core_.prepare(rate*factor,factor>1);
         activeOversampling_.store(factor,std::memory_order_release);
         lufsLeft_.prepare(rate);
         lufsRight_.prepare(rate);
