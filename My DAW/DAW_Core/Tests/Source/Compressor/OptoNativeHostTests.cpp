@@ -115,6 +115,35 @@ public:
                             static_cast<int>(msState.getSize()));
                         expectWithinAbsoluteError(mode.getUnits(),1.f,.001f,
                             "M/S mode is a real saved and automatable host parameter");
+                        // With link=0, Mid and Side each have a genuine,
+                        // independent detector+gain computer, not a cosmetic
+                        // setting merely changing the text of the selector.
+                        auto& ratio=ms.getC3Parameter(APEX::PrecisionC3::Ratio);
+                        ratio.setValue(ratio.toNormalised(8.0f));
+                        auto& threshold=ms.getC3Parameter(APEX::PrecisionC3::Threshold);
+                        threshold.setValue(threshold.toNormalised(-30.0f));
+                        ms.getC3Parameter(APEX::PrecisionC3::StereoLink).setValue(0.0f);
+                        const auto renderDomain=[&](bool useMs)
+                        {
+                            mode.setValue(useMs?1.f:0.f);
+                            ms.reset();
+                            juce::AudioBuffer<float> frame(2,128);
+                            for(int block=0;block<300;++block)
+                            {
+                                for(int i=0;i<128;++i)
+                                {
+                                    frame.setSample(0,i,.72f);
+                                    frame.setSample(1,i,.18f);
+                                }
+                                ms.processBlock(frame,midi);
+                            }
+                            return frame.getSample(0,127);
+                        };
+                        const auto lrOutput=renderDomain(false);
+                        const auto msOutput=renderDomain(true);
+                        expect(std::abs(lrOutput-msOutput)>.002f,
+                            "M/S actual gain computers must produce a DIFFERENT"
+                            " audible result from L/R for unlinked stereo audio");
                         juce::ValueTree legacy(APEX::PrecisionC3::Processor::kStateTag);
                         legacy.setProperty("schema",1,nullptr);
                         juce::MemoryBlock oldState;
