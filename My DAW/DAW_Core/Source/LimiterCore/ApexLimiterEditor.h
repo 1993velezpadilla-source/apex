@@ -92,7 +92,7 @@ public:
         detector_.onChange=[this] { selectParameter(DetectorQuality,detector_.getSelectedId()-1); };
         addAndMakeVisible(detector_);
         audioOs_.addItemList({"1x","2x","4x","8x","16x","32x"},1);
-        audioOs_.setTooltip("Experimental REAL audio oversampling. Requires audio engine/plugin restart to apply (PDC cannot change inside playback). At >1x, dither is applied at host sample rate after decimation. Mode takes effect at audio engine restart.");
+        audioOs_.setTooltip("Experimental REAL audio oversampling. Audio engine restart required for fixed PDC. At 16x/32x, DSP CPU usage is high: multiple instances can MISS 128-sample realtime deadlines. Use 32x only for offline/high-buffer rendering until hardware-tested. Final dither is applied once after decimation.");
         audioOs_.setSelectedId(static_cast<int>(param(AudioOversampling).units())+1,
                                juce::dontSendNotification);
         audioOs_.onChange=[this] {selectParameter(AudioOversampling,audioOs_.getSelectedId()-1);};
@@ -361,8 +361,10 @@ public:
         juce::String osStatus="AUDIO OS "+juce::String(osFactor)+"x EXPERIMENTAL";
         if(processor_.audioOversamplingChangePending())
             osStatus+="  |  restart audio engine to apply";
+        else if(osFactor>=16)
+            osStatus+="  |  HIGH CPU: live dropout risk  |  TP not certified";
         else if(osFactor>1)
-            osStatus+="  |  post-OS dither  |  TP/PDC not certified";
+            osStatus+="  |  post-OS dither  |  TP not certified";
         else
             osStatus+="  |  TP not certified";
         label(g,osStatus,chart.getX()+13,advance.getY()-19,chart.getWidth()-10,15,
