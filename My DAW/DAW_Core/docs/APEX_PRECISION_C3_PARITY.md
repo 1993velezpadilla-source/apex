@@ -301,6 +301,39 @@ savings** until actual profiler data on the target laptop/Legion Go
 have been added on the audio thread. The exact 1:1 look/feature/sound
 review and physical ASIO validation remain BLOCKING. Keep PR draft.
 
+## Adversarial critic V15 — honest signed gain-action UI (2026-10-24)
+
+**Verified defect in code:** Upward compression could audibly BOOST quiet
+material, yet the right-hand GR meter and DSP-history graph showed 0 dB.
+This happened because the existing readout deliberately used
+`max(0, grL, grR)`, which discards negative gain-reduction values.
+
+**Fix on the Precision C feature branch:**
+
+- DSP now exposes `getSignedGainActionDb()`, with positive values for
+  attenuation and negative values for Upward gain. The dominant-magnitude
+  L/R DSP gain action is measured after the envelope; bypass smoothing
+  scales the signed meter toward zero. The old positive-only
+  `getGainReductionDb()` API remains unchanged for compatibility.
+- The real JUCE processor now publishes signed DSP action through a
+  separate lock-free atomic value and existing fixed-size meter history.
+- The compiled native GUI draws a **red Downward** timeline and
+  **green Upward** timeline. A center-zero action meter fills upward
+  for attenuation and downward for boost; numerals display the
+  audible sign (negative for attenuation, positive for boost).
+- New portable adversarial tests cover genuine Upward DSP boost,
+  legacy GR compatibility, downward GR, and bypass meter returning
+  to zero. Windows native-host tests additionally exercise real
+  `AudioBuffer` processing and read the GUI's atomically stored
+  signed history, not mock meter data.
+
+**Remaining limit:** This is the gain computer's single summary sample at
+the end of each audio block; a signed peak action timeline is not a
+sample-accurate multichannel GR history. Compressor styles, waveform
+ballistics and spatial parity with Pro-C 3 are still independent gates.
+No original FabFilter artwork or code was used. Head-specific CI,
+actual 48k/128 ASIO listening and screenshot review still gate merge.
+
 ## Engineering gates before merge to main
 
 1. Windows Debug + Release builds, host unit tests and portable C++17 sanitizer tests GREEN.
