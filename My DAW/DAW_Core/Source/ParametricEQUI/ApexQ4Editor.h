@@ -279,8 +279,15 @@ public:
         const int minX = 9;
         const int maxX = std::max (minX, w - controlWidth - 9);
         const int minY = graph_.getY() + 8;
+        // PASS 11 RED at 640x400: the previous 29px bottom reserve left
+        // *no* legal position below a low-frequency-neighbouring tooltip.
+        // The selected band's readout collided with a bottom-clamped HUD,
+        // while the upper placement covered another active EQ node.
+        // Compact-height hosts need an 8px canvas-safe bottom reserve;
+        // the footer remains entirely outside graph_.
+        const int hudBottomInset = h <= 420 ? 8 : 29;
         const int maxY = std::max (minY, graph_.getBottom()
-                                          - controlHeight - 29);
+                                          - controlHeight - hudBottomInset);
         const auto selectedPoint = selected_ < 0
             ? graph_.getCentre().toFloat()
             : nodePoint (selected_).toFloat();
