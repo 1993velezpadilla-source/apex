@@ -33,3 +33,15 @@ jobs:
           cmp /tmp/apex-cache.csv /tmp/apex-reference.csv
           wc -l /tmp/apex-cache.csv
           echo APEX_PEAK_CACHE_PARITY_GREEN
+      - name: Benchmark 32x cached versus reference DSP on same runner
+        run: |
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror -fno-fast-math Tests/Standalone/ApexLimiterOversamplingBench.cpp -o /tmp/apex-cache-bench
+          g++ -std=c++17 -O3 -Wall -Wextra -Wpedantic -Werror -fno-fast-math -DAPEX_LIMITER_REFERENCE_PEAK_LOG Tests/Standalone/ApexLimiterOversamplingBench.cpp -o /tmp/apex-log-bench
+          /tmp/apex-cache-bench > /tmp/apex-cache-perf.csv
+          /tmp/apex-log-bench > /tmp/apex-log-perf.csv
+          echo '=== CACHED 32x (shared runner, NOT device validation) ==='
+          grep 'APEX_OS_CPU,32,' /tmp/apex-cache-perf.csv
+          grep 'APEX_OS_MULTI,32,' /tmp/apex-cache-perf.csv
+          echo '=== UNCACHED 32x CONTROL ==='
+          grep 'APEX_OS_CPU,32,' /tmp/apex-log-perf.csv
+          grep 'APEX_OS_MULTI,32,' /tmp/apex-log-perf.csv
