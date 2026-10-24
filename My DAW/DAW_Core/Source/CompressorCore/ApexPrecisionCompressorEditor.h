@@ -208,7 +208,9 @@ public:
 
         scToggle_.setName("C3 SIDECHAIN PANEL");
         scToggle_.setButtonText("SIDE CHAIN   ^");
-        scToggle_.setTooltip("Open or close detector EQ and stereo linking");
+        scToggle_.setTooltip("Open/close detector EQ. Right-click for"
+                             " TRUE L/R or Mid/Side stereo processing."); 
+        scToggle_.addMouseListener(this,false);
         scToggle_.onClick=[this] {
             sidechainOpen_=!sidechainOpen_;
             scToggle_.setButtonText(sidechainOpen_ ? "SIDE CHAIN   ^" : "SIDE CHAIN   v");
@@ -362,6 +364,26 @@ public:
 
     void mouseDown(const juce::MouseEvent& event) override
     {
+        if(event.eventComponent==&scToggle_ && event.mods.isPopupMenu())
+        {
+            juce::PopupMenu menu;
+            const bool ms=processor_.getC3Parameter(StereoMode)
+                .getUnits()>0.5f;
+            menu.addSectionHeader("STEREO COMPRESSION DOMAIN");
+            menu.addItem(1,"L/R — independent channels",true,!ms);
+            menu.addItem(2,"M/S — true Mid/Side domains",true,ms);
+            juce::Component::SafePointer<Editor> safe(this);
+            menu.showMenuAsync(juce::PopupMenu::Options()
+                .withTargetComponent(&scToggle_),[safe](int id)
+            {
+                if(auto* e=safe.getComponent();e && (id==1||id==2))
+                {
+                    e->rememberUndo();
+                    e->setDiscrete(StereoMode,id==2 ? 1 : 0);
+                }
+            });
+            return;
+        }
         if(!sidechainOpen_)return;
         const float x=(event.position.x-shiftX())/scale();
         const float y=(event.position.y-shiftY())/scale();
