@@ -105,8 +105,19 @@ private:
 class Core final
 {
 public:
-    void prepare(double rate)
+    void prepare(double rate,bool useHighRateGainTable=false)
     {
+        // Enabled ONLY for the separately prepared >1x audio-rate DSP.
+        // Legacy 1x Core stays bit-identical. No table work in process().
+        useHighRateGainTable_=useHighRateGainTable;
+        if(useHighRateGainTable_)
+        {
+            reductionGainTable_.resize(kGainTableSize+1);
+            for(int n=0;n<=kGainTableSize;++n)
+                reductionGainTable_[static_cast<size_t>(n)]=std::exp(
+                    kDbGainExponent*static_cast<double>(n)/kGainTableScale);
+        }
+        else reductionGainTable_.clear();
         rate_ = std::isfinite(rate) && rate >= 8000.0 ? rate : 48000.0;
         // Reserve FIR's 32 input-frame reconstruction guard in the fixed
         // host-reported latency; the 20ms user lookahead remains available.
@@ -294,7 +305,13 @@ public:
                 // to pow(10, -reductionDb/20), with bounded floating-point
                 // differences. Reference code remains selectable for A/B.
                 static constexpr double kDbGainExponent=-0.1151292546497022842;
+#if defined(APEX_LIMITER_REFERENCE_GAIN_EXP)
                 const double reductionGain=std::exp(kDbGainExponent*c.reduction);
+#else
+                const double reductionGain=useHighRateGainTable_
+                    ? lookupReductionGain(c.reduction)
+                    : std::exp(kDbGainExponent*c.reduction);
+#endif
 #endif
                 double processed = delayed[ch] * reductionGain;
                 if (std::abs(processed) > ceiling)
@@ -335,6 +352,25 @@ public:
         }
     }
 private:
+    // 1/128 dB interpolation of the precise attenuation curve: theoretical
+    // relative interpolation error < 1.1e-7 for 0..96 dB. The original
+    // exact exp() remains the fallback outside that range and for 1x.
+    // Prepare creates all 12,289 double entries OFF the audio thread.
+    static constexpr double kDbGainExponent=-0.1151292546497022842;
+    static constexpr int kGainTableScale=128;
+    static constexpr int kGainTableSize=96*kGainTableScale;
+    double lookupReductionGain(double reductionDb) const noexcept
+    {
+        if(reductionDb<=0.0)return 1.0;
+        const double position=reductionDb*kGainTableScale;
+        if(!(position<static_cast<double>(kGainTableSize)) ||
+           reductionGainTable_.size()!=static_cast<size_t>(kGainTableSize+1))
+            return std::exp(kDbGainExponent*reductionDb);
+        const auto index=static_cast<size_t>(position);
+        const double fraction=position-static_cast<double>(index);
+        const double a=reductionGainTable_[index];
+        return a+(reductionGainTable_[index+1]-a)*fraction;
+    }
     static constexpr int kFirHalf=32;
     static constexpr int kFirTaps=2*kFirHalf;
 
@@ -383,6 +419,8 @@ private:
         uint32_t rng=0x12345678u;
     };
     std::array<Channel,2> channel_;
+    bool useHighRateGainTable_=false;
+    std::vector<double> reductionGainTable_;
     std::array<std::array<std::array<double,kFirTaps>,8>,4> firCoefficients_{};
     Settings settings_;
     double rate_=48000.0, runningGain_=1.0, bypassBlend_=1.0;
