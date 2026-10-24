@@ -3,6 +3,7 @@
 #include "ApexLimiterCore.h"
 #include "ApexLimiterLoudness.h"
 #include "ApexLimiterOversampling.h"
+#include "ApexLimiterTruePeakReserve.h"
 #include "../MeteringCore/LufsMeterCore.h"
 #include <algorithm>
 #include <array>
@@ -457,6 +458,15 @@ private:
         {
             // High-rate audio already resolves fractional peaks. Additional
             // detector FIR is redundant and extraordinarily costly at 32x.
+            // The user-facing ceiling is an actual reconstructed TP
+            // target, not merely an oversampled sample peak. Apply a
+            // small, explicitly documented empirical safety reserve to
+            // the WET limiter before final host-rate reconstruction.
+            // Do not change the final user-selected HOST sample ceiling,
+            // the bypass lane, or the 1x legacy bit-identical path.
+            if(settings.truePeak && !settings.audition && !settings.unityGain)
+                settings.ceilingDb-=audioTruePeakReserveDb(
+                    activeOversampling_.load(std::memory_order_relaxed),true);
             settings.truePeak=false;
             settings.detectorQuality=0;
             // The oversampled Core always processes WET so host dry can
