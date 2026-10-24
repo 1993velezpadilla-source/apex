@@ -58,7 +58,7 @@ public:
     int maxChunkFrames() const noexcept {return baseChunk_;}
 
     // Measured/derived group delay. At each 2x stage, interpolation adds
-    // (kTaps-1)/2=31 HIGH samples and the downsampler's odd output phase
+    // (kTaps-1)/2=47 HIGH samples and the downsampler's odd output phase
     // advances the cascade by ONE high sample. Therefore a stage roundtrip
     // is 93 high frames, or 30.5 host frames at the first 2x level.
     // The downsampler's odd output phase must be accounted for exactly.
@@ -214,7 +214,7 @@ private:
                         *weights[static_cast<size_t>(tap)];
             }
             dst[2*i]=static_cast<float>(even);
-            // Odd polyphase: only k=15 (the 95-tap halfband centre) is
+            // Odd polyphase: only k=23 (the 95-tap halfband centre) is
             // nonzero after DC normalisation. An EXACT delayed sample,
             // with no kernel loop or frame-dependent interpolation drift.
             dst[2*i+1]=static_cast<float>(
