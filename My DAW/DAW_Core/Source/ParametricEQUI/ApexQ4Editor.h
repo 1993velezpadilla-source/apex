@@ -1679,20 +1679,26 @@ private:
                 repaint();
             }
         };
-        slider.textFromValueFunction = [this, offset] (double value)
+        slider.textFromValueFunction = [this, offset] (double uiValue)
         {
-            if (selected_ < 0) return juce::String (value, 2);
+            if (selected_ < 0) return juce::String (uiValue, 2);
+            // Signed Pro-Q-style range display is the inverse of the
+            // legacy APEX host range. Apply the same map to formatted text.
+            const float hostValue = static_cast<float> (
+                offset == DynamicBandOffset::Range
+                    ? 1.0 - uiValue : uiValue);
             return param (dynamicParameterIndex (
-                selected_, offset))->getText (
-                    static_cast<float> (value), 0);
+                selected_, offset))->getText (hostValue, 0);
         };
         slider.valueFromTextFunction = [this, offset] (
             const juce::String& text)
         {
             if (selected_ < 0) return 0.0;
-            return static_cast<double> (
+            const double hostValue = static_cast<double> (
                 param (dynamicParameterIndex (
                     selected_, offset))->getValueForText (text));
+            return offset == DynamicBandOffset::Range
+                ? 1.0 - hostValue : hostValue;
         };
         addAndMakeVisible (slider);
     }
