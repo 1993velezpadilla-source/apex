@@ -3,12 +3,14 @@ on:
   push:
     paths:
       - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCompressor*"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCharacterOversamplingCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionC3CoreTests.cpp"
       - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionCharacterOversamplingTests.cpp"
       - ".github/workflows/apex-precision-c3.yml"
   pull_request:
     paths:
       - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCompressor*"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCharacterOversamplingCore.h"
       - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionC3CoreTests.cpp"
       - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionCharacterOversamplingTests.cpp"
       - ".github/workflows/apex-precision-c3.yml"
