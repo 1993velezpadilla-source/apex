@@ -536,6 +536,55 @@ public:
                         native->prepareToPlay(48000.0,128);
                         expectEquals(native->getLatencySamples(),0);
                     }
+                    beginTest("Precision C V12 guards live transport quality-mode changes");
+                    {
+                        // Actual hosted JUCE processor, not only the
+                        // portable guard fixture. Prove that a mode request
+                        // during PLAY does not jump latency or bypass timing.
+                        struct TestPlayHead final : juce::AudioPlayHead
+                        {
+                            bool running=true;
+                            juce::Optional<PositionInfo> getPosition() const override
+                            {
+                                PositionInfo position;
+                                position.setIsPlaying(running);
+                                position.setIsRecording(false);
+                                return position;
+                            }
+                        } playhead;
+                        auto& os=native->getC3Parameter(APEX::PrecisionC3::Oversampling2x);
+                        auto& look=native->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+                        os.setValue(0.f);
+                        look.setValue(0.f);
+                        native->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.f);
+                        native->prepareToPlay(48000.0,128);
+                        native->setPlayHead(&playhead);
+                        expectEquals(native->getLatencySamples(),0);
+                        os.setValue(1.f); // user changes oversampling during PLAY
+                        juce::AudioBuffer<float> audio(4,128);
+                        audio.clear();
+                        audio.setSample(0,0,0.45f);
+                        audio.setSample(1,0,0.45f);
+                        native->processBlock(audio,midi);
+                        expect(native->isLatencyModePendingStop(),
+                               "2x DSP must not switch without transport STOP");
+                        expectEquals(native->getLatencySamples(),0,
+                                     "Host PDC must stay unchanged during PLAY");
+                        expectWithinAbsoluteError(audio.getSample(0,0),0.45f,1.e-6f,
+                            "Existing zero-latency path must not jump 48 samples");
+                        playhead.running=false;
+                        audio.clear();
+                        native->processBlock(audio,midi);
+                        expect(native->isLatencyModePendingStop(),
+                               "Pending request awaits message-thread host PDC");
+                        // Cancel queued change without leaking fake latency
+                        // into the next native test or destruction.
+                        os.setValue(0.f);
+                        native->processBlock(audio,midi);
+                        expect(!native->isLatencyModePendingStop());
+                        native->setPlayHead(nullptr);
+                        native->prepareToPlay(48000.0,128);
+                    }
                     native->releaseResources();
                 }
             }
