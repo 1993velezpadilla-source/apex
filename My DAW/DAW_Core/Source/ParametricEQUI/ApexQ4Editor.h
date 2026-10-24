@@ -613,9 +613,10 @@ public:
                     band, DynamicBandOffset::Enable))->getBool()
                 && ! s.bypassed)
             {
-                const float maxRange = std::abs (param (
+                const float hostedRange = param (
                     dynamicParameterIndex (band, DynamicBandOffset::Range))
-                        ->getUnitsValue());
+                        ->getUnitsValue();
+                const float maxRange = std::abs (hostedRange);
                 // Outer range arc is tied to the REAL hosted parameter.
                 // A second, thinner arc represents the last coherent
                 // audio-thread ResponseFrame gain, never a fake meter.
@@ -630,7 +631,13 @@ public:
                     rangeArc.addCentredArc (static_cast<float> (pt.x),
                         static_cast<float> (pt.y), 17.0f, 17.0f, 0.0f,
                         startAngle, startAngle + maxAngle, true);
-                    g.setColour (bandColour (band).withAlpha (0.77f));
+                    // Shared visual sign semantics: red for downward
+                    // compression (positive legacy HOST range), magenta
+                    // for upward expansion (negative legacy HOST range).
+                    // The user's manual display sign is its inverse.
+                    g.setColour ((hostedRange > 0.0f
+                        ? juce::Colour (0xffec6f80)
+                        : juce::Colour (0xffdb76d1)).withAlpha (0.77f));
                     g.strokePath (rangeArc, juce::PathStrokeType (2.2f));
                 }
                 if (dynamicMeterValid_
