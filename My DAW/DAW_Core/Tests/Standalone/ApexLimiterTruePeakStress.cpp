@@ -56,7 +56,8 @@ std::vector<float> programme(int rate,int profile)
     return x;
 }
 std::vector<float> render(int rate,int factor,const std::vector<float>& source,
-                          bool requestTruePeak,bool& reductionObserved)
+                          bool requestTruePeak,bool& reductionObserved,
+                          bool enableNative1xDetector=false)
 {
     Core core;
     core.prepare(static_cast<double>(rate)*factor);
@@ -67,11 +68,12 @@ std::vector<float> render(int rate,int factor,const std::vector<float>& source,
     p.attackMs=0.01;
     p.releaseMs=55.0;
     p.lookaheadMs=5.0;
-    p.detectorQuality=0;
-    // The original 1x sample-only baseline is retained as a known red
-    // diagnostic. Above 1x, the host resolves peaks using full-rate audio
-    // plus an optional empirical ceiling reserve, not a duplicate FIR.
-    p.truePeak=false;
+    // Native 1x FIR ISP detector runs at the original project rate, not
+    // the audio oversampling path. It is deliberately measured separately
+    // from the historical 1x sample-only RED control.
+    p.truePeak=factor==1 && enableNative1xDetector;
+    p.detectorQuality=p.truePeak?3:0;  // 8x FIR reconstruction at native rate.
+    // Above 1x, full-rate audio + empirical reserve replaces duplicate FIR.
     p.ditherMode=0;
     core.setSettings(p);
     AudioRateConverter converter;
@@ -142,6 +144,51 @@ int main()
                 }
             }
         }
+    // Separate 1x TRUE PEAK ON probe: the baseline matrix above uses
+    // 1x TP OFF intentionally. Exercise the native 8x-windowed-sinc
+    // detector at all three native rates; compare it against TP OFF.
+    // Measurements are directional, not a claim of BS.1770 compliance.
+    int nativeChangedRates=0;
+    std::puts("APEX_NATIVE_1X_TP columns: rate,profile,tp_off,tp_on,on_overshoot_dbTP,max_sample_delta,reduction_active");
+    for(const int rate:rates)
+    {
+        double maxRateDelta=0.0;
+        for(const int profile:{0,1,2})
+        {
+            const auto source=programme(rate,profile);
+            bool reducedOff=false,reducedOn=false;
+            const auto off=render(rate,1,source,false,reducedOff);
+            const auto on=render(rate,1,source,true,reducedOn,true);
+            const auto offPeak=TruePeakReference::analyze(off.data(),frames,32);
+            const auto onPeak=TruePeakReference::analyze(on.data(),frames,32);
+            double maxDelta=0.0;
+            for(int n=0;n<frames;++n)
+                maxDelta=std::max(maxDelta,std::abs(
+                    static_cast<double>(on[static_cast<size_t>(n)])
+                   -static_cast<double>(off[static_cast<size_t>(n)])));
+            const double overshoot=20.0*std::log10(
+                std::max(1.0e-12,onPeak.reconstructedPeak)/ceiling);
+            std::printf("APEX_NATIVE_1X_TP,%d,%d,%.9f,%.9f,%+.5f,%.9f,%d\n",
+                        rate,profile,offPeak.reconstructedPeak,
+                        onPeak.reconstructedPeak,overshoot,maxDelta,reducedOn?1:0);
+            if(!reducedOff||!reducedOn||!std::isfinite(overshoot)||
+               !std::isfinite(maxDelta)||onPeak.samplePeak>ceiling+1.0e-6)
+            {
+                std::fprintf(stderr,"Native 1x TP detector regression at %dHz profile %d\n",
+                             rate,profile);
+                return EXIT_FAILURE;
+            }
+            maxRateDelta=std::max(maxRateDelta,maxDelta);
+        }
+        // Confirm the native FIR changes real rendered AUDIO at every rate.
+        // This does not assert perfect ISP compliance or loudness matching.
+        if(maxRateDelta>1.0e-7)++nativeChangedRates;
+    }
+    if(nativeChangedRates!=static_cast<int>(rates.size()))
+    {
+        std::fprintf(stderr,"Native 1x detector did not change audio at all rates\n");
+        return EXIT_FAILURE;
+    }
     std::printf("APEX_TRUEPEAK_SUMMARY,max_overshoot_db=%.5f,overshoot_cases=%d/%d\n",
                 maximumOvershoot,overshootCases,totalCases);
     // Explicit A/B: switching TP OFF must remove the headroom reserve.
