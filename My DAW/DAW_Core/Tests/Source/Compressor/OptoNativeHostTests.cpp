@@ -584,6 +584,62 @@ public:
                         native->setPlayHead(nullptr);
                         native->prepareToPlay(48000.0,128);
                     }
+                    beginTest("Precision C V15 real hosted Upward action reaches GUI metering");
+                    {
+                        auto set=[this,native](int idx,float units)
+                        {
+                            auto& p=native->getC3Parameter(idx);
+                            p.setValue(p.toNormalised(units));
+                        };
+                        set(APEX::PrecisionC3::Oversampling2x,0.f);
+                        set(APEX::PrecisionC3::LookaheadMode,0.f);
+                        set(APEX::PrecisionC3::Style,4.f); // Upward
+                        set(APEX::PrecisionC3::Threshold,-18.f);
+                        set(APEX::PrecisionC3::Ratio,4.f);
+                        set(APEX::PrecisionC3::Knee,0.f);
+                        set(APEX::PrecisionC3::Attack,.1f);
+                        set(APEX::PrecisionC3::Release,100.f);
+                        set(APEX::PrecisionC3::Input,0.f);
+                        set(APEX::PrecisionC3::Output,0.f);
+                        set(APEX::PrecisionC3::Wet,0.f);
+                        set(APEX::PrecisionC3::DryGainDb,-100.f);
+                        set(APEX::PrecisionC3::Bypass,0.f);
+                        set(APEX::PrecisionC3::Character,0.f);
+                        set(APEX::PrecisionC3::AutoThreshold,0.f);
+                        set(APEX::PrecisionC3::AutoGain,0.f);
+                        native->prepareToPlay(48000.0,128);
+                        juce::AudioBuffer<float> audio(4,128);
+                        for(int block=0;block<375;++block)
+                        {
+                            audio.clear();
+                            for(int channel=0;channel<2;++channel)
+                                for(int i=0;i<128;++i)
+                                    audio.setSample(channel,i,.01f);
+                            native->processBlock(audio,midi);
+                        }
+                        expect(native->signedGainAction()<-10.f,
+                               "Native Upward meter must report real negative reduction");
+                        expectWithinAbsoluteError(native->gainReduction(),0.f,1.e-4f,
+                               "Legacy attenuation-only meter API remains compatible");
+                        float in=0,out=0,action=0;
+                        const auto count=native->meterHistoryCount();
+                        expect(count>0);
+                        if(count>0)
+                        {
+                            native->meterHistoryFrame(count-1,in,out,action);
+                            expect(action<-10.f,
+                                   "Production GUI history must contain upward gain action");
+                            expect(std::isfinite(in)&&std::isfinite(out));
+                        }
+                        set(APEX::PrecisionC3::Bypass,1.f);
+                        for(int block=0;block<160;++block)
+                        {
+                            audio.clear();
+                            native->processBlock(audio,midi);
+                        }
+                        expectWithinAbsoluteError(native->signedGainAction(),0.f,.01f,
+                            "Bypass must not show phantom gain change");
+                    }
                     native->releaseResources();
                 }
             }
