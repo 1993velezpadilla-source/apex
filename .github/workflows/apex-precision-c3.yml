@@ -1,0 +1,54 @@
+name: APEX Precision C3 Portable DSP
+on:
+  push:
+    paths:
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCompressor*"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCharacterOversamplingCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionC3CoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionCharacterOversamplingTests.cpp"
+      - ".github/workflows/apex-precision-c3.yml"
+  pull_request:
+    paths:
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCompressor*"
+      - "My DAW/DAW_Core/Source/CompressorCore/ApexPrecisionCharacterOversamplingCore.h"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionC3CoreTests.cpp"
+      - "My DAW/DAW_Core/Tests/Standalone/ApexPrecisionCharacterOversamplingTests.cpp"
+      - ".github/workflows/apex-precision-c3.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-sanitizers:
+    name: Portable C++17 / ASAN UBSAN
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with strict warnings and sanitizers
+        shell: bash
+        working-directory: My DAW/DAW_Core
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            Tests/Standalone/ApexPrecisionC3CoreTests.cpp -o /tmp/apex-precision-c3
+      - name: Build independent 2x character antialias test
+        shell: bash
+        working-directory: My DAW/DAW_Core
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            Tests/Standalone/ApexPrecisionCharacterOversamplingTests.cpp -o /tmp/apex-precision-2x
+      - name: Run portable DSP gates
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: /tmp/apex-precision-c3
+      - name: Run spectral alias / latency / stereo isolation gates
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: /tmp/apex-precision-2x

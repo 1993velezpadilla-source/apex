@@ -5,6 +5,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../CompressorCore/ApexPrecisionCompressorProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
 
@@ -49,6 +50,10 @@ public:
         APEX::Compressor::OptoProcessor optoPrototype;
         optoPrototype.fillInPluginDescription(opto);
         results.add(new juce::PluginDescription(opto));
+        juce::PluginDescription precision;
+        APEX::PrecisionC3::Processor precisionPrototype;
+        precisionPrototype.fillInPluginDescription(precision);
+        results.add(new juce::PluginDescription(precision));
         juce::PluginDescription delay;
         APEX::Delay::Processor delayPrototype;
         delayPrototype.fillInPluginDescription(delay);
@@ -68,6 +73,7 @@ public:
             || fileOrIdentifier == APEX::C4::C4NativePluginFormat::createC4Description().fileOrIdentifier
             || fileOrIdentifier == APEX::ParametricEQ::Processor::kFileOrIdentifier
             || fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier
+            || fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier
             || fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier
             || fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier;
     }
@@ -82,6 +88,8 @@ public:
             return APEX::ParametricEQ::Processor::kPluginName;
         if (fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
             return APEX::Compressor::OptoProcessor::kPluginName;
+        if (fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier)
+            return APEX::PrecisionC3::Processor::kPluginName;
         if (fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier)
             return APEX::Delay::Processor::kPluginName;
         if (fileOrIdentifier == APEX::Reverie::Processor::kFileOrIdentifier)
@@ -102,6 +110,9 @@ public:
             || (desc.uniqueId == APEX::Compressor::OptoProcessor::kUniqueId
                 && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && desc.fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
+            || (desc.uniqueId == APEX::PrecisionC3::Processor::kUniqueId
+                && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
+                && desc.fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier)
             || (desc.uniqueId == APEX::Delay::Processor::kUniqueId
                 && desc.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && desc.fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier)
@@ -152,6 +163,10 @@ protected:
                 && description.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && description.fileOrIdentifier == APEX::Compressor::OptoProcessor::kFileOrIdentifier)
                 instance = std::make_unique<APEX::Compressor::OptoProcessor>();
+            else if (description.uniqueId == APEX::PrecisionC3::Processor::kUniqueId
+                && description.pluginFormatName.equalsIgnoreCase(kFormatName)
+                && description.fileOrIdentifier == APEX::PrecisionC3::Processor::kFileOrIdentifier)
+                instance = std::make_unique<APEX::PrecisionC3::Processor>();
             else if (description.uniqueId == APEX::Delay::Processor::kUniqueId
                 && description.pluginFormatName.equalsIgnoreCase(kFormatName)
                 && description.fileOrIdentifier == APEX::Delay::Processor::kFileOrIdentifier)
