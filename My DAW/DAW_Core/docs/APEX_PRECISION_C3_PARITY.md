@@ -27,7 +27,7 @@ Reference: [FabFilter Pro-C 3 manual](https://www.fabfilter.com/downloads/pdf/he
 | Sidechain | Internal, external host bus, MIDI, host tempo | Optional external mono/stereo host bus + explicit trigger selector (new param); MIDI/host tempo remain absent | Windows bus-route audio test; APEX mixer support; MIDI/tempo |
 | Sidechain EQ | Up to six bands, sophisticated shapes | 1 internal HP + 1 LP | 6-band EQ and band editor |
 | Character | Off/Tube/Diode/Bright; Drive and pre/post | Original mode/drive with functional PRE and POST DSP routing; not analog-calibrated | Harmonics measurements and oversampling |
-| Lookahead/PDC | Configurable 0–20 ms | Not implemented; zero reported latency | Preallocated delay and exact host PDC |
+| Lookahead/PDC | Configurable 0–20 ms | Implemented six real steps (0/1/2/5/10/20 ms): preallocated 2-channel delayed audio, undelayed detector, both bypass and dry aligned, exact PDC on prepare and message-thread timer updates. No callback allocation/host notifications. | Fresh Windows real-host PDC, zero-mode tracking, transient and block invariance tests; changes while playing may briefly desynchronise host PDC |
 | Oversampling | Up to 32× | Not implemented | Anti-alias engine + CPU/load limits |
 | Input/output and GR metering | Accurate peak/loudness + dynamic graph | Lock-free histories of actual per-block input/output/GR values; reference-hierarchy GUI with scrolling meter graph | Meter ballistics / true-peak & loudness still missing |
 | Surround | Up to immersive 9.1.6 | Mono/stereo only | Multi-bus and channel policies |
@@ -98,6 +98,35 @@ These verdicts are **fail-until-demonstrated**; passing C++ compilation alone is
 | User acceptance | User can use it naturally and sees reference-class workflow | **FAIL until explicitly accepted by user** | Real screenshot, direct interaction and side-by-side annotated audit |
 
 **Critic principle:** reject any attractive but unimplemented visual feature, audio-data graph with arbitrary random data, cosmetic knob that does not automate a real parameter, empty/non-responsive dropdown, overlay of labels and controls, missing plugin in browser, or any failure in the Windows integration suite. Keep main protected until human + technical acceptance.
+
+## Adversarial critic — iteration 7: actual feed-forward lookahead (2026-10-23)
+
+- **Implementation:** \`ApexPrecisionCompressorCore\` now has fixed, preallocated
+  stereo input-delay history (8192 frames per channel). The feed-forward
+  detector sees the CURRENT input or external key while the processed/dry/bypass
+  MAIN signal is from the past (by exactly N samples). This provides genuine
+  0/1/2/5/10/20 ms lookahead. 0 ms preserves the old zero-latency audio path.
+- **Host parameter:** \`c3.lookahead\` appended after all existing IDs. Its
+  normalized enum indices are stable; keep those even after the public product
+  name changed to Precision C. The JUCE plugin reports the exact delay during
+  \`prepareToPlay\`. For host automation, its audio thread publishes latency to
+  an atomic; a JUCE \`Timer\` on the message thread calls \`setLatencySamples\`.
+  There are **no locks/allocations/message posts inside processBlock**.
+- **Review gates:** tests demand impulse delay == host sample count; output
+  bypass remains compensated, 0ms stays sample-transparent, project/session
+  recall stores the mode, external detector is feed-forward, and output is
+  block-invariant across 1/128 sample partitions.
+- **Limitations:** CHANGING lookahead DURING playback can produce a short
+  discontinuity and temporary PDC mismatch until the next message-thread
+  update. The 20ms mode increases effective tracking latency by 20ms; users
+  recording through the Apollo at 48k/128 should leave lookahead OFF.
+  Nonzero modes need live ASIO/host automation testing, especially with GUI
+  closed, before merging. JUCE platform-specific threading must be revisited
+  on macOS/iOS AU. 20ms is a delay, **not** a Pro-C 3-calibrated detector.
+- **Oversampling remains OFF/not implemented.** No pretend active
+  oversampling control may be drawn before its actual antialiasing DSP and
+  compensated wet/dry latency are implemented. Reference-sonic A/B blind
+  tests and real visual overlay parity are outstanding.
 
 ## Engineering gates before merge to main
 
