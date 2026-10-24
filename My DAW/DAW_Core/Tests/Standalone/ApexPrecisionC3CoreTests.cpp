@@ -639,6 +639,97 @@ int main()
         assert(precisionStaticReductionDb(
             std::numeric_limits<double>::quiet_NaN(),-18.0,p)==0.0);
     }
+    // V14: coefficient cache must avoid expensive exp/sin/cos/pow work on
+    // every unchanged host block. A different sample rate or single automated
+    // sidechain parameter must rebuild the correct filters without modifying
+    // the other five coefficient sets.
+    {
+        Core filtered;
+        Parameters p;
+        p.sidechainHighpassHz=140.0;
+        p.sidechainLowpassHz=14000.0;
+        for(int band=0;band<4;++band)
+        {
+            p.sidechainBells[static_cast<std::size_t>(band)].gainDb
+                = band%2==0 ? 4.5 : -3.0;
+            p.sidechainBells[static_cast<std::size_t>(band)].q=1.2+band*0.3;
+        }
+        filtered.prepare(48000.0);
+        assert(filtered.detectorCoefficientRebuilds()==0);
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==6);
+        for(int i=0;i<200;++i)
+            filtered.setParameters(p); // typical JUCE processBlock pattern
+        assert(filtered.detectorCoefficientRebuilds()==6);
+        p.thresholdDb=-31.0;p.releaseMs=75.0;p.style=8;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==6);
+        p.sidechainBells[2].hz+=200.0;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==7);
+        p.sidechainBells[2].gainDb+=0.5;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==8);
+        p.sidechainBells[2].q+=0.2;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==9);
+        p.sidechainHighpassHz=280.0;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==10);
+        p.sidechainLowpassHz=12000.0;
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==11);
+        filtered.prepare(96000.0);
+        assert(filtered.detectorCoefficientRebuilds()==0);
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==6);
+        filtered.prepare(44100.0);
+        filtered.setParameters(p);
+        assert(filtered.detectorCoefficientRebuilds()==6);
+    }
+    // Setting identical hosted parameters every 128 samples must produce
+    // the same audio as setting those parameters once, independent of block
+    // partitioning. Both versions exercise live nonzero detector bells and
+    // feedback-style gain reduction under a changing program signal.
+    {
+        Core repeated,constant;
+        repeated.prepare(48000.0);
+        constant.prepare(48000.0);
+        Parameters p;
+        p.thresholdDb=-26.0;p.ratio=4.0;p.attackMs=4.0;
+        p.releaseMs=115.0;p.style=7;p.stereoLinkPercent=78.0;
+        p.sidechainHighpassHz=130.0;p.sidechainLowpassHz=11500.0;
+        p.sidechainBells[0].gainDb=5.0;
+        p.sidechainBells[1].gainDb=-3.0;
+        p.sidechainBells[2].gainDb=7.0;
+        p.sidechainBells[3].gainDb=-2.0;
+        constant.setParameters(p);
+        const int frames=4096, block=128;
+        std::vector<float> a(frames), b(frames), ca(frames), cb(frames);
+        for(int i=0;i<frames;++i)
+        {
+            const float left=static_cast<float>(0.21*std::sin(.041*i)
+                +0.09*std::sin(.319*i));
+            const float right=static_cast<float>(0.18*std::cos(.053*i)
+                +0.11*std::sin(.126*i));
+            a[static_cast<std::size_t>(i)]=ca[static_cast<std::size_t>(i)]=left;
+            b[static_cast<std::size_t>(i)]=cb[static_cast<std::size_t>(i)]=right;
+        }
+        for(int i=0;i<frames;i+=block)
+        {
+            repeated.setParameters(p);
+            repeated.process(a.data()+i,b.data()+i,block);
+            constant.process(ca.data()+i,cb.data()+i,block);
+        }
+        assert(repeated.detectorCoefficientRebuilds()==6);
+        for(int i=0;i<frames;++i)
+        {
+            assert(std::abs(a[static_cast<std::size_t>(i)]
+                           -ca[static_cast<std::size_t>(i)])<1.e-6f);
+            assert(std::abs(b[static_cast<std::size_t>(i)]
+                           -cb[static_cast<std::size_t>(i)])<1.e-6f);
+        }
+    }
     std::cout << "APEX Precision C3 portable DSP gates PASS\n";
     return 0;
 }
