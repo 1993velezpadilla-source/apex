@@ -12,6 +12,7 @@
 #include "../C4Core/C4NativePluginFormat.h"
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
+#include "../LimiterCore/ApexLimiterProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
 
@@ -39,6 +40,7 @@ public:
         hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
@@ -275,6 +277,7 @@ private:
         hideUnfinishedC4FromBrowser();
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
+        seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
 
@@ -333,6 +336,17 @@ private:
     void seedNativeOpto2AEntry()
     {
         APEX::Compressor::OptoProcessor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Limiter is a native in-process processor, not a disk VST. The format
+        manager alone does not populate the user-facing browser: seed it on
+        startup and before forced rescans without duplicating cache entries. */
+    void seedNativeBubblegumLimiterEntry()
+    {
+        APEX::Limiter::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);
