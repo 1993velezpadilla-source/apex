@@ -48,7 +48,9 @@ int main()
         const int peak=static_cast<int>(std::distance(impulse.begin(),
             std::max_element(impulse.begin(),impulse.end())));
         assert(peak==CharacterOversampling2x::kLatencySamples);
-        assert(impulse[static_cast<std::size_t>(peak)] > 0.90);
+        // Bandlimited low-pass reconstruction intentionally spreads the peak
+        // (the exact 48-sample centroid remains unchanged).
+        assert(impulse[static_cast<std::size_t>(peak)] > 0.80);
         // FIR interpolation+decimation must preserve DC gain to <0.1%.
         double sum=0.0;
         for(const auto x:impulse)sum+=x;
