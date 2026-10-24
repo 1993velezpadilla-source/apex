@@ -122,6 +122,7 @@ public:
         for (auto& h : holdRemaining_) h = 0;
         for (auto& ring : lookaheadHistory_) ring.fill(0.0f);
         for (auto& ring : oversamplingDryHistory_) ring.fill(0.0f);
+        for (auto& ring : oversamplingWetInputHistory_) ring.fill(0.0f);
         for (auto& stage : oversamplingPre_) stage.reset();
         for (auto& stage : oversamplingPost_) stage.reset();
         lookaheadWrite_ = 0;
@@ -255,10 +256,18 @@ public:
             // second, shared stereo tap on the dry/bypass path; this is not
             // an unaligned parallel wet/dry mix. With 2x OFF, untouched
             // preview behaviour and zero-latency monitoring are preserved.
+            const double x[2] = {dryL * smoothedInput_, dryR * smoothedInput_};
             oversamplingDryHistory_[0][oversamplingDryWrite_] =
                 static_cast<float>(dryL);
             oversamplingDryHistory_[1][oversamplingDryWrite_] =
                 static_cast<float>(dryR);
+            // Keep the input-gain automation sample-aligned with the wet
+            // FIR's 48-frame delay. Applying the CURRENT input gain to an
+            // old dry sample produces an audible parallel-path mismatch.
+            oversamplingWetInputHistory_[0][oversamplingDryWrite_] =
+                static_cast<float>(x[0]);
+            oversamplingWetInputHistory_[1][oversamplingDryWrite_] =
+                static_cast<float>(x[1]);
             constexpr std::size_t extraDelay = CharacterOversampling2x::kLatencySamples;
             const auto alignedIndex=(oversamplingDryWrite_+kOversamplingDryCapacity
                 -extraDelay)%kOversamplingDryCapacity;
@@ -268,9 +277,11 @@ public:
                 ? oversamplingDryHistory_[1][alignedIndex] : dryR;
             oversamplingDryWrite_=(oversamplingDryWrite_+1)%kOversamplingDryCapacity;
 
-            const double x[2] = {dryL * smoothedInput_, dryR * smoothedInput_};
             const double alignedX[2] = {
-                alignedDryL*smoothedInput_, alignedDryR*smoothedInput_
+                parameters_.oversampling2x
+                    ? oversamplingWetInputHistory_[0][alignedIndex] : x[0],
+                parameters_.oversampling2x
+                    ? oversamplingWetInputHistory_[1][alignedIndex] : x[1]
             };
             const bool osEnabled=parameters_.oversampling2x;
             const bool colourEnabled=parameters_.character!=0
@@ -550,6 +561,7 @@ private:
     int lookaheadSamples_ = 0;
     static constexpr std::size_t kOversamplingDryCapacity = 64;
     std::array<std::array<float,kOversamplingDryCapacity>,2> oversamplingDryHistory_ {};
+    std::array<std::array<float,kOversamplingDryCapacity>,2> oversamplingWetInputHistory_ {};
     std::size_t oversamplingDryWrite_ = 0;
     std::array<std::array<double,kOversamplingDryCapacity>,2> neutralWetHistory_ {};
     std::array<std::size_t,2> neutralWetWrite_ {};
