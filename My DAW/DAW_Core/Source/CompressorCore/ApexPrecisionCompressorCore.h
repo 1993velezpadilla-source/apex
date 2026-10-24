@@ -31,6 +31,9 @@ struct Parameters
     double attackMs = 10.0;
     double releaseMs = 120.0;
     double holdMs = 0.0;
+    // Delays the MAIN/WET/DRY/BYPASS audio while the detector reads the
+    // current input. This is feed-forward lookahead with real host PDC.
+    double lookaheadMs = 0.0; // 0..10 ms, 0 preserves live tracking latency
     double inputDb = 0.0;
     double wetDb = 0.0;
     double dryPercent = 0.0; // legacy C3 beta session state, 0..100
@@ -68,6 +71,7 @@ struct Parameters
         p.attackMs = bounded(p.attackMs, 0.005, 250.0, 10.0);
         p.releaseMs = bounded(p.releaseMs, 5.0, 3000.0, 120.0);
         p.holdMs = bounded(p.holdMs, 0.0, 500.0, 0.0);
+        p.lookaheadMs = bounded(p.lookaheadMs, 0.0, 10.0, 0.0);
         p.inputDb = bounded(p.inputDb, -24.0, 24.0, 0.0);
         p.wetDb = bounded(p.wetDb, -24.0, 24.0, 0.0);
         p.dryPercent = bounded(p.dryPercent, 0.0, 100.0, 0.0);
@@ -112,6 +116,8 @@ public:
     {
         for (auto& s : channels_) s = {};
         for (auto& h : holdRemaining_) h = 0;
+        for (auto& ring : lookaheadHistory_) ring.fill(0.0f);
+        lookaheadWrite_ = 0;
         smoothedInput_ = dbGain(parameters_.inputDb);
         smoothedWet_ = dbGain(parameters_.wetDb);
         smoothedOutput_ = dbGain(parameters_.outputDb);
@@ -131,6 +137,10 @@ public:
     void setParameters (const Parameters& value) noexcept
     {
         parameters_ = Parameters::sanitise(value);
+        const auto requested = static_cast<int>(
+            std::lround(sampleRate_ * parameters_.lookaheadMs * .001));
+        lookaheadSamples_ = std::clamp(requested,0,
+            static_cast<int>(kLookaheadCapacity)-1);
         const auto nyquist = 0.499 * sampleRate_;
         const auto hpf = std::min(parameters_.sidechainHighpassHz, nyquist);
         const auto lpf = std::min(parameters_.sidechainLowpassHz, nyquist);
@@ -174,7 +184,9 @@ public:
     double getGainReductionDb() const noexcept { return gainReductionDb_; }
     double getInputPeakDb() const noexcept { return inputPeakDb_; }
     double getOutputPeakDb() const noexcept { return outputPeakDb_; }
-    static constexpr int latencySamples() noexcept { return 0; }
+    // With lookahead ON, this is the exact sample delay of BOTH wet and dry
+    // paths (including bypass). It must be reported to the plugin host.
+    int latencySamples() const noexcept { return lookaheadSamples_; }
 
     // Separate SC pointers are optional and must be valid for the whole block.
     // The native wrapper currently uses the internal path. This port is ready
@@ -209,9 +221,22 @@ public:
             smoothedThreshold_ = smooth(smoothedThreshold_, parameters_.thresholdDb);
             smoothedDrive_ = smooth(smoothedDrive_, parameters_.drive);
 
-            const double dryL = safe(left[i]);
-            const double dryR = stereo ? safe(right[i]) : dryL;
-            inputPeak = std::max(inputPeak, std::max(std::abs(dryL), std::abs(dryR)));
+            const double inputL = safe(left[i]);
+            const double inputR = stereo ? safe(right[i]) : inputL;
+            inputPeak = std::max(inputPeak, std::max(std::abs(inputL),std::abs(inputR)));
+
+            // Persist history even at zero lookahead, so switching the mode
+            // never allocates on the callback. Write before reading; for N
+            // delayed samples, ring[write-N] is the exact input at t-N.
+            lookaheadHistory_[0][lookaheadWrite_] = static_cast<float>(inputL);
+            lookaheadHistory_[1][lookaheadWrite_] = static_cast<float>(inputR);
+            const auto readIndex = (lookaheadWrite_ + kLookaheadCapacity
+                 - static_cast<std::size_t>(lookaheadSamples_)) % kLookaheadCapacity;
+            const double dryL = lookaheadSamples_ == 0
+                ? inputL : lookaheadHistory_[0][readIndex];
+            const double dryR = lookaheadSamples_ == 0
+                ? inputR : lookaheadHistory_[1][readIndex];
+            lookaheadWrite_ = (lookaheadWrite_ + 1) % kLookaheadCapacity;
             const double x[2] = {dryL * smoothedInput_, dryR * smoothedInput_};
             // True PRE topology: saturate the WET audio before the detector
             // and gain computer. POST topology (default) colours the output
@@ -223,9 +248,20 @@ public:
                 parameters_.characterPre
                     ? colour(x[1],parameters_.character,smoothedDrive_) : x[1]
             };
+            // Detector sees input at t, but the actual output below is the
+            // stored input at t-lookaheadSamples_, giving it time to react.
+            // At lookahead=0, preserve the prior C3 detector bit for bit.
+            const double triggerL = lookaheadSamples_ == 0
+                ? colouredIn[0] : (parameters_.characterPre
+                    ? colour(inputL*smoothedInput_,parameters_.character,smoothedDrive_)
+                    : inputL*smoothedInput_);
+            const double triggerR = lookaheadSamples_ == 0
+                ? colouredIn[1] : (parameters_.characterPre
+                    ? colour(inputR*smoothedInput_,parameters_.character,smoothedDrive_)
+                    : inputR*smoothedInput_);
             const double trigger[2] = {
-                sideLeft ? safe(sideLeft[i]) : colouredIn[0],
-                sideRight ? safe(sideRight[i]) : (sideLeft ? safe(sideLeft[i]) : colouredIn[1])
+                sideLeft ? safe(sideLeft[i]) : triggerL,
+                sideRight ? safe(sideRight[i]) : (sideLeft ? safe(sideLeft[i]) : triggerR)
             };
             double detectorDb[2] {};
             for (int c = 0; c < (stereo ? 2 : 1); ++c)
@@ -426,6 +462,12 @@ private:
     double hpCoeff_ = 0.0, lpCoeff_ = 0.0;
     std::array<Channel,2> channels_ {};
     std::array<BellCoefficients,4> bellCoefficients_ {};
+    // Preallocated per-channel ring: ~64 KiB. No dynamic allocation in
+    // prepare(), setParameters() or process() (RT-safe, block invariant).
+    static constexpr std::size_t kLookaheadCapacity = 8192;
+    std::array<std::array<float,kLookaheadCapacity>,2> lookaheadHistory_ {};
+    std::size_t lookaheadWrite_ = 0;
+    int lookaheadSamples_ = 0;
     std::array<int,2> holdRemaining_ {};
     double smoothedInput_ = 1.0, smoothedWet_ = 1.0, smoothedOutput_ = 1.0;
     double smoothedDry_ = 0.0, smoothedBypass_ = 1.0, smoothedThreshold_ = -18.0;
