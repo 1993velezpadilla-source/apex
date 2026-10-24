@@ -62,19 +62,46 @@ public:
     // any third-party compressor remains wholly unproven.
     double process(double input, double drive, bool nonlinear) noexcept
     {
-        if (!std::isfinite(input)) input = 0.0;
-        input = std::clamp(input,-32.0,32.0);
         if (!std::isfinite(drive)) drive = 1.0;
         drive = std::clamp(drive,0.01,16.0);
+        return processCustom(input,[drive,nonlinear](double x) noexcept {
+            return nonlinear ? std::tanh(x*drive)/std::tanh(drive) : x;
+        });
+    }
 
+    // The hosted Precision C character stage uses the same distinct
+    // modes as its old single-rate Core::colour(), but at 2× rate.
+    // Filtering is applied BEFORE AND AFTER these nonlinear operations.
+    // A mode-0 result is still delayed/filtered; the parent Core can
+    // use an exact 48-sample delay tap when character is disabled.
+    double processColour(double input,int mode,double drivePercent) noexcept
+    {
+        if (!std::isfinite(drivePercent))drivePercent=0.0;
+        const double amount=std::clamp(drivePercent,0.0,100.0)*0.01;
+        return processCustom(input,[mode,amount](double sample) noexcept {
+            if(mode==0 || amount<=0.0)return sample;
+            const double x=sample*(1.0+2.0*amount);
+            if(mode==1)
+                return (1.0-amount)*sample+amount*std::tanh(x)/(1.0+amount);
+            if(mode==2)
+                return (1.0-amount)*sample+amount*x/(1.0+std::abs(x));
+            return (1.0-amount)*sample+
+                amount*(x-(x*x*x)/(3.0+x*x));
+        });
+    }
+
+private:
+    template<class Shaper>
+    double processCustom(double input,Shaper&& shape) noexcept
+    {
+        if (!std::isfinite(input)) input = 0.0;
+        input = std::clamp(input,-32.0,32.0);
         double selected = 0.0;
         for (int phase = 0; phase < 2; ++phase)
         {
             push(upHistory_,upWrite_,phase == 0 ? input : 0.0);
             const double reconstructed = 2.0 * convolve(upHistory_,upWrite_);
-            const double shaped = nonlinear
-                ? std::tanh(reconstructed * drive) / std::tanh(drive)
-                : reconstructed;
+            const double shaped = shape(reconstructed);
             push(downHistory_,downWrite_,shaped);
             const double lowpassed = convolve(downHistory_,downWrite_);
             // Even high-rate phase makes the cascade's *integer* group delay
@@ -85,7 +112,6 @@ public:
             ? std::clamp(selected,-32.0,32.0) : 0.0;
     }
 
-private:
     static double bessel0(double x) noexcept
     {
         // Absolutely convergent I_0 series, finite for x <= 8.
