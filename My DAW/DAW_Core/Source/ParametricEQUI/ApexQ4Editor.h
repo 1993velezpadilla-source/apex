@@ -186,14 +186,7 @@ public:
                 sync();
             }
         };
-        dynFilter_.onClick = [this]
-        {
-            if (selected_ >= 0)
-            {
-                toggleParameter (dynamicFilterParameterIndex (selected_));
-                sync();
-            }
-        };
+        dynFilter_.onClick = [this] { showDynamicsTriggerMenu(); };
         dynClose_.onClick = [this] { setDynamicExpanded (false); };
 
         undo_.onClick = [this] { historyStep (-1); };
@@ -1048,6 +1041,10 @@ public:
                 if (! enabled->getBool()
                     && std::abs (range->getUnitsValue()) > 0.001f)
                 {
+                    // A newly created dynamic band uses its own bandpass
+                    // detector by default, matching the expected Band key.
+                    // Existing saved-session detector modes remain intact.
+                    setUnits (dynamicFilterParameterIndex (b), 1.0f);
                     enabled->beginChangeGesture();
                     enabled->setValueNotifyingHost (1.0f);
                     enabled->endChangeGesture();
@@ -1296,6 +1293,10 @@ public:
         beginGainRingGesture();
         dragGainRingRange (deltaDb);
         endGainRingGesture();
+    }
+    void clearSelectedDynamicsForTesting()
+    {
+        clearSelectedDynamics();
     }
     juce::Range<float> measuredSpectrumDomainXForTesting() const noexcept
     {
@@ -1661,6 +1662,10 @@ private:
                 gainRingGestureBand_, DynamicBandOffset::Enable));
             if (! enabled->getBool())
             {
+                // Only newly enabled dynamics receives the band-limited key
+                // default; opening an old session never rewrites its state.
+                setUnits (dynamicFilterParameterIndex (
+                    gainRingGestureBand_), 1.0f);
                 enabled->beginChangeGesture();
                 enabled->setValueNotifyingHost (1.0f);
                 enabled->endChangeGesture();
@@ -2077,9 +2082,13 @@ private:
             dynSpectral_.setButtonText (
                 param (spectralBandParameterIndex (selected_))->getBool()
                     ? "SPECTRAL ON" : "SPECTRAL");
-            dynFilter_.setButtonText (
-                param (dynamicFilterParameterIndex (selected_))->getBool()
-                    ? "FILTER ON" : "BAND DETECTOR");
+            const bool bandKey = param (
+                dynamicFilterParameterIndex (selected_))->getBool();
+            dynFilter_.setButtonText (bandKey ? "KEY: BAND  v"
+                                               : "KEY: FULL  v");
+            dynFilter_.setTooltip (
+                "Select internal band-limited or full-band trigger,"
+                " and internal/external source (source is GLOBAL)");
             constexpr DynamicBandOffset offsets[] = {
                 DynamicBandOffset::Threshold, DynamicBandOffset::Range,
                 DynamicBandOffset::Attack, DynamicBandOffset::Release
@@ -2185,6 +2194,7 @@ private:
                 slot, DynamicBandOffset::Enable), 1.0f);
             setUnits (dynamicParameterIndex (
                 slot, DynamicBandOffset::Range), 6.0f);
+            setUnits (dynamicFilterParameterIndex (slot), 1.0f);
         }
         if (spectral)
             setUnits (spectralBandParameterIndex (slot), 1.0f);
@@ -2638,6 +2648,68 @@ private:
             }
         });
     }
+    void clearSelectedDynamics()
+    {
+        if (selected_ < 0) return;
+        const int band = selected_;
+        auto* range = param (dynamicParameterIndex (
+            band, DynamicBandOffset::Range));
+        auto* enabled = param (dynamicParameterIndex (
+            band, DynamicBandOffset::Enable));
+        range->beginChangeGesture();
+        range->setValueNotifyingHost (range->toNormalised (0.0f));
+        range->endChangeGesture();
+        enabled->beginChangeGesture();
+        enabled->setValueNotifyingHost (0.0f);
+        enabled->endChangeGesture();
+        commitHistory();
+        sync();
+        repaint();
+    }
+    void showDynamicsTriggerMenu()
+    {
+        if (selected_ < 0) return;
+        // These options reflect the actual APEX DSP plumbing. The external
+        // sidechain is a SHARED hosted parameter, not a per-band source;
+        // the detector filter is either linked to this band or wideband.
+        // Do not imply that a non-existent 'Free' pair of editable
+        // frequency crossover knobs is already implemented.
+        const bool filter = param (
+            dynamicFilterParameterIndex (selected_))->getBool();
+        const bool ext = param (kDynamicSidechainParameter)->getBool();
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("DYNAMIC TRIGGER FREQUENCY");
+        menu.addItem (1, "Band-limited (follow this EQ band)", true, filter);
+        menu.addItem (2, "Full-band (wideband key)", true, ! filter);
+        menu.addSeparator();
+        menu.addSectionHeader ("DETECTOR SOURCE — SHARED ACROSS BANDS");
+        menu.addItem (3, "Internal program signal", true, ! ext);
+        menu.addItem (4, "External sidechain bus", true, ext);
+        menu.addSeparator();
+        menu.addItem (5, "Clear selected band's dynamics");
+        juce::Component::SafePointer<ApexQ4Editor> safe (this);
+        menu.showMenuAsync (juce::PopupMenu::Options()
+            .withTargetComponent (&dynFilter_), [safe] (int id)
+        {
+            if (auto* e = safe.getComponent(); e && e->selected_ >= 0)
+            {
+                if (id == 1 || id == 2)
+                {
+                    e->setUnits (dynamicFilterParameterIndex (
+                        e->selected_), id == 1 ? 1.0f : 0.0f);
+                    e->commitHistory();
+                }
+                if (id == 3 || id == 4)
+                {
+                    e->setUnits (kDynamicSidechainParameter,
+                                 id == 4 ? 1.0f : 0.0f);
+                    e->commitHistory();
+                }
+                if (id == 5) e->clearSelectedDynamics();
+                e->sync(); e->repaint();
+            }
+        });
+    }
     void showAdvancedMenu()
     {
         if (selected_ < 0) return;
@@ -2649,6 +2721,8 @@ private:
         menu.addItem (5, "Delete band");
         menu.addSeparator();
         menu.addItem (9, "Open dynamic EQ controls...");
+        menu.addItem (12, "Dynamic trigger / sidechain...");
+        menu.addItem (13, "Clear selected band's dynamics");
         menu.addSectionHeader ("KEYBOARD — WHEN CANVAS HAS FOCUS");
         menu.addItem (31, "Arrow keys: freq (semi) / gain (dB)", false);
         menu.addItem (32, "Shift+arrows: fine adjustments", false);
@@ -2691,6 +2765,10 @@ private:
                 }
                 else if (id == 9)
                     e->setDynamicExpanded (true);
+                else if (id == 12)
+                    e->showDynamicsTriggerMenu();
+                else if (id == 13)
+                    e->clearSelectedDynamics();
                 else if (id == 10)
                     e->setTouchMultiSelectMode (! e->touchMultiSelectMode_);
                 else if (id == 11)
