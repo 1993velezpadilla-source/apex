@@ -316,7 +316,7 @@ public:
                                     "C3 A/B","C3 COPY","C3 UNDO","C3 REDO",
                                     "C3 PRESET","C3 STYLE","C3 CHARACTER",
                                     "C3 TRIGGER SOURCE","C3 CHARACTER ROUTING",
-                                    "C3 SIDECHAIN PANEL","PRECISION LOOKAHEAD"})
+                                    "C3 SIDECHAIN PANEL","PRECISION LOOKAHEAD","PRECISION OVERSAMPLING"})
                                 expect(findControl(name)!=nullptr,
                                        juce::String(name)+" must exist as a real clickable component");
 
@@ -507,6 +507,34 @@ public:
                         native->prepareToPlay(48000.0,128);
                         expectEquals(native->getLatencySamples(),0,
                                      "0ms mode must impose no monitoring delay");
+                    }
+                    beginTest("Precision C real 2x character reports 48-sample PDC");
+                    {
+                        auto& os=native->getC3Parameter(APEX::PrecisionC3::Oversampling2x);
+                        auto& look=native->getC3Parameter(APEX::PrecisionC3::LookaheadMode);
+                        expectEquals(os.paramID,juce::String("c3.oversampling"));
+                        os.setValue(1.0f);
+                        look.setValue(0.0f);
+                        native->getC3Parameter(APEX::PrecisionC3::Bypass).setValue(1.f);
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),48);
+                        juce::AudioBuffer<float> pulse(4,128);
+                        pulse.clear();
+                        pulse.setSample(0,0,.55f);
+                        pulse.setSample(1,0,.55f);
+                        native->processBlock(pulse,midi);
+                        for(int i=0;i<128;++i)
+                            expectWithinAbsoluteError(pulse.getSample(0,i),
+                                i==48?.55f:0.f,1.e-6f);
+                        look.setValue(look.toNormalised(3.0f)); // 5ms
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),288);
+                        os.setValue(0.0f);
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),240);
+                        look.setValue(0.0f);
+                        native->prepareToPlay(48000.0,128);
+                        expectEquals(native->getLatencySamples(),0);
                     }
                     native->releaseResources();
                 }
