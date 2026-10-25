@@ -30,6 +30,7 @@
 #include "ClipAutomationPanel.h"
 #include "../../../Source/UICore/ApexRadialContextMenu.h"
 #include <JuceHeader.h>
+#include <array>
 #include <functional>
 
 namespace ArrangementEditor
@@ -77,6 +78,9 @@ struct ClipContextCallbacks
     // Open or remove automation for precisely this engine clip (not its parent track).
     std::function<void(ArrangementClipModel*)> openAutomateClipPanel;
     std::function<void(ArrangementClipModel*)> removeClipAutomation;
+    std::function<void(ArrangementClipModel*, juce::Colour, bool)> recolorClip;
+    std::function<void(ArrangementClipModel*)> toggleTapeStop;
+    std::function<bool(ArrangementClipModel*)> isTapeStopActive;
 
     // Open Vocal Tune for the clicked clip.
     std::function<void(ArrangementClipModel*)> openVocalTune;
@@ -132,6 +136,8 @@ public:
         juce::PopupMenu menu;
 
         // ── Standard clip edit operations ─────────────────────────────────
+        // Delete must be in the FIRST radial page, never hidden behind More.
+        menu.addItem(kIdDelete, "Delete", cb.deleteClip != nullptr);
         menu.addItem(kIdCut,       "Cut",       cb.cutClip       != nullptr);
         menu.addItem(kIdCopy,      "Copy",      cb.copyClip      != nullptr);
         menu.addItem(kIdDuplicate, "Duplicate", cb.duplicateClip != nullptr);
@@ -143,12 +149,12 @@ public:
         menu.addItem(kIdRename, juce::String(juce::CharPointer_UTF8("Rename\xe2\x80\xa6")), cb.renameClip != nullptr);
         menu.addItem(kIdClipProperties, "Clip Properties...", cb.openClipProperties != nullptr);
         menu.addSeparator();
-        menu.addItem(kIdDelete, "Delete", cb.deleteClip != nullptr);
-        menu.addSeparator();
 
-        // Pitch/Time, presets, Safe Defaults, Reset Pitch/Time, Freeze and
-        // Bounce are intentionally NOT in the Radial/Classic clip menus.
-        // Double-click/tap (or Clip Properties) owns detailed editing.
+        // Presets are clip-local DSP state, with checked active item.
+        // The same item is a toggle: selecting an active preset resets it.
+        menu.addSubMenu("Presets", buildPresetsMenu(*clip, cb), cb.applyPreset != nullptr);
+        menu.addSubMenu("Recolor Clip", buildClipColorsMenu(), cb.recolorClip != nullptr);
+        menu.addSeparator();
         {
             const bool normalized = cb.isClipNormalized ? cb.isClipNormalized(clip) : false;
             juce::PopupMenu::Item normItem;
@@ -223,6 +229,9 @@ private:
         kIdNormalize        = 23,
         kIdVoiceCleaner     = 24,
         kIdRemoveClipAutomation = 25,
+        kIdClipColourBase = 400,
+        kIdFollowTrackColour = 408,
+        kIdTapeStop = 109,
         kIdAutomationBase   = 300,
         // Presets: 100-106
         kIdPresetBase       = 100,
@@ -267,6 +276,14 @@ private:
                                             const ClipContextCallbacks& cb)
     {
         juce::PopupMenu sub;
+        juce::PopupMenu::Item tape;
+        tape.itemID = kIdTapeStop;
+        tape.text = "Tape Stop";
+        tape.isEnabled = cb.toggleTapeStop != nullptr;
+        tape.isTicked = cb.isTapeStopActive
+            ? cb.isTapeStopActive(const_cast<ArrangementClipModel*>(&clip)) : false;
+        sub.addItem(tape);
+        sub.addSeparator();
         const auto names = TimePitchPresetsCore::allNames();
         const auto presets = TimePitchPresetsCore::allPresets();
         for (int i = 0; i < (int)names.size(); ++i)
@@ -294,6 +311,27 @@ private:
             sub.addItem(toggle);
         }
         return sub;
+    }
+
+    static juce::PopupMenu buildClipColorsMenu()
+    {
+        juce::PopupMenu sub;
+        const auto colors = clipPalette();
+        const char* names[] = {"Orange", "Green", "Pink", "Blue",
+                               "Yellow", "Purple", "Red", "Cyan"};
+        for (int index = 0; index < (int)colors.size(); ++index)
+            sub.addItem(kIdClipColourBase + index, names[index]);
+        sub.addSeparator();
+        sub.addItem(kIdFollowTrackColour, "Follow Track Color");
+        return sub;
+    }
+
+    static std::array<juce::Colour, 8> clipPalette()
+    {
+        return {juce::Colour(0xFFE07B39), juce::Colour(0xFF4EC94E),
+                juce::Colour(0xFFE0559A), juce::Colour(0xFF60A0E0),
+                juce::Colour(0xFFE0D060), juce::Colour(0xFFB060E0),
+                juce::Colour(0xFFE06060), juce::Colour(0xFF60E0D0)};
     }
 
     static juce::PopupMenu buildSafeDefaultsMenu()
@@ -395,6 +433,11 @@ private:
         {
             if (cb.normalizeClip) cb.normalizeClip(clip);
         }
+        else if (result == kIdTapeStop)
+        {
+            if (cb.toggleTapeStop)
+                cb.toggleTapeStop(clip);
+        }
         else if (result == kIdPresetCurveVisible)
         {
             if (cb.togglePresetCurveVisibility) cb.togglePresetCurveVisibility(clip);
@@ -416,6 +459,16 @@ private:
                     cb.applyPreset(clip, names[idx]);
                 }
             }
+        }
+        else if (result >= kIdClipColourBase && result < kIdClipColourBase + 8)
+        {
+            if (cb.recolorClip)
+                cb.recolorClip(clip, clipPalette()[(size_t)(result - kIdClipColourBase)], true);
+        }
+        else if (result == kIdFollowTrackColour)
+        {
+            if (cb.recolorClip)
+                cb.recolorClip(clip, clip->trackColour, false);
         }
         else if (result >= kIdSafeDefaultBase && result < kIdSafeDefaultBase + 5)
         {

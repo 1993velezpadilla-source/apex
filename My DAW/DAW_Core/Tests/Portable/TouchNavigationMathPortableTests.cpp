@@ -60,6 +60,18 @@ int main()
     assert(TouchNavigationMath::contextHoldReady(320, 100, 100, 104, 104));
     assert(!TouchNavigationMath::contextHoldReady(700, 100, 100, 108, 100));
 
-    std::cout << "TouchNavigationMath: 26 deterministic assertions passed\n";
+    // Only a physical TOUCH finger gets second-tap context action. A mouse
+    // first+second click must not open the radial/classic menu; an explicit
+    // mouse right-click still does so in ArrangementViewCore::mouseUp.
+    assert(TouchNavigationMath::selectedSecondTapReady(true, true, 80, 100, 100, 100, 100));
+    assert(TouchNavigationMath::selectedSecondTapReady(true, true, 280, 100, 100, 104, 104));
+    assert(!TouchNavigationMath::selectedSecondTapReady(false, true, 80, 100, 100, 100, 100)); // mouse / pen
+    assert(!TouchNavigationMath::selectedSecondTapReady(true, false, 80, 100, 100, 100, 100)); // first tap
+    assert(!TouchNavigationMath::selectedSecondTapReady(true, true, 281, 100, 100, 100, 100)); // press too long
+    assert(!TouchNavigationMath::selectedSecondTapReady(true, true, 120, 100, 100, 108, 100)); // drag
+    assert(TouchNavigationMath::mouseDoubleClickMayOpenProperties(false, false)); // mouse L-button
+    assert(!TouchNavigationMath::mouseDoubleClickMayOpenProperties(true, false)); // no touch property popup
+    assert(!TouchNavigationMath::mouseDoubleClickMayOpenProperties(false, true)); // right click stays contextual
+    std::cout << "TouchNavigationMath: touchscreen/mouse click routing assertions passed\n";
     return 0;
 }

@@ -548,6 +548,20 @@ private:
         void timerCallback() override { owner.inputWatchdogTick(); }
         MainComponent& owner;
     } inputWatchdog_ { *this };
+
+    // FL Studio-inspired pinned value hint. UI thread only: clip edits take
+    // priority over last-touched VST3 parameters, with no audio-thread polling.
+    juce::String liveClipEditInfo_;
+    juce::String lastPluginValueHint_;
+    double lastPluginHintTimestampMs_ = -1.0;
+    double lastPluginHintObservedMs_ = 0.0;
+    void refreshPinnedValueHint();
+    struct PinnedValueTimer : public juce::Timer
+    {
+        explicit PinnedValueTimer(MainComponent& o) : owner(o) {}
+        void timerCallback() override { owner.refreshPinnedValueHint(); }
+        MainComponent& owner;
+    } pinnedValueTimer_ { *this };
     int  inputWatchdogRepairAttempts_ = 0;
     bool inputWatchdogWasHealthy_     = false;
     static constexpr int kMaxInputWatchdogRepairAttempts = 5;
