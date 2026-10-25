@@ -47,16 +47,27 @@ namespace ArrangementEditor
             return durationMs >= 320 && withinTapSlop(x0, y0, x1, y1);
         }
 
-        // Logic for iPad: an already selected clip accepts a second short tap;
-        // the first tap only selects. Any real movement must cancel the menu
-        // so drag-to-move remains instantaneous and unambiguous.
-        static bool selectedSecondTapReady(bool selectedAtPointerDown,
+        // Only a real touchscreen FINGER can use second-tap-to-context-menu.
+        // Physical mouse clicks (including a double-click) and pen taps must
+        // never be misclassified as this gesture. This is also checked before
+        // forwarding JUCE's mouseDoubleClick callback to Clip Properties.
+        static bool selectedSecondTapReady(bool isFingerInput,
+                                           bool selectedAtPointerDown,
                                            int durationMs, double x0, double y0,
                                            double x1, double y1) noexcept
         {
-            return selectedAtPointerDown && durationMs >= 0
+            return isFingerInput && selectedAtPointerDown && durationMs >= 0
                 && durationMs <= 280
                 && withinTapSlop(x0, y0, x1, y1);
+        }
+
+        // Clip Properties belongs to a desktop mouse/pen double-click, NOT
+        // a touch double-tap (which has its own selected-clip context menu).
+        // Right-click is exclusively the explicit desktop context action.
+        static bool mouseDoubleClickMayOpenProperties(bool isFingerInput,
+                                                      bool isRightButton) noexcept
+        {
+            return !isFingerInput && !isRightButton;
         }
 
         // Compare to the LAST APPLIED pinch distance, not the last sampled
