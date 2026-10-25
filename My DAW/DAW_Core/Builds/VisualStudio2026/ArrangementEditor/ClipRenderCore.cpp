@@ -499,11 +499,14 @@ namespace ArrangementEditor
             return;
         }
 
-        // Logic Pro iPad semantics: first tap selects; a subsequent short tap
-        // on that selected clip opens the context menu. Movement cancels the
-        // menu, letting a deliberate drag reposition the clip. No long hold.
+        // TOUCHSCREEN FINGERS ONLY: once selected, a second short tap opens
+        // the radial/classic menu. Mouse left clicks (even double-clicks) and
+        // pen clicks must NEVER enter this path; mouse double-click instead
+        // opens Clip Properties, and mouse right-click opens the context menu.
+        // A held/moved touch can still pan or edit without opening a menu.
         if (z == Zone::None
-            && DAW::ApexPointerPolicy::isDirect(e))
+            && e.source.getType() == juce::MouseInputSource::InputSourceType::touch
+            && !e.mods.isRightButtonDown())
         {
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
             {
@@ -785,6 +788,7 @@ namespace ArrangementEditor
             && touchView != nullptr && touchView->getTouchGestureEpoch() == m_touchMenuGestureEpoch
             && DAW::ApexPointerPolicy::isDirect(e)
             && TouchNavigationMath::selectedSecondTapReady(
+                e.source.getType() == juce::MouseInputSource::InputSourceType::touch,
                 true, e.getLengthOfMousePress(),
                 m_touchMenuDownScreen.x, m_touchMenuDownScreen.y,
                 e.getScreenPosition().x, e.getScreenPosition().y)
@@ -854,9 +858,12 @@ namespace ArrangementEditor
 
     void ClipRenderCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        // Mouse double-click opens Properties. On direct touch the second
-        // tap belongs to the selected-clip menu; never open both surfaces.
-        if (DAW::ApexPointerPolicy::isDirect(e))
+        // JUCE may synthesize mouseDoubleClick during touch interaction.
+        // Only actual mouse/pen double-clicks open Clip Properties. Finger
+        // second-tap opens the context menu; mouse right-click is contextual.
+        if (!TouchNavigationMath::mouseDoubleClickMayOpenProperties(
+                e.source.getType() == juce::MouseInputSource::InputSourceType::touch,
+                e.mods.isRightButtonDown()))
             return;
         if (auto* parent = getParentComponent())
             parent->mouseDoubleClick(e.getEventRelativeTo(parent));
