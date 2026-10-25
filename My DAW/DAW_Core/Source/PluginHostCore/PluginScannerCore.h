@@ -13,6 +13,7 @@
 #include "../ParametricEQCore/ParametricEQNativePluginFormat.h"
 #include "../CompressorCore/ApexOptoLevelerProcessor.h"
 #include "../CompressorCore/ApexPrecisionCompressorProcessor.h"
+#include "../LimiterCore/ApexLimiterProcessor.h"
 #include "../DelayCore/ApexBubblegumDelayProcessor.h"
 #include "../ReverieCore/ApexReverieProcessor.h"
 
@@ -41,6 +42,7 @@ public:
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativePrecisionC3Entry();
+        seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
         browserFeed_.rebuildFromCache(cache_, knownPlugins_);
@@ -278,6 +280,7 @@ private:
         seedNativeParametricEQEntry();
         seedNativeOpto2AEntry();
         seedNativePrecisionC3Entry();
+        seedNativeBubblegumLimiterEntry();
         seedNativeBubblegumDelayEntry();
         seedNativeReverieEntry();
 
@@ -341,12 +344,22 @@ private:
         cache_.cacheFromDescription(description);
     }
 
-    /** Register the second compressor in the REAL scanner/cache path, not
-        just the format manager. Both startup AND forced rescan must make the
-        native C3 available in the plugin browser without disturbing Opto 2A. */
+    /** Precision C is a second intrinsic compressor with an independent
+        identifier and persistent browser entry on startup and rescans. */
     void seedNativePrecisionC3Entry()
     {
         APEX::PrecisionC3::Processor prototype;
+        juce::PluginDescription description;
+        prototype.fillInPluginDescription(description);
+        cache_.cacheFromDescription(description);
+    }
+
+    /** Limiter is a native in-process processor, not a disk VST. The format
+        manager alone does not populate the user-facing browser: seed it on
+        startup and before forced rescans without duplicating cache entries. */
+    void seedNativeBubblegumLimiterEntry()
+    {
+        APEX::Limiter::Processor prototype;
         juce::PluginDescription description;
         prototype.fillInPluginDescription(description);
         cache_.cacheFromDescription(description);

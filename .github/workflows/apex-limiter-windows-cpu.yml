@@ -1,0 +1,124 @@
+name: APEX Limiter Windows x64 CPU and parity audit
+on:
+  push:
+    paths:
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - '.github/workflows/apex-limiter-windows-cpu.yml'
+  pull_request:
+    paths:
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterCore.h'
+      - 'My DAW/DAW_Core/Source/LimiterCore/ApexLimiterOversampling.h'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterOversamplingBench.cpp'
+      - 'My DAW/DAW_Core/Tests/Standalone/ApexLimiterPeakCacheAudit.cpp'
+      - '.github/workflows/apex-limiter-windows-cpu.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-msvc-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: My DAW/DAW_Core
+    steps:
+      - uses: actions/checkout@v4
+      - name: MSVC x64 compile native DSP and reference variants
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%D in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%D"
+          if not defined VSROOT exit /b 1
+          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise Tests\Standalone\ApexLimiterOversamplingBench.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cpu-fast.exe"
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE /DAPEX_LIMITER_REFERENCE_HIGH_RATE_DRY /DAPEX_LIMITER_REFERENCE_EXTERNAL_DRY Tests\Standalone\ApexLimiterOversamplingBench.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cpu-decimator-reference.exe"
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise Tests\Standalone\ApexLimiterPeakCacheAudit.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cache-fast.exe"
+          if errorlevel 1 exit /b 1
+          cl /nologo /std:c++17 /O2 /EHsc /W4 /fp:precise /DAPEX_LIMITER_OS_REFERENCE_PAIR_DECIMATE /DAPEX_LIMITER_REFERENCE_PEAK_LOG /DAPEX_LIMITER_REFERENCE_HIGH_RATE_DRY Tests\Standalone\ApexLimiterPeakCacheAudit.cpp /Fe:"%RUNNER_TEMP%\apex-windows-cache-reference.exe"
+          if errorlevel 1 exit /b 1
+      - name: Enforce 81,920-row precise mono stereo automation parity on Windows
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\apex-windows-cache-fast.exe" | Set-Content -Encoding ascii "$env:RUNNER_TEMP\apex-windows-cache-fast.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Fast Windows DSP failed" }
+          & "$env:RUNNER_TEMP\apex-windows-cache-reference.exe" | Set-Content -Encoding ascii "$env:RUNNER_TEMP\apex-windows-cache-reference.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Reference Windows DSP failed" }
+          $a = @(Get-Content "$env:RUNNER_TEMP\apex-windows-cache-fast.csv")
+          $b = @(Get-Content "$env:RUNNER_TEMP\apex-windows-cache-reference.csv")
+          if ($a.Count -ne 81920 -or $b.Count -ne 81920) { throw "Unexpected audio row count: $($a.Count) / $($b.Count)" }
+          for ($i=0; $i -lt $a.Count; $i++) {
+            if ($a[$i] -cne $b[$i]) { throw "AUDIO DIFFERENCE at $i : $($a[$i]) != $($b[$i])" }
+          }
+          "APEX_WINDOWS_AUDIO_PARITY_GREEN,rows=$($a.Count)" | Tee-Object -FilePath "$env:RUNNER_TEMP\apex-windows-verdict.txt"
+      - name: Measure four 32x instances against 48k 128-sample deadline on Windows
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\apex-windows-cpu-fast.exe" | Set-Content -Encoding ascii "$env:RUNNER_TEMP\apex-windows-cpu-fast.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Fast Windows CPU benchmark failed" }
+          & "$env:RUNNER_TEMP\apex-windows-cpu-decimator-reference.exe" | Set-Content -Encoding ascii "$env:RUNNER_TEMP\apex-windows-cpu-reference.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Reference Windows CPU benchmark failed" }
+          '=== WINDOWS OPTIMIZED, 32x ==='
+          Get-Content "$env:RUNNER_TEMP\apex-windows-cpu-fast.csv" | Select-String '^APEX_OS_CPU,32,|^APEX_OS_MULTI,32,'
+          '=== WINDOWS ORIGINAL DECIMATOR, 32x ==='
+          Get-Content "$env:RUNNER_TEMP\apex-windows-cpu-reference.csv" | Select-String '^APEX_OS_CPU,32,|^APEX_OS_MULTI,32,'
+          'WARNING: shared Windows runner != Lenovo Legion Go. CPU-only DSP benchmark != full JUCE/plugin/driver deadline.'
+      - name: Package a local Windows x64 CPU probe for the Lenovo Legion Go
+        shell: pwsh
+        run: |
+          $script = @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          echo APEX Limiter hardware CPU audit - 48 kHz, 128 samples, stereo.
+          echo This runs the standalone CPU-only DSP, not the full DAW or driver.
+          "%~dp0apex-windows-cpu-fast.exe" > "%~dp0APEX_THIS_PC_CPU.csv"
+          if errorlevel 1 (
+            echo Benchmark failed.
+            pause
+            exit /b 1
+          )
+          findstr /B "APEX_OS_CPU,32, APEX_OS_MULTI,32," "%~dp0APEX_THIS_PC_CPU.csv"
+          echo.
+          echo Save APEX_THIS_PC_CPU.csv and share its contents for analysis.
+          echo No automatic oversampling fallback or realtime claim.
+          pause
+          '@
+          Set-Content -LiteralPath "$env:RUNNER_TEMP\Run_APEX_CPU_on_Windows.cmd" -Value $script -Encoding ascii
+          $readme = @'
+          APEX Bubblegum Limiter experimental CPU-only x64 test.
+          For Windows 11 / Lenovo Legion Go: extract ALL files to one folder
+          and double-click Run_APEX_CPU_on_Windows.cmd.
+          It creates APEX_THIS_PC_CPU.csv in that folder.
+          The 48 kHz / 128-frame budget is 2.6667 milliseconds.
+          A passing 375/375 deadline test on this standalone benchmark
+          does not guarantee no audio dropouts in JUCE, ASIO, or VST3 chains.
+          Do not run through an audio session; the benchmark uses CPU only.
+          Source: Tests/Standalone/ApexLimiterOversamplingBench.cpp in APEX.
+          '@
+          Set-Content -LiteralPath "$env:RUNNER_TEMP\APEX_CPU_ReadMe.txt" -Value $readme -Encoding ascii
+      - name: Publish executable Windows hardware probe (unsigned diagnostic)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-limiter-run-on-your-windows-pc
+          path: |
+            ${{ runner.temp }}/apex-windows-cpu-fast.exe
+            ${{ runner.temp }}/Run_APEX_CPU_on_Windows.cmd
+            ${{ runner.temp }}/APEX_CPU_ReadMe.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve reproducible Windows x64 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-limiter-windows-msvc-cpu-parity
+          path: |
+            ${{ runner.temp }}/apex-windows-cpu-fast.csv
+            ${{ runner.temp }}/apex-windows-cpu-reference.csv
+            ${{ runner.temp }}/apex-windows-verdict.txt
+          if-no-files-found: warn
+          retention-days: 30
