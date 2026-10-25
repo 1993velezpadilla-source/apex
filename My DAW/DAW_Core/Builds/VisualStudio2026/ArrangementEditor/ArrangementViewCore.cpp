@@ -3547,8 +3547,14 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::mouseDoubleClick(const juce::MouseEvent& e)
     {
-        // Free View Mode: nothing opens or edits while viewing.
-        if (m_viewOnlyMode)
+        // Only a physical mouse/pen double-click opens Clip Properties.
+        // Touchscreen fingers use the selected-clip second-tap context
+        // action instead. Guard the parent too: JUCE may dispatch a synthetic
+        // mouseDoubleClick directly here instead of via ClipRenderCore.
+        if (m_viewOnlyMode
+            || !TouchNavigationMath::mouseDoubleClickMayOpenProperties(
+                e.source.getType() == juce::MouseInputSource::InputSourceType::touch,
+                e.mods.isRightButtonDown()))
             return;
 
         DBG("[ArrangementView] mouseDoubleClick pos=" << e.getPosition().toString());
