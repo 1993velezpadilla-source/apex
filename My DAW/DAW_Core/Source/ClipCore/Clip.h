@@ -178,7 +178,18 @@ public:
     // Audio file
     juce::File getSourceFile() const { return sourceFile_; }
     void setSourceFile(const juce::File& file);
-    
+
+    // Peak Normalize is an audio-cache transform, so its desired state and
+    // exact source range must live on the clip model and survive project reload.
+    bool isPeakNormalizeActive() const noexcept { return peakNormalizeActive_; }
+    SamplePosition getPeakNormalizeStartSample() const noexcept { return peakNormalizeStartSample_; }
+    SamplePosition getPeakNormalizeEndSample() const noexcept { return peakNormalizeEndSample_; }
+    float getPeakNormalizeTargetDb() const noexcept { return peakNormalizeTargetDb_; }
+    void setPeakNormalizeState(bool active,
+                               SamplePosition startSample = 0,
+                               SamplePosition endSample = 0,
+                               float targetDb = 0.0f);
+
     // Gain
     float getGain() const { return gain_; }
     void setGain(float newGain);
@@ -385,6 +396,12 @@ public:
 
 private:
     juce::File sourceFile_;
+    // Persist the desired cache transform separately from the source audio.
+    // start/end are source-file samples; end==0 means legacy/unspecified range.
+    bool peakNormalizeActive_{false};
+    SamplePosition peakNormalizeStartSample_{0};
+    SamplePosition peakNormalizeEndSample_{0};
+    float peakNormalizeTargetDb_{0.0f};
     float gain_{1.0f};
     std::atomic<float> clipPan_{0.0f};
     bool reversed_{false};
