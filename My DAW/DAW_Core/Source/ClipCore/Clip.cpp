@@ -177,6 +177,31 @@ void AudioClip::setSourceFile(const juce::File& file)
     notifyPropertyChanged();
 }
 
+void AudioClip::setPeakNormalizeState(bool active,
+                                      SamplePosition startSample,
+                                      SamplePosition endSample,
+                                      float targetDb)
+{
+    const bool nextActive = active;
+    const SamplePosition nextStart = active ? juce::jmax((SamplePosition)0, startSample) : 0;
+    const SamplePosition nextEnd = active && endSample > nextStart ? endSample : 0;
+    const float nextTargetDb = active && std::isfinite(targetDb)
+        ? juce::jlimit(-120.0f, 24.0f, targetDb)
+        : 0.0f;
+
+    if (peakNormalizeActive_ == nextActive
+        && peakNormalizeStartSample_ == nextStart
+        && peakNormalizeEndSample_ == nextEnd
+        && std::abs(peakNormalizeTargetDb_ - nextTargetDb) <= 0.0001f)
+        return;
+
+    peakNormalizeActive_ = nextActive;
+    peakNormalizeStartSample_ = nextStart;
+    peakNormalizeEndSample_ = nextEnd;
+    peakNormalizeTargetDb_ = nextTargetDb;
+    notifyPropertyChanged();
+}
+
 void AudioClip::setGain(float newGain)
 {
     const auto clamped = juce::jlimit(0.0f, 4.0f, newGain);
@@ -261,6 +286,10 @@ juce::ValueTree AudioClip::getState() const
 
     // Add audio clip specific properties
     state.setProperty(IDs::SOURCE_FILE, sourceFile_.getFullPathName(), nullptr);
+    state.setProperty("peakNormalizeActive", peakNormalizeActive_, nullptr);
+    state.setProperty("peakNormalizeStartSample", (int64_t)peakNormalizeStartSample_, nullptr);
+    state.setProperty("peakNormalizeEndSample", (int64_t)peakNormalizeEndSample_, nullptr);
+    state.setProperty("peakNormalizeTargetDb", peakNormalizeTargetDb_, nullptr);
     state.setProperty(IDs::GAIN, gain_, nullptr);
     state.setProperty(IDs::CLIP_PAN, clipPan_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::REVERSED, reversed_, nullptr);
@@ -286,6 +315,21 @@ void AudioClip::restoreState(const juce::ValueTree& state)
 {
     Clip::restoreState(state);
     sourceFile_ = juce::File(state.getProperty(IDs::SOURCE_FILE, ""));
+    peakNormalizeActive_ = static_cast<bool>(state.getProperty("peakNormalizeActive", false));
+    peakNormalizeStartSample_ = juce::jmax((SamplePosition)0,
+        (SamplePosition)(int64_t)state.getProperty("peakNormalizeStartSample", (int64_t)0));
+    peakNormalizeEndSample_ = (SamplePosition)(int64_t)state.getProperty(
+        "peakNormalizeEndSample", (int64_t)0);
+    if (peakNormalizeEndSample_ <= peakNormalizeStartSample_)
+        peakNormalizeEndSample_ = 0;
+    peakNormalizeTargetDb_ = juce::jlimit(-120.0f, 24.0f,
+        (float)state.getProperty("peakNormalizeTargetDb", 0.0f));
+    if (!peakNormalizeActive_)
+    {
+        peakNormalizeStartSample_ = 0;
+        peakNormalizeEndSample_ = 0;
+        peakNormalizeTargetDb_ = 0.0f;
+    }
     gain_ = state.getProperty(IDs::GAIN, 1.0f);
     clipPan_.store(juce::jlimit(-1.0f, 1.0f, (float)state.getProperty(IDs::CLIP_PAN, 0.0f)), std::memory_order_relaxed);
     reversed_ = static_cast<bool>(state.getProperty(IDs::REVERSED, false));

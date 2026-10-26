@@ -10,7 +10,7 @@
 
 namespace DAW {
 
-static constexpr int kCurrentProjectVersion = 9;   // v9: clip-local tape stop lanes + sidechain bus resolution
+static constexpr int kCurrentProjectVersion = 10;  // v10: persist per-clip peak Normalize state
 
 void ProjectManager::setSubsystems(const Subsystems& s)
 {
@@ -802,15 +802,16 @@ bool ProjectManager::restoreFromState(const juce::ValueTree& state)
     }
 
     // ── Project migrations (v8 → v9) ─────────────────────────────────────
-    // Sequential, idempotent and additive-only: projects older than the
-    // current format are converted here, after every subsystem has been
-    // restored. Nothing the user created is deleted.
+    // v10 adds optional peakNormalize* properties to AudioClip state. Older
+    // projects intentionally default to Normalize-off; no tree migration is
+    // needed because AudioClip::restoreState() supplies those defaults.
+    // The v8→v9 repair remains sequential, idempotent and additive-only.
     const int migrationSourceVersion = (int) state.getProperty("version", 0);
     lastUpgradeReport_.reset(migrationSourceVersion, kCurrentProjectVersion);
     // NOTE: the repair runs UNCONDITIONALLY, not only for version < 9. Every
     // step is idempotent and additive-only, and a project that was opened and
-    // re-saved by a build after the version bump is stamped v9 while still
-    // carrying the broken legacy data — a version gate would then never repair
+    // re-saved by a build after the version bump is stamped with the current
+    // project version while still carrying the broken legacy data — a version gate would never repair
     // it. Running the (idempotent) repair on every load guarantees old
     // projects heal regardless of how they were re-saved.
     if (subs_.automation != nullptr && subs_.clips != nullptr && subs_.tracks != nullptr)
