@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "../../../Source/AudioEngineCore/AudioFileManager.h"
+#include "../../../Source/ClipCore/Clip.h"
 #include "../../../Source/UtilityCore/Types.h"
 #include <cmath>
 #include <vector>
