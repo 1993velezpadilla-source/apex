@@ -89,7 +89,16 @@ jobs:
           path: My DAW/DAW_Core/evidence/boot/*.png
           if-no-files-found: error
       - name: Run complete test suite
+        env:
+          APEX_REVERIE_CAPTURE_PNG: ${{ runner.temp }}\apex-reverie-real-gui-${{ matrix.configuration }}.png
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
+      - name: Publish authentic APEX Reverie JUCE GUI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apex-Reverie-Real-GUI-${{ matrix.configuration }}-${{ github.sha }}
+          path: ${{ runner.temp }}/apex-reverie-real-gui-${{ matrix.configuration }}.png
+          if-no-files-found: warn
       - name: Smoke real APEX GUI and project automation persistence
         run: .\Scripts\smoke_apex_app_launch.ps1 -Configuration ${{ matrix.configuration }}
       - name: Preserve test results

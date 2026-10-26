@@ -130,6 +130,41 @@ public:
             }
         }
 
+        // On explicit CI request, capture the ACTUAL APEX JUCE editor (all
+        // child controls and the shared procedural boot-eye geometry). This
+        // is not a generated/mockup artwork or a reference screenshot.
+        const auto destination = juce::SystemStats::getEnvironmentVariable(
+            "APEX_REVERIE_CAPTURE_PNG", {});
+        if (destination.isNotEmpty())
+        {
+            beginTest("Render authentic Reverie plugin GUI into review PNG");
+            Processor screenshotProcessor; // untouched factory Pure Plate/Modern
+            auto liveEditor = std::unique_ptr<juce::AudioProcessorEditor>(
+                screenshotProcessor.createEditor());
+            expect(liveEditor != nullptr);
+            if (liveEditor)
+            {
+                liveEditor->setVisible(true);
+                auto actualGUI = liveEditor->createComponentSnapshot(
+                    liveEditor->getLocalBounds(), true, 1.0f);
+                expect(actualGUI.isValid(), "JUCE GUI rasterization failed");
+                if (actualGUI.isValid())
+                {
+                    auto target = juce::File(destination);
+                    expect(target.getParentDirectory().createDirectory().wasOk(),
+                           "Could not create screenshot artifact folder");
+                    juce::FileOutputStream stream(target);
+                    juce::PNGImageFormat format;
+                    expect(stream.openedOk() &&
+                           format.writeImageToStream(actualGUI, stream),
+                           "Could not write authentic rendered Reverie PNG");
+                    stream.flush();
+                    expect(target.existsAsFile() && target.getSize()>10000,
+                           "Rendered Reverie screenshot missing or too small");
+                }
+            }
+        }
+
         beginTest("Deterministic bounded plate/hall/room impulse tails at 44.1/48/96 kHz");
         for(double sr:{44100.0,48000.0,96000.0})
         {
