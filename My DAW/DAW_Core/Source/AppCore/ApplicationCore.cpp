@@ -2142,7 +2142,63 @@ void ApplicationCore::reloadAudioFiles(std::function<void(int, int, const juce::
     int completed = 0;
     for (const auto& request : reloadRequests)
     {
-        audioFileManager_.publishPreparedForClip(request.clipId, prepared[request.preparedIndex]);
+        const auto published = audioFileManager_.publishPreparedForClip(
+            request.clipId, prepared[request.preparedIndex]);
+
+        // Normalize previously lived only in AudioFileManager's in-memory
+        // cache. Recreate that transform after decoding the original source,
+        // using the state serialized by AudioClip::getState().
+        if (published.success)
+        {
+            if (auto* audio = dynamic_cast<AudioClip*>(clipManager_->getClip(request.clipId)))
+            {
+                if (audio->isPeakNormalizeActive())
+                {
+                    const auto* buffer = audioFileManager_.getBuffer(request.clipId);
+                    const int totalSamples = buffer != nullptr ? buffer->getNumSamples() : 0;
+                    if (totalSamples > 0)
+                    {
+                        SamplePosition start = 0;
+                        SamplePosition end = (SamplePosition)totalSamples;
+                        const auto savedStart = audio->getPeakNormalizeStartSample();
+                        const auto savedEnd = audio->getPeakNormalizeEndSample();
+
+                        if (savedEnd > savedStart)
+                        {
+                            start = juce::jlimit<SamplePosition>(
+                                0, (SamplePosition)totalSamples - 1, savedStart);
+                            end = juce::jlimit<SamplePosition>(
+                                start + 1, (SamplePosition)totalSamples, savedEnd);
+                        }
+                        else
+                        {
+                            // Compatibility fallback for projects whose
+                            // Normalize flag has no persisted source range.
+                            start = juce::jlimit<SamplePosition>(
+                                0, (SamplePosition)totalSamples - 1,
+                                juce::jmax<SamplePosition>(
+                                    (SamplePosition)audio->getSourceOffset(),
+                                    (SamplePosition)audio->getSourceStartSample()));
+                            end = audio->getSourceEndSample() > 0
+                                ? juce::jlimit<SamplePosition>(
+                                    start + 1, (SamplePosition)totalSamples,
+                                    (SamplePosition)audio->getSourceEndSample())
+                                : (SamplePosition)totalSamples;
+                        }
+
+                        const auto normalizeResult = audioFileManager_.togglePeakNormalize(
+                            request.clipId, start, end, audio->getPeakNormalizeTargetDb());
+                        if (normalizeResult != AudioFileManager::NormalizeResult::Applied)
+                        {
+                            juce::Logger::writeToLog(
+                                "[NORMALIZE] Could not restore persisted Normalize state for clip "
+                                + juce::String(request.clipId));
+                        }
+                    }
+                }
+            }
+        }
+
         ++completed;
         if (progress) progress(completed, total, request.source.getFileName());
     }
