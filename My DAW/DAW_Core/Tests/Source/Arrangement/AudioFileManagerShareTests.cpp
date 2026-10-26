@@ -150,6 +150,29 @@ public:
 
             tempDir.deleteRecursively();
         }
+
+        beginTest ("audio clip peak Normalize state survives ValueTree save and restore");
+        {
+            AudioClip clip ("normalize-persist-clip", "Normalize Persistence");
+            clip.setPeakNormalizeState (true, 128, 3072, -0.5f);
+
+            const auto savedState = clip.getState();
+            AudioClip restored ("normalize-persist-clip", "Restored");
+            restored.restoreState (savedState);
+
+            expect (restored.isPeakNormalizeActive(),
+                    "the project must remember that Normalize was enabled");
+            expectEquals (restored.getPeakNormalizeStartSample(), (SamplePosition) 128);
+            expectEquals (restored.getPeakNormalizeEndSample(), (SamplePosition) 3072);
+            expect (std::abs (restored.getPeakNormalizeTargetDb() - (-0.5f)) < 0.0001f,
+                    "the normalization target must survive project serialization");
+
+            restored.setPeakNormalizeState (false);
+            AudioClip reverted ("normalize-persist-clip", "Reverted");
+            reverted.restoreState (restored.getState());
+            expect (! reverted.isPeakNormalizeActive(),
+                    "turning Normalize off must persist the disabled state");
+        }
     }
 };
 
