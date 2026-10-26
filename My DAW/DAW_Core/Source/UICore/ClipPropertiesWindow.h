@@ -2540,6 +2540,7 @@ private:
         if (result == AudioFileManager::NormalizeResult::Applied)
         {
             const bool normalizedNow = afm_->isPeakNormalized(ac->getID());
+            ac->setPeakNormalizeState(normalizedNow, sourceStart, sourceEnd, 0.0f);
             if (normalizedNow)
                 ac->setGain(1.0f);
 
