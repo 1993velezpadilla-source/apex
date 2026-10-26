@@ -5142,17 +5142,24 @@ namespace ArrangementEditor
         if (result != DAW::AudioFileManager::NormalizeResult::Applied)
             return false;
 
-        if (m_engineAudioFiles->isPeakNormalized(audio->getID()))
+        const bool normalizedNow = m_engineAudioFiles->isPeakNormalized(audio->getID());
         {
-            // Source normalization changes samples; clip gain returns to 1x
-            // exactly as in the full Clip Properties panel.
+            // Persist the desired cache transform on the clip model.  The
+            // audio cache itself is rebuilt from the source file at project
+            // load, so it cannot be the sole owner of Normalize state.
             const juce::ScopedValueSetter<bool> guard(m_syncingArrangementToEngine, true);
-            audio->setGain(1.0f);
-            if (auto* model = m_clipState.findClip(clipId))
+            audio->setPeakNormalizeState(normalizedNow, start, end, 0.0f);
+            if (normalizedNow)
             {
-                model->gain = 1.0f;
-                model->bumpWaveformVisualVersion();
-                m_clipState.updateClip(*model);
+                // Source normalization changes samples; clip gain returns to
+                // 1x exactly as in the full Clip Properties panel.
+                audio->setGain(1.0f);
+                if (auto* model = m_clipState.findClip(clipId))
+                {
+                    model->gain = 1.0f;
+                    model->bumpWaveformVisualVersion();
+                    m_clipState.updateClip(*model);
+                }
             }
         }
         notifyEngineClipPropertiesChanged(clipId);
