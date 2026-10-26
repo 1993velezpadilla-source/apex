@@ -174,6 +174,60 @@ public:
             expect (! reverted.isPeakNormalizeActive(),
                     "turning Normalize off must persist the disabled state");
         }
+
+        beginTest ("persisted Normalize metadata reapplies the same gain to a freshly decoded cache");
+        {
+            const ClipID clipId = "normalize-cache-reload";
+            constexpr int sampleCount = 4096;
+            constexpr SamplePosition rangeStart = 128;
+            constexpr SamplePosition rangeEnd = 3072;
+            constexpr float targetDb = -0.5f;
+
+            auto decodedSource = std::make_shared<AudioFileManager::CachedAudio>();
+            decodedSource->sampleRate = 48000.0;
+            decodedSource->buffer.setSize (1, sampleCount);
+            decodedSource->buffer.clear();
+            for (int sample = 0; sample < sampleCount; ++sample)
+                decodedSource->buffer.setSample (0, sample, 0.25f);
+            decodedSource->buffer.setSample (0, 512, 0.5f);
+
+            AudioFileManager manager;
+            manager.shareSnapshotForClip (decodedSource, clipId);
+            expect (manager.togglePeakNormalize (clipId, rangeStart, rangeEnd, targetDb)
+                        == AudioFileManager::NormalizeResult::Applied);
+
+            AudioClip clip (clipId, "Normalize Reload");
+            clip.setPeakNormalizeState (true, rangeStart, rangeEnd, targetDb);
+            AudioClip restored (clipId, "Restored");
+            restored.restoreState (clip.getState());
+
+            // A new project load starts with decoded source audio, not the
+            // normalized cache snapshot that existed before saving.
+            manager.clearAll();
+            manager.shareSnapshotForClip (decodedSource, clipId);
+            if (restored.isPeakNormalizeActive())
+            {
+                manager.togglePeakNormalize (clipId,
+                    restored.getPeakNormalizeStartSample(),
+                    restored.getPeakNormalizeEndSample(),
+                    restored.getPeakNormalizeTargetDb());
+            }
+
+            const auto* reloaded = manager.getBuffer (clipId);
+            expect (reloaded != nullptr, "reloaded source audio should be available");
+            expect (manager.isPeakNormalized (clipId),
+                    "the restored clip state must reactivate Normalize");
+            if (reloaded != nullptr)
+            {
+                const float expectedPeak = juce::Decibels::decibelsToGain (targetDb);
+                const float actualPeak = reloaded->getMagnitude (
+                    0, (int)rangeStart, (int)(rangeEnd - rangeStart));
+                expect (std::abs (actualPeak - expectedPeak) < 0.002f,
+                        "the same persisted source range and target must be normalized after reload");
+                expect (std::abs (reloaded->getSample (0, 0) - 0.25f) < 0.0001f,
+                        "samples outside the persisted range must remain unchanged");
+            }
+        }
     }
 };
 
