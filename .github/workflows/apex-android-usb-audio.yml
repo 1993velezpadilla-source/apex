@@ -1,0 +1,93 @@
+name: APEX Android Phase 1 USB Audio APK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Android/**"
+      - ".github/workflows/apex-android-usb-audio.yml"
+  push:
+    branches:
+      - "feature/android-port-*"
+    paths:
+      - "Android/**"
+      - ".github/workflows/apex-android-usb-audio.yml"
+
+jobs:
+  build-arm64-debug-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout APEX
+        uses: actions/checkout@v4
+
+      - name: Install Linux prerequisites for JUCE Projucer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ninja-build cmake pkg-config xvfb \
+            libasound2-dev libjack-jackd2-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libcurl4-openssl-dev
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and build tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Fetch the JUCE release used by APEX
+        run: |
+          mkdir -p third_party
+          git clone --quiet --depth 1 --branch 8.0.12 \
+            https://github.com/juce-framework/JUCE.git third_party/JUCE
+
+      - name: Compile JUCE Projucer host generator
+        run: |
+          cmake -S third_party/JUCE -B /tmp/apex-juce-host \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
+          cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+
+      - name: Export APEX Android Studio project
+        run: |
+          PROJUCER=/tmp/apex-juce-host/extras/Projucer/Projucer
+          test -x "$PROJUCER"
+          xvfb-run -a "$PROJUCER" --resave Android/APEXAndroid.jucer
+          test -f Android/Builds/Android/gradlew
+
+      - name: Build Android Debug APK (ARM64 target)
+        working-directory: Android/Builds/Android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Collect built APKs
+        if: always()
+        run: |
+          mkdir -p android-apk-artifacts
+          find Android/Builds/Android -type f -name '*.apk' \
+            -exec cp -v '{}' android-apk-artifacts/ \; || true
+
+      - name: Publish debug APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Phase1-Debug-APK
+          path: android-apk-artifacts/*.apk
+          if-no-files-found: warn
+          retention-days: 14
