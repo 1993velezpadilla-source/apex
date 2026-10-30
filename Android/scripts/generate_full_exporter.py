@@ -121,7 +121,7 @@ def main() -> int:
             android_excluded.append(relative)
         if relative in utf16_windows_units and entry.get("compile") == "1":
             data = source_path.read_bytes()
-            if data.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
                 decoded = data.decode("utf-16")
             else:
                 decoded = data.decode("utf-8-sig")
