@@ -835,7 +835,13 @@ public:
     void initialise (const juce::String& commandLine) override
     {
         const auto processArguments = getCommandLineParameterArray();
+       #if JUCE_ANDROID
+        // Android always launches the actual DAW application in-process.
+        // Windows worker and sandbox command-line entry points are disabled.
+        processMode_ = DAW::ApexProcessMode::NormalApex;
+       #else
         processMode_ = DAW::PluginSandboxCommandLineCore::resolveProcessMode(processArguments);
+       #endif
         DAW::ApexProcessModeStateCore::setProcessMode(processMode_);
 
 #if JUCE_WINDOWS
