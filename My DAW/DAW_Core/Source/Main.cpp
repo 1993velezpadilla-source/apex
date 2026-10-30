@@ -427,7 +427,11 @@ private:
         if (! pluginFile_.existsAsFile())
             fail("plugin file does not exist: " + pluginFile_.getFullPathName());
 
+       #if JUCE_PLUGINHOST_VST3
         formatManager_.addFormat(std::make_unique<juce::VST3PluginFormat>());
+       #else
+        fail("Windows VST3 forensic diagnostic is not available on Android");
+       #endif
         auto* format = formatManager_.getFormat(0);
         if (format == nullptr)
             fail("VST3 format unavailable");
@@ -487,8 +491,12 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> scanned;
         auto& fm = manager();
+       #if JUCE_PLUGINHOST_VST3
         if (fm.getNumFormats() == 0)
             fm.addFormat(std::make_unique<juce::VST3PluginFormat>());
+       #else
+        fail("Windows VST3 forensic diagnostic is not available on Android");
+       #endif
         auto* format = fm.getFormat(0);
         if (format == nullptr)
             fail("VST3 format unavailable");
@@ -1057,8 +1065,9 @@ public:
             });
         }
 
-        // Wire the MessageBox suppressor to activate only during plugin scans.
-        // This cuts EnumWindows overhead from 11% continuous CPU to near-zero.
+        // Wire the Windows MessageBox suppressor only on Windows. Android
+        // does not load Windows protection DLLs or run Windows plugin scans.
+       #if JUCE_WINDOWS
         if (auto* mc = mainWindow->getMainComponent())
         {
             DAW::MessageBoxSuppressorCore* suppressor = msgBoxSuppressor_.get();
@@ -1068,6 +1077,7 @@ public:
                     suppressor->setScanActive(active);
             });
         }
+       #endif
 
         // ── Production GUI launch smoke for Windows CI ────────────────────
         // Unlike the unit-test executable, this launches the actual DAW with
