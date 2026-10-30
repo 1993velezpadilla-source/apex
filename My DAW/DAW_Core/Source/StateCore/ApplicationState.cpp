@@ -66,7 +66,7 @@ ApplicationState::ApplicationState()
     state_.setProperty(IDs::IS_PAUSED, false, nullptr);
     state_.setProperty(IDs::IS_LOOPING, false, nullptr);
     state_.setProperty(IDs::TEMPO, 120.0, nullptr);
-    state_.setProperty(IDs::TRANSPORT_POSITION, (int64_t)0, nullptr);
+    state_.setProperty(IDs::TRANSPORT_POSITION, (juce::int64)0, nullptr);
     state_.setProperty(IDs::BAR_BEAT_POSITION, 0.0, nullptr);
     state_.setProperty(IDs::SELECTED_TRACK_ID, "", nullptr);
     state_.setProperty(IDs::SELECTED_CLIP_ID, "", nullptr);
