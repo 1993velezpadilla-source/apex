@@ -70,13 +70,31 @@ jobs:
           git clone --quiet --depth 1 --branch 8.0.12 \
             https://github.com/juce-framework/JUCE.git third_party/JUCE
 
+      - name: Restore pinned JUCE Projucer cache
+        id: projucer-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
+
       - name: Build Projucer host generator
         shell: bash
         run: |
-          cmake -S third_party/JUCE -B /tmp/apex-juce-host \
-            -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
-          cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+          if ! find /tmp/apex-juce-host -type f -name Projucer -perm /111 2>/dev/null | grep -q .; then
+            cmake -S third_party/JUCE -B /tmp/apex-juce-host \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
+            cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+          else
+            echo "Using cached JUCE 8.0.12 Projucer binary"
+          fi
+
+      - name: Cache compiled host Projucer before Android build
+        if: steps.projucer-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
 
       - name: Generate Android exporter from ORIGINAL APEX .jucer
         shell: bash
