@@ -13,6 +13,10 @@ on:
       - "Android/**"
       - ".github/workflows/apex-android-usb-audio.yml"
 
+concurrency:
+  group: apex-android-usb-audio-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-arm64-debug-apk:
     runs-on: ubuntu-24.04
