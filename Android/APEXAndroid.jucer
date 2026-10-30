@@ -15,9 +15,9 @@
     <ANDROIDSTUDIO targetFolder="Builds/Android" androidMinimumSDK="26"
                    microphonePermissionNeeded="1">
       <CONFIGURATIONS>
-        <CONFIGURATION name="Debug" isDebug="1" optimisation="1"
+        <CONFIGURATION name="Debug" isDebug="1" androidArchitectures="arm64-v8a" optimisation="1"
                        linkTimeOptimisation="0"/>
-        <CONFIGURATION name="Release" isDebug="0" optimisation="3"/>
+        <CONFIGURATION name="Release" isDebug="0" androidArchitectures="arm64-v8a" optimisation="3"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_core" path="../third_party/JUCE/modules"/>
