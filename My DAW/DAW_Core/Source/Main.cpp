@@ -17,8 +17,10 @@
 #include "PluginHostCore/HostedPluginIsolationCore.h"
 #include "PluginSandboxCore/PluginSandboxProtocolCore.h"
 #include "PluginSandboxCore/PluginSandboxProcessCore.h"
+#if JUCE_WINDOWS
 #include "PluginSandboxCore/PluginSandboxSelfTestCore.h"
 #include "PluginSandboxCore/PluginWorkerMainCore.h"
+#endif
 #include "Benchmark/TimelineBenchmarkController.h"
 #include "ThemeCore/ApexPrimitives.h"
 #include "Automation/AutomationLaneStoreCore.h"
@@ -855,6 +857,7 @@ public:
         SetUnhandledExceptionFilter(ApexCrashHandler);
 #endif
 
+#if JUCE_WINDOWS
         // #7F Phase A: resolve the process role before any normal APEX logger,
         // MainWindow, MainComponent, project, plugin browser, audio device, or
         // presentation infrastructure is created. Worker mode cannot recurse:
@@ -872,6 +875,8 @@ public:
             quit();
             return;
         }
+
+#endif
 
         // Deterministic QA snapshot of THE ACTUAL PROCEDURAL BOOT DRAWER.
         // Independent of plugin scans/project/audio, so screenshot comparison
