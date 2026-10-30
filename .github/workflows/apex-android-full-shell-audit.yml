@@ -89,6 +89,19 @@ jobs:
             "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
           test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
 
+      - name: Create disposable Android Debug signing key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -storetype JKS \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s "$HOME/.android/debug.keystore"
+
       - name: Compile full original APEX app sources for Android
         shell: bash
         working-directory: My DAW/DAW_Core/Builds/AndroidFull
