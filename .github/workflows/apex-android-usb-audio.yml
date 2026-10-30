@@ -72,8 +72,9 @@ jobs:
 
       - name: Export APEX Android Studio project
         run: |
-          PROJUCER=/tmp/apex-juce-host/extras/Projucer/Projucer
-          test -x "$PROJUCER"
+          PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
+          test -n "$PROJUCER"
+          echo "Using Projucer: $PROJUCER"
           xvfb-run -a "$PROJUCER" --resave Android/APEXAndroid.jucer
           test -f Android/Builds/Android/gradlew
 
