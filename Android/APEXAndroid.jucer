@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JUCERPROJECT id="APXm01" name="APEXAndroid" projectType="guiapp"
+              jucerFormatVersion="1" version="0.1.0" companyName="Xziel"
+              bundleIdentifier="com.xziel.apex" useAppConfig="1"
+              addUsingNamespaceToJuceHeader="0"
+              cppLanguageStandard="17"
+              defines="JUCE_PLUGINHOST_VST3=0 JUCE_ASIO=0 JUCE_USE_CURL=0">
+  <MAINGROUP id="APXmain" name="APEXAndroid">
+    <GROUP id="APXsrc" name="Source">
+      <FILE id="APXmaincpp" name="Main.cpp" compile="1" resource="0"
+            file="Source/Main.cpp"/>
+    </GROUP>
+  </MAINGROUP>
+  <EXPORTFORMATS>
+    <ANDROIDSTUDIO targetFolder="Builds/Android" androidMinimumSDK="26"
+                   microphonePermissionNeeded="1">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug" isDebug="1" optimisation="1"
+                       linkTimeOptimisation="0"/>
+        <CONFIGURATION name="Release" isDebug="0" optimisation="3"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_core" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_basics" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../third_party/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../third_party/JUCE/modules"/>
+      </MODULEPATHS>
+    </ANDROIDSTUDIO>
+  </EXPORTFORMATS>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
+  </MODULES>
+</JUCERPROJECT>
