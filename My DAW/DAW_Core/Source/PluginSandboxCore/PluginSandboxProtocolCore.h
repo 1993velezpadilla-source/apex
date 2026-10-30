@@ -17,6 +17,13 @@
 
 namespace DAW {
 
+// The Windows sandbox is not implemented on Android. Keep its public
+// timeout/diagnostic types parseable without importing any Win32 headers.
+// No process, pipe, shared-memory, or VST3 isolation is enabled here.
+#if !JUCE_WINDOWS
+using DWORD = std::uint32_t;
+#endif
+
 inline constexpr std::uint32_t APEX_PLUGIN_SANDBOX_PROTOCOL_V1 = 1;
 
 #if defined(APEX_ENABLE_TEST_HOOKS) && APEX_ENABLE_TEST_HOOKS
