@@ -282,4 +282,13 @@ inline void processDeterministicDsp(SharedAudioSlot& slot,
 } // namespace PluginSandboxAudioShared
 #endif
 
+#if !JUCE_WINDOWS
+// The reblocker's generic bounds validation uses the same deterministic
+// pipeline-depth ceiling; no Win32 shared-memory region is defined on Android.
+namespace PluginSandboxAudioShared
+{
+inline constexpr std::uint32_t kMaxOutstandingDepth = 4;
+}
+#endif
+
 } // namespace DAW
