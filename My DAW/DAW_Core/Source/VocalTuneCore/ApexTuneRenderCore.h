@@ -60,7 +60,17 @@ public:
                                   const ApexTuneAnalysis&                 analysis,
                                   const std::vector<ApexTuneNote>&        notes,
                                   const std::vector<ApexSibilantRegion>&  sibilants,
-                                  const Params&                           params = {});
+                                  const Params&                           params);
+    static Result renderClipMono (const float*                           source,
+                                  int                                    numSamples,
+                                  double                                 sampleRate,
+                                  const ApexTuneAnalysis&                analysis,
+                                  const std::vector<ApexTuneNote>&       notes,
+                                  const std::vector<ApexSibilantRegion>& sibilants)
+    {
+        return renderClipMono(source, numSamples, sampleRate, analysis, notes,
+                              sibilants, Params{});
+    }
 };
 
 }} // namespace apex::vocaltune
