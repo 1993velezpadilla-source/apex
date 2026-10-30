@@ -1377,42 +1377,6 @@ private:
     // timeouts and never run on the realtime audio thread.
 
 public:
-   #if !JUCE_WINDOWS
-    // Android never creates sandbox workers. These signatures only keep
-    // shared source parseable and reject any unexpected worker operation.
-    bool requestParameterMetadata(juce::MemoryBlock& result, juce::String& error)
-    {
-        result.reset();
-        error = "Windows sandbox worker unavailable on Android";
-        return false;
-    }
-    bool requestLiveParameterValues(juce::MemoryBlock& result, juce::String& error)
-    {
-        result.reset();
-        error = "Windows sandbox worker unavailable on Android";
-        return false;
-    }
-    bool setPluginParameter(const juce::String& parameterId, float value,
-                            float& applied, juce::String& error)
-    {
-        juce::ignoreUnused(parameterId, value);
-        applied = 0.0f;
-        error = "Windows sandbox worker unavailable on Android";
-        return false;
-    }
-    bool capturePluginState(juce::MemoryBlock& result, juce::String& error)
-    {
-        result.reset();
-        error = "Windows sandbox worker unavailable on Android";
-        return false;
-    }
-    bool restorePluginState(const juce::MemoryBlock& state, juce::String& error)
-    {
-        juce::ignoreUnused(state);
-        error = "Windows sandbox worker unavailable on Android";
-        return false;
-    }
-   #endif
    #if JUCE_WINDOWS
     bool e1Ready(juce::String& error) const
     {
@@ -1833,6 +1797,46 @@ public:
     bool running_ = false;
     std::uint64_t workerGeneration_ = 0;
     DWORD launchedWorkerProcessId_ = 0;
+
+public:
+    // The public no-worker interface is OUTSIDE the #if JUCE_WINDOWS private
+    // implementation block: Android must see these signatures.
+    // Android never creates sandbox workers. These signatures only keep
+    // shared source parseable and reject any unexpected worker operation.
+    bool requestParameterMetadata(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool requestLiveParameterValues(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool setPluginParameter(const juce::String& parameterId, float value,
+                            float& applied, juce::String& error)
+    {
+        juce::ignoreUnused(parameterId, value);
+        applied = 0.0f;
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool capturePluginState(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool restorePluginState(const juce::MemoryBlock& state, juce::String& error)
+    {
+        juce::ignoreUnused(state);
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+
+private:
    #endif
 
     Diagnostics diagnostics_;
