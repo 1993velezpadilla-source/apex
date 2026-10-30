@@ -288,6 +288,8 @@ inline void processDeterministicDsp(SharedAudioSlot& slot,
 namespace PluginSandboxAudioShared
 {
 inline constexpr std::uint32_t kMaxOutstandingDepth = 4;
+inline constexpr std::uint32_t kPhysicalMaxChannels = 8;
+inline constexpr std::uint32_t kPhysicalMaxSamples = 2048;
 }
 #endif
 
