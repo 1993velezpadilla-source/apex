@@ -126,7 +126,13 @@ public:
      *  idempotent. Covers JUCE-internal standard cursors (scrollbars, text
      *  editors, popups) and any OS-standard cursor anywhere, including plugin
      *  windows. Implementation lives in Main.cpp (Win32 only). */
+   #if JUCE_WINDOWS
     static void startGlobalOverride();
+   #else
+    // Win32 WM_SETCURSOR / HCURSOR override cannot run on Android.
+    // The cross-platform JUCE LookAndFeel cursor theme remains available.
+    static void startGlobalOverride() {}
+   #endif
 
     /** Install the global APEX cursor theme.
      *  1) Makes ApexCursorLookAndFeel the default LookAndFeel so EVERY JUCE
