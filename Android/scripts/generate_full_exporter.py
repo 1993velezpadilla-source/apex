@@ -57,11 +57,11 @@ def main() -> int:
     )
     configs = ET.SubElement(android, "CONFIGURATIONS")
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Debug", "isDebug": "1",
+        "name": "Debug", "isDebug": "1", "androidArchitectures": "arm64-v8a",
         "optimisation": "1", "linkTimeOptimisation": "0",
     })
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Release", "isDebug": "0", "optimisation": "3",
+        "name": "Release", "isDebug": "0", "androidArchitectures": "arm64-v8a", "optimisation": "3",
     })
     paths = ET.SubElement(android, "MODULEPATHS")
     for module in modules.findall("MODULE"):
