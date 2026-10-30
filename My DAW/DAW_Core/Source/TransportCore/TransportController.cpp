@@ -54,7 +54,7 @@ void TransportController::play()
     if (!isPlaying())
     {
         playStartPosition_ = userCursorPosition_;
-        state_.transportPosition.setValue((int64_t)userCursorPosition_);
+        state_.transportPosition.setValue((juce::int64)userCursorPosition_);
     }
     applyPlayRT(isPlaying() ? currentPosition_.load(std::memory_order_relaxed) : userCursorPosition_);
     state_.isPlaying.setValue(true);
@@ -127,7 +127,7 @@ void TransportController::record()
     if (!isPlaying())
     {
         playStartPosition_ = userCursorPosition_;
-        state_.transportPosition.setValue((int64_t)userCursorPosition_);
+        state_.transportPosition.setValue((juce::int64)userCursorPosition_);
     }
     applyRecordRT(isPlaying() ? currentPosition_.load(std::memory_order_relaxed) : userCursorPosition_);
     state_.isRecording.setValue(true);
@@ -200,7 +200,7 @@ double TransportController::getTempo() const
 void TransportController::setPosition(SamplePosition samples)
 {
     currentPosition_.store(samples, std::memory_order_relaxed);
-    state_.transportPosition.setValue((int64_t)samples);
+    state_.transportPosition.setValue((juce::int64)samples);
     // Track the user-chosen cursor position so stop() can always return
     // here. Only update when not playing — during playback this is called
     // by ruler scrubbing and we do NOT want to change the return point.
