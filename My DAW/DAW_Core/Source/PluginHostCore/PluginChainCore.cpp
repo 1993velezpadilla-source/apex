@@ -288,7 +288,7 @@ void PluginChainCore::pollSandboxHealth()
                 slotOwner->completeSandboxRecovery();
         }
     }
+#endif
 }
 
-#endif
 } // namespace DAW
