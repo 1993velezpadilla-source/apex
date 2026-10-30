@@ -129,6 +129,28 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 assembleDebug \
             2>&1 | tee "$RUNNER_TEMP/apex-android-full-compile.log"
 
+      - name: Adversarial full native translation-unit error sweep
+        if: failure()
+        shell: bash
+        working-directory: My DAW/DAW_Core/Builds/AndroidFull
+        run: |
+          # Gradle/Ninja normally aborts after the first failing C++ unit.
+          # Keep going across all original APEX units to discover independent
+          # Android incompatibilities in a single CI run. Diagnostic only:
+          # this never changes the build result or fabricates an APK.
+          set +e
+          count=0
+          while IFS= read -r -d '' manifest; do
+            count=$((count + 1))
+            dir="$(dirname "$manifest")"
+            echo "[APEX-ANDROID-ALL-TUS] ninja directory: $dir"
+            ninja -C "$dir" -k 0 -j 2 2>&1 |
+              tee -a "$RUNNER_TEMP/apex-android-all-tus-errors.log"
+          done < <(find app/.cxx/Debug -type f -name build.ninja -print0 2>/dev/null)
+          echo "[APEX-ANDROID-ALL-TUS] evaluated native build manifests: $count" |
+            tee -a "$RUNNER_TEMP/apex-android-all-tus-errors.log"
+          exit 0
+
       - name: Publish compile logs, app manifest and actual APKs if any
         if: always()
         shell: bash
@@ -137,6 +159,8 @@ jobs:
           cp "$RUNNER_TEMP/apex-android-full-source-audit.txt" \
             android-full-shell-diagnostics/ 2>/dev/null || true
           cp "$RUNNER_TEMP/apex-android-full-compile.log" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/apex-android-all-tus-errors.log" \
             android-full-shell-diagnostics/ 2>/dev/null || true
           cp "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer" \
             android-full-shell-diagnostics/ 2>/dev/null || true
