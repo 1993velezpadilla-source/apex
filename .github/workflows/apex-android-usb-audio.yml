@@ -6,7 +6,14 @@ on:
     branches:
       - "feature/android-port-*"
     paths:
-      - "Android/**"
+      # The Phase 1 USB probe is independent of full desktop shell port.
+      # Avoid rebuilding the unchanged diagnostic APK for every native C++
+      # compatibility fix or Android exporter/doc edit.
+      - "Android/APEXAndroid.jucer"
+      - "Android/Source/**"
+      - "Android/Tests/**"
+      - "Android/Assets/**"
+      - "My DAW/DAW_Core/Source/DeviceCore/AudioDeviceBlockAdapterCore.h"
       - ".github/workflows/apex-android-usb-audio.yml"
 
 concurrency:
