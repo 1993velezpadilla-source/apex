@@ -48,7 +48,13 @@ public:
     static ApexTuneAnalysis analyzeOffline (const float* mono,
                                             int          numSamples,
                                             double       sampleRate,
-                                            const Params& params = {});
+                                            const Params& params);
+    static ApexTuneAnalysis analyzeOffline (const float* mono,
+                                            int          numSamples,
+                                            double       sampleRate)
+    {
+        return analyzeOffline(mono, numSamples, sampleRate, Params{});
+    }
 
 private:
     // Single-frame YIN core.
