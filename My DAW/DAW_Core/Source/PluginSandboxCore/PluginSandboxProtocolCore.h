@@ -1650,6 +1650,29 @@ inline juce::String buildWindowsCommandLine(const juce::StringArray& arguments)
     return quoted.joinIntoString(" ");
 }
 } // namespace PluginSandboxWin32
+#else
+// Diagnostic enum only: Android has no Windows sandbox editor transport.
+// Preserve the wire numeric identity for the public status record, but do
+// not provide any worker/IPC implementation.
+namespace PluginSandboxWin32
+{
+enum class EditorAsyncStatus : std::uint32_t
+{
+    Rejected = 0,
+    Accepted = 1,
+    AlreadyCreating = 2,
+    AlreadyReady = 3,
+    Creating = 4,
+    Slow = 5,
+    Ready = 6,
+    Failed = 7,
+    CancelPending = 8,
+    Cancelled = 9,
+    Stale = 10,
+    WorkerGone = 11,
+    Closed = 12
+};
+}
 #endif
 
 } // namespace DAW
