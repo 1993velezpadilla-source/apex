@@ -5,6 +5,7 @@
     Not yet a full DAW or recorder.
 */
 #include <JuceHeader.h>
+#include "../../My DAW/DAW_Core/Source/DeviceCore/AudioDeviceBlockAdapterCore.h"
 #include <atomic>
 #include <cmath>
 
@@ -195,26 +196,31 @@ private:
     {
         const float* input = (inputs != nullptr && inputChannels > 0) ? inputs[0] : nullptr;
         float peak = 0.0f;
-        if (input != nullptr)
-            for (int i = 0; i < samples; ++i)
-                peak = juce::jmax(peak, std::abs(input[i]));
+        const bool monitor = monitorEnabled_.load(std::memory_order_acquire);
+        // Reuse the same bounded device-callback adapter as Windows APEX.
+        // Avoid passing oversized buffers to processing code prepared for less.
+        DAW::AudioDeviceBlockAdapterCore::forEachPreparedChunk(
+            samples, 256, [&](int offset, int frames)
+            {
+                const auto* in = input != nullptr ? input + offset : nullptr;
+                if (in != nullptr)
+                    for (int i = 0; i < frames; ++i)
+                        peak = juce::jmax(peak, std::abs(in[i]));
+                for (int ch = 0; ch < outputChannels; ++ch)
+                {
+                    auto* out = outputs != nullptr ? outputs[ch] : nullptr;
+                    if (out == nullptr)
+                        continue;
+                    if (monitor && in != nullptr)
+                        juce::FloatVectorOperations::copy(out + offset, in, frames);
+                    else
+                        juce::FloatVectorOperations::clear(out + offset, frames);
+                }
+            });
         auto previous = peak_.load(std::memory_order_relaxed);
         while (peak > previous
             && !peak_.compare_exchange_weak(previous, peak,
                                             std::memory_order_relaxed)) {}
-
-        const bool monitor = monitorEnabled_.load(std::memory_order_acquire);
-        // Output is silent by default to prevent speaker feedback.
-        for (int ch = 0; ch < outputChannels; ++ch)
-        {
-            auto* out = outputs != nullptr ? outputs[ch] : nullptr;
-            if (out == nullptr)
-                continue;
-            if (monitor && input != nullptr)
-                juce::FloatVectorOperations::copy(out, input, samples);
-            else
-                juce::FloatVectorOperations::clear(out, samples);
-        }
     }
 
     juce::AudioDeviceManager deviceManager_;
