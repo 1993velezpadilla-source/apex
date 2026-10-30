@@ -23,6 +23,13 @@ jobs:
       - name: Checkout APEX
         uses: actions/checkout@v4
 
+      - name: Test shared callback adapter (host C++17)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            Android/Tests/AudioDeviceBlockAdapterCoreTests.cpp \
+            -o /tmp/apex-android-device-adapter-test
+          /tmp/apex-android-device-adapter-test
+
       - name: Install Linux prerequisites for JUCE Projucer
         run: |
           sudo apt-get update
