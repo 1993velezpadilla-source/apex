@@ -36,7 +36,13 @@ def main() -> int:
         flag for flag in root.get("defines", "").split()
         if not flag.startswith(("JUCE_ASIO=", "JUCE_PLUGINHOST_VST3="))
     ]
-    defines.extend(["JUCE_ASIO=0", "JUCE_PLUGINHOST_VST3=0"])
+    # Android uses in-process JUCE/native plugins, not the Windows
+    # subprocess/VST3 sandbox. The original Windows .jucer is NOT modified.
+    defines.extend([
+        "JUCE_ASIO=0",
+        "JUCE_PLUGINHOST_VST3=0",
+        "APEX_ENABLE_PLUGIN_SANDBOX=0",
+    ])
     root.set("defines", " ".join(defines))
 
     modules = root.find("MODULES")
