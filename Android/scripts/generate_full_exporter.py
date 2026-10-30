@@ -55,13 +55,22 @@ def main() -> int:
             "androidEnableContentSharing": "1",
         },
     )
+    # Include checked-out SignalSmith DSP headers in the ARM64 target.
+    shared_headers = ";".join((
+        "Source/ThirdParty",
+        "Source/ThirdParty/signalsmith-stretch",
+        "Source/ThirdParty/signalsmith-stretch/include",
+        "Source/ThirdParty/signalsmith-linear",
+    ))
     configs = ET.SubElement(android, "CONFIGURATIONS")
     ET.SubElement(configs, "CONFIGURATION", {
         "name": "Debug", "isDebug": "1", "androidArchitectures": "arm64-v8a",
         "optimisation": "1", "linkTimeOptimisation": "0",
+        "headerPath": shared_headers,
     })
     ET.SubElement(configs, "CONFIGURATION", {
         "name": "Release", "isDebug": "0", "androidArchitectures": "arm64-v8a", "optimisation": "3",
+        "headerPath": shared_headers,
     })
     paths = ET.SubElement(android, "MODULEPATHS")
     for module in modules.findall("MODULE"):
