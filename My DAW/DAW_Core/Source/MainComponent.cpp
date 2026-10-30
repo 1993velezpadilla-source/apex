@@ -7178,7 +7178,11 @@ void MainComponent::dockMixer()
 
 void MainComponent::initializeSafeStartupAudio()
 {
+   #if ! JUCE_ANDROID
+    // The Windows ASIO/SEH device wrapper is deliberately not compiled on
+    // Android. JUCE's AudioDeviceManager supplies Android/USB routing.
     DAW::installSafeAudioDeviceTypes(getOwnedDeviceManager());
+   #endif
     selectSafeStartupAudioDeviceType();
     setAudioChannels(kMaxHardwareInputChannels, 2);
 
