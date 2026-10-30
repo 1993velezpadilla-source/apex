@@ -94,10 +94,20 @@ def main() -> int:
     listed = root.findall(".//FILE")
     missing = []
     compiled = 0
+    android_excluded = []
+    # Windows' SEH (__try/__except) + ASIO wrappers are not Android source:
+    # JUCE's Android AudioIODevice backend handles Android/USB audio instead.
+    # This changes ONLY the generated exporter. Windows .jucer stays intact.
+    windows_only_translation_units = {
+        "Source/DeviceCore/SafeAsioDeviceTypeCore.cpp",
+    }
     for entry in listed:
         relative = entry.get("file")
         if relative is None:
             continue
+        if relative in windows_only_translation_units:
+            entry.set("compile", "0")
+            android_excluded.append(relative)
         if entry.get("compile") == "1":
             compiled += 1
         if not (original.parent / relative).exists():
@@ -108,6 +118,9 @@ def main() -> int:
     tree.write(output, encoding="utf-8", xml_declaration=True)
     print(f"Android Full exporter: {output}")
     print(f"Desktop files retained: {len(listed)}; translation units: {compiled}")
+    print(f"Windows-only translation units excluded from Android: {len(android_excluded)}")
+    for path in android_excluded:
+        print(f"  ANDROID-EXCLUDED {path}")
     print(f"Missing original source files: {len(missing)}")
     for path in missing[:40]:
         print(f"  MISSING {path}")
