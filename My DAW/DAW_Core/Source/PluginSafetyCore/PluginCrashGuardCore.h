@@ -47,7 +47,9 @@ public:
 private:
     /** Vectored Exception Handler callback.  Private static member so it
         can access s_crashDetected and s_crashLogPath. */
+   #if JUCE_WINDOWS
     static LONG CALLBACK apexPluginCrashVEH(PEXCEPTION_POINTERS exInfo);
+   #endif
 
     static inline bool s_installed = false;
     static inline bool s_crashDetected = false;
