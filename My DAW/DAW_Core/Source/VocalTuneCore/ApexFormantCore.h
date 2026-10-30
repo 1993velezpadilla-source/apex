@@ -36,13 +36,23 @@ public:
     // full source duration. Unvoiced / outside-note regions = 0.0.
     static std::vector<float> buildFormantCurve (const ApexTuneAnalysis& analysis,
                                                  const std::vector<ApexTuneNote>& notes,
-                                                 const Params& params = {});
+                                                 const Params& params);
+    static std::vector<float> buildFormantCurve (const ApexTuneAnalysis& analysis,
+                                                 const std::vector<ApexTuneNote>& notes)
+    {
+        return buildFormantCurve(analysis, notes, Params{});
+    }
 
     // Returns one gain (linear, not dB) per controlHop. Outside notes = 1.0.
     // Lets the renderer apply per-note gainDb cleanly with edge ramps.
     static std::vector<float> buildGainCurve  (const ApexTuneAnalysis& analysis,
                                                 const std::vector<ApexTuneNote>& notes,
-                                                const Params& params = {});
+                                                const Params& params);
+    static std::vector<float> buildGainCurve  (const ApexTuneAnalysis& analysis,
+                                                const std::vector<ApexTuneNote>& notes)
+    {
+        return buildGainCurve(analysis, notes, Params{});
+    }
 
 private:
     // Writes a value into a slice of `curve` with linear ramps at both edges.
