@@ -111,7 +111,9 @@ public:
     PluginSandboxProcessCore(const PluginSandboxProcessCore&) = delete;
     PluginSandboxProcessCore& operator=(const PluginSandboxProcessCore&) = delete;
 
-    StartResult start(const Options& options = {})
+    StartResult start() { return start(Options{}); }
+
+    StartResult start(const Options& options)
     {
        #if JUCE_WINDOWS
         using namespace PluginSandboxWin32;
@@ -1787,7 +1789,14 @@ public:
      std::uint32_t workerStartCount_ = 0;   // Phase D diagnostics: lifetime CreateProcessW successes
    #endif
    #else
+    // Android has no Win32 worker, pipe, or mapped sandbox. Keep state and
+    // transport objects so the original host can compile and reject startup.
     void closeOwnedResources() {}
+    PluginSandboxAudioTransportCore audioTransport_;
+    PluginSandboxAutomationTransportCore automationTransport_;
+    bool running_ = false;
+    std::uint64_t workerGeneration_ = 0;
+    DWORD launchedWorkerProcessId_ = 0;
    #endif
 
     Diagnostics diagnostics_;
