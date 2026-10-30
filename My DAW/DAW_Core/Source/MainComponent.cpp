@@ -32,10 +32,15 @@
 
 namespace
 {
-    // Request a practical multichannel input ceiling so JUCE can expose and
-    // compact the user's active ASIO input pair instead of hard-limiting the
-    // app to channels 1-2.
+   #if JUCE_ANDROID
+    // Android's JUCE/Oboe device exposes the OS-negotiated route. Request a
+    // modest channel count rather than asking a phone for 64 inputs; USB
+    // class-compliant devices still expose their actual granted channels.
+    static constexpr int kMaxHardwareInputChannels = 2;
+   #else
+    // Preserve desktop multi-input ASIO recording support on Windows.
     static constexpr int kMaxHardwareInputChannels = 64;
+   #endif
 
     class RealtimeDeviceCallbackGuard
     {
@@ -5152,14 +5157,46 @@ MainComponent::MainComponent()
     });
 
     juce::Component::SafePointer<MainComponent> safeForAudioInit(this);
-    // The first paint of StartupPanel must not wait behind potentially slow
-    // ASIO device enumeration/initialization. Give the message pump one frame
-    // to present navigation; then initialize the device on the control thread.
-    // Never initialize the JUCE AudioDeviceManager on a worker thread.
+    // The first paint of StartupPanel must not wait behind device
+    // enumeration/initialization. Keep all AudioDeviceManager mutations on
+    // JUCE's message thread. Android must grant RECORD_AUDIO before opening
+    // any input (including USB class-compliant devices).
     juce::Timer::callAfterDelay(150, [safeForAudioInit]
     {
         if (auto* self = safeForAudioInit.getComponent())
         {
+           #if JUCE_ANDROID
+            if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio))
+            {
+                juce::Logger::writeToLog("[APEX-ANDROID-AUDIO] requesting RECORD_AUDIO before input init");
+                juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio,
+                    [safeForAudioInit](bool granted)
+                    {
+                        if (auto* main = safeForAudioInit.getComponent())
+                        {
+                            if (granted)
+                            {
+                                appendMainStartupTrace("android-mic-granted.audio-init.begin");
+                                main->initializeSafeStartupAudio();
+                                appendMainStartupTrace("android-mic-granted.audio-init.complete");
+                            }
+                            else
+                            {
+                                // Permission denial must never trigger repeated
+                                // input-device reopen attempts. Output-only
+                                // playback remains available; the user can
+                                // grant microphone permission in Android Settings
+                                // and restart APEX.
+                                juce::Logger::writeToLog("[APEX-ANDROID-AUDIO] RECORD_AUDIO denied; output-only until restart");
+                                main->setAudioChannels(0, 2);
+                                main->cachedEnabledAudioInputChannels_.store(0, std::memory_order_release);
+                                main->appCore_.setHardwareInputChannelCount(0);
+                            }
+                        }
+                    });
+                return;
+            }
+           #endif
             appendMainStartupTrace("audio-init.begin");
             self->initializeSafeStartupAudio();
             appendMainStartupTrace("audio-init.after-setAudioChannels");
