@@ -107,6 +107,9 @@ def main() -> int:
     # This changes ONLY the generated exporter. Windows .jucer stays intact.
     windows_only_translation_units = {
         "Source/DeviceCore/SafeAsioDeviceTypeCore.cpp",
+        # This original file is an empty UTF-16 Windows IDE placeholder.
+        # Clang cannot read its malformed trailing UTF-16 code unit.
+        "Builds/VisualStudio2026/ArrangementEditor/AutomationImplementations.cpp",
     }
     for entry in listed:
         relative = entry.get("file")
