@@ -1656,6 +1656,8 @@ inline juce::String buildWindowsCommandLine(const juce::StringArray& arguments)
 // not provide any worker/IPC implementation.
 namespace PluginSandboxWin32
 {
+inline constexpr std::uint32_t kE1MaximumParameters = 256;
+inline constexpr std::uint32_t kE2BMaximumLiveValueEntries = 128;
 enum class EditorAsyncStatus : std::uint32_t
 {
     Rejected = 0,
