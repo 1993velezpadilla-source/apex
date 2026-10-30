@@ -33,6 +33,12 @@ int PluginChainCore::appendSandboxedPlugin(const juce::PluginDescription& descri
                                            const PluginSandboxPreparation& preparationIn,
                                            bool publishAndNotify)
 {
+#if JUCE_ANDROID
+    juce::ignoreUnused(description, preparationIn, publishAndNotify);
+    errorMsg = "Sandboxing is not supported on Android. Use an in-process native plugin.";
+    return -1;
+#else
+
     if (sampleRate_ <= 0.0 || blockSize_ <= 0)
     {
         errorMsg = "Audio engine is not prepared yet.";
@@ -132,6 +138,7 @@ int PluginChainCore::appendSandboxedPlugin(const juce::PluginDescription& descri
             + " slotIndex=" + juce::String((int) slots_.size() - 1)
             + " slotCount=" + juce::String((int) slots_.size()));
     return (int) slots_.size() - 1;
+#endif
 }
 
 bool PluginChainCore::loadSandboxedPlugin(int slotIndex,
@@ -139,6 +146,12 @@ bool PluginChainCore::loadSandboxedPlugin(int slotIndex,
                                           const PluginInsertOptions& options,
                                           juce::String& errorMsg)
 {
+#if JUCE_ANDROID
+    juce::ignoreUnused(slotIndex, description, options);
+    errorMsg = "Android does not support Windows plugin sandboxing.";
+    return false;
+#else
+
     if (slotIndex < 0)
     {
         errorMsg = "Invalid plugin slot index for sandbox replacement.";
@@ -219,11 +232,17 @@ bool PluginChainCore::loadSandboxedPlugin(int slotIndex,
             + " plugin=\"" + description.name + "\""
             + " slotCount=" + juce::String(static_cast<int>(slots_.size())));
     return true;
+#endif
 }
 
 std::shared_ptr<PluginInstanceCore> PluginChainCore::makeSharedSandboxedPlugin(
     std::unique_ptr<SandboxedPluginProxyCore> proxy)
 {
+#if JUCE_ANDROID
+    juce::ignoreUnused(proxy);
+    return {};
+#else
+
     return std::shared_ptr<PluginInstanceCore>(
         new PluginInstanceCore(std::move(proxy)),
         [](PluginInstanceCore* p)
@@ -244,10 +263,15 @@ std::shared_ptr<PluginInstanceCore> PluginChainCore::makeSharedSandboxedPlugin(
                 jassertfalse;
             }
         });
+#endif
 }
 
 void PluginChainCore::pollSandboxHealth()
 {
+#if JUCE_ANDROID
+    // No worker processes or sandbox health polling on Android.
+#else
+
     for (auto& slot : slots_)
     {
         // Keep the owning instance alive for the entire control-plane
@@ -266,4 +290,5 @@ void PluginChainCore::pollSandboxHealth()
     }
 }
 
+#endif
 } // namespace DAW
