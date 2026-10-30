@@ -129,6 +129,39 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 assembleDebug \
             2>&1 | tee "$RUNNER_TEMP/apex-android-full-compile.log"
 
+      - name: Verify actual full APEX ARM64 APK package (not a probe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android-full-real-apk
+          found=0
+          while IFS= read -r -d '' apk; do
+            found=$((found + 1))
+            test -s "$apk"
+            entries="$(unzip -Z1 "$apk")"
+            grep -qx 'lib/arm64-v8a/libjuce_jni.so' <<< "$entries" || {
+              echo "Missing real ARM64 JUCE native library in $apk"; exit 1;
+            }
+            grep -qx 'classes.dex' <<< "$entries" || {
+              echo "Missing Java dex entry in $apk"; exit 1;
+            }
+            cp -v "$apk" "android-full-real-apk/APEX-Full-Original-ARM64-Debug-${found}.apk"
+            echo "Verified original APEX Android debug APK: $apk"
+          done < <(find "My DAW/DAW_Core/Builds/AndroidFull/app/build/outputs/apk" \
+            -type f -name '*.apk' -print0)
+          test "$found" -gt 0 || { echo "Full APEX compiled but no installable APK was created"; exit 1; }
+          echo "### APEX original full-shell Android package verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "Found $found real APK(s), with ARM64 JUCE JNI library and classes.dex." >> "$GITHUB_STEP_SUMMARY"
+          echo "This is a package integrity check, NOT a device startup or recording test." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload installable ORIGINAL full APEX Android APK (only on verified build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Full-Original-ARM64-Debug-APK
+          path: android-full-real-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Adversarial full native translation-unit error sweep
         if: failure()
         shell: bash
