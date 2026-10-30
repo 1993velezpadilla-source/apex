@@ -393,12 +393,24 @@ public:
      * direct BitmapData writes, bypassing JUCE's D2D pipeline entirely.
      * Only rebuilt when colour or clip range changes — never on zoom or vertical resize.
      */
+    // Explicit overload avoids Clang's nested-type default-initializer
+    // error under Android while retaining the desktop call contract.
+    void drawWaveform(const ClipID& clipId, juce::Graphics& g,
+                      juce::Rectangle<float> bounds,
+                      SamplePosition sourceOffset,
+                      SamplePosition numSourceSamples,
+                      juce::Colour colour) const
+    {
+        drawWaveform(clipId, g, bounds, sourceOffset, numSourceSamples,
+                     colour, WaveformVisualOptions{});
+    }
+
     void drawWaveform(const ClipID& clipId, juce::Graphics& g,
                       juce::Rectangle<float> bounds,
                       SamplePosition sourceOffset,
                       SamplePosition numSourceSamples,
                       juce::Colour colour,
-                      const WaveformVisualOptions& visual = {}) const
+                      const WaveformVisualOptions& visual) const
     {
         auto cachedHandle = getCachedAudioSnapshot(clipId);
         if (!cachedHandle) return;
