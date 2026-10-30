@@ -405,7 +405,15 @@ public:
         return activeHostBlockSamples > 0 ? activeHostBlockSamples : 0;
     }
     static constexpr int getTransportLatencyBlocks() noexcept { return 1; }
-    bool isPrepared() const noexcept { return region_ != nullptr; }
+    bool isPrepared() const noexcept
+    {
+       #if JUCE_WINDOWS
+        return region_ != nullptr;
+       #else
+        // Win32 mapping is intentionally unavailable on Android.
+        return false;
+       #endif
+    }
     const juce::String& mappingName() const noexcept { return mappingName_; }
     std::size_t mappedBytes() const noexcept
     {
