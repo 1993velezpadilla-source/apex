@@ -95,6 +95,13 @@ def main() -> int:
     missing = []
     compiled = 0
     android_excluded = []
+    android_utf8_remapped = []
+    # Some original Windows translation units are UTF-16 LE. Android's Clang
+    # rejects their BOM; convert into a generated UTF-8 sibling and point ONLY
+    # the generated Android exporter at it (never rewrite canonical sources).
+    utf16_windows_units = {
+        "Builds/VisualStudio2026/ArrangementEditor/AutomationImplementations.cpp",
+    }
     # Windows' SEH (__try/__except) + ASIO wrappers are not Android source:
     # JUCE's Android AudioIODevice backend handles Android/USB audio instead.
     # This changes ONLY the generated exporter. Windows .jucer stays intact.
@@ -105,13 +112,25 @@ def main() -> int:
         relative = entry.get("file")
         if relative is None:
             continue
+        source_path = original.parent / relative
+        if not source_path.exists():
+            missing.append(relative)
+            continue
         if relative in windows_only_translation_units:
             entry.set("compile", "0")
             android_excluded.append(relative)
+        if relative in utf16_windows_units and entry.get("compile") == "1":
+            data = source_path.read_bytes()
+            if data.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+                decoded = data.decode("utf-16")
+            else:
+                decoded = data.decode("utf-8-sig")
+            utf8_copy = source_path.with_name(source_path.stem + "_AndroidUTF8.cpp")
+            utf8_copy.write_bytes(decoded.encode("utf-8"))
+            entry.set("file", utf8_copy.relative_to(original.parent).as_posix())
+            android_utf8_remapped.append(relative)
         if entry.get("compile") == "1":
             compiled += 1
-        if not (original.parent / relative).exists():
-            missing.append(relative)
 
     if hasattr(ET, "indent"):
         ET.indent(tree, space="  ")
@@ -121,6 +140,9 @@ def main() -> int:
     print(f"Windows-only translation units excluded from Android: {len(android_excluded)}")
     for path in android_excluded:
         print(f"  ANDROID-EXCLUDED {path}")
+    print(f"UTF-16 source units remapped to generated UTF-8 copies: {len(android_utf8_remapped)}")
+    for path in android_utf8_remapped:
+        print(f"  ANDROID-UTF8 {path}")
     print(f"Missing original source files: {len(missing)}")
     for path in missing[:40]:
         print(f"  MISSING {path}")
