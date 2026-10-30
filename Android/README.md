@@ -7,10 +7,29 @@ The Android port begins with the independent JUCE 8.0.12 Android Studio exporter
 `Android/APEXAndroid.jucer` and a lightweight C++ audio-device probe in
 `Android/Source/Main.cpp`. The Android work is contained in its own Git branch.
 
-**Status:** source and APK-building CI pipeline created. **Not yet certified
-as compiling, installable, recording, or working on hardware.** A GitHub Actions
-GREEN build is necessary for an APK artifact; a Pixel Fold + Volt 1 test is
-necessary for a class-compliant USB audio compatibility claim.
+**Status (2026-10-30):** the Phase 1 JUCE Android ARM64 USB-audio
+probe **compiled GREEN** and produced a GitHub Actions APK artifact; it has **not
+been installed or tested on a Pixel Fold / Volt 1**. Separately, the
+`apex-android-full-shell-audit.yml` workflow experimentally compiles the
+**actual desktop APEX sources** for Android. A full DAW APK is **not yet GREEN**,
+and no full DAW startup or recording has been verified on Android.
+
+## Android policy: no plugin sandbox
+
+**Decision:** Android does **not** support or require the Windows plugin
+sandbox/worker-process subsystem. The native host runs compatible built-in APEX
+effects in-process. A Windows sandbox slot is not silently converted to a
+different execution mode on Android: insertion is rejected with an explicit
+message, preserving the desktop project state instead of risking DSP changes.
+
+The full-shell Android exporter sets `APEX_ENABLE_PLUGIN_SANDBOX=0` and
+`JUCE_PLUGINHOST_VST3=0`. The Android app starts in normal DAW mode and will
+not launch Windows worker or VST3 sandbox subprocesses. Some cross-platform
+plugin-host declarations still carry lightweight compatibility types so that
+the shared source compiles; these **do not implement** an Android sandbox.
+
+Windows remains unchanged and retains its existing VST3 and optional
+sandbox functionality. The original desktop `.jucer` is never rewritten.
 
 ## Phase 1 hardware smoke test
 
