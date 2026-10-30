@@ -11,6 +11,10 @@ on:
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
 
+concurrency:
+  group: apex-android-full-shell-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   full-desktop-source-android-attempt:
     runs-on: ubuntu-24.04
