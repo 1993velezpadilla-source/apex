@@ -1,0 +1,111 @@
+name: APEX Android Full Desktop Shell Compile Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/android-port-*"
+    paths:
+      - "Android/scripts/generate_full_exporter.py"
+      - ".github/workflows/apex-android-full-shell-audit.yml"
+      - "My DAW/DAW_Core/Source/**"
+      - "My DAW/DAW_Core/DAW_Core.jucer"
+
+jobs:
+  full-desktop-source-android-attempt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout APEX original source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Projucer and Android build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ninja-build cmake pkg-config xvfb \
+            libasound2-dev libjack-jackd2-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libcurl4-openssl-dev
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android toolchains
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Download pinned JUCE used by Windows APEX
+        shell: bash
+        run: |
+          mkdir -p third_party
+          git clone --quiet --depth 1 --branch 8.0.12 \
+            https://github.com/juce-framework/JUCE.git third_party/JUCE
+
+      - name: Build Projucer host generator
+        shell: bash
+        run: |
+          cmake -S third_party/JUCE -B /tmp/apex-juce-host \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
+          cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+
+      - name: Generate Android exporter from ORIGINAL APEX .jucer
+        shell: bash
+        run: |
+          python3 Android/scripts/generate_full_exporter.py \
+            2>&1 | tee "$RUNNER_TEMP/apex-android-full-source-audit.txt"
+          PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
+          test -n "$PROJUCER"
+          xvfb-run -a "$PROJUCER" --resave \
+            "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
+          test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
+
+      - name: Compile full original APEX app sources for Android
+        shell: bash
+        working-directory: My DAW/DAW_Core/Builds/AndroidFull
+        run: |
+          set -o pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --max-workers=2 assembleDebug \
+            2>&1 | tee "$RUNNER_TEMP/apex-android-full-compile.log"
+
+      - name: Publish compile logs, app manifest and actual APKs if any
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p android-full-shell-diagnostics
+          cp "$RUNNER_TEMP/apex-android-full-source-audit.txt" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/apex-android-full-compile.log" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          find "My DAW/DAW_Core/Builds/AndroidFull" \
+            -type f \( -name '*.apk' -o -name AndroidManifest.xml \) \
+            -exec cp -v '{}' android-full-shell-diagnostics/ \; 2>/dev/null || true
+      - name: Upload full-shell compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Original-Full-Shell-Compile-Audit
+          path: android-full-shell-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
