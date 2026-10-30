@@ -49,8 +49,8 @@ struct TrackPlaylistCompCore final
         for (auto* clip : clips.getClipsOnTrack(track.getID()))
         {
             if (!clip) continue;
-            const auto a = (int64_t)clip->getStartPosition();
-            const auto b = (int64_t)clip->getEndPosition();
+            const auto a = (juce::int64)clip->getStartPosition();
+            const auto b = (juce::int64)clip->getEndPosition();
             if (b <= a) continue;
             // Historical alternate takes count, even when the current Main
             // was switched/cleared during comping. Never lose take #3 just
@@ -83,19 +83,19 @@ struct TrackPlaylistCompCore final
     {
         if (!original.hasType("AudioClip") || end <= begin)
             return {};
-        const int64_t base = (int64_t)original.getProperty("startPosition", (juce::int64)0);
-        const int64_t length = (int64_t)original.getProperty("length", (juce::int64)0);
+        const int64_t base = (juce::int64)original.getProperty("startPosition", (juce::int64)0);
+        const int64_t length = (juce::int64)original.getProperty("length", (juce::int64)0);
         if (begin < base || end > base + length)
             return {};
         auto result = original.createCopy();
         const int64_t delta = begin - base;
         const double ratio = sourceSampleRate > 0.0 && projectSampleRate > 0.0
             ? sourceSampleRate / projectSampleRate : 1.0;
-        const int64_t sourceDelta = (int64_t)std::llround(delta * ratio);
-        const int64_t sourceLength = (int64_t)std::llround((end - begin) * ratio);
-        const int64_t sourceOffset = (int64_t)original.getProperty("sourceOffset", (juce::int64)0);
-        const int64_t sourceStart = (int64_t)original.getProperty("sourceStartSample", (juce::int64)0);
-        const int64_t sourceEnd = (int64_t)original.getProperty("sourceEndSample", (juce::int64)0);
+        const int64_t sourceDelta = (juce::int64)std::llround(delta * ratio);
+        const int64_t sourceLength = (juce::int64)std::llround((end - begin) * ratio);
+        const int64_t sourceOffset = (juce::int64)original.getProperty("sourceOffset", (juce::int64)0);
+        const int64_t sourceStart = (juce::int64)original.getProperty("sourceStartSample", (juce::int64)0);
+        const int64_t sourceEnd = (juce::int64)original.getProperty("sourceEndSample", (juce::int64)0);
 
         result.setProperty("startPosition", (juce::int64)begin, nullptr);
         result.setProperty("length", (juce::int64)(end - begin), nullptr);
@@ -113,10 +113,10 @@ struct TrackPlaylistCompCore final
         const int64_t keptLength = end - begin;
         const int64_t fadeIn = begin == base
             ? juce::jmin(keptLength, juce::jmax<int64_t>(0,
-                (int64_t)original.getProperty("fadeInLength", (juce::int64)0))) : 0;
+                (juce::int64)original.getProperty("fadeInLength", (juce::int64)0))) : 0;
         const int64_t fadeOut = end == base + length
             ? juce::jmin(keptLength, juce::jmax<int64_t>(0,
-                (int64_t)original.getProperty("fadeOutLength", (juce::int64)0))) : 0;
+                (juce::int64)original.getProperty("fadeOutLength", (juce::int64)0))) : 0;
         result.setProperty("fadeInLength", (juce::int64)fadeIn, nullptr);
         result.setProperty("fadeOutLength", (juce::int64)fadeOut, nullptr);
         return result;
@@ -163,8 +163,8 @@ public:
         // Remove only selected target interval; preserve unselected parts.
         for (const auto& old : before_)
         {
-            const auto a = (int64_t)old.getProperty("startPosition", (juce::int64)0);
-            const auto b = a + (int64_t)old.getProperty("length", (juce::int64)0);
+            const auto a = (juce::int64)old.getProperty("startPosition", (juce::int64)0);
+            const auto b = a + (juce::int64)old.getProperty("length", (juce::int64)0);
             if (b <= start_ || a >= end_)
             {
                 after_.push_back(old.createCopy());
