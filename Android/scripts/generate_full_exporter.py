@@ -55,12 +55,15 @@ def main() -> int:
             "androidEnableContentSharing": "1",
         },
     )
-    # Include checked-out SignalSmith DSP headers in the ARM64 target.
+    # Projucer's Android exporter emits headerPath relative to the generated
+    # Builds/AndroidFull directory (and then prefixes ../ from app/).
+    # Two parent segments are needed to reach DAW_Core/Source from Builds.
+    # Verified against the Android clang++ -I commands in the first ARM64 log.
     shared_headers = ";".join((
-        "Source/ThirdParty",
-        "Source/ThirdParty/signalsmith-stretch",
-        "Source/ThirdParty/signalsmith-stretch/include",
-        "Source/ThirdParty/signalsmith-linear",
+        "../../Source/ThirdParty",
+        "../../Source/ThirdParty/signalsmith-stretch",
+        "../../Source/ThirdParty/signalsmith-stretch/include",
+        "../../Source/ThirdParty/signalsmith-linear",
     ))
     configs = ET.SubElement(android, "CONFIGURATIONS")
     ET.SubElement(configs, "CONFIGURATION", {
