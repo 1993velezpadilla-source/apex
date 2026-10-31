@@ -3,12 +3,35 @@
 #include <initializer_list>
 #include <limits>
 using DAW::mobile::fitBubblegumSends;
+using DAW::mobile::phoneCloseTouchBounds;
 constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 {
     return p.x >= 0 && p.y >= 0 && p.x + p.width <= w && p.y + p.height <= h;
 }
 int main()
 {
+    // The painted 30x30 close orb gets a 44x44 touch target on phones.
+    constexpr auto closePortrait = phoneCloseTouchBounds(360, 420);
+    static_assert(closePortrait.x == 313 && closePortrait.y == 3
+                  && closePortrait.width == 44 && closePortrait.height == 44
+                  && inside(closePortrait, 360, 420));
+    constexpr auto closeLandscape = phoneCloseTouchBounds(360, 80);
+    static_assert(closeLandscape.width == 44 && closeLandscape.height == 44
+                  && inside(closeLandscape, 360, 80));
+    constexpr auto closeTiny = phoneCloseTouchBounds(27, 20);
+    static_assert(closeTiny.width == 27 && closeTiny.height == 20
+                  && inside(closeTiny, 27, 20));
+    constexpr auto closeZero = phoneCloseTouchBounds(0, 0);
+    static_assert(closeZero.width == 0 && closeZero.height == 0);
+    for (int w = 1; w <= 600; w += 7)
+        for (int h = 1; h <= 500; h += 9)
+        {
+            const auto target = phoneCloseTouchBounds(w, h);
+            assert(inside(target, w, h));
+            assert(target.width == (w < 44 ? w : 44));
+            assert(target.height == (h < 44 ? h : 44));
+        }
+
     constexpr auto portrait = fitBubblegumSends(393, 852, 360, 70, true);
     static_assert(portrait.width == 360 && portrait.height == 420
                   && inside(portrait, 393, 852));
