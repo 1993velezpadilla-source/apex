@@ -145,6 +145,13 @@ constexpr bool phoneClipPropertiesFits(const PhoneClipPropertiesFit& fit,
             <= static_cast<long long>(fit.safe.y) + fit.safe.height;
 }
 
+// Phone FX Browser rows/search must be finger-sized; the decorative desktop
+// manufacturer summary header can be removed to preserve one list row in
+// short landscape viewports. Desktop/iPad retain their exact original sizes.
+constexpr int pluginBrowserHeaderHeight(bool phone) noexcept { return phone ? 0 : 28; }
+constexpr int pluginBrowserSearchSlotHeight(bool phone) noexcept { return phone ? 48 : 26; }
+constexpr int pluginBrowserRowHeight(bool phone) noexcept { return phone ? 44 : 22; }
+
 /** Keep the floating FX browser's title, close control and scrollable list
  *  between the phone header and persistent bottom Transport. Desktop/iPad
  *  keep their existing 340x560 browser placement.
