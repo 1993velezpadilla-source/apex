@@ -4267,6 +4267,15 @@ MainComponent::MainComponent()
             slimeSidePanel_->setVisible(true);
     };
 
+   #if JUCE_ANDROID
+    // On Android a desktop floating mixer is initially placed beyond the
+    // activity viewport and can end up obscured by the window/taskbar layer.
+    // Dock the ORIGINAL MixerPanel into the main content area instead; this
+    // preserves all faders, effects, sends, meters, routing and touch controls.
+    // The View > Mixer action still allows it to be shown/hidden.
+    dockMixer();
+   #endif
+
     // Timeline bubble - shows when timeline window is minimized/closed
     timelineBubble_ = std::make_unique<DAW::TimelineBubble>();
     timelineBubble_->onClicked = [this]
@@ -7229,7 +7238,9 @@ void MainComponent::dockMixer()
     mixerViewport_.setViewedComponent(mixerPanel_.get(), false);
     mixerViewport_.setVisible(true);
     mixerWindow_->setVisible(false);
-    mixerBubble_->setVisible(false);
+    if (mixerBubble_) mixerBubble_->setVisible(false);
+    // Maintain explicit Android owner of mixer viewport: no phantom
+    // floating mixer window and no hidden parent swallowing touch input.
     resized();
 }
 
@@ -8930,13 +8941,15 @@ void MainComponent::resized()
     }
 
     auto content = area;
-    if (mixerDocked_ && mixerPanel_)
+    if (mixerDocked_ && mixerPanel_ && mixerViewport_.isVisible())
     {
        #if JUCE_ANDROID
-        // Preserve the arrangement above the docked mixer on compact
-        // landscape phones instead of consuming nearly all available height.
-        const int visibleMixerHeight = juce::jmin(mixerH_,
-            juce::jmax(90, content.getHeight() / 3));
+        // Device-independent responsive split: reserve timeline working
+        // space while exposing real faders. Do not reserve ANY mixer height
+        // after View > Mixer hides it.
+        const int visibleMixerHeight = juce::jmin(
+            juce::jmax(0, content.getHeight() - 120),
+            juce::jmax(180, juce::roundToInt(content.getHeight() * 0.46)));
        #else
         const int visibleMixerHeight = mixerH_;
        #endif
