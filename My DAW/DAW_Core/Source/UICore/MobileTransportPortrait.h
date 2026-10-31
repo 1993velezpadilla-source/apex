@@ -19,11 +19,12 @@ constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int vie
         return out;
 
     constexpr int margin = 6;
+    constexpr int verticalMargin = 3; // 44-unit touch rows at a 144-unit deck.
     constexpr int gap = 3;
     const int usableW = viewportW - 2 * margin;
-    const int rowH = (viewportH - 4 * margin) / 3;
-    const int actionsY = 2 * margin + rowH;
-    const int bottomY = 3 * margin + 2 * rowH;
+    const int rowH = (viewportH - 4 * verticalMargin) / 3;
+    const int actionsY = 2 * verticalMargin + rowH;
+    const int bottomY = 3 * verticalMargin + 2 * rowH;
 
     const int actionGap = usableW / 7 < gap ? usableW / 7 : gap;
     const int actionW = (usableW - 5 * actionGap) / 6;
