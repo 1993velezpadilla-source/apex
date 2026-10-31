@@ -184,6 +184,16 @@ public:
     /** Quick-access callbacks for panels — wired from MainComponent */
     std::function<void()> onQuickAccessSidePanel;
     std::function<void()> onQuickAccessFxBrowser;
+    std::function<void()> onOpenFloatingMixer;
+    std::function<void()> onOpenBubblegumSends;
+
+    void setPhoneLayout(bool enabled)
+    {
+        if (phoneLayout_ == enabled) return;
+        phoneLayout_ = enabled;
+        resized();
+        repaint();
+    }
 
     /** Fired when the user picks a new project key. Wired from MainComponent. */
     std::function<void(const juce::String&)> onProjectKeyChanged;
@@ -325,6 +335,23 @@ public:
         g.setColour(a.color.cyan);
         g.drawText(clockStr, tb, juce::Justification::centred);
 
+        if (phoneLayout_)
+        {
+            const auto paintAction = [&](juce::Rectangle<int> r, const juce::String& label, juce::Colour tint)
+            {
+                if (r.isEmpty()) return;
+                g.setColour(tint.withAlpha(0.20f));
+                g.fillRoundedRectangle(r.toFloat().reduced(2.f), 7.f);
+                g.setColour(tint.withAlpha(0.65f));
+                g.drawRoundedRectangle(r.toFloat().reduced(2.f), 7.f, 1.f);
+                g.setColour(a.color.textPrimary);
+                g.setFont(juce::Font(juce::FontOptions(12.f, juce::Font::bold)));
+                g.drawText(label, r, juce::Justification::centred);
+            };
+            paintAction(mobileMixerBounds_, "MIXER", a.color.violet);
+            paintAction(mobileSendsBounds_, "SENDS", a.color.magenta);
+        }
+
         // Quick-access panel buttons with icons — shared control-state language
         auto mouse = getMouseXYRelative().toFloat();
         // FX Chain / Side Panel icon — chain links
@@ -365,6 +392,83 @@ public:
 
     void resized() override
     {
+        if (phoneLayout_)
+        {
+            // Portrait-first layout: every important transport action stays visible.
+            // Three rows on a tall phone, two on a short landscape phone.
+            const int w = juce::jmax(0, getWidth());
+            const int h = juce::jmax(0, getHeight());
+            const bool portrait = h >= 112;
+            const int margin = 6;
+            const int gap = 3;
+            const int rowH = juce::jmax(0, (h - (portrait ? 4 : 3) * margin)
+                                        / (portrait ? 3 : 2));
+            const int topY = margin;
+            const int keysWidth = juce::jmax(54, juce::jmin(95, w / 5));
+            const int bpmWidth = juce::jmax(54, juce::jmin(85, w / 5));
+            const int clockWidth = juce::jmax(82, juce::jmin(130, w / 4));
+            auto pos = juce::Rectangle<int>(margin, topY,
+                                            juce::jmax(0, w - 2 * margin), rowH);
+            projectKey_.setBounds(pos.removeFromLeft(juce::jmin(keysWidth, pos.getWidth())));
+            pos.removeFromLeft(gap);
+            tempo_.setBounds(pos.removeFromLeft(juce::jmin(bpmWidth, pos.getWidth())));
+            pos.removeFromLeft(gap);
+            posReadoutBounds_ = pos.removeFromLeft(juce::jmin(clockWidth, pos.getWidth()));
+            pos.removeFromLeft(gap);
+            automArmBtn_.setBounds(pos.reduced(1, 2));
+            projectKey_.setVisible(true);
+            tempo_.setVisible(true);
+
+            auto actions = juce::Rectangle<int>(margin, topY + rowH + margin,
+                                                juce::jmax(0, w - 2 * margin), rowH);
+            const int buttonCount = (int) buttons_.size() + 2;
+            const int buttonW = juce::jmax(1,
+                (actions.getWidth() - gap * (buttonCount - 1)) / buttonCount);
+            for (auto* btn : buttons_)
+            {
+                if (btn == nullptr) continue;
+                btn->setBounds(actions.removeFromLeft(buttonW).reduced(1, 0));
+                btn->setVisible(true);
+                actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
+            }
+            fxBtnBounds_ = actions.removeFromLeft(buttonW);
+            actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
+            brBtnBounds_ = actions.removeFromLeft(juce::jmax(0, actions.getWidth()));
+            mobileMixerBounds_ = {};
+            mobileSendsBounds_ = {};
+
+            if (portrait)
+            {
+                auto bottom = juce::Rectangle<int>(margin, topY + 2 * (rowH + margin),
+                                                    juce::jmax(0, w - 2 * margin), rowH);
+                const int sendsW = juce::jmin(96, juce::jmax(65, w / 4));
+                const int mixerW = juce::jmin(96, juce::jmax(65, w / 4));
+                mobileSendsBounds_ = bottom.removeFromRight(sendsW);
+                bottom.removeFromRight(juce::jmin(gap, bottom.getWidth()));
+                mobileMixerBounds_ = bottom.removeFromRight(mixerW);
+                if (clickStrip_)
+                    clickStrip_->setBounds(bottom.removeFromLeft(juce::jmin(132, bottom.getWidth())));
+            }
+            else
+            {
+                // Landscape presents mixer/sends in the wide top row.
+                const int actionW = juce::jmin(80, juce::jmax(54, w / 9));
+                const int auxWidth = juce::jmin(pos.getWidth(), actionW * 2 + 2 * gap);
+                auto aux = pos.removeFromRight(auxWidth);
+                if (clickStrip_)
+                {
+                    // Metronome stays reachable between transport and controls.
+                    clickStrip_->setBounds(juce::Rectangle<int>(
+                        pos.getX(), topY, juce::jmin(132, pos.getWidth()), rowH));
+                }
+                mobileMixerBounds_ = aux.removeFromLeft(juce::jmin(actionW, aux.getWidth()));
+                aux.removeFromLeft(juce::jmin(gap, aux.getWidth()));
+                mobileSendsBounds_ = aux;
+            }
+            repaint();
+            return;
+        }
+
         const int totalW = getWidth();
         const int totalH = getHeight();
         const int padX   = 8;
@@ -427,6 +531,16 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phoneLayout_ && mobileMixerBounds_.toFloat().contains(e.position))
+        {
+            if (onOpenFloatingMixer) onOpenFloatingMixer();
+            return;
+        }
+        if (phoneLayout_ && mobileSendsBounds_.toFloat().contains(e.position))
+        {
+            if (onOpenBubblegumSends) onOpenBubblegumSends();
+            return;
+        }
         if (fxBtnBounds_.toFloat().contains(e.position))
         {
             DBG("[TransportBar] Quick access Side Panel clicked");
@@ -508,6 +622,8 @@ private:
     juce::OwnedArray<TransportButton> owned_;
     std::vector<TransportButton*>     buttons_;
     std::unique_ptr<ClickToolbarStrip> clickStrip_;
+    bool phoneLayout_ = false;
+    juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_;
     TransportButton* playBtn_  = nullptr;
     TransportButton* recBtn_   = nullptr;
     TransportButton* loopBtn_  = nullptr;
