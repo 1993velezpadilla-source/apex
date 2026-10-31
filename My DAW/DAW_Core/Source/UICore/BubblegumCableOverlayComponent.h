@@ -35,9 +35,11 @@ public:
     {
         setOpaque(false);
         setInterceptsMouseClicks(true, false);  // receive mouseMove for tooltips; hitTest=false blocks no clicks
+       #if !JUCE_ANDROID
         auto& presentationClock = ApexPresentationClock::instance();
         presentationClock.addReceiver(this);
         presentationUpdateActive_ = presentationClock.requestContinuousUpdate(this) != 0;
+       #endif
     }
 
     ~BubblegumCableOverlayComponent() override;
@@ -57,6 +59,10 @@ public:
 
     bool hitTest(int x, int y) override
     {
+       #if JUCE_ANDROID
+        juce::ignoreUnused(x, y);
+        return false; // No invisible cable regions intercept Android touches.
+       #endif
         // Only intercept clicks that land on a cable endpoint anchor; every
         // other pixel passes through to the mixer below.
         const float px = (float) x, py = (float) y;
@@ -75,6 +81,9 @@ public:
 
     void notifyMotionFinished()
     {
+       #if JUCE_ANDROID
+        return; // Cable visuals are disabled; routing state is unaffected.
+       #endif
         snapMotionUntilSec_ = 0.0;
         forceTopologyRefreshFrames_ = 0;
         snapshotCacheValid_ = false;
@@ -84,6 +93,9 @@ public:
 
     void requestTopologyRefresh()
     {
+       #if JUCE_ANDROID
+        return; // No UI cable cache on Android.
+       #endif
         lastMixerScreenX_ = std::numeric_limits<int>::min();
         lastMixerScreenY_ = std::numeric_limits<int>::min();
         snapshotCacheValid_  = false;
