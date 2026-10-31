@@ -106,7 +106,8 @@ int main()
     for (int workspace = 0; workspace <= 900; ++workspace)
     {
         const int width = phoneTrackListWidth(220, workspace);
-        assert(width >= 0 && width <= 220);
+        const int expectedMax = workspace <= 600 ? workspace / 2 : 220;
+        assert(width >= 0 && width <= expectedMax);
         assert(width < workspace || workspace <= 1);
     }
 
