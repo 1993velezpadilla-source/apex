@@ -101,7 +101,16 @@ constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexce
     // Landscape: keep the original user width, with a 220-unit touch floor.
     // Minuscule split-screen widths degrade symmetrically, never overflow.
     if (workspaceWidth <= 600)
-        return minInt(200, minInt(workspaceWidth / 2, workspaceWidth - 1));
+    {
+        // 220 is the original desktop Track List baseline. On phones the
+        // initial width is half the display, but dragging wider must remain
+        // functional instead of snapping forever to a fixed 50%.
+        const int preferred = workspaceWidth / 2;
+        const int maxAllowed = minInt(workspaceWidth - 1,
+                                      static_cast<int>((static_cast<long long>(workspaceWidth) * 65) / 100));
+        const int extra = maxInt(0, requestedWidth - 220);
+        return minInt(maxAllowed, preferred + extra);
+    }
     return minInt(maxInt(requestedWidth, 220), minInt(260, workspaceWidth - 1));
 }
 
