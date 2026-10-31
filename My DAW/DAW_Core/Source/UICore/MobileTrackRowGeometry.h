@@ -19,6 +19,25 @@ struct PhoneTrackControlLayout
 constexpr int trackMin(int a, int b) noexcept { return a < b ? a : b; }
 constexpr int trackMax(int a, int b) noexcept { return a > b ? a : b; }
 
+// Existing desktop projects may include nested folder buses. Keep their
+// hierarchy perceptible without allowing 14-unit * depth to shrink phone
+// record controls below their touch target size.
+constexpr int phoneTrackIndentWidth(int depth) noexcept
+{
+    return trackMin(2, trackMax(0, depth)) * 5;
+}
+
+// The folder toggle is in the title strip, safely ABOVE M/S/Record.
+// A mid-row chevron would steal touches from Arm on a 180-unit phone lane.
+constexpr TrackControlRect phoneFolderChevronBounds(
+    int colourStripLeft, int rowWidth, int rowHeight) noexcept
+{
+    if (rowHeight < 36 || rowWidth < 48) return {};
+    const int x = colourStripLeft + 11;
+    return x + 26 <= rowWidth ? TrackControlRect{x, 7, 26, 26}
+                              : TrackControlRect{};
+}
+
 constexpr PhoneTrackControlLayout phoneTrackControlLayout(
     int contentX, int contentWidth, int primaryRowHeight,
     bool isMaster, bool showInput, bool showTarget) noexcept
