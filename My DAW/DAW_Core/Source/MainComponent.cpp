@@ -7937,7 +7937,7 @@ void MainComponent::hideBubblegumPanel()
         bubblegumPanel_->hideAnimated();
 
     if (bubblegumOrb_)
-        bubblegumOrb_->setVisible(true);
+        bubblegumOrb_->setVisible(!usesPhoneMixerPresentation());
 }
 
 void MainComponent::refreshPinnedValueHint()
@@ -9057,8 +9057,14 @@ void MainComponent::resized()
     if (markerBubble_)
         markerBubble_->setBounds(getLocalBounds());
     if (bubblegumOrb_)
+    {
+        // Phone has a permanent SENDS button in its transport. A large
+        // floating Bubblegum orb covers the ruler and obstructs clip edits.
+        // Never hide the actual Sends panel or any underlying routing.
+        if (phoneLayout) bubblegumOrb_->setVisible(false);
         bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18,
             phoneLayout ? (kMenuH + 10) : 92, bubbleSize, bubbleSize);
+    }
     if (masterBubble_)
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
 
