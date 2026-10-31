@@ -9203,6 +9203,8 @@ void MainComponent::resized()
     updateSlimeAttachedPosition();
     if (pluginBrowser_)
         pluginBrowser_->setPhonePresentation(phoneLayout);
+    if (browserChrome_)
+        browserChrome_->setPhonePresentation(phoneLayout);
     if (browserChrome_ && browserChrome_->isVisible()
         && (phoneLayout || !browserChrome_->isMaximized()))
     {
