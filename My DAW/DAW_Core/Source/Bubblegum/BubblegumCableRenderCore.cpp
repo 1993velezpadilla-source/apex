@@ -189,6 +189,48 @@ namespace bubblegum
             visible.push_back(s);
         }
 
+       #if JUCE_ANDROID
+        // MOBILE PRESENTATION PATH (ARM64): do not allocate full-colour cable
+        // images, run expensive liquid shaders, or refresh hundreds of glow
+        // gradients from the JUCE message thread. This preserves *routing
+        // truth*, cable endpoints and native wet/dry hit areas; desktop stays
+        // on its original premium shader and cache path.
+        //
+        // A simple two-layer Bézier is deliberately cheap even in DEBUG. It
+        // does not touch audio DSP, sidechain state or send automation.
+        for (const auto& snapshot : visible)
+        {
+            const auto src = snapshot.endpoints.source;
+            const auto dst = snapshot.endpoints.destination;
+            if (!std::isfinite(src.x) || !std::isfinite(src.y)
+                || !std::isfinite(dst.x) || !std::isfinite(dst.y))
+                continue;
+            const float depth = juce::jlimit(16.0f, 100.0f,
+                22.0f + std::abs(dst.x - src.x) * 0.12f);
+            juce::Path cable;
+            cable.startNewSubPath(src);
+            cable.cubicTo(src.x + (dst.x - src.x) * 0.23f, src.y + depth,
+                          src.x + (dst.x - src.x) * 0.77f, dst.y + depth, dst);
+            const float alpha = snapshot.bypassed
+                              || snapshot.state == SendVisualState::ExistsInactive
+                              ? 0.32f : 0.92f;
+            const auto accent = snapshot.isMasterTarget
+                ? juce::Colour(0xffff4da1) : juce::Colour(0xffae6aff);
+            g.setColour(juce::Colours::black.withAlpha(alpha * 0.88f));
+            g.strokePath(cable, juce::PathStrokeType(7.0f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour(accent.withAlpha(alpha));
+            g.strokePath(cable, juce::PathStrokeType(3.5f,
+                juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour(accent.withAlpha(alpha));
+            g.fillEllipse(src.x - 4.5f, src.y - 4.5f, 9.0f, 9.0f);
+            g.fillEllipse(dst.x - 4.5f, dst.y - 4.5f, 9.0f, 9.0f);
+            ++stats.rendered;
+        }
+        if (outStats) *outStats = stats;
+        return;
+       #endif
+
         // ── Motion stability pass ──────────────────────────────────────────────
         // Returns same list with endpoints replaced by smoothed values.
         auto stable = motionStabilityCore.resolveStableSnapshots(
