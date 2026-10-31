@@ -104,6 +104,11 @@ def main() -> int:
     if old not in ("com.rmsl.juce.JuceActivity", ANDROID_ACTIVITY):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     activity.set(f"{{{ANDROID_NS}}}name", ANDROID_ACTIVITY)
+    # Projucer's Android exporter (or a stale generated manifest) can keep an
+    # orientation lock even after the C++ Desktop mask is corrected. Android
+    # 'fullUser' allows portrait + reverse-portrait + both landscapes while
+    # respecting the user's system auto-rotate preference (minSdk=26).
+    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "fullUser")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
     java = (generated / "app/src/main/java/com/xziel/apex/fulltest"
@@ -116,10 +121,12 @@ def main() -> int:
     app_activity = again.getroot().find("./application/activity")
     assert app_activity is not None
     assert app_activity.get(f"{{{ANDROID_NS}}}name") == ANDROID_ACTIVITY
+    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "fullUser"
     assert "WindowInsetsController" in java.read_text(encoding="utf-8")
     print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {ANDROID_ACTIVITY}")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
     print(f"[APEX ANDROID IMMERSIVE] source={java}")
+    print("[APEX ANDROID IMMERSIVE] orientation: fullUser (portrait + landscape, respects Auto-rotate)")
     print("[APEX ANDROID IMMERSIVE] lifecycle: onCreate/onResume/onWindowFocusChanged")
     print("[APEX ANDROID IMMERSIVE] Android >=30 native system bars, 26-29 fallback")
     return 0
