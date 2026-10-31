@@ -20,6 +20,21 @@ int main()
     constexpr auto desktop = fitBubblegumSends(1800, 900, 450, 490, false);
     static_assert(desktop.width == 260 && desktop.height == 380
                   && inside(desktop, 1800, 900));
+    // A panel dragged beyond any phone edge must have a valid on-screen
+    // recovery position. The UI calls this fitter when the drag ends.
+    constexpr auto offLeft = fitBubblegumSends(393, 852, -1000, -1000, true);
+    static_assert(offLeft.x == 8 && offLeft.y == 8
+                  && inside(offLeft, 393, 852));
+    constexpr auto offRight = fitBubblegumSends(393, 852, 20000, 20000, true);
+    static_assert(offRight.x == 25 && offRight.y == 424
+                  && inside(offRight, 393, 852));
+    for (int w : {1, 2, 10, 160, 245, 393, 852})
+        for (int h : {1, 2, 10, 120, 220, 300, 852})
+            for (int anchor : {-20000, -100, 0, 100, 20000})
+            {
+                const auto fitted = fitBubblegumSends(w, h, anchor, anchor, true);
+                assert(inside(fitted, w, h));
+            }
     constexpr auto zero = fitBubblegumSends(0, 0, 0, 0, true);
     static_assert(zero.width == 0 && zero.height == 0);
     for (int w = 1; w <= 900; w += 9)
