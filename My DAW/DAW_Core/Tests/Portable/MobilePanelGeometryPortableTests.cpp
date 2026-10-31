@@ -116,6 +116,18 @@ int main()
     // 44dp tall controls in an 180dp track lane.
     using DAW::mobile::phoneTrackControlLayout;
     using DAW::mobile::TrackControlRect;
+    // Visual feedback on Pixel Fold: 180-unit default lanes waste most of
+    // the arranger. Two rows at 132 preserve full 44-unit touch heights.
+    static_assert(DAW::mobile::kPhoneTrackDefaultHeight == 132);
+    constexpr auto compact = phoneTrackControlLayout(12, 162, 132, false, true, false);
+    static_assert(compact.mute.height == 44 && compact.arm.height == 44);
+    static_assert(compact.arm.y + compact.arm.height <= 132);
+    static_assert(compact.target.empty());
+    constexpr auto compactAutomation = phoneTrackControlLayout(12, 162, 132, false, true, true);
+    static_assert(compactAutomation.target.height > 0
+                  && compactAutomation.target.y + compactAutomation.target.height <= 132);
+    static_assert(compactAutomation.input.y + compactAutomation.input.height
+                  <= compactAutomation.target.y);
     constexpr auto phoneRow = phoneTrackControlLayout(12, 162, 180, false, true, true);
     static_assert(phoneRow.mute.width == 50 && phoneRow.mute.height == 44);
     static_assert(phoneRow.solo.width == 50 && phoneRow.monitor.width == 50);
