@@ -26,6 +26,7 @@
 #include "VocalTuneCore/ApexTuneIntegrationCore.h"
 #include "RecordingCore/RecordingInputValidityCore.h"
 #include "UICore/QuickSendPopup.h"
+#include "UICore/MobilePanelGeometry.h"
 #include <set>
 #include <algorithm>
 #include <cstdlib>
@@ -35,6 +36,19 @@
 
 namespace
 {
+    // Android and iPhone share the phone Mixer policy; iPad, Windows and Mac
+    // retain the original dock/desktop presentation.
+    static bool usesPhoneMixerPresentation()
+    {
+       #if JUCE_ANDROID
+        return true;
+       #elif JUCE_IOS
+        return !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad");
+       #else
+        return false;
+       #endif
+    }
+
    #if JUCE_ANDROID
     // Android's JUCE/Oboe device exposes the OS-negotiated route. Request a
     // modest channel count rather than asking a phone for 64 inputs; USB
@@ -4310,17 +4324,16 @@ MainComponent::MainComponent()
             slimeSidePanel_->setVisible(true);
     };
 
-   #if JUCE_ANDROID
-    // Product decision: Android uses the SAME floating mixer window as
-    // desktop, not a docked viewport. The initial layout is computed from
-    // the actual Android activity size on MainComponent::resized().
-    // A minimized/closed mixer can always reopen via its floating bubble.
-    mixerDocked_ = false;
-    mixerPanel_->setDockedState(false);
-    // Phone opens on the Arrangement; its persistent bottom MIXER button
-    // always opens the real floating window without docking or taking space.
-    mixerWindow_->setVisible(false);
-    mixerBubble_->setVisible(false);
+   #if JUCE_ANDROID || JUCE_IOS
+    // Phones start on Arrangement with a floating Mixer, never a dock.
+    // iPad keeps its desktop mixer and Matrix presentation.
+    if (usesPhoneMixerPresentation())
+    {
+        mixerDocked_ = false;
+        mixerPanel_->setDockedState(false);
+        mixerWindow_->setVisible(false);
+        mixerBubble_->setVisible(false);
+    }
    #endif
 
     // Timeline bubble - shows when timeline window is minimized/closed
@@ -7293,17 +7306,20 @@ void MainComponent::undockMixer()
 
 void MainComponent::dockMixer()
 {
-   #if JUCE_ANDROID
-    // Android intentionally only supports the floating presentation of the
-    // original MixerWindow; do not reparent the viewport into a dock.
-    if (mixerWindow_)
+   #if JUCE_ANDROID || JUCE_IOS
+    // Android/iPhone only: do not reparent the floating mixer into a dock.
+    // iPad still follows the desktop docking path below.
+    if (usesPhoneMixerPresentation())
     {
-        mixerWindow_->restoreIfMinimized();
-        mixerWindow_->setVisible(true);
-        mixerWindow_->toFront(false);
+        if (mixerWindow_)
+        {
+            mixerWindow_->restoreIfMinimized();
+            mixerWindow_->setVisible(true);
+            mixerWindow_->toFront(false);
+        }
+        if (mixerBubble_) mixerBubble_->setVisible(false);
+        return;
     }
-    if (mixerBubble_) mixerBubble_->setVisible(false);
-    return;
    #endif
     mixerDocked_ = true;
     mixerPanel_->setDockedState(true);
@@ -8971,12 +8987,7 @@ void MainComponent::resized()
 
     // Desktop and iPad keep their original layout. Phone transport stays at
     // the bottom for thumb reach and leaves the Arrangement dominant.
-    bool phoneLayout = false;
-   #if JUCE_ANDROID
-    phoneLayout = true;
-   #elif JUCE_IOS
-    phoneLayout = !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad");
-   #endif
+    const bool phoneLayout = usesPhoneMixerPresentation();
     if (menuBar_)
         menuBar_->setBounds(area.removeFromTop(kMenuH));
 
@@ -9088,27 +9099,30 @@ void MainComponent::resized()
 
     if (mixerWindow_ && !mixerDocked_)
     {
-       #if JUCE_ANDROID
-        // First MainComponent layout uses desktop 1280x800. Once Android
-        // delivers its actual viewport, recompute if the window is off-screen
-        // or bigger than that viewport. Preserve the user's position/size
-        // during regular resizes that already fit.
-        const int safeTop = juce::jmin(getHeight() / 3,
-                                      kMenuH + kTransportH + 8);
-        const auto safe = getLocalBounds()
-            .withTrimmedTop(safeTop).reduced(8, 6);
-        const auto current = mixerWindow_->getBounds();
-        if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
-            || current.getHeight() > safe.getHeight()
-            || current.getX() < safe.getX()
-            || current.getY() < safe.getY()
-            || current.getRight() > safe.getRight()
-            || current.getBottom() > safe.getBottom())
+        if (phoneLayout)
+        {
+            // On Android/iPhone, preserve manual size and position if they
+            // still fit above the bottom Transport after rotation.
+            const int safeTop = juce::jmin(getHeight() / 3, kMenuH + 8);
+            const auto fit = DAW::mobile::fitFloatingMixer(
+                getWidth(), getHeight(), safeTop,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            if (fit.safe.width > 0 && fit.safe.height > 0)
+            {
+                const auto safe = juce::Rectangle<int>(
+                    fit.safe.x, fit.safe.y, fit.safe.width, fit.safe.height);
+                const auto current = mixerWindow_->getBounds();
+                if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
+                    || current.getHeight() > safe.getHeight()
+                    || current.getX() < safe.getX()
+                    || current.getY() < safe.getY()
+                    || current.getRight() > safe.getRight()
+                    || current.getBottom() > safe.getBottom())
+                    setDefaultMixerWindowBounds();
+            }
+        }
+        else if (!mixerWindowPlaced_)
             setDefaultMixerWindowBounds();
-       #else
-        if (!mixerWindowPlaced_)
-            setDefaultMixerWindowBounds();
-       #endif
     }
 
     if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
@@ -9179,28 +9193,23 @@ void MainComponent::setDefaultMixerWindowBounds()
     if (!mixerWindow_ || !mixerPanel_)
         return;
 
-   #if JUCE_ANDROID
-    // True FLOATING mixer, fitted to the live phone/tablet activity rather
-    // than the hard-coded 80, desktopY, 320px-high Windows rectangle.
-    // Keep the desktop original chrome, title bar, drag-to-move and resizing.
-    const int safeTop = juce::jmin(getHeight() / 3,
-                                  kMenuH + kTransportH + 8);
-    const auto safe = getLocalBounds().withTrimmedTop(safeTop).reduced(8, 6);
-    if (safe.isEmpty())
+   #if JUCE_ANDROID || JUCE_IOS
+    if (usesPhoneMixerPresentation())
+    {
+        // Keep the floating mixer inside the live phone viewport and ABOVE
+        // the persistent bottom Transport. iPad/desktop keep original chrome.
+        const int safeTop = juce::jmin(getHeight() / 3, kMenuH + 8);
+        const auto fit = DAW::mobile::fitFloatingMixer(
+            getWidth(), getHeight(), safeTop,
+            transportBar_ ? transportBar_->getHeight() : 0);
+        if (fit.window.width <= 0 || fit.window.height <= 0)
+            return;
+        mixerWindow_->setMinimumSize(fit.minimumWidth, fit.minimumHeight);
+        mixerWindow_->setBounds(fit.window.x, fit.window.y,
+                                fit.window.width, fit.window.height);
+        mixerWindowPlaced_ = true;
         return;
-    const int width = juce::jmin(safe.getWidth(),
-        juce::jmax(200, juce::roundToInt(safe.getWidth() * 0.88)));
-    const int height = juce::jmin(safe.getHeight(),
-        juce::jmax(180, juce::roundToInt(safe.getHeight() * 0.86)));
-    // The desktop 260px minimum cannot be imposed on a short Android
-    // viewport: update its resize constrainer to the actual visible limits.
-    mixerWindow_->setMinimumSize(juce::jmin(200, safe.getWidth()),
-                                 juce::jmin(180, safe.getHeight()));
-    mixerWindow_->setBounds(safe.getX() + (safe.getWidth() - width) / 2,
-                            safe.getY() + (safe.getHeight() - height) / 2,
-                            width, height);
-    mixerWindowPlaced_ = true;
-    return;
+    }
    #endif
 
     // The outer frame/title chrome is not part of the Mixer content width.
