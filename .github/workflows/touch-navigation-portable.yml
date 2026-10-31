@@ -12,6 +12,9 @@ on:
       - 'My DAW/DAW_Core/Tests/Portable/ApexRadialGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialGeometry.h'
       - 'My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h'
+      - 'My DAW/DAW_Core/Source/UICore/MobileTransportPortrait.h'
+      - 'My DAW/DAW_Core/Source/UICore/TransportBar.h'
+      - 'My DAW/DAW_Core/Tests/Portable/MobileTransportPortraitPortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/MobilePanelGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/BubblegumV2PanelUI.h'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialContextMenu.h'
@@ -43,3 +46,7 @@ jobs:
           /tmp/apex_mobile_panel_geometry_tests
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_ubsan
           /tmp/apex_mobile_panel_geometry_ubsan
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_tests
+          /tmp/apex_mobile_transport_portrait_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_ubsan
+          /tmp/apex_mobile_transport_portrait_ubsan
