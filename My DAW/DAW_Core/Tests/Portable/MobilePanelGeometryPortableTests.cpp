@@ -85,6 +85,26 @@ int main()
                 assert(inside(fitted, w, h));
             }
 
+    // iPhone previously used desktop's 220-unit Track List at 393 units,
+    // leaving too little horizontal Arrangement space. Android already had
+    // the compact policy; both phones now share the same bounded calculation.
+    using DAW::mobile::phoneTrackListWidth;
+    static_assert(phoneTrackListWidth(220, 393) == 108);
+    static_assert(phoneTrackListWidth(220, 360) == 108);
+    static_assert(phoneTrackListWidth(220, 852) == 213);
+    static_assert(phoneTrackListWidth(80, 393) == 80);
+    static_assert(phoneTrackListWidth(220, 100) == 99);
+    static_assert(phoneTrackListWidth(220, 1) == 0);
+    static_assert(phoneTrackListWidth(220, 0) == 0);
+    static_assert(phoneTrackListWidth(-1, 393) == 0);
+    static_assert(phoneTrackListWidth(220, std::numeric_limits<int>::max()) == 220);
+    for (int workspace = 0; workspace <= 900; ++workspace)
+    {
+        const int width = phoneTrackListWidth(220, workspace);
+        assert(width >= 0 && width <= 220);
+        assert(width < workspace || workspace <= 1);
+    }
+
     // Floating phone Mixer must not cover the persistent bottom Transport,
     // including landscape and when an activity becomes very short.
     using DAW::mobile::fitFloatingMixer;
