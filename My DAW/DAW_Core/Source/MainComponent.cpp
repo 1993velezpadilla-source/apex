@@ -29,6 +29,9 @@
 #include <set>
 #include <algorithm>
 #include <cstdlib>
+#if JUCE_ANDROID
+ #include <android/log.h>
+#endif
 
 namespace
 {
@@ -7223,6 +7226,21 @@ void MainComponent::initializeSafeStartupAudio()
     selectSafeStartupAudioDeviceType();
     setAudioChannels(kMaxHardwareInputChannels, 2);
 
+   #if JUCE_ANDROID
+    // USB audio routing belongs to Android/Oboe. The Windows-era repair
+    // workflow can close/reopen the Android stream on the message thread,
+    // starving input dispatch and causing an Application Not Responding.
+    // Capture the negotiated channels once; explicit Audio Settings remains
+    // the path for changing devices. No periodic Windows ASIO/USB repair.
+    const int activeInputs = getEnabledAudioInputChannelCount();
+    cachedEnabledAudioInputChannels_.store(activeInputs, std::memory_order_release);
+    appCore_.setHardwareInputChannelCount(activeInputs);
+    __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                        "06 Android audio initialized inputs=%d", activeInputs);
+    inputWatchdog_.startTimer(2000);  // heartbeat only, never reopens device
+    return;
+   #endif
+
     if (!repairInvalidCurrentAudioDevice())
     {
         shutdownAudio();
@@ -8581,6 +8599,16 @@ void MainComponent::drainCallbackAuditRing()
 
 void MainComponent::inputWatchdogTick()
 {
+   #if JUCE_ANDROID
+    // Evidence for device ANRs: this heartbeat stops if JUCE's GUI thread
+    // becomes blocked. Never run the Windows device-reopen watchdog or
+    // sandbox maintenance on Android.
+    __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                        "UI heartbeat inputs=%d audioCallbacks=%lld",
+                        cachedEnabledAudioInputChannels_.load(std::memory_order_acquire),
+                        static_cast<long long>(audioCallbackTickCounter_.load(std::memory_order_relaxed)));
+    return;
+   #endif
     // ── Callback audit: drain and report from message thread (5-second interval) ──
     if (callbackAuditEnabled_)
     {
