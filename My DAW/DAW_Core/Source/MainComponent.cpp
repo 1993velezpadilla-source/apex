@@ -8915,7 +8915,15 @@ void MainComponent::resized()
     auto content = area;
     if (mixerDocked_ && mixerPanel_)
     {
-        auto mixerArea = content.removeFromBottom(mixerH_);
+       #if JUCE_ANDROID
+        // Preserve the arrangement above the docked mixer on compact
+        // landscape phones instead of consuming nearly all available height.
+        const int visibleMixerHeight = juce::jmin(mixerH_,
+            juce::jmax(90, content.getHeight() / 3));
+       #else
+        const int visibleMixerHeight = mixerH_;
+       #endif
+        auto mixerArea = content.removeFromBottom(visibleMixerHeight);
         if (monitorSection_)
             monitorSection_->setBounds(mixerArea.removeFromRight(DAW::MonitorSectionUI::kPreferredWidth));
 
@@ -8939,7 +8947,18 @@ void MainComponent::resized()
     }
 
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
+    {
+       #if JUCE_ANDROID
+        // Desktop's 220 logical pixels would consume over half the width on
+        // narrow Android views. Keep tracks reachable while exposing a real
+        // timeline for scrolling, selection and pinch/zoom work.
+        const int mobileTrackWidth = juce::jmin(trackListW_,
+            juce::jmax(108, content.getWidth() / 4));
+        trackListWindow_->setBounds(content.removeFromLeft(mobileTrackWidth));
+       #else
         trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
+       #endif
+    }
 
     if (timelineWindow_)
         timelineWindow_->setBounds(content);
