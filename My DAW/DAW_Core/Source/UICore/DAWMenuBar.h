@@ -69,11 +69,40 @@ public:
         };
     }
 
+    void setPhonePresentation(bool enabled)
+    {
+        if (phonePresentation_ == enabled) return;
+        phonePresentation_ = enabled;
+        resized();
+        repaint();
+    }
+
     void paint(juce::Graphics& g) override
     {
         auto& t = Theme::getInstance();
         auto& a = t.apex;
         g.fillAll(a.color.deepestB);
+        if (phonePresentation_)
+        {
+            // Phone Studio: no Windows title controls, six overlapping desktop
+            // menus, decorative splash or synthetic mouse hover. Preserve all
+            // commands under one explicit, generous mobile MENU target.
+            g.setColour(a.color.magenta);
+            g.setFont(t.fonts.bold.withHeight(16.0f));
+            g.drawText("APEX", 10, 0, 70, getHeight(),
+                       juce::Justification::centredLeft);
+            g.setColour(a.color.textSecondary);
+            g.setFont(t.fonts.regular.withHeight(11.0f));
+            g.drawText("STUDIO", 79, 0, juce::jmax(0, getWidth() - 188),
+                       getHeight(), juce::Justification::centredLeft);
+            g.setColour(a.color.panelB);
+            g.fillRoundedRectangle(phoneMenuBounds_.toFloat(), 5.0f);
+            g.setColour(a.color.textPrimary);
+            g.setFont(t.fonts.bold.withHeight(12.0f));
+            g.drawText("MENU", phoneMenuBounds_,
+                       juce::Justification::centred);
+            return;
+        }
 
         // ── Cached 50/50 splash background ─────────────────────────────────
         // Blue/cyan energy enters from the left, purple/violet from the right,
@@ -228,6 +257,8 @@ public:
 
     void resized() override
     {
+        phoneMenuBounds_ = { juce::jmax(0, getWidth() - 78), 1,
+                             juce::jmin(74, getWidth()), juce::jmax(0, getHeight() - 2) };
         menuRects_.resize(menus_.size());
         updateWindowControlRects();
         brandSigil_.clear();  // geometry depends on height; rebuild on next paint
@@ -236,6 +267,7 @@ public:
 
     void mouseMove(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_) return;
         int prev = hoveredMenu_;
         hoveredMenu_ = -1;
         for (int i = 0; i < (int)menus_.size(); ++i)
@@ -261,6 +293,12 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_)
+        {
+            if (phoneMenuBounds_.contains(e.getPosition()))
+                showPhoneRootMenu();
+            return;
+        }
         if (undoBtnBounds_.contains(e.position) && CommandManager::getInstance().canUndo())
         {
             ActionManager::getInstance().dispatch(ActionID::EditUndo);
@@ -346,6 +384,46 @@ public:
     }
 
 private:
+    bool phonePresentation_ = false;
+    juce::Rectangle<int> phoneMenuBounds_;
+
+    // The mobile menu exposes exactly the original registered commands:
+    // File/Edit/View/Track/Clip/Settings are navigable categories instead of
+    // overlapping desktop tabs. Only menu presentation changes; actions
+    // continue to dispatch through APEX's real ActionManager callbacks.
+    void showPhoneRootMenu()
+    {
+        juce::PopupMenu root;
+        for (const auto& category : menus_)
+        {
+            juce::PopupMenu submenu;
+            for (const auto& item : category.items)
+            {
+                if (item.label == "---")
+                {
+                    submenu.addSeparator();
+                    continue;
+                }
+                if (item.label == "Project Settings" || item.label == "Keybinding Profile")
+                    continue; // desktop-specific nested chooser, parent Settings still accessible
+                auto action = item.action;
+                if (!action && item.actionId != ActionID::None)
+                {
+                    const auto id = item.actionId;
+                    action = [id] { ActionManager::getInstance().dispatch(id); };
+                }
+                if (!action) continue; // don't expose nonfunctional placeholders
+                submenu.addItem(item.label, action);
+            }
+            if (submenu.getNumItems() > 0)
+                root.addSubMenu(category.title, submenu);
+        }
+        root.showMenuAsync(juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withTargetScreenArea(localAreaToGlobal(phoneMenuBounds_))
+            .withMinimumWidth(220));
+    }
+
     std::vector<Menu> menus_;
     std::vector<juce::Rectangle<int>> menuRects_;
     int hoveredMenu_   = -1;
