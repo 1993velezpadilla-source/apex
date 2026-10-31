@@ -40,6 +40,37 @@ int main()
             assert(target.height == (h < 44 ? h : 44));
         }
 
+    // A phone Sends window must never cover the APEX header or the bottom
+    // Transport, even when opened near the bottom or dragged off-screen.
+    constexpr auto sendsPortrait = fitBubblegumSends(393, 852, 360, 800, true, 50, 144);
+    static_assert(sendsPortrait.y == 280 && sendsPortrait.height == 420
+                  && sendsPortrait.y + sendsPortrait.height <= 852 - 144);
+    constexpr auto sendsLandscape = fitBubblegumSends(852, 300, 820, 280, true, 50, 96);
+    static_assert(sendsLandscape.y == 58 && sendsLandscape.height == 138
+                  && sendsLandscape.y + sendsLandscape.height <= 300 - 96);
+    constexpr auto sendsCollapsed = fitBubblegumSends(360, 96, 200, 80, true, 50, 46);
+    static_assert(sendsCollapsed.width == 0 && sendsCollapsed.height == 0);
+    constexpr auto sendsDesktopUnchanged = fitBubblegumSends(1800, 900, 450, 490, false, 50, 144);
+    static_assert(sendsDesktopUnchanged.x == 174 && sendsDesktopUnchanged.y == 130
+                  && sendsDesktopUnchanged.width == 260 && sendsDesktopUnchanged.height == 380);
+    for (int w : {1, 20, 245, 393, 852})
+        for (int h : {1, 96, 220, 300, 852})
+            for (int top : {0, 50, 1000})
+                for (int bottom : {0, 96, 144, 1000})
+                {
+                    const auto fitted = fitBubblegumSends(w, h,
+                        std::numeric_limits<int>::max(),
+                        std::numeric_limits<int>::min(), true, top, bottom);
+                    const int safeTop = DAW::mobile::clampInt(top, 0, h);
+                    const int safeBottom = DAW::mobile::clampInt(bottom, 0, h - safeTop);
+                    assert(inside(fitted, w, h));
+                    if (fitted.height > 0)
+                    {
+                        assert(fitted.y >= safeTop);
+                        assert(static_cast<long long>(fitted.y) + fitted.height <= h - safeBottom);
+                    }
+                }
+
     constexpr auto portrait = fitBubblegumSends(393, 852, 360, 70, true);
     static_assert(portrait.width == 360 && portrait.height == 420
                   && inside(portrait, 393, 852));
