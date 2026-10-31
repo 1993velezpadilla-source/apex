@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "MobilePanelGeometry.h"
 #include "../ThemeCore/Theme.h"
 #include "../Bubblegum/BubblegumV2System.h"
 #include "CursorThemeCore.h"
@@ -57,6 +58,18 @@ public:
         ApexPresentationClock::instance().removeReceiver(this);
     }
 
+    // Mobile retains the Bubblegum Sends UI but must never open Matrix.
+    void setPhonePresentation(bool isPhone)
+    {
+        if (phonePresentation_ == isPhone) return;
+        phonePresentation_ = isPhone;
+        eyeBtnPressed_ = false;
+        if (phonePresentation_ && fullScreenMode_)
+            toggleFullScreenMode();
+        updateContentSize();
+        repaint();
+    }
+
     void bind(BubblegumV2System* sys, TrackManager* tracks)
     {
         bgV2_   = sys;
@@ -69,16 +82,21 @@ public:
     void showNear(juce::Point<int> anchorCentre)
     {
         fullScreenMode_ = false;
-        // Position above-left of anchor
-        int x = anchorCentre.x - kPanelW - 16;
-        int y = anchorCentre.y - kPanelH + 20;
-        // Clamp to screen
         if (auto* parent = getParentComponent())
         {
-            x = juce::jlimit(8, parent->getWidth() - kPanelW - 8, x);
-            y = juce::jlimit(8, parent->getHeight() - kPanelH - 8, y);
+            // Bounds are valid even when landscape height is below 380.
+            const auto fitted = mobile::fitBubblegumSends(
+                parent->getWidth(), parent->getHeight(),
+                anchorCentre.x, anchorCentre.y, phonePresentation_);
+            if (fitted.width <= 0 || fitted.height <= 0)
+                return;
+            setBounds(fitted.x, fitted.y, fitted.width, fitted.height);
         }
-        setBounds(x, y, kPanelW, kPanelH);
+        else
+        {
+            setBounds(0, 0, phonePresentation_ ? 360 : kPanelW,
+                               phonePresentation_ ? 420 : kPanelH);
+        }
         setVisible(true);
         toFront(true);
         // Start open animation
@@ -247,7 +265,8 @@ public:
             g.restoreState();
         }
 
-        // ── Fullscreen eye button — premium gel orb style ──
+        // The Matrix eye is desktop/iPad-only.
+        if (!phonePresentation_)
         {
             auto eb = eyeBtnBounds();
             bool hov = eb.contains(getMouseXYRelative().toFloat());
@@ -319,7 +338,7 @@ public:
         g.setFont(juce::Font(11.f, juce::Font::bold));
         g.drawText(fullScreenMode_ ? "BUBBLEGUM MATRIX" : "BUBBLEGUM SENDS",
                    header.reduced(14.f, 0.f).removeFromTop(24.f)
-                          .withTrimmedRight((kCloseBtnSize + kEyeBtnSize) + 16.f + (masterSelected_ ? 28.f : 0.f)),
+                          .withTrimmedRight((kCloseBtnSize + (phonePresentation_ ? 0.f : kEyeBtnSize)) + 16.f + (masterSelected_ ? 28.f : 0.f)),
                    juce::Justification::centredLeft);
 
         // Source label
@@ -341,7 +360,7 @@ public:
         // above the header title and source label.
         if (masterSelected_)
         {
-            const auto eye = eyeBtnBounds();
+            const auto eye = phonePresentation_ ? closeBtnBounds() : eyeBtnBounds();
             drawCrownBadge(g, juce::Rectangle<float>(eye.getX() - 8.f - 20.f,
                                                      eye.getCentreY() - 10.f,
                                                      20.f, 20.f));
@@ -367,18 +386,18 @@ public:
         //   knob  : 30 px left of X centre
         //   SC    : 32 px left of knob centre
         //   name  : starts from left inset
-        const float kTrashCX = (float)width - 14.f;
-        const float kKnobCX  = kTrashCX - 30.f;
-        const float kSCCX    = kKnobCX  - 30.f;
-        const float kSCW     = 26.f;   // sidechain button — slightly larger
+        const float kTrashCX = trashCX(width);
+        const float kKnobCX  = knobCX(width);
+        const float kSCCX    = scCX(width);
+        const float kSCW     = phonePresentation_ ? 38.f : 26.f;   // sidechain button — slightly larger
         const float kNameL   = 12.f;
         const float kNameR   = kSCCX - kSCW * 0.5f - 6.f;
 
         for (int i = 0; i < (int)targets_.size(); ++i)
         {
             auto& tid = targets_[i];
-            float rowY  = (float)(i * kRowH);
-            auto rowBounds = juce::Rectangle<float>(0.f, rowY, (float)width, (float)kRowH);
+            float rowY  = (float)(i * rowHeight());
+            auto rowBounds = juce::Rectangle<float>(0.f, rowY, (float)width, (float)rowHeight());
             float cy    = rowBounds.getCentreY();
 
             bool hasSend   = bgV2_->hasSendTo(tid);
@@ -428,13 +447,13 @@ public:
                     nameRight -= 96.f;   // reserve room for the MASTER SELECTED seal
                 g.drawText(name,
                            juce::Rectangle<float>(kNameL, rowBounds.getY(),
-                                                  nameRight - kNameL, (float)kRowH),
+                                                  nameRight - kNameL, (float)rowHeight()),
                            juce::Justification::centredLeft, true);
 
                 if (masterSel)
                 {
                     auto seal = juce::Rectangle<float>(kNameR - 92.f,
-                                                      rowBounds.getY() + ((float)kRowH - 13.f) * 0.5f,
+                                                      rowBounds.getY() + ((float)rowHeight() - 13.f) * 0.5f,
                                                       88.f, 13.f);
                     g.setColour(juce::Colour(0xFF0A0D15).withAlpha(0.95f));
                     g.fillRoundedRectangle(seal, 6.5f);
@@ -589,7 +608,7 @@ public:
     // ── Mouse: close button + drag panel by header area ────────────────
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (eyeBtnBounds().contains(e.position))
+        if (!phonePresentation_ && eyeBtnBounds().contains(e.position))
         {
             eyeBtnPressed_ = true;
             repaint();
@@ -618,7 +637,7 @@ public:
         if (eyeBtnPressed_)
         {
             eyeBtnPressed_ = false;
-            if (eyeBtnBounds().contains(e.position))
+            if (!phonePresentation_ && eyeBtnBounds().contains(e.position))
                 toggleFullScreenMode();
             repaint();
             return;
@@ -640,7 +659,7 @@ public:
     {
         // Repaint header for close button hover state
         bool overClose = closeBtnBounds().contains(e.position);
-        bool overEye = eyeBtnBounds().contains(e.position);
+        bool overEye = !phonePresentation_ && eyeBtnBounds().contains(e.position);
         if (overClose != closeBtnHovered_ || overEye != eyeBtnHovered_)
         {
             closeBtnHovered_ = overClose;
@@ -663,7 +682,7 @@ public:
         }
 
         if (!bgV2_ || targets_.empty()) return;
-        int row = e.getPosition().y / kRowH;
+        int row = e.getPosition().y / rowHeight();
         if (row < 0 || row >= (int)targets_.size()) return;
 
         auto& tid = targets_[row];
@@ -810,7 +829,7 @@ public:
         }
 
         mousePos_ = e.getPosition().toFloat();
-        int row = e.getPosition().y / kRowH;
+        int row = e.getPosition().y / rowHeight();
         if (row != hoveredRow_)
         {
             hoveredRow_ = (row >= 0 && row < (int)targets_.size()) ? row : -1;
@@ -899,6 +918,7 @@ private:
     float dragStartLevel_ = 0.f;
     juce::Point<float> mousePos_ { -1000.f, -1000.f };
 
+    bool phonePresentation_ = false;
     bool fullScreenMode_ = false;
     juce::Rectangle<int> compactBoundsBeforeFull_;
     TrackID compactSourceBeforeFull_;
@@ -980,14 +1000,16 @@ private:
         return h;
     }
 
+    int rowHeight() const noexcept { return phonePresentation_ ? 52 : kRowH; }
+
     // ── Layout helpers (must match paintContent) ─────────────────────────
-    static float trashCX(int width) noexcept { return (float)width - 14.f; }
-    static float knobCX(int width)  noexcept { return trashCX(width) - 30.f; }
-    static float scCX(int width)    noexcept { return knobCX(width)  - 30.f; }
+    float trashCX(int width) const noexcept { return (float)width - (phonePresentation_ ? 26.f : 14.f); }
+    float knobCX(int width)  const noexcept { return trashCX(width) - (phonePresentation_ ? 50.f : 30.f); }
+    float scCX(int width)    const noexcept { return knobCX(width) - (phonePresentation_ ? 50.f : 30.f); }
 
     bool isDotHit(juce::Point<int> pt, int row, int /*w*/) const noexcept
     {
-        float cy = (float)(row * kRowH) + kRowH * 0.5f;
+        float cy = (float)(row * rowHeight()) + rowHeight() * 0.5f;
         float dx = (float)pt.x - 14.f;
         float dy = (float)pt.y - cy;
         return (dx * dx + dy * dy) <= (kDotR + 4.f) * (kDotR + 4.f);
@@ -995,17 +1017,19 @@ private:
 
     bool isKnobHit(juce::Point<int> pt, int row, int width) const noexcept
     {
-        float cy = (float)(row * kRowH) + kRowH * 0.5f;
+        float cy = (float)(row * rowHeight()) + rowHeight() * 0.5f;
         float cx = knobCX(width);
         float dx = (float)pt.x - cx;
         float dy = (float)pt.y - cy;
-        return (dx * dx + dy * dy) <= (kRingR + 4.f) * (kRingR + 4.f);
+        const float radius = phonePresentation_ ? 22.f : (kRingR + 4.f);
+        return (dx * dx + dy * dy) <= radius * radius;
     }
 
     bool isSCBtnHit(juce::Point<int> pt, int row, int width) const noexcept
     {
-        const float kSCW = 26.f, kSCH = 18.f;
-        float cy = (float)(row * kRowH) + kRowH * 0.5f;
+        const float kSCW = phonePresentation_ ? 44.f : 26.f;
+        const float kSCH = phonePresentation_ ? 40.f : 18.f;
+        float cy = (float)(row * rowHeight()) + rowHeight() * 0.5f;
         float cx = scCX(width);
         return std::abs((float)pt.x - cx) <= kSCW * 0.5f + 3.f
             && std::abs((float)pt.y - cy) <= kSCH * 0.5f + 3.f;
@@ -1014,9 +1038,10 @@ private:
     bool isNearTrash(juce::Point<float> pt, int row, int width) const noexcept
     {
         float tx = trashCX(width);
-        float ty = (float)(row * kRowH) + kRowH * 0.5f;
+        float ty = (float)(row * rowHeight()) + rowHeight() * 0.5f;
         float dx = pt.x - tx, dy = pt.y - ty;
-        return (dx * dx + dy * dy) <= 10.f * 10.f;
+        const float radius = phonePresentation_ ? 22.f : 10.f;
+        return (dx * dx + dy * dy) <= radius * radius;
     }
 
     // Helpers used by paintContent for hover detection
@@ -1032,6 +1057,8 @@ private:
 
     void toggleFullScreenMode()
     {
+        if (phonePresentation_ && !fullScreenMode_)
+            return; // protect even future programmatic entry points
         if (!fullScreenMode_)
         {
             compactBoundsBeforeFull_ = getBounds();
@@ -1251,7 +1278,7 @@ private:
 
         int contentH = fullScreenMode_
             ? juce::jmax(fullContentH_, viewport_.getHeight())
-            : juce::jmax((int)targets_.size() * kRowH, viewport_.getHeight());
+            : juce::jmax((int)targets_.size() * rowHeight(), viewport_.getHeight());
         content_.setSize(contentW, contentH);
     }
 
