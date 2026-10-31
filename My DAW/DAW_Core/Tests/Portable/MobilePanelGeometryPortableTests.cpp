@@ -156,7 +156,22 @@ int main()
     static_assert(pluginBrowserRowHeight(false) == 22);
     static_assert(pluginBrowserSearchSlotHeight(false) == 26);
     static_assert(pluginBrowserHeaderHeight(false) == 28);
-    static_assert(browserMaxLandscape.height - 28 - pluginBrowserHeaderHeight(true)
+    using DAW::mobile::pluginBrowserChromeHeight;
+    using DAW::mobile::phoneChromeControlSize;
+    static_assert(pluginBrowserChromeHeight(true) == 44);
+    static_assert(pluginBrowserChromeHeight(false) == 28);
+    static_assert(phoneChromeControlSize(393) == 44);
+    static_assert(phoneChromeControlSize(245) == 44);
+    static_assert(phoneChromeControlSize(100) == 33);
+    static_assert(phoneChromeControlSize(2) == 0);
+    static_assert(phoneChromeControlSize(0) == 0);
+    for (int w : {0, 1, 2, 10, 100, 245, 393, 852})
+    {
+        const int side = phoneChromeControlSize(w);
+        assert(side >= 0 && side <= 44 && 3 * side <= w);
+    }
+    static_assert(browserMaxLandscape.height - pluginBrowserChromeHeight(true)
+                  - pluginBrowserHeaderHeight(true)
                   - pluginBrowserSearchSlotHeight(true) >= pluginBrowserRowHeight(true));
     constexpr auto browserMaxCollapsed = fitPhonePluginBrowser(360, 96, 50, 46, true);
     static_assert(browserMaxCollapsed.width == 0 && browserMaxCollapsed.height == 0);
