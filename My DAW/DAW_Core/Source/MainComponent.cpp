@@ -3169,7 +3169,7 @@ MainComponent::MainComponent()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        if (mixerBubble_) mixerBubble_->setVisible(!usesPhoneMixerPresentation());
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
@@ -4329,7 +4329,7 @@ MainComponent::MainComponent()
     mixerWindow_->onMinimized = [this]
     {
         mixerWindow_->setVisible(false);
-        mixerBubble_->setVisible(true);
+        mixerBubble_->setVisible(!usesPhoneMixerPresentation());
         mixerBubble_->toFront(false);
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
@@ -5231,7 +5231,7 @@ MainComponent::MainComponent()
            #if JUCE_ANDROID
             // Keep a floating one-tap reopen control only while mixer dock
             // is closed, without permanently obscuring the arrangement.
-            if (mixerBubble_) mixerBubble_->setVisible(!showMixer);
+            if (mixerBubble_) mixerBubble_->setVisible(!usesPhoneMixerPresentation() && !showMixer);
             if (showMixer) mixerViewport_.toFront(false);
            #endif
             if (slimeSidePanel_ && slimeSidePanel_->isAttached())
@@ -5239,7 +5239,7 @@ MainComponent::MainComponent()
         }
         else
         {
-            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(true); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
+            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(!usesPhoneMixerPresentation()); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
             else { mixerWindow_->setVisible(true); mixerWindow_->restoreIfMinimized(); mixerWindow_->toFront(false); mixerBubble_->setVisible(false); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(true); }
         }
         resized();
@@ -7314,7 +7314,7 @@ void MainComponent::undockMixer()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        if (mixerBubble_) mixerBubble_->setVisible(!usesPhoneMixerPresentation());
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
@@ -9011,7 +9011,10 @@ void MainComponent::resized()
     if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < DAW::mobile::kPhoneTrackDefaultHeight)
         arrangement_->setLaneHeight(0, DAW::mobile::kPhoneTrackDefaultHeight);
     if (menuBar_)
+    {
+        menuBar_->setPhonePresentation(phoneLayout);
         menuBar_->setBounds(area.removeFromTop(kMenuH));
+    }
 
     if (transportBar_)
     {
