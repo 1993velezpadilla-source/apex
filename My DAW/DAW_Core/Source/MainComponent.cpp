@@ -2738,8 +2738,25 @@ MainComponent::MainComponent()
                 return false;
             };
         }
-        auto area = getLocalBounds().reduced(80, 60).withSizeKeepingCentre(420, 360);
-        clipPropertiesWindow_->setBounds(area);
+        // Clip Properties also hosts clip-region FX. Keep its close/title
+        // chrome inside the phone safe area, clear of the bottom Transport.
+        // iPad/desktop retain the original floating dialog geometry.
+        if (usesPhoneMixerPresentation())
+        {
+            const auto fit = DAW::mobile::fitPhoneClipProperties(
+                getWidth(), getHeight(), 50,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            if (fit.window.width > 0 && fit.window.height > 0)
+                clipPropertiesWindow_->setBounds(
+                    fit.window.x, fit.window.y, fit.window.width, fit.window.height);
+            else
+                clipPropertiesWindow_->setBounds({});
+        }
+        else
+        {
+            auto area = getLocalBounds().reduced(80, 60).withSizeKeepingCentre(420, 360);
+            clipPropertiesWindow_->setBounds(area);
+        }
         clipPropertiesWindow_->setVisible(true);
         clipPropertiesWindow_->restoreIfMinimized();
         if (auto it = clipFxPanelOpenByClipId_.find(clipId); it != clipFxPanelOpenByClipId_.end())
@@ -9160,6 +9177,24 @@ void MainComponent::resized()
                                       kMenuH + kTransportH + 18, pw, ph);
         }
         syncPlaylistTimeline();
+    }
+
+    // After rotation, an open Clip Properties/clip FX dialog must not keep
+    // stale landscape/portrait bounds over the persistent phone Transport.
+    if (phoneLayout && clipPropertiesWindow_ && clipPropertiesWindow_->isVisible())
+    {
+        const auto fit = DAW::mobile::fitPhoneClipProperties(
+            getWidth(), getHeight(), 50,
+            transportBar_ ? transportBar_->getHeight() : 0);
+        if (fit.window.width > 0 && fit.window.height > 0)
+        {
+            const auto current = clipPropertiesWindow_->getBounds();
+            if (!DAW::mobile::phoneClipPropertiesFits(
+                    fit, { current.getX(), current.getY(),
+                           current.getWidth(), current.getHeight() }))
+                clipPropertiesWindow_->setBounds(
+                    fit.window.x, fit.window.y, fit.window.width, fit.window.height);
+        }
     }
 
     if (pianoRollWindow_ && pianoRollWindow_->getBounds().isEmpty())
