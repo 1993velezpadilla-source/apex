@@ -89,7 +89,9 @@ void BubblegumCableOverlayComponent::setCableAccentColour(juce::Colour colour)
 BubblegumCableOverlayComponent::~BubblegumCableOverlayComponent()
 {
     unbind();
+   #if !JUCE_ANDROID
     ApexPresentationClock::instance().removeReceiver(this);
+   #endif
 }
 
 void BubblegumCableOverlayComponent::unbind() noexcept
@@ -124,6 +126,13 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
     cachedSendRecords_.clear();
     cachedSnapshots_.clear();
 
+   #if JUCE_ANDROID
+    // Explicit product decision: visual cables are absent in APEX Android.
+    // Bind no graph listener, schedule no cable paint, build no cable cache.
+    // Bubblegum routing, sends, sidechains and automation remain in AppCore.
+    return;
+   #endif
+
     // Push reduced-motion preference to the sidechain cable animator.
     // Default is false (full animation). To honour the Windows "Show animations
     // in Windows" accessibility toggle, wire setReducedMotion() from your
@@ -143,6 +152,9 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
 
 void BubblegumCableOverlayComponent::requestPresentationUpdates()
 {
+   #if JUCE_ANDROID
+    return; // Don't request the continuous cable redraw clock on phones.
+   #endif
     if (presentationUpdateActive_)
         return;
 
@@ -152,6 +164,9 @@ void BubblegumCableOverlayComponent::requestPresentationUpdates()
 
 void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
 {
+   #if JUCE_ANDROID
+    return;
+   #endif
     if (isShowing())
         requestTopologyRefresh();
     else
@@ -164,6 +179,9 @@ void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
 
 bool BubblegumCableOverlayComponent::shouldRender() const
 {
+   #if JUCE_ANDROID
+    return false; // Never render any cable or profiler overlay on Android.
+   #endif
     if (!bgV2_ || !bgV2_->routingGraph || !mixerPanel_)
         return false;
 
@@ -177,6 +195,10 @@ bool BubblegumCableOverlayComponent::shouldRender() const
 
 void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
 {
+   #if JUCE_ANDROID
+    juce::ignoreUnused(deltaSeconds);
+    return; // Avoid all geometry, routing scans, HUD and UI-thread work.
+   #endif
     const double timerStart = juce::Time::getMillisecondCounterHiRes();
     const double nowSec = timerStart * 0.001;
 
@@ -298,6 +320,10 @@ void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
 
 void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
 {
+   #if JUCE_ANDROID
+    juce::ignoreUnused(g);
+    return;
+   #endif
     paintRateMeter_.tick();
     const double paintStart = juce::Time::getMillisecondCounterHiRes();
 
