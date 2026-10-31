@@ -101,6 +101,7 @@ jobs:
       - name: Generate Android exporter from ORIGINAL APEX .jucer
         shell: bash
         run: |
+          python3 -m unittest discover -s Android/scripts/tests -p 'test_enable_immersive_fullscreen.py' -v
           python3 Android/scripts/generate_full_exporter.py \
             2>&1 | tee "$RUNNER_TEMP/apex-android-full-source-audit.txt"
           PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
