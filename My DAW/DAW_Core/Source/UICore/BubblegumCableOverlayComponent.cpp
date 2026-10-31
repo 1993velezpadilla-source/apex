@@ -620,6 +620,7 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
     // ── Composite frame cache ──────────────────────────────────────────────
     // Only re-bake cachedFrame_ when topology/layout changed or sidechain is
     // animating. Static cables with all cache hits blit the previous frame.
+   #if !JUCE_ANDROID
     const int w = getWidth(), h = getHeight();
     const bool frameSizeChanged = !cachedFrame_.isValid()
                                   || cachedFrame_.getWidth() != w
@@ -629,11 +630,24 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
         cachedFrame_ = juce::Image(juce::Image::ARGB, juce::jmax(1, w), juce::jmax(1, h), true);
         compositeFrameDirty_ = true;
     }
+   #endif
 
+   #if JUCE_ANDROID
+    // Mobile: the expensive part of the user's 130-310ms paint captures was
+    // NOT paintAll (often 0.00ms). Full-screen ARGB cache clear/upload/blit
+    // remains outside that profiler counter. Avoid an extra 1536x864 buffer
+    // and its full-frame software-to-screen composite for every touch update.
+    // Drawing paths directly also avoids copying a transparent entire screen.
+    // Repaint with existing real routing snapshots and hit targets each time.
+    if (true)
+    {
+        juce::Graphics& offG = g;
+   #else
     if (compositeFrameDirty_)
     {
         cachedFrame_.clear(cachedFrame_.getBounds(), juce::Colours::transparentBlack);
         juce::Graphics offG(cachedFrame_);
+   #endif
 
         // Rebuild the clickable anchor set for this frame's geometry.
         cableAnchors_.clear();
@@ -856,10 +870,12 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
     // frame must be blitted ONCE at reduced opacity — blitting the same
     // frame a second time at 45% over itself re-composites to full opacity
     // and the transparency effect silently disappears.
+   #if !JUCE_ANDROID
     if (draggingWetDry_)
         g.setOpacity(0.45f);
     g.drawImageAt(cachedFrame_, 0, 0);
     g.setOpacity(1.0f);
+   #endif
 
     if (draggingWetDry_)
     {
