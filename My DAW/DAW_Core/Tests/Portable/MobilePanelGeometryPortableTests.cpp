@@ -240,6 +240,18 @@ int main()
             assert(phoneChromeButtonTapActivates(1, 1, dx, dy) == tap);
             assert(!phoneChromeButtonTapActivates(1, 2, dx, dy));
         }
+    // Double-tapping a phone title bar must not maximize unexpectedly or
+    // overwrite saved floating bounds during the second touch gesture.
+    // Desktop title-bar double-click retains its original behavior.
+    using DAW::mobile::chromeTitleDoubleClickMaximizes;
+    static_assert(!chromeTitleDoubleClickMaximizes(true, false));
+    static_assert(!chromeTitleDoubleClickMaximizes(true, true));
+    static_assert(chromeTitleDoubleClickMaximizes(false, false));
+    static_assert(!chromeTitleDoubleClickMaximizes(false, true));
+    for (bool phone : {false, true})
+        for (bool overButton : {false, true})
+            assert(chromeTitleDoubleClickMaximizes(phone, overButton)
+                   == (!phone && !overButton));
     using DAW::mobile::pluginBrowserChromeHeight;
     using DAW::mobile::phoneChromeControlSize;
     static_assert(pluginBrowserChromeHeight(true) == 44);
