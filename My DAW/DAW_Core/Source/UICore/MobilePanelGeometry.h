@@ -150,7 +150,8 @@ constexpr bool phoneClipPropertiesFits(const PhoneClipPropertiesFit& fit,
  *  keep their existing 340x560 browser placement.
  */
 constexpr PanelBounds fitPhonePluginBrowser(int viewportW, int viewportH,
-                                            int reservedTop, int reservedBottom) noexcept
+                                            int reservedTop, int reservedBottom,
+                                            bool maximized = false) noexcept
 {
     if (viewportW <= 0 || viewportH <= 0)
         return { 0, 0, 0, 0 };
@@ -161,7 +162,9 @@ constexpr PanelBounds fitPhonePluginBrowser(int viewportW, int viewportH,
     const int safeH = viewportH - top - bottom - 2 * margin;
     if (safeW <= 0 || safeH <= 0)
         return { 0, 0, 0, 0 };
-    return { margin, top + margin, minInt(340, safeW), minInt(560, safeH) };
+    return { margin, top + margin,
+             maximized ? safeW : minInt(340, safeW),
+             maximized ? safeH : minInt(560, safeH) };
 }
 
 /** Keep a phone's Track List reachable without stealing the Arrangement.
