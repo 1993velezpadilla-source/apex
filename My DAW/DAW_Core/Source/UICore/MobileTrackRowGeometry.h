@@ -32,7 +32,7 @@ constexpr PhoneTrackControlLayout phoneTrackControlLayout(
     const int gapX = trackMin(6, contentWidth / 12);
     const int w = trackMax(0, (contentWidth - 2 * gapX) / 3);
     const int firstY = trackMin(41, primaryRowHeight / 4);
-    const int maxButtonH = trackMax(0, (primaryRowHeight - firstY - 12) / 3);
+    const int maxButtonH = trackMax(0, (primaryRowHeight - firstY) / 3);
     const int h = trackMin(44, maxButtonH);
     if (w == 0 || h == 0)
         return out;
