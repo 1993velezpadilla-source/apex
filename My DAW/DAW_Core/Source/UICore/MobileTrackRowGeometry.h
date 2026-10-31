@@ -7,7 +7,7 @@ namespace DAW::mobile
 {
 // Two 44-unit control rows + 36-unit title + spacing. Phone tracks must
 // NOT be stretched to 180 just to reserve an unused automation-target row.
-constexpr int kPhoneTrackDefaultHeight = 132;
+constexpr int kPhoneTrackDefaultHeight = 80;
 
 struct TrackControlRect
 {
