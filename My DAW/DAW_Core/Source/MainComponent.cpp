@@ -9202,7 +9202,21 @@ void MainComponent::resized()
 
     updateSlimeAttachedPosition();
     if (browserChrome_ && browserChrome_->isVisible() && !browserChrome_->isMaximized())
-        browserChrome_->setBounds(24, kMenuH + kTransportH + 18, 340, juce::jmin(560, getHeight() - 150));
+    {
+        if (phoneLayout)
+        {
+            // FX Browser must not use desktop's fixed width or top Transport
+            // offset on phones. Leave the persistent bottom Transport clear
+            // through portrait/landscape and split-window resize.
+            const auto bounds = DAW::mobile::fitPhonePluginBrowser(
+                getWidth(), getHeight(), 50,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            browserChrome_->setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+        }
+        else
+            browserChrome_->setBounds(24, kMenuH + kTransportH + 18,
+                                     340, juce::jmin(560, getHeight() - 150));
+    }
 
     if (settingsPanel_ && settingsPanel_->isVisible())
         settingsPanel_->setBounds(getLocalBounds().reduced(120, 70));
