@@ -152,6 +152,20 @@ constexpr int pluginBrowserHeaderHeight(bool phone) noexcept { return phone ? 0 
 constexpr int pluginBrowserSearchSlotHeight(bool phone) noexcept { return phone ? 48 : 26; }
 constexpr int pluginBrowserRowHeight(bool phone) noexcept { return phone ? 44 : 22; }
 constexpr int pluginBrowserChromeHeight(bool phone) noexcept { return phone ? 44 : 28; }
+// A phone swipe that scrolls the FX list must never load a plugin on
+// mouseUp. JUCE delivers mouseUp to the row that received mouseDown even
+// when the finger has moved; desktop mouse selection stays unchanged.
+// Limit each axis before squaring to avoid overflow for malformed events.
+constexpr bool pluginBrowserRowTapActivates(bool phone, int dragX, int dragY,
+                                            bool releasedInside) noexcept
+{
+    if (!phone)
+        return true;
+    if (!releasedInside || dragX < -8 || dragX > 8 || dragY < -8 || dragY > 8)
+        return false;
+    return dragX * dragX + dragY * dragY <= 64;
+}
+
 // In impossibly narrow split views three controls share the available width.
 constexpr int phoneChromeControlSize(int panelWidth) noexcept
 {
