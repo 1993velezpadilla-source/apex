@@ -88,6 +88,18 @@ constexpr FloatingMixerFit fitFloatingMixer(int viewportW, int viewportH,
     return { safe, window, minInt(200, safeW), minInt(180, safeH) };
 }
 
+/** Keep a phone's Track List reachable without stealing the Arrangement.
+ *  iPhone and Android use this; iPad/desktop keep their stored track width.
+ *  Reserve at least one logical unit for the timeline in tiny split views.
+ */
+constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexcept
+{
+    if (requestedWidth <= 0 || workspaceWidth <= 1)
+        return 0;
+    const int preferred = maxInt(108, workspaceWidth / 4);
+    return minInt(requestedWidth, minInt(preferred, workspaceWidth - 1));
+}
+
 /** Check a restored or dragged Mixer window against the safe phone area.
  *  Long-long edges avoid signed overflow from corrupt/restored coordinates.
  *  Reject collapsed windows even if their origin lies inside the viewport.
