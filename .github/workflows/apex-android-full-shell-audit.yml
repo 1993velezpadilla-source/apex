@@ -126,8 +126,24 @@ jobs:
         run: |
           set -o pipefail
           chmod +x ./gradlew
-          ./gradlew --no-daemon --max-workers=2 assembleDebug \
-            2>&1 | tee "$RUNNER_TEMP/apex-android-full-compile.log"
+          # Gradle dependency servers intermittently failed to resolve the
+          # Android Gradle Plugin transitive dependencies on run 41152629694.
+          # Retry NETWORK resolution only; never ignore real C++ errors.
+          for attempt in 1 2 3; do
+            echo "[APEX-ANDROID] Gradle build attempt $attempt/3" |
+              tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
+            if ./gradlew --no-daemon --max-workers=2 assembleDebug \
+                2>&1 | tee -a "$RUNNER_TEMP/apex-android-full-compile.log"; then
+              exit 0
+            fi
+            if ! tail -n 300 "$RUNNER_TEMP/apex-android-full-compile.log" |
+                grep -Eq 'Could not resolve|Could not find com\\.|Could not GET|Read timed out|Connection timed out|repo.maven.apache.org|dl.google.com'; then
+              echo "[APEX-ANDROID] Real build error; will not hide it with retries."
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
 
       - name: Verify actual full APEX ARM64 APK package (not a probe)
         shell: bash
