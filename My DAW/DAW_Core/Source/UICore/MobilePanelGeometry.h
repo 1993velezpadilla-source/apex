@@ -17,6 +17,19 @@ constexpr int clampAnchorOffset(long long offset, int lower, int upper) noexcept
 {
     return offset < lower ? lower : offset > upper ? upper : static_cast<int>(offset);
 }
+// Expand the 30-unit painted close orb to a 44-unit phone touch target.
+// Clamp within the panel for tiny split-screen viewports; desktop keeps
+// its original painted hit bounds.
+constexpr PanelBounds phoneCloseTouchBounds(int panelW, int panelH) noexcept
+{
+    if (panelW <= 0 || panelH <= 0)
+        return { 0, 0, 0, 0 };
+    const int w = minInt(44, panelW);
+    const int h = minInt(44, panelH);
+    return { clampInt(panelW - 25 - w / 2, 0, panelW - w),
+             clampInt(25 - h / 2, 0, panelH - h), w, h };
+}
+
 constexpr PanelBounds fitBubblegumSends(int viewportW, int viewportH,
                                        int anchorX, int anchorY, bool phone) noexcept
 {
