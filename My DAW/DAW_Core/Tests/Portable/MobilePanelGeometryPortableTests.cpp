@@ -150,6 +150,17 @@ int main()
                         assert(!touching(a, boxes[j]));
                 }
             }
+    // Folder icon was previously at mid-row, stealing touches from Arm.
+    // Nested folder indentation must not shrink the three columns below 44.
+    static_assert(DAW::mobile::phoneTrackIndentWidth(0) == 0);
+    static_assert(DAW::mobile::phoneTrackIndentWidth(1) == 5);
+    static_assert(DAW::mobile::phoneTrackIndentWidth(12) == 10);
+    constexpr auto folderIcon = DAW::mobile::phoneFolderChevronBounds(14, 180, 180);
+    constexpr auto nestedRow = phoneTrackControlLayout(22, 152, 180, false, true, true);
+    static_assert(folderIcon.width == 26 && folderIcon.height == 26);
+    static_assert(folderIcon.y + folderIcon.height < nestedRow.mute.y);
+    static_assert(nestedRow.arm.width >= 44 && nestedRow.input.width >= 44);
+
     constexpr auto masterGrid = phoneTrackControlLayout(12, 162, 180, true, true, true);
     static_assert(masterGrid.mute.width == 50 && masterGrid.solo.width == 50);
     static_assert(masterGrid.monitor.empty() && masterGrid.arm.empty());
