@@ -668,6 +668,11 @@ public:
             repaint();
             return;
         }
+        // The dragger intentionally has no desktop bounds constrainer, but
+        // on a phone a released panel must never strand its close button
+        // outside the activity (including after a gesture near a screen edge).
+        if (isDragging_ && phonePresentation_)
+            constrainPhonePanelToParent();
         isDragging_ = false;
     }
     void mouseMove(const juce::MouseEvent& e) override
