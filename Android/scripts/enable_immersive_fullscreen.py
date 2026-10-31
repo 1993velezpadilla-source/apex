@@ -116,6 +116,12 @@ def main() -> int:
     if old not in ("com.rmsl.juce.JuceActivity", ANDROID_ACTIVITY):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     activity.set(f"{{{ANDROID_NS}}}name", ANDROID_ACTIVITY)
+    # JUCE must consume rotation changes instead of destroying/recreating the
+    # DAW session. Both configuration flags must survive the Projucer export.
+    config_changes = set(activity.get(f"{{{ANDROID_NS}}}configChanges", "").split("|"))
+    if not {"orientation", "screenSize"}.issubset(config_changes):
+        raise RuntimeError("Android Activity would restart the DAW on rotation")
+
     # Projucer's Android exporter (or a stale generated manifest) can keep an
     # orientation lock even after the C++ Desktop mask is corrected.
     # FULL_SENSOR permits portrait and landscape when Android auto-rotate is off.
