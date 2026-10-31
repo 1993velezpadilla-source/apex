@@ -7,6 +7,7 @@
 #include "../ActionCore/ActionManager.h"
 #include "../ActionCore/ActionID.h"
 #include "ClickToolbarStrip.h"
+#include "MobileTransportPortrait.h"
 #include "../Automation/AutomationSystemCore.h"
 #include "../AutomationCore/PluginAutomationRecorderCore.h"
 
@@ -440,15 +441,23 @@ public:
 
             if (portrait)
             {
-                auto bottom = juce::Rectangle<int>(margin, topY + 2 * (rowH + margin),
-                                                    juce::jmax(0, w - 2 * margin), rowH);
-                const int sendsW = juce::jmin(96, juce::jmax(65, w / 4));
-                const int mixerW = juce::jmin(96, juce::jmax(65, w / 4));
-                mobileSendsBounds_ = bottom.removeFromRight(sendsW);
-                bottom.removeFromRight(juce::jmin(gap, bottom.getWidth()));
-                mobileMixerBounds_ = bottom.removeFromRight(mixerW);
+                // Eight controls cannot all provide 44-unit targets on a
+                // 360-unit phone. Keep six transport buttons in the action
+                // row and move FX/Browser to the bottom beside Mixer/Sends.
+                const auto layout = mobile::portraitTransportLayout(w, h);
+                const auto asRect = [](mobile::PortraitTransportBounds b)
+                {
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
+                    if (auto* btn = buttons_[(size_t)i])
+                        btn->setBounds(asRect(layout.transport[i]));
+                fxBtnBounds_ = asRect(layout.fx);
+                brBtnBounds_ = asRect(layout.browser);
+                mobileMixerBounds_ = asRect(layout.mixer);
+                mobileSendsBounds_ = asRect(layout.sends);
                 if (clickStrip_)
-                    clickStrip_->setBounds(bottom.removeFromLeft(juce::jmin(132, bottom.getWidth())));
+                    clickStrip_->setBounds(asRect(layout.click));
             }
             else
             {
