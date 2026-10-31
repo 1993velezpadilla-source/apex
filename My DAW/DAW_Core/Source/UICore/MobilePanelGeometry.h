@@ -204,6 +204,29 @@ constexpr PanelBounds fitPhonePluginBrowser(int viewportW, int viewportH,
              maximized ? safeH : minInt(560, safeH) };
 }
 
+/** Preserve a manually dragged phone FX Browser position while keeping its
+ *  title and list within the header/Transport safe workspace. Rotation may
+ *  shrink the browser; maximized windows always fill the safe rectangle.
+ */
+constexpr PanelBounds fitPhonePluginBrowserPlacement(
+    int viewportW, int viewportH, int reservedTop, int reservedBottom,
+    PanelBounds current, bool maximized = false) noexcept
+{
+    const auto fitted = fitPhonePluginBrowser(
+        viewportW, viewportH, reservedTop, reservedBottom, maximized);
+    if (maximized || fitted.width <= 0 || fitted.height <= 0
+        || current.width <= 0 || current.height <= 0)
+        return fitted;
+
+    const int top = clampInt(reservedTop, 0, viewportH);
+    const int bottom = clampInt(reservedBottom, 0, viewportH - top);
+    const int margin = fitted.x;
+    return { clampInt(current.x, margin, viewportW - margin - fitted.width),
+             clampInt(current.y, top + margin,
+                      viewportH - bottom - margin - fitted.height),
+             fitted.width, fitted.height };
+}
+
 /** Keep a phone's Track List reachable without stealing the Arrangement.
  *  iPhone and Android use this; iPad/desktop keep their stored track width.
  *  Reserve at least one logical unit for the timeline in tiny split views.
