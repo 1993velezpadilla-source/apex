@@ -28,9 +28,9 @@ def main() -> int:
     root = tree.getroot()
     if root.tag != "JUCERPROJECT":
         raise ValueError(f"Expected JUCERPROJECT, got {root.tag}")
-    root.set("name", "APEXFullAndroid")
-    root.set("bundleIdentifier", "com.xziel.apex.fulltest")
-    root.set("version", "0.1.0")
+    root.set("name", "APEX Mobile Portrait QA")
+    root.set("bundleIdentifier", "com.xziel.apex.mobileportraitqa")
+    root.set("version", "0.2.1")
     # Do not let this experimental build generate VST3/ASIO host code on Android.
     defines = [
         flag for flag in root.get("defines", "").split()
