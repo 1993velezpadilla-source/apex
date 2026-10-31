@@ -33,6 +33,8 @@ constexpr bool valid(int w, int h)
     }
     return true;
 }
+static_assert(valid(320, 144));
+static_assert(valid(360, 112));
 static_assert(valid(360, 144));
 static_assert(valid(393, 144));
 static_assert(valid(245, 144));
@@ -48,9 +50,17 @@ static_assert(phone.transport[0].width >= 44 && phone.transport[5].width >= 44);
 static_assert(phone.fx.width == 44 && phone.browser.width == 44);
 static_assert(phone.mixer.width >= 44 && phone.sends.width >= 44);
 static_assert(phone.click.width == 132);
-// The existing 144-unit transport deck still gives 40-unit-tall rows.
-// Vertical target size remains a separate layout/device QA gate.
-static_assert(phone.transport[0].height == 40);
+// At the 144-unit portrait deck, all primary actions must have >=44
+// logical-unit vertical hit areas, without overlapping the top readouts.
+static_assert(phone.transport[0].height >= 44 && phone.transport[5].height >= 44);
+static_assert(phone.fx.height >= 44 && phone.browser.height >= 44);
+static_assert(phone.mixer.height >= 44 && phone.sends.height >= 44);
+static_assert(phone.click.height >= 44);
+static_assert(phone.transport[0].y >= 6 + (144 - 4 * 6) / 3);
+static_assert(phone.sends.y + phone.sends.height <= 144);
+static_assert(portraitTransportLayout(320, 144).transport[0].width >= 44);
+// A shorter deck cannot provide the same 44-unit height in three rows.
+static_assert(portraitTransportLayout(360, 112).transport[0].height < 44);
 
 int main()
 {
