@@ -285,7 +285,11 @@ public:
 
     bool needsPresentationTick() const
     {
-        return track_.isMaster()
+        // Android/iPhone: a permanently animated MASTER eye repainting a
+        // buffered row on every idle tick is unnecessary for recording.
+        // Keep the eye graphic static on phones; active selection and actual
+        // automation still animate. Desktop/iPad behavior is unchanged.
+        return (track_.isMaster() && !phonePresentation_)
             || selectionVisual_.needsAnimationTick()
             || (!automationBounds_.isEmpty() && hasTrackAutomation());
     }
@@ -317,7 +321,7 @@ public:
                         .getIntersection(getLocalBounds()));
         }
 
-        if (track_.isMaster())
+        if (track_.isMaster() && !phonePresentation_)
         {
             masterLivingEye_.update(dt);
             repaint(masterLivingEye_.getContentBounds().toNearestInt()
