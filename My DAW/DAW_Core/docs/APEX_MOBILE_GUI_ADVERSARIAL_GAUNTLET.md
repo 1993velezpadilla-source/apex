@@ -41,3 +41,10 @@
 3. Floating Mixer responsive strip viewport and drag/resize constraints.
 4. Native plugin editor touch layouts, gesture arbitration, safe keyboard & window insets.
 5. Portrait/landscape on-device workflows: Volt 1 input → record → play → open Mixer → Bubblegum send → reopen project.
+
+## Pass 2 — drag-release viewport recovery (2026-10-31)
+
+- **Observed code defect:** `BubblegumV2PanelUI::mouseDrag()` calls `ComponentDragger::dragComponent(..., nullptr)` without bounds constraints; releasing beyond the activity could strand the header and close button off-screen. Rotation-only recovery did not handle ordinary drag release.
+- **Small UI-only fix:** On phone presentation, `mouseUp()` now calls the existing `constrainPhonePanelToParent()` after a header drag. Desktop/iPad drag behavior remains unchanged; no DSP, routing, send level, project, or `main` changes.
+- **Regression coverage:** Added explicit negative/large drag-anchor cases and multiple tiny portrait/landscape viewports to the portable geometry test. This checks recovery geometry, **not** JUCE event dispatch or physical touch behavior.
+- **Remaining gates:** CI on the new head, native compile, actual drag/touch/rotation on Android and iPhone, iPad Matrix regression, save/reopen, and USB audio recording. Keep this PR draft.
