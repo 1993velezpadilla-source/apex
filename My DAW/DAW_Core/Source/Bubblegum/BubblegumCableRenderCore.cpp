@@ -210,7 +210,7 @@ namespace bubblegum
             juce::Path cable;
             cable.startNewSubPath(src);
             cable.cubicTo(src.x + (dst.x - src.x) * 0.23f, src.y + depth,
-                          src.x + (dst.x - src.x) * 0.77f, dst.y + depth, dst);
+                          src.x + (dst.x - src.x) * 0.77f, dst.y + depth, dst.x, dst.y);
             const float alpha = snapshot.bypassed
                               || snapshot.state == SendVisualState::ExistsInactive
                               ? 0.32f : 0.92f;
