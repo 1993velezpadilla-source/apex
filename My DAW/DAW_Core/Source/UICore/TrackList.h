@@ -637,7 +637,7 @@ public:
         if (isFolderBus_ && !master)
             nameBounds.removeFromLeft(phonePresentation_ ? 26.f : 16.f);
         nameBounds = nameBounds.reduced(8, 0);
-        nameBounds = nameBounds.removeFromTop(phonePresentation_ ? 41.0f
+        nameBounds = nameBounds.removeFromTop(phonePresentation_ ? 34.0f
                                                                   : nameBounds.getHeight() * 0.5f);
         if (!master) nameBounds.removeFromRight(67);
         g.drawText(track_.getName(), nameBounds, juce::Justification::centredLeft);
