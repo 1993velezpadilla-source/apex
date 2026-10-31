@@ -3159,7 +3159,9 @@ MainComponent::MainComponent()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        // A phone's persistent Mixer deck replaces the floating desktop
+        // restore bubble. Closing must not reintroduce a draggable desktop orb.
+        if (mixerBubble_) mixerBubble_->setVisible(!usesPhoneMixerPresentation());
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
@@ -4319,8 +4321,9 @@ MainComponent::MainComponent()
     mixerWindow_->onMinimized = [this]
     {
         mixerWindow_->setVisible(false);
-        mixerBubble_->setVisible(true);
-        mixerBubble_->toFront(false);
+        mixerBubble_->setVisible(!usesPhoneMixerPresentation());
+        if (!usesPhoneMixerPresentation())
+            mixerBubble_->toFront(false);
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
         resized();
@@ -9035,8 +9038,15 @@ void MainComponent::resized()
     if (markerBubble_)
         markerBubble_->setBounds(getLocalBounds());
     if (bubblegumOrb_)
-        bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18,
-            phoneLayout ? (kMenuH + 10) : 92, bubbleSize, bubbleSize);
+    {
+        // "Sends" lives in the bottom touch transport. The desktop B orb
+        // steals a 54x54 hit area from a narrow phone Arrangement.
+        if (phoneLayout)
+            bubblegumOrb_->setVisible(false);
+        else
+            bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18,
+                                     92, bubbleSize, bubbleSize);
+    }
     if (masterBubble_)
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
 
