@@ -399,7 +399,7 @@ public:
             // Three rows on a tall phone, two on a short landscape phone.
             const int w = juce::jmax(0, getWidth());
             const int h = juce::jmax(0, getHeight());
-            const bool portrait = h >= 112;
+            const bool portrait = h >= 144;
             const int margin = 6;
             const int gap = 3;
             const int rowH = juce::jmax(0, (h - (portrait ? 4 : 3) * margin)
@@ -461,19 +461,28 @@ public:
             }
             else
             {
-                // Landscape presents mixer/sends in the wide top row.
-                const int actionW = juce::jmin(80, juce::jmax(54, w / 9));
-                const int auxWidth = juce::jmin(pos.getWidth(), actionW * 2 + 2 * gap);
-                auto aux = pos.removeFromRight(auxWidth);
-                if (clickStrip_)
+                // Short portrait and landscape: two 44+ unit rows at h >= 94.
+                // Reserve Mixer/Sends instead of allowing readouts to crowd them.
+                const auto layout = mobile::compactPhoneTransportLayout(w, h);
+                const auto asRect = [](mobile::PortraitTransportBounds b)
                 {
-                    // Metronome stays reachable between transport and controls.
-                    clickStrip_->setBounds(juce::Rectangle<int>(
-                        pos.getX(), topY, juce::jmin(132, pos.getWidth()), rowH));
-                }
-                mobileMixerBounds_ = aux.removeFromLeft(juce::jmin(actionW, aux.getWidth()));
-                aux.removeFromLeft(juce::jmin(gap, aux.getWidth()));
-                mobileSendsBounds_ = aux;
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
+                    if (auto* btn = buttons_[(size_t)i])
+                        btn->setBounds(asRect(layout.transport[i]));
+                fxBtnBounds_ = asRect(layout.fx);
+                brBtnBounds_ = asRect(layout.browser);
+                mobileMixerBounds_ = asRect(layout.mixer);
+                mobileSendsBounds_ = asRect(layout.sends);
+                projectKey_.setBounds(asRect(layout.key));
+                tempo_.setBounds(asRect(layout.tempo));
+                posReadoutBounds_ = asRect(layout.clock);
+                automArmBtn_.setBounds(asRect(layout.automation));
+                if (clickStrip_)
+                    clickStrip_->setBounds(asRect(layout.click));
+                projectKey_.setVisible(layout.key.width > 0);
+                tempo_.setVisible(layout.tempo.width > 0);
             }
             repaint();
             return;

@@ -62,9 +62,56 @@ static_assert(portraitTransportLayout(320, 144).transport[0].width >= 44);
 // A shorter deck cannot provide the same 44-unit height in three rows.
 static_assert(portraitTransportLayout(360, 112).transport[0].height < 44);
 
+
+constexpr bool validCompact(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (!inside(r.transport[i], w, h)) return false;
+        if (i && !separated(r.transport[i - 1], r.transport[i])) return false;
+    }
+    const PortraitTransportBounds top[] = {
+        r.clock, r.tempo, r.key, r.automation, r.click,
+        r.fx, r.browser, r.mixer, r.sends
+    };
+    for (int i = 0; i < 9; ++i)
+    {
+        if (!inside(top[i], w, h)) return false;
+        if (top[i].width == 0 || top[i].height == 0) continue;
+        for (int j = 0; j < i; ++j)
+            if (top[j].width && top[j].height
+                && !separated(top[j], top[i])) return false;
+        for (int j = 0; j < 6; ++j)
+            if (!separated(top[i], r.transport[j])) return false;
+    }
+    return true;
+}
+static_assert(validCompact(360, 96));
+static_assert(validCompact(320, 112));
+static_assert(validCompact(480, 96));
+static_assert(validCompact(245, 96));
+static_assert(validCompact(20, 8));
+static_assert(validCompact(0, 0));
+static_assert(validCompact(std::numeric_limits<int>::max(),
+                           std::numeric_limits<int>::max()));
+constexpr auto compact360 = DAW::mobile::compactPhoneTransportLayout(360, 96);
+static_assert(compact360.transport[0].width >= 44
+              && compact360.transport[5].width >= 44);
+static_assert(compact360.transport[0].height >= 44
+              && compact360.transport[5].height >= 44);
+static_assert(compact360.fx.width >= 44 && compact360.browser.width >= 44);
+static_assert(compact360.mixer.width >= 44 && compact360.sends.width >= 44);
+static_assert(compact360.mixer.height >= 44 && compact360.sends.height >= 44);
+static_assert(DAW::mobile::compactPhoneTransportLayout(320, 112).transport[0].height >= 44);
+static_assert(DAW::mobile::compactPhoneTransportLayout(480, 96).sends.width >= 44);
+
 int main()
 {
     for (int w = 0; w < 900; w += 7)
         for (int h = 0; h < 500; h += 9)
+        {
             assert(valid(w, h));
+            if (h < 144) assert(validCompact(w, h));
+        }
 }
