@@ -7,6 +7,7 @@
 #include "CursorThemeCore.h"
 #include "ApexRadialContextMenu.h"
 #include "ApexPointerPolicy.h"
+#include "MobileTrackRowGeometry.h"
 #include "BeatMakingFeaturePolicy.h"
 #include "../TrackCore/Track.h"
 #include "../TrackCore/TrackReorderCore.h"
@@ -134,6 +135,14 @@ public:
         isFolderBus_ = (track_.getRole() == TrackRole::FolderBus);
         selectionVisual_.setAccentColour(track_.isMaster() ? masterAccentColour()
                                                             : track_.getColor());
+        resized();
+        repaint();
+    }
+
+    void setPhonePresentation(bool enabled)
+    {
+        if (phonePresentation_ == enabled) return;
+        phonePresentation_ = enabled;
         resized();
         repaint();
     }
@@ -609,7 +618,8 @@ public:
         if (isFolderBus_ && !master)
             nameBounds.removeFromLeft(16.f);
         nameBounds = nameBounds.reduced(8, 0);
-        nameBounds = nameBounds.removeFromTop(nameBounds.getHeight() * 0.5f);
+        nameBounds = nameBounds.removeFromTop(phonePresentation_ ? 41.0f
+                                                                  : nameBounds.getHeight() * 0.5f);
         if (!master) nameBounds.removeFromRight(67);
         g.drawText(track_.getName(), nameBounds, juce::Justification::centredLeft);
         if (!master)
@@ -754,6 +764,31 @@ public:
         const bool showPiano = BeatMakingFeaturePolicy::kPianoRollEnabled;
         const bool showTarget = !isMaster && track_.isAutomationVisible();
         const bool showInput  = !isMaster && track_.getRole() == TrackRole::Audio;
+
+        if (phonePresentation_)
+        {
+            // A fixed single row can NEVER fit 5 controls plus hardware input
+            // in a 108-unit sidebar. Use a 3-column phone grid instead. Hit
+            // rectangles are the painted rectangles, not invisible overlays.
+            const auto layout = mobile::phoneTrackControlLayout(
+                juce::roundToInt(bounds.getX()), juce::roundToInt(bounds.getWidth()),
+                juce::roundToInt(bounds.getHeight()), isMaster, showInput, showTarget);
+            const auto place = [](juce::Rectangle<float>& dst, mobile::TrackControlRect src)
+            {
+                dst = { (float)src.x, (float)src.y, (float)src.width, (float)src.height };
+            };
+            place(muteBounds_, layout.mute);
+            place(soloBounds_, layout.solo);
+            place(monitorBounds_, layout.monitor);
+            place(armBounds_, layout.arm);
+            place(automationBounds_, layout.automation);
+            place(inputBounds_, layout.input);
+            place(automationTargetBounds_, layout.target);
+            preFaderBounds_ = {};
+            trimBounds_ = {};
+            pianoRollBounds_ = {};
+            return;
+        }
 
         // Bottom half for buttons
         const float h = bounds.getHeight();
@@ -1819,6 +1854,7 @@ public:
     enum class DragMode { None, Resize, PendingReorder, Reorder };
     DragMode dragMode_ = DragMode::None;
     int  height_      = 72;
+    bool phonePresentation_ = false;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
     juce::Point<int> contextScreenPoint_; // exact mouse/touch position for wheel
@@ -2570,6 +2606,15 @@ public:
             trackRows_[actual]->setDesiredHeight(h);
     }
 
+    void setPhonePresentation(bool enabled)
+    {
+        if (phonePresentation_ == enabled) return;
+        phonePresentation_ = enabled;
+        for (auto* row : trackRows_)
+            if (row != nullptr) row->setPhonePresentation(enabled);
+        resized();
+    }
+
     TrackList(TrackManager& trackManager)
         : trackManager_(trackManager)
     {
@@ -3129,6 +3174,7 @@ public:
 
 private:
     TrackManager& trackManager_;
+    bool phonePresentation_ = false;
     juce::OwnedArray<TrackRow> trackRows_;
     TrackListHeaderBar headerBar_;   // pinned overlay with the real TRACKS "+"
     int  dragStartX_ = -1;
@@ -3410,6 +3456,7 @@ private:
         if (trackManager_.hasMasterTrack())
         {
             auto* masterRow = new TrackRow(*trackManager_.getMasterTrack());
+            masterRow->setPhonePresentation(phonePresentation_);
             masterRow->setDesiredHeight(108);
             masterRow->setSelected(selectedTrackIds_.count(masterRow->getTrackID()) > 0);
             masterRow->onPresentationDemandChanged = [this]
@@ -3501,6 +3548,7 @@ private:
             {
                 const int visibleRowIndex = trackRows_.size() - (trackManager_.hasMasterTrack() ? 1 : 0);
                 auto* row = new TrackRow(*track);
+            row->setPhonePresentation(phonePresentation_);
                 row->setSelected(selectedTrackIds_.count(row->getTrackID()) > 0);
                 row->setIndentLevel(depth);
                 row->onPresentationDemandChanged = [this]
