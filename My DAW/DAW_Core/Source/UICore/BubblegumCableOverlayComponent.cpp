@@ -882,6 +882,8 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
         compositeFrameDirty_ = false;
     } // compositeFrameDirty_ block ends — offG is destroyed here
 
+    const double paintAfterBakeStartMs = juce::Time::getMillisecondCounterHiRes();
+
     // ── Wet/dry anchor adjustment feedback ─────────────────────────────────
     // While the user drags a destination anchor (the send-level knob), dim
     // the cables so the value being adjusted reads clearly, and draw a
@@ -1019,7 +1021,8 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
             paintEnd   - paintStart,   // total paint ms
             (int)cachedSnapshots_.size(),
             cableRenderStats.cacheHits,
-            cableRenderStats.cacheMisses);
+            cableRenderStats.cacheMisses,
+            paintEnd - paintAfterBakeStartMs);
         const double mixerFps = mixerFpsFn_ ? mixerFpsFn_() : -1.0;
         timingHUD_.draw(g, getLocalBounds(), paintRateMeter_.getFps(), mixerFps);
     }
