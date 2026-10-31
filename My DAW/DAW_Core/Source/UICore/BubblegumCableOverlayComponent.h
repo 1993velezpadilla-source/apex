@@ -328,6 +328,7 @@ private:
         double setupMs[kWindow]  = {};
         double renderMs[kWindow] = {};
         double totalMs[kWindow]  = {};
+        double afterBakeMs[kWindow] = {};
         double presentationTickMs[kWindow] = {};
         int    snapCount[kWindow]= {};
         int    cacheHits[kWindow] = {};
@@ -337,11 +338,13 @@ private:
 
         double lastTimerCall = 0.0; // set each timerCallback
 
-        void record(double setup, double render, double total, int snaps, int hits, int misses)
+        void record(double setup, double render, double total, int snaps, int hits, int misses,
+                    double afterBake)
         {
             setupMs [head] = setup;
             renderMs[head] = render;
             totalMs [head] = total;
+            afterBakeMs[head] = afterBake;
             snapCount[head]= snaps;
             cacheHits[head] = hits;
             cacheMisses[head] = misses;
@@ -366,6 +369,7 @@ private:
             double aSetup  = avg(setupMs);
             double aRender = avg(renderMs);
             double aTotal  = avg(totalMs);
+            double aTail   = avg(afterBakeMs);
             double aTick  = avg(presentationTickMs);
             int    aSnaps  = (filled > 0) ? snapCount[(head - 1 + kWindow) % kWindow] : 0;
             int totalHits = 0;
@@ -385,6 +389,7 @@ private:
             txt << "Total paint:  " << juce::String(aTotal,  2) << " ms\n"
                 << "  Setup/maps: " << juce::String(aSetup,  2) << " ms\n"
                 << "  paintAll:   " << juce::String(aRender, 2) << " ms\n"
+                << "  After bake: " << juce::String(aTail, 2) << " ms\n"
                 << "Cable cache: " << totalHits << " H / " << totalMisses << " M\n"
                 << "Presentation: " << juce::String(aTick,  2) << " ms\n"
                 << "Snapshots:    " << aSnaps << "\n"
