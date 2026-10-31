@@ -1,6 +1,7 @@
 #include "../../Source/UICore/MobilePanelGeometry.h"
 #include <cassert>
 #include <initializer_list>
+#include <limits>
 using DAW::mobile::fitBubblegumSends;
 constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 {
@@ -35,6 +36,22 @@ int main()
                 const auto fitted = fitBubblegumSends(w, h, anchor, anchor, true);
                 assert(inside(fitted, w, h));
             }
+    // Extreme coordinates from restored windows or drag gesture corruption
+    // previously caused signed-int overflow in anchorX - width - 16.
+    constexpr int lo = std::numeric_limits<int>::min();
+    constexpr int hi = std::numeric_limits<int>::max();
+    constexpr auto extremeLeft = fitBubblegumSends(393, 852, lo, lo, true);
+    constexpr auto extremeRight = fitBubblegumSends(393, 852, hi, hi, true);
+    static_assert(extremeLeft.x == 8 && extremeLeft.y == 8
+                  && inside(extremeLeft, 393, 852));
+    static_assert(extremeRight.x == 25 && extremeRight.y == 424
+                  && inside(extremeRight, 393, 852));
+    constexpr auto landscapeExtreme = fitBubblegumSends(852, 300, hi, lo, true);
+    static_assert(landscapeExtreme.x == 484 && landscapeExtreme.y == 8
+                  && inside(landscapeExtreme, 852, 300));
+    constexpr auto desktopExtreme = fitBubblegumSends(1800, 900, lo, hi, false);
+    static_assert(desktopExtreme.x == 8 && desktopExtreme.y == 512
+                  && inside(desktopExtreme, 1800, 900));
     constexpr auto zero = fitBubblegumSends(0, 0, 0, 0, true);
     static_assert(zero.width == 0 && zero.height == 0);
     for (int w = 1; w <= 900; w += 9)
