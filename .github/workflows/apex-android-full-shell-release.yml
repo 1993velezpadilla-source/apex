@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "feature/android-port-*"
+      - "fix/mobile-track-control-grid-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
@@ -19,6 +20,8 @@ concurrency:
 jobs:
   original-apex-release-preview:
     runs-on: ubuntu-24.04
+    env:
+      APEX_ANDROID_PORTRAIT_PREVIEW: '1'
     timeout-minutes: 95
     permissions:
       contents: read
@@ -97,6 +100,10 @@ jobs:
           path: /tmp/apex-juce-host
           key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
 
+      - name: Verify APEX Android package and immersive patch
+        shell: bash
+        run: python3 Android/Tests/test_immersive_fullscreen.py
+
       - name: Generate Android exporter from ORIGINAL APEX .jucer
         shell: bash
         run: |
@@ -111,9 +118,9 @@ jobs:
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
           python3 Android/scripts/enable_immersive_fullscreen.py
-          grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" \
+          grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" \
             "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
-          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
+          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
 
       - name: Create disposable Android Debug signing key
         shell: bash
