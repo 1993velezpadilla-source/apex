@@ -9108,6 +9108,11 @@ void MainComponent::resized()
     fpsOverlay_.setBounds(getWidth() - 70 - 160, 6, 60, 20);
    #endif
 
+   #if JUCE_ANDROID || JUCE_IOS
+    if (bubblegumPanel_)
+        bubblegumPanel_->constrainPhonePanelToParent();
+   #endif
+
     refreshBubblegumOffscreenState();
 }
 
