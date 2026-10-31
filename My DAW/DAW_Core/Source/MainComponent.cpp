@@ -9240,8 +9240,14 @@ void MainComponent::resized()
    #endif
 
    #if JUCE_ANDROID || JUCE_IOS
-    if (bubblegumPanel_)
+    if (phoneLayout && bubblegumPanel_)
+    {
+        // The Sends panel shares the same header/Transport reservations as
+        // the floating Mixer and FX Browser, including after phone rotation.
+        bubblegumPanel_->setPhoneSafeInsets(
+            50, transportBar_ ? transportBar_->getHeight() : 0);
         bubblegumPanel_->constrainPhonePanelToParent();
+    }
    #endif
 
     refreshBubblegumOffscreenState();
