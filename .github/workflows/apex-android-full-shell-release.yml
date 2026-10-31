@@ -111,9 +111,11 @@ jobs:
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
           python3 Android/scripts/enable_immersive_fullscreen.py
-          grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" \
+          grep -q "com.xziel.apex.mobileportraitqa.ApexImmersiveActivity" \
             "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
-          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
+          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportraitqa/ApexImmersiveActivity.java"
+          grep -q 'android:screenOrientation="fullSensor"' \
+            "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
 
       - name: Create disposable Android Debug signing key
         shell: bash
