@@ -2347,6 +2347,15 @@ MainComponent::MainComponent()
         if (!arrangement_ || !trackList_)
             return;
 
+        // A loaded desktop project or a pinch-zoom must not silently shrink
+        // the phone's clickable grid to the old 80-unit track height. The
+        // Arrangement remains authoritative for BOTH waveform and row height.
+        if (usesPhoneMixerPresentation() && arrangement_->getPhysicalTrackHeight() < 180)
+        {
+            arrangement_->setLaneHeight(0, 180);
+            return; // the zoom callback synchronizes the taller layout
+        }
+
         updateTimelineViewportContentBounds();
 
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
