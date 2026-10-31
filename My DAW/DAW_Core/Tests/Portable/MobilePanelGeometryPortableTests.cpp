@@ -1,4 +1,5 @@
 #include "../../Source/UICore/MobilePanelGeometry.h"
+#include "../../Source/UICore/MobileTrackRowGeometry.h"
 #include <cassert>
 #include <initializer_list>
 #include <limits>
@@ -89,11 +90,11 @@ int main()
     // leaving too little horizontal Arrangement space. Android already had
     // the compact policy; both phones now share the same bounded calculation.
     using DAW::mobile::phoneTrackListWidth;
-    static_assert(phoneTrackListWidth(220, 393) == 108);
-    static_assert(phoneTrackListWidth(220, 360) == 108);
-    static_assert(phoneTrackListWidth(220, 852) == 213);
-    static_assert(phoneTrackListWidth(80, 393) == 80);
-    static_assert(phoneTrackListWidth(220, 100) == 99);
+    static_assert(phoneTrackListWidth(220, 393) == 196);
+    static_assert(phoneTrackListWidth(220, 360) == 180);
+    static_assert(phoneTrackListWidth(220, 852) == 220);
+    static_assert(phoneTrackListWidth(80, 393) == 196);
+    static_assert(phoneTrackListWidth(220, 100) == 50);
     static_assert(phoneTrackListWidth(220, 1) == 0);
     static_assert(phoneTrackListWidth(220, 0) == 0);
     static_assert(phoneTrackListWidth(-1, 393) == 0);
@@ -104,6 +105,48 @@ int main()
         assert(width >= 0 && width <= 220);
         assert(width < workspace || workspace <= 1);
     }
+
+    // Phone track controls must NEVER overlap or reach beyond the row.
+    // At the target 360dp screen: 180dp side panel, 3 x 50dp touch columns,
+    // 44dp tall controls in an 180dp track lane.
+    using DAW::mobile::phoneTrackControlLayout;
+    using DAW::mobile::TrackControlRect;
+    constexpr auto phoneRow = phoneTrackControlLayout(12, 162, 180, false, true, true);
+    static_assert(phoneRow.mute.width == 50 && phoneRow.mute.height == 44);
+    static_assert(phoneRow.solo.width == 50 && phoneRow.monitor.width == 50);
+    static_assert(phoneRow.input.width == 50 && phoneRow.target.height == 44);
+    static_assert(phoneRow.target.y + phoneRow.target.height <= 180);
+    const auto touching = [](TrackControlRect a, TrackControlRect b)
+    {
+        if (a.empty() || b.empty()) return false;
+        return a.x < b.x + b.width && b.x < a.x + a.width
+            && a.y < b.y + b.height && b.y < a.y + a.height;
+    };
+    for (int rowWidth : {18, 108, 122, 180, 196, 220, 260})
+        for (int rowHeight : {24, 72, 108, 180, 216})
+            for (bool targetEnabled : {false, true})
+            {
+                const int contentWidth = rowWidth > 18 ? rowWidth - 18 : 0;
+                const auto g = phoneTrackControlLayout(
+                    12, contentWidth, rowHeight, false, true, targetEnabled);
+                const TrackControlRect boxes[] = {
+                    g.mute, g.solo, g.monitor, g.arm, g.automation, g.input, g.target
+                };
+                for (unsigned i = 0; i < 7; ++i)
+                {
+                    const auto a = boxes[i];
+                    if (a.empty()) continue;
+                    assert(a.x >= 0 && a.y >= 0 && a.x + a.width <= rowWidth);
+                    assert(a.y + a.height <= rowHeight);
+                    for (unsigned j = i + 1; j < 7; ++j)
+                        assert(!touching(a, boxes[j]));
+                }
+            }
+    constexpr auto masterGrid = phoneTrackControlLayout(12, 162, 180, true, true, true);
+    static_assert(masterGrid.mute.width == 50 && masterGrid.solo.width == 50);
+    static_assert(masterGrid.monitor.empty() && masterGrid.arm.empty());
+    static_assert(masterGrid.automation.empty() && masterGrid.input.empty());
+    static_assert(masterGrid.target.empty());
 
     // Floating phone Mixer must not cover the persistent bottom Transport,
     // including landscape and when an activity becomes very short.
