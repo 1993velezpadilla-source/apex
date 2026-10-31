@@ -93,6 +93,48 @@ int main()
                 assert(inside(fitted, w, h));
             }
 
+    // FX browser used a desktop 340x560 rect at x=24 and a top offset
+    // derived from desktop Transport. On narrow phones and short landscape
+    // windows it could cover the bottom thumb Transport or exit the viewport.
+    using DAW::mobile::fitPhonePluginBrowser;
+    constexpr auto browserPortrait = fitPhonePluginBrowser(393, 852, 50, 144);
+    static_assert(browserPortrait.x == 8 && browserPortrait.y == 58
+                  && browserPortrait.width == 340 && browserPortrait.height == 560);
+    static_assert(inside(browserPortrait, 393, 852));
+    constexpr auto browserNarrow = fitPhonePluginBrowser(320, 640, 50, 144);
+    static_assert(browserNarrow.width == 304 && browserNarrow.height == 430
+                  && inside(browserNarrow, 320, 640));
+    constexpr auto browserLandscape = fitPhonePluginBrowser(852, 300, 50, 96);
+    static_assert(browserLandscape.y == 58 && browserLandscape.height == 138
+                  && browserLandscape.y + browserLandscape.height <= 300 - 96);
+    constexpr auto browserSplit = fitPhonePluginBrowser(245, 220, 50, 96);
+    static_assert(browserSplit.width == 229 && browserSplit.height == 58
+                  && inside(browserSplit, 245, 220));
+    constexpr auto browserCollapsed = fitPhonePluginBrowser(360, 96, 50, 46);
+    static_assert(browserCollapsed.width == 0 && browserCollapsed.height == 0);
+    constexpr auto browserExtreme = fitPhonePluginBrowser(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 50, 144);
+    static_assert(inside(browserExtreme,
+                         std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    for (int w : {1, 2, 20, 245, 320, 393, 852})
+        for (int h : {1, 10, 96, 144, 220, 300, 852})
+            for (int top : {0, 50, 1000})
+                for (int bottom : {0, 96, 144, 1000})
+                {
+                    const auto fit = fitPhonePluginBrowser(w, h, top, bottom);
+                    if (fit.width == 0 || fit.height == 0)
+                    {
+                        assert(fit.width == 0 && fit.height == 0);
+                        continue;
+                    }
+                    const int reservedTop = DAW::mobile::clampInt(top, 0, h);
+                    const int reservedBottom = DAW::mobile::clampInt(bottom, 0, h - reservedTop);
+                    assert(inside(fit, w, h));
+                    assert(fit.y >= reservedTop);
+                    assert(fit.y + fit.height <= h - reservedBottom);
+                    assert(fit.width <= 340 && fit.height <= 560);
+                }
+
     // iPhone previously used desktop's 220-unit Track List at 393 units,
     // leaving too little horizontal Arrangement space. Android already had
     // the compact policy; both phones now share the same bounded calculation.
