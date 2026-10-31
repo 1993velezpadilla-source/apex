@@ -86,19 +86,18 @@ int main()
                 assert(inside(fitted, w, h));
             }
 
-    // iPhone previously used desktop's 220-unit Track List at 393 units,
-    // leaving too little horizontal Arrangement space. Android already had
-    // the compact policy; both phones now share the same bounded calculation.
+    // iPhone and Android use a compact identity-only track rail so phone
+    // Arrange keeps ~two thirds of its width for editable waveforms.
     using DAW::mobile::phoneTrackListWidth;
-    static_assert(phoneTrackListWidth(220, 393) == 196);
-    static_assert(phoneTrackListWidth(220, 360) == 180);
-    static_assert(phoneTrackListWidth(260, 360) == 220);
-    static_assert(phoneTrackListWidth(400, 360) == 234);
-    static_assert(phoneTrackListWidth(260, 393) == 236);
-    static_assert(phoneTrackListWidth(2147483647, 393) == 255);
+    static_assert(phoneTrackListWidth(220, 393) == 128);
+    static_assert(phoneTrackListWidth(220, 360) == 120);
+    static_assert(phoneTrackListWidth(260, 360) == 160);
+    static_assert(phoneTrackListWidth(400, 360) == 216);
+    static_assert(phoneTrackListWidth(260, 393) == 168);
+    static_assert(phoneTrackListWidth(2147483647, 393) == 235);
     static_assert(phoneTrackListWidth(220, 852) == 220);
-    static_assert(phoneTrackListWidth(80, 393) == 196);
-    static_assert(phoneTrackListWidth(220, 100) == 50);
+    static_assert(phoneTrackListWidth(80, 393) == 128);
+    static_assert(phoneTrackListWidth(220, 100) == 60);
     static_assert(phoneTrackListWidth(220, 1) == 0);
     static_assert(phoneTrackListWidth(220, 0) == 0);
     static_assert(phoneTrackListWidth(-1, 393) == 0);
@@ -106,7 +105,8 @@ int main()
     for (int workspace = 0; workspace <= 900; ++workspace)
     {
         const int width = phoneTrackListWidth(220, workspace);
-        const int expectedMax = workspace <= 600 ? workspace / 2 : 220;
+        const int expectedMax = workspace <= 600
+            ? (workspace <= 1 ? 0 : (workspace * 60) / 100) : 220;
         assert(width >= 0 && width <= expectedMax);
         assert(width < workspace || workspace <= 1);
     }
@@ -116,9 +116,10 @@ int main()
     // 44dp tall controls in an 180dp track lane.
     using DAW::mobile::phoneTrackControlLayout;
     using DAW::mobile::TrackControlRect;
-    // Visual feedback on Pixel Fold: 180-unit default lanes waste most of
-    // the arranger. Two rows at 132 preserve full 44-unit touch heights.
-    static_assert(DAW::mobile::kPhoneTrackDefaultHeight == 132);
+    // Pixel Fold real-device feedback: 180 and 132-unit default lanes waste
+    // vertical canvas. 80-unit rail rows show identities; the 44-unit
+    // ellipsis opens all functional controls in a separate inspector.
+    static_assert(DAW::mobile::kPhoneTrackDefaultHeight == 80);
     constexpr auto compact = phoneTrackControlLayout(12, 162, 132, false, true, false);
     static_assert(compact.mute.height == 44 && compact.arm.height == 44);
     static_assert(compact.arm.y + compact.arm.height <= 132);
