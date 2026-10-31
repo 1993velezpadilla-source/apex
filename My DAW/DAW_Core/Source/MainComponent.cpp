@@ -4074,7 +4074,19 @@ MainComponent::MainComponent()
     appendMainStartupTrace("ctor.startup-panel.created");
     // Closing the start page is an explicit choice. An in-flight plugin scan
     // must never resurrect it over an active user session.
-    startupPanel_->onDismissed = [this] { startupPanelMayBeShown_ = false; };
+    startupPanel_->onDismissed = [this]
+    {
+        startupPanelMayBeShown_ = false;
+       #if JUCE_ANDROID
+        // Show the genuine movable MixerWindow above the track arranger,
+        // never behind the later-added timeline and taskbar components.
+        if (mixerWindow_ && mixerWindow_->isVisible())
+        {
+            mixerWindow_->toFront(false);
+            if (mixerBubble_) mixerBubble_->setVisible(false);
+        }
+       #endif
+    };
     startupPanel_->onNewProject = [this]
     {
         startupPanel_->dismiss();
@@ -4237,18 +4249,7 @@ MainComponent::MainComponent()
     mixerBubble_->setInterceptsMouseClicks(true, true);
     mixerBubble_->onClicked = [this]
     {
-       #if JUCE_ANDROID
-        if (mixerDocked_)
-        {
-            // Reopen the *real* mixer dock with one touch after View > Mixer
-            // closes it; never try to open a detached desktop window.
-            mixerViewport_.setVisible(true);
-            mixerBubble_->setVisible(false);
-            resized();
-            return;
-        }
-       #endif
-        if (!mixerDocked_)
+            if (!mixerDocked_)
         {
             mixerWindow_->setVisible(true);
             mixerWindow_->restoreIfMinimized();
@@ -4279,12 +4280,14 @@ MainComponent::MainComponent()
     };
 
    #if JUCE_ANDROID
-    // On Android a desktop floating mixer is initially placed beyond the
-    // activity viewport and can end up obscured by the window/taskbar layer.
-    // Dock the ORIGINAL MixerPanel into the main content area instead; this
-    // preserves all faders, effects, sends, meters, routing and touch controls.
-    // The View > Mixer action still allows it to be shown/hidden.
-    dockMixer();
+    // Product decision: Android uses the SAME floating mixer window as
+    // desktop, not a docked viewport. The initial layout is computed from
+    // the actual Android activity size on MainComponent::resized().
+    // A minimized/closed mixer can always reopen via its floating bubble.
+    mixerDocked_ = false;
+    mixerPanel_->setDockedState(false);
+    mixerWindow_->setVisible(true);
+    mixerBubble_->setVisible(false);
    #endif
 
     // Timeline bubble - shows when timeline window is minimized/closed
@@ -7250,6 +7253,18 @@ void MainComponent::undockMixer()
 
 void MainComponent::dockMixer()
 {
+   #if JUCE_ANDROID
+    // Android intentionally only supports the floating presentation of the
+    // original MixerWindow; do not reparent the viewport into a dock.
+    if (mixerWindow_)
+    {
+        mixerWindow_->restoreIfMinimized();
+        mixerWindow_->setVisible(true);
+        mixerWindow_->toFront(false);
+    }
+    if (mixerBubble_) mixerBubble_->setVisible(false);
+    return;
+   #endif
     mixerDocked_ = true;
     mixerPanel_->setDockedState(true);
     addChildComponent(mixerViewport_);
@@ -9015,16 +9030,27 @@ void MainComponent::resized()
 
     if (mixerWindow_ && !mixerDocked_)
     {
-        // Place the floating mixer exactly once, in a SAFE position that never
-        // covers the app header (kMenuH + kTransportH). The MixerWindow ctor
-        // pre-sizes itself, so bounds are never empty — the placed flag (set
-        // by user move/resize and by Reset Size) is the real guard.
-        if (!mixerWindowPlaced_)
-        {
-            // Default to six normal strips plus the pinned Master; the user can resize the floating
-            // window freely (the viewport scrolls horizontally for the rest).
+       #if JUCE_ANDROID
+        // First MainComponent layout uses desktop 1280x800. Once Android
+        // delivers its actual viewport, recompute if the window is off-screen
+        // or bigger than that viewport. Preserve the user's position/size
+        // during regular resizes that already fit.
+        const int safeTop = juce::jmin(getHeight() / 3,
+                                      kMenuH + kTransportH + 8);
+        const auto safe = getLocalBounds()
+            .withTrimmedTop(safeTop).reduced(8, 6);
+        const auto current = mixerWindow_->getBounds();
+        if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
+            || current.getHeight() > safe.getHeight()
+            || current.getX() < safe.getX()
+            || current.getY() < safe.getY()
+            || current.getRight() > safe.getRight()
+            || current.getBottom() > safe.getBottom())
             setDefaultMixerWindowBounds();
-        }
+       #else
+        if (!mixerWindowPlaced_)
+            setDefaultMixerWindowBounds();
+       #endif
     }
 
     if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
@@ -9082,6 +9108,30 @@ void MainComponent::setDefaultMixerWindowBounds()
 {
     if (!mixerWindow_ || !mixerPanel_)
         return;
+
+   #if JUCE_ANDROID
+    // True FLOATING mixer, fitted to the live phone/tablet activity rather
+    // than the hard-coded 80, desktopY, 320px-high Windows rectangle.
+    // Keep the desktop original chrome, title bar, drag-to-move and resizing.
+    const int safeTop = juce::jmin(getHeight() / 3,
+                                  kMenuH + kTransportH + 8);
+    const auto safe = getLocalBounds().withTrimmedTop(safeTop).reduced(8, 6);
+    if (safe.isEmpty())
+        return;
+    const int width = juce::jmin(safe.getWidth(),
+        juce::jmax(200, juce::roundToInt(safe.getWidth() * 0.88)));
+    const int height = juce::jmin(safe.getHeight(),
+        juce::jmax(180, juce::roundToInt(safe.getHeight() * 0.86)));
+    // The desktop 260px minimum cannot be imposed on a short Android
+    // viewport: update its resize constrainer to the actual visible limits.
+    mixerWindow_->setMinimumSize(juce::jmin(200, safe.getWidth()),
+                                 juce::jmin(180, safe.getHeight()));
+    mixerWindow_->setBounds(safe.getX() + (safe.getWidth() - width) / 2,
+                            safe.getY() + (safe.getHeight() - height) / 2,
+                            width, height);
+    mixerWindowPlaced_ = true;
+    return;
+   #endif
 
     // The outer frame/title chrome is not part of the Mixer content width.
     // Derive it from the live window rather than duplicating frame constants.
