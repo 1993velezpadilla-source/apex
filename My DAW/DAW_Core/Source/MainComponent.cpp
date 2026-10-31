@@ -4029,9 +4029,20 @@ MainComponent::MainComponent()
     };
     transportBar_->onOpenBubblegumSends = [this]
     {
-        if (!bubblegumPanel_ || !bubblegumOrb_) return;
-        if (bubblegumPanel_->isVisible()) hideBubblegumPanel();
-        else showBubblegumPanel();
+        if (!bubblegumPanel_ || !mixerPanel_) return;
+        // Open/close through the canonical Bubblegum controller so the
+        // current source, PRE/POST, and routing state stay synchronized.
+        if (mixerPanel_->isBubblegumModeActive())
+            mixerPanel_->deactivateBubblegumMode();
+        else
+        {
+            auto source = mixerPanel_->getSelectedTrackId();
+            auto& tracks = appCore_.getTrackManager();
+            if (source.isEmpty() && tracks.hasMasterTrack())
+                source = tracks.getMasterTrack()->getID();
+            if (source.isNotEmpty())
+                mixerPanel_->activateBubblegumMode(source);
+        }
     };
 
     // Wire same quick-access to ArrangementView timeline toolbar
@@ -9142,6 +9153,13 @@ void MainComponent::resized()
 
     cableOverlay_.setBounds(getLocalBounds());
     offscreenEndpoint_.setBounds(getLocalBounds());
+    if (phoneLayout)
+    {
+        // Keep Bubblegum routing audio intact, but never paint Matrix cables
+        // or desktop-only offscreen routing endpoints over phone controls.
+        cableOverlay_.setVisible(false);
+        offscreenEndpoint_.setVisible(false);
+    }
    #if JUCE_DEBUG
     // Left of the custom title-bar window controls so the overlay never covers
     // the minimize / maximize / close buttons.
