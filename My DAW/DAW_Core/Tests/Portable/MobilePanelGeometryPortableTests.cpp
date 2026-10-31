@@ -156,6 +156,27 @@ int main()
     static_assert(pluginBrowserRowHeight(false) == 22);
     static_assert(pluginBrowserSearchSlotHeight(false) == 26);
     static_assert(pluginBrowserHeaderHeight(false) == 28);
+    // A swipe over a plugin row must scroll the phone FX Browser, not
+    // instantiate an effect on release. Stationary taps still activate.
+    using DAW::mobile::pluginBrowserRowTapActivates;
+    static_assert(pluginBrowserRowTapActivates(true, 0, 0, true));
+    static_assert(pluginBrowserRowTapActivates(true, 8, 0, true));
+    static_assert(pluginBrowserRowTapActivates(true, 6, 5, true));
+    static_assert(!pluginBrowserRowTapActivates(true, 8, 8, true));
+    static_assert(!pluginBrowserRowTapActivates(true, 0, 9, true));
+    static_assert(!pluginBrowserRowTapActivates(true, 30, 0, true));
+    static_assert(!pluginBrowserRowTapActivates(true, 0, 0, false));
+    static_assert(!pluginBrowserRowTapActivates(true,
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), true));
+    static_assert(pluginBrowserRowTapActivates(false, 30, 0, true));
+    static_assert(pluginBrowserRowTapActivates(false, 0, 0, false));
+    for (int dx = -12; dx <= 12; ++dx)
+        for (int dy = -12; dy <= 12; ++dy)
+        {
+            const bool expected = dx * dx + dy * dy <= 64;
+            assert(pluginBrowserRowTapActivates(true, dx, dy, true) == expected);
+            assert(!pluginBrowserRowTapActivates(true, dx, dy, false));
+        }
     using DAW::mobile::pluginBrowserChromeHeight;
     using DAW::mobile::phoneChromeControlSize;
     static_assert(pluginBrowserChromeHeight(true) == 44);
