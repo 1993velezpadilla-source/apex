@@ -109,6 +109,21 @@ public:
             + " bounds=" + getBounds().toString());
     }
 
+    // Keep the dragged phone panel reachable after rotation / window resizing.
+    void constrainPhonePanelToParent()
+    {
+        if (!phonePresentation_ || !isVisible()) return;
+        if (auto* parent = getParentComponent())
+        {
+            const auto old = getBounds();
+            const auto fitted = mobile::fitBubblegumSends(
+                parent->getWidth(), parent->getHeight(),
+                old.getRight() + 16, old.getBottom() - 20, true);
+            if (fitted.width > 0 && fitted.height > 0)
+                setBounds(fitted.x, fitted.y, fitted.width, fitted.height);
+        }
+    }
+
     /** Hide with close animation. */
     void hideAnimated()
     {
