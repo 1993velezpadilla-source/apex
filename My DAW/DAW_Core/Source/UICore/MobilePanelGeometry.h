@@ -95,6 +95,51 @@ constexpr FloatingMixerFit fitFloatingMixer(int viewportW, int viewportH,
     return { safe, window, minInt(200, safeW), minInt(180, safeH) };
 }
 
+/** Clip Properties hosts clip FX on phones. Keep its title/close chrome
+ *  between the APEX header and the persistent bottom Transport on rotation.
+ *  Desktop and iPad retain the existing 420x360 opening behavior.
+ */
+struct PhoneClipPropertiesFit
+{
+    PanelBounds safe{}, window{};
+    int minimumWidth = 0, minimumHeight = 0;
+};
+
+constexpr PhoneClipPropertiesFit fitPhoneClipProperties(
+    int viewportW, int viewportH, int reservedTop, int reservedBottom) noexcept
+{
+    if (viewportW <= 0 || viewportH <= 0)
+        return {};
+    const int top = clampInt(reservedTop, 0, viewportH);
+    const int bottom = clampInt(reservedBottom, 0, viewportH - top);
+    const int margin = minInt(8, minInt(viewportW, viewportH) / 4);
+    const int safeW = viewportW - 2 * margin;
+    const int safeH = viewportH - top - bottom - 2 * margin;
+    if (safeW <= 0 || safeH <= 0)
+        return {};
+
+    const int width = minInt(420, safeW);
+    const int height = minInt(360, safeH);
+    const PanelBounds safe{ margin, top + margin, safeW, safeH };
+    const PanelBounds window{ safe.x + (safeW - width) / 2,
+                              safe.y + (safeH - height) / 2, width, height };
+    return { safe, window, minInt(180, safeW), minInt(120, safeH) };
+}
+
+constexpr bool phoneClipPropertiesFits(const PhoneClipPropertiesFit& fit,
+                                       PanelBounds current) noexcept
+{
+    if (fit.safe.width <= 0 || fit.safe.height <= 0
+        || current.width < fit.minimumWidth || current.height < fit.minimumHeight
+        || current.width <= 0 || current.height <= 0)
+        return false;
+    return current.x >= fit.safe.x && current.y >= fit.safe.y
+        && static_cast<long long>(current.x) + current.width
+            <= static_cast<long long>(fit.safe.x) + fit.safe.width
+        && static_cast<long long>(current.y) + current.height
+            <= static_cast<long long>(fit.safe.y) + fit.safe.height;
+}
+
 /** Keep a phone's Track List reachable without stealing the Arrangement.
  *  iPhone and Android use this; iPad/desktop keep their stored track width.
  *  Reserve at least one logical unit for the timeline in tiny split views.
