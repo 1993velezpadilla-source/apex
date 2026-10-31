@@ -45,10 +45,18 @@ constexpr PhoneTrackControlLayout phoneTrackControlLayout(
     const int y1 = y0 + h + gapY;
     const int y2 = y1 + h + gapY;
 
+    if (isMaster)
+    {
+        // MASTER keeps its name/eye presentation and only has Mute/Solo.
+        // Put both below the title/eye area, not into the tiny row top.
+        const int masterH = trackMin(44, trackMax(0, primaryRowHeight - 58));
+        const int masterY = primaryRowHeight - masterH - 4;
+        out.mute = { x0, masterY, w, masterH };
+        out.solo = { x1, masterY, w, masterH };
+        return out;
+    }
     out.mute = { x0, y0, w, h };
     out.solo = { x1, y0, w, h };
-    if (isMaster)
-        return out;
 
     out.monitor = { x2, y0, w, h };
     out.arm = { x0, y1, w, h };
@@ -56,7 +64,10 @@ constexpr PhoneTrackControlLayout phoneTrackControlLayout(
     if (showInput)
         out.input = { x2, y1, w, h };
     if (showTarget)
-        out.target = { x0, y2, w, h };
+        // Automation parameter names are longer than single-letter toggles.
+        // Use the third row as a full-width selector instead of another tiny
+        // 50-unit cell.
+        out.target = { x0, y2, contentWidth, h };
     return out;
 }
 } // namespace DAW::mobile
