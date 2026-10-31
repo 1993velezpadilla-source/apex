@@ -289,9 +289,12 @@ public:
         // buffered row on every idle tick is unnecessary for recording.
         // Keep the eye graphic static on phones; active selection and actual
         // automation still animate. Desktop/iPad behavior is unchanged.
-        return (track_.isMaster() && !phonePresentation_)
-            || selectionVisual_.needsAnimationTick()
-            || (!automationBounds_.isEmpty() && hasTrackAutomation());
+        // Phone rails have static selection outlines and no animated eye.
+        // They should NOT keep a 30Hz redraw loop alive while idle.
+        return !phonePresentation_
+            && (track_.isMaster()
+                || selectionVisual_.needsAnimationTick()
+                || (!automationBounds_.isEmpty() && hasTrackAutomation()));
     }
 
     /** Present this row's visual-only animation from TrackList's shared clock.
@@ -303,7 +306,7 @@ public:
 
         const float dt = (float) juce::jlimit(0.0, 0.25, deltaSeconds);
 
-        if (selectionVisual_.needsAnimationTick())
+        if (!phonePresentation_ && selectionVisual_.needsAnimationTick())
         {
             selectionVisual_.stepSweep(dt);
             selectionVisual_.getLavaCore().stepExternal(dt);
