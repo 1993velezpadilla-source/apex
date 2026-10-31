@@ -145,6 +145,9 @@ private:
     mutable int lastMixerScreenX_    = std::numeric_limits<int>::min();
     mutable int lastMixerScreenY_    = std::numeric_limits<int>::min();
 
+   #if JUCE_ANDROID
+    double lastMobilePresentationMs_ = 0.0;
+   #endif
     double visualTime_      = 0.0;
     double freezeUntilSec_  = 0.0;
     double snapMotionUntilSec_ = 0.0;
