@@ -88,4 +88,21 @@ constexpr FloatingMixerFit fitFloatingMixer(int viewportW, int viewportH,
     return { safe, window, minInt(200, safeW), minInt(180, safeH) };
 }
 
+/** Check a restored or dragged Mixer window against the safe phone area.
+ *  Long-long edges avoid signed overflow from corrupt/restored coordinates.
+ *  Reject collapsed windows even if their origin lies inside the viewport.
+ */
+constexpr bool floatingMixerFits(const FloatingMixerFit& fit, PanelBounds current) noexcept
+{
+    if (fit.safe.width <= 0 || fit.safe.height <= 0
+        || current.width < fit.minimumWidth || current.height < fit.minimumHeight
+        || current.width <= 0 || current.height <= 0)
+        return false;
+    return current.x >= fit.safe.x && current.y >= fit.safe.y
+        && static_cast<long long>(current.x) + current.width
+            <= static_cast<long long>(fit.safe.x) + fit.safe.width
+        && static_cast<long long>(current.y) + current.height
+            <= static_cast<long long>(fit.safe.y) + fit.safe.height;
+}
+
 }
