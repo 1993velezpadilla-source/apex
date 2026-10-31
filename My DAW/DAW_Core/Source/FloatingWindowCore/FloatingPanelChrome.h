@@ -193,6 +193,14 @@ public:
         // Hit-test window buttons
         auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
         auto hit = hitTestButtons(e.position, titleBar);
+        // On phones, defer window actions until a stationary release over
+        // the same button. A swipe must not accidentally close an FX window.
+        pendingPhoneButton_ = BtnHit::None;
+        if (phonePresentation_ && hit != BtnHit::None)
+        {
+            pendingPhoneButton_ = hit;
+            return;
+        }
         if (hit == BtnHit::Close)    { closePanel(); return; }
         if (hit == BtnHit::Minimize) { minimizePanel(); return; }
         if (hit == BtnHit::Maximize)
@@ -216,8 +224,26 @@ public:
         dragger_.dragComponent(this, e, &constrainer_);
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_ && pendingPhoneButton_ != BtnHit::None)
+        {
+            const auto pressed = pendingPhoneButton_;
+            pendingPhoneButton_ = BtnHit::None;
+            const auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
+            const auto released = hitTestButtons(e.position, titleBar);
+            if (mobile::phoneChromeButtonTapActivates(
+                    static_cast<int>(pressed), static_cast<int>(released),
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            {
+                if (pressed == BtnHit::Close) closePanel();
+                else if (pressed == BtnHit::Minimize) minimizePanel();
+                else if (pressed == BtnHit::Maximize)
+                    if (auto* parent = getParentComponent())
+                        maximizePanel(parent->getLocalBounds());
+            }
+            return;
+        }
         if (isDragging_)
         {
             isDragging_ = false;
@@ -260,6 +286,7 @@ private:
     juce::ComponentBoundsConstrainer constrainer_;
 
     enum class BtnHit { None, Close, Minimize, Maximize };
+    BtnHit pendingPhoneButton_ = BtnHit::None;
 
     struct BtnRects
     {

@@ -166,6 +166,16 @@ constexpr bool pluginBrowserRowTapActivates(bool phone, int dragX, int dragY,
     return dragX * dragX + dragY * dragY <= 64;
 }
 
+// A phone window control must not close/minimize/maximize during a swipe,
+// or when the finger is released over a different title-bar button. This
+// shares the FX row's bounded 8-unit tap threshold (no overflow on extremes).
+constexpr bool phoneChromeButtonTapActivates(int pressedButton, int releasedButton,
+                                             int dragX, int dragY) noexcept
+{
+    return pressedButton != 0 && pressedButton == releasedButton
+        && pluginBrowserRowTapActivates(true, dragX, dragY, true);
+}
+
 // In impossibly narrow split views three controls share the available width.
 constexpr int phoneChromeControlSize(int panelWidth) noexcept
 {

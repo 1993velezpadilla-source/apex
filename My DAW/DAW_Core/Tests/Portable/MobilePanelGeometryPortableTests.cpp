@@ -177,6 +177,25 @@ int main()
             assert(pluginBrowserRowTapActivates(true, dx, dy, true) == expected);
             assert(!pluginBrowserRowTapActivates(true, dx, dy, false));
         }
+    // Phone title-bar buttons must activate on a stationary release over
+    // the same control, not on mouseDown or after swiping across controls.
+    using DAW::mobile::phoneChromeButtonTapActivates;
+    static_assert(phoneChromeButtonTapActivates(1, 1, 0, 0));
+    static_assert(phoneChromeButtonTapActivates(2, 2, 8, 0));
+    static_assert(!phoneChromeButtonTapActivates(0, 0, 0, 0));
+    static_assert(!phoneChromeButtonTapActivates(1, 2, 0, 0));
+    static_assert(!phoneChromeButtonTapActivates(3, 0, 0, 0));
+    static_assert(!phoneChromeButtonTapActivates(1, 1, 8, 8));
+    static_assert(!phoneChromeButtonTapActivates(1, 1, 9, 0));
+    static_assert(!phoneChromeButtonTapActivates(1, 1,
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
+    for (int dx = -12; dx <= 12; ++dx)
+        for (int dy = -12; dy <= 12; ++dy)
+        {
+            const bool tap = dx * dx + dy * dy <= 64;
+            assert(phoneChromeButtonTapActivates(1, 1, dx, dy) == tap);
+            assert(!phoneChromeButtonTapActivates(1, 2, dx, dy));
+        }
     using DAW::mobile::pluginBrowserChromeHeight;
     using DAW::mobile::phoneChromeControlSize;
     static_assert(pluginBrowserChromeHeight(true) == 44);
