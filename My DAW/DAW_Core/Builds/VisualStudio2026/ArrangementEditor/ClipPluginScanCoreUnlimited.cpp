@@ -230,7 +230,11 @@ namespace ClipPlugins
     char* ClipPluginScanCore::readFileAlloc(const char* path, size_t* outLen)
     {
         FILE* f = nullptr;
+       #if defined(_WIN32)
         fopen_s(&f, path, "rb");
+       #else
+        f = std::fopen(path, "rb");
+       #endif
         if (!f) return nullptr;
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);

@@ -51,7 +51,11 @@ public:
     //          targetMidi is initialized = detectedMidi (no correction yet).
     //          noteId is assigned as "n_<index>".
     static std::vector<ApexTuneNote> segment (const ApexTuneAnalysis& analysis,
-                                              const Params& params = {});
+                                              const Params& params);
+    static std::vector<ApexTuneNote> segment (const ApexTuneAnalysis& analysis)
+    {
+        return segment(analysis, Params{});
+    }
 
 private:
     // Median of an arbitrary float window (copies + nth_element).

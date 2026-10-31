@@ -29,13 +29,21 @@
 #include <set>
 #include <algorithm>
 #include <cstdlib>
+#if JUCE_ANDROID
+ #include <android/log.h>
+#endif
 
 namespace
 {
-    // Request a practical multichannel input ceiling so JUCE can expose and
-    // compact the user's active ASIO input pair instead of hard-limiting the
-    // app to channels 1-2.
+   #if JUCE_ANDROID
+    // Android's JUCE/Oboe device exposes the OS-negotiated route. Request a
+    // modest channel count rather than asking a phone for 64 inputs; USB
+    // class-compliant devices still expose their actual granted channels.
+    static constexpr int kMaxHardwareInputChannels = 2;
+   #else
+    // Preserve desktop multi-input ASIO recording support on Windows.
     static constexpr int kMaxHardwareInputChannels = 64;
+   #endif
 
     class RealtimeDeviceCallbackGuard
     {
@@ -3189,15 +3197,23 @@ MainComponent::MainComponent()
         mixerWindow_->browserOpen = browserChrome_->isVisible();
         mixerWindow_->refreshToolbar();
     };
+   #if JUCE_ANDROID
+    // Android UX: no visible routing cables (including the overlay's profiler).
+    // Keep the component hidden and inert; the real Bubblegum routing/send
+    // engine and its panels continue working without visual cable graphics.
+    // Startup/Loading overlays are already sized in MainComponent::resized().
+    addChildComponent(cableOverlay_);
+   #else
     addAndMakeVisible(cableOverlay_);
-    // Drive offscreen bubble/panel updates at the same 60 Hz cadence as cable motion.
-    cableOverlay_.onTick = [this]() {     if (loadingOverlay_)
-        loadingOverlay_->setBounds(getLocalBounds());
-    if (startupPanel_)
-        startupPanel_->setBounds(getLocalBounds());
-
-    refreshBubblegumOffscreenState();
+    // Preserve the existing Windows presentation/update behavior.
+    cableOverlay_.onTick = [this]() {
+        if (loadingOverlay_)
+            loadingOverlay_->setBounds(getLocalBounds());
+        if (startupPanel_)
+            startupPanel_->setBounds(getLocalBounds());
+        refreshBubblegumOffscreenState();
     };
+   #endif
     addAndMakeVisible(offscreenEndpoint_);
     offscreenEndpoint_.toFront(false);
 
@@ -4058,7 +4074,19 @@ MainComponent::MainComponent()
     appendMainStartupTrace("ctor.startup-panel.created");
     // Closing the start page is an explicit choice. An in-flight plugin scan
     // must never resurrect it over an active user session.
-    startupPanel_->onDismissed = [this] { startupPanelMayBeShown_ = false; };
+    startupPanel_->onDismissed = [this]
+    {
+        startupPanelMayBeShown_ = false;
+       #if JUCE_ANDROID
+        // Show the genuine movable MixerWindow above the track arranger,
+        // never behind the later-added timeline and taskbar components.
+        if (mixerWindow_ && mixerWindow_->isVisible())
+        {
+            mixerWindow_->toFront(false);
+            if (mixerBubble_) mixerBubble_->setVisible(false);
+        }
+       #endif
+    };
     startupPanel_->onNewProject = [this]
     {
         startupPanel_->dismiss();
@@ -4129,6 +4157,15 @@ MainComponent::MainComponent()
     DAW::StartupProgressCore::reach(65);
     startupPanel_->onRescanPlugins = [this]
     {
+       #if JUCE_ANDROID
+        // Android natively loads built-in APEX processors; Windows plugin
+        // subprocess scanners and VST3 discovery must not run on a phone.
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::InfoIcon, "APEX Android",
+            "Native APEX effects are available without scanning. "
+            "Desktop VST3 scanning is not available on Android.");
+        return;
+       #endif
         // Don't dismiss startup panel — let user see it close via X or after scan.
         // Route through the dialog so the loading bar receives progress + completion.
         if (scanDialog_)
@@ -4212,7 +4249,7 @@ MainComponent::MainComponent()
     mixerBubble_->setInterceptsMouseClicks(true, true);
     mixerBubble_->onClicked = [this]
     {
-        if (!mixerDocked_)
+            if (!mixerDocked_)
         {
             mixerWindow_->setVisible(true);
             mixerWindow_->restoreIfMinimized();
@@ -4241,6 +4278,17 @@ MainComponent::MainComponent()
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(true);
     };
+
+   #if JUCE_ANDROID
+    // Product decision: Android uses the SAME floating mixer window as
+    // desktop, not a docked viewport. The initial layout is computed from
+    // the actual Android activity size on MainComponent::resized().
+    // A minimized/closed mixer can always reopen via its floating bubble.
+    mixerDocked_ = false;
+    mixerPanel_->setDockedState(false);
+    mixerWindow_->setVisible(true);
+    mixerBubble_->setVisible(false);
+   #endif
 
     // Timeline bubble - shows when timeline window is minimized/closed
     timelineBubble_ = std::make_unique<DAW::TimelineBubble>();
@@ -5107,9 +5155,16 @@ MainComponent::MainComponent()
     {
         if (mixerDocked_)
         {
-            mixerViewport_.setVisible(!mixerViewport_.isVisible());
+            const bool showMixer = !mixerViewport_.isVisible();
+            mixerViewport_.setVisible(showMixer);
+           #if JUCE_ANDROID
+            // Keep a floating one-tap reopen control only while mixer dock
+            // is closed, without permanently obscuring the arrangement.
+            if (mixerBubble_) mixerBubble_->setVisible(!showMixer);
+            if (showMixer) mixerViewport_.toFront(false);
+           #endif
             if (slimeSidePanel_ && slimeSidePanel_->isAttached())
-                slimeSidePanel_->setVisible(mixerViewport_.isVisible());
+                slimeSidePanel_->setVisible(showMixer);
         }
         else
         {
@@ -5152,14 +5207,46 @@ MainComponent::MainComponent()
     });
 
     juce::Component::SafePointer<MainComponent> safeForAudioInit(this);
-    // The first paint of StartupPanel must not wait behind potentially slow
-    // ASIO device enumeration/initialization. Give the message pump one frame
-    // to present navigation; then initialize the device on the control thread.
-    // Never initialize the JUCE AudioDeviceManager on a worker thread.
+    // The first paint of StartupPanel must not wait behind device
+    // enumeration/initialization. Keep all AudioDeviceManager mutations on
+    // JUCE's message thread. Android must grant RECORD_AUDIO before opening
+    // any input (including USB class-compliant devices).
     juce::Timer::callAfterDelay(150, [safeForAudioInit]
     {
         if (auto* self = safeForAudioInit.getComponent())
         {
+           #if JUCE_ANDROID
+            if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio))
+            {
+                juce::Logger::writeToLog("[APEX-ANDROID-AUDIO] requesting RECORD_AUDIO before input init");
+                juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio,
+                    [safeForAudioInit](bool granted)
+                    {
+                        if (auto* main = safeForAudioInit.getComponent())
+                        {
+                            if (granted)
+                            {
+                                appendMainStartupTrace("android-mic-granted.audio-init.begin");
+                                main->initializeSafeStartupAudio();
+                                appendMainStartupTrace("android-mic-granted.audio-init.complete");
+                            }
+                            else
+                            {
+                                // Permission denial must never trigger repeated
+                                // input-device reopen attempts. Output-only
+                                // playback remains available; the user can
+                                // grant microphone permission in Android Settings
+                                // and restart APEX.
+                                juce::Logger::writeToLog("[APEX-ANDROID-AUDIO] RECORD_AUDIO denied; output-only until restart");
+                                main->setAudioChannels(0, 2);
+                                main->cachedEnabledAudioInputChannels_.store(0, std::memory_order_release);
+                                main->appCore_.setHardwareInputChannelCount(0);
+                            }
+                        }
+                    });
+                return;
+            }
+           #endif
             appendMainStartupTrace("audio-init.begin");
             self->initializeSafeStartupAudio();
             appendMainStartupTrace("audio-init.after-setAudioChannels");
@@ -7166,21 +7253,54 @@ void MainComponent::undockMixer()
 
 void MainComponent::dockMixer()
 {
+   #if JUCE_ANDROID
+    // Android intentionally only supports the floating presentation of the
+    // original MixerWindow; do not reparent the viewport into a dock.
+    if (mixerWindow_)
+    {
+        mixerWindow_->restoreIfMinimized();
+        mixerWindow_->setVisible(true);
+        mixerWindow_->toFront(false);
+    }
+    if (mixerBubble_) mixerBubble_->setVisible(false);
+    return;
+   #endif
     mixerDocked_ = true;
     mixerPanel_->setDockedState(true);
     addChildComponent(mixerViewport_);
     mixerViewport_.setViewedComponent(mixerPanel_.get(), false);
     mixerViewport_.setVisible(true);
     mixerWindow_->setVisible(false);
-    mixerBubble_->setVisible(false);
+    if (mixerBubble_) mixerBubble_->setVisible(false);
+    // Maintain explicit Android owner of mixer viewport: no phantom
+    // floating mixer window and no hidden parent swallowing touch input.
     resized();
 }
 
 void MainComponent::initializeSafeStartupAudio()
 {
+   #if ! JUCE_ANDROID
+    // The Windows ASIO/SEH device wrapper is deliberately not compiled on
+    // Android. JUCE's AudioDeviceManager supplies Android/USB routing.
     DAW::installSafeAudioDeviceTypes(getOwnedDeviceManager());
+   #endif
     selectSafeStartupAudioDeviceType();
     setAudioChannels(kMaxHardwareInputChannels, 2);
+
+   #if JUCE_ANDROID
+    // USB audio routing belongs to Android/Oboe. The Windows-era repair
+    // workflow can close/reopen the Android stream on the message thread,
+    // starving input dispatch and causing an Application Not Responding.
+    // Capture the negotiated channels once; explicit Audio Settings remains
+    // the path for changing devices. No periodic Windows ASIO/USB repair.
+    const int activeInputs = getEnabledAudioInputChannelCount();
+    cachedEnabledAudioInputChannels_.store(activeInputs, std::memory_order_release);
+    appCore_.setHardwareInputChannelCount(activeInputs);
+    __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                        "06 Android audio initialized inputs=%d", activeInputs);
+    inputWatchdog_.startTimer(2000);  // heartbeat only, never reopens device
+    return;
+   #endif
 
     if (!repairInvalidCurrentAudioDevice())
     {
@@ -8540,6 +8660,16 @@ void MainComponent::drainCallbackAuditRing()
 
 void MainComponent::inputWatchdogTick()
 {
+   #if JUCE_ANDROID
+    // Evidence for device ANRs: this heartbeat stops if JUCE's GUI thread
+    // becomes blocked. Never run the Windows device-reopen watchdog or
+    // sandbox maintenance on Android.
+    __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                        "UI heartbeat inputs=%d audioCallbacks=%lld",
+                        cachedEnabledAudioInputChannels_.load(std::memory_order_acquire),
+                        static_cast<long long>(audioCallbackTickCounter_.load(std::memory_order_relaxed)));
+    return;
+   #endif
     // ── Callback audit: drain and report from message thread (5-second interval) ──
     if (callbackAuditEnabled_)
     {
@@ -8844,9 +8974,19 @@ void MainComponent::resized()
     }
 
     auto content = area;
-    if (mixerDocked_ && mixerPanel_)
+    if (mixerDocked_ && mixerPanel_ && mixerViewport_.isVisible())
     {
-        auto mixerArea = content.removeFromBottom(mixerH_);
+       #if JUCE_ANDROID
+        // Device-independent responsive split: reserve timeline working
+        // space while exposing real faders. Do not reserve ANY mixer height
+        // after View > Mixer hides it.
+        const int visibleMixerHeight = juce::jmin(
+            juce::jmax(0, content.getHeight() - 120),
+            juce::jmax(180, juce::roundToInt(content.getHeight() * 0.46)));
+       #else
+        const int visibleMixerHeight = mixerH_;
+       #endif
+        auto mixerArea = content.removeFromBottom(visibleMixerHeight);
         if (monitorSection_)
             monitorSection_->setBounds(mixerArea.removeFromRight(DAW::MonitorSectionUI::kPreferredWidth));
 
@@ -8870,7 +9010,18 @@ void MainComponent::resized()
     }
 
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
+    {
+       #if JUCE_ANDROID
+        // Desktop's 220 logical pixels would consume over half the width on
+        // narrow Android views. Keep tracks reachable while exposing a real
+        // timeline for scrolling, selection and pinch/zoom work.
+        const int mobileTrackWidth = juce::jmin(trackListW_,
+            juce::jmax(108, content.getWidth() / 4));
+        trackListWindow_->setBounds(content.removeFromLeft(mobileTrackWidth));
+       #else
         trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
+       #endif
+    }
 
     if (timelineWindow_)
         timelineWindow_->setBounds(content);
@@ -8879,16 +9030,27 @@ void MainComponent::resized()
 
     if (mixerWindow_ && !mixerDocked_)
     {
-        // Place the floating mixer exactly once, in a SAFE position that never
-        // covers the app header (kMenuH + kTransportH). The MixerWindow ctor
-        // pre-sizes itself, so bounds are never empty — the placed flag (set
-        // by user move/resize and by Reset Size) is the real guard.
-        if (!mixerWindowPlaced_)
-        {
-            // Default to six normal strips plus the pinned Master; the user can resize the floating
-            // window freely (the viewport scrolls horizontally for the rest).
+       #if JUCE_ANDROID
+        // First MainComponent layout uses desktop 1280x800. Once Android
+        // delivers its actual viewport, recompute if the window is off-screen
+        // or bigger than that viewport. Preserve the user's position/size
+        // during regular resizes that already fit.
+        const int safeTop = juce::jmin(getHeight() / 3,
+                                      kMenuH + kTransportH + 8);
+        const auto safe = getLocalBounds()
+            .withTrimmedTop(safeTop).reduced(8, 6);
+        const auto current = mixerWindow_->getBounds();
+        if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
+            || current.getHeight() > safe.getHeight()
+            || current.getX() < safe.getX()
+            || current.getY() < safe.getY()
+            || current.getRight() > safe.getRight()
+            || current.getBottom() > safe.getBottom())
             setDefaultMixerWindowBounds();
-        }
+       #else
+        if (!mixerWindowPlaced_)
+            setDefaultMixerWindowBounds();
+       #endif
     }
 
     if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
@@ -8946,6 +9108,30 @@ void MainComponent::setDefaultMixerWindowBounds()
 {
     if (!mixerWindow_ || !mixerPanel_)
         return;
+
+   #if JUCE_ANDROID
+    // True FLOATING mixer, fitted to the live phone/tablet activity rather
+    // than the hard-coded 80, desktopY, 320px-high Windows rectangle.
+    // Keep the desktop original chrome, title bar, drag-to-move and resizing.
+    const int safeTop = juce::jmin(getHeight() / 3,
+                                  kMenuH + kTransportH + 8);
+    const auto safe = getLocalBounds().withTrimmedTop(safeTop).reduced(8, 6);
+    if (safe.isEmpty())
+        return;
+    const int width = juce::jmin(safe.getWidth(),
+        juce::jmax(200, juce::roundToInt(safe.getWidth() * 0.88)));
+    const int height = juce::jmin(safe.getHeight(),
+        juce::jmax(180, juce::roundToInt(safe.getHeight() * 0.86)));
+    // The desktop 260px minimum cannot be imposed on a short Android
+    // viewport: update its resize constrainer to the actual visible limits.
+    mixerWindow_->setMinimumSize(juce::jmin(200, safe.getWidth()),
+                                 juce::jmin(180, safe.getHeight()));
+    mixerWindow_->setBounds(safe.getX() + (safe.getWidth() - width) / 2,
+                            safe.getY() + (safe.getHeight() - height) / 2,
+                            width, height);
+    mixerWindowPlaced_ = true;
+    return;
+   #endif
 
     // The outer frame/title chrome is not part of the Mixer content width.
     // Derive it from the live window rather than duplicating frame constants.
@@ -9366,6 +9552,14 @@ void MainComponent::startPluginScanIfNeeded()
     const bool hasCachedPlugins = scanner.getCache().getCount() > 0
         || scanner.getKnownPlugins().getNumTypes() > 0;
     scanStarted_ = true;
+   #if JUCE_ANDROID
+    // On Android there are no desktop VST3 DLLs to enumerate. The old
+    // first-run scan was being scheduled shortly after the startup screen
+    // appeared and could block the UI message thread (ANR). Built-in effects
+    // are registered in the DAW; Android has no auto plugin scan.
+    juce::Logger::writeToLog("[APEX-ANDROID-BOOT] bypass desktop auto plugin scan");
+    return;
+   #endif
     if (hasCachedPlugins)
         return; // Persisted registry is ready; manual Rescan stays available.
 

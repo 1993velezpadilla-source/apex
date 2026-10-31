@@ -404,6 +404,30 @@ private:
     std::uint64_t generation_ = 0;
     std::uint32_t quantumSamples_ = 512;
 };
+#else
+class PluginSandboxAutomationTransportCore
+{
+public:
+    struct Diagnostics { std::uint64_t latestPublishedSequence=0, parentOverflowRejected=0,
+                         workerInvalidBatches=0, workerAppliedEvents=0; };
+    bool create(const juce::String&, std::uint64_t, juce::String& e)
+    { e = "Sandbox automation requires Windows"; return false; }
+    bool reconfigureAfterWorkerStopped(std::uint64_t) noexcept { return false; }
+    void openRealtimeGate() noexcept {}
+    void closeRealtimeGate() noexcept {}
+    bool isPrepared() const noexcept { return false; }
+    const juce::String& mappingName() const noexcept { return empty_; }
+    std::uint64_t generation() const noexcept { return 0; }
+    Diagnostics diagnostics() const noexcept { return {}; }
+    bool publishBatch(std::uint64_t,
+         const PluginSandboxAutomationShared::SandboxAutomationEvent*,
+         std::uint32_t, bool) noexcept { return false; }
+    void cancelBatch(std::uint64_t) noexcept {}
+    void releaseAfterWorkerStopped() noexcept {}
+private:
+    juce::String empty_;
+};
+
 #endif
 
 } // namespace DAW

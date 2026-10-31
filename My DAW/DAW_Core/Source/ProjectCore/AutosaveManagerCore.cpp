@@ -149,7 +149,7 @@ void AutosaveManagerCore::onProjectLoaded()
     diagRecordingFinalizedAutosave_.store(false);
     {
         const juce::ScopedWriteLock sl(fileLock_);
-        latestAutosaveFile_ = {};
+        latestAutosaveFile_ = juce::File();
     }
     // Do not reset writing_ here: the previous job must drain before a new
     // project is allowed to start another autosave.

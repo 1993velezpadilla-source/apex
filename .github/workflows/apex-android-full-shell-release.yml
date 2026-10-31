@@ -1,0 +1,249 @@
+name: APEX Android Original Optimized Release Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/android-port-*"
+    paths:
+      - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/enable_immersive_fullscreen.py"
+      - ".github/workflows/apex-android-full-shell-release.yml"
+      - "My DAW/DAW_Core/Source/**"
+      - "My DAW/DAW_Core/DAW_Core.jucer"
+
+concurrency:
+  group: apex-android-optimized-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-apex-release-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout APEX original source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Projucer and Android build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ninja-build cmake pkg-config xvfb \
+            libasound2-dev libjack-jackd2-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libcurl4-openssl-dev
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Use preinstalled Android SDK (avoid legacy sdkmanager tools package)
+        shell: bash
+        run: |
+          test -n "${ANDROID_HOME:-}" || { echo 'ANDROID_HOME unavailable'; exit 1; }
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER" || { echo "Missing Android sdkmanager: $SDKMANAGER"; exit 1; }
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --version
+
+      - name: Install Android toolchains
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Download pinned JUCE used by Windows APEX
+        shell: bash
+        run: |
+          mkdir -p third_party
+          git clone --quiet --depth 1 --branch 8.0.12 \
+            https://github.com/juce-framework/JUCE.git third_party/JUCE
+
+      - name: Restore pinned JUCE Projucer cache
+        id: projucer-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
+
+      - name: Build Projucer host generator
+        shell: bash
+        run: |
+          if ! find /tmp/apex-juce-host -type f -name Projucer -perm /111 2>/dev/null | grep -q .; then
+            cmake -S third_party/JUCE -B /tmp/apex-juce-host \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
+            cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+          else
+            echo "Using cached JUCE 8.0.12 Projucer binary"
+          fi
+
+      - name: Cache compiled host Projucer before Android build
+        if: steps.projucer-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
+
+      - name: Generate Android exporter from ORIGINAL APEX .jucer
+        shell: bash
+        run: |
+          python3 Android/scripts/generate_full_exporter.py \
+            2>&1 | tee "$RUNNER_TEMP/apex-android-full-source-audit.txt"
+          PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
+          test -n "$PROJUCER"
+          xvfb-run -a "$PROJUCER" --resave \
+            "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
+          test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
+          # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
+          # Android 15/16 WindowInsetsController hides the real status/nav
+          # bars and re-applies after focus changes from plugin dialogs.
+          python3 Android/scripts/enable_immersive_fullscreen.py
+          grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" \
+            "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
+          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
+
+      - name: Create disposable Android Debug signing key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -storetype JKS \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s "$HOME/.android/debug.keystore"
+
+      - name: Build full original APEX for Android ARM64 with release compiler optimizations
+        shell: bash
+        working-directory: My DAW/DAW_Core/Builds/AndroidFull
+        run: |
+          set -o pipefail
+          chmod +x ./gradlew
+          # Gradle dependency servers intermittently failed to resolve the
+          # Android Gradle Plugin transitive dependencies on run 41152629694.
+          # Retry NETWORK resolution only; never ignore real C++ errors.
+          for attempt in 1 2 3; do
+            echo "[APEX-ANDROID] Gradle build attempt $attempt/3" |
+              tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
+            if ./gradlew --no-daemon --max-workers=2 assembleRelease \
+                2>&1 | tee -a "$RUNNER_TEMP/apex-android-full-compile.log"; then
+              exit 0
+            fi
+            if ! tail -n 300 "$RUNNER_TEMP/apex-android-full-compile.log" |
+                grep -Eq 'Could not resolve|Could not find com\\.|Could not GET|Read timed out|Connection timed out|repo.maven.apache.org|dl.google.com'; then
+              echo "[APEX-ANDROID] Real build error; will not hide it with retries."
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+
+      - name: Sign and verify RELEASE-optimized ARM64 preview APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          test -x "$tools/zipalign"
+          test -x "$tools/apksigner"
+          test -s "$HOME/.android/debug.keystore"
+          mkdir -p android-release-real-apk
+          found=0
+          while IFS= read -r -d '' apk; do
+            found=$((found + 1))
+            test -s "$apk"
+            unsigned="android-release-real-apk/apex-release-unsigned-tmp-${found}.apk"
+            aligned="android-release-real-apk/apex-release-aligned-tmp-${found}.apk"
+            output="android-release-real-apk/APEX-Android-Original-Release-Optimized-ARM64-Preview-${found}.apk"
+            cp "$apk" "$unsigned"
+            "$tools/zipalign" -f -p 4 "$unsigned" "$aligned"
+            # Preview only: Android install requires a signature. A disposable
+            # DEBUG key signs the RELEASE-optimized binary for device QA, not
+            # for store distribution or updates to an existing installation.
+            "$tools/apksigner" sign --ks "$HOME/.android/debug.keystore" \
+              --ks-key-alias androiddebugkey --ks-pass pass:android \
+              --key-pass pass:android --out "$output" "$aligned"
+            "$tools/apksigner" verify --verbose "$output"
+            entries="$(unzip -Z1 "$output")"
+            grep -qx 'lib/arm64-v8a/libjuce_jni.so' <<< "$entries"
+            grep -qx 'classes.dex' <<< "$entries"
+            rm -f "$unsigned" "$aligned"
+            echo "Validated release-optimized ORIGINAL APEX: $output"
+          done < <(find "My DAW/DAW_Core/Builds/AndroidFull/app/build/outputs/apk" \
+            -type f -name '*release*.apk' -print0)
+          # JUCE Projucer names the release variant "Release_" and AGP
+          # publishes under app/build/outputs/apk/release_/release/, not
+          # outputs/apk/release/. Do not hardcode Gradle's variant directory.
+          test "$found" -gt 0 || { echo "Release build produced NO APK"; exit 1; }
+          echo "### Release-optimized APEX Android preview (QA only)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Produced $found signed ARM64 preview APK(s); real device UX and audio still need QA." >> "$GITHUB_STEP_SUMMARY"
+          echo "Release compiler optimizations, signed with temporary debug key. Not a store release." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release-optimized ORIGINAL APEX ARM64 preview APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Original-Release-Optimized-ARM64-PREVIEW
+          path: android-release-real-apk/APEX-Android-Original-Release-Optimized-ARM64-Preview-*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Adversarial full native translation-unit error sweep
+        if: failure()
+        shell: bash
+        working-directory: My DAW/DAW_Core/Builds/AndroidFull
+        run: |
+          # Gradle/Ninja normally aborts after the first failing C++ unit.
+          # Keep going across all original APEX units to discover independent
+          # Android incompatibilities in a single CI run. Diagnostic only:
+          # this never changes the build result or fabricates an APK.
+          set +e
+          count=0
+          while IFS= read -r -d '' manifest; do
+            count=$((count + 1))
+            dir="$(dirname "$manifest")"
+            echo "[APEX-ANDROID-ALL-TUS] ninja directory: $dir"
+            ninja -C "$dir" -k 0 -j 2 2>&1 |
+              tee -a "$RUNNER_TEMP/apex-android-all-tus-errors.log"
+          done < <(find app/.cxx/Debug -type f -name build.ninja -print0 2>/dev/null)
+          echo "[APEX-ANDROID-ALL-TUS] evaluated native build manifests: $count" |
+            tee -a "$RUNNER_TEMP/apex-android-all-tus-errors.log"
+          exit 0
+
+      - name: Publish compile logs, app manifest and actual APKs if any
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p android-full-shell-diagnostics
+          cp "$RUNNER_TEMP/apex-android-full-source-audit.txt" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/apex-android-full-compile.log" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/apex-android-all-tus-errors.log" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          cp "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer" \
+            android-full-shell-diagnostics/ 2>/dev/null || true
+          find "My DAW/DAW_Core/Builds/AndroidFull" \
+            -type f \( -name '*.apk' -o -name AndroidManifest.xml \) \
+            -exec cp -v '{}' android-full-shell-diagnostics/ \; 2>/dev/null || true
+      - name: Upload full-shell compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Original-Release-Compile-Audit
+          path: android-full-shell-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14

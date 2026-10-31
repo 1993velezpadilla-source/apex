@@ -35,9 +35,11 @@ public:
     {
         setOpaque(false);
         setInterceptsMouseClicks(true, false);  // receive mouseMove for tooltips; hitTest=false blocks no clicks
+       #if !JUCE_ANDROID
         auto& presentationClock = ApexPresentationClock::instance();
         presentationClock.addReceiver(this);
         presentationUpdateActive_ = presentationClock.requestContinuousUpdate(this) != 0;
+       #endif
     }
 
     ~BubblegumCableOverlayComponent() override;
@@ -57,6 +59,10 @@ public:
 
     bool hitTest(int x, int y) override
     {
+       #if JUCE_ANDROID
+        juce::ignoreUnused(x, y);
+        return false; // No invisible cable regions intercept Android touches.
+       #endif
         // Only intercept clicks that land on a cable endpoint anchor; every
         // other pixel passes through to the mixer below.
         const float px = (float) x, py = (float) y;
@@ -75,6 +81,9 @@ public:
 
     void notifyMotionFinished()
     {
+       #if JUCE_ANDROID
+        return; // Cable visuals are disabled; routing state is unaffected.
+       #endif
         snapMotionUntilSec_ = 0.0;
         forceTopologyRefreshFrames_ = 0;
         snapshotCacheValid_ = false;
@@ -84,6 +93,9 @@ public:
 
     void requestTopologyRefresh()
     {
+       #if JUCE_ANDROID
+        return; // No UI cable cache on Android.
+       #endif
         lastMixerScreenX_ = std::numeric_limits<int>::min();
         lastMixerScreenY_ = std::numeric_limits<int>::min();
         snapshotCacheValid_  = false;
@@ -145,6 +157,35 @@ private:
     mutable int lastMixerScreenX_    = std::numeric_limits<int>::min();
     mutable int lastMixerScreenY_    = std::numeric_limits<int>::min();
 
+   #if JUCE_ANDROID
+    double lastMobilePresentationMs_ = 0.0;
+    juce::Rectangle<int> lastMobileDamageBounds_;
+    // Keep transparent-overlay invalidations confined to cable pixels, not
+    // the entire Pixel Fold screen. The previous region must be repainted
+    // too, to erase moved or disconnected cables.
+    juce::Rectangle<int> mobileCableDamageBounds() const
+    {
+        juce::Rectangle<int> damage;
+        auto includePoint = [&damage](juce::Point<float> p)
+        {
+            if (!std::isfinite(p.x) || !std::isfinite(p.y))
+                return;
+            const auto x = juce::roundToInt(p.x), y = juce::roundToInt(p.y);
+            auto rect = juce::Rectangle<int>(x - 26, y - 32, 52, 176);
+            damage = damage.isEmpty() ? rect : damage.getUnion(rect);
+        };
+        for (const auto& s : cachedSnapshots_)
+            if (s.visible)
+            {
+                includePoint(s.endpoints.source);
+                includePoint(s.endpoints.destination);
+            }
+        for (const auto& hit : cableAnchors_)
+            if (hit.isSidechain)
+                includePoint(hit.point);
+        return damage.getIntersection(getLocalBounds());
+    }
+   #endif
     double visualTime_      = 0.0;
     double freezeUntilSec_  = 0.0;
     double snapMotionUntilSec_ = 0.0;
@@ -299,6 +340,7 @@ private:
         double setupMs[kWindow]  = {};
         double renderMs[kWindow] = {};
         double totalMs[kWindow]  = {};
+        double afterBakeMs[kWindow] = {};
         double presentationTickMs[kWindow] = {};
         int    snapCount[kWindow]= {};
         int    cacheHits[kWindow] = {};
@@ -308,11 +350,13 @@ private:
 
         double lastTimerCall = 0.0; // set each timerCallback
 
-        void record(double setup, double render, double total, int snaps, int hits, int misses)
+        void record(double setup, double render, double total, int snaps, int hits, int misses,
+                    double afterBake)
         {
             setupMs [head] = setup;
             renderMs[head] = render;
             totalMs [head] = total;
+            afterBakeMs[head] = afterBake;
             snapCount[head]= snaps;
             cacheHits[head] = hits;
             cacheMisses[head] = misses;
@@ -337,6 +381,7 @@ private:
             double aSetup  = avg(setupMs);
             double aRender = avg(renderMs);
             double aTotal  = avg(totalMs);
+            double aTail   = avg(afterBakeMs);
             double aTick  = avg(presentationTickMs);
             int    aSnaps  = (filled > 0) ? snapCount[(head - 1 + kWindow) % kWindow] : 0;
             int totalHits = 0;
@@ -356,6 +401,7 @@ private:
             txt << "Total paint:  " << juce::String(aTotal,  2) << " ms\n"
                 << "  Setup/maps: " << juce::String(aSetup,  2) << " ms\n"
                 << "  paintAll:   " << juce::String(aRender, 2) << " ms\n"
+                << "  After bake: " << juce::String(aTail, 2) << " ms\n"
                 << "Cable cache: " << totalHits << " H / " << totalMisses << " M\n"
                 << "Presentation: " << juce::String(aTick,  2) << " ms\n"
                 << "Snapshots:    " << aSnaps << "\n"

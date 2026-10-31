@@ -185,7 +185,14 @@ namespace bg::sidechain
         bool process (uint64_t sendId,
                       float levelLinear,
                       double nowSeconds,
-                      const Config& cfg = {});
+                      const Config& cfg);
+
+        bool process (uint64_t sendId,
+                      float levelLinear,
+                      double nowSeconds)
+        {
+            return process(sendId, levelLinear, nowSeconds, Config{});
+        }
 
         void reset (uint64_t sendId);
 

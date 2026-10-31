@@ -862,7 +862,7 @@ public:
         // Tall console proportions (compact CLOSED) and a sane resize range.
         // Minimum height = the FULL closed console (640): the host can never
         // shrink the strips below their complete control set.
-        setResizable (true, nullptr);
+        setResizable (true, false);
         setResizeLimits (560, 640, 1100, 1000);
 
         setSize (660, 640);

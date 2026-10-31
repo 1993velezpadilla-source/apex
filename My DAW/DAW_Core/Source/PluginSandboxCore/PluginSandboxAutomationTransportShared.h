@@ -187,6 +187,23 @@ inline bool validBatchEvents(const SandboxAutomationEvent* events,
     return true;
 }
 } // namespace PluginSandboxAutomationShared
+#else
+// On Android the Windows shared-memory automation transport is unavailable.
+// Keep only the portable event contract required by the plugin-host headers;
+// never create or simulate a cross-process transport.
+namespace PluginSandboxAutomationShared
+{
+inline constexpr std::uint32_t kAutomationBatchSlotCount = 5;
+inline constexpr std::uint32_t kMaxAutomationEventsPerQuantum = 64;
+inline constexpr std::uint32_t kMaxAutomationParameters = 128;
+struct SandboxAutomationEvent
+{
+    std::uint32_t parameterOrdinal = 0;
+    std::uint32_t sampleOffset = 0;
+    float normalizedValue = 0.0f;
+};
+static_assert(sizeof(SandboxAutomationEvent) == 12);
+} // namespace PluginSandboxAutomationShared
 #endif
 
 } // namespace DAW

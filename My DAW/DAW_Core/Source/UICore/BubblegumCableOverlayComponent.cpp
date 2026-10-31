@@ -89,7 +89,9 @@ void BubblegumCableOverlayComponent::setCableAccentColour(juce::Colour colour)
 BubblegumCableOverlayComponent::~BubblegumCableOverlayComponent()
 {
     unbind();
+   #if !JUCE_ANDROID
     ApexPresentationClock::instance().removeReceiver(this);
+   #endif
 }
 
 void BubblegumCableOverlayComponent::unbind() noexcept
@@ -108,6 +110,9 @@ void BubblegumCableOverlayComponent::unbind() noexcept
     wasRendering_ = false;
     cachedSendRecords_.clear();
     cachedSnapshots_.clear();
+   #if JUCE_ANDROID
+    lastMobileDamageBounds_ = {};
+   #endif
 }
 
 void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* mixer, juce::Viewport* viewport)
@@ -120,6 +125,13 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
     snapshotCacheValid_ = false;
     cachedSendRecords_.clear();
     cachedSnapshots_.clear();
+
+   #if JUCE_ANDROID
+    // Explicit product decision: visual cables are absent in APEX Android.
+    // Bind no graph listener, schedule no cable paint, build no cable cache.
+    // Bubblegum routing, sends, sidechains and automation remain in AppCore.
+    return;
+   #endif
 
     // Push reduced-motion preference to the sidechain cable animator.
     // Default is false (full animation). To honour the Windows "Show animations
@@ -140,6 +152,9 @@ void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* m
 
 void BubblegumCableOverlayComponent::requestPresentationUpdates()
 {
+   #if JUCE_ANDROID
+    return; // Don't request the continuous cable redraw clock on phones.
+   #endif
     if (presentationUpdateActive_)
         return;
 
@@ -149,6 +164,9 @@ void BubblegumCableOverlayComponent::requestPresentationUpdates()
 
 void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
 {
+   #if JUCE_ANDROID
+    return;
+   #endif
     if (isShowing())
         requestTopologyRefresh();
     else
@@ -161,6 +179,9 @@ void BubblegumCableOverlayComponent::handlePresentationVisibilityChange()
 
 bool BubblegumCableOverlayComponent::shouldRender() const
 {
+   #if JUCE_ANDROID
+    return false; // Never render any cable or profiler overlay on Android.
+   #endif
     if (!bgV2_ || !bgV2_->routingGraph || !mixerPanel_)
         return false;
 
@@ -174,8 +195,22 @@ bool BubblegumCableOverlayComponent::shouldRender() const
 
 void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
 {
+   #if JUCE_ANDROID
+    juce::ignoreUnused(deltaSeconds);
+    return; // Avoid all geometry, routing scans, HUD and UI-thread work.
+   #endif
     const double timerStart = juce::Time::getMillisecondCounterHiRes();
     const double nowSec = timerStart * 0.001;
+
+   #if JUCE_ANDROID
+    // The desktop overlay is registered for continuous presentation; on a
+    // phone its heavyweight route/setup work must not starve touch handling.
+    // Independent audio callbacks and the rest of APEX keep their own cadence.
+    if (lastMobilePresentationMs_ > 0.0
+        && timerStart - lastMobilePresentationMs_ < 100.0)
+        return;
+    lastMobilePresentationMs_ = timerStart;
+   #endif
 
     if (viewport_ && bgV2_)
     {
@@ -257,7 +292,23 @@ void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
     if (visibleAndSized && (compositeFrameDirty_ || clearFrame))
     {
         ++paintedTickCount_;
+       #if JUCE_ANDROID
+        // Redrawing a full-screen transparent overlay on Android is expensive
+        // even when drawing a single cable. Invalidate only cable geometry
+        // and its previous location. First frame/topology refresh can still
+        // request full bounds so new endpoints are discovered correctly.
+        const auto damage = mobileCableDamageBounds();
+        const auto combined = lastMobileDamageBounds_.isEmpty()
+            ? damage : (damage.isEmpty() ? lastMobileDamageBounds_
+                                         : damage.getUnion(lastMobileDamageBounds_));
+        lastMobileDamageBounds_ = damage;
+        if (!combined.isEmpty())
+            repaint(combined);
+        else if (clearFrame)
+            repaint();
+       #else
         repaint();
+       #endif
     }
     else
     {
@@ -269,6 +320,10 @@ void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
 
 void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
 {
+   #if JUCE_ANDROID
+    juce::ignoreUnused(g);
+    return;
+   #endif
     paintRateMeter_.tick();
     const double paintStart = juce::Time::getMillisecondCounterHiRes();
 
@@ -610,6 +665,7 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
     // ── Composite frame cache ──────────────────────────────────────────────
     // Only re-bake cachedFrame_ when topology/layout changed or sidechain is
     // animating. Static cables with all cache hits blit the previous frame.
+   #if !JUCE_ANDROID
     const int w = getWidth(), h = getHeight();
     const bool frameSizeChanged = !cachedFrame_.isValid()
                                   || cachedFrame_.getWidth() != w
@@ -619,11 +675,24 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
         cachedFrame_ = juce::Image(juce::Image::ARGB, juce::jmax(1, w), juce::jmax(1, h), true);
         compositeFrameDirty_ = true;
     }
+   #endif
 
+   #if JUCE_ANDROID
+    // Mobile: the expensive part of the user's 130-310ms paint captures was
+    // NOT paintAll (often 0.00ms). Full-screen ARGB cache clear/upload/blit
+    // remains outside that profiler counter. Avoid an extra 1536x864 buffer
+    // and its full-frame software-to-screen composite for every touch update.
+    // Drawing paths directly also avoids copying a transparent entire screen.
+    // Repaint with existing real routing snapshots and hit targets each time.
+    if (true)
+    {
+        juce::Graphics& offG = g;
+   #else
     if (compositeFrameDirty_)
     {
         cachedFrame_.clear(cachedFrame_.getBounds(), juce::Colours::transparentBlack);
         juce::Graphics offG(cachedFrame_);
+   #endif
 
         // Rebuild the clickable anchor set for this frame's geometry.
         cableAnchors_.clear();
@@ -708,7 +777,28 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
             if (!scCables.empty())
             {
                 bgV2_->sidechainCable.thicknessMultiplier = sidechainCableThickness_;
+               #if JUCE_ANDROID
+                // On phones the legacy 2.5D sidechain pipeline costs multiple
+                // full-window paint passes. Keep real active/bypassed routes
+                // visible and interactive with a lightweight cyan path.
+                for (const auto& sc : scCables)
+                {
+                    const float x0 = sc.source.x, y0 = sc.source.y;
+                    const float x1 = sc.target.x, y1 = sc.target.y;
+                    const float sag = juce::jlimit(15.0f, 85.0f,
+                        20.0f + std::abs(x1 - x0) * 0.10f);
+                    juce::Path path;
+                    path.startNewSubPath(x0, y0);
+                    path.cubicTo(x0 + (x1-x0)*0.25f, y0+sag,
+                                 x0 + (x1-x0)*0.75f, y1+sag, x1, y1);
+                    offG.setColour(juce::Colours::black.withAlpha(0.72f * sc.alphaMult));
+                    offG.strokePath(path, juce::PathStrokeType(6.0f));
+                    offG.setColour(juce::Colour(0xff51d9ff).withAlpha(sc.alphaMult));
+                    offG.strokePath(path, juce::PathStrokeType(2.8f));
+                }
+               #else
                 bgV2_->paintSidechainCables(offG, scCables, laneBottomY);
+               #endif
             }
         }
 
@@ -818,6 +908,8 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
         compositeFrameDirty_ = false;
     } // compositeFrameDirty_ block ends — offG is destroyed here
 
+    const double paintAfterBakeStartMs = juce::Time::getMillisecondCounterHiRes();
+
     // ── Wet/dry anchor adjustment feedback ─────────────────────────────────
     // While the user drags a destination anchor (the send-level knob), dim
     // the cables so the value being adjusted reads clearly, and draw a
@@ -825,10 +917,12 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
     // frame must be blitted ONCE at reduced opacity — blitting the same
     // frame a second time at 45% over itself re-composites to full opacity
     // and the transparency effect silently disappears.
+   #if !JUCE_ANDROID
     if (draggingWetDry_)
         g.setOpacity(0.45f);
     g.drawImageAt(cachedFrame_, 0, 0);
     g.setOpacity(1.0f);
+   #endif
 
     if (draggingWetDry_)
     {
@@ -953,7 +1047,8 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
             paintEnd   - paintStart,   // total paint ms
             (int)cachedSnapshots_.size(),
             cableRenderStats.cacheHits,
-            cableRenderStats.cacheMisses);
+            cableRenderStats.cacheMisses,
+            paintEnd - paintAfterBakeStartMs);
         const double mixerFps = mixerFpsFn_ ? mixerFpsFn_() : -1.0;
         timingHUD_.draw(g, getLocalBounds(), paintRateMeter_.getFps(), mixerFps);
     }

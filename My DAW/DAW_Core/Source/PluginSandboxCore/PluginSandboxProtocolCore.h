@@ -17,6 +17,13 @@
 
 namespace DAW {
 
+// The Windows sandbox is not implemented on Android. Keep its public
+// timeout/diagnostic types parseable without importing any Win32 headers.
+// No process, pipe, shared-memory, or VST3 isolation is enabled here.
+#if !JUCE_WINDOWS
+using DWORD = std::uint32_t;
+#endif
+
 inline constexpr std::uint32_t APEX_PLUGIN_SANDBOX_PROTOCOL_V1 = 1;
 
 #if defined(APEX_ENABLE_TEST_HOOKS) && APEX_ENABLE_TEST_HOOKS
@@ -1643,6 +1650,31 @@ inline juce::String buildWindowsCommandLine(const juce::StringArray& arguments)
     return quoted.joinIntoString(" ");
 }
 } // namespace PluginSandboxWin32
+#else
+// Diagnostic enum only: Android has no Windows sandbox editor transport.
+// Preserve the wire numeric identity for the public status record, but do
+// not provide any worker/IPC implementation.
+namespace PluginSandboxWin32
+{
+inline constexpr std::uint32_t kE1MaximumParameters = 256;
+inline constexpr std::uint32_t kE2BMaximumLiveValueEntries = 128;
+enum class EditorAsyncStatus : std::uint32_t
+{
+    Rejected = 0,
+    Accepted = 1,
+    AlreadyCreating = 2,
+    AlreadyReady = 3,
+    Creating = 4,
+    Slow = 5,
+    Ready = 6,
+    Failed = 7,
+    CancelPending = 8,
+    Cancelled = 9,
+    Stale = 10,
+    WorkerGone = 11,
+    Closed = 12
+};
+}
 #endif
 
 } // namespace DAW

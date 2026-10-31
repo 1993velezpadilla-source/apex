@@ -111,7 +111,9 @@ public:
     PluginSandboxProcessCore(const PluginSandboxProcessCore&) = delete;
     PluginSandboxProcessCore& operator=(const PluginSandboxProcessCore&) = delete;
 
-    StartResult start(const Options& options = {})
+    StartResult start() { return start(Options{}); }
+
+    StartResult start(const Options& options)
     {
        #if JUCE_WINDOWS
         using namespace PluginSandboxWin32;
@@ -1787,7 +1789,54 @@ public:
      std::uint32_t workerStartCount_ = 0;   // Phase D diagnostics: lifetime CreateProcessW successes
    #endif
    #else
+    // Android has no Win32 worker, pipe, or mapped sandbox. Keep state and
+    // transport objects so the original host can compile and reject startup.
     void closeOwnedResources() {}
+    PluginSandboxAudioTransportCore audioTransport_;
+    PluginSandboxAutomationTransportCore automationTransport_;
+    bool running_ = false;
+    std::uint64_t workerGeneration_ = 0;
+    DWORD launchedWorkerProcessId_ = 0;
+
+public:
+    // The public no-worker interface is OUTSIDE the #if JUCE_WINDOWS private
+    // implementation block: Android must see these signatures.
+    // Android never creates sandbox workers. These signatures only keep
+    // shared source parseable and reject any unexpected worker operation.
+    bool requestParameterMetadata(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool requestLiveParameterValues(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool setPluginParameter(const juce::String& parameterId, float value,
+                            float& applied, juce::String& error)
+    {
+        juce::ignoreUnused(parameterId, value);
+        applied = 0.0f;
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool capturePluginState(juce::MemoryBlock& result, juce::String& error)
+    {
+        result.reset();
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+    bool restorePluginState(const juce::MemoryBlock& state, juce::String& error)
+    {
+        juce::ignoreUnused(state);
+        error = "Windows sandbox worker unavailable on Android";
+        return false;
+    }
+
+private:
    #endif
 
     Diagnostics diagnostics_;

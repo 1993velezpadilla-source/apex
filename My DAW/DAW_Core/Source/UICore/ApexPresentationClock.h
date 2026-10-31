@@ -447,14 +447,19 @@ public:
     };
 
     //==============================================================================
-    /** Idle-polling rate in Hz when no receiver needs continuous updates. */
+   #if JUCE_ANDROID
+    // The desktop shell has many simultaneous animated components. Cap
+    // presentation only on mobile while the initial port's ANR is investigated.
+    // No audio callback or DSP processing cadence is changed by these values.
+    static constexpr int kIdleRateHz = 5;
+    static constexpr int kMinActiveRateHz = 30;
+    static constexpr int kMaxRateHz = 30;
+   #else
+    /** Desktop: preserve the 60-144Hz original presentation policy. */
     static constexpr int kIdleRateHz = 10;
-
-    /** Minimum active presentation rate (60 FPS baseline). */
     static constexpr int kMinActiveRateHz = 60;
-
-    /** Maximum supported presentation rate. */
     static constexpr int kMaxRateHz = 144;
+   #endif
 
 private:
     //==============================================================================

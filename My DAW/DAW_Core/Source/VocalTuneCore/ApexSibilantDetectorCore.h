@@ -46,8 +46,14 @@ public:
     };
 
     // Detect sibilant/breath regions from the analysis.
+    // Keep the one-argument API without triggering Clang's nested Params
+    // default member initializer diagnostics on Android.
     static std::vector<ApexSibilantRegion> detect (const ApexTuneAnalysis& analysis,
-                                                   const Params& params = {});
+                                                   const Params& params);
+    static std::vector<ApexSibilantRegion> detect (const ApexTuneAnalysis& analysis)
+    {
+        return detect(analysis, Params{});
+    }
 
     // Mark voiced notes that overlap any sibilant region.
     // After this call, those notes have sibilantProtected = true and the

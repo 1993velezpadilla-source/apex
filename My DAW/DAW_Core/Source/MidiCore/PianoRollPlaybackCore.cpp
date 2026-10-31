@@ -106,8 +106,11 @@ void PianoRollPlaybackCore::processBlock (const juce::String& trackId,
 
         // Block window relative to clip start, clamped to clip bounds
         const juce::int64 relBlockStart = juce::jmax<juce::int64> (0, blockStart - clipStartSamples);
-        const juce::int64 relBlockEnd   = juce::jmin (clipEndSamples - clipStartSamples,
-                                                      blockEnd - clipStartSamples);
+        // SamplePosition may be LP64 long on Android while JUCE's int64 is
+        // long long. Explicit template type avoids an ambiguous jmin overload.
+        const juce::int64 relBlockEnd = juce::jmin<juce::int64>(
+            static_cast<juce::int64>(clipEndSamples - clipStartSamples),
+            static_cast<juce::int64>(blockEnd - clipStartSamples));
         if (relBlockEnd <= relBlockStart) continue;
 
         const juce::int64 blockStartTicks = samplesToTicks (relBlockStart, ppq);

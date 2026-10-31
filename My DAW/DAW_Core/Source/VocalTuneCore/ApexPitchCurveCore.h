@@ -80,7 +80,12 @@ public:
     // pass-through points if needed.
     static std::vector<CurvePoint> buildCurve (const ApexTuneAnalysis& analysis,
                                                const std::vector<ApexTuneNote>& notes,
-                                               const Params& params = {});
+                                               const Params& params);
+    static std::vector<CurvePoint> buildCurve (const ApexTuneAnalysis& analysis,
+                                               const std::vector<ApexTuneNote>& notes)
+    {
+        return buildCurve(analysis, notes, Params{});
+    }
 
 private:
     // Single-pole IIR low-pass for drift extraction.

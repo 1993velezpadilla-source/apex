@@ -412,7 +412,7 @@ bool ProjectManager::newProject()
 bool ProjectManager::resetToRawMix(juce::File& backupFile, juce::String& error)
 {
     jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
-    backupFile = {};
+    backupFile = juce::File();
     error.clear();
     if (!projectStateUsable_ || subs_.appCore == nullptr)
     {
@@ -458,7 +458,7 @@ bool ProjectManager::resetToRawMix(juce::File& backupFile, juce::String& error)
     if (xml == nullptr)
     {
         error = "Could not serialize pre-reset project backup.";
-        backupFile = {};
+        backupFile = juce::File();
         return false;
     }
 
@@ -476,14 +476,14 @@ bool ProjectManager::resetToRawMix(juce::File& backupFile, juce::String& error)
     if (!ready || juce::XmlDocument::parse(temporary.getFile()) == nullptr)
     {
         error = "Pre-reset backup did not pass write/parse verification.";
-        backupFile = {};
+        backupFile = juce::File();
         return false;
     }
     juce::String publicationError;
     if (!DAW::publishFileTransactionally(temporary.getFile(), backupFile, publicationError))
     {
         error = "Pre-reset backup publication failed: " + publicationError;
-        backupFile = {};
+        backupFile = juce::File();
         return false;
     }
 

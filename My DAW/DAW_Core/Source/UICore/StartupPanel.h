@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include "../ThemeCore/Theme.h"
 #include "../ThemeCore/ApexPrimitives.h"
 
@@ -116,6 +117,13 @@ public:
         auto& t = Theme::getInstance();
         auto& a = t.apex;
         g.fillAll(a.color.deepestA.withAlpha(0.90f));
+
+       #if JUCE_ANDROID
+        // The Windows 540x608 splash dialog extends below a phone's landscape
+        // window. Use the SAME real actions, compacted without clipping.
+        paintAndroidCompact(g);
+        return;
+       #endif
 
         auto box = getLocalBounds().withSizeKeepingCentre(540, 608).toFloat();
         ApexPrimitives::drawGlow(g, box.reduced(3.0f), true, a.color.violet);
@@ -252,6 +260,15 @@ public:
 
     void resized() override
     {
+       #if JUCE_ANDROID
+        for (int i = 0; i < 5; ++i)
+            btnAreas_[i] = androidButtonBounds(i);
+        btnAreas_[kCloseBtnIdx] = androidCloseBounds();
+        openProjectButton_.setBounds(btnAreas_[1]);
+        rescanPluginsButton_.setBounds(btnAreas_[3]);
+        upgradeProjectButton_.setBounds(btnAreas_[4]);
+        return;
+       #endif
         auto box = getLocalBounds().withSizeKeepingCentre(540, 608);
         auto inner = box.reduced(32);
         slashFlow_ = ApexPrimitives::buildSlashFlowPaths(box.toFloat().reduced(10.0f), 0xA9E12026u, 10);
@@ -336,6 +353,155 @@ public:
     bool hitTest(int, int) override { return true; }
 
 private:
+   #if JUCE_ANDROID
+    // A true responsive layout driven solely by the *current* JUCE content
+    // bounds. Supports landscape phones, unfolded tablets, split screen,
+    // resizable Android windows and DPI changes without fixed PC dimensions.
+    // The exact same rectangles drive paint, hit testing and real buttons.
+    struct AndroidLayout
+    {
+        juce::Rectangle<int> panel;
+        juce::Rectangle<int> title;
+        juce::Rectangle<int> close;
+        std::array<juce::Rectangle<int>, 5> actions {};
+        bool twoColumns = false;
+    };
+
+    AndroidLayout makeAndroidLayout() const
+    {
+        AndroidLayout layout;
+        const int viewW = juce::jmax(1, getWidth());
+        const int viewH = juce::jmax(1, getHeight());
+        const int edge = juce::jlimit(4, 16, juce::jmin(viewW, viewH) / 30);
+        auto available = getLocalBounds().reduced(edge);
+        if (available.isEmpty())
+            available = { 0, 0, viewW, viewH };
+
+        // Landscape: two columns keep five actions fully visible above the
+        // gesture/nav bar; compact portrait uses a vertical stack instead.
+        layout.twoColumns = available.getWidth() >= 560
+            && available.getWidth() > available.getHeight() * 13 / 10;
+        const int targetW = juce::jmin(available.getWidth(),
+                                      layout.twoColumns ? 880 : 540);
+        const int targetH = juce::jmin(available.getHeight(),
+                                      layout.twoColumns ? 400 : 550);
+        layout.panel = available.withSizeKeepingCentre(juce::jmax(1, targetW),
+                                                       juce::jmax(1, targetH));
+
+        const int inset = juce::jlimit(5, 20, layout.panel.getWidth() / 35);
+        const int titleH = juce::jlimit(36, 64, layout.panel.getHeight() / 6);
+        const int gap = juce::jlimit(3, 10, layout.panel.getHeight() / 64);
+        layout.title = {layout.panel.getX() + inset, layout.panel.getY() + 2,
+                        juce::jmax(1, layout.panel.getWidth() - inset * 2),
+                        titleH};
+        layout.close = {layout.panel.getRight() - inset - 34,
+                        layout.panel.getY() + 5, 32, 32};
+        const int rows = layout.twoColumns ? 3 : 5;
+        const int rowY = layout.panel.getY() + titleH + 5;
+        const int usableH = juce::jmax(1, layout.panel.getBottom() - rowY - inset);
+        const int rowH = juce::jmax(1, (usableH - (rows - 1) * gap) / rows);
+        const int actionW = juce::jmax(1, layout.panel.getWidth() - 2 * inset);
+        const int colGap = juce::jlimit(4, 12, actionW / 65);
+        const int colW = (actionW - colGap) / 2;
+
+        for (int i = 0; i < 5; ++i)
+        {
+            const int row = layout.twoColumns ? i / 2 : i;
+            const int col = layout.twoColumns ? i % 2 : 0;
+            // The final action spans the full last row rather than leaving
+            // dead space or moving off the bottom of the screen.
+            const bool fullRow = !layout.twoColumns || i == 4;
+            layout.actions[(size_t) i] = {
+                layout.panel.getX() + inset + (fullRow ? 0 : col * (colW + colGap)),
+                rowY + row * (rowH + gap),
+                fullRow ? actionW : colW,
+                rowH
+            };
+        }
+        return layout;
+    }
+
+    juce::Rectangle<int> androidButtonBounds(int index) const
+    {
+        if (index < 0 || index >= 5)
+            return {};
+        return makeAndroidLayout().actions[(size_t) index];
+    }
+
+    juce::Rectangle<int> androidCloseBounds() const
+    {
+        return makeAndroidLayout().close;
+    }
+
+    void paintAndroidCompact(juce::Graphics& g)
+    {
+        const auto layout = makeAndroidLayout();
+        auto& a = Theme::getInstance().apex;
+        ApexPrimitives::drawPanel(g, layout.panel.toFloat(),
+                                  ApexPrimitives::PanelDepth::floating,
+                                  true, a.color.magenta);
+
+        g.setColour(a.color.textPrimary);
+        g.setFont(juce::Font(juce::FontOptions(
+            juce::jlimit(17.0f, 27.0f,
+                         (float) layout.title.getHeight() * 0.53f),
+            juce::Font::bold)));
+        g.drawText(projectName_.isNotEmpty() ? projectName_ : "APEX",
+                   layout.title.reduced(40, 0),
+                   juce::Justification::centred, true);
+
+        const char* labels[] = { "New Project", "Open Project", "Audio Settings",
+                                 "Rescan Plugins", "Upgrade Project" };
+        const char* hints[]  = { "Start a clean studio session", "Browse .dawproj",
+                                 "Select input / output", "Refresh available effects",
+                                 "Repair an older project" };
+        const juce::Colour accents[] = { a.color.magenta, a.color.violet,
+                                         a.color.cyan, a.color.blue, a.color.cyan };
+
+        for (int i = 0; i < 5; ++i)
+        {
+            const auto b = layout.actions[(size_t) i];
+            btnAreas_[i] = b;
+            const bool hovered = hoveredBtn_ == i;
+            g.setColour(hovered ? a.color.panelC : a.color.panelB);
+            g.fillRoundedRectangle(b.toFloat(), 5.0f);
+            g.setColour(accents[i].withAlpha(hovered ? 0.96f : 0.72f));
+            g.drawRoundedRectangle(b.toFloat().reduced(0.5f), 5.0f, 1.0f);
+            const int textInset = juce::jlimit(5, 12, b.getWidth() / 30);
+            if (b.getHeight() >= 39)
+            {
+                auto labelRect = b.reduced(textInset, 1);
+                labelRect.setHeight(juce::jmax(1, b.getHeight() / 2 + 2));
+                g.setColour(a.color.textPrimary);
+                g.setFont(juce::Font(juce::FontOptions(
+                    juce::jlimit(11.0f, 16.0f, (float) b.getHeight() * 0.29f),
+                    juce::Font::bold)));
+                g.drawText(labels[i], labelRect,
+                           juce::Justification::centredLeft, true);
+                g.setColour(a.color.textSecondary);
+                g.setFont(juce::Font(juce::FontOptions(
+                    juce::jlimit(9.0f, 12.0f, (float) b.getHeight() * 0.2f))));
+                g.drawText(hints[i], b.reduced(textInset, 1)
+                                     .withTrimmedTop(b.getHeight() / 2),
+                           juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setColour(a.color.textPrimary);
+                g.setFont(juce::Font(juce::FontOptions(
+                    juce::jlimit(10.0f, 15.0f, (float) b.getHeight() * 0.45f),
+                    juce::Font::bold)));
+                g.drawText(labels[i], b.reduced(textInset, 1),
+                           juce::Justification::centredLeft, true);
+            }
+        }
+        btnAreas_[kCloseBtnIdx] = layout.close;
+        g.setColour(a.color.textPrimary);
+        g.setFont(juce::Font(juce::FontOptions(20.0f)));
+        g.drawText("x", layout.close, juce::Justification::centred);
+    }
+   #endif
+
     juce::TextButton openProjectButton_;
     juce::TextButton rescanPluginsButton_;
     juce::TextButton upgradeProjectButton_;

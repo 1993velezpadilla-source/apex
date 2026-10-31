@@ -114,14 +114,14 @@ juce::ValueTree Clip::getState() const
     state.setProperty(IDs::ID, id_, nullptr);
     state.setProperty(IDs::NAME, name_, nullptr);
     state.setProperty(IDs::TYPE, (int)type_, nullptr);
-    state.setProperty(IDs::START_POSITION, (int64_t)startPosition_, nullptr);
-    state.setProperty(IDs::LENGTH, (int64_t)length_, nullptr);
+    state.setProperty(IDs::START_POSITION, (juce::int64)startPosition_, nullptr);
+    state.setProperty(IDs::LENGTH, (juce::int64)length_, nullptr);
     state.setProperty(IDs::TRACK_ID, trackID_, nullptr);
     state.setProperty(IDs::COLOR, color_.toString(), nullptr);
     state.setProperty(IDs::SELECTED, selected_, nullptr);
     state.setProperty(IDs::MUTED, muted_, nullptr);
     state.setProperty("playlistId", playlistId_, nullptr);
-    state.setProperty(IDs::SOURCE_OFFSET, (int64_t)sourceOffset_, nullptr);
+    state.setProperty(IDs::SOURCE_OFFSET, (juce::int64)sourceOffset_, nullptr);
     return state;
 }
 
@@ -129,8 +129,8 @@ void Clip::restoreState(const juce::ValueTree& state)
 {
     name_ = state.getProperty(IDs::NAME, "Untitled Clip");
     type_ = (ClipType)(int)state.getProperty(IDs::TYPE, 0);
-    startPosition_ = (SamplePosition)(int64_t)state.getProperty(IDs::START_POSITION, 0);
-    length_ = (SamplePosition)(int64_t)state.getProperty(IDs::LENGTH, 44100);
+    startPosition_ = (SamplePosition)(juce::int64)state.getProperty(IDs::START_POSITION, 0);
+    length_ = (SamplePosition)(juce::int64)state.getProperty(IDs::LENGTH, 44100);
     trackID_ = state.getProperty(IDs::TRACK_ID, "");
     color_ = juce::Colour::fromString(state.getProperty(IDs::COLOR, "ff808080").toString());
     selected_ = state.getProperty(IDs::SELECTED, false);
@@ -138,7 +138,7 @@ void Clip::restoreState(const juce::ValueTree& state)
     playlistId_ = state.getProperty("playlistId", "main").toString();
     if (playlistId_.isEmpty()) playlistId_ = "main";
     playlistAudible_.store(true, std::memory_order_release);
-    sourceOffset_ = (SamplePosition)(int64_t)state.getProperty(IDs::SOURCE_OFFSET, 0);
+    sourceOffset_ = (SamplePosition)(juce::int64)state.getProperty(IDs::SOURCE_OFFSET, 0);
 }
 
 void Clip::addListener(Listener* listener)
@@ -275,20 +275,20 @@ juce::ValueTree AudioClip::getState() const
     state.setProperty(IDs::ID, getID(), nullptr);
     state.setProperty(IDs::NAME, getName(), nullptr);
     state.setProperty(IDs::TYPE, (int)getType(), nullptr);
-    state.setProperty(IDs::START_POSITION, (int64_t)getStartPosition(), nullptr);
-    state.setProperty(IDs::LENGTH, (int64_t)getLength(), nullptr);
+    state.setProperty(IDs::START_POSITION, (juce::int64)getStartPosition(), nullptr);
+    state.setProperty(IDs::LENGTH, (juce::int64)getLength(), nullptr);
     state.setProperty(IDs::TRACK_ID, getTrackID(), nullptr);
     state.setProperty(IDs::COLOR, getColor().toString(), nullptr);
     state.setProperty(IDs::SELECTED, isSelected(), nullptr);
     state.setProperty(IDs::MUTED, isMuted(), nullptr);
     state.setProperty("playlistId", getPlaylistId(), nullptr);
-    state.setProperty(IDs::SOURCE_OFFSET, (int64_t)getSourceOffset(), nullptr);
+    state.setProperty(IDs::SOURCE_OFFSET, (juce::int64)getSourceOffset(), nullptr);
 
     // Add audio clip specific properties
     state.setProperty(IDs::SOURCE_FILE, sourceFile_.getFullPathName(), nullptr);
     state.setProperty("peakNormalizeActive", peakNormalizeActive_, nullptr);
-    state.setProperty("peakNormalizeStartSample", (int64_t)peakNormalizeStartSample_, nullptr);
-    state.setProperty("peakNormalizeEndSample", (int64_t)peakNormalizeEndSample_, nullptr);
+    state.setProperty("peakNormalizeStartSample", (juce::int64)peakNormalizeStartSample_, nullptr);
+    state.setProperty("peakNormalizeEndSample", (juce::int64)peakNormalizeEndSample_, nullptr);
     state.setProperty("peakNormalizeTargetDb", peakNormalizeTargetDb_, nullptr);
     state.setProperty(IDs::GAIN, gain_, nullptr);
     state.setProperty(IDs::CLIP_PAN, clipPan_.load(std::memory_order_relaxed), nullptr);
@@ -302,10 +302,10 @@ juce::ValueTree AudioClip::getState() const
     state.setProperty("timePitchMode",    timePitchMode_.load(std::memory_order_relaxed),    nullptr);
     state.setProperty("transientLock", transientLock_.load(std::memory_order_relaxed), nullptr);
     state.setProperty("timePitchQuality", timePitchQuality_.load(std::memory_order_relaxed), nullptr);
-    state.setProperty("sourceStartSample",(int64_t)sourceStartSample_, nullptr);
-    state.setProperty("sourceEndSample",  (int64_t)sourceEndSample_,   nullptr);
-    state.setProperty(IDs::FADE_IN_LENGTH, (int64_t)fadeInLength_, nullptr);
-    state.setProperty(IDs::FADE_OUT_LENGTH, (int64_t)fadeOutLength_, nullptr);
+    state.setProperty("sourceStartSample",(juce::int64)sourceStartSample_, nullptr);
+    state.setProperty("sourceEndSample",  (juce::int64)sourceEndSample_,   nullptr);
+    state.setProperty(IDs::FADE_IN_LENGTH, (juce::int64)fadeInLength_, nullptr);
+    state.setProperty(IDs::FADE_OUT_LENGTH, (juce::int64)fadeOutLength_, nullptr);
     state.setProperty(IDs::FADE_IN_CURVE, fadeInCurve_.load(std::memory_order_relaxed), nullptr);
     state.setProperty(IDs::FADE_OUT_CURVE, fadeOutCurve_.load(std::memory_order_relaxed), nullptr);
     return state;
@@ -317,9 +317,9 @@ void AudioClip::restoreState(const juce::ValueTree& state)
     sourceFile_ = juce::File(state.getProperty(IDs::SOURCE_FILE, ""));
     peakNormalizeActive_ = static_cast<bool>(state.getProperty("peakNormalizeActive", false));
     peakNormalizeStartSample_ = juce::jmax((SamplePosition)0,
-        (SamplePosition)(int64_t)state.getProperty("peakNormalizeStartSample", (int64_t)0));
-    peakNormalizeEndSample_ = (SamplePosition)(int64_t)state.getProperty(
-        "peakNormalizeEndSample", (int64_t)0);
+        (SamplePosition)(juce::int64)state.getProperty("peakNormalizeStartSample", (juce::int64)0));
+    peakNormalizeEndSample_ = (SamplePosition)(juce::int64)state.getProperty(
+        "peakNormalizeEndSample", (juce::int64)0);
     if (peakNormalizeEndSample_ <= peakNormalizeStartSample_)
         peakNormalizeEndSample_ = 0;
     peakNormalizeTargetDb_ = juce::jlimit(-120.0f, 24.0f,
@@ -344,10 +344,10 @@ void AudioClip::restoreState(const juce::ValueTree& state)
     timePitchMode_.store(juce::jlimit(TimePitchModeIds::Resample, TimePitchModeIds::MaxMode, restoredMode), std::memory_order_relaxed);
     transientLock_.store(static_cast<bool>(state.getProperty("transientLock", false)), std::memory_order_relaxed);
     timePitchQuality_.store(juce::jlimit(0, 4, static_cast<int>(state.getProperty("timePitchQuality", (int)ArrangementEditor::TimePitchQuality::Balanced))), std::memory_order_relaxed);
-    sourceStartSample_= static_cast<int64_t>(state.getProperty("sourceStartSample", (int64_t)0));
-    sourceEndSample_  = static_cast<int64_t>(state.getProperty("sourceEndSample",   (int64_t)0));
-    fadeInLength_ = (SamplePosition)(int64_t)state.getProperty(IDs::FADE_IN_LENGTH, 0);
-    fadeOutLength_ = (SamplePosition)(int64_t)state.getProperty(IDs::FADE_OUT_LENGTH, 0);
+    sourceStartSample_= static_cast<juce::int64>(state.getProperty("sourceStartSample", (juce::int64)0));
+    sourceEndSample_  = static_cast<juce::int64>(state.getProperty("sourceEndSample",   (juce::int64)0));
+    fadeInLength_ = (SamplePosition)(juce::int64)state.getProperty(IDs::FADE_IN_LENGTH, 0);
+    fadeOutLength_ = (SamplePosition)(juce::int64)state.getProperty(IDs::FADE_OUT_LENGTH, 0);
     fadeInCurve_.store(juce::jlimit(0, 3, (int)state.getProperty(IDs::FADE_IN_CURVE, 0)), std::memory_order_relaxed);
     fadeOutCurve_.store(juce::jlimit(0, 3, (int)state.getProperty(IDs::FADE_OUT_CURVE, 0)), std::memory_order_relaxed);
 }
@@ -516,9 +516,9 @@ Clip* ClipManager::duplicateClip(const ClipID& originalId)
 
     // Give it a fresh unique ID (recreateClipFromState assigns one via createAudioClip/createMIDIClip)
     // Position same as original (caller moves it as needed)
-    copy->setStartPosition((SamplePosition)(int64_t)origState.getProperty("startPosition", 0));
-    copy->setLength       ((SamplePosition)(int64_t)origState.getProperty("length",        1));
-    copy->setSourceOffset ((SamplePosition)(int64_t)origState.getProperty("sourceOffset",  0));
+    copy->setStartPosition((SamplePosition)(juce::int64)origState.getProperty("startPosition", 0));
+    copy->setLength       ((SamplePosition)(juce::int64)origState.getProperty("length",        1));
+    copy->setSourceOffset ((SamplePosition)(juce::int64)origState.getProperty("sourceOffset",  0));
 
     // Share audio cache so waveform is immediately visible — no reload
     if (auto* origClip = getClip(originalId))

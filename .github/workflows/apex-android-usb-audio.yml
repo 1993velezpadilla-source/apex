@@ -1,0 +1,146 @@
+name: APEX Android Phase 1 USB Audio APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/android-port-*"
+    paths:
+      # The Phase 1 USB probe is independent of full desktop shell port.
+      # Avoid rebuilding the unchanged diagnostic APK for every native C++
+      # compatibility fix or Android exporter/doc edit.
+      - "Android/APEXAndroid.jucer"
+      - "Android/Source/**"
+      - "Android/Tests/**"
+      - "Android/Assets/**"
+      - "My DAW/DAW_Core/Source/DeviceCore/AudioDeviceBlockAdapterCore.h"
+      - ".github/workflows/apex-android-usb-audio.yml"
+
+concurrency:
+  group: apex-android-usb-audio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-arm64-debug-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout APEX
+        uses: actions/checkout@v4
+
+      - name: Test shared callback adapter (host C++17)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            Android/Tests/AudioDeviceBlockAdapterCoreTests.cpp \
+            -o /tmp/apex-android-device-adapter-test
+          /tmp/apex-android-device-adapter-test
+
+      - name: Install Linux prerequisites for JUCE Projucer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git ninja-build cmake pkg-config xvfb \
+            libasound2-dev libjack-jackd2-dev \
+            libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libcurl4-openssl-dev
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Use preinstalled Android SDK (avoid legacy sdkmanager tools package)
+        shell: bash
+        run: |
+          test -n "${ANDROID_HOME:-}" || { echo 'ANDROID_HOME unavailable'; exit 1; }
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER" || { echo "Missing Android sdkmanager: $SDKMANAGER"; exit 1; }
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --version
+
+      - name: Install Android NDK and build tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Fetch the JUCE release used by APEX
+        run: |
+          mkdir -p third_party
+          git clone --quiet --depth 1 --branch 8.0.12 \
+            https://github.com/juce-framework/JUCE.git third_party/JUCE
+
+      - name: Restore pinned JUCE Projucer cache
+        id: projucer-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
+
+      - name: Compile JUCE Projucer host generator
+        run: |
+          if ! find /tmp/apex-juce-host -type f -name Projucer -perm /111 2>/dev/null | grep -q .; then
+            cmake -S third_party/JUCE -B /tmp/apex-juce-host \
+              -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DJUCE_BUILD_EXTRAS=ON -DJUCE_BUILD_EXAMPLES=OFF
+            cmake --build /tmp/apex-juce-host --target Projucer --parallel 2
+          else
+            echo "Using cached JUCE 8.0.12 Projucer binary"
+          fi
+
+      - name: Cache compiled host Projucer before Android build
+        if: steps.projucer-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/apex-juce-host
+          key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
+
+      - name: Export APEX Android Studio project
+        run: |
+          PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
+          test -n "$PROJUCER"
+          echo "Using Projucer: $PROJUCER"
+          xvfb-run -a "$PROJUCER" --resave Android/APEXAndroid.jucer
+          test -f Android/Builds/Android/gradlew
+
+      - name: Create disposable Android Debug signing key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -storetype JKS \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s "$HOME/.android/debug.keystore"
+
+      - name: Build Android Debug APK (ARM64 target)
+        working-directory: Android/Builds/Android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Collect built APKs
+        if: always()
+        run: |
+          mkdir -p android-apk-artifacts
+          find Android/Builds/Android -type f -name '*.apk' \
+            -exec cp -v '{}' android-apk-artifacts/ \; || true
+
+      - name: Publish debug APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-Phase1-Debug-APK
+          path: android-apk-artifacts/*.apk
+          if-no-files-found: warn
+          retention-days: 14

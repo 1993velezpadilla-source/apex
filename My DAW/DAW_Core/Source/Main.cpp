@@ -17,8 +17,10 @@
 #include "PluginHostCore/HostedPluginIsolationCore.h"
 #include "PluginSandboxCore/PluginSandboxProtocolCore.h"
 #include "PluginSandboxCore/PluginSandboxProcessCore.h"
+#if JUCE_WINDOWS
 #include "PluginSandboxCore/PluginSandboxSelfTestCore.h"
 #include "PluginSandboxCore/PluginWorkerMainCore.h"
+#endif
 #include "Benchmark/TimelineBenchmarkController.h"
 #include "ThemeCore/ApexPrimitives.h"
 #include "Automation/AutomationLaneStoreCore.h"
@@ -31,6 +33,16 @@
 #include <vector>
 #include <utility>
 #include <array>
+
+#if JUCE_ANDROID
+ #include <android/log.h>
+ // Logcat remains usable even if the existing Windows-era session file
+ // location is inaccessible or the application blocks during startup.
+ static void apexAndroidBootLog (const char* stage) noexcept
+ {
+     __android_log_print (ANDROID_LOG_INFO, "APEX_ANDROID_BOOT", "%s", stage);
+ }
+#endif
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -425,7 +437,11 @@ private:
         if (! pluginFile_.existsAsFile())
             fail("plugin file does not exist: " + pluginFile_.getFullPathName());
 
+       #if JUCE_PLUGINHOST_VST3
         formatManager_.addFormat(std::make_unique<juce::VST3PluginFormat>());
+       #else
+        fail("Windows VST3 forensic diagnostic is not available on Android");
+       #endif
         auto* format = formatManager_.getFormat(0);
         if (format == nullptr)
             fail("VST3 format unavailable");
@@ -485,8 +501,12 @@ private:
 
         juce::OwnedArray<juce::PluginDescription> scanned;
         auto& fm = manager();
+       #if JUCE_PLUGINHOST_VST3
         if (fm.getNumFormats() == 0)
             fm.addFormat(std::make_unique<juce::VST3PluginFormat>());
+       #else
+        fail("Windows VST3 forensic diagnostic is not available on Android");
+       #endif
         auto* format = fm.getFormat(0);
         if (format == nullptr)
             fail("VST3 format unavailable");
@@ -834,8 +854,21 @@ public:
     //==============================================================================
     void initialise (const juce::String& commandLine) override
     {
+       #if JUCE_ANDROID
+        apexAndroidBootLog ("01 JUCEApplication initialise entered");
+        // Phone studio is a landscape-first product. JUCE requests both
+        // landscape rotations; Android/device policy can still override it.
+        juce::Desktop::getInstance().setOrientationsEnabled (
+            juce::Desktop::rotatedClockwise | juce::Desktop::rotatedAntiClockwise);
+       #endif
         const auto processArguments = getCommandLineParameterArray();
+       #if JUCE_ANDROID
+        // Android always launches the actual DAW application in-process.
+        // Windows worker and sandbox command-line entry points are disabled.
+        processMode_ = DAW::ApexProcessMode::NormalApex;
+       #else
         processMode_ = DAW::PluginSandboxCommandLineCore::resolveProcessMode(processArguments);
+       #endif
         DAW::ApexProcessModeStateCore::setProcessMode(processMode_);
 
 #if JUCE_WINDOWS
@@ -849,6 +882,7 @@ public:
         SetUnhandledExceptionFilter(ApexCrashHandler);
 #endif
 
+#if JUCE_WINDOWS
         // #7F Phase A: resolve the process role before any normal APEX logger,
         // MainWindow, MainComponent, project, plugin browser, audio device, or
         // presentation infrastructure is created. Worker mode cannot recurse:
@@ -866,6 +900,8 @@ public:
             quit();
             return;
         }
+
+#endif
 
         // Deterministic QA snapshot of THE ACTUAL PROCEDURAL BOOT DRAWER.
         // Independent of plugin scans/project/audio, so screenshot comparison
@@ -994,7 +1030,24 @@ public:
             : "[EVO EYE] Procedural renderer unavailable; existing StartupPanel still opens");
 
         const auto beforeWindowMs = juce::Time::getMillisecondCounterHiRes();
+       #if JUCE_ANDROID
+        apexAndroidBootLog ("02 creating fast first-paint Android window");
+       #endif
         mainWindow.reset (new MainWindow (getApplicationName()));
+       #if JUCE_ANDROID
+        apexAndroidBootLog ("03 first-paint window created");
+        // A full Windows-grade MainComponent may do expensive startup work.
+        // Returning from initialise() lets the Android activity render the
+        // boot surface BEFORE touching that real original DAW component.
+        juce::Timer::callAfterDelay (350, [this]
+        {
+            if (mainWindow == nullptr)
+                return;
+            apexAndroidBootLog ("04 constructing ORIGINAL APEX MainComponent");
+            mainWindow->mountOriginalDawOnAndroid();
+            apexAndroidBootLog ("05 original APEX MainComponent mounted");
+        });
+       #endif
         juce::Logger::writeToLog(
             "[APEX STARTUP PROFILE] main-window-construction="
             + juce::String(juce::Time::getMillisecondCounterHiRes() - beforeWindowMs, 1)
@@ -1046,8 +1099,9 @@ public:
             });
         }
 
-        // Wire the MessageBox suppressor to activate only during plugin scans.
-        // This cuts EnumWindows overhead from 11% continuous CPU to near-zero.
+        // Wire the Windows MessageBox suppressor only on Windows. Android
+        // does not load Windows protection DLLs or run Windows plugin scans.
+       #if JUCE_WINDOWS
         if (auto* mc = mainWindow->getMainComponent())
         {
             DAW::MessageBoxSuppressorCore* suppressor = msgBoxSuppressor_.get();
@@ -1057,6 +1111,7 @@ public:
                     suppressor->setScanActive(active);
             });
         }
+       #endif
 
         // ── Production GUI launch smoke for Windows CI ────────────────────
         // Unlike the unit-test executable, this launches the actual DAW with
@@ -1688,6 +1743,34 @@ public:
         This class implements the desktop window that contains an instance of
         our MainComponent class.
     */
+   #if JUCE_ANDROID
+    // First visible JUCE frame, not a mock DAW or a replacement GUI.
+    // It is replaced by the original MainComponent on the message thread.
+    class AndroidFirstPaint final : public juce::Component
+    {
+    public:
+        AndroidFirstPaint() { setOpaque(true); }
+        void paint(juce::Graphics& g) override
+        {
+            g.fillAll(juce::Colour::fromRGB(10, 12, 20));
+            auto bounds = getLocalBounds().reduced(20);
+            g.setColour(juce::Colour::fromRGB(125, 221, 255));
+            g.setFont(juce::Font(juce::FontOptions(juce::jlimit(24.0f, 44.0f,
+                (float) getWidth() * 0.060f), juce::Font::bold)));
+            g.drawFittedText("APEX  /  ANDROID", bounds.removeFromTop(90),
+                juce::Justification::centred, 1);
+            g.setColour(juce::Colour::fromRGB(212, 220, 233));
+            g.setFont(juce::Font(juce::FontOptions(18.0f)));
+            g.drawFittedText("Starting the original APEX studio...",
+                bounds.removeFromTop(55), juce::Justification::centred, 2);
+            g.setColour(juce::Colour::fromRGB(130, 143, 162));
+            g.setFont(juce::Font(juce::FontOptions(13.0f)));
+            g.drawFittedText("First Android build - please report if this screen remains.",
+                bounds.removeFromTop(45), juce::Justification::centred, 2);
+        }
+    };
+   #endif
+
     class MainWindow    : public juce::DocumentWindow
     {
     public:
@@ -1705,7 +1788,14 @@ public:
             // safely, once — never during normal operation.
             setUsingNativeTitleBar (false);
             setTitleBarHeight (0);
+           #if JUCE_ANDROID
+            // Do NOT block Activity launch constructing the desktop shell.
+            // Paint a real, branded JUCE surface before beginning its startup.
+            // The activity/peer owns phone dimensions, never a child component.
+            setContentOwned (new AndroidFirstPaint(), false);
+           #else
             setContentOwned (new MainComponent(), true);
+           #endif
 
             // Premium cursor theme: the custom arrow applies to every
             // default-cursor area in the whole DAW (floating windows are
@@ -1755,6 +1845,16 @@ public:
 
             setVisible (true);
 
+           #if JUCE_ANDROID
+            // setFullScreen(true) alone only fills the Android display and
+            // explicitly DOES NOT hide the OS status/navigation bars (JUCE
+            // Android windowing contract). Use JUCE's own native kiosk mode
+            // on the ACTUAL Android ComponentPeer so the OS bars hide like a
+            // game and can still be revealed transiently by an edge swipe.
+            // Do not move, scale or re-layout the APEX GUI to work around it.
+            juce::Desktop::getInstance().setKioskModeComponent(this, false);
+           #endif
+
            #if JUCE_WINDOWS
             installSubclass();
            #endif
@@ -1782,6 +1882,35 @@ public:
             return dynamic_cast<MainComponent*>(getContentComponent());
         }
 
+       #if JUCE_ANDROID
+        // Must run on the JUCE message thread, AFTER the first activity frame.
+        void mountOriginalDawOnAndroid()
+        {
+            jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+            if (getMainComponent() != nullptr)
+                return;
+            // This is the exact same MainComponent Windows instantiates,
+            // not Android/Source/Main.cpp's independent USB diagnostic.
+            // IMPORTANT: do NOT use resizeToFit=true here. MainComponent's
+            // desktop constructor intentionally sets 1280x800; allowing
+            // ResizableWindow::setContentOwned to size the TOP-LEVEL window
+            // to that preference overwrites Android's real landscape
+            // viewport. This caused the startup panel to be centred in an
+            // off-screen 1280x800 canvas and clipped on the Pixel Fold.
+            auto* daw = new MainComponent();
+            setContentOwned (daw, false);
+            resized(); // JUCE derives owned content bounds from the actual peer
+            // ResizableWindow::resized() is JUCE's authoritative owner of
+            // content bounds. Do not override it with a desktop-sized guess:
+            // Android can rotate while MainComponent is being constructed.
+            repaint();
+            __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                "mounted window=%dx%d content=%dx%d origin=%d,%d",
+                getWidth(), getHeight(), daw->getWidth(), daw->getHeight(),
+                daw->getX(), daw->getY());
+        }
+       #endif
+
         /** The APEX content lives inside the shell frame, not under it. The
          *  frame (drawOuterWindowFrame) ends ~5.75 px inside the client area;
          *  insetting the content by the same shell margin guarantees that no
@@ -1789,7 +1918,15 @@ public:
          *  right — is ever overlapped, clipped or covered by the frame. */
         juce::BorderSize<int> getContentComponentBorder() const override
         {
+           #if JUCE_ANDROID
+            // Preserve the established APEX Android GUI geometry EXACTLY.
+            // Immersive notification/navigation bar hiding belongs only to
+            // the generated native Android Activity (not to JUCE layout).
+            // BorderSize order: top, left, bottom, right.
+            return juce::BorderSize<int>(24, 8, 8, 24);
+           #else
             return juce::BorderSize<int>(kFrameInset);
+           #endif
         }
 
         /** Routes the OS non-client hit-test so the APEX shell behaves like a

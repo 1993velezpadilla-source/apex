@@ -85,7 +85,7 @@ void DrumSamplerEngine::fromValueTree(const juce::ValueTree& tree) {
     for (int i = 0; i < juce::jmin(tree.getNumChildren(), (int)pads_.size()); ++i) {
         const auto& padTree = tree.getChild(i);
         pads_[i].name = padTree.getProperty("name", "Pad").toString();
-        pads_[i].midiNote = (int)(int64_t)padTree.getProperty("midiNote", 36);
+        pads_[i].midiNote = (int)(juce::int64)padTree.getProperty("midiNote", 36);
         pads_[i].gainDb = (float)(double)padTree.getProperty("gainDb", 0.0);
         pads_[i].pan = (float)(double)padTree.getProperty("pan", 0.0);
         pads_[i].tune = (float)(double)padTree.getProperty("tune", 0.0);
