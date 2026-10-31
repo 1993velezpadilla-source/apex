@@ -3197,15 +3197,23 @@ MainComponent::MainComponent()
         mixerWindow_->browserOpen = browserChrome_->isVisible();
         mixerWindow_->refreshToolbar();
     };
+   #if JUCE_ANDROID
+    // Android UX: no visible routing cables (including the overlay's profiler).
+    // Keep the component hidden and inert; the real Bubblegum routing/send
+    // engine and its panels continue working without visual cable graphics.
+    // Startup/Loading overlays are already sized in MainComponent::resized().
+    addChildComponent(cableOverlay_);
+   #else
     addAndMakeVisible(cableOverlay_);
-    // Drive offscreen bubble/panel updates at the same 60 Hz cadence as cable motion.
-    cableOverlay_.onTick = [this]() {     if (loadingOverlay_)
-        loadingOverlay_->setBounds(getLocalBounds());
-    if (startupPanel_)
-        startupPanel_->setBounds(getLocalBounds());
-
-    refreshBubblegumOffscreenState();
+    // Preserve the existing Windows presentation/update behavior.
+    cableOverlay_.onTick = [this]() {
+        if (loadingOverlay_)
+            loadingOverlay_->setBounds(getLocalBounds());
+        if (startupPanel_)
+            startupPanel_->setBounds(getLocalBounds());
+        refreshBubblegumOffscreenState();
     };
+   #endif
     addAndMakeVisible(offscreenEndpoint_);
     offscreenEndpoint_.toFront(false);
 
