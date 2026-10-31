@@ -9201,7 +9201,8 @@ void MainComponent::resized()
         pianoRollWindow_->setBounds(getLocalBounds().reduced(90, 70));
 
     updateSlimeAttachedPosition();
-    if (browserChrome_ && browserChrome_->isVisible() && !browserChrome_->isMaximized())
+    if (browserChrome_ && browserChrome_->isVisible()
+        && (phoneLayout || !browserChrome_->isMaximized()))
     {
         if (phoneLayout)
         {
@@ -9210,7 +9211,8 @@ void MainComponent::resized()
             // through portrait/landscape and split-window resize.
             const auto bounds = DAW::mobile::fitPhonePluginBrowser(
                 getWidth(), getHeight(), 50,
-                transportBar_ ? transportBar_->getHeight() : 0);
+                transportBar_ ? transportBar_->getHeight() : 0,
+                browserChrome_->isMaximized());
             browserChrome_->setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
         }
         else
