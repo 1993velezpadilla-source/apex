@@ -179,4 +179,51 @@ int main()
                     assert(fit.minimumWidth <= fit.window.width);
                     assert(fit.minimumHeight <= fit.window.height);
                 }
+    // Clip Properties contains clip-region FX. A desktop 420x360 dialog
+    // overflows a 393-wide phone and covers Transport in short landscape.
+    using DAW::mobile::fitPhoneClipProperties;
+    using DAW::mobile::phoneClipPropertiesFits;
+    constexpr auto clipPortrait = fitPhoneClipProperties(393, 852, 50, 144);
+    static_assert(clipPortrait.window.width == 377
+                  && clipPortrait.window.height == 360);
+    static_assert(clipPortrait.window.y >= 50
+                  && clipPortrait.window.y + clipPortrait.window.height <= 852 - 144);
+    static_assert(phoneClipPropertiesFits(clipPortrait, clipPortrait.window));
+    constexpr auto clipLandscape = fitPhoneClipProperties(852, 300, 50, 96);
+    static_assert(clipLandscape.window.width == 420
+                  && clipLandscape.window.height == 138);
+    static_assert(clipLandscape.window.y >= 50
+                  && clipLandscape.window.y + clipLandscape.window.height <= 300 - 96);
+    static_assert(phoneClipPropertiesFits(clipLandscape, clipLandscape.window));
+    static_assert(!phoneClipPropertiesFits(clipLandscape, clipPortrait.window));
+    static_assert(!phoneClipPropertiesFits(clipPortrait,
+        { 0, 0, 420, 360 }));
+    static_assert(!phoneClipPropertiesFits(clipPortrait,
+        { std::numeric_limits<int>::max(), 60, 420, 360 }));
+    constexpr auto clipCollapsed = fitPhoneClipProperties(360, 96, 50, 46);
+    static_assert(clipCollapsed.window.width == 0
+                  && clipCollapsed.window.height == 0);
+    constexpr auto clipExtreme = fitPhoneClipProperties(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 50, 144);
+    static_assert(inside(clipExtreme.safe,
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    static_assert(phoneClipPropertiesFits(clipExtreme, clipExtreme.window));
+    for (int w : {1, 2, 20, 245, 360, 393, 852})
+        for (int h : {1, 10, 96, 144, 220, 300, 852})
+            for (int top : {0, 50, 1000})
+                for (int bottom : {0, 96, 144, 1000})
+                {
+                    const auto fit = fitPhoneClipProperties(w, h, top, bottom);
+                    if (fit.safe.width <= 0 || fit.safe.height <= 0)
+                    {
+                        assert(fit.window.width == 0 && fit.window.height == 0);
+                        continue;
+                    }
+                    assert(inside(fit.safe, w, h));
+                    assert(inside(fit.window, w, h));
+                    assert(fit.window.y >= fit.safe.y);
+                    assert(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height);
+                    assert(phoneClipPropertiesFits(fit, fit.window));
+                }
+
 }
