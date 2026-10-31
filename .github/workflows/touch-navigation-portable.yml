@@ -41,3 +41,5 @@ jobs:
           /tmp/apex_radial_geometry_tests
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
           /tmp/apex_mobile_panel_geometry_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_ubsan
+          /tmp/apex_mobile_panel_geometry_ubsan
