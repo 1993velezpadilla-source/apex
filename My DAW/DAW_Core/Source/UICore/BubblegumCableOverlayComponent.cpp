@@ -108,6 +108,9 @@ void BubblegumCableOverlayComponent::unbind() noexcept
     wasRendering_ = false;
     cachedSendRecords_.clear();
     cachedSnapshots_.clear();
+   #if JUCE_ANDROID
+    lastMobileDamageBounds_ = {};
+   #endif
 }
 
 void BubblegumCableOverlayComponent::bind(BubblegumV2System* bgV2, MixerPanel* mixer, juce::Viewport* viewport)
@@ -267,7 +270,23 @@ void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
     if (visibleAndSized && (compositeFrameDirty_ || clearFrame))
     {
         ++paintedTickCount_;
+       #if JUCE_ANDROID
+        // Redrawing a full-screen transparent overlay on Android is expensive
+        // even when drawing a single cable. Invalidate only cable geometry
+        // and its previous location. First frame/topology refresh can still
+        // request full bounds so new endpoints are discovered correctly.
+        const auto damage = mobileCableDamageBounds();
+        const auto combined = lastMobileDamageBounds_.isEmpty()
+            ? damage : (damage.isEmpty() ? lastMobileDamageBounds_
+                                         : damage.getUnion(lastMobileDamageBounds_));
+        lastMobileDamageBounds_ = damage;
+        if (!combined.isEmpty())
+            repaint(combined);
+        else if (clearFrame)
+            repaint();
+       #else
         repaint();
+       #endif
     }
     else
     {
