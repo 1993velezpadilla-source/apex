@@ -5,6 +5,10 @@
 // not use this layout. Never force five buttons plus Input onto one row.
 namespace DAW::mobile
 {
+// Two 44-unit control rows + 36-unit title + spacing. Phone tracks must
+// NOT be stretched to 180 just to reserve an unused automation-target row.
+constexpr int kPhoneTrackDefaultHeight = 132;
+
 struct TrackControlRect
 {
     int x = 0, y = 0, width = 0, height = 0;
@@ -50,12 +54,19 @@ constexpr PhoneTrackControlLayout phoneTrackControlLayout(
     // Automation Target on the final row. Every actionable cell is in-bounds.
     const int gapX = trackMin(6, contentWidth / 12);
     const int w = trackMax(0, (contentWidth - 2 * gapX) / 3);
-    const int firstY = trackMin(41, primaryRowHeight / 4);
-    const int maxButtonH = trackMax(0, (primaryRowHeight - firstY) / 3);
+    // Normal phone tracks contain TWO control rows, not an empty third row.
+    // When automation target is actually visible, distribute three rows
+    // within the available lane. Do not silently clip a target or force
+    // ALL tracks to 180 units just because one might use automation.
+    const int rows = showTarget && !isMaster ? 3 : 2;
+    const int firstY = trackMin(36, primaryRowHeight / (rows == 3 ? 4 : 3));
+    const int gapBudget = (rows - 1) * 4;
+    const int maxButtonH = trackMax(0, (primaryRowHeight - firstY - gapBudget) / rows);
     const int h = trackMin(44, maxButtonH);
     if (w == 0 || h == 0)
         return out;
-    const int gapY = trackMin(6, trackMax(0, (primaryRowHeight - firstY - 3 * h) / 2));
+    const int gapY = trackMin(6, trackMax(0,
+        (primaryRowHeight - firstY - rows * h) / (rows - 1)));
 
     const int x0 = contentX;
     const int x1 = x0 + w + gapX;
