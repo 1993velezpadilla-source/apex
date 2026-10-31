@@ -143,6 +143,9 @@ public:
     {
         if (phonePresentation_ == enabled) return;
         phonePresentation_ = enabled;
+        // MASTER eye changes vertical placement in phone mode, so invalidate
+        // its cached geometry even if the surrounding bounds are identical.
+        masterDecorBounds_ = { -1.0f, -1.0f, -1.0f, -1.0f };
         resized();
         repaint();
     }
@@ -739,7 +742,8 @@ public:
         const float eyeH = juce::jmin(bounds.getHeight() * 0.60f, 40.0f);
         masterLivingEye_.setBounds(
             juce::Rectangle<float>(bounds.getRight() - eyeW - 10.0f,
-                                   bounds.getCentreY() - eyeH * 0.5f,
+                                   phonePresentation_ ? 6.0f
+                                                      : bounds.getCentreY() - eyeH * 0.5f,
                                    eyeW, eyeH));
 
         // Splatter hugging the top and bottom edges — away from the name text.
