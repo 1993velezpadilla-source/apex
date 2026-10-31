@@ -147,6 +147,32 @@ private:
 
    #if JUCE_ANDROID
     double lastMobilePresentationMs_ = 0.0;
+    juce::Rectangle<int> lastMobileDamageBounds_;
+    // Keep transparent-overlay invalidations confined to cable pixels, not
+    // the entire Pixel Fold screen. The previous region must be repainted
+    // too, to erase moved or disconnected cables.
+    juce::Rectangle<int> mobileCableDamageBounds() const
+    {
+        juce::Rectangle<int> damage;
+        auto includePoint = [&damage](juce::Point<float> p)
+        {
+            if (!std::isfinite(p.x) || !std::isfinite(p.y))
+                return;
+            const auto x = juce::roundToInt(p.x), y = juce::roundToInt(p.y);
+            auto rect = juce::Rectangle<int>(x - 26, y - 32, 52, 176);
+            damage = damage.isEmpty() ? rect : damage.getUnion(rect);
+        };
+        for (const auto& s : cachedSnapshots_)
+            if (s.visible)
+            {
+                includePoint(s.endpoints.source);
+                includePoint(s.endpoints.destination);
+            }
+        for (const auto& hit : cableAnchors_)
+            if (hit.isSidechain)
+                includePoint(hit.point);
+        return damage.getIntersection(getLocalBounds());
+    }
    #endif
     double visualTime_      = 0.0;
     double freezeUntilSec_  = 0.0;
