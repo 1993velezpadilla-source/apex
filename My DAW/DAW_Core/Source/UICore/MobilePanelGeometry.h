@@ -102,15 +102,17 @@ constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexce
     // Minuscule split-screen widths degrade symmetrically, never overflow.
     if (workspaceWidth <= 600)
     {
-        // 220 is the original desktop Track List baseline. On phones the
-        // initial width is half the display, but dragging wider must remain
-        // functional instead of snapping forever to a fixed 50%.
-        const int preferred = workspaceWidth / 2;
+        // BandLab-like split: compact track identity/status (~1/3 viewport),
+        // while the actual waveforms remain the dominant interaction canvas.
+        // Advanced track controls are accessible through the 44-unit ellipsis
+        // inspector; expanding the header by drag is still possible.
+        const int preferred = minInt(workspaceWidth - 1,
+            minInt(128, maxInt(84, workspaceWidth / 3)));
         const int maxAllowed = minInt(workspaceWidth - 1,
-                                      static_cast<int>((static_cast<long long>(workspaceWidth) * 65) / 100));
+            static_cast<int>((static_cast<long long>(workspaceWidth) * 60) / 100));
+        const int base = minInt(preferred, maxAllowed);
         const int extra = maxInt(0, requestedWidth - 220);
-        const int usableExtra = maxInt(0, maxAllowed - preferred);
-        return preferred + minInt(extra, usableExtra);
+        return base + minInt(extra, maxInt(0, maxAllowed - base));
     }
     return minInt(maxInt(requestedWidth, 220), minInt(260, workspaceWidth - 1));
 }
