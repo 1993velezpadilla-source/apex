@@ -415,7 +415,8 @@ public:
             pos.removeFromLeft(gap);
             posReadoutBounds_ = pos.removeFromLeft(juce::jmin(clockWidth, pos.getWidth()));
             pos.removeFromLeft(gap);
-            automArmBtn_.setBounds(pos.reduced(1, 2));
+            automArmBtn_.setBounds(pos.removeFromLeft(juce::jmin(72, pos.getWidth())).reduced(1, 2));
+            pos.removeFromLeft(juce::jmin(gap, pos.getWidth()));
             projectKey_.setVisible(true);
             tempo_.setVisible(true);
 
