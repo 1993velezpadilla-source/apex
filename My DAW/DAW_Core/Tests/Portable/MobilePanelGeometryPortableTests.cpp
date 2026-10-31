@@ -132,6 +132,38 @@ int main()
     static_assert(browserPortrait.x == 8 && browserPortrait.y == 58
                   && browserPortrait.width == 340 && browserPortrait.height == 560);
     static_assert(inside(browserPortrait, 393, 852));
+    // Maximized phone FX Browser previously escaped the responsive branch:
+    // FloatingPanelChrome maximized to the entire parent, covering Transport.
+    // Its maximized state must fill only the safe phone workspace.
+    constexpr auto browserMaxPortrait = fitPhonePluginBrowser(393, 852, 50, 144, true);
+    static_assert(browserMaxPortrait.x == 8 && browserMaxPortrait.y == 58
+                  && browserMaxPortrait.width == 377 && browserMaxPortrait.height == 642);
+    static_assert(browserMaxPortrait.y + browserMaxPortrait.height <= 852 - 144);
+    constexpr auto browserMaxLandscape = fitPhonePluginBrowser(852, 300, 50, 96, true);
+    static_assert(browserMaxLandscape.x == 8 && browserMaxLandscape.y == 58
+                  && browserMaxLandscape.width == 836 && browserMaxLandscape.height == 138);
+    static_assert(browserMaxLandscape.y + browserMaxLandscape.height <= 300 - 96);
+    constexpr auto browserMaxCollapsed = fitPhonePluginBrowser(360, 96, 50, 46, true);
+    static_assert(browserMaxCollapsed.width == 0 && browserMaxCollapsed.height == 0);
+    constexpr auto browserMaxExtreme = fitPhonePluginBrowser(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 50, 144, true);
+    static_assert(inside(browserMaxExtreme,
+                         std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    for (int w : {1, 2, 20, 245, 320, 393, 852})
+        for (int h : {1, 10, 96, 144, 220, 300, 852})
+            for (int top : {0, 50, 1000})
+                for (int bottom : {0, 96, 144, 1000})
+                {
+                    const auto fit = fitPhonePluginBrowser(w, h, top, bottom, true);
+                    const int safeTop = DAW::mobile::clampInt(top, 0, h);
+                    const int safeBottom = DAW::mobile::clampInt(bottom, 0, h - safeTop);
+                    assert(inside(fit, w, h));
+                    if (fit.height > 0)
+                    {
+                        assert(fit.y >= safeTop);
+                        assert(fit.y + fit.height <= h - safeBottom);
+                    }
+                }
     constexpr auto browserNarrow = fitPhonePluginBrowser(320, 640, 50, 144);
     static_assert(browserNarrow.width == 304 && browserNarrow.height == 430
                   && inside(browserNarrow, 320, 640));
