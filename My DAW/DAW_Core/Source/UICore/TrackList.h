@@ -1486,6 +1486,89 @@ private:
             onSelected(this);
     }
 
+    void showPhoneTrackControls()
+    {
+        // Explicit BandLab-inspired separation: the arrangement always shows
+        // compact track names/status; detailed TRACK controls open on demand
+        // from a dedicated 44-unit touch target. Existing Track and Callback
+        // semantics remain authoritative, no duplicate state or DSP paths.
+        juce::Component::SafePointer<TrackRow> safe(this);
+        juce::PopupMenu menu;
+        menu.addSectionHeader(track_.getName() + "  |  TRACK");
+
+        menu.addItem("Mute", true, track_.isMuted(), [safe]
+        {
+            if (!safe) return;
+            if (safe->onToggleMute) safe->onToggleMute(safe->track_.getID());
+            else safe->track_.setMuted(!safe->track_.isMuted());
+            safe->repaint();
+        });
+        menu.addItem("Solo", true, track_.isSoloed(), [safe]
+        {
+            if (!safe) return;
+            if (safe->onToggleSolo) safe->onToggleSolo(safe->track_.getID());
+            else safe->track_.setSoloed(!safe->track_.isSoloed());
+            safe->repaint();
+        });
+
+        if (!track_.isMaster())
+        {
+            menu.addItem("Record Arm", true, track_.isArmed(), [safe]
+            {
+                if (!safe) return;
+                if (safe->onToggleArm) safe->onToggleArm(safe->track_.getID());
+                else safe->track_.setArmed(!safe->track_.isArmed());
+                safe->repaint();
+            });
+            menu.addItem("Input Monitoring", true, track_.isMonitoring(), [safe]
+            {
+                if (!safe) return;
+                const bool newValue = !safe->track_.isMonitoring();
+                if (safe->onSetMonitoring)
+                    safe->onSetMonitoring(safe->track_.getID(), newValue);
+                else safe->track_.setMonitoring(newValue);
+                safe->repaint();
+            });
+            if (track_.getRole() == TrackRole::Audio)
+                menu.addItem("Input Channel...", [safe]
+                {
+                    if (safe) safe->showInputSourceMenu();
+                });
+
+            menu.addSeparator();
+            menu.addItem("Automation Lane", true, track_.isAutomationVisible(), [safe]
+            {
+                if (!safe) return;
+                safe->track_.setAutomationVisible(!safe->track_.isAutomationVisible());
+                if (safe->onAutomationLaneStateChanged)
+                    safe->onAutomationLaneStateChanged(safe->track_.getID());
+                safe->resized();
+                safe->repaint();
+            });
+            if (track_.isAutomationVisible())
+                menu.addItem("Automation Parameter...", [safe]
+                {
+                    if (safe) safe->showAutomationTargetMenu();
+                });
+            menu.addItem("Playlists / Takes...", [safe]
+            {
+                if (safe) safe->showPlaylistSelectorMenu();
+            });
+            menu.addItem("More Track Actions...", [safe]
+            {
+                if (!safe) return;
+                safe->contextScreenPoint_ = safe->getScreenBounds().getCentre();
+                safe->showContextMenu();
+            });
+        }
+
+        // Native JUCE menu on phone: full-width readable actions instead of a
+        // radial or miniature nested desktop control grid on the timeline.
+        menu.showMenuAsync(juce::PopupMenu::Options()
+            .withTargetComponent(this)
+            .withMinimumWidth(220));
+    }
+
     void showPlaylistSelectorMenu()
     {
         juce::PopupMenu menu;
