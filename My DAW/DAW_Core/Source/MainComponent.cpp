@@ -3163,6 +3163,11 @@ MainComponent::MainComponent()
     mixerWindow_->onDragEnded = [this]
     {
         mixerWindowPlaced_ = true;
+        // A drag can end outside the activity without any orientation change.
+        // Re-run phone layout once on release so the Mixer header/close button
+        // cannot remain stranded beyond the visible safe area.
+        if (usesPhoneMixerPresentation())
+            resized();
         cableOverlay_.notifyMotionFinished();
         refreshBubblegumOffscreenState();
     };
@@ -9109,15 +9114,10 @@ void MainComponent::resized()
                 transportBar_ ? transportBar_->getHeight() : 0);
             if (fit.safe.width > 0 && fit.safe.height > 0)
             {
-                const auto safe = juce::Rectangle<int>(
-                    fit.safe.x, fit.safe.y, fit.safe.width, fit.safe.height);
                 const auto current = mixerWindow_->getBounds();
-                if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
-                    || current.getHeight() > safe.getHeight()
-                    || current.getX() < safe.getX()
-                    || current.getY() < safe.getY()
-                    || current.getRight() > safe.getRight()
-                    || current.getBottom() > safe.getBottom())
+                if (!mixerWindowPlaced_ || !DAW::mobile::floatingMixerFits(
+                        fit, { current.getX(), current.getY(),
+                               current.getWidth(), current.getHeight() }))
                     setDefaultMixerWindowBounds();
             }
         }
