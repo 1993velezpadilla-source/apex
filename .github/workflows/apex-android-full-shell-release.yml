@@ -175,8 +175,11 @@ jobs:
             grep -qx 'classes.dex' <<< "$entries"
             rm -f "$unsigned" "$aligned"
             echo "Validated release-optimized ORIGINAL APEX: $output"
-          done < <(find "My DAW/DAW_Core/Builds/AndroidFull/app/build/outputs/apk/release" \
-            -type f -name '*.apk' -print0)
+          done < <(find "My DAW/DAW_Core/Builds/AndroidFull/app/build/outputs/apk" \
+            -type f -name '*release*.apk' -print0)
+          # JUCE Projucer names the release variant "Release_" and AGP
+          # publishes under app/build/outputs/apk/release_/release/, not
+          # outputs/apk/release/. Do not hardcode Gradle's variant directory.
           test "$found" -gt 0 || { echo "Release build produced NO APK"; exit 1; }
           echo "### Release-optimized APEX Android preview (QA only)" >> "$GITHUB_STEP_SUMMARY"
           echo "Produced $found signed ARM64 preview APK(s); real device UX and audio still need QA." >> "$GITHUB_STEP_SUMMARY"
