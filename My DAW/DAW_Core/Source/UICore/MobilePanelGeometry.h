@@ -38,14 +38,19 @@ constexpr PanelBounds phoneCloseTouchBounds(int panelW, int panelH) noexcept
 }
 
 constexpr PanelBounds fitBubblegumSends(int viewportW, int viewportH,
-                                       int anchorX, int anchorY, bool phone) noexcept
+                                       int anchorX, int anchorY, bool phone,
+                                       int reservedTop = 0, int reservedBottom = 0) noexcept
 {
     if (viewportW <= 0 || viewportH <= 0)
         return { 0, 0, 0, 0 };
 
+    // The phone's APEX header and persistent bottom Transport are not
+    // available to the Sends panel. Desktop callers keep zero reservations.
+    const int top = phone ? clampInt(reservedTop, 0, viewportH) : 0;
+    const int bottom = phone ? clampInt(reservedBottom, 0, viewportH - top) : 0;
     const int margin = minInt(8, minInt(viewportW, viewportH) / 4);
     const int availableW = maxInt(0, viewportW - 2 * margin);
-    const int availableH = maxInt(0, viewportH - 2 * margin);
+    const int availableH = maxInt(0, viewportH - top - bottom - 2 * margin);
     const int w = minInt(phone ? 360 : 260, availableW);
     const int h = minInt(phone ? 420 : 380, availableH);
     if (w <= 0 || h <= 0)
@@ -54,7 +59,7 @@ constexpr PanelBounds fitBubblegumSends(int viewportW, int viewportH,
     return { clampAnchorOffset(static_cast<long long>(anchorX) - w - 16,
                                margin, viewportW - margin - w),
              clampAnchorOffset(static_cast<long long>(anchorY) - h + 20,
-                               margin, viewportH - margin - h),
+                               top + margin, viewportH - bottom - margin - h),
              w, h };
 }
 
