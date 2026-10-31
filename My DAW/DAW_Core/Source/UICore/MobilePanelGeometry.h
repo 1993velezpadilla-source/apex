@@ -109,7 +109,8 @@ constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexce
         const int maxAllowed = minInt(workspaceWidth - 1,
                                       static_cast<int>((static_cast<long long>(workspaceWidth) * 65) / 100));
         const int extra = maxInt(0, requestedWidth - 220);
-        return minInt(maxAllowed, preferred + extra);
+        const int usableExtra = maxInt(0, maxAllowed - preferred);
+        return preferred + minInt(extra, usableExtra);
     }
     return minInt(maxInt(requestedWidth, 220), minInt(260, workspaceWidth - 1));
 }
