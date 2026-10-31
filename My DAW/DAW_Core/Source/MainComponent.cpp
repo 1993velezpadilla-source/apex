@@ -9040,6 +9040,11 @@ void MainComponent::resized()
         // MixerBubble draws the circle at its own internal bubbleX_/bubbleY_.
         // If we clamp its bounds to a tiny square, it cannot be moved outside it.
         mixerBubble_->setBounds(getLocalBounds());
+        // The phone Transport already exposes a full-size MIXER button.
+        // Do not allow a second floating Mixer bubble to obscure Sends,
+        // transport controls, or the Arrangement after close/minimize.
+        if (phoneLayout)
+            mixerBubble_->setVisible(false);
         if (!mixerBubble_->wasDraggedByUser())
             mixerBubble_->resized();
     }
