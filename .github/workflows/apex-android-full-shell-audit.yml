@@ -2,6 +2,15 @@ name: APEX Android Full Desktop Shell Compile Audit
 
 on:
   workflow_dispatch:
+  # Catch Android-native regressions in the actual APEX shell before any
+  # phone UI PR is marked ready. The probe APK is not a substitute.
+  pull_request:
+    paths:
+      - "My DAW/DAW_Core/Source/MainComponent.cpp"
+      - "My DAW/DAW_Core/Source/UICore/TrackList.h"
+      - "My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h"
+      - "My DAW/DAW_Core/Source/UICore/MobileTrackRowGeometry.h"
+      - ".github/workflows/apex-android-full-shell-audit.yml"
   push:
     branches:
       - "feature/android-port-*"
