@@ -8,6 +8,7 @@ Do not confuse a successful XML export with an installable or usable DAW.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -28,8 +29,15 @@ def main() -> int:
     root = tree.getroot()
     if root.tag != "JUCERPROJECT":
         raise ValueError(f"Expected JUCERPROJECT, got {root.tag}")
-    root.set("name", "APEXFullAndroid")
-    root.set("bundleIdentifier", "com.xziel.apex.fulltest")
+    # Mobile GUI PRs produce a DIFFERENT Android application ID. The portrait
+    # preview can be installed alongside an existing full-shell APK, without
+    # deleting or overwriting the user's saved Android test projects.
+    # Explicit build flag; GitHub pull_request checks use a merge ref name.
+    # Never change the package name based on the branch name alone.
+    portrait_preview = os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
+    root.set("name", "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid")
+    root.set("bundleIdentifier", "com.xziel.apex.mobileportrait" if portrait_preview
+             else "com.xziel.apex.fulltest")
     root.set("version", "0.1.0")
     # Do not let this experimental build generate VST3/ASIO host code on Android.
     defines = [
@@ -139,6 +147,7 @@ def main() -> int:
         ET.indent(tree, space="  ")
     tree.write(output, encoding="utf-8", xml_declaration=True)
     print(f"Android Full exporter: {output}")
+    print(f"Portrait-first separate-install preview: {portrait_preview}; package={root.get('bundleIdentifier')}")
     print(f"Desktop files retained: {len(listed)}; translation units: {compiled}")
     print(f"Windows-only translation units excluded from Android: {len(android_excluded)}")
     for path in android_excluded:
