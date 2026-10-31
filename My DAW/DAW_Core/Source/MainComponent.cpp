@@ -4325,6 +4325,13 @@ MainComponent::MainComponent()
     // Bubblegum V2 floating send panel - lives on MainComponent, not inside mixer
     bubblegumPanel_ = std::make_unique<DAW::BubblegumV2PanelUI>();
     bubblegumPanel_->bind(&appCore_.getBubblegumV2(), &appCore_.getTrackManager());
+   #if JUCE_ANDROID
+    bubblegumPanel_->setPhonePresentation(true);
+   #elif JUCE_IOS
+    // iPad retains the desktop Send Matrix; iPhone gets Sends only.
+    bubblegumPanel_->setPhonePresentation(
+        !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad"));
+   #endif
     bubblegumPanel_->onIsMasterSelected = [this]
     {
         auto& mgr = appCore_.getTrackManager();
