@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "feature/android-port-*"
+      - "feature/mobile-portrait-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
@@ -111,9 +112,17 @@ jobs:
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
           python3 Android/scripts/enable_immersive_fullscreen.py
-          grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" \
-            "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
-          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
+          MANIFEST="My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
+          # Do not call this mobile APK fixed unless the generated manifest
+          # explicitly requests portrait and the separate mobile Activity.
+          grep -q 'android:screenOrientation="portrait"' "$MANIFEST"
+          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then
+            grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
+          else
+            grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
+          fi
 
       - name: Create disposable Android Debug signing key
         shell: bash

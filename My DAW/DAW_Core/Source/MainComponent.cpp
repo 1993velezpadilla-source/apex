@@ -26,6 +26,7 @@
 #include "VocalTuneCore/ApexTuneIntegrationCore.h"
 #include "RecordingCore/RecordingInputValidityCore.h"
 #include "UICore/QuickSendPopup.h"
+#include "UICore/MobilePanelGeometry.h"
 #include <set>
 #include <algorithm>
 #include <cstdlib>
@@ -35,6 +36,19 @@
 
 namespace
 {
+    // Android and iPhone share the phone Mixer policy; iPad, Windows and Mac
+    // retain the original dock/desktop presentation.
+    static bool usesPhoneMixerPresentation()
+    {
+       #if JUCE_ANDROID
+        return true;
+       #elif JUCE_IOS
+        return !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad");
+       #else
+        return false;
+       #endif
+    }
+
    #if JUCE_ANDROID
     // Android's JUCE/Oboe device exposes the OS-negotiated route. Request a
     // modest channel count rather than asking a phone for 64 inputs; USB
@@ -1133,6 +1147,9 @@ MainComponent::MainComponent()
 
     // Menu bar
     menuBar_ = std::make_unique<DAW::DAWMenuBar>();
+    // APEX phone gets its own 50-unit touch header instead of the desktop
+    // File/Edit/... bar and Windows minimize/maximize/close controls.
+    menuBar_->setPhoneMode(usesPhoneMixerPresentation());
     appendMainStartupTrace("ctor.menu-bar.created");
     menuBar_->setMenuAction("Track", "Add Audio Track", [this]
     {
@@ -1348,6 +1365,12 @@ MainComponent::MainComponent()
     // Use the single authoritative click state from ApplicationCore.
     clickState_ = &appCore_.getClickState();
     transportBar_ = std::make_unique<DAW::TransportBar>(appCore_.getTransport(), clickState_);
+   #if JUCE_ANDROID
+    transportBar_->setPhoneLayout(true);
+   #elif JUCE_IOS
+    transportBar_->setPhoneLayout(
+        !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad"));
+   #endif
     appendMainStartupTrace("ctor.transport-bar.created");
     addAndMakeVisible(transportBar_.get());
 
@@ -2715,8 +2738,25 @@ MainComponent::MainComponent()
                 return false;
             };
         }
-        auto area = getLocalBounds().reduced(80, 60).withSizeKeepingCentre(420, 360);
-        clipPropertiesWindow_->setBounds(area);
+        // Clip Properties also hosts clip-region FX. Keep its close/title
+        // chrome inside the phone safe area, clear of the bottom Transport.
+        // iPad/desktop retain the original floating dialog geometry.
+        if (usesPhoneMixerPresentation())
+        {
+            const auto fit = DAW::mobile::fitPhoneClipProperties(
+                getWidth(), getHeight(), 50,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            if (fit.window.width > 0 && fit.window.height > 0)
+                clipPropertiesWindow_->setBounds(
+                    fit.window.x, fit.window.y, fit.window.width, fit.window.height);
+            else
+                clipPropertiesWindow_->setBounds({});
+        }
+        else
+        {
+            auto area = getLocalBounds().reduced(80, 60).withSizeKeepingCentre(420, 360);
+            clipPropertiesWindow_->setBounds(area);
+        }
         clipPropertiesWindow_->setVisible(true);
         clipPropertiesWindow_->restoreIfMinimized();
         if (auto it = clipFxPanelOpenByClipId_.find(clipId); it != clipFxPanelOpenByClipId_.end())
@@ -3136,13 +3176,20 @@ MainComponent::MainComponent()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        // A phone's persistent Mixer deck replaces the floating desktop
+        // restore bubble. Closing must not reintroduce a draggable desktop orb.
+        if (mixerBubble_) mixerBubble_->setVisible(!usesPhoneMixerPresentation());
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
     mixerWindow_->onDragEnded = [this]
     {
         mixerWindowPlaced_ = true;
+        // A drag can end outside the activity without any orientation change.
+        // Re-run phone layout once on release so the Mixer header/close button
+        // cannot remain stranded beyond the visible safe area.
+        if (usesPhoneMixerPresentation())
+            resized();
         cableOverlay_.notifyMotionFinished();
         refreshBubblegumOffscreenState();
     };
@@ -4013,6 +4060,31 @@ MainComponent::MainComponent()
     };
     transportBar_->onQuickAccessSidePanel = quickAccessSidePanel;
     transportBar_->onQuickAccessFxBrowser = quickAccessFxBrowser;
+    transportBar_->onOpenFloatingMixer = [this]
+    {
+        if (!mixerWindow_) return;
+        mixerWindow_->restoreIfMinimized();
+        mixerWindow_->setVisible(true);
+        mixerWindow_->toFront(false);
+        if (mixerBubble_) mixerBubble_->setVisible(false);
+    };
+    transportBar_->onOpenBubblegumSends = [this]
+    {
+        if (!bubblegumPanel_ || !mixerPanel_) return;
+        // Open/close through the canonical Bubblegum controller so the
+        // current source, PRE/POST, and routing state stay synchronized.
+        if (mixerPanel_->isBubblegumModeActive())
+            mixerPanel_->deactivateBubblegumMode();
+        else
+        {
+            auto source = mixerPanel_->getSelectedTrackId();
+            auto& tracks = appCore_.getTrackManager();
+            if (source.isEmpty() && tracks.hasMasterTrack())
+                source = tracks.getMasterTrack()->getID();
+            if (source.isNotEmpty())
+                mixerPanel_->activateBubblegumMode(source);
+        }
+    };
 
     // Wire same quick-access to ArrangementView timeline toolbar
     if (arrangement_)
@@ -4266,8 +4338,9 @@ MainComponent::MainComponent()
     mixerWindow_->onMinimized = [this]
     {
         mixerWindow_->setVisible(false);
-        mixerBubble_->setVisible(true);
-        mixerBubble_->toFront(false);
+        mixerBubble_->setVisible(!usesPhoneMixerPresentation());
+        if (!usesPhoneMixerPresentation())
+            mixerBubble_->toFront(false);
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
         resized();
@@ -4279,15 +4352,16 @@ MainComponent::MainComponent()
             slimeSidePanel_->setVisible(true);
     };
 
-   #if JUCE_ANDROID
-    // Product decision: Android uses the SAME floating mixer window as
-    // desktop, not a docked viewport. The initial layout is computed from
-    // the actual Android activity size on MainComponent::resized().
-    // A minimized/closed mixer can always reopen via its floating bubble.
-    mixerDocked_ = false;
-    mixerPanel_->setDockedState(false);
-    mixerWindow_->setVisible(true);
-    mixerBubble_->setVisible(false);
+   #if JUCE_ANDROID || JUCE_IOS
+    // Phones start on Arrangement with a floating Mixer, never a dock.
+    // iPad keeps its desktop mixer and Matrix presentation.
+    if (usesPhoneMixerPresentation())
+    {
+        mixerDocked_ = false;
+        mixerPanel_->setDockedState(false);
+        mixerWindow_->setVisible(false);
+        mixerBubble_->setVisible(false);
+    }
    #endif
 
     // Timeline bubble - shows when timeline window is minimized/closed
@@ -4325,6 +4399,13 @@ MainComponent::MainComponent()
     // Bubblegum V2 floating send panel - lives on MainComponent, not inside mixer
     bubblegumPanel_ = std::make_unique<DAW::BubblegumV2PanelUI>();
     bubblegumPanel_->bind(&appCore_.getBubblegumV2(), &appCore_.getTrackManager());
+   #if JUCE_ANDROID
+    bubblegumPanel_->setPhonePresentation(true);
+   #elif JUCE_IOS
+    // iPad retains the desktop Send Matrix; iPhone gets Sends only.
+    bubblegumPanel_->setPhonePresentation(
+        !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad"));
+   #endif
     bubblegumPanel_->onIsMasterSelected = [this]
     {
         auto& mgr = appCore_.getTrackManager();
@@ -5160,7 +5241,7 @@ MainComponent::MainComponent()
            #if JUCE_ANDROID
             // Keep a floating one-tap reopen control only while mixer dock
             // is closed, without permanently obscuring the arrangement.
-            if (mixerBubble_) mixerBubble_->setVisible(!showMixer);
+            if (mixerBubble_) mixerBubble_->setVisible(!showMixer && DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
             if (showMixer) mixerViewport_.toFront(false);
            #endif
             if (slimeSidePanel_ && slimeSidePanel_->isAttached())
@@ -5168,7 +5249,7 @@ MainComponent::MainComponent()
         }
         else
         {
-            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(true); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
+            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation())); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
             else { mixerWindow_->setVisible(true); mixerWindow_->restoreIfMinimized(); mixerWindow_->toFront(false); mixerBubble_->setVisible(false); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(true); }
         }
         resized();
@@ -7243,7 +7324,7 @@ void MainComponent::undockMixer()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        if (mixerBubble_) mixerBubble_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
@@ -7253,17 +7334,20 @@ void MainComponent::undockMixer()
 
 void MainComponent::dockMixer()
 {
-   #if JUCE_ANDROID
-    // Android intentionally only supports the floating presentation of the
-    // original MixerWindow; do not reparent the viewport into a dock.
-    if (mixerWindow_)
+   #if JUCE_ANDROID || JUCE_IOS
+    // Android/iPhone only: do not reparent the floating mixer into a dock.
+    // iPad still follows the desktop docking path below.
+    if (usesPhoneMixerPresentation())
     {
-        mixerWindow_->restoreIfMinimized();
-        mixerWindow_->setVisible(true);
-        mixerWindow_->toFront(false);
+        if (mixerWindow_)
+        {
+            mixerWindow_->restoreIfMinimized();
+            mixerWindow_->setVisible(true);
+            mixerWindow_->toFront(false);
+        }
+        if (mixerBubble_) mixerBubble_->setVisible(false);
+        return;
     }
-    if (mixerBubble_) mixerBubble_->setVisible(false);
-    return;
    #endif
     mixerDocked_ = true;
     mixerPanel_->setDockedState(true);
@@ -7863,7 +7947,7 @@ void MainComponent::hideBubblegumPanel()
         bubblegumPanel_->hideAnimated();
 
     if (bubblegumOrb_)
-        bubblegumOrb_->setVisible(true);
+        bubblegumOrb_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
 }
 
 void MainComponent::refreshPinnedValueHint()
@@ -8929,13 +9013,25 @@ void MainComponent::resized()
     if (loadingOverlay_)
         loadingOverlay_->setBounds(getLocalBounds());
 
+    // Desktop and iPad keep their original layout. Phone transport stays at
+    // the bottom for thumb reach and leaves the Arrangement dominant.
+    const bool phoneLayout = usesPhoneMixerPresentation();
     if (menuBar_)
-        menuBar_->setBounds(area.removeFromTop(kMenuH));
+        menuBar_->setBounds(area.removeFromTop(phoneLayout ? 50 : kMenuH));
 
-    // Transport lives in the TOP command/control zone (the original APEX shell
-    // design); the bottom belongs to the workspace and the docked mixer.
     if (transportBar_)
-        transportBar_->setBounds(area.removeFromTop(kTransportH));
+    {
+        if (phoneLayout)
+        {
+            const bool portrait = getHeight() >= getWidth();
+            const int wanted = portrait ? 144 : 96;
+            const int available = juce::jmax(0, area.getHeight() - 72);
+            const int actual = juce::jmin(wanted, available);
+            transportBar_->setBounds(area.removeFromBottom(actual));
+        }
+        else
+            transportBar_->setBounds(area.removeFromTop(kTransportH));
+    }
 
     if (bubblegumTaskbar_)
         bubblegumTaskbar_->setBounds({});
@@ -8959,7 +9055,15 @@ void MainComponent::resized()
     if (markerBubble_)
         markerBubble_->setBounds(getLocalBounds());
     if (bubblegumOrb_)
-        bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18, 92, bubbleSize, bubbleSize);
+    {
+        // "Sends" lives in the bottom touch transport. The desktop B orb
+        // steals a 54x54 hit area from a narrow phone Arrangement.
+        if (phoneLayout)
+            bubblegumOrb_->setVisible(false);
+        else
+            bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18,
+                                     92, bubbleSize, bubbleSize);
+    }
     if (masterBubble_)
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
 
@@ -9011,16 +9115,13 @@ void MainComponent::resized()
 
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
     {
-       #if JUCE_ANDROID
-        // Desktop's 220 logical pixels would consume over half the width on
-        // narrow Android views. Keep tracks reachable while exposing a real
-        // timeline for scrolling, selection and pinch/zoom work.
-        const int mobileTrackWidth = juce::jmin(trackListW_,
-            juce::jmax(108, content.getWidth() / 4));
-        trackListWindow_->setBounds(content.removeFromLeft(mobileTrackWidth));
-       #else
-        trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
-       #endif
+        // Android and iPhone share the compact Track List policy. iPad and
+        // desktop keep the original user-selected width and Matrix workspace.
+        // A tiny split-screen viewport still reserves a sliver for Arrangement.
+        const int trackWidth = phoneLayout
+            ? DAW::mobile::phoneTrackListWidth(trackListW_, content.getWidth())
+            : trackListW_;
+        trackListWindow_->setBounds(content.removeFromLeft(trackWidth));
     }
 
     if (timelineWindow_)
@@ -9030,27 +9131,25 @@ void MainComponent::resized()
 
     if (mixerWindow_ && !mixerDocked_)
     {
-       #if JUCE_ANDROID
-        // First MainComponent layout uses desktop 1280x800. Once Android
-        // delivers its actual viewport, recompute if the window is off-screen
-        // or bigger than that viewport. Preserve the user's position/size
-        // during regular resizes that already fit.
-        const int safeTop = juce::jmin(getHeight() / 3,
-                                      kMenuH + kTransportH + 8);
-        const auto safe = getLocalBounds()
-            .withTrimmedTop(safeTop).reduced(8, 6);
-        const auto current = mixerWindow_->getBounds();
-        if (!mixerWindowPlaced_ || current.getWidth() > safe.getWidth()
-            || current.getHeight() > safe.getHeight()
-            || current.getX() < safe.getX()
-            || current.getY() < safe.getY()
-            || current.getRight() > safe.getRight()
-            || current.getBottom() > safe.getBottom())
+        if (phoneLayout)
+        {
+            // On Android/iPhone, preserve manual size and position if they
+            // still fit above the bottom Transport after rotation.
+            const int safeTop = juce::jmin(getHeight() / 3, kMenuH + 8);
+            const auto fit = DAW::mobile::fitFloatingMixer(
+                getWidth(), getHeight(), safeTop,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            if (fit.safe.width > 0 && fit.safe.height > 0)
+            {
+                const auto current = mixerWindow_->getBounds();
+                if (!mixerWindowPlaced_ || !DAW::mobile::floatingMixerFits(
+                        fit, { current.getX(), current.getY(),
+                               current.getWidth(), current.getHeight() }))
+                    setDefaultMixerWindowBounds();
+            }
+        }
+        else if (!mixerWindowPlaced_)
             setDefaultMixerWindowBounds();
-       #else
-        if (!mixerWindowPlaced_)
-            setDefaultMixerWindowBounds();
-       #endif
     }
 
     if (playlistPanel_ && playlistPanel_->getParentComponent() == this)
@@ -9080,12 +9179,44 @@ void MainComponent::resized()
         syncPlaylistTimeline();
     }
 
+    // After rotation, an open Clip Properties/clip FX dialog must not keep
+    // stale landscape/portrait bounds over the persistent phone Transport.
+    if (phoneLayout && clipPropertiesWindow_ && clipPropertiesWindow_->isVisible())
+    {
+        const auto fit = DAW::mobile::fitPhoneClipProperties(
+            getWidth(), getHeight(), 50,
+            transportBar_ ? transportBar_->getHeight() : 0);
+        if (fit.window.width > 0 && fit.window.height > 0)
+        {
+            const auto current = clipPropertiesWindow_->getBounds();
+            if (!DAW::mobile::phoneClipPropertiesFits(
+                    fit, { current.getX(), current.getY(),
+                           current.getWidth(), current.getHeight() }))
+                clipPropertiesWindow_->setBounds(
+                    fit.window.x, fit.window.y, fit.window.width, fit.window.height);
+        }
+    }
+
     if (pianoRollWindow_ && pianoRollWindow_->getBounds().isEmpty())
         pianoRollWindow_->setBounds(getLocalBounds().reduced(90, 70));
 
     updateSlimeAttachedPosition();
     if (browserChrome_ && browserChrome_->isVisible() && !browserChrome_->isMaximized())
-        browserChrome_->setBounds(24, kMenuH + kTransportH + 18, 340, juce::jmin(560, getHeight() - 150));
+    {
+        if (phoneLayout)
+        {
+            // FX Browser must not use desktop's fixed width or top Transport
+            // offset on phones. Leave the persistent bottom Transport clear
+            // through portrait/landscape and split-window resize.
+            const auto bounds = DAW::mobile::fitPhonePluginBrowser(
+                getWidth(), getHeight(), 50,
+                transportBar_ ? transportBar_->getHeight() : 0);
+            browserChrome_->setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+        }
+        else
+            browserChrome_->setBounds(24, kMenuH + kTransportH + 18,
+                                     340, juce::jmin(560, getHeight() - 150));
+    }
 
     if (settingsPanel_ && settingsPanel_->isVisible())
         settingsPanel_->setBounds(getLocalBounds().reduced(120, 70));
@@ -9095,10 +9226,28 @@ void MainComponent::resized()
 
     cableOverlay_.setBounds(getLocalBounds());
     offscreenEndpoint_.setBounds(getLocalBounds());
+    if (phoneLayout)
+    {
+        // Keep Bubblegum routing audio intact, but never paint Matrix cables
+        // or desktop-only offscreen routing endpoints over phone controls.
+        cableOverlay_.setVisible(false);
+        offscreenEndpoint_.setVisible(false);
+    }
    #if JUCE_DEBUG
     // Left of the custom title-bar window controls so the overlay never covers
     // the minimize / maximize / close buttons.
     fpsOverlay_.setBounds(getWidth() - 70 - 160, 6, 60, 20);
+   #endif
+
+   #if JUCE_ANDROID || JUCE_IOS
+    if (phoneLayout && bubblegumPanel_)
+    {
+        // The Sends panel shares the same header/Transport reservations as
+        // the floating Mixer and FX Browser, including after phone rotation.
+        bubblegumPanel_->setPhoneSafeInsets(
+            50, transportBar_ ? transportBar_->getHeight() : 0);
+        bubblegumPanel_->constrainPhonePanelToParent();
+    }
    #endif
 
     refreshBubblegumOffscreenState();
@@ -9109,28 +9258,23 @@ void MainComponent::setDefaultMixerWindowBounds()
     if (!mixerWindow_ || !mixerPanel_)
         return;
 
-   #if JUCE_ANDROID
-    // True FLOATING mixer, fitted to the live phone/tablet activity rather
-    // than the hard-coded 80, desktopY, 320px-high Windows rectangle.
-    // Keep the desktop original chrome, title bar, drag-to-move and resizing.
-    const int safeTop = juce::jmin(getHeight() / 3,
-                                  kMenuH + kTransportH + 8);
-    const auto safe = getLocalBounds().withTrimmedTop(safeTop).reduced(8, 6);
-    if (safe.isEmpty())
+   #if JUCE_ANDROID || JUCE_IOS
+    if (usesPhoneMixerPresentation())
+    {
+        // Keep the floating mixer inside the live phone viewport and ABOVE
+        // the persistent bottom Transport. iPad/desktop keep original chrome.
+        const int safeTop = juce::jmin(getHeight() / 3, kMenuH + 8);
+        const auto fit = DAW::mobile::fitFloatingMixer(
+            getWidth(), getHeight(), safeTop,
+            transportBar_ ? transportBar_->getHeight() : 0);
+        if (fit.window.width <= 0 || fit.window.height <= 0)
+            return;
+        mixerWindow_->setMinimumSize(fit.minimumWidth, fit.minimumHeight);
+        mixerWindow_->setBounds(fit.window.x, fit.window.y,
+                                fit.window.width, fit.window.height);
+        mixerWindowPlaced_ = true;
         return;
-    const int width = juce::jmin(safe.getWidth(),
-        juce::jmax(200, juce::roundToInt(safe.getWidth() * 0.88)));
-    const int height = juce::jmin(safe.getHeight(),
-        juce::jmax(180, juce::roundToInt(safe.getHeight() * 0.86)));
-    // The desktop 260px minimum cannot be imposed on a short Android
-    // viewport: update its resize constrainer to the actual visible limits.
-    mixerWindow_->setMinimumSize(juce::jmin(200, safe.getWidth()),
-                                 juce::jmin(180, safe.getHeight()));
-    mixerWindow_->setBounds(safe.getX() + (safe.getWidth() - width) / 2,
-                            safe.getY() + (safe.getHeight() - height) / 2,
-                            width, height);
-    mixerWindowPlaced_ = true;
-    return;
+    }
    #endif
 
     // The outer frame/title chrome is not part of the Mixer content width.
