@@ -856,12 +856,12 @@ public:
     {
        #if JUCE_ANDROID
         apexAndroidBootLog ("01 JUCEApplication initialise entered");
-        // APEX Mobile is portrait-first, but MUST also rotate into landscape.
-        // Restricting this mask to landscape used to freeze the APK sideways.
-        // JUCE requests the four orientations; Android still honours the
-        // system's Auto-rotate setting (see generated Activity manifest).
-        juce::Desktop::getInstance().setOrientationsEnabled (
-            juce::Desktop::allOrientations);
+        // Do not call Desktop::setOrientationsEnabled(allOrientations) here:
+        // JUCE maps that mask to Android SCREEN_ORIENTATION_USER, overriding
+        // the sensor policy and making the Pixel Fold stay landscape when the
+        // user's system rotation toggle is off. Our native ApexImmersiveActivity
+        // owns the policy with FULL_SENSOR, preserving both orientations.
+        // This changes no orientation behavior on Windows, Mac or iPad.
        #endif
         const auto processArguments = getCommandLineParameterArray();
        #if JUCE_ANDROID
