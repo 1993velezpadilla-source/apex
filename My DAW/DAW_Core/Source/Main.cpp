@@ -1920,11 +1920,10 @@ public:
         juce::BorderSize<int> getContentComponentBorder() const override
         {
            #if JUCE_ANDROID
-            // Preserve the established APEX Android GUI geometry EXACTLY.
-            // Immersive notification/navigation bar hiding belongs only to
-            // the generated native Android Activity (not to JUCE layout).
-            // BorderSize order: top, left, bottom, right.
-            return juce::BorderSize<int>(24, 8, 8, 24);
+            // Touchscreen has no desktop resize frame. Fill the whole
+            // native portrait activity instead of reserving 24/8/8/24 pixels
+            // for decorative desktop window chrome.
+            return juce::BorderSize<int>(0);
            #else
             return juce::BorderSize<int>(kFrameInset);
            #endif
@@ -1943,6 +1942,12 @@ public:
         juce::Component::WindowControlKind findControlAtPoint(juce::Point<float> pt) const override
         {
             using Kind = juce::Component::WindowControlKind;
+           #if JUCE_ANDROID
+            // No draggable Win32 caption, edge-resize or close hit zones on
+            // a phone. Every point belongs to touch input inside APEX.
+            juce::ignoreUnused(pt);
+            return Kind::client;
+           #endif
 
             const auto b = getLocalBounds();
             const int x = (int) std::floor(pt.x);
@@ -2034,6 +2039,12 @@ public:
 
         void paintOverChildren(juce::Graphics& g) override
         {
+           #if JUCE_ANDROID
+            // Android native portrait window is edge-to-edge. The desktop
+            // electric-blue resize frame must not consume the touch screen.
+            juce::ignoreUnused(g);
+            return;
+           #endif
             // One continuous shell frame around the COMPLETE top-level client
             // area. getLocalBounds() is the only visual authority: the frame is
             // redrawn automatically on every resize / DPI change / repaint, the
