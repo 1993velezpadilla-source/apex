@@ -151,6 +151,12 @@ constexpr bool phoneClipPropertiesFits(const PhoneClipPropertiesFit& fit,
 constexpr int pluginBrowserHeaderHeight(bool phone) noexcept { return phone ? 0 : 28; }
 constexpr int pluginBrowserSearchSlotHeight(bool phone) noexcept { return phone ? 48 : 26; }
 constexpr int pluginBrowserRowHeight(bool phone) noexcept { return phone ? 44 : 22; }
+constexpr int pluginBrowserChromeHeight(bool phone) noexcept { return phone ? 44 : 28; }
+// In impossibly narrow split views three controls share the available width.
+constexpr int phoneChromeControlSize(int panelWidth) noexcept
+{
+    return panelWidth > 0 ? minInt(44, panelWidth / 3) : 0;
+}
 
 /** Keep the floating FX browser's title, close control and scrollable list
  *  between the phone header and persistent bottom Transport. Desktop/iPad
