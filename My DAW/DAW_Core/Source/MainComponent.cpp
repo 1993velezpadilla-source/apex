@@ -1147,6 +1147,9 @@ MainComponent::MainComponent()
 
     // Menu bar
     menuBar_ = std::make_unique<DAW::DAWMenuBar>();
+    // APEX phone gets its own 50-unit touch header instead of the desktop
+    // File/Edit/... bar and Windows minimize/maximize/close controls.
+    menuBar_->setPhoneMode(usesPhoneMixerPresentation());
     appendMainStartupTrace("ctor.menu-bar.created");
     menuBar_->setMenuAction("Track", "Add Audio Track", [this]
     {
@@ -8994,7 +8997,7 @@ void MainComponent::resized()
     // the bottom for thumb reach and leaves the Arrangement dominant.
     const bool phoneLayout = usesPhoneMixerPresentation();
     if (menuBar_)
-        menuBar_->setBounds(area.removeFromTop(kMenuH));
+        menuBar_->setBounds(area.removeFromTop(phoneLayout ? 50 : kMenuH));
 
     if (transportBar_)
     {
