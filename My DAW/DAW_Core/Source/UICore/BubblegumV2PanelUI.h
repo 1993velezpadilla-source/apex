@@ -70,6 +70,14 @@ public:
         repaint();
     }
 
+    // Updated by MainComponent during every phone layout/orientation change.
+    // The Sends window may float, but never across the persistent Transport.
+    void setPhoneSafeInsets(int headerHeight, int transportHeight) noexcept
+    {
+        phoneSafeTop_ = headerHeight;
+        phoneSafeBottom_ = transportHeight;
+    }
+
     void bind(BubblegumV2System* sys, TrackManager* tracks)
     {
         bgV2_   = sys;
@@ -87,7 +95,8 @@ public:
             // Bounds are valid even when landscape height is below 380.
             const auto fitted = mobile::fitBubblegumSends(
                 parent->getWidth(), parent->getHeight(),
-                anchorCentre.x, anchorCentre.y, phonePresentation_);
+                anchorCentre.x, anchorCentre.y, phonePresentation_,
+                phoneSafeTop_, phoneSafeBottom_);
             if (fitted.width <= 0 || fitted.height <= 0)
                 return;
             setBounds(fitted.x, fitted.y, fitted.width, fitted.height);
@@ -118,9 +127,12 @@ public:
             const auto old = getBounds();
             const auto fitted = mobile::fitBubblegumSends(
                 parent->getWidth(), parent->getHeight(),
-                old.getRight() + 16, old.getBottom() - 20, true);
+                old.getRight() + 16, old.getBottom() - 20, true,
+                phoneSafeTop_, phoneSafeBottom_);
             if (fitted.width > 0 && fitted.height > 0)
                 setBounds(fitted.x, fitted.y, fitted.width, fitted.height);
+            else
+                setBounds({}); // No safe space: never intercept the Transport.
         }
     }
 
@@ -939,6 +951,8 @@ private:
     juce::Point<float> mousePos_ { -1000.f, -1000.f };
 
     bool phonePresentation_ = false;
+    int phoneSafeTop_ = 0;
+    int phoneSafeBottom_ = 0;
     bool fullScreenMode_ = false;
     juce::Rectangle<int> compactBoundsBeforeFull_;
     TrackID compactSourceBeforeFull_;
