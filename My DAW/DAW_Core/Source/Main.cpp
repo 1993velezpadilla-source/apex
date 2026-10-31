@@ -1880,9 +1880,28 @@ public:
                 return;
             // This is the exact same MainComponent Windows instantiates,
             // not Android/Source/Main.cpp's independent USB diagnostic.
-            setContentOwned (new MainComponent(), true);
-            resized();
+            // IMPORTANT: do NOT use resizeToFit=true here. MainComponent's
+            // desktop constructor intentionally sets 1280x800; allowing
+            // ResizableWindow::setContentOwned to size the TOP-LEVEL window
+            // to that preference overwrites Android's real landscape
+            // viewport. This caused the startup panel to be centred in an
+            // off-screen 1280x800 canvas and clipped on the Pixel Fold.
+            auto* daw = new MainComponent();
+            setContentOwned (daw, false);
+            resized(); // JUCE derives owned content bounds from the actual peer
+            // Catch a phone activity resize/rotation that happened during
+            // the expensive MainComponent constructor.
+            if (auto* peer = getPeer())
+            {
+                juce::ignoreUnused(peer);
+                const auto content = getContentComponentArea();
+                daw->setBounds(content);
+            }
             repaint();
+            __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
+                "mounted window=%dx%d content=%dx%d origin=%d,%d",
+                getWidth(), getHeight(), daw->getWidth(), daw->getHeight(),
+                daw->getX(), daw->getY());
         }
        #endif
 
