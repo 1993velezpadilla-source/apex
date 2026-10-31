@@ -5,6 +5,13 @@ namespace DAW::mobile
 {
 struct PanelBounds { int x, y, width, height; };
 
+// The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
+// restore bubbles must stay hidden after closing a floating phone panel.
+constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept
+{
+    return !phonePresentation;
+}
+
 constexpr int minInt(int a, int b) noexcept { return a < b ? a : b; }
 constexpr int maxInt(int a, int b) noexcept { return a > b ? a : b; }
 constexpr int clampInt(int value, int lower, int upper) noexcept
