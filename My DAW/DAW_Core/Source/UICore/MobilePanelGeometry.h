@@ -140,6 +140,25 @@ constexpr bool phoneClipPropertiesFits(const PhoneClipPropertiesFit& fit,
             <= static_cast<long long>(fit.safe.y) + fit.safe.height;
 }
 
+/** Keep the floating FX browser's title, close control and scrollable list
+ *  between the phone header and persistent bottom Transport. Desktop/iPad
+ *  keep their existing 340x560 browser placement.
+ */
+constexpr PanelBounds fitPhonePluginBrowser(int viewportW, int viewportH,
+                                            int reservedTop, int reservedBottom) noexcept
+{
+    if (viewportW <= 0 || viewportH <= 0)
+        return { 0, 0, 0, 0 };
+    const int top = clampInt(reservedTop, 0, viewportH);
+    const int bottom = clampInt(reservedBottom, 0, viewportH - top);
+    const int margin = minInt(8, minInt(viewportW, viewportH) / 4);
+    const int safeW = viewportW - 2 * margin;
+    const int safeH = viewportH - top - bottom - 2 * margin;
+    if (safeW <= 0 || safeH <= 0)
+        return { 0, 0, 0, 0 };
+    return { margin, top + margin, minInt(340, safeW), minInt(560, safeH) };
+}
+
 /** Keep a phone's Track List reachable without stealing the Arrangement.
  *  iPhone and Android use this; iPad/desktop keep their stored track width.
  *  Reserve at least one logical unit for the timeline in tiny split views.
