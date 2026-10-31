@@ -4137,6 +4137,15 @@ MainComponent::MainComponent()
     DAW::StartupProgressCore::reach(65);
     startupPanel_->onRescanPlugins = [this]
     {
+       #if JUCE_ANDROID
+        // Android natively loads built-in APEX processors; Windows plugin
+        // subprocess scanners and VST3 discovery must not run on a phone.
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::MessageBoxIconType::InfoIcon, "APEX Android",
+            "Native APEX effects are available without scanning. "
+            "Desktop VST3 scanning is not available on Android.");
+        return;
+       #endif
         // Don't dismiss startup panel — let user see it close via X or after scan.
         // Route through the dialog so the loading bar receives progress + completion.
         if (scanDialog_)
@@ -9454,6 +9463,14 @@ void MainComponent::startPluginScanIfNeeded()
     const bool hasCachedPlugins = scanner.getCache().getCount() > 0
         || scanner.getKnownPlugins().getNumTypes() > 0;
     scanStarted_ = true;
+   #if JUCE_ANDROID
+    // On Android there are no desktop VST3 DLLs to enumerate. The old
+    // first-run scan was being scheduled shortly after the startup screen
+    // appeared and could block the UI message thread (ANR). Built-in effects
+    // are registered in the DAW; Android has no auto plugin scan.
+    juce::Logger::writeToLog("[APEX-ANDROID-BOOT] bypass desktop auto plugin scan");
+    return;
+   #endif
     if (hasCachedPlugins)
         return; // Persisted registry is ready; manual Rescan stays available.
 
