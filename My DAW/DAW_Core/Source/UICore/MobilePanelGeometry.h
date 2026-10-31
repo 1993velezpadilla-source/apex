@@ -176,6 +176,15 @@ constexpr bool phoneChromeButtonTapActivates(int pressedButton, int releasedButt
         && pluginBrowserRowTapActivates(true, dragX, dragY, true);
 }
 
+// Phones already expose a 44-unit maximize button. A second finger tap on
+// the title must not toggle maximize while JUCE is still processing the
+// second mouseDown/drag; desktop double-click-to-maximize remains available.
+constexpr bool chromeTitleDoubleClickMaximizes(bool phonePresentation,
+                                                bool hitWindowButton) noexcept
+{
+    return !phonePresentation && !hitWindowButton;
+}
+
 // In impossibly narrow split views three controls share the available width.
 constexpr int phoneChromeControlSize(int panelWidth) noexcept
 {
