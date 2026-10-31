@@ -92,6 +92,10 @@ int main()
     using DAW::mobile::phoneTrackListWidth;
     static_assert(phoneTrackListWidth(220, 393) == 196);
     static_assert(phoneTrackListWidth(220, 360) == 180);
+    static_assert(phoneTrackListWidth(260, 360) == 220);
+    static_assert(phoneTrackListWidth(400, 360) == 234);
+    static_assert(phoneTrackListWidth(260, 393) == 236);
+    static_assert(phoneTrackListWidth(2147483647, 393) == 255);
     static_assert(phoneTrackListWidth(220, 852) == 220);
     static_assert(phoneTrackListWidth(80, 393) == 196);
     static_assert(phoneTrackListWidth(220, 100) == 50);
