@@ -1348,6 +1348,12 @@ MainComponent::MainComponent()
     // Use the single authoritative click state from ApplicationCore.
     clickState_ = &appCore_.getClickState();
     transportBar_ = std::make_unique<DAW::TransportBar>(appCore_.getTransport(), clickState_);
+   #if JUCE_ANDROID
+    transportBar_->setPhoneLayout(true);
+   #elif JUCE_IOS
+    transportBar_->setPhoneLayout(
+        !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad"));
+   #endif
     appendMainStartupTrace("ctor.transport-bar.created");
     addAndMakeVisible(transportBar_.get());
 
@@ -4013,6 +4019,20 @@ MainComponent::MainComponent()
     };
     transportBar_->onQuickAccessSidePanel = quickAccessSidePanel;
     transportBar_->onQuickAccessFxBrowser = quickAccessFxBrowser;
+    transportBar_->onOpenFloatingMixer = [this]
+    {
+        if (!mixerWindow_) return;
+        mixerWindow_->restoreIfMinimized();
+        mixerWindow_->setVisible(true);
+        mixerWindow_->toFront(false);
+        if (mixerBubble_) mixerBubble_->setVisible(false);
+    };
+    transportBar_->onOpenBubblegumSends = [this]
+    {
+        if (!bubblegumPanel_ || !bubblegumOrb_) return;
+        if (bubblegumPanel_->isVisible()) hideBubblegumPanel();
+        else showBubblegumPanel();
+    };
 
     // Wire same quick-access to ArrangementView timeline toolbar
     if (arrangement_)
@@ -4286,7 +4306,9 @@ MainComponent::MainComponent()
     // A minimized/closed mixer can always reopen via its floating bubble.
     mixerDocked_ = false;
     mixerPanel_->setDockedState(false);
-    mixerWindow_->setVisible(true);
+    // Phone opens on the Arrangement; its persistent bottom MIXER button
+    // always opens the real floating window without docking or taking space.
+    mixerWindow_->setVisible(false);
     mixerBubble_->setVisible(false);
    #endif
 
@@ -8936,13 +8958,30 @@ void MainComponent::resized()
     if (loadingOverlay_)
         loadingOverlay_->setBounds(getLocalBounds());
 
+    // Desktop and iPad keep their original layout. Phone transport stays at
+    // the bottom for thumb reach and leaves the Arrangement dominant.
+    bool phoneLayout = false;
+   #if JUCE_ANDROID
+    phoneLayout = true;
+   #elif JUCE_IOS
+    phoneLayout = !juce::SystemStats::getDeviceDescription().containsIgnoreCase("iPad");
+   #endif
     if (menuBar_)
         menuBar_->setBounds(area.removeFromTop(kMenuH));
 
-    // Transport lives in the TOP command/control zone (the original APEX shell
-    // design); the bottom belongs to the workspace and the docked mixer.
     if (transportBar_)
-        transportBar_->setBounds(area.removeFromTop(kTransportH));
+    {
+        if (phoneLayout)
+        {
+            const bool portrait = getHeight() >= getWidth();
+            const int wanted = portrait ? 144 : 96;
+            const int available = juce::jmax(0, area.getHeight() - 72);
+            const int actual = juce::jmin(wanted, available);
+            transportBar_->setBounds(area.removeFromBottom(actual));
+        }
+        else
+            transportBar_->setBounds(area.removeFromTop(kTransportH));
+    }
 
     if (bubblegumTaskbar_)
         bubblegumTaskbar_->setBounds({});
@@ -8966,7 +9005,8 @@ void MainComponent::resized()
     if (markerBubble_)
         markerBubble_->setBounds(getLocalBounds());
     if (bubblegumOrb_)
-        bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18, 92, bubbleSize, bubbleSize);
+        bubblegumOrb_->setBounds(getWidth() - bubbleSize - 18,
+            phoneLayout ? (kMenuH + 10) : 92, bubbleSize, bubbleSize);
     if (masterBubble_)
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
 
