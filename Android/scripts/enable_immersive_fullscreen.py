@@ -13,11 +13,12 @@ import argparse
 import xml.etree.ElementTree as ET
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
-ANDROID_ACTIVITY = "com.xziel.apex.fulltest.ApexImmersiveActivity"
-JAVA_SOURCE = r"""package com.xziel.apex.fulltest;
+ANDROID_ACTIVITY = "com.xziel.apex.mobileportraitqa.ApexImmersiveActivity"
+JAVA_SOURCE = r"""package com.xziel.apex.mobileportraitqa;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.content.pm.ActivityInfo;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -34,20 +35,31 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ensureSensorRotation();
         applyApexImmersiveMode();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        ensureSensorRotation();
         applyApexImmersiveMode();
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus)
+        if (hasFocus) {
+            ensureSensorRotation();
             applyApexImmersiveMode();
+        }
+    }
+
+    private void ensureSensorRotation() {
+        // Pixel Fold: allow portrait/landscape regardless of Android quick-setting
+        // rotation lock. This is QA policy for the mobile DAW, not an OS change.
+        if (getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR)
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
     }
 
     private void applyApexImmersiveMode() {
@@ -105,13 +117,12 @@ def main() -> int:
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     activity.set(f"{{{ANDROID_NS}}}name", ANDROID_ACTIVITY)
     # Projucer's Android exporter (or a stale generated manifest) can keep an
-    # orientation lock even after the C++ Desktop mask is corrected. Android
-    # 'fullUser' allows portrait + reverse-portrait + both landscapes while
-    # respecting the user's system auto-rotate preference (minSdk=26).
-    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "fullUser")
+    # orientation lock even after the C++ Desktop mask is corrected.
+    # FULL_SENSOR permits portrait and landscape when Android auto-rotate is off.
+    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "fullSensor")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
-    java = (generated / "app/src/main/java/com/xziel/apex/fulltest"
+    java = (generated / "app/src/main/java/com/xziel/apex/mobileportraitqa"
             / "ApexImmersiveActivity.java")
     java.parent.mkdir(parents=True, exist_ok=True)
     java.write_text(JAVA_SOURCE, encoding="utf-8")
@@ -121,12 +132,13 @@ def main() -> int:
     app_activity = again.getroot().find("./application/activity")
     assert app_activity is not None
     assert app_activity.get(f"{{{ANDROID_NS}}}name") == ANDROID_ACTIVITY
-    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "fullUser"
+    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "fullSensor"
     assert "WindowInsetsController" in java.read_text(encoding="utf-8")
+    assert "SCREEN_ORIENTATION_FULL_SENSOR" in java.read_text(encoding="utf-8")
     print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {ANDROID_ACTIVITY}")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
     print(f"[APEX ANDROID IMMERSIVE] source={java}")
-    print("[APEX ANDROID IMMERSIVE] orientation: fullUser (portrait + landscape, respects Auto-rotate)")
+    print("[APEX ANDROID IMMERSIVE] orientation: fullSensor (portrait + landscape even with system rotation lock)")
     print("[APEX ANDROID IMMERSIVE] lifecycle: onCreate/onResume/onWindowFocusChanged")
     print("[APEX ANDROID IMMERSIVE] Android >=30 native system bars, 26-29 fallback")
     return 0
