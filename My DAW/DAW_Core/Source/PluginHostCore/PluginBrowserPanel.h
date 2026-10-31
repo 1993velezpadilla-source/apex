@@ -312,6 +312,14 @@ private:
                 suppressNextActivation_ = false;
                 return;
             }
+            // On phones, JUCE can deliver mouseUp to the original row after
+            // a finger swipe or an off-row release. Never load an FX as a
+            // side effect of scrolling; desktop selection is unchanged.
+            if (!mobile::pluginBrowserRowTapActivates(
+                    owner_.phonePresentation_,
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY(),
+                    getLocalBounds().contains(e.getPosition())))
+                return;
             owner_.activateRow(index_);
         }
 
