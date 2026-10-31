@@ -4022,6 +4022,10 @@ MainComponent::MainComponent()
     browserChrome_->onMoved = [this]
     {
         DBG("[MainComponent] FX browser moved to " + browserChrome_->getBounds().toString());
+        // Apply the phone safe-area clamp immediately on drag release, not
+        // only after the next orientation change or parent resize.
+        if (usesPhoneMixerPresentation())
+            resized();
     };
     addChildComponent(browserChrome_.get());
 
@@ -9213,9 +9217,11 @@ void MainComponent::resized()
             // FX Browser must not use desktop's fixed width or top Transport
             // offset on phones. Leave the persistent bottom Transport clear
             // through portrait/landscape and split-window resize.
-            const auto bounds = DAW::mobile::fitPhonePluginBrowser(
+            const auto current = browserChrome_->getBounds();
+            const auto bounds = DAW::mobile::fitPhonePluginBrowserPlacement(
                 getWidth(), getHeight(), 50,
                 transportBar_ ? transportBar_->getHeight() : 0,
+                { current.getX(), current.getY(), current.getWidth(), current.getHeight() },
                 browserChrome_->isMaximized());
             browserChrome_->setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
         }
