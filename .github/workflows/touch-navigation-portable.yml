@@ -12,6 +12,7 @@ on:
       - 'My DAW/DAW_Core/Tests/Portable/ApexRadialGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialGeometry.h'
       - 'My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h'
+      - 'My DAW/DAW_Core/Source/UICore/MobileTrackRowGeometry.h'
       - 'My DAW/DAW_Core/Source/UICore/MobileTransportPortrait.h'
       - 'My DAW/DAW_Core/Source/UICore/TransportBar.h'
       - 'My DAW/DAW_Core/Tests/Portable/MobileTransportPortraitPortableTests.cpp'

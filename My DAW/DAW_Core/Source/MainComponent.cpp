@@ -1419,7 +1419,10 @@ MainComponent::MainComponent()
     trackList_->onRowHeightChanged = [this](int index, int newHeight)
     {
         const int masterOffset = appCore_.getTrackManager().hasMasterTrack() ? 1 : 0;
-        arrangement_->setLaneHeight(index + masterOffset, newHeight);
+        // Phone rows need enough vertical room for two 3-wide control rows
+        // and the optional automation target, keeping Arrangement aligned.
+        arrangement_->setLaneHeight(index + masterOffset,
+            usesPhoneMixerPresentation() ? juce::jmax(180, newHeight) : newHeight);
     };
     trackList_->onTrackSelected = [this](const DAW::TrackID& id)
     {
@@ -2346,6 +2349,15 @@ MainComponent::MainComponent()
     {
         if (!arrangement_ || !trackList_)
             return;
+
+        // A loaded desktop project or a pinch-zoom must not silently shrink
+        // the phone's clickable grid to the old 80-unit track height. The
+        // Arrangement remains authoritative for BOTH waveform and row height.
+        if (usesPhoneMixerPresentation() && arrangement_->getPhysicalTrackHeight() < 180)
+        {
+            arrangement_->setLaneHeight(0, 180);
+            return; // the zoom callback synchronizes the taller layout
+        }
 
         updateTimelineViewportContentBounds();
 
@@ -8964,7 +8976,7 @@ void MainComponent::paint(juce::Graphics& g)
     // Starts below the top command/control zone (menu bar + transport).
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0)
     {
-        const int x = trackListW_;
+        const int x = trackListWindow_->getRight();
         const float top = (float)(kMenuH + kTransportH);
         g.setColour(apex.color.deepestB.withAlpha(0.9f));
         g.fillRect((float)x - 2.0f, top, 4.0f, (float)getHeight() - top);
@@ -8999,6 +9011,10 @@ void MainComponent::resized()
     // Desktop and iPad keep their original layout. Phone transport stays at
     // the bottom for thumb reach and leaves the Arrangement dominant.
     const bool phoneLayout = usesPhoneMixerPresentation();
+    if (trackList_)
+        trackList_->setPhonePresentation(phoneLayout);
+    if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < 180)
+        arrangement_->setLaneHeight(0, 180);
     if (menuBar_)
         menuBar_->setBounds(area.removeFromTop(phoneLayout ? 50 : kMenuH));
 
