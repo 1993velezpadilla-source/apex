@@ -143,6 +143,21 @@ int main()
     static_assert(browserMaxLandscape.x == 8 && browserMaxLandscape.y == 58
                   && browserMaxLandscape.width == 836 && browserMaxLandscape.height == 138);
     static_assert(browserMaxLandscape.y + browserMaxLandscape.height <= 300 - 96);
+    // Browser rows were 22 high and the search field only 22 high. Phones
+    // now use 44-unit row hit targets and a 44-unit search input; desktop
+    // geometry is unchanged. The 138-high landscape window still shows
+    // at least one full row beneath the 28-unit floating chrome.
+    using DAW::mobile::pluginBrowserHeaderHeight;
+    using DAW::mobile::pluginBrowserSearchSlotHeight;
+    using DAW::mobile::pluginBrowserRowHeight;
+    static_assert(pluginBrowserRowHeight(true) == 44);
+    static_assert(pluginBrowserSearchSlotHeight(true) - 4 == 44);
+    static_assert(pluginBrowserHeaderHeight(true) == 0);
+    static_assert(pluginBrowserRowHeight(false) == 22);
+    static_assert(pluginBrowserSearchSlotHeight(false) == 26);
+    static_assert(pluginBrowserHeaderHeight(false) == 28);
+    static_assert(browserMaxLandscape.height - 28 - pluginBrowserHeaderHeight(true)
+                  - pluginBrowserSearchSlotHeight(true) >= pluginBrowserRowHeight(true));
     constexpr auto browserMaxCollapsed = fitPhonePluginBrowser(360, 96, 50, 46, true);
     static_assert(browserMaxCollapsed.width == 0 && browserMaxCollapsed.height == 0);
     constexpr auto browserMaxExtreme = fitPhonePluginBrowser(
