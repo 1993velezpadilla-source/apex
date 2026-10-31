@@ -143,6 +143,50 @@ int main()
     static_assert(browserMaxLandscape.x == 8 && browserMaxLandscape.y == 58
                   && browserMaxLandscape.width == 836 && browserMaxLandscape.height == 138);
     static_assert(browserMaxLandscape.y + browserMaxLandscape.height <= 300 - 96);
+    // Dragging the phone FX Browser should not be undone by layout, but
+    // releasing it beyond the viewport must keep its title and controls
+    // accessible above the persistent bottom Transport.
+    using DAW::mobile::fitPhonePluginBrowserPlacement;
+    constexpr auto browserDragInside = fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { 20, 90, 340, 560 });
+    static_assert(browserDragInside.x == 20 && browserDragInside.y == 90
+                  && browserDragInside.width == 340 && browserDragInside.height == 560);
+    constexpr auto browserDragOutside = fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { 400, 900, 340, 560 });
+    static_assert(browserDragOutside.x == 45 && browserDragOutside.y == 140
+                  && browserDragOutside.y + browserDragOutside.height <= 852 - 144);
+    constexpr auto browserDragNegative = fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { -500, -500, 340, 560 });
+    static_assert(browserDragNegative.x == 8 && browserDragNegative.y == 58);
+    constexpr auto browserAfterRotation = fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96, browserDragInside);
+    static_assert(browserAfterRotation.x == 20 && browserAfterRotation.y == 58
+                  && browserAfterRotation.height == 138);
+    constexpr auto browserMaxAfterDrag = fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96, browserDragOutside, true);
+    static_assert(browserMaxAfterDrag.x == 8 && browserMaxAfterDrag.y == 58
+                  && browserMaxAfterDrag.width == 836 && browserMaxAfterDrag.height == 138);
+    constexpr auto browserFirstOpen = fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { 0, 0, 0, 0 });
+    static_assert(browserFirstOpen.x == browserPortrait.x
+                  && browserFirstOpen.y == browserPortrait.y);
+    constexpr auto browserNoWorkspace = fitPhonePluginBrowserPlacement(
+        360, 96, 50, 46, { 400, 900, 340, 560 });
+    static_assert(browserNoWorkspace.width == 0 && browserNoWorkspace.height == 0);
+    constexpr auto browserExtremeDrag = fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144,
+        { std::numeric_limits<int>::max(), std::numeric_limits<int>::min(), 340, 560 });
+    static_assert(browserExtremeDrag.x == 45 && browserExtremeDrag.y == 58);
+    for (int w : {1, 2, 20, 245, 393, 852})
+        for (int h : {1, 50, 96, 300, 852})
+        {
+            const auto fitted = fitPhonePluginBrowserPlacement(
+                w, h, 50, 96, { 100000, -100000, 340, 560 });
+            assert(inside(fitted, w, h));
+            if (fitted.height > 0)
+                assert(fitted.y + fitted.height <= h - DAW::mobile::clampInt(
+                    96, 0, h - DAW::mobile::clampInt(50, 0, h)));
+        }
     // Browser rows were 22 high and the search field only 22 high. Phones
     // now use 44-unit row hit targets and a 44-unit search input; desktop
     // geometry is unchanged. The 138-high landscape window still shows
