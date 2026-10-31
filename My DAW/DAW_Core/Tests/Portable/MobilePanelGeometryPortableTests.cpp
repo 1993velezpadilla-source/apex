@@ -115,6 +115,10 @@ int main()
     static_assert(phoneRow.mute.width == 50 && phoneRow.mute.height == 44);
     static_assert(phoneRow.solo.width == 50 && phoneRow.monitor.width == 50);
     static_assert(phoneRow.input.width == 50 && phoneRow.target.height == 44);
+    static_assert(phoneRow.target.width == 162);
+    constexpr auto master108 = phoneTrackControlLayout(12, 162, 108, true, true, true);
+    static_assert(master108.mute.y >= 58 && master108.mute.height == 44);
+    static_assert(master108.solo.y >= 58 && master108.solo.height == 44);
     static_assert(phoneRow.target.y + phoneRow.target.height <= 180);
     const auto touching = [](TrackControlRect a, TrackControlRect b)
     {
