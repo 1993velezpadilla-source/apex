@@ -630,7 +630,7 @@ public:
             return;
         }
         // Close button hit test
-        if (closeBtnBounds().contains(e.position))
+        if (closeBtnHitBounds().contains(e.position))
         {
             closeBtnPressed_ = true;
             repaint();
@@ -660,7 +660,7 @@ public:
         if (closeBtnPressed_)
         {
             closeBtnPressed_ = false;
-            if (closeBtnBounds().contains(e.position))
+            if (closeBtnHitBounds().contains(e.position))
             {
                 DBG("[BubblegumV2PanelUI] X close button clicked");
                 if (onCloseRequested) onCloseRequested();
@@ -678,7 +678,7 @@ public:
     void mouseMove(const juce::MouseEvent& e) override
     {
         // Repaint header for close button hover state
-        bool overClose = closeBtnBounds().contains(e.position);
+        bool overClose = closeBtnHitBounds().contains(e.position);
         bool overEye = !phonePresentation_ && eyeBtnBounds().contains(e.position);
         if (overClose != closeBtnHovered_ || overEye != eyeBtnHovered_)
         {
@@ -1681,6 +1681,14 @@ private:
     {
         content_.repaint();
         if (onSendChanged) onSendChanged();
+    }
+
+    juce::Rectangle<float> closeBtnHitBounds() const
+    {
+        if (!phonePresentation_)
+            return closeBtnBounds();
+        const auto hit = mobile::phoneCloseTouchBounds(getWidth(), getHeight());
+        return { (float)hit.x, (float)hit.y, (float)hit.width, (float)hit.height };
     }
 
     juce::Rectangle<float> closeBtnBounds() const
