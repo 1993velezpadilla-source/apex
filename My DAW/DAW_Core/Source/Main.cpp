@@ -1845,6 +1845,16 @@ public:
 
             setVisible (true);
 
+           #if JUCE_ANDROID
+            // setFullScreen(true) alone only fills the Android display and
+            // explicitly DOES NOT hide the OS status/navigation bars (JUCE
+            // Android windowing contract). Use JUCE's own native kiosk mode
+            // on the ACTUAL Android ComponentPeer so the OS bars hide like a
+            // game and can still be revealed transiently by an edge swipe.
+            // Do not move, scale or re-layout the APEX GUI to work around it.
+            juce::Desktop::getInstance().setKioskModeComponent(this, false);
+           #endif
+
            #if JUCE_WINDOWS
             installSubclass();
            #endif
