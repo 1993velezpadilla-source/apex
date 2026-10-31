@@ -265,7 +265,11 @@ public:
         if (e.y <= chromeHeight())
         {
             auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
-            if (hitTestButtons(e.position, titleBar) == BtnHit::None)
+            // A phone has an explicit large maximize target. Ignore title
+            // double-taps so the second touch cannot unexpectedly maximize
+            // a floating browser or corrupt its drag/restore bounds.
+            if (mobile::chromeTitleDoubleClickMaximizes(
+                    phonePresentation_, hitTestButtons(e.position, titleBar) != BtnHit::None))
             {
                 if (auto* parent = getParentComponent())
                     maximizePanel(parent->getLocalBounds());
