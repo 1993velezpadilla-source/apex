@@ -1791,7 +1791,8 @@ public:
            #if JUCE_ANDROID
             // Do NOT block Activity launch constructing the desktop shell.
             // Paint a real, branded JUCE surface before beginning its startup.
-            setContentOwned (new AndroidFirstPaint(), true);
+            // The activity/peer owns phone dimensions, never a child component.
+            setContentOwned (new AndroidFirstPaint(), false);
            #else
             setContentOwned (new MainComponent(), true);
            #endif
