@@ -84,4 +84,45 @@ int main()
                 const auto fitted = fitBubblegumSends(w, h, w + 50, -100, isPhone);
                 assert(inside(fitted, w, h));
             }
+
+    // Floating phone Mixer must not cover the persistent bottom Transport,
+    // including landscape and when an activity becomes very short.
+    using DAW::mobile::fitFloatingMixer;
+    constexpr auto mixerPortrait = fitFloatingMixer(393, 852, 52, 144);
+    static_assert(inside(mixerPortrait.safe, 393, 852));
+    static_assert(inside(mixerPortrait.window, 393, 852));
+    static_assert(mixerPortrait.window.y >= mixerPortrait.safe.y);
+    static_assert(mixerPortrait.window.y + mixerPortrait.window.height <= 852 - 144);
+    static_assert(mixerPortrait.minimumWidth <= mixerPortrait.window.width);
+    constexpr auto mixerLandscape = fitFloatingMixer(852, 300, 52, 96);
+    static_assert(inside(mixerLandscape.safe, 852, 300));
+    static_assert(mixerLandscape.window.y + mixerLandscape.window.height <= 300 - 96);
+    static_assert(mixerLandscape.window.height > 0);
+    constexpr auto mixerTiny = fitFloatingMixer(360, 96, 50, 46);
+    static_assert(mixerTiny.window.width == 0 && mixerTiny.window.height == 0);
+    constexpr auto mixerExtreme = fitFloatingMixer(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 52, 144);
+    static_assert(inside(mixerExtreme.safe,
+                         std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    static_assert(inside(mixerExtreme.window,
+                         std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    for (int w : {1, 2, 20, 245, 360, 393, 852})
+        for (int h : {1, 10, 96, 144, 220, 300, 852})
+            for (int top : {0, 48, 1000})
+                for (int bottom : {0, 96, 144, 1000})
+                {
+                    const auto fit = fitFloatingMixer(w, h, top, bottom);
+                    if (fit.safe.width <= 0 || fit.safe.height <= 0)
+                    {
+                        assert(fit.window.width == 0 && fit.window.height == 0);
+                        continue;
+                    }
+                    assert(inside(fit.safe, w, h));
+                    assert(inside(fit.window, w, h));
+                    assert(fit.window.x >= fit.safe.x && fit.window.y >= fit.safe.y);
+                    assert(fit.window.x + fit.window.width <= fit.safe.x + fit.safe.width);
+                    assert(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height);
+                    assert(fit.minimumWidth <= fit.window.width);
+                    assert(fit.minimumHeight <= fit.window.height);
+                }
 }
