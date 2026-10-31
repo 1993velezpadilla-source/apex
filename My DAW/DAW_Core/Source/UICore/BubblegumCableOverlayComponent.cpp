@@ -177,6 +177,16 @@ void BubblegumCableOverlayComponent::onPresentationTick(double deltaSeconds)
     const double timerStart = juce::Time::getMillisecondCounterHiRes();
     const double nowSec = timerStart * 0.001;
 
+   #if JUCE_ANDROID
+    // The desktop overlay is registered for continuous presentation; on a
+    // phone its heavyweight route/setup work must not starve touch handling.
+    // Independent audio callbacks and the rest of APEX keep their own cadence.
+    if (lastMobilePresentationMs_ > 0.0
+        && timerStart - lastMobilePresentationMs_ < 100.0)
+        return;
+    lastMobilePresentationMs_ = timerStart;
+   #endif
+
     if (viewport_ && bgV2_)
     {
         const int scrollX = viewport_->getViewPositionX();
@@ -708,7 +718,28 @@ void BubblegumCableOverlayComponent::paint(juce::Graphics& g)
             if (!scCables.empty())
             {
                 bgV2_->sidechainCable.thicknessMultiplier = sidechainCableThickness_;
+               #if JUCE_ANDROID
+                // On phones the legacy 2.5D sidechain pipeline costs multiple
+                // full-window paint passes. Keep real active/bypassed routes
+                // visible and interactive with a lightweight cyan path.
+                for (const auto& sc : scCables)
+                {
+                    const float x0 = sc.source.x, y0 = sc.source.y;
+                    const float x1 = sc.target.x, y1 = sc.target.y;
+                    const float sag = juce::jlimit(15.0f, 85.0f,
+                        20.0f + std::abs(x1 - x0) * 0.10f);
+                    juce::Path path;
+                    path.startNewSubPath(x0, y0);
+                    path.cubicTo(x0 + (x1-x0)*0.25f, y0+sag,
+                                 x0 + (x1-x0)*0.75f, y1+sag, x1, y1);
+                    offG.setColour(juce::Colours::black.withAlpha(0.72f * sc.alphaMult));
+                    offG.strokePath(path, juce::PathStrokeType(6.0f));
+                    offG.setColour(juce::Colour(0xff51d9ff).withAlpha(sc.alphaMult));
+                    offG.strokePath(path, juce::PathStrokeType(2.8f));
+                }
+               #else
                 bgV2_->paintSidechainCables(offG, scCables, laneBottomY);
+               #endif
             }
         }
 
