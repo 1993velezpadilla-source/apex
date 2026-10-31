@@ -9085,16 +9085,13 @@ void MainComponent::resized()
 
     if (trackListWindow_ && trackListWindow_->isVisible() && trackListW_ > 0 && !trackListWindow_->isMaximized())
     {
-       #if JUCE_ANDROID
-        // Desktop's 220 logical pixels would consume over half the width on
-        // narrow Android views. Keep tracks reachable while exposing a real
-        // timeline for scrolling, selection and pinch/zoom work.
-        const int mobileTrackWidth = juce::jmin(trackListW_,
-            juce::jmax(108, content.getWidth() / 4));
-        trackListWindow_->setBounds(content.removeFromLeft(mobileTrackWidth));
-       #else
-        trackListWindow_->setBounds(content.removeFromLeft(trackListW_));
-       #endif
+        // Android and iPhone share the compact Track List policy. iPad and
+        // desktop keep the original user-selected width and Matrix workspace.
+        // A tiny split-screen viewport still reserves a sliver for Arrangement.
+        const int trackWidth = phoneLayout
+            ? DAW::mobile::phoneTrackListWidth(trackListW_, content.getWidth())
+            : trackListW_;
+        trackListWindow_->setBounds(content.removeFromLeft(trackWidth));
     }
 
     if (timelineWindow_)
