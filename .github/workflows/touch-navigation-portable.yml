@@ -11,6 +11,9 @@ on:
       - 'My DAW/DAW_Core/Tests/Portable/TouchNavigationMathPortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/ApexRadialGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialGeometry.h'
+      - 'My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h'
+      - 'My DAW/DAW_Core/Tests/Portable/MobilePanelGeometryPortableTests.cpp'
+      - 'My DAW/DAW_Core/Source/UICore/BubblegumV2PanelUI.h'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialContextMenu.h'
       - 'My DAW/DAW_Core/Source/UICore/ApexContextMenuStyle.h'
       - 'My DAW/DAW_Core/Source/UICore/SettingsPanel.h'
@@ -36,3 +39,5 @@ jobs:
           /tmp/apex_touch_navigation_tests
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ApexRadialGeometryPortableTests.cpp -o /tmp/apex_radial_geometry_tests
           /tmp/apex_radial_geometry_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
+          /tmp/apex_mobile_panel_geometry_tests
