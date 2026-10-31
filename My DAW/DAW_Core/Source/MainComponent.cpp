@@ -9201,6 +9201,8 @@ void MainComponent::resized()
         pianoRollWindow_->setBounds(getLocalBounds().reduced(90, 70));
 
     updateSlimeAttachedPosition();
+    if (pluginBrowser_)
+        pluginBrowser_->setPhonePresentation(phoneLayout);
     if (browserChrome_ && browserChrome_->isVisible()
         && (phoneLayout || !browserChrome_->isMaximized()))
     {
