@@ -562,8 +562,11 @@ public:
         g.fillRect(bounds.getX(), bounds.getBottom() - 1.f, bounds.getWidth(), 1.f);
 
         // Indent + nesting guides for child tracks
-        const float indentPx = (float) (indentLevel_ * kIndentStepPx);
-        if (indentLevel_ > 0 && !master)
+        const int visibleDepth = phonePresentation_ ? juce::jmin(indentLevel_, 2)
+                                                      : indentLevel_;
+        const int indentStep = phonePresentation_ ? 5 : kIndentStepPx;
+        const float indentPx = (float) (visibleDepth * indentStep);
+        if (visibleDepth > 0 && !master)
         {
             auto indentArea = bounds.removeFromLeft(indentPx);
 
@@ -574,16 +577,17 @@ public:
             // Vertical guide lines for each ancestor level
             auto guide = track_.getColor().withAlpha(0.35f);
             g.setColour(guide);
-            for (int i = 0; i < indentLevel_; ++i)
+            for (int i = 0; i < visibleDepth; ++i)
             {
-                float gx = (float) (i * kIndentStepPx) + 8.f;
+                float gx = (float) (i * indentStep) + (phonePresentation_ ? 2.f : 8.f);
                 g.fillRect(gx, 0.f, 1.f, (float) getHeight());
             }
 
             // Elbow connector into the row (horizontal stub)
             float stubY = bounds.getCentreY();
-            float stubX = (float) ((indentLevel_ - 1) * kIndentStepPx) + 8.f;
-            g.fillRect(stubX, stubY, (float) kIndentStepPx - 4.f, 1.f);
+            float stubX = (float) ((visibleDepth - 1) * indentStep)
+                          + (phonePresentation_ ? 2.f : 8.f);
+            g.fillRect(stubX, stubY, (float) juce::jmax(1, indentStep - 4), 1.f);
         }
 
         // Reserve a left inset so the (thickened) DAW window frame never
@@ -595,10 +599,18 @@ public:
         // 16px hit target so the arrow is easy to see and click.
         if (isFolderBus_ && !master)
         {
-            float chevX = bounds.getX() + 6.f + kColorStripChevronGapPx;
-            float chevY = (getHeight() - 16.f) * 0.5f;
-            auto chev = juce::Rectangle<float>(chevX, chevY, 16.f, 16.f);
-            chevronBounds_ = chev;
+            if (phonePresentation_)
+            {
+                const auto b = mobile::phoneFolderChevronBounds(
+                    juce::roundToInt(bounds.getX()), getWidth(), primaryHeight);
+                chevronBounds_ = { (float)b.x, (float)b.y, (float)b.width, (float)b.height };
+            }
+            else
+            {
+                float chevX = bounds.getX() + 6.f + kColorStripChevronGapPx;
+                float chevY = (getHeight() - 16.f) * 0.5f;
+                chevronBounds_ = { chevX, chevY, 16.f, 16.f };
+            }
         }
         else
         {
@@ -619,7 +631,7 @@ public:
         g.setFont(t.fonts.bold);
         auto nameBounds = bounds.removeFromLeft(bounds.getWidth());
         if (isFolderBus_ && !master)
-            nameBounds.removeFromLeft(16.f);
+            nameBounds.removeFromLeft(phonePresentation_ ? 26.f : 16.f);
         nameBounds = nameBounds.reduced(8, 0);
         nameBounds = nameBounds.removeFromTop(phonePresentation_ ? 41.0f
                                                                   : nameBounds.getHeight() * 0.5f);
@@ -757,7 +769,9 @@ public:
     {
         auto bounds = getLocalBounds().toFloat().withHeight((float)getPrimaryHeight());
         if (indentLevel_ > 0 && !track_.isMaster())
-            bounds.removeFromLeft((float)(indentLevel_ * kIndentStepPx));
+            bounds.removeFromLeft((float)(phonePresentation_
+                ? mobile::phoneTrackIndentWidth(indentLevel_)
+                : indentLevel_ * kIndentStepPx));
         bounds.removeFromLeft(6.0f); // colour strip
 
         // Keep buttons comfortably inside the row so they don't kiss/overlap the edge.
