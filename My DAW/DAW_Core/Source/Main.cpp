@@ -856,10 +856,15 @@ public:
     {
        #if JUCE_ANDROID
         apexAndroidBootLog ("01 JUCEApplication initialise entered");
-        // Phone studio is a landscape-first product. JUCE requests both
-        // landscape rotations; Android/device policy can still override it.
+        // Android phone is portrait-first, but rotation must still work.
+        // The generated Activity does not force SCREEN_ORIENTATION_PORTRAIT.
+        // Keep JUCE's own allowed orientation mask consistent with that
+        // policy; otherwise Android rotates its Activity while APEX stays
+        // landscape-only (or the inverse).
         juce::Desktop::getInstance().setOrientationsEnabled (
-            juce::Desktop::rotatedClockwise | juce::Desktop::rotatedAntiClockwise);
+            juce::Desktop::upright
+            | juce::Desktop::rotatedClockwise
+            | juce::Desktop::rotatedAntiClockwise);
        #endif
         const auto processArguments = getCommandLineParameterArray();
        #if JUCE_ANDROID
