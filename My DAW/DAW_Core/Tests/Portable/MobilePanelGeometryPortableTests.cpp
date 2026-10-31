@@ -10,6 +10,14 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Regression: closing Sends or the floating Mixer must not resurrect
+    // desktop draggable launchers over the phone Arrangement. The desktop
+    // restore affordance remains available for iPad/Windows/macOS.
+    using DAW::mobile::desktopRestoreBubbleVisible;
+    static_assert(!desktopRestoreBubbleVisible(true));
+    static_assert(desktopRestoreBubbleVisible(false));
+    assert(!desktopRestoreBubbleVisible(true));
+    assert(desktopRestoreBubbleVisible(false));
     // The painted 30x30 close orb gets a 44x44 touch target on phones.
     constexpr auto closePortrait = phoneCloseTouchBounds(360, 420);
     static_assert(closePortrait.x == 313 && closePortrait.y == 3
