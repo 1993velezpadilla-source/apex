@@ -106,6 +106,32 @@ int main()
                          std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
     static_assert(inside(mixerExtreme.window,
                          std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+    // Drag-release recovery: a mixer entirely inside the safe area is kept;
+    // any edge crossing the top header or bottom Transport must be rejected.
+    using DAW::mobile::floatingMixerFits;
+    using DAW::mobile::PanelBounds;
+    static_assert(floatingMixerFits(mixerPortrait, mixerPortrait.window));
+    constexpr PanelBounds manuallyPlaced{
+        mixerPortrait.safe.x, mixerPortrait.safe.y,
+        mixerPortrait.minimumWidth, mixerPortrait.minimumHeight };
+    static_assert(floatingMixerFits(mixerPortrait, manuallyPlaced));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { manuallyPlaced.x, 0, manuallyPlaced.width, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { manuallyPlaced.x, 852 - 144, manuallyPlaced.width, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { -500, 80, manuallyPlaced.width, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { 390, 80, manuallyPlaced.width, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { manuallyPlaced.x, manuallyPlaced.y, 0, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { manuallyPlaced.x, manuallyPlaced.y, manuallyPlaced.width - 1, manuallyPlaced.height }));
+    static_assert(!floatingMixerFits(mixerPortrait,
+        { std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
+          std::numeric_limits<int>::max(), std::numeric_limits<int>::max() }));
+    static_assert(!floatingMixerFits(mixerTiny, { 0, 0, 200, 180 }));
+    static_assert(floatingMixerFits(mixerLandscape, mixerLandscape.window));
     for (int w : {1, 2, 20, 245, 360, 393, 852})
         for (int h : {1, 10, 96, 144, 220, 300, 852})
             for (int top : {0, 48, 1000})
