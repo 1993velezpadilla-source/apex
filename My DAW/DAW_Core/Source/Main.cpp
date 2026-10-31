@@ -1893,7 +1893,15 @@ public:
          *  right — is ever overlapped, clipped or covered by the frame. */
         juce::BorderSize<int> getContentComponentBorder() const override
         {
+           #if JUCE_ANDROID
+            // JUCE's full-screen window may overlap the translucent Android
+            // status/navigation system bars in landscape. Reserve touch-safe
+            // edges until the native window-insets bridge is implemented.
+            // BorderSize order: top, left, bottom, right.
+            return juce::BorderSize<int>(24, 8, 8, 24);
+           #else
             return juce::BorderSize<int>(kFrameInset);
+           #endif
         }
 
         /** Routes the OS non-client hit-test so the APEX shell behaves like a
