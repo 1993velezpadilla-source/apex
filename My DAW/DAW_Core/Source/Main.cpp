@@ -1909,13 +1909,11 @@ public:
         juce::BorderSize<int> getContentComponentBorder() const override
         {
            #if JUCE_ANDROID
-            // The generated APEX Android Activity now hides native system
-            // bars using WindowInsetsController (Android 11+). The previous
-            // fake 24px notification-bar top padding displaced the menu and
-            // did NOT stop Android intercepting touch near the top edge.
-            // Keep a modest frame/gesture gutter for touch and cutout safety.
+            // Preserve the established APEX Android GUI geometry EXACTLY.
+            // Immersive notification/navigation bar hiding belongs only to
+            // the generated native Android Activity (not to JUCE layout).
             // BorderSize order: top, left, bottom, right.
-            return juce::BorderSize<int>(8, 8, 12, 24);
+            return juce::BorderSize<int>(24, 8, 8, 24);
            #else
             return juce::BorderSize<int>(kFrameInset);
            #endif
