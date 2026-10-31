@@ -50,4 +50,42 @@ constexpr PanelBounds fitBubblegumSends(int viewportW, int viewportH,
                                margin, viewportH - margin - h),
              w, h };
 }
+
+/** A phone's floating mixer must stay above its bottom Transport and below
+ *  the header. Keep the safe rectangle separate from the preferred window:
+ *  rotation can preserve a manually sized window while it still fits.
+ *  All coordinates are logical component units, independent of JUCE/DSP.
+ */
+struct FloatingMixerFit
+{
+    PanelBounds safe{}, window{};
+    int minimumWidth = 0, minimumHeight = 0;
+};
+
+constexpr FloatingMixerFit fitFloatingMixer(int viewportW, int viewportH,
+                                            int reservedTop, int reservedBottom) noexcept
+{
+    if (viewportW <= 0 || viewportH <= 0)
+        return {};
+
+    const int insetX = minInt(8, viewportW / 4);
+    const int insetY = minInt(6, viewportH / 4);
+    const int top = clampInt(reservedTop, 0, viewportH);
+    const int bottom = clampInt(reservedBottom, 0, viewportH - top);
+    const int safeW = viewportW - 2 * insetX;
+    const int safeH = viewportH - top - bottom - 2 * insetY;
+    if (safeW <= 0 || safeH <= 0)
+        return {};
+
+    // Use 64-bit intermediate arithmetic for extreme restored display sizes.
+    const int wantedW = static_cast<int>((static_cast<long long>(safeW) * 88 + 50) / 100);
+    const int wantedH = static_cast<int>((static_cast<long long>(safeH) * 86 + 50) / 100);
+    const int width = minInt(safeW, maxInt(200, wantedW));
+    const int height = minInt(safeH, maxInt(180, wantedH));
+    const PanelBounds safe{ insetX, top + insetY, safeW, safeH };
+    const PanelBounds window{ safe.x + (safeW - width) / 2,
+                              safe.y + (safeH - height) / 2, width, height };
+    return { safe, window, minInt(200, safeW), minInt(180, safeH) };
+}
+
 }
