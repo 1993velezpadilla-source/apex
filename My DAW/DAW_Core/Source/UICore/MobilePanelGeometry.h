@@ -96,8 +96,13 @@ constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexce
 {
     if (requestedWidth <= 0 || workspaceWidth <= 1)
         return 0;
-    const int preferred = maxInt(108, workspaceWidth / 4);
-    return minInt(requestedWidth, minInt(preferred, workspaceWidth - 1));
+    // Portrait: allow an actual three-column touch grid while preserving
+    // approximately half of the screen for waveform/timeline interaction.
+    // Landscape: keep the original user width, with a 220-unit touch floor.
+    // Minuscule split-screen widths degrade symmetrically, never overflow.
+    if (workspaceWidth <= 600)
+        return minInt(200, minInt(workspaceWidth / 2, workspaceWidth - 1));
+    return minInt(maxInt(requestedWidth, 220), minInt(260, workspaceWidth - 1));
 }
 
 /** Check a restored or dragged Mixer window against the safe phone area.
