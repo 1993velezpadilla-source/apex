@@ -1889,14 +1889,9 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
-            // Catch a phone activity resize/rotation that happened during
-            // the expensive MainComponent constructor.
-            if (auto* peer = getPeer())
-            {
-                juce::ignoreUnused(peer);
-                const auto content = getContentComponentArea();
-                daw->setBounds(content);
-            }
+            // ResizableWindow::resized() is JUCE's authoritative owner of
+            // content bounds. Do not override it with a desktop-sized guess:
+            // Android can rotate while MainComponent is being constructed.
             repaint();
             __android_log_print(ANDROID_LOG_INFO, "APEX_ANDROID_BOOT",
                 "mounted window=%dx%d content=%dx%d origin=%d,%d",
