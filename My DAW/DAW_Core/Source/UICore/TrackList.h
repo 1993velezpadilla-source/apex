@@ -377,6 +377,78 @@ public:
         auto bounds = getLocalBounds().toFloat().withHeight((float)primaryHeight);
         const bool master = track_.isMaster();
 
+        // Phone uses an audio-first TRACK HEADER, not the six-button desktop
+        // channel strip. The main Arrangement retains the majority of the
+        // width; every advanced track control remains in the explicit ellipsis
+        // inspector. The existing DSP, routing and playlist lanes are untouched.
+        if (phonePresentation_)
+        {
+            const auto c = master ? a.color.magenta : track_.getColor();
+            g.setColour(master ? a.color.magentaDeep.darker(0.8f)
+                               : a.color.panelA);
+            g.fillRect(bounds);
+            g.setColour(c.withAlpha(0.92f));
+            g.fillRect(0.0f, 0.0f, 4.0f, (float)primaryHeight);
+            if (selected_)
+            {
+                g.setColour(a.color.magenta.withAlpha(0.83f));
+                g.drawRect(bounds.reduced(0.5f), 1.5f);
+            }
+
+            const bool folder = isFolderBus_ && !master;
+            const float titleX = folder ? 35.0f : 11.0f;
+            g.setColour(a.color.textPrimary);
+            g.setFont(t.fonts.bold.withHeight(12.5f));
+            g.drawFittedText(master ? "MASTER" : track_.getName(),
+                             juce::Rectangle<int>((int)titleX, 6,
+                               juce::jmax(0, getWidth() - (int)titleX - 42), 23),
+                             juce::Justification::centredLeft, 1);
+
+            if (folder)
+            {
+                g.setColour(a.color.textPrimary.withAlpha(0.7f));
+                g.setFont(juce::Font(17.0f));
+                g.drawText(folderExpanded_ ? "v" : ">",
+                           chevronBounds_.toNearestInt(),
+                           juce::Justification::centred);
+            }
+
+            // Read-only track status. No tiny touch targets or overlapping
+            // hit regions; use the 44x44 ellipsis to change these parameters.
+            juce::String status;
+            if (track_.isMuted()) status << "M ";
+            if (track_.isSoloed()) status << "S ";
+            if (!master)
+            {
+                if (track_.isArmed()) status << "REC ";
+                if (track_.isMonitoring()) status << "MON ";
+                if (track_.isAutomationVisible()) status << "AUTO ";
+            }
+            if (status.isEmpty()) status = master ? "OUTPUT" : "AUDIO";
+            g.setColour(track_.isArmed() && !master
+                            ? t.colors.transportRecord
+                            : a.color.textMuted);
+            g.setFont(t.fonts.small.withHeight(10.5f));
+            g.drawFittedText(status,
+                            juce::Rectangle<int>((int)titleX, 35,
+                              juce::jmax(0, getWidth() - (int)titleX - 42), 18),
+                            juce::Justification::centredLeft, 1);
+
+            g.setColour(a.color.deepestB);
+            g.fillRoundedRectangle(phoneControlsBounds_, 6.0f);
+            g.setColour(a.color.violet.withAlpha(0.75f));
+            g.drawRoundedRectangle(phoneControlsBounds_, 6.0f, 1.0f);
+            g.setColour(a.color.textPrimary);
+            g.setFont(t.fonts.bold.withHeight(18.0f));
+            g.drawText("...", phoneControlsBounds_.toNearestInt(),
+                       juce::Justification::centred);
+
+            g.setColour(a.color.borderSoftA.withAlpha(0.50f));
+            g.fillRect(0.0f, bounds.getBottom() - 1.0f,
+                       bounds.getWidth(), 1.0f);
+        }
+        else
+        {
         // Background — tracks stay dark; identity comes from thin accents.
         // MASTER gets a dark wine/magenta foundation with eye motif + splatter.
         if (master)
@@ -682,6 +754,7 @@ public:
                                : a.color.borderSoftA.withAlpha(0.55f));
             g.drawRect(r, master ? 1.5f : 1.0f);
         }
+        }
         g.restoreState();
         if (playlistExtraHeight_ > 0 && !master)
         {
@@ -789,26 +862,24 @@ public:
 
         if (phonePresentation_)
         {
-            // A fixed single row can NEVER fit 5 controls plus hardware input
-            // in a 108-unit sidebar. Use a 3-column phone grid instead. Hit
-            // rectangles are the painted rectangles, not invisible overlays.
-            const auto layout = mobile::phoneTrackControlLayout(
-                juce::roundToInt(bounds.getX()), juce::roundToInt(bounds.getWidth()),
-                juce::roundToInt(bounds.getHeight()), isMaster, showInput, showTarget);
-            const auto place = [](juce::Rectangle<float>& dst, mobile::TrackControlRect src)
-            {
-                dst = { (float)src.x, (float)src.y, (float)src.width, (float)src.height };
-            };
-            place(muteBounds_, layout.mute);
-            place(soloBounds_, layout.solo);
-            place(monitorBounds_, layout.monitor);
-            place(armBounds_, layout.arm);
-            place(automationBounds_, layout.automation);
-            place(inputBounds_, layout.input);
-            place(automationTargetBounds_, layout.target);
-            preFaderBounds_ = {};
-            trimBounds_ = {};
-            pianoRollBounds_ = {};
+            // ONLY the 44x44 ellipsis is a direct header control. All M/S/R,
+            // monitor, input, playlist and automation controls are accessible
+            // through its dedicated track-inspector menu. The remainder of
+            // the row is one clean touch-selection/scroll surface.
+            muteBounds_ = soloBounds_ = monitorBounds_ = armBounds_ = {};
+            automationBounds_ = automationTargetBounds_ = inputBounds_ = {};
+            preFaderBounds_ = trimBounds_ = pianoRollBounds_ = {};
+            playlistBounds_ = {};
+            const float w = (float)getWidth();
+            const float h = (float)getPrimaryHeight();
+            phoneControlsBounds_ = { juce::jmax(4.0f, w - 49.0f),
+                                    juce::jmax(0.0f, (h - 44.0f) * 0.5f),
+                                    juce::jmin(44.0f, w),
+                                    juce::jmin(44.0f, h) };
+            chevronBounds_ = isFolderBus_ && !isMaster
+                ? juce::Rectangle<float>(4.0f, 2.0f, 28.0f, 30.0f)
+                : juce::Rectangle<float>();
+            colorStripBounds_ = { 0.0f, 0.0f, 4.0f, h };
             return;
         }
 
@@ -902,6 +973,12 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_ && phoneControlsBounds_.contains(e.position))
+        {
+            notifySelectionForInteraction(e.mods);
+            showPhoneTrackControls();
+            return;
+        }
         if (!track_.isMaster() && playlistExtraHeight_ > 0
             && e.y >= getPrimaryHeight() && e.y < getHeight())
         {
@@ -1383,6 +1460,7 @@ public:
 
 private:
     Track& track_;
+    juce::Rectangle<float> phoneControlsBounds_;
     TrackSelectionVisualCore selectionVisual_;
     juce::String currentTooltip_;
     CompactVuNeedle vu_;
