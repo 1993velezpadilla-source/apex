@@ -4237,6 +4237,17 @@ MainComponent::MainComponent()
     mixerBubble_->setInterceptsMouseClicks(true, true);
     mixerBubble_->onClicked = [this]
     {
+       #if JUCE_ANDROID
+        if (mixerDocked_)
+        {
+            // Reopen the *real* mixer dock with one touch after View > Mixer
+            // closes it; never try to open a detached desktop window.
+            mixerViewport_.setVisible(true);
+            mixerBubble_->setVisible(false);
+            resized();
+            return;
+        }
+       #endif
         if (!mixerDocked_)
         {
             mixerWindow_->setVisible(true);
@@ -5141,9 +5152,16 @@ MainComponent::MainComponent()
     {
         if (mixerDocked_)
         {
-            mixerViewport_.setVisible(!mixerViewport_.isVisible());
+            const bool showMixer = !mixerViewport_.isVisible();
+            mixerViewport_.setVisible(showMixer);
+           #if JUCE_ANDROID
+            // Keep a floating one-tap reopen control only while mixer dock
+            // is closed, without permanently obscuring the arrangement.
+            if (mixerBubble_) mixerBubble_->setVisible(!showMixer);
+            if (showMixer) mixerViewport_.toFront(false);
+           #endif
             if (slimeSidePanel_ && slimeSidePanel_->isAttached())
-                slimeSidePanel_->setVisible(mixerViewport_.isVisible());
+                slimeSidePanel_->setVisible(showMixer);
         }
         else
         {
