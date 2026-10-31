@@ -105,7 +105,18 @@ def main() -> int:
     if len(launcher) != 1:
         raise RuntimeError(f"Expected exactly one launcher Activity, found {len(launcher)}")
     activity = launcher[0]
-    package = root.get("package", "")
+    # JUCE 8/modern Android Gradle Plugin may omit the manifest's package
+    # attribute entirely. Read the generated .jucer bundleIdentifier instead;
+    # never guess a package or silently accept a mismatch.
+    generated_jucer = generated.parent.parent / "DAW_Core_AndroidFull.jucer"
+    if not generated_jucer.is_file():
+        raise RuntimeError("Missing generated APEX Android .jucer: " + str(generated_jucer))
+    project_package = ET.parse(generated_jucer).getroot().get("bundleIdentifier", "")
+    manifest_package = root.get("package", "").strip()
+    if manifest_package and manifest_package != project_package:
+        raise RuntimeError("Android manifest/.jucer package mismatch: "
+                           + manifest_package + " != " + project_package)
+    package = manifest_package or project_package
     if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
         raise RuntimeError("Unexpected APEX Android package: " + package)
     android_activity = package + "." + ACTIVITY_SIMPLE_NAME
