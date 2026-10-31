@@ -5224,7 +5224,7 @@ MainComponent::MainComponent()
            #if JUCE_ANDROID
             // Keep a floating one-tap reopen control only while mixer dock
             // is closed, without permanently obscuring the arrangement.
-            if (mixerBubble_) mixerBubble_->setVisible(!showMixer);
+            if (mixerBubble_) mixerBubble_->setVisible(!showMixer && DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
             if (showMixer) mixerViewport_.toFront(false);
            #endif
             if (slimeSidePanel_ && slimeSidePanel_->isAttached())
@@ -5232,7 +5232,7 @@ MainComponent::MainComponent()
         }
         else
         {
-            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(true); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
+            if (mixerWindow_->isVisible()) { mixerWindow_->setVisible(false); mixerBubble_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation())); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(false); }
             else { mixerWindow_->setVisible(true); mixerWindow_->restoreIfMinimized(); mixerWindow_->toFront(false); mixerBubble_->setVisible(false); if (slimeSidePanel_ && slimeSidePanel_->isAttached()) slimeSidePanel_->setVisible(true); }
         }
         resized();
@@ -7307,7 +7307,7 @@ void MainComponent::undockMixer()
     mixerWindow_->onCloseClicked = [this]
     {
         mixerWindow_->setVisible(false);
-        if (mixerBubble_) mixerBubble_->setVisible(true);
+        if (mixerBubble_) mixerBubble_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
         if (slimeSidePanel_ && slimeSidePanel_->isAttached())
             slimeSidePanel_->setVisible(false);
     };
@@ -7930,7 +7930,7 @@ void MainComponent::hideBubblegumPanel()
         bubblegumPanel_->hideAnimated();
 
     if (bubblegumOrb_)
-        bubblegumOrb_->setVisible(true);
+        bubblegumOrb_->setVisible(DAW::mobile::desktopRestoreBubbleVisible(usesPhoneMixerPresentation()));
 }
 
 void MainComponent::refreshPinnedValueHint()
