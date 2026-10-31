@@ -7,6 +7,7 @@ on:
       - "feature/android-port-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/enable_immersive_fullscreen.py"
       - ".github/workflows/apex-android-full-shell-release.yml"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
@@ -106,6 +107,13 @@ jobs:
           xvfb-run -a "$PROJUCER" --resave \
             "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
           test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
+          # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
+          # Android 15/16 WindowInsetsController hides the real status/nav
+          # bars and re-applies after focus changes from plugin dialogs.
+          python3 Android/scripts/enable_immersive_fullscreen.py
+          grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" \
+            "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
+          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
 
       - name: Create disposable Android Debug signing key
         shell: bash
