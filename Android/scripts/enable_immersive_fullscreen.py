@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import os
+import re
 import xml.etree.ElementTree as ET
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
-ANDROID_ACTIVITY = "com.xziel.apex.fulltest.ApexImmersiveActivity"
-JAVA_SOURCE = r"""package com.xziel.apex.fulltest;
+# The actual activity name is derived from the generated Projucer manifest.
+# Portrait previews have a separate package from the existing landscape build.
+ACTIVITY_SIMPLE_NAME = "ApexImmersiveActivity"
+JAVA_SOURCE = r"""package __APEX_PACKAGE__;
 
 import android.os.Build;
 import android.os.Bundle;
@@ -100,24 +104,48 @@ def main() -> int:
     if len(launcher) != 1:
         raise RuntimeError(f"Expected exactly one launcher Activity, found {len(launcher)}")
     activity = launcher[0]
+    # JUCE Projucer can omit package from manifest AND remove a custom
+    # bundleIdentifier when resaving. In PR checkouts GITHUB_REF_NAME is 167/merge.
+    # Select the explicitly requested build variant and verify every available
+    # generated package source; never trust a missing manifest attribute.
+    portrait = os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
+    expected = ("com.xziel.apex.mobileportrait" if portrait
+                else "com.xziel.apex.fulltest")
+    manifest_package = root.get("package", "").strip()
+    if manifest_package and manifest_package != expected:
+        raise RuntimeError("Generated manifest package mismatch: "
+                           + manifest_package + " != " + expected)
+    gradle_ids = set()
+    for gradle in (generated / "app/build.gradle", generated / "app/build.gradle.kts"):
+        if gradle.is_file():
+            text = gradle.read_text(encoding="utf-8")
+            gradle_ids.update(re.findall(
+                r'''(?m)^\s*(?:applicationId|namespace)\s*(?:=\s*)?["']([^"']+)["']''',
+                text))
+    if gradle_ids and expected not in gradle_ids:
+        raise RuntimeError("Generated Gradle app ID mismatch: "
+                           + ", ".join(sorted(gradle_ids)) + " != " + expected)
+    package = expected
+    android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
-    if old not in ("com.rmsl.juce.JuceActivity", ANDROID_ACTIVITY):
+    if old not in ("com.rmsl.juce.JuceActivity", android_activity):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
-    activity.set(f"{{{ANDROID_NS}}}name", ANDROID_ACTIVITY)
+    activity.set(f"{{{ANDROID_NS}}}name", android_activity)
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
-    java = (generated / "app/src/main/java/com/xziel/apex/fulltest"
-            / "ApexImmersiveActivity.java")
+    java = (generated / "app/src/main/java" / package.replace(".", "/")
+            / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
-    java.write_text(JAVA_SOURCE, encoding="utf-8")
+    java.write_text(JAVA_SOURCE.replace("__APEX_PACKAGE__", package), encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)
     app_activity = again.getroot().find("./application/activity")
     assert app_activity is not None
-    assert app_activity.get(f"{{{ANDROID_NS}}}name") == ANDROID_ACTIVITY
+    assert app_activity.get(f"{{{ANDROID_NS}}}name") == android_activity
     assert "WindowInsetsController" in java.read_text(encoding="utf-8")
-    print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {ANDROID_ACTIVITY}")
+    print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {android_activity}")
+    print("[APEX ANDROID ORIENTATION] no forced portrait lock; follows Android device rotation")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
     print(f"[APEX ANDROID IMMERSIVE] source={java}")
     print("[APEX ANDROID IMMERSIVE] lifecycle: onCreate/onResume/onWindowFocusChanged")
