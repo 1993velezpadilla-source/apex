@@ -6,6 +6,9 @@ on:
   # phone UI PR is marked ready. The probe APK is not a substitute.
   pull_request:
     paths:
+      - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/enable_immersive_fullscreen.py"
+      - "Android/Tests/test_immersive_fullscreen.py"
       - "My DAW/DAW_Core/Source/MainComponent.cpp"
       - "My DAW/DAW_Core/Source/UICore/TrackList.h"
       - "My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h"
@@ -14,6 +17,7 @@ on:
   push:
     branches:
       - "feature/android-port-*"
+      - "fix/mobile-track-control-grid-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
