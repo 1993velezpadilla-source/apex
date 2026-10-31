@@ -27,6 +27,7 @@
 #include "RecordingCore/RecordingInputValidityCore.h"
 #include "UICore/QuickSendPopup.h"
 #include "UICore/MobilePanelGeometry.h"
+#include "UICore/MobileTrackRowGeometry.h"
 #include <set>
 #include <algorithm>
 #include <cstdlib>
@@ -1419,7 +1420,7 @@ MainComponent::MainComponent()
         // Phone rows need enough vertical room for two 3-wide control rows
         // and the optional automation target, keeping Arrangement aligned.
         arrangement_->setLaneHeight(index + masterOffset,
-            usesPhoneMixerPresentation() ? juce::jmax(180, newHeight) : newHeight);
+            usesPhoneMixerPresentation() ? juce::jmax(DAW::mobile::kPhoneTrackDefaultHeight, newHeight) : newHeight);
     };
     trackList_->onTrackSelected = [this](const DAW::TrackID& id)
     {
@@ -2350,9 +2351,9 @@ MainComponent::MainComponent()
         // A loaded desktop project or a pinch-zoom must not silently shrink
         // the phone's clickable grid to the old 80-unit track height. The
         // Arrangement remains authoritative for BOTH waveform and row height.
-        if (usesPhoneMixerPresentation() && arrangement_->getPhysicalTrackHeight() < 180)
+        if (usesPhoneMixerPresentation() && arrangement_->getPhysicalTrackHeight() < DAW::mobile::kPhoneTrackDefaultHeight)
         {
-            arrangement_->setLaneHeight(0, 180);
+            arrangement_->setLaneHeight(0, DAW::mobile::kPhoneTrackDefaultHeight);
             return; // the zoom callback synchronizes the taller layout
         }
 
@@ -9007,8 +9008,8 @@ void MainComponent::resized()
     const bool phoneLayout = usesPhoneMixerPresentation();
     if (trackList_)
         trackList_->setPhonePresentation(phoneLayout);
-    if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < 180)
-        arrangement_->setLaneHeight(0, 180);
+    if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < DAW::mobile::kPhoneTrackDefaultHeight)
+        arrangement_->setLaneHeight(0, DAW::mobile::kPhoneTrackDefaultHeight);
     if (menuBar_)
         menuBar_->setBounds(area.removeFromTop(kMenuH));
 
