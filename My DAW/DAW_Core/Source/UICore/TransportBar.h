@@ -193,6 +193,8 @@ public:
     {
         if (phoneLayout_ == enabled) return;
         phoneLayout_ = enabled;
+        undoPhoneBtn_.setVisible(enabled);
+        redoPhoneBtn_.setVisible(enabled);
         resized();
         repaint();
     }
@@ -215,9 +217,11 @@ public:
         : transport_(transport), tempo_(transport)
     {
         auto& t = Theme::getInstance();
-        auto* skipBtn = addBtn("<<", t.apex.color.textSecondary,  TransportIcon::SkipBack,
-               [this]{ ActionManager::getInstance().dispatch(ActionID::TransportJumpStart); });
-        skipBtn->tooltipText = "Skip to Start\nJump the playhead to the beginning of the project.";
+        // Explicit action identity: this is JUMP TO START (|<), not the
+        // toggle controlling where playback returns after Stop.
+        jumpStartBtn_ = addBtn("<<", t.apex.color.textSecondary, TransportIcon::SkipBack,
+               []{ ActionManager::getInstance().dispatch(ActionID::TransportJumpStart); });
+        jumpStartBtn_->tooltipText = "Return to Start\nJump to 001:1 / 00:00 without changing the loop.";
 
         // PLAY carries the primary creative-energy accent: strong APEX magenta,
         // visible even at idle (primary action must be findable without search).
@@ -235,7 +239,13 @@ public:
         recBtn_->tooltipText = "Record\nStart recording on all armed tracks. Press again to stop.";
 
         loopBtn_  = addBtn("~",  t.apex.color.violet,          TransportIcon::Loop,
-               []{ ActionManager::getInstance().dispatch(ActionID::TransportToggleLoop); });
+               [this]
+               {
+                   // This button previously dispatched an ActionID that had
+                   // no registered handler on Android. A second tap could
+                   // not turn the audible loop off, even if the icon changed.
+                   transport_.setLooping(!transport_.isLooping());
+               });
         loopBtn_->tooltipText = "Loop\nToggle loop mode. Playback loops between the left and right locators.";
 
         returnBtn_ = addBtn(juce::String(juce::CharPointer_UTF8("↩")),  t.apex.color.cyan, TransportIcon::Return,
@@ -277,7 +287,15 @@ public:
         };
         addAndMakeVisible (automArmBtn_);
         // ===== End automation arm button ====================================
-        startTimerHz(60);
+        undoPhoneBtn_.setButtonText("UNDO");
+        redoPhoneBtn_.setButtonText("REDO");
+        undoPhoneBtn_.setColour(juce::TextButton::buttonColourId, t.apex.color.panelB);
+        redoPhoneBtn_.setColour(juce::TextButton::buttonColourId, t.apex.color.panelB);
+        undoPhoneBtn_.onClick = [] { ActionManager::getInstance().dispatch(ActionID::EditUndo); };
+        redoPhoneBtn_.onClick = [] { ActionManager::getInstance().dispatch(ActionID::EditRedo); };
+        addChildComponent(undoPhoneBtn_);
+        addChildComponent(redoPhoneBtn_);
+        startTimerHz(30);
     }
 
     void paint(juce::Graphics& g) override
@@ -351,7 +369,8 @@ public:
                 g.drawText(label, r, juce::Justification::centred);
             };
             paintAction(mobileMixerBounds_, "MIXER", a.color.violet);
-            paintAction(mobileSendsBounds_, "SENDS", a.color.magenta);
+            paintAction(mobileSettingsBounds_, juce::String(juce::CharPointer_UTF8("\xE2\x9A\x99")),
+                        a.color.cyan);
         }
 
         // Quick-access panel buttons with icons — shared control-state language
@@ -398,98 +417,72 @@ public:
         phoneLauncherTap_.invalidate();
         if (phoneLayout_)
         {
-            // Portrait-first layout: every important transport action stays visible.
-            // Three rows on a tall phone, two on a short landscape phone.
+            // Thumb-first transport: Mixer | Undo | Back | Record | Play |
+            // Redo | Settings. Recording is always central. The secondary
+            // actions live on the upper strip, not in an overcrowded 8th slot.
             const int w = juce::jmax(0, getWidth());
             const int h = juce::jmax(0, getHeight());
-            const bool portrait = h >= 144;
-            const int margin = 6;
-            const int gap = 3;
-            const int rowH = juce::jmax(0, (h - (portrait ? 4 : 3) * margin)
-                                        / (portrait ? 3 : 2));
+            constexpr int margin = 5, gap = 3;
+            const int contentW = juce::jmax(0, w - 2 * margin);
+            const int rowH = juce::jmax(0, (h - 3 * margin) / 2);
+            const int actionsY = 2 * margin + rowH;
+            // Use the shared deterministic seven-button layout. A named
+            // action cannot be accidentally dropped or reordered by adding
+            // another desktop button to buttons_ in the future.
+            const auto primary = mobile::phoneTransportPrimaryLayout(w, h);
+            const auto action = [&](mobile::PhoneTransportPrimaryAction which)
+            {
+                const auto b = primary.buttons[static_cast<int>(which)];
+                return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+            };
+            for (auto* btn : buttons_)
+                if (btn != nullptr) { btn->setVisible(false); btn->setBounds({}); }
+            // Transport order, left to right:
+            // Mixer | Undo | |< Return to Start | Record | Play | Redo | Settings
+            if (jumpStartBtn_ != nullptr)
+            {
+                jumpStartBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::ReturnToStart).reduced(1, 0));
+                jumpStartBtn_->setVisible(true);
+            }
+            if (recBtn_ != nullptr)
+            {
+                recBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::Record).reduced(1, 0));
+                recBtn_->setVisible(true);
+            }
+            if (playBtn_ != nullptr)
+            {
+                playBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::Play).reduced(1, 0));
+                playBtn_->setVisible(true);
+            }
+            if (loopBtn_ != nullptr) loopBtn_->setVisible(true); // upper strip
+            undoPhoneBtn_.setBounds(action(mobile::PhoneTransportPrimaryAction::Undo));
+            redoPhoneBtn_.setBounds(action(mobile::PhoneTransportPrimaryAction::Redo));
+            mobileMixerBounds_ = action(mobile::PhoneTransportPrimaryAction::Mixer);
+            mobileSettingsBounds_ = action(mobile::PhoneTransportPrimaryAction::Settings);
+            mobileSendsBounds_ = {};
+            fxBtnBounds_ = brBtnBounds_ = {};
+            // Existing key/tempo/clock stay interactive until the project
+            // controls migrate into the header; zero dummy readouts.
+            int x = margin;
             const int topY = margin;
-            const int keysWidth = juce::jmax(54, juce::jmin(95, w / 5));
-            const int bpmWidth = juce::jmax(54, juce::jmin(85, w / 5));
-            const int clockWidth = juce::jmax(82, juce::jmin(130, w / 4));
-            auto pos = juce::Rectangle<int>(margin, topY,
-                                            juce::jmax(0, w - 2 * margin), rowH);
-            projectKey_.setBounds(pos.removeFromLeft(juce::jmin(keysWidth, pos.getWidth())));
-            pos.removeFromLeft(gap);
-            tempo_.setBounds(pos.removeFromLeft(juce::jmin(bpmWidth, pos.getWidth())));
-            pos.removeFromLeft(gap);
-            posReadoutBounds_ = pos.removeFromLeft(juce::jmin(clockWidth, pos.getWidth()));
-            pos.removeFromLeft(gap);
-            automArmBtn_.setBounds(pos.removeFromLeft(juce::jmin(72, pos.getWidth())).reduced(1, 2));
-            pos.removeFromLeft(juce::jmin(gap, pos.getWidth()));
+            const int leftW = juce::jmax(0, contentW - 96);
+            const int keyW = juce::jmin(66, leftW / 3);
+            const int bpmW = juce::jmin(72, leftW / 3);
+            const int clockW = juce::jmax(0, leftW - keyW - bpmW - 2 * gap);
+            projectKey_.setBounds(x, topY, keyW, rowH); x += keyW + gap;
+            tempo_.setBounds(x, topY, bpmW, rowH); x += bpmW + gap;
+            posReadoutBounds_ = {x, topY, clockW, rowH};
+            const int utilityX = margin + contentW - 96;
+            if (loopBtn_) loopBtn_->setBounds(utilityX, topY, 45, rowH);
+            automArmBtn_.setBounds(utilityX + 48, topY, 48, rowH);
             projectKey_.setVisible(true);
             tempo_.setVisible(true);
-
-            auto actions = juce::Rectangle<int>(margin, topY + rowH + margin,
-                                                juce::jmax(0, w - 2 * margin), rowH);
-            const int buttonCount = (int) buttons_.size() + 2;
-            const int buttonW = juce::jmax(1,
-                (actions.getWidth() - gap * (buttonCount - 1)) / buttonCount);
-            for (auto* btn : buttons_)
-            {
-                if (btn == nullptr) continue;
-                btn->setBounds(actions.removeFromLeft(buttonW).reduced(1, 0));
-                btn->setVisible(true);
-                actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
-            }
-            fxBtnBounds_ = actions.removeFromLeft(buttonW);
-            actions.removeFromLeft(juce::jmin(gap, actions.getWidth()));
-            brBtnBounds_ = actions.removeFromLeft(juce::jmax(0, actions.getWidth()));
-            mobileMixerBounds_ = {};
-            mobileSendsBounds_ = {};
-
-            if (portrait)
-            {
-                // Eight controls cannot all provide 44-unit targets on a
-                // 360-unit phone. Keep six transport buttons in the action
-                // row and move FX/Browser to the bottom beside Mixer/Sends.
-                const auto layout = mobile::portraitTransportLayout(w, h);
-                const auto asRect = [](mobile::PortraitTransportBounds b)
-                {
-                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
-                };
-                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
-                    if (auto* btn = buttons_[(size_t)i])
-                        btn->setBounds(asRect(layout.transport[i]));
-                fxBtnBounds_ = asRect(layout.fx);
-                brBtnBounds_ = asRect(layout.browser);
-                mobileMixerBounds_ = asRect(layout.mixer);
-                mobileSendsBounds_ = asRect(layout.sends);
-                if (clickStrip_)
-                    clickStrip_->setBounds(asRect(layout.click));
-            }
-            else
-            {
-                // Short portrait and landscape: two 44+ unit rows at h >= 94.
-                // Reserve Mixer/Sends instead of allowing readouts to crowd them.
-                const auto layout = mobile::compactPhoneTransportLayout(w, h);
-                const auto asRect = [](mobile::PortraitTransportBounds b)
-                {
-                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
-                };
-                for (int i = 0; i < (int)buttons_.size() && i < 6; ++i)
-                    if (auto* btn = buttons_[(size_t)i])
-                        btn->setBounds(asRect(layout.transport[i]));
-                fxBtnBounds_ = asRect(layout.fx);
-                brBtnBounds_ = asRect(layout.browser);
-                mobileMixerBounds_ = asRect(layout.mixer);
-                mobileSendsBounds_ = asRect(layout.sends);
-                projectKey_.setBounds(asRect(layout.key));
-                tempo_.setBounds(asRect(layout.tempo));
-                posReadoutBounds_ = asRect(layout.clock);
-                automArmBtn_.setBounds(asRect(layout.automation));
-                if (clickStrip_)
-                    clickStrip_->setBounds(asRect(layout.click));
-                projectKey_.setVisible(layout.key.width > 0);
-                tempo_.setVisible(layout.tempo.width > 0);
-            }
+            automArmBtn_.setVisible(true);
+            if (clickStrip_) clickStrip_->setVisible(false);
             repaint();
             return;
         }
+
 
         const int totalW = getWidth();
         const int totalH = getHeight();
@@ -664,14 +657,16 @@ private:
     std::vector<TransportButton*>     buttons_;
     std::unique_ptr<ClickToolbarStrip> clickStrip_;
     bool phoneLayout_ = false;
-    juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_;
+    juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_, mobileSettingsBounds_;
+    juce::TextButton undoPhoneBtn_, redoPhoneBtn_;
 
-    enum class PhoneLauncher { None, Mixer, Sends, SidePanel, Browser };
+    enum class PhoneLauncher { None, Mixer, Sends, SidePanel, Browser, Settings };
     mobile::PhoneTransportTapState phoneLauncherTap_;
 
     PhoneLauncher phoneLauncherAt(juce::Point<float> p) const noexcept
     {
         if (mobileMixerBounds_.toFloat().contains(p)) return PhoneLauncher::Mixer;
+        if (mobileSettingsBounds_.toFloat().contains(p)) return PhoneLauncher::Settings;
         if (mobileSendsBounds_.toFloat().contains(p)) return PhoneLauncher::Sends;
         if (fxBtnBounds_.toFloat().contains(p)) return PhoneLauncher::SidePanel;
         if (brBtnBounds_.toFloat().contains(p)) return PhoneLauncher::Browser;
@@ -694,10 +689,14 @@ private:
             case PhoneLauncher::Browser:
                 if (onQuickAccessFxBrowser) onQuickAccessFxBrowser();
                 break;
+            case PhoneLauncher::Settings:
+                ActionManager::getInstance().dispatch(ActionID::ViewToggleSettings);
+                break;
             case PhoneLauncher::None:
                 break;
         }
     }
+    TransportButton* jumpStartBtn_ = nullptr;
     TransportButton* playBtn_  = nullptr;
     TransportButton* recBtn_   = nullptr;
     TransportButton* loopBtn_  = nullptr;

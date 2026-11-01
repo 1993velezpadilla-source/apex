@@ -152,6 +152,28 @@ namespace ArrangementEditor
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
         if (!m_model) return;
 
+        // P0 Android touch hot-path: drawing one detailed waveform per visible
+        // clip *per scroll frame* walks/locks the peak cache and draws every
+        // handle/name/badge. Those costs scale with visible clip count, not
+        // the displayed zoom percentage. During real movement paint only a
+        // lightweight, stable clip silhouette; restore detail on gesture end.
+        // No peak cache lock, no text layout, no child widget reconstruction.
+        if (s_lightweightPaint.load(std::memory_order_relaxed))
+        {
+            const auto rect = getLocalBounds().toFloat();
+            const auto visible = g.getClipBounds().getIntersection(getLocalBounds());
+            if (visible.isEmpty()) return;
+            g.setColour(juce::Colour(0xFF151923));
+            g.fillRect(visible);
+            const auto accent = m_model->trackColour.withAlpha(0.80f);
+            g.setColour(accent.withAlpha(0.22f));
+            g.fillRect(visible.withY(juce::jmax(visible.getY(), getHeight() / 2 - 2))
+                              .withHeight(juce::jmin(4, visible.getHeight())));
+            g.setColour(accent);
+            g.drawRect(rect.reduced(0.5f), m_selected ? 2.f : 1.f);
+            return;
+        }
+
         // DEBUG: Increment paint counter to verify paint() is being called
         ++m_paintDebugCounter;
         if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
@@ -266,7 +288,12 @@ namespace ArrangementEditor
         const bool waveformGeometryChanged = oldWidth != m_lastWaveformRequestWidth
             || oldWaveformLod != m_lastWaveformRenderable;
         if (waveformGeometryChanged && isShowing() && shouldRenderWaveform())
-            refresh();
+        {
+            if (s_lightweightPaint.load(std::memory_order_relaxed))
+                m_waveformNeedsUpdate = true;
+            else
+                refresh();
+        }
     }
 
     // -----------------------------------------------------------------------

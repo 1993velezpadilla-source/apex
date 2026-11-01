@@ -106,6 +106,44 @@ static_assert(compact360.mixer.height >= 44 && compact360.sends.height >= 44);
 static_assert(DAW::mobile::compactPhoneTransportLayout(320, 112).transport[0].height >= 44);
 static_assert(DAW::mobile::compactPhoneTransportLayout(480, 96).sends.width >= 44);
 
+// Regression for the seven-action BandLab-inspired phone transport.
+// The return-to-start icon is ALWAYS at index 2, immediately between Undo
+// (1) and Record (3). Geometry must never collide after device rotation.
+constexpr bool validPrimary(int w, int h)
+{
+    const auto r = DAW::mobile::phoneTransportPrimaryLayout(w, h);
+    for (int i = 0; i < 7; ++i)
+    {
+        if (!inside(r.buttons[i], w, h)) return false;
+        if (i > 0 && !separated(r.buttons[i-1], r.buttons[i])) return false;
+    }
+    return true;
+}
+using PhoneAction = DAW::mobile::PhoneTransportPrimaryAction;
+static_assert((int)PhoneAction::Mixer == 0);
+static_assert((int)PhoneAction::Undo == 1);
+static_assert((int)PhoneAction::ReturnToStart == 2);
+static_assert((int)PhoneAction::Record == 3);
+static_assert((int)PhoneAction::Play == 4);
+static_assert((int)PhoneAction::Redo == 5);
+static_assert((int)PhoneAction::Settings == 6);
+static_assert(validPrimary(320, 144));
+static_assert(validPrimary(360, 144));
+static_assert(validPrimary(393, 144));
+static_assert(validPrimary(360, 96));
+static_assert(validPrimary(852, 96));
+static_assert(validPrimary(29, 20));
+static_assert(validPrimary(0, 0));
+static_assert(validPrimary(std::numeric_limits<int>::max(),
+                          std::numeric_limits<int>::max()));
+constexpr auto primary320 = DAW::mobile::phoneTransportPrimaryLayout(320, 144);
+static_assert(primary320.buttons[(int)PhoneAction::ReturnToStart].width >= 44);
+static_assert(primary320.buttons[(int)PhoneAction::Record].width >= 44);
+static_assert(primary320.buttons[(int)PhoneAction::ReturnToStart].x
+              < primary320.buttons[(int)PhoneAction::Record].x);
+static_assert(primary320.buttons[(int)PhoneAction::ReturnToStart].x
+              > primary320.buttons[(int)PhoneAction::Undo].x);
+
 int main()
 {
     for (int w = 0; w < 900; w += 7)
@@ -113,5 +151,6 @@ int main()
         {
             assert(valid(w, h));
             if (h < 144) assert(validCompact(w, h));
+            assert(validPrimary(w, h));
         }
 }

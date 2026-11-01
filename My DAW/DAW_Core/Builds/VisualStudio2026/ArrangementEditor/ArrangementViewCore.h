@@ -419,6 +419,7 @@ namespace ArrangementEditor
         std::function<void(DAW::MidiClip&)> onEngineMidiClipDoubleClicked;
         std::function<void()> onOpenPianoRollRequested;
         std::function<void(double)> onPlayheadMoved;
+    std::function<void(double, double)> onLoopRegionChanged;
 
         // Test-only control-plane seam. Returning true requests a failure at
         // the named Split transaction stage; production leaves it unset.
@@ -812,7 +813,7 @@ namespace ArrangementEditor
                 if (m_owner.m_deferredRebuildRequested)
                 {
                     m_owner.m_deferredRebuildRequested = false;
-                    m_owner.rebuildClipRenderersInternal();
+                    m_owner.rebuildClipRenderers();
                 }
             }
         private:

@@ -220,6 +220,10 @@ namespace ArrangementEditor
         };
 
         m_toolbar.setSelectedSnapModeIndex(getSnapModeIndex());
+        m_ruler.onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            if (onLoopRegionChanged) onLoopRegionChanged(beginSeconds, endSeconds);
+        };
         m_toolbar.onSnapModeSelected = [this](int index)
         {
             switch (index)
@@ -1461,7 +1465,13 @@ namespace ArrangementEditor
         m_skipSlop = false;
         m_touchPanVelocityX = 0.0;
         m_touchPanVelocityY = 0.0;
-        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+        const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+            false, std::memory_order_relaxed);
+        if (wasLightweight && m_rebuildDeferTimer != nullptr)
+        {
+            m_deferredRebuildRequested = true;
+            m_rebuildDeferTimer->startTimer(16);
+        }
     }
 
     void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
@@ -1505,7 +1515,17 @@ namespace ArrangementEditor
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            // A no-fling pan must restore waveform detail. Paint the
+            // existing renderers rather than a whole parent relayout.
+            if (wasLightweight)
+            {
+                for (const auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterNavigation();
+                repaint();
+            }
         }
     }
 
@@ -2275,12 +2295,10 @@ namespace ArrangementEditor
         juce::ScopedValueSetter<bool> guard(m_rebuildInProgress, true);
         rebuildClipRenderersInternal();
 
-        // If another rebuild was requested while we were running, defer it
-        if (m_deferredRebuildRequested)
-        {
-            m_deferredRebuildRequested = false;
-            m_rebuildDeferTimer->startTimer(1);  // Defer 1ms to avoid immediate recursion
-        }
+        // Keep the pending flag for RebuildDeferTimer. Clearing it
+        // *before* the timer checked it silently dropped rebuild requests.
+        if (m_deferredRebuildRequested && m_rebuildDeferTimer != nullptr)
+            m_rebuildDeferTimer->startTimer(1);
     }
 
     void ArrangementViewCore::rebuildClipRenderersInternal()

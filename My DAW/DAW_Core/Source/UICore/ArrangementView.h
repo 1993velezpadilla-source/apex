@@ -112,6 +112,17 @@ public:
             const auto samples = (SamplePosition)std::llround(timeSeconds * juce::jmax(1.0, core_->m_engineSampleRate));
             transport_.setPosition(samples);
         };
+        core_->onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            const auto sampleRate = juce::jmax(1.0, core_->m_engineSampleRate);
+            const auto begin = (SamplePosition)std::llround(beginSeconds * sampleRate);
+            const auto end = (SamplePosition)std::llround(endSeconds * sampleRate);
+            if (end > begin)
+            {
+                transport_.setLoopRange(begin, end);
+                transport_.setLooping(true);
+            }
+        };
         core_->onEngineClipSelected = [this](Clip& clip)
         {
             state_.selectedClipID.setValue(clip.getID());
@@ -214,6 +225,15 @@ trackManager_.addListener(this);
         startTimerHz(60);
     }
 
+    void configurePhoneToolbar(bool phone, std::function<void()> onSends)
+    {
+        if (core_ != nullptr)
+        {
+            core_->getToolbar().setPhonePresentation(phone);
+            core_->getToolbar().setPhoneSendsAction(std::move(onSends));
+        }
+    }
+
     void setMetronomeBindings(std::function<bool()> isEnabled, std::function<void()> toggle)
     {
         if (core_ != nullptr)
@@ -281,6 +301,7 @@ trackManager_.addListener(this);
             core_->onEngineClipIsVocalTuneBypassed = nullptr;
             core_->onEngineMidiClipDoubleClicked = nullptr;
             core_->onPlayheadMoved = nullptr;
+            core_->onLoopRegionChanged = nullptr;
         }
     }
 

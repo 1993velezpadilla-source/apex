@@ -6,6 +6,33 @@
 namespace DAW::mobile
 {
 struct PortraitTransportBounds { int x, y, width, height; };
+// Seven physical, non-overlapping bottom-transport touch targets.
+// The central Record button and the Return To Start button immediately
+// before it are identity-stable across portrait/landscape and project reload.
+enum class PhoneTransportPrimaryAction
+{
+    Mixer, Undo, ReturnToStart, Record, Play, Redo, Settings
+};
+struct PhoneTransportPrimaryLayout
+{
+    PortraitTransportBounds buttons[7]{};
+};
+constexpr PhoneTransportPrimaryLayout phoneTransportPrimaryLayout(int w, int h) noexcept
+{
+    PhoneTransportPrimaryLayout out{};
+    if (w < 29 || h < 20) return out;
+    // 320dp phones still get seven >=44dp touch targets (including |<).
+    constexpr int margin = 3, gap = 1;
+    const int usable = w - 2 * margin;
+    const int rowHeight = (h - 3 * margin) / 2;
+    const int buttonWidth = (usable - 6 * gap) / 7;
+    const int y = 2 * margin + rowHeight;
+    for (int i = 0; i < 7; ++i)
+        out.buttons[i] = { margin + i * (buttonWidth + gap), y,
+                           buttonWidth, rowHeight };
+    return out;
+}
+
 struct PortraitTransportLayout
 {
     PortraitTransportBounds transport[6]{};

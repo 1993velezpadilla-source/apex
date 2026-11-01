@@ -248,20 +248,10 @@ public:
         {
             for (auto& rect : menuRects_)
                 rect = {};
-            // 90 logical units preserve APEX branding. At 320dp, the five
-            // 44+ touch targets remain on screen without horizontal scrolling.
-            // Clip operations continue through the existing context menu.
-            const bool showClipMenu = getWidth() >= 435;
-            const int menuCount = showClipMenu ? 6 : 5;
-            const int firstX = juce::jmin(90, juce::jmax(0, getWidth() / 4));
-            const int gap = 2;
-            const int available = juce::jmax(0, getWidth() - firstX - 5);
-            const int cellW = juce::jmax(0, (available - gap * (menuCount - 1)) / menuCount);
-            const int indices[6] = { 0, 1, 2, 3, 5, 4 };
-            for (int i = 0; i < menuCount; ++i)
-                menuRects_[(size_t)indices[i]] = {
-                    firstX + i * (cellW + gap), 0, cellW, getHeight()
-                };
+            // Never expose the six desktop ribbon menus on a narrow phone.
+            // All original commands remain reachable under one MENU chip.
+            phoneMenuBounds_ = { juce::jmax(90, getWidth() - 94), 3,
+                                 juce::jmin(88, getWidth()), juce::jmax(0, getHeight() - 6) };
         }
         brandSigil_.clear();  // geometry depends on height; rebuild on next paint
         repaint();
@@ -294,6 +284,25 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phoneMode_ && phoneMenuBounds_.contains(e.getPosition()))
+        {
+            // Event-driven only: no nested radial animations, no expensive
+            // menu construction in paint() or arranger touch callbacks.
+            juce::PopupMenu categories;
+            juce::Component::SafePointer<DAWMenuBar> safe(this);
+            for (int i = 0; i < (int)menus_.size(); ++i)
+            {
+                const int index = i;
+                categories.addItem(menus_[(size_t)i].title, [safe, index]()
+                {
+                    if (safe != nullptr) safe->showPopup(index);
+                });
+            }
+            categories.showMenuAsync(juce::PopupMenu::Options()
+                .withTargetComponent(this)
+                .withTargetScreenArea(localAreaToGlobal(phoneMenuBounds_)));
+            return;
+        }
         if (undoBtnBounds_.contains(e.position) && CommandManager::getInstance().canUndo())
         {
             ActionManager::getInstance().dispatch(ActionID::EditUndo);
@@ -362,6 +371,7 @@ public:
             return true;
         for (const auto& r : menuRects_)
             if (r.contains(p)) return true;
+        if (phoneMode_ && phoneMenuBounds_.contains(p)) return true;
         if (undoBtnBounds_.contains(p.toFloat())) return true;
         if (redoBtnBounds_.contains(p.toFloat())) return true;
         return false;
@@ -400,6 +410,17 @@ private:
         g.drawText("APEX", juce::Rectangle<int>(9, 1, 78, juce::jmax(0, getHeight()-2)),
                    juce::Justification::centredLeft);
 
+        // One real touch target; no visual desktop File/Edit/View/Track row.
+        {
+            const auto chip = phoneMenuBounds_.toFloat();
+            g.setColour(a.color.panelB);
+            g.fillRoundedRectangle(chip, 8.f);
+            g.setColour(a.color.borderSoftA);
+            g.drawRoundedRectangle(chip.reduced(0.5f), 8.f, 1.f);
+            g.setColour(a.color.textPrimary);
+            g.setFont(juce::Font(juce::FontOptions(14.f, juce::Font::bold)));
+            g.drawText("MENU", phoneMenuBounds_, juce::Justification::centred);
+        }
         for (int i = 0; i < (int)menus_.size(); ++i)
         {
             const auto rect = menuRects_[(size_t)i];
@@ -422,6 +443,7 @@ private:
     }
 
     bool phoneMode_ = false;
+    juce::Rectangle<int> phoneMenuBounds_;
     std::vector<Menu> menus_;
     std::vector<juce::Rectangle<int>> menuRects_;
     int hoveredMenu_   = -1;
@@ -685,7 +707,7 @@ private:
             pm.addItem(pi);
         }
 
-        auto rect = menuRects_[menuIdx];
+        auto rect = phoneMode_ ? phoneMenuBounds_ : menuRects_[menuIdx];
         pm.showMenuAsync(juce::PopupMenu::Options()
                              .withTargetComponent(this)
                              .withTargetScreenArea(localAreaToGlobal(rect)));

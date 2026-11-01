@@ -266,6 +266,15 @@ void ArrangementRulerCore::drawGrid(juce::Graphics& g)
     {
         m_dragStart = e.getPosition();
 
+        m_touchLoopPending = e.source.getType() ==
+            juce::MouseInputSource::InputSourceType::touch && !e.mods.isShiftDown();
+        if (m_touchLoopPending)
+        {
+            // No Shift key on a phone: defer seeking until tap release.
+            // A deliberate ruler drag selects a loop range instead.
+            m_draggingLoop = m_draggingPlayhead = false;
+            return;
+        }
         if (e.mods.isShiftDown())
         {
             // Start loop region drag
@@ -289,11 +298,17 @@ void ArrangementRulerCore::drawGrid(juce::Graphics& g)
 
     void ArrangementRulerCore::mouseDrag(const juce::MouseEvent& e)
     {
+        if (m_touchLoopPending)
+        {
+            if (!m_draggingLoop && std::abs(e.x - m_dragStart.x) < 12) return;
+            m_draggingLoop = true;
+        }
         if (m_draggingLoop)
         {
-            m_loopEnd = xToTime(e.x);
-            if (m_loopEnd < m_loopStart)
-                std::swap(m_loopStart, m_loopEnd);
+            const auto anchor = xToTime(m_dragStart.x);
+            const auto cursor = xToTime(e.x);
+            m_loopStart = juce::jmin(anchor, cursor);
+            m_loopEnd = juce::jmax(anchor, cursor);
         }
         else if (m_draggingPlayhead)
         {
@@ -307,16 +322,19 @@ void ArrangementRulerCore::drawGrid(juce::Graphics& g)
         repaint();
     }
 
-    void ArrangementRulerCore::mouseUp(const juce::MouseEvent&)
+    void ArrangementRulerCore::mouseUp(const juce::MouseEvent& e)
     {
-        if (m_draggingLoop)
+        if (m_touchLoopPending && !m_draggingLoop)
         {
-            if (onLoopRegionChanged && m_loopEnd > m_loopStart)
-                onLoopRegionChanged(m_loopStart, m_loopEnd);
+            m_playheadTime = juce::jmax(0.0, xToTime(e.x));
+            if (onPlayheadMoved) onPlayheadMoved(m_playheadTime);
         }
-
+        if (m_draggingLoop && onLoopRegionChanged && m_loopEnd > m_loopStart)
+            onLoopRegionChanged(m_loopStart, m_loopEnd);
+        m_touchLoopPending = false;
         m_draggingPlayhead = false;
         m_draggingLoop = false;
+        repaint();
     }
 
     double ArrangementRulerCore::xToTime(int x) const
