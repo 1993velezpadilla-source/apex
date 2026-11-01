@@ -38,10 +38,13 @@ constexpr PanelBounds phoneCloseTouchBounds(int panelW, int panelH) noexcept
 }
 
 // MixerWindow hides its close light, leaving minimize/maximize at the two
-// left-side JUCE chrome centres. Phone-only hit zones expand each 12x12 orb
-// to a non-overlapping 20-wide, full-title-height target. Return 1/2 for
-// minimize/maximize; zero means title dragging may proceed. The caller
-// supplies FloatingWindowBase's geometry constants to avoid drift.
+// left-side JUCE chrome centres. On phones, extend the adjacent touch zones
+// into unused title-bar space without moving the original 12x12 artwork.
+// With the 12/8/14 chrome geometry these are two non-overlapping 30x32
+// targets (formerly 20x32). The midpoint is the exclusive boundary: a
+// release cannot activate a different orb by landing in an overlap.
+// Return 1/2 for minimize/maximize; zero allows title dragging.
+// The caller supplies FloatingWindowBase's constants to avoid drift.
 constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
                                            int padLeft, int buttonSize,
                                            int buttonGap, int titleHeight) noexcept
@@ -49,14 +52,15 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
     if (buttonSize <= 0 || buttonGap < 0 || titleHeight <= 0
         || y < 0.0f || y >= static_cast<float>(titleHeight))
         return 0;
-    const float halfWidth = static_cast<float>(buttonSize + buttonGap) * 0.5f;
     const float firstCentre = static_cast<float>(padLeft)
                             + static_cast<float>(buttonSize) * 0.5f;
-    if (x >= firstCentre - halfWidth && x < firstCentre + halfWidth)
+    const float separation = static_cast<float>(buttonSize + buttonGap);
+    const float boundary = firstCentre + separation * 0.5f;
+    const float touchWidth = separation * 1.5f;
+    const float firstLeft = boundary > touchWidth ? boundary - touchWidth : 0.0f;
+    if (x >= firstLeft && x < boundary)
         return 1;
-    const float secondCentre = firstCentre
-                             + static_cast<float>(buttonSize + buttonGap);
-    return x >= secondCentre - halfWidth && x < secondCentre + halfWidth ? 2 : 0;
+    return x >= boundary && x < boundary + touchWidth ? 2 : 0;
 }
 
 // Phone Mixer title bar is 32 units tall. Use the full available height for
