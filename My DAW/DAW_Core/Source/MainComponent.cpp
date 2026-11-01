@@ -1364,6 +1364,15 @@ MainComponent::MainComponent()
     // Transport bar
     // Use the single authoritative click state from ApplicationCore.
     clickState_ = &appCore_.getClickState();
+    // Phone defaults: quiet metronome and return the playhead to the last
+    // explicitly chosen start position after Stop. No desktop/iPad override.
+    if (usesPhoneMixerPresentation())
+    {
+        if (clickState_ != nullptr)
+            clickState_->activeMode.store((int)DAW::ClickActiveMode::Off,
+                                           std::memory_order_relaxed);
+        appCore_.getTransport().setReturnToLastPosition(true);
+    }
     transportBar_ = std::make_unique<DAW::TransportBar>(appCore_.getTransport(), clickState_);
    #if JUCE_ANDROID
     transportBar_->setPhoneLayout(true);
@@ -1373,6 +1382,14 @@ MainComponent::MainComponent()
    #endif
     appendMainStartupTrace("ctor.transport-bar.created");
     addAndMakeVisible(transportBar_.get());
+    // The lag report can now include an exact 100px/sec-relative zoom percent,
+    // even while pinch is active. This HUD never captures touch input.
+    phoneZoomIndicator_.getPixelsPerSecond = [this]() -> double
+    {
+        return arrangement_ ? arrangement_->getPixelsPerSecond() : 100.0;
+    };
+    addAndMakeVisible(phoneZoomIndicator_);
+    phoneZoomIndicator_.setPhoneActive(usesPhoneMixerPresentation());
 
     // Playhead clock: convert transport sample position to seconds at the
     // current device/project sample rate.
@@ -4093,6 +4110,19 @@ MainComponent::MainComponent()
                 mixerPanel_->activateBubblegumMode(source);
         }
     };
+
+    // Phone: a single TOOLS radial wheel replaces the cluttered desktop
+    // tool strip; SENDS still opens the actual Bubblegum controller.
+    // Avoid duplicate launchers across the bottom transport.
+    if (arrangement_)
+    {
+        arrangement_->configurePhoneToolbar(usesPhoneMixerPresentation(),
+            [this]()
+            {
+                if (transportBar_ && transportBar_->onOpenBubblegumSends)
+                    transportBar_->onOpenBubblegumSends();
+            });
+    }
 
     // Wire same quick-access to ArrangementView timeline toolbar
     if (arrangement_)
@@ -9051,7 +9081,11 @@ void MainComponent::resized()
     if (bubblegumTaskbar_)
         bubblegumTaskbar_->setBounds({});
     if (bubbleTaskbar_)
-        bubbleTaskbar_->setBounds(getLocalBounds());
+    {
+        bubbleTaskbar_->setBounds(phoneLayout ? juce::Rectangle<int>{} : getLocalBounds());
+        if (phoneLayout)
+            bubbleTaskbar_->setVisible(false);
+    }
 
     const auto bubbleSize = 54;
     const auto timelineBubbleSize = DAW::TimelineBubble::kBubbleSize;
@@ -9080,7 +9114,16 @@ void MainComponent::resized()
                                      92, bubbleSize, bubbleSize);
     }
     if (masterBubble_)
+    {
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
+        if (phoneLayout) masterBubble_->setVisible(false);
+    }
+    // Below MENU on phones, pinned above the arranger yet fully transparent
+    // to touches. Never resize/rebuild clip renderers just to update the text.
+    phoneZoomIndicator_.setBounds(phoneLayout ? juce::Rectangle<int>{
+        juce::jmax(0, getWidth() - 180), 53, juce::jmin(174, getWidth()), 26
+    } : juce::Rectangle<int>{});
+    if (phoneLayout) phoneZoomIndicator_.toFront(false);
 
     // TrackLens peak bubble - top-right, only auto-position if not manually dragged
     {
