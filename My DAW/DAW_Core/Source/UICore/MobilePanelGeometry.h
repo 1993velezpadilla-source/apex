@@ -37,6 +37,53 @@ constexpr PanelBounds phoneCloseTouchBounds(int panelW, int panelH) noexcept
              clampInt(25 - h / 2, 0, panelH - h), w, h };
 }
 
+// Phone Mixer title bar is 32 units tall. Use the full available height for
+// 44-wide, 28-high touch targets; a true 44-high target needs a separate chrome
+// redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.
+// Bubblegum Sends is launched from the phone Transport, never the Send Matrix.
+enum PhoneMixerToolbarAction
+{
+    phoneMixerBrowser = 0, phoneMixerFXChain, phoneMixerReset, phoneMixerOverflow
+};
+struct PhoneMixerToolbarButton
+{
+    PanelBounds bounds{};
+    PhoneMixerToolbarAction action = phoneMixerOverflow;
+};
+struct PhoneMixerToolbarLayout
+{
+    PhoneMixerToolbarButton buttons[4]{};
+    int count = 0;
+};
+constexpr PhoneMixerToolbarLayout phoneMixerToolbarLayout(int zoneW, int zoneH) noexcept
+{
+    PhoneMixerToolbarLayout out{};
+    constexpr int pad = 2, gap = 4, targetW = 44, targetH = 28;
+    if (zoneW < targetW + 2 * pad || zoneH < targetH)
+        return out;
+    const int available = zoneW - 2 * pad;
+    int visible = 3;
+    if (3 * targetW + 2 * gap > available)
+    {
+        visible = 0;
+        for (int n = 1; n <= 3; ++n)
+            if ((n + 1) * targetW + n * gap <= available)
+                visible = n;
+    }
+    const int y = (zoneH - targetH) / 2;
+    int x = pad;
+    for (int i = 0; i < visible; ++i)
+    {
+        const auto action = i == 0 ? phoneMixerBrowser
+                          : i == 1 ? phoneMixerFXChain : phoneMixerReset;
+        out.buttons[out.count++] = { { x, y, targetW, targetH }, action };
+        x += targetW + gap;
+    }
+    if (visible < 3)
+        out.buttons[out.count++] = { { x, y, targetW, targetH }, phoneMixerOverflow };
+    return out;
+}
+
 constexpr PanelBounds fitBubblegumSends(int viewportW, int viewportH,
                                        int anchorX, int anchorY, bool phone,
                                        int reservedTop = 0, int reservedBottom = 0) noexcept
