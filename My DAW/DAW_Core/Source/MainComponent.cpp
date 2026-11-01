@@ -9124,10 +9124,12 @@ void MainComponent::resized()
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
         if (phoneLayout) masterBubble_->setVisible(false);
     }
-    // Below MENU on phones, pinned above the arranger yet fully transparent
-    // to touches. Never resize/rebuild clip renderers just to update the text.
+    // Show live zoom INSIDE the phone header between the APEX wordmark
+    // and the single MENU entry. The old y=53 overlay covered the toolbar's
+    // Add Track/Tools hit targets and made the GUI look broken.
+    const int zoomLeft = 90;
     phoneZoomIndicator_.setBounds(phoneLayout ? juce::Rectangle<int>{
-        juce::jmax(0, getWidth() - 180), 53, juce::jmin(174, getWidth()), 26
+        zoomLeft, 12, juce::jmax(0, getWidth() - zoomLeft - 100), 25
     } : juce::Rectangle<int>{});
     if (phoneLayout) phoneZoomIndicator_.toFront(false);
 
