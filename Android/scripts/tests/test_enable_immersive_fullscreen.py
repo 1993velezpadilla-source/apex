@@ -12,7 +12,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 
 class ImmersiveManifestTests(unittest.TestCase):
-    def run_patch(self, bundle, manifest_package=None):
+    def run_patch(self, bundle, manifest_package=None, extra_activity_first=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -26,6 +26,9 @@ class ImmersiveManifestTests(unittest.TestCase):
             attributes = {} if manifest_package is None else {"package": manifest_package}
             root = ET.Element("manifest", attributes)
             app = ET.SubElement(root, "application")
+            if extra_activity_first:
+                ET.SubElement(app, "activity", {
+                    f"{{{ANDROID_NS}}}name": "com.example.UnrelatedActivity"})
             activity = ET.SubElement(app, "activity", {
                 f"{{{ANDROID_NS}}}name": "com.rmsl.juce.JuceActivity"})
             filt = ET.SubElement(activity, "intent-filter")
@@ -39,7 +42,13 @@ class ImmersiveManifestTests(unittest.TestCase):
             java = (generated / "app/src/main/java" /
                     bundle.replace(".", "/") / "ApexImmersiveActivity.java")
             if run.returncode == 0:
-                patched = ET.parse(manifest).getroot().find("./application/activity")
+                activities = ET.parse(manifest).getroot().findall("./application/activity")
+                patched = next(a for a in activities
+                               if a.get(f"{{{ANDROID_NS}}}name")
+                               == bundle + ".ApexImmersiveActivity")
+                if extra_activity_first:
+                    self.assertEqual(activities[0].get(f"{{{ANDROID_NS}}}name"),
+                                     "com.example.UnrelatedActivity")
                 self.assertEqual(patched.get(f"{{{ANDROID_NS}}}name"),
                                  bundle + ".ApexImmersiveActivity")
                 self.assertEqual(patched.get(f"{{{ANDROID_NS}}}screenOrientation"),
@@ -55,6 +64,13 @@ class ImmersiveManifestTests(unittest.TestCase):
         for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
             with self.subTest(bundle=bundle):
                 self.assertEqual(self.run_patch(bundle).returncode, 0)
+
+    def test_unrelated_activity_before_launcher_is_allowed(self):
+        # The generated manifest is not guaranteed to put JUCE's launcher first.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                self.assertEqual(
+                    self.run_patch(bundle, extra_activity_first=True).returncode, 0)
 
     def test_manifest_package_matching_project_is_allowed(self):
         bundle = "com.xziel.apex.mobileportrait"
