@@ -92,6 +92,35 @@ int main()
                    DAW::mobile::maxInt(energy.x, toolbarStart));
         }
 
+    // The toolbar's hover and active glows extend 2 units beyond the
+    // painted button. On phones, clip them to the right title-bar zone so
+    // neither Mixer strips below y=32 nor the centred title can be painted.
+    // This is deliberately phone-only; desktop/iPad keep existing chrome.
+    using DAW::mobile::phoneMixerToolbarPaintClip;
+    constexpr auto toolbarPaintPortrait = phoneMixerToolbarPaintClip(390, 32, 237);
+    static_assert(toolbarPaintPortrait.x == 237 && toolbarPaintPortrait.y == 0
+                  && toolbarPaintPortrait.width == 153
+                  && toolbarPaintPortrait.height == 32);
+    constexpr auto toolbarPaintLandscape = phoneMixerToolbarPaintClip(852, 32, 622);
+    static_assert(toolbarPaintLandscape.x == 622
+                  && toolbarPaintLandscape.width == 230);
+    constexpr auto toolbarPaintTiny = phoneMixerToolbarPaintClip(20, 32, 237);
+    static_assert(toolbarPaintTiny.x == 20 && toolbarPaintTiny.width == 0);
+    constexpr auto toolbarPaintInvalid = phoneMixerToolbarPaintClip(-1, -1, -100);
+    static_assert(toolbarPaintInvalid.x == 0 && toolbarPaintInvalid.width == 0
+                  && toolbarPaintInvalid.height == 0);
+    for (int w : {-1, 0, 1, 20, 390, 852})
+        for (int h : {-1, 0, 1, 32, 44})
+            for (int start : {-100, 0, 60, 237, 622, 2000})
+            {
+                const auto clip = phoneMixerToolbarPaintClip(w, h, start);
+                assert(inside(clip, DAW::mobile::maxInt(0, w),
+                                    DAW::mobile::maxInt(0, h)));
+                assert(clip.x == DAW::mobile::clampInt(
+                    start, 0, DAW::mobile::maxInt(0, w)));
+                assert(clip.x + clip.width == DAW::mobile::maxInt(0, w));
+            }
+
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
     // The 32-high title bar caps phone targets at 44x32; fill that height
     // without spilling the pill into Mixer content. Overflow prevents
