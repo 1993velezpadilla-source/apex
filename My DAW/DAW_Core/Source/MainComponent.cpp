@@ -9157,10 +9157,21 @@ void MainComponent::resized()
             if (fit.safe.width > 0 && fit.safe.height > 0)
             {
                 const auto current = mixerWindow_->getBounds();
-                if (!mixerWindowPlaced_ || !DAW::mobile::floatingMixerFits(
-                        fit, { current.getX(), current.getY(),
-                               current.getWidth(), current.getHeight() }))
+                const DAW::mobile::PanelBounds currentBounds{
+                    current.getX(), current.getY(),
+                    current.getWidth(), current.getHeight() };
+                if (!mixerWindowPlaced_)
                     setDefaultMixerWindowBounds();
+                else if (!DAW::mobile::floatingMixerFits(fit, currentBounds))
+                {
+                    // Only an oversized window needs the responsive default.
+                    // A window dragged beyond an edge keeps its manual size.
+                    const auto corrected = DAW::mobile::constrainFloatingMixerPlacement(
+                        fit, currentBounds);
+                    mixerWindow_->setMinimumSize(fit.minimumWidth, fit.minimumHeight);
+                    mixerWindow_->setBounds(corrected.x, corrected.y,
+                                            corrected.width, corrected.height);
+                }
             }
         }
         else if (!mixerWindowPlaced_)

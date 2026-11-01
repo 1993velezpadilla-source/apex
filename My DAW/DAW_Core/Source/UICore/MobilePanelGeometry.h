@@ -400,6 +400,25 @@ constexpr bool floatingMixerFits(const FloatingMixerFit& fit, PanelBounds curren
             <= static_cast<long long>(fit.safe.y) + fit.safe.height;
 }
 
+// Preserve a manually sized floating phone Mixer when only its position
+// escaped the safe workspace (drag release, rotation or changed insets).
+// A size that cannot fit falls back to the responsive default. All edges
+// remain inside the fit's safe area, including extreme restored coordinates.
+constexpr PanelBounds constrainFloatingMixerPlacement(
+    const FloatingMixerFit& fit, PanelBounds current) noexcept
+{
+    if (fit.safe.width <= 0 || fit.safe.height <= 0
+        || current.width < fit.minimumWidth || current.height < fit.minimumHeight
+        || current.width > fit.safe.width || current.height > fit.safe.height)
+        return fit.window;
+
+    return { clampInt(current.x, fit.safe.x,
+                      fit.safe.x + fit.safe.width - current.width),
+             clampInt(current.y, fit.safe.y,
+                      fit.safe.y + fit.safe.height - current.height),
+             current.width, current.height };
+}
+
 // Desktop Quick Send historically expands a collapsed Mixer to 800x260.
 // A phone in landscape can have less than 260 units above its Transport;
 // applying that desktop recovery would push the floating Mixer off-screen.

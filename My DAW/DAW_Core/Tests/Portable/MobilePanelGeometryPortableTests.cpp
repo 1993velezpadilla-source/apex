@@ -630,6 +630,40 @@ int main()
         { std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
           std::numeric_limits<int>::max(), std::numeric_limits<int>::max() }));
     static_assert(!floatingMixerFits(mixerTiny, { 0, 0, 200, 180 }));
+    // A phone drag/rotation should clamp only the escaped position, not
+    // discard the user's manually selected Mixer width and height.
+    using DAW::mobile::constrainFloatingMixerPlacement;
+    constexpr PanelBounds movedOffscreen{ -500, 0, 210, 190 };
+    constexpr auto recoveredMixer = constrainFloatingMixerPlacement(
+        mixerPortrait, movedOffscreen);
+    static_assert(recoveredMixer.x == mixerPortrait.safe.x
+                  && recoveredMixer.y == mixerPortrait.safe.y
+                  && recoveredMixer.width == 210 && recoveredMixer.height == 190);
+    static_assert(floatingMixerFits(mixerPortrait, recoveredMixer));
+    constexpr auto recoveredFarEdge = constrainFloatingMixerPlacement(
+        mixerPortrait, { std::numeric_limits<int>::max(),
+                         std::numeric_limits<int>::max(), 210, 190 });
+    static_assert(recoveredFarEdge.x + recoveredFarEdge.width
+                  == mixerPortrait.safe.x + mixerPortrait.safe.width);
+    static_assert(recoveredFarEdge.y + recoveredFarEdge.height
+                  == mixerPortrait.safe.y + mixerPortrait.safe.height);
+    static_assert(floatingMixerFits(mixerPortrait, recoveredFarEdge));
+    constexpr auto unchangedMixer = constrainFloatingMixerPlacement(
+        mixerPortrait, manuallyPlaced);
+    static_assert(unchangedMixer.x == manuallyPlaced.x
+                  && unchangedMixer.y == manuallyPlaced.y
+                  && unchangedMixer.width == manuallyPlaced.width
+                  && unchangedMixer.height == manuallyPlaced.height);
+    constexpr auto oversizedMixer = constrainFloatingMixerPlacement(
+        mixerLandscape, mixerPortrait.window);
+    static_assert(oversizedMixer.x == mixerLandscape.window.x
+                  && oversizedMixer.y == mixerLandscape.window.y
+                  && oversizedMixer.width == mixerLandscape.window.width
+                  && oversizedMixer.height == mixerLandscape.window.height);
+    static_assert(floatingMixerFits(mixerLandscape, oversizedMixer));
+    static_assert(constrainFloatingMixerPlacement(
+        mixerTiny, { 100, 100, 200, 180 }).width == 0);
+
     static_assert(floatingMixerFits(mixerLandscape, mixerLandscape.window));
     for (int w : {1, 2, 20, 245, 360, 393, 852})
         for (int h : {1, 10, 96, 144, 220, 300, 852})
@@ -649,6 +683,16 @@ int main()
                     assert(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height);
                     assert(fit.minimumWidth <= fit.window.width);
                     assert(fit.minimumHeight <= fit.window.height);
+                    // Arbitrary out-of-bounds restored positions must
+                    // recover to a usable window without losing a fitting size.
+                    for (int offset : { -1000000, -1, 0, 1000000 })
+                    {
+                        const auto moved = constrainFloatingMixerPlacement(
+                            fit, { offset, -offset, fit.window.width, fit.window.height });
+                        assert(floatingMixerFits(fit, moved));
+                        assert(moved.width == fit.window.width
+                               && moved.height == fit.window.height);
+                    }
                 }
     // Clip Properties contains clip-region FX. A desktop 420x360 dialog
     // overflows a 393-wide phone and covers Transport in short landscape.
