@@ -7282,7 +7282,7 @@ void MainComponent::timerCallback()
     const double elapsedMs = juce::Time::getMillisecondCounterHiRes()
                              - phoneRailAnimationStartMs_;
     const float t = juce::jlimit(0.0f, 1.0f, (float)(elapsedMs / 180.0));
-    const float ease = t * t * (3.0f - 2.0f * t);
+    const float ease = DAW::mobile::smoothPhoneRailProgress(t);
     phoneRailAnimatedWidth_ = juce::roundToInt(
         (float)phoneRailAnimationFrom_
         + ((float)(phoneRailAnimationTo_ - phoneRailAnimationFrom_) * ease));
