@@ -64,6 +64,8 @@ public:
         if (phonePresentation_ == isPhone) return;
         phonePresentation_ = isPhone;
         eyeBtnPressed_ = false;
+        closeBtnPressed_ = false;
+        phoneCloseTap_.invalidate();
         if (phonePresentation_ && fullScreenMode_)
             toggleFullScreenMode();
         updateContentSize();
@@ -74,6 +76,12 @@ public:
     // The Sends window may float, but never across the persistent Transport.
     void setPhoneSafeInsets(int headerHeight, int transportHeight) noexcept
     {
+        if (phonePresentation_ && (phoneSafeTop_ != headerHeight
+                                   || phoneSafeBottom_ != transportHeight))
+        {
+            phoneCloseTap_.invalidate();
+            closeBtnPressed_ = false;
+        }
         phoneSafeTop_ = headerHeight;
         phoneSafeBottom_ = transportHeight;
     }
@@ -226,6 +234,12 @@ public:
 
     void resized() override
     {
+        // A phone rotation/resize must cancel any in-flight Sends close tap.
+        if (phonePresentation_)
+        {
+            phoneCloseTap_.invalidate();
+            closeBtnPressed_ = false;
+        }
         auto b = getLocalBounds().reduced(2); // inset for shadow
         b.removeFromTop(kHeaderH);
         viewport_.setBounds(b);
@@ -635,6 +649,8 @@ public:
     // ── Mouse: close button + drag panel by header area ────────────────
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_)
+            phoneCloseTap_.invalidate();
         if (!phonePresentation_ && eyeBtnBounds().contains(e.position))
         {
             eyeBtnPressed_ = true;
@@ -645,6 +661,8 @@ public:
         if (closeBtnHitBounds().contains(e.position))
         {
             closeBtnPressed_ = true;
+            if (phonePresentation_)
+                phoneCloseTap_.begin(1);
             repaint();
             return;
         }
@@ -656,6 +674,9 @@ public:
     }
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_ && closeBtnPressed_)
+            phoneCloseTap_.move(e.getDistanceFromDragStartX(),
+                                e.getDistanceFromDragStartY());
         if (isDragging_)
             dragger_.dragComponent(this, e, nullptr);
     }
@@ -672,7 +693,13 @@ public:
         if (closeBtnPressed_)
         {
             closeBtnPressed_ = false;
-            if (closeBtnHitBounds().contains(e.position))
+            const bool releasedInside = closeBtnHitBounds().contains(e.position);
+            const bool activate = phonePresentation_
+                ? phoneCloseTap_.release(releasedInside ? 1 : 0,
+                                         e.getDistanceFromDragStartX(),
+                                         e.getDistanceFromDragStartY())
+                : releasedInside;
+            if (activate)
             {
                 DBG("[BubblegumV2PanelUI] X close button clicked");
                 if (onCloseRequested) onCloseRequested();
@@ -979,6 +1006,7 @@ private:
 
     // Close button state
     bool closeBtnPressed_ = false;
+    mobile::PhoneChromeTapState phoneCloseTap_;
     bool closeBtnHovered_ = false;
     bool eyeBtnPressed_ = false;
     bool eyeBtnHovered_ = false;
