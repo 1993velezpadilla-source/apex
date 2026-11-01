@@ -235,6 +235,9 @@ protected:
         }
     }
 
+public:
+    // MainComponent explicitly relayouts the floating Mixer after opening it.
+    // Keep this override public, matching FloatingWindowBase::resized().
     void resized() override
     {
         if (phonePresentation_)
@@ -242,6 +245,7 @@ protected:
         FloatingWindowBase::resized();
     }
 
+protected:
     void mouseDown(const juce::MouseEvent& e) override
     {
         if (phonePresentation_)
