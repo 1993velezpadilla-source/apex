@@ -247,6 +247,12 @@ namespace ArrangementEditor
         // region tap. Read only from the UI/message thread.
         std::uint64_t getTouchGestureEpoch() const noexcept { return m_touchGestureEpoch; }
 
+        // Phones can expand/collapse their track-name rail only AFTER the
+        // arranger's gesture and kinetic pan have finished. Resizing the
+        // viewport while a finger is anchoring a pinch/pan changes maxScroll
+        // and causes the repeated jump/snap reported on Pixel Fold.
+        std::function<void()> onTouchNavigationSettled;
+
         // One non-persistent clip-audition Solo authority for both the M/S/V
         // clip header and the floating Clip Properties panel. The engine
         // clip ID is stable across renderer rebuilds and UI window changes.
