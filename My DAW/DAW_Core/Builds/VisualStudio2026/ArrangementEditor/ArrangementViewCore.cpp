@@ -1568,7 +1568,19 @@ namespace ArrangementEditor
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            // mouseUp can close a gesture BEFORE the 60 Hz timer gets one
+            // final idle tick. Merely clearing the lightweight flag leaves
+            // stale cached clip/waveform rectangles on screen indefinitely
+            // after a short no-fling scroll. Restore authoritative detail
+            // exactly once here, never inside the per-frame gesture path.
+            const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            if (wasLightweight)
+            {
+                rebuildClipRenderers();
+                updateAutomationLayout();
+                repaint();
+            }
             // The release callback already updated track rail presentation.
             // No second update is needed when momentum is absent.
             m_touchHorizontalPanOccurred = false;
