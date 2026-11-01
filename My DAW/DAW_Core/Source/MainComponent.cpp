@@ -475,6 +475,23 @@ public:
 
     /** (isVertical, zoomIn) — fired by the corner zoom buttons. */
     std::function<void(bool, bool)> onZoomButton;
+    std::function<void(juce::Point<int>)> onVisiblePositionChanged;
+
+    void setPhonePresentation(bool phone)
+    {
+        if (phonePresentation_ == phone) return;
+        phonePresentation_ = phone;
+        // Hide desktop scrollbars and all four corner +/- controls on phones,
+        // but permit genuine programmatic/touch scrolling without the bars.
+        setScrollBarsShown(!phone, !phone, true, true);
+        layoutCornerZoomButtons();
+    }
+
+    void visibleAreaChanged(const juce::Rectangle<int>& area) override
+    {
+        if (onVisiblePositionChanged)
+            onVisiblePositionChanged(area.getPosition());
+    }
 
     void resized() override
     {
@@ -553,6 +570,7 @@ protected:
     }
 
 private:
+    bool phonePresentation_ = false;
     // ── Corner zoom buttons (bottom-right, where the two scrollbars meet) ──
     struct BarListener final : juce::ComponentListener
     {
@@ -582,7 +600,8 @@ private:
         const int th = getScrollBarThickness();
         const int btn = th; // square buttons matching scrollbar thickness
 
-        const bool showButtons = hVisible && vVisible && getWidth() > btn * 6 && getHeight() > btn * 6;
+        const bool showButtons = !phonePresentation_
+            && hVisible && vVisible && getWidth() > btn * 6 && getHeight() > btn * 6;
 
         hZoomInBtn_.setVisible(showButtons);
         hZoomOutBtn_.setVisible(showButtons);
@@ -2866,8 +2885,18 @@ MainComponent::MainComponent()
     };
 
     timelineViewport->setViewedComponent(arrangement_.get(), false);
-    timelineViewport->setScrollBarsShown(true, true);
+    timelineViewport->setPhonePresentation(usesPhoneMixerPresentation());
     timelineViewport->setScrollBarThickness(14);
+    // The invisible JUCE bars are not reliable scroll event providers:
+    // listen to Viewport's actual visible-area changes for touch scrolling.
+    timelineViewport->onVisiblePositionChanged = [this](juce::Point<int> pos)
+    {
+        handlePhoneTimelineScroll(pos.x);
+        if (arrangement_)
+            arrangement_->setViewportScrollOffsets(pos.x, pos.y);
+        if (trackList_)
+            trackList_->setScrollOffset(pos.y);
+    };
     timelineViewport->setSingleStepSizes(32, 32);
     timelineViewport->getPixelsPerSecond = [this]() -> double
     {
