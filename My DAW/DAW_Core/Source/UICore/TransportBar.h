@@ -8,6 +8,7 @@
 #include "../ActionCore/ActionID.h"
 #include "ClickToolbarStrip.h"
 #include "MobileTransportPortrait.h"
+#include "MobilePanelGeometry.h"
 #include "../Automation/AutomationSystemCore.h"
 #include "../AutomationCore/PluginAutomationRecorderCore.h"
 
@@ -393,6 +394,8 @@ public:
 
     void resized() override
     {
+        // A rotation or resized Transport invalidates an in-flight launcher tap.
+        pendingPhoneLauncher_ = PhoneLauncher::None;
         if (phoneLayout_)
         {
             // Portrait-first layout: every important transport action stays visible.
@@ -550,16 +553,15 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (phoneLayout_ && mobileMixerBounds_.toFloat().contains(e.position))
+        if (phoneLayout_)
         {
-            if (onOpenFloatingMixer) onOpenFloatingMixer();
+            // A swipe over the persistent Transport must not open a floating
+            // panel on mouseDown. Defer all four phone launchers to mouseUp.
+            pendingPhoneLauncher_ = phoneLauncherAt(e.position);
             return;
         }
-        if (phoneLayout_ && mobileSendsBounds_.toFloat().contains(e.position))
-        {
-            if (onOpenBubblegumSends) onOpenBubblegumSends();
-            return;
-        }
+
+        // Desktop/iPad keep their existing immediate quick-access behavior.
         if (fxBtnBounds_.toFloat().contains(e.position))
         {
             DBG("[TransportBar] Quick access Side Panel clicked");
@@ -572,6 +574,28 @@ public:
             if (onQuickAccessFxBrowser) onQuickAccessFxBrowser();
             return;
         }
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (phoneLayout_ && pendingPhoneLauncher_ != PhoneLauncher::None
+            && !mobile::phoneTapGestureRemainsEligible(
+                true, e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            pendingPhoneLauncher_ = PhoneLauncher::None;
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (!phoneLayout_)
+            return;
+
+        const auto pressed = pendingPhoneLauncher_;
+        pendingPhoneLauncher_ = PhoneLauncher::None;
+        if (mobile::phoneTransportLauncherTapActivates(
+                static_cast<int>(pressed),
+                static_cast<int>(phoneLauncherAt(e.position)),
+                e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            activatePhoneLauncher(pressed);
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -643,6 +667,39 @@ private:
     std::unique_ptr<ClickToolbarStrip> clickStrip_;
     bool phoneLayout_ = false;
     juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_;
+
+    enum class PhoneLauncher { None, Mixer, Sends, SidePanel, Browser };
+    PhoneLauncher pendingPhoneLauncher_ = PhoneLauncher::None;
+
+    PhoneLauncher phoneLauncherAt(juce::Point<float> p) const noexcept
+    {
+        if (mobileMixerBounds_.toFloat().contains(p)) return PhoneLauncher::Mixer;
+        if (mobileSendsBounds_.toFloat().contains(p)) return PhoneLauncher::Sends;
+        if (fxBtnBounds_.toFloat().contains(p)) return PhoneLauncher::SidePanel;
+        if (brBtnBounds_.toFloat().contains(p)) return PhoneLauncher::Browser;
+        return PhoneLauncher::None;
+    }
+
+    void activatePhoneLauncher(PhoneLauncher target)
+    {
+        switch (target)
+        {
+            case PhoneLauncher::Mixer:
+                if (onOpenFloatingMixer) onOpenFloatingMixer();
+                break;
+            case PhoneLauncher::Sends:
+                if (onOpenBubblegumSends) onOpenBubblegumSends();
+                break;
+            case PhoneLauncher::SidePanel:
+                if (onQuickAccessSidePanel) onQuickAccessSidePanel();
+                break;
+            case PhoneLauncher::Browser:
+                if (onQuickAccessFxBrowser) onQuickAccessFxBrowser();
+                break;
+            case PhoneLauncher::None:
+                break;
+        }
+    }
     TransportButton* playBtn_  = nullptr;
     TransportButton* recBtn_   = nullptr;
     TransportButton* loopBtn_  = nullptr;

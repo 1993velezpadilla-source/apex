@@ -200,6 +200,15 @@ constexpr bool phoneChromeButtonTapActivates(int pressedButton, int releasedButt
         && pluginBrowserRowTapActivates(true, dragX, dragY, true);
 }
 
+// Four phone Transport launchers (Mixer, Sends, FX, Browser) must
+// activate only after a stationary release on the same launcher. A gesture
+// cancelled during mouseDrag stays cancelled even if it returns to origin.
+constexpr bool phoneTransportLauncherTapActivates(int pressed, int released,
+                                                  int dragX, int dragY) noexcept
+{
+    return phoneChromeButtonTapActivates(pressed, released, dragX, dragY);
+}
+
 // Phones already expose a 44-unit maximize button. A second finger tap on
 // the title must not toggle maximize while JUCE is still processing the
 // second mouseDown/drag; desktop double-click-to-maximize remains available.

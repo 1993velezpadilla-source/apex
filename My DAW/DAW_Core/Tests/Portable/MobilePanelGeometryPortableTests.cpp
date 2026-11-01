@@ -263,6 +263,30 @@ int main()
             assert(phoneChromeButtonTapActivates(1, 1, dx, dy) == tap);
             assert(!phoneChromeButtonTapActivates(1, 2, dx, dy));
         }
+    // Phone Transport panel launchers must not open Mixer/Sends/FX/Browser
+    // on swipe, on release over a different launcher, or after a drag that
+    // returns to its origin. Desktop launchers are intentionally unchanged.
+    using DAW::mobile::phoneTransportLauncherTapActivates;
+    for (int launcher = 1; launcher <= 4; ++launcher)
+    {
+        assert(phoneTransportLauncherTapActivates(launcher, launcher, 0, 0));
+        assert(phoneTransportLauncherTapActivates(launcher, launcher, 6, 5));
+        assert(!phoneTransportLauncherTapActivates(launcher, launcher, 9, 0));
+        assert(!phoneTransportLauncherTapActivates(launcher, launcher, 8, 8));
+        assert(!phoneTransportLauncherTapActivates(launcher, 0, 0, 0));
+        assert(!phoneTransportLauncherTapActivates(0, launcher, 0, 0));
+        assert(!phoneTransportLauncherTapActivates(launcher, launcher % 4 + 1, 0, 0));
+        bool eligible = DAW::mobile::phoneTapGestureRemainsEligible(true, 20, 0);
+        eligible = DAW::mobile::phoneTapGestureRemainsEligible(eligible, 0, 0);
+        assert(!eligible && !(eligible && phoneTransportLauncherTapActivates(
+            launcher, launcher, 0, 0)));
+    }
+    static_assert(phoneTransportLauncherTapActivates(1, 1, 0, 0));
+    static_assert(phoneTransportLauncherTapActivates(4, 4, 8, 0));
+    static_assert(!phoneTransportLauncherTapActivates(2, 3, 0, 0));
+    static_assert(!phoneTransportLauncherTapActivates(3, 3, 9, 0));
+    static_assert(!phoneTransportLauncherTapActivates(4, 4,
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
     // Double-tapping a phone title bar must not maximize unexpectedly or
     // overwrite saved floating bounds during the second touch gesture.
     // Desktop title-bar double-click retains its original behavior.
