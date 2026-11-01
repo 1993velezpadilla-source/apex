@@ -1522,7 +1522,19 @@ namespace ArrangementEditor
         m_skipSlop = false;
         m_touchPanVelocityX = 0.0;
         m_touchPanVelocityY = 0.0;
-        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+        // A finger landing on a clip interrupts kinetic scrolling without
+        // visiting the normal momentum-settled rebuild. Simply clearing the
+        // lightweight flag can strand waveforms and offscreen clip bounds in
+        // their previous LOD. Queue ONE deferred restoration, not a synchronous
+        // renderer rebuild on the pointer-down hot path.
+        const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+            false, std::memory_order_relaxed);
+        if (wasLightweight && m_rebuildDeferTimer != nullptr)
+        {
+            m_deferredRebuildRequested = true;
+            m_rebuildDeferTimer->startTimer(16);
+            repaint();
+        }
     }
 
     void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
