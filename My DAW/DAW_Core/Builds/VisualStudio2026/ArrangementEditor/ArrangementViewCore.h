@@ -253,6 +253,11 @@ namespace ArrangementEditor
         // and causes the repeated jump/snap reported on Pixel Fold.
         std::function<void()> onTouchNavigationSettled;
 
+        /** True only during a phone pinch that edits timeline/lane scale.
+         *  A lightweight geometry update must avoid rebuilding all audio
+         *  renderers, re-fetching cached audio and re-queueing waveforms. */
+        bool m_fastTouchPinchResize = false;
+
         // One non-persistent clip-audition Solo authority for both the M/S/V
         // clip header and the floating Clip Properties panel. The engine
         // clip ID is stable across renderer rebuilds and UI window changes.
@@ -483,6 +488,7 @@ namespace ArrangementEditor
         bool m_gestureMoved = false;   // moved past the threshold → it is a drag
         bool m_marqueePending = false; // empty-space press waiting for the hold
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
+        bool m_touchHorizontalPanOccurred = false; // NOT triggered by zoom
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
         std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
         double m_lastPinchDistance = 0.0; // legacy pinch scratch state
@@ -527,6 +533,7 @@ namespace ArrangementEditor
         double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
         double m_touchPanVelocityY = 0.0;
         bool applyTouchPanInertia();
+        void updateClipGeometryForFastPinch();
         void endTouchPanGesture();
 
         std::unique_ptr<ClipPropertiesWindowCore> m_propertiesWindow;
