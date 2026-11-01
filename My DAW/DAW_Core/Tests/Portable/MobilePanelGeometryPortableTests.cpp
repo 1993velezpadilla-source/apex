@@ -239,7 +239,7 @@ int main()
     phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 30);
     phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 0);
     assert(!phoneButtonTapEligible);
-    assert(!(phoneButtonTapEligible && phoneChromeButtonTapActivates(1, 1, 0, 0)));
+    assert(!(phoneButtonTapEligible && DAW::mobile::phoneChromeButtonTapActivates(1, 1, 0, 0)));
     // A short stationary touch remains eligible.
     bool shortPhoneTap = phoneTapGestureRemainsEligible(true, 4, 3);
     shortPhoneTap = phoneTapGestureRemainsEligible(shortPhoneTap, 0, 0);
