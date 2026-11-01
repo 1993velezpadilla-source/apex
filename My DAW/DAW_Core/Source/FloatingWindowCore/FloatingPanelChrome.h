@@ -220,6 +220,13 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        // A swipe that returns to its starting button is still a swipe.
+        // Cancel the pending phone action permanently once the touch travels
+        // beyond the tap slop, even if mouseUp lands on the same button.
+        if (phonePresentation_ && pendingPhoneButton_ != BtnHit::None
+            && !mobile::phoneTapGestureRemainsEligible(
+                true, e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            pendingPhoneButton_ = BtnHit::None;
         if (!isDragging_) return;
         dragger_.dragComponent(this, e, &constrainer_);
     }
