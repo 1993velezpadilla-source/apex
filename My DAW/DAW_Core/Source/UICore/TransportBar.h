@@ -217,9 +217,11 @@ public:
         : transport_(transport), tempo_(transport)
     {
         auto& t = Theme::getInstance();
-        auto* skipBtn = addBtn("<<", t.apex.color.textSecondary,  TransportIcon::SkipBack,
-               [this]{ ActionManager::getInstance().dispatch(ActionID::TransportJumpStart); });
-        skipBtn->tooltipText = "Skip to Start\nJump the playhead to the beginning of the project.";
+        // Explicit action identity: this is JUMP TO START (|<), not the
+        // toggle controlling where playback returns after Stop.
+        jumpStartBtn_ = addBtn("<<", t.apex.color.textSecondary, TransportIcon::SkipBack,
+               []{ ActionManager::getInstance().dispatch(ActionID::TransportJumpStart); });
+        jumpStartBtn_->tooltipText = "Return to Start\nJump to 001:1 / 00:00 without changing the loop.";
 
         // PLAY carries the primary creative-energy accent: strong APEX magenta,
         // visible even at idle (primary action must be findable without search).
@@ -418,29 +420,39 @@ public:
             const int contentW = juce::jmax(0, w - 2 * margin);
             const int rowH = juce::jmax(0, (h - 3 * margin) / 2);
             const int actionsY = 2 * margin + rowH;
-            const int cellW = juce::jmax(1, (contentW - 6 * gap) / 7);
-            const auto action = [&](int index)
+            // Use the shared deterministic seven-button layout. A named
+            // action cannot be accidentally dropped or reordered by adding
+            // another desktop button to buttons_ in the future.
+            const auto primary = mobile::phoneTransportPrimaryLayout(w, h);
+            const auto action = [&](mobile::PhoneTransportPrimaryAction which)
             {
-                return juce::Rectangle<int>(margin + index * (cellW + gap),
-                                            actionsY, cellW, rowH);
+                const auto b = primary.buttons[static_cast<int>(which)];
+                return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
             };
             for (auto* btn : buttons_)
                 if (btn != nullptr) { btn->setVisible(false); btn->setBounds({}); }
-            // Existing JUCE controls retain their original command bindings.
-            if (buttons_.size() >= 6)
+            // Transport order, left to right:
+            // Mixer | Undo | |< Return to Start | Record | Play | Redo | Settings
+            if (jumpStartBtn_ != nullptr)
             {
-                buttons_[0]->setBounds(action(2).reduced(1, 0)); // back
-                buttons_[0]->setVisible(true);
-                buttons_[3]->setBounds(action(3).reduced(1, 0)); // record
-                buttons_[3]->setVisible(true);
-                buttons_[1]->setBounds(action(4).reduced(1, 0)); // play
-                buttons_[1]->setVisible(true);
-                buttons_[4]->setVisible(true); // top-row loop toggle
+                jumpStartBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::ReturnToStart).reduced(1, 0));
+                jumpStartBtn_->setVisible(true);
             }
-            undoPhoneBtn_.setBounds(action(1));
-            redoPhoneBtn_.setBounds(action(5));
-            mobileMixerBounds_ = action(0);
-            mobileSettingsBounds_ = action(6);
+            if (recBtn_ != nullptr)
+            {
+                recBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::Record).reduced(1, 0));
+                recBtn_->setVisible(true);
+            }
+            if (playBtn_ != nullptr)
+            {
+                playBtn_->setBounds(action(mobile::PhoneTransportPrimaryAction::Play).reduced(1, 0));
+                playBtn_->setVisible(true);
+            }
+            if (loopBtn_ != nullptr) loopBtn_->setVisible(true); // upper strip
+            undoPhoneBtn_.setBounds(action(mobile::PhoneTransportPrimaryAction::Undo));
+            redoPhoneBtn_.setBounds(action(mobile::PhoneTransportPrimaryAction::Redo));
+            mobileMixerBounds_ = action(mobile::PhoneTransportPrimaryAction::Mixer);
+            mobileSettingsBounds_ = action(mobile::PhoneTransportPrimaryAction::Settings);
             mobileSendsBounds_ = {};
             fxBtnBounds_ = brBtnBounds_ = {};
             // Existing key/tempo/clock stay interactive until the project
@@ -466,6 +478,7 @@ public:
         }
 
 
+        const int totalW = getWidth();
         const int totalH = getHeight();
         const int padX   = 8;
         const int padY   = 6;
@@ -677,6 +690,7 @@ private:
                 break;
         }
     }
+    TransportButton* jumpStartBtn_ = nullptr;
     TransportButton* playBtn_  = nullptr;
     TransportButton* recBtn_   = nullptr;
     TransportButton* loopBtn_  = nullptr;
