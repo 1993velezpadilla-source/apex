@@ -588,15 +588,15 @@ int main()
     // must remain above Transport; overlap between floating panels is allowed.
     constexpr auto browserBeforeRotation = DAW::mobile::fitPhonePluginBrowserPlacement(
         393, 852, 50, 144, { 8, 80, 340, 560 });
-    constexpr auto browserAfterRotation = DAW::mobile::fitPhonePluginBrowserPlacement(
+    constexpr auto concurrentBrowserAfterRotation = DAW::mobile::fitPhonePluginBrowserPlacement(
         852, 300, 50, 96, browserBeforeRotation);
-    static_assert(browserAfterRotation.y >= 50
-                  && browserAfterRotation.y + browserAfterRotation.height <= 300 - 96);
-    static_assert(browserAfterRotation.width > 0 && browserAfterRotation.height > 0);
+    static_assert(concurrentBrowserAfterRotation.y >= 50
+                  && concurrentBrowserAfterRotation.y + concurrentBrowserAfterRotation.height <= 300 - 96);
+    static_assert(concurrentBrowserAfterRotation.width > 0 && concurrentBrowserAfterRotation.height > 0);
     static_assert(!floatingMixerFits(mixerLandscape, mixerPortrait.window));
     static_assert(floatingMixerFits(mixerLandscape, mixerLandscape.window));
     constexpr auto browserAfterReturn = DAW::mobile::fitPhonePluginBrowserPlacement(
-        393, 852, 50, 144, browserAfterRotation);
+        393, 852, 50, 144, concurrentBrowserAfterRotation);
     static_assert(browserAfterReturn.x >= 0 && browserAfterReturn.y >= 50);
     static_assert(browserAfterReturn.y + browserAfterReturn.height <= 852 - 144);
 
