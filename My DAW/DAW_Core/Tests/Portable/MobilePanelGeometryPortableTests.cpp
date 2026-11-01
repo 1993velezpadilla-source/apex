@@ -93,6 +93,32 @@ int main()
     phoneLauncherTap.begin(4, 7);
     phoneLauncherTap.invalidate(); // rotation or resize
     assert(!phoneLauncherTap.release(7, 4, 0, 0));
+    // A non-launcher touch also occupies the Transport: a second finger
+    // must not turn a previously ineligible gesture into a panel launch.
+    phoneLauncherTap.begin(0, 7);
+    phoneLauncherTap.begin(1, 8);
+    assert(!phoneLauncherTap.release(8, 1, 0, 0));
+    assert(!phoneLauncherTap.release(7, 0, 0, 0));
+    phoneLauncherTap.begin(1, 7);
+    assert(phoneLauncherTap.release(7, 1, 0, 0));
+
+    // A cancelled two-finger gesture stays blocked until BOTH fingers lift.
+    phoneLauncherTap.begin(1, 7);
+    phoneLauncherTap.begin(2, 8);
+    assert(!phoneLauncherTap.release(7, 1, 0, 0));
+    phoneLauncherTap.begin(3, 9); // third finger cannot re-arm
+    assert(!phoneLauncherTap.release(9, 3, 0, 0));
+    assert(!phoneLauncherTap.release(8, 2, 0, 0));
+    phoneLauncherTap.begin(4, 7);
+    assert(phoneLauncherTap.release(7, 4, 0, 0));
+
+    // A cancelled swipe cannot be re-armed by another finger.
+    phoneLauncherTap.begin(1, 7);
+    phoneLauncherTap.move(7, 20, 0);
+    phoneLauncherTap.begin(2, 8);
+    assert(!phoneLauncherTap.release(7, 1, 0, 0));
+    assert(!phoneLauncherTap.release(8, 2, 0, 0));
+
 
     // Header energy must not overpaint either the original left chrome or
     // the phone toolbar. Desktop/iPad keep the original full-width rendering.
