@@ -3163,6 +3163,7 @@ MainComponent::MainComponent()
     addChildComponent(mixerViewport_);
 
     mixerWindow_ = std::make_unique<DAW::MixerWindow>();
+    mixerWindow_->setPhonePresentation(usesPhoneMixerPresentation());
     mixerWindow_->setContent(&mixerViewport_);
     mixerWindow_->setVisible(true);
     addChildComponent(mixerWindow_.get());
