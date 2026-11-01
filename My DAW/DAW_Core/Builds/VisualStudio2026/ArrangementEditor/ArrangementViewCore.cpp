@@ -343,9 +343,14 @@ namespace ArrangementEditor
             repaint();
         };
 
-        // Wire zoom callbacks
+        // Wire zoom callbacks. The production ArrangementView overrides
+        // this bridge, but a standalone core must honour the same cheap
+        // touch-pinch geometry path rather than rebuilding waveforms per tick.
         m_zoom.onZoomChanged = [this]() {
-            rebuildClipRenderers();
+            if (m_fastTouchPinchResize)
+                updateClipGeometryForFastPinch();
+            else
+                rebuildClipRenderers();
             repaint();
         };
 
