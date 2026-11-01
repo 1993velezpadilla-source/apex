@@ -583,4 +583,48 @@ int main()
                     assert(phoneClipPropertiesFits(fit, fit.window));
                 }
 
+    // Cross-panel rotation gauntlet: a portrait FX Browser and Mixer may both
+    // remain open when the phone turns landscape. Their *individual* chrome
+    // must remain above Transport; overlap between floating panels is allowed.
+    constexpr auto browserBeforeRotation = DAW::mobile::fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { 8, 80, 340, 560 });
+    constexpr auto browserAfterRotation = DAW::mobile::fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96, browserBeforeRotation);
+    static_assert(browserAfterRotation.y >= 50
+                  && browserAfterRotation.y + browserAfterRotation.height <= 300 - 96);
+    static_assert(browserAfterRotation.width > 0 && browserAfterRotation.height > 0);
+    static_assert(!floatingMixerFits(mixerLandscape, mixerPortrait.window));
+    static_assert(floatingMixerFits(mixerLandscape, mixerLandscape.window));
+    constexpr auto browserAfterReturn = DAW::mobile::fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, browserAfterRotation);
+    static_assert(browserAfterReturn.x >= 0 && browserAfterReturn.y >= 50);
+    static_assert(browserAfterReturn.y + browserAfterReturn.height <= 852 - 144);
+
+    // The same safe-area contract applies while Sends, FX Browser, Clip FX
+    // and the floating Mixer coexist through portrait/landscape transitions.
+    for (int w : {245, 393, 852})
+        for (int h : {220, 300, 852})
+            for (int bottom : {96, 144})
+            {
+                constexpr int top = 50;
+                const auto mixer = fitFloatingMixer(w, h, top, bottom);
+                const auto browser = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    w, h, top, bottom, { 1000000, -1000000, 340, 560 });
+                const auto sends = fitBubblegumSends(
+                    w, h, 1000000, -1000000, true, top, bottom);
+                const auto clip = fitPhoneClipProperties(w, h, top, bottom);
+                assert(browser.x >= 0 && browser.y >= top);
+                assert(static_cast<long long>(browser.y) + browser.height <= h - bottom);
+                assert(inside(browser, w, h));
+                assert(inside(sends, w, h));
+                assert(inside(clip.window, w, h));
+                if (sends.height > 0)
+                    assert(sends.y >= top
+                           && static_cast<long long>(sends.y) + sends.height <= h - bottom);
+                if (mixer.safe.width > 0 && mixer.safe.height > 0)
+                    assert(floatingMixerFits(mixer, mixer.window));
+                if (clip.safe.width > 0 && clip.safe.height > 0)
+                    assert(phoneClipPropertiesFits(clip, clip.window));
+            }
+
 }
