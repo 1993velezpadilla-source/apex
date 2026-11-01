@@ -128,6 +128,25 @@ int main()
     static_assert(shouldCollapsePhoneTrackRail(true, 11));
     static_assert(!shouldCollapsePhoneTrackRail(true, 10));
     static_assert(!shouldCollapsePhoneTrackRail(true, 0));
+    // Smoothness contract: no jump in rail width/opacity at animation
+    // endpoints, symmetric easing and clamped overshoot on missed frames.
+    using DAW::mobile::smoothPhoneRailProgress;
+    static_assert(smoothPhoneRailProgress(-1.0f) == 0.0f);
+    static_assert(smoothPhoneRailProgress(0.0f) == 0.0f);
+    static_assert(smoothPhoneRailProgress(0.5f) == 0.5f);
+    static_assert(smoothPhoneRailProgress(1.0f) == 1.0f);
+    static_assert(smoothPhoneRailProgress(2.0f) == 1.0f);
+    static_assert(smoothPhoneRailProgress(0.25f) > 0.0f
+                  && smoothPhoneRailProgress(0.25f) < 0.25f);
+    static_assert(smoothPhoneRailProgress(0.75f) > 0.75f
+                  && smoothPhoneRailProgress(0.75f) < 1.0f);
+    for (int frame = 0; frame <= 180; ++frame)
+    {
+        const float p = smoothPhoneRailProgress((float)frame / 180.0f);
+        assert(p >= 0.0f && p <= 1.0f);
+        if (frame > 0)
+            assert(p >= smoothPhoneRailProgress((float)(frame - 1) / 180.0f));
+    }
     for (int space = 0; space <= 1000; ++space)
     {
         const int full = phoneTrackRailWidth(220, space, false);
