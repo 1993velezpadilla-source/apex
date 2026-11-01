@@ -387,7 +387,25 @@ private:
 
     std::vector<Btn> buildBtns(juce::Rectangle<float> zone) const
     {
-        return computeToolbarLayout(zone);
+        if (!phonePresentation_)
+            return computeToolbarLayout(zone); // Desktop/iPad: unchanged.
+
+        const auto phone = mobile::phoneMixerToolbarLayout(
+            juce::roundToInt(zone.getWidth()), juce::roundToInt(zone.getHeight()));
+        std::vector<Btn> buttons;
+        buttons.reserve((size_t) phone.count);
+        for (int i = 0; i < phone.count; ++i)
+        {
+            const auto& item = phone.buttons[i];
+            const int id = item.action == mobile::phoneMixerBrowser ? kBrowser
+                         : item.action == mobile::phoneMixerFXChain ? kSidePanel
+                         : item.action == mobile::phoneMixerReset ? kReset : kOverflow;
+            const auto& b = item.bounds;
+            buttons.push_back({ { zone.getX() + (float) b.x,
+                                  zone.getY() + (float) b.y,
+                                  (float) b.width, (float) b.height }, id });
+        }
+        return buttons;
     }
 
     bool isOn(int id) const
@@ -411,9 +429,11 @@ private:
         auto pillBg = [&](juce::Rectangle<float> r)
         {
             g.setColour(juce::Colours::black.withAlpha(0.28f));
-            g.fillRoundedRectangle(r.expanded(4.f, 2.f), 6.f);
+            const auto pill = r.expanded(phonePresentation_ ? 1.f : 4.f,
+                                         phonePresentation_ ? 1.f : 2.f);
+            g.fillRoundedRectangle(pill, 6.f);
             g.setColour(juce::Colours::white.withAlpha(0.06f));
-            g.drawRoundedRectangle(r.expanded(4.f, 2.f), 6.f, 0.8f);
+            g.drawRoundedRectangle(pill, 6.f, 0.8f);
         };
         // Keep every hit target on the same single row.  The old fixed-index
         // grouping assumed all seven actions were present, which made the
@@ -626,6 +646,11 @@ case kBG:
         bool addedAny = false;
         for (int id = kSettings; id <= kReset; ++id)
         {
+            // The phone toolbar must not offer unbound desktop actions or
+            // routing-cable visuals. Sends remains in the phone Transport.
+            if (phonePresentation_ && id != kBrowser
+                                   && id != kSidePanel && id != kReset)
+                continue;
             if (isVisible(id))
                 continue;
 
