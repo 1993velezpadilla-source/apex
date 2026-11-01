@@ -117,6 +117,27 @@ constexpr int phoneTrackListWidth(int requestedWidth, int workspaceWidth) noexce
     return minInt(maxInt(requestedWidth, 220), minInt(260, workspaceWidth - 1));
 }
 
+/** BandLab-style phone arranger rail.
+ *  Collapses the track-name header to a fixed icon strip after horizontal
+ *  movement away from the beginning. Hysteresis prevents a rapid open/close
+ *  loop from touch scroll jitter. Pixel widths are JUCE logical coordinates.
+ *  The actual Arrangement horizontal offset is NEVER modified here.
+ */
+constexpr bool shouldCollapsePhoneTrackRail(bool wasCollapsed,
+                                             int timelineScrollX) noexcept
+{
+    // Only a deliberate scroll collapses the name rail; returning to song
+    // start restores it. Between thresholds keep the current state.
+    return wasCollapsed ? timelineScrollX > 10 : timelineScrollX >= 48;
+}
+
+constexpr int phoneTrackRailWidth(int requestedWidth, int workspaceWidth,
+                                  bool isCollapsed) noexcept
+{
+    const int full = phoneTrackListWidth(requestedWidth, workspaceWidth);
+    return isCollapsed ? minInt(full, 48) : full;
+}
+
 /** Check a restored or dragged Mixer window against the safe phone area.
  *  Long-long edges avoid signed overflow from corrupt/restored coordinates.
  *  Reject collapsed windows even if their origin lies inside the viewport.
