@@ -4596,7 +4596,8 @@ namespace ArrangementEditor
             // visible/overscanned region and only when the current LOD needs it.
             // Tiny or non-audio clips therefore never start a cache worker just
             // because their renderer exists.
-            if (shouldBeVisible && renderer->shouldRenderWaveform()
+            if (!ClipRenderCore::s_lightweightPaint.load(std::memory_order_relaxed)
+                && shouldBeVisible && renderer->shouldRenderWaveform()
                 && renderer->getClip() != nullptr
                 && !renderer->getClip()->sourcePath.empty()
                 && renderer->needsWaveformUpdate())
