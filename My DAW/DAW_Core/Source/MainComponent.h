@@ -105,6 +105,7 @@ class MainComponent : public juce::Component,
                       private DAW::CommandManager::Listener,
                       private DAW::RoutingGraph::Listener,
                       private juce::ScrollBar::Listener,
+                      private juce::Timer,
                       private juce::ComponentListener,
                       private juce::KeyListener,
                       private DAW::ProjectManager::Listener,
@@ -313,6 +314,16 @@ private:
     // at the SAME time offset when the name rail collapses/expands.
     bool phoneTrackRailCollapsed_ = false;
     bool phoneTrackRailTransitioning_ = false;
+    // 180 ms tween, ~6 geometry updates. Never run a repaint timer at idle.
+    int phoneRailAnimatedWidth_ = -1;
+    int phoneRailAnimationFrom_ = 0;
+    int phoneRailAnimationTo_ = 0;
+    float phoneRailVisualProgress_ = 0.0f;
+    float phoneRailVisualFrom_ = 0.0f;
+    float phoneRailVisualTo_ = 0.0f;
+    double phoneRailAnimationStartMs_ = 0.0;
+    void handlePhoneTimelineScroll(int scrollX);
+    void timerCallback() override;
     int mixerH_     = 276;  // resizable via drag
 
     // ActionManager RAII registrations — auto-unregister on destruction
