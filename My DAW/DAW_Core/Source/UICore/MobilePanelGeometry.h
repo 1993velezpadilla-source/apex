@@ -78,6 +78,19 @@ constexpr PanelBounds phoneMixerHeaderEnergyRegion(int windowWidth,
     return { left, 0, right - left, maxInt(0, titleHeight) };
 }
 
+// Clip the phone toolbar's painted hover/active glows to its own title-bar
+// zone. The 32-high touch targets may paint a 2-unit glow; without a clip,
+// the glow bleeds into the Mixer content and can cover the title artwork.
+// Desktop/iPad do not use this clipping policy.
+constexpr PanelBounds phoneMixerToolbarPaintClip(int windowWidth,
+                                                 int titleHeight,
+                                                 int toolbarStart) noexcept
+{
+    const int width = maxInt(0, windowWidth);
+    const int left = clampInt(toolbarStart, 0, width);
+    return { left, 0, width - left, maxInt(0, titleHeight) };
+}
+
 // Phone Mixer title bar is 32 units tall. Use the full available height for
 // 44-wide, full 32-high touch targets; a true 44-high target needs a
 // separate chrome redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.
