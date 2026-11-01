@@ -113,6 +113,22 @@ int main()
     phoneLauncherTap.begin(4, 7);
     assert(phoneLauncherTap.release(7, 4, 0, 0));
 
+    // Nine or ten contacts can coexist on Android. If only eight are
+    // tracked, the state resets while the ninth is still down and an
+    // unrelated new finger can accidentally open a floating panel.
+    for (int source = 0; source < 10; ++source)
+        phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
+    assert(phoneLauncherTap.activeCount == 10);
+    for (int source = 0; source < 8; ++source)
+        assert(!phoneLauncherTap.release(source, 1, 0, 0));
+    assert(phoneLauncherTap.activeCount == 2);
+    phoneLauncherTap.begin(2, 12); // Must not re-arm while 8 and 9 remain.
+    assert(!phoneLauncherTap.release(12, 2, 0, 0));
+    assert(!phoneLauncherTap.release(8, 1, 0, 0));
+    assert(!phoneLauncherTap.release(9, 1, 0, 0));
+    phoneLauncherTap.begin(4, 7);
+    assert(phoneLauncherTap.release(7, 4, 0, 0));
+
     // A cancelled swipe cannot be re-armed by another finger.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
