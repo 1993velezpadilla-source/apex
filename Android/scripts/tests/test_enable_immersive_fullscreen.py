@@ -12,7 +12,8 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 
 class ImmersiveManifestTests(unittest.TestCase):
-    def run_patch(self, bundle, manifest_package=None, extra_activity_first=False):
+    def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
+                  launcher_exported=None):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -29,8 +30,11 @@ class ImmersiveManifestTests(unittest.TestCase):
             if extra_activity_first:
                 ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.UnrelatedActivity"})
-            activity = ET.SubElement(app, "activity", {
-                f"{{{ANDROID_NS}}}name": "com.rmsl.juce.JuceActivity"})
+            launcher_attributes = {
+                f"{{{ANDROID_NS}}}name": "com.rmsl.juce.JuceActivity"}
+            if launcher_exported is not None:
+                launcher_attributes[f"{{{ANDROID_NS}}}exported"] = launcher_exported
+            activity = ET.SubElement(app, "activity", launcher_attributes)
             filt = ET.SubElement(activity, "intent-filter")
             ET.SubElement(filt, "category", {
                 f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
@@ -53,6 +57,8 @@ class ImmersiveManifestTests(unittest.TestCase):
                                  bundle + ".ApexImmersiveActivity")
                 self.assertEqual(patched.get(f"{{{ANDROID_NS}}}screenOrientation"),
                                  "user")
+                self.assertEqual(patched.get(f"{{{ANDROID_NS}}}exported"),
+                                 "true")
                 self.assertTrue(java.is_file())
                 source = java.read_text(encoding="utf-8")
                 self.assertIn("WindowInsetsController", source)
@@ -71,6 +77,11 @@ class ImmersiveManifestTests(unittest.TestCase):
             with self.subTest(bundle=bundle):
                 self.assertEqual(
                     self.run_patch(bundle, extra_activity_first=True).returncode, 0)
+
+    def test_launcher_exported_false_is_repaired(self):
+        # Android 12+ requires exported=true for the launcher to start.
+        self.assertEqual(self.run_patch("com.xziel.apex.mobileportrait",
+                                        launcher_exported="false").returncode, 0)
 
     def test_manifest_package_matching_project_is_allowed(self):
         bundle = "com.xziel.apex.mobileportrait"
