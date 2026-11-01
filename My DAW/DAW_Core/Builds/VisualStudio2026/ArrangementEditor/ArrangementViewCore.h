@@ -827,7 +827,9 @@ namespace ArrangementEditor
                 if (m_owner.m_deferredRebuildRequested)
                 {
                     m_owner.m_deferredRebuildRequested = false;
-                    m_owner.rebuildClipRenderersInternal();
+                    // Go through the public recursion guard: a deferred
+                    // callback must not recursively enter renderer internals.
+                    m_owner.rebuildClipRenderers();
                 }
             }
         private:
