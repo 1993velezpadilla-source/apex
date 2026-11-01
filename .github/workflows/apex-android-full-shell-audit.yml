@@ -9,6 +9,7 @@ on:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - "Android/Tests/test_immersive_fullscreen.py"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/Source/MainComponent.cpp"
       - "My DAW/DAW_Core/Source/UICore/TrackList.h"
       - "My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h"
@@ -22,6 +23,7 @@ on:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - ".github/workflows/apex-android-full-shell-audit.yml"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
 
