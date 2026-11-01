@@ -458,8 +458,10 @@ private:
         auto pillBg = [&](juce::Rectangle<float> r)
         {
             g.setColour(juce::Colours::black.withAlpha(0.28f));
+            // Phone targets already fill the 32-unit title bar vertically;
+            // never paint the pill beyond the header into Mixer content.
             const auto pill = r.expanded(phonePresentation_ ? 1.f : 4.f,
-                                         phonePresentation_ ? 1.f : 2.f);
+                                         phonePresentation_ ? 0.f : 2.f);
             g.fillRoundedRectangle(pill, 6.f);
             g.setColour(juce::Colours::white.withAlpha(0.06f));
             g.drawRoundedRectangle(pill, 6.f, 0.8f);

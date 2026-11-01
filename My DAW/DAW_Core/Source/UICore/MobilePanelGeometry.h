@@ -64,8 +64,8 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
 }
 
 // Phone Mixer title bar is 32 units tall. Use the full available height for
-// 44-wide, 28-high touch targets; a true 44-high target needs a separate chrome
-// redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.
+// 44-wide, full 32-high touch targets; a true 44-high target needs a
+// separate chrome redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.
 // Bubblegum Sends is launched from the phone Transport, never the Send Matrix.
 enum PhoneMixerToolbarAction
 {
@@ -87,7 +87,7 @@ constexpr PhoneMixerToolbarLayout phoneMixerToolbarLayout(int zoneW, int zoneH) 
     // A 1-unit edge inset preserves all three 44-wide actions in a 142-unit
     // phone toolbar zone (common ~390-wide portrait Mixer), without shrinking
     // touch targets or reducing the 4-unit separation between actions.
-    constexpr int pad = 1, gap = 4, targetW = 44, targetH = 28;
+    constexpr int pad = 1, gap = 4, targetW = 44, targetH = 32;
     if (zoneW < targetW + 2 * pad || zoneH < targetH)
         return out;
     const int available = zoneW - 2 * pad;

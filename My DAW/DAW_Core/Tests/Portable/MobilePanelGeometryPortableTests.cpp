@@ -71,8 +71,9 @@ int main()
     assert(mixerChromeTap.release(102, 0, 0)); // stationary tap
 
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
-    // The 32-high title bar caps the phone target height at 28, while 44-wide
-    // targets and overflow avoid invisible/overlapping actions on narrow phones.
+    // The 32-high title bar caps phone targets at 44x32; fill that height
+    // without spilling the pill into Mixer content. Overflow prevents
+    // invisible/overlapping actions on narrow phones.
     using DAW::mobile::phoneMixerToolbarLayout;
     using DAW::mobile::phoneMixerBrowser;
     using DAW::mobile::phoneMixerFXChain;
@@ -83,8 +84,8 @@ int main()
                   && mixerToolbarPortrait.buttons[0].action == phoneMixerBrowser
                   && mixerToolbarPortrait.buttons[1].action == phoneMixerOverflow
                   && mixerToolbarPortrait.buttons[0].bounds.width == 44
-                  && mixerToolbarPortrait.buttons[0].bounds.height == 28
-                  && mixerToolbarPortrait.buttons[0].bounds.y == 2);
+                  && mixerToolbarPortrait.buttons[0].bounds.height == 32
+                  && mixerToolbarPortrait.buttons[0].bounds.y == 0);
     constexpr auto mixerToolbarLandscape = phoneMixerToolbarLayout(144, 32);
     static_assert(mixerToolbarLandscape.count == 3
                   && mixerToolbarLandscape.buttons[0].action == phoneMixerBrowser
@@ -103,8 +104,10 @@ int main()
                   && phoneMixerToolbarLayout(46, 32).buttons[0].action == phoneMixerOverflow);
     static_assert(phoneMixerToolbarLayout(45, 32).count == 0);
     static_assert(phoneMixerToolbarLayout(108, 20).count == 0);
+    static_assert(phoneMixerToolbarLayout(108, 31).count == 0);
+    static_assert(phoneMixerToolbarLayout(108, 32).buttons[0].bounds.height == 32);
     for (int w = 0; w <= 500; ++w)
-        for (int h : {0, 20, 28, 32, 48})
+        for (int h : {0, 20, 28, 31, 32, 48})
         {
             const auto layout = phoneMixerToolbarLayout(w, h);
             assert(layout.count >= 0 && layout.count <= 3);
@@ -112,7 +115,8 @@ int main()
             {
                 const auto b = layout.buttons[i];
                 assert(inside(b.bounds, w, h));
-                assert(b.bounds.width == 44 && b.bounds.height == 28);
+                assert(b.bounds.width == 44 && b.bounds.height == 32);
+                assert(b.bounds.y >= 0 && b.bounds.y + b.bounds.height <= h);
                 if (i > 0)
                 {
                     const auto previous = layout.buttons[i - 1].bounds;
