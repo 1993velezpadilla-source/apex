@@ -150,6 +150,14 @@ public:
         repaint();
     }
 
+    void setPhoneCollapsedRail(bool collapsed)
+    {
+        if (phoneCollapsedRail_ == collapsed) return;
+        phoneCollapsedRail_ = collapsed;
+        resized();
+        repaint();
+    }
+
     int getDesiredHeight() const { return height_; }
     void setDesiredHeight(int h) { height_ = h; }
     void setPlaylistExtraHeight(int extra)
@@ -387,6 +395,65 @@ public:
         if (phonePresentation_)
         {
             const auto c = master ? a.color.magenta : track_.getColor();
+            if (phoneCollapsedRail_)
+            {
+                // Horizontal-scroll mini rail: the actual waveform owns almost
+                // all viewport width. Keep each row selectable with a
+                // colour-coded microphone and a truthful loaded-FX badge.
+                g.setColour(master ? a.color.deepestB : a.color.panelA);
+                g.fillRect(bounds);
+                g.setColour(c.withAlpha(0.95f));
+                g.fillRect(0.f, 0.f, 3.f, (float)primaryHeight);
+                if (selected_)
+                {
+                    g.setColour(a.color.magenta.withAlpha(0.75f));
+                    g.drawRect(bounds.reduced(0.5f), 1.f);
+                }
+                const float cx = bounds.getCentreX();
+                const float micY = 31.f;
+                if (master)
+                {
+                    g.setFont(t.fonts.bold.withHeight(16.0f));
+                    g.setColour(c);
+                    g.drawText("M", juce::Rectangle<int>(0, 15, getWidth(), 30),
+                               juce::Justification::centred);
+                }
+                else
+                {
+                    g.setColour(c);
+                    g.drawRoundedRectangle(cx - 5.f, micY - 13.f,
+                                           10.f, 19.f, 5.f, 1.8f);
+                    g.drawLine(cx - 10.f, micY - 2.f, cx - 10.f, micY + 6.f, 1.8f);
+                    g.drawLine(cx + 10.f, micY - 2.f, cx + 10.f, micY + 6.f, 1.8f);
+                    g.drawLine(cx - 10.f, micY + 6.f, cx, micY + 12.f, 1.8f);
+                    g.drawLine(cx + 10.f, micY + 6.f, cx, micY + 12.f, 1.8f);
+                    g.drawLine(cx, micY + 12.f, cx, micY + 17.f, 1.8f);
+                    g.drawLine(cx - 7.f, micY + 17.f, cx + 7.f, micY + 17.f, 1.8f);
+                }
+                bool hasFx = false;
+                if (!master)
+                    if (auto* chain = track_.getPluginChain())
+                        for (int i = 0; i < chain->getNumSlots(); ++i)
+                            if (chain->hasPlugin(i)) { hasFx = true; break; }
+                if (hasFx)
+                {
+                    g.setColour(c.withAlpha(0.35f));
+                    g.fillRoundedRectangle(cx - 16.f, 56.f, 32.f, 17.f, 6.f);
+                    g.setColour(c);
+                    g.setFont(t.fonts.bold.withHeight(10.0f));
+                    g.drawText("FX", juce::Rectangle<int>(juce::roundToInt(cx - 16.f),
+                               56, 32, 17), juce::Justification::centred);
+                }
+                else if (track_.isArmed() && !master)
+                {
+                    g.setColour(t.colors.transportRecord);
+                    g.fillEllipse(cx - 4.f, 61.f, 8.f, 8.f);
+                }
+                g.setColour(a.color.borderSoftA.withAlpha(0.40f));
+                g.fillRect(0.f, bounds.getBottom() - 1.f, bounds.getWidth(), 1.f);
+            }
+            else
+            {
             g.setColour(master ? a.color.magentaDeep.darker(0.8f)
                                : a.color.panelA);
             g.fillRect(bounds);
@@ -449,6 +516,7 @@ public:
             g.setColour(a.color.borderSoftA.withAlpha(0.50f));
             g.fillRect(0.0f, bounds.getBottom() - 1.0f,
                        bounds.getWidth(), 1.0f);
+            }
         }
         else
         {
@@ -865,6 +933,17 @@ public:
 
         if (phonePresentation_)
         {
+            if (phoneCollapsedRail_)
+            {
+                phoneControlsBounds_ = {};
+                muteBounds_ = soloBounds_ = monitorBounds_ = armBounds_ = {};
+                automationBounds_ = automationTargetBounds_ = inputBounds_ = {};
+                preFaderBounds_ = trimBounds_ = pianoRollBounds_ = {};
+                playlistBounds_ = {};
+                colorStripBounds_ = {};
+                chevronBounds_ = {};
+                return;
+            }
             // ONLY the 44x44 ellipsis is a direct header control. All M/S/R,
             // monitor, input, playlist and automation controls are accessible
             // through its dedicated track-inspector menu. The remainder of
@@ -976,6 +1055,20 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_ && phoneCollapsedRail_
+            && e.y < getPrimaryHeight() && !e.mods.isPopupMenu())
+        {
+            // Defer inspector opening until mouseUp: scrolling vertically
+            // through mini-rail tracks must NOT spawn a menu on touch-down.
+            notifySelectionForInteraction(e.mods);
+            touchRowCandidate_ = ApexPointerPolicy::isDirect(e);
+            touchRowScrolling_ = false;
+            touchRowDownScreen_ = e.getScreenPosition();
+            touchRowDownMs_ = juce::Time::getMillisecondCounterHiRes();
+            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                touchRowViewportStartY_ = viewport->getViewPositionY();
+            return;
+        }
         if (phonePresentation_ && phoneControlsBounds_.contains(e.position))
         {
             notifySelectionForInteraction(e.mods);
@@ -1318,6 +1411,10 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        const bool compactRailTap = phonePresentation_ && phoneCollapsedRail_
+            && e.y < getPrimaryHeight() && !e.mods.isPopupMenu()
+            && !touchRowScrolling_
+            && e.getDistanceFromDragStart() <= 10;
         const bool showTouchMenu = touchRowCandidate_
             && ApexPointerPolicy::isDirect(e)
             && juce::Time::getMillisecondCounterHiRes() - touchRowDownMs_ >= 320.0
@@ -1329,7 +1426,9 @@ public:
             onReorderDrop(this);
         dragStartY_ = -1;
         dragMode_ = DragMode::None;
-        if (showTouchMenu && !track_.isMaster())
+        if (compactRailTap)
+            showPhoneTrackControls();
+        else if (showTouchMenu && !track_.isMaster())
             showContextMenu(); // exactly the native desktop right-click actions
     }
 
@@ -2041,6 +2140,7 @@ public:
     DragMode dragMode_ = DragMode::None;
     int  height_      = 72;
     bool phonePresentation_ = false;
+    bool phoneCollapsedRail_ = false;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
     juce::Point<int> contextScreenPoint_; // exact mouse/touch position for wheel
