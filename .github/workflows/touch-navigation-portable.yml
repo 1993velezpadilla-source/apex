@@ -25,6 +25,9 @@ on:
       - 'My DAW/DAW_Core/Source/UICore/SettingsPanel.h'
       - 'My DAW/DAW_Core/Source/UICore/TrackList.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipContextMenuCore.h'
+      - 'Android/scripts/enable_immersive_fullscreen.py'
+      - 'Android/scripts/tests/test_enable_immersive_fullscreen.py'
+      - 'My DAW/DAW_Core/Source/Main.cpp'
       - '.github/workflows/touch-navigation-portable.yml'
   workflow_dispatch:
 
@@ -53,3 +56,6 @@ jobs:
           /tmp/apex_mobile_transport_portrait_tests
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_ubsan
           /tmp/apex_mobile_transport_portrait_ubsan
+      - name: Validate generated Android orientation and immersive activity
+        shell: bash
+        run: python3 -m unittest discover -s Android/scripts/tests -p 'test_enable_immersive_fullscreen.py' -v
