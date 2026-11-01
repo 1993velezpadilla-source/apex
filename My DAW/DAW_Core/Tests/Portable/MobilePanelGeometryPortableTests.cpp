@@ -40,6 +40,50 @@ int main()
             assert(target.height == (h < 44 ? h : 44));
         }
 
+    // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
+    // The 32-high title bar caps the phone target height at 28, while 44-wide
+    // targets and overflow avoid invisible/overlapping actions on narrow phones.
+    using DAW::mobile::phoneMixerToolbarLayout;
+    using DAW::mobile::phoneMixerBrowser;
+    using DAW::mobile::phoneMixerFXChain;
+    using DAW::mobile::phoneMixerReset;
+    using DAW::mobile::phoneMixerOverflow;
+    constexpr auto mixerToolbarPortrait = phoneMixerToolbarLayout(108, 32);
+    static_assert(mixerToolbarPortrait.count == 2
+                  && mixerToolbarPortrait.buttons[0].action == phoneMixerBrowser
+                  && mixerToolbarPortrait.buttons[1].action == phoneMixerOverflow
+                  && mixerToolbarPortrait.buttons[0].bounds.width == 44
+                  && mixerToolbarPortrait.buttons[0].bounds.height == 28
+                  && mixerToolbarPortrait.buttons[0].bounds.y == 2);
+    constexpr auto mixerToolbarLandscape = phoneMixerToolbarLayout(144, 32);
+    static_assert(mixerToolbarLandscape.count == 3
+                  && mixerToolbarLandscape.buttons[0].action == phoneMixerBrowser
+                  && mixerToolbarLandscape.buttons[1].action == phoneMixerFXChain
+                  && mixerToolbarLandscape.buttons[2].action == phoneMixerReset);
+    static_assert(phoneMixerToolbarLayout(48, 32).count == 1
+                  && phoneMixerToolbarLayout(48, 32).buttons[0].action == phoneMixerOverflow);
+    static_assert(phoneMixerToolbarLayout(47, 32).count == 0);
+    static_assert(phoneMixerToolbarLayout(108, 20).count == 0);
+    for (int w = 0; w <= 500; ++w)
+        for (int h : {0, 20, 28, 32, 48})
+        {
+            const auto layout = phoneMixerToolbarLayout(w, h);
+            assert(layout.count >= 0 && layout.count <= 3);
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto b = layout.buttons[i];
+                assert(inside(b.bounds, w, h));
+                assert(b.bounds.width == 44 && b.bounds.height == 28);
+                if (i > 0)
+                {
+                    const auto previous = layout.buttons[i - 1].bounds;
+                    assert(previous.x + previous.width < b.bounds.x);
+                }
+            }
+            if (layout.count > 0 && layout.count < 3)
+                assert(layout.buttons[layout.count - 1].action == phoneMixerOverflow);
+        }
+
     // A phone Sends window must never cover the APEX header or the bottom
     // Transport, even when opened near the bottom or dragged off-screen.
     constexpr auto sendsPortrait = fitBubblegumSends(393, 852, 360, 800, true, 50, 144);
