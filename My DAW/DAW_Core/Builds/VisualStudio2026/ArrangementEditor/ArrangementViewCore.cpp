@@ -2411,12 +2411,11 @@ namespace ArrangementEditor
         juce::ScopedValueSetter<bool> guard(m_rebuildInProgress, true);
         rebuildClipRenderersInternal();
 
-        // If another rebuild was requested while we were running, defer it
-        if (m_deferredRebuildRequested)
-        {
-            m_deferredRebuildRequested = false;
-            m_rebuildDeferTimer->startTimer(1);  // Defer 1ms to avoid immediate recursion
-        }
+        // Keep the pending flag until the timer consumes it. Clearing it
+        // here made RebuildDeferTimer do nothing, silently dropping updates
+        // that arrived during a prior clip rebuild (including touch restore).
+        if (m_deferredRebuildRequested && m_rebuildDeferTimer != nullptr)
+            m_rebuildDeferTimer->startTimer(1); // next message-loop iteration
     }
 
     void ArrangementViewCore::rebuildClipRenderersInternal()
