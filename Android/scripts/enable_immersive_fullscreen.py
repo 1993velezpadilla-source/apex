@@ -94,7 +94,10 @@ def main() -> int:
     tree = ET.parse(manifest)
     root = tree.getroot()
     candidates = root.findall("./application/activity")
-    # A LAUNCHER category alone does not make an activity launchable: the\n    # MAIN action must appear in the same intent-filter. Ignore decoys.\n    launcher = [\n        a for a in candidates
+    # A LAUNCHER category alone does not make an activity launchable: the
+    # MAIN action must appear in the same intent-filter. Ignore decoys.
+    launcher = [
+        a for a in candidates
         if any(
             any(action.get(f"{{{ANDROID_NS}}}name")
                     == "android.intent.action.MAIN"
