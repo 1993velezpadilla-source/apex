@@ -152,6 +152,22 @@ constexpr int pluginBrowserHeaderHeight(bool phone) noexcept { return phone ? 0 
 constexpr int pluginBrowserSearchSlotHeight(bool phone) noexcept { return phone ? 48 : 26; }
 constexpr int pluginBrowserRowHeight(bool phone) noexcept { return phone ? 44 : 22; }
 constexpr int pluginBrowserChromeHeight(bool phone) noexcept { return phone ? 44 : 28; }
+// Calculate the FX list width from *current* content overflow, rather than
+// the scrollbar visibility from the previous layout pass. A stale scrollbar
+// state can cover the right edge of phone plugin rows after rotation/filtering.
+constexpr int pluginBrowserListWidth(int viewportW, int viewportH,
+                                     int rowCount, int rowHeight,
+                                     int scrollbarThickness) noexcept
+{
+    if (viewportW <= 0 || viewportH <= 0)
+        return 0;
+    const bool needsScrollbar = rowCount > 0 && rowHeight > 0
+        && rowCount > viewportH / rowHeight;
+    const int reserved = needsScrollbar
+        ? clampInt(scrollbarThickness, 0, viewportW) : 0;
+    return viewportW - reserved;
+}
+
 // A phone swipe that scrolls the FX list must never load a plugin on
 // mouseUp. JUCE delivers mouseUp to the row that received mouseDown even
 // when the finger has moved; desktop mouse selection stays unchanged.
