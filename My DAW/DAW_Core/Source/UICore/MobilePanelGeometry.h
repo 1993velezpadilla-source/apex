@@ -200,6 +200,35 @@ constexpr bool phoneChromeButtonTapActivates(int pressedButton, int releasedButt
         && pluginBrowserRowTapActivates(true, dragX, dragY, true);
 }
 
+// Preserve a phone chrome press across movement, but cancel it on rotation
+// or any parent resize before the release can hit newly positioned controls.
+struct PhoneChromeTapState
+{
+    int pressed = 0;
+    bool eligible = false;
+    constexpr void begin(int button) noexcept
+    {
+        pressed = button;
+        eligible = button != 0;
+    }
+    constexpr void move(int dx, int dy) noexcept
+    {
+        eligible = phoneTapGestureRemainsEligible(eligible, dx, dy);
+    }
+    constexpr void invalidate() noexcept
+    {
+        pressed = 0;
+        eligible = false;
+    }
+    constexpr bool release(int released, int dx, int dy) noexcept
+    {
+        const bool activate = eligible
+            && phoneChromeButtonTapActivates(pressed, released, dx, dy);
+        invalidate();
+        return activate;
+    }
+};
+
 // Four phone Transport launchers (Mixer, Sends, FX, Browser) must
 // activate only after a stationary release on the same launcher. A gesture
 // cancelled during mouseDrag stays cancelled even if it returns to origin.
