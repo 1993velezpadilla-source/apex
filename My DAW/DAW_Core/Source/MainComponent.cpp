@@ -7209,7 +7209,7 @@ void MainComponent::trackOrderChanged()
     cableOverlay_.repaint();
 }
 
-void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRangeStart*/)
+void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeStart)
 {
     // Mixer horizontal scroll - sync cables and offscreen indicators immediately
     // without waiting for the 60 Hz timer poll.
@@ -7226,6 +7226,24 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
         && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
             || scrollBar == &timelineViewport_->getVerticalScrollBar()))
     {
+        // React ONLY to crossing a horizontal threshold, not every pixel
+        // during a swipe. Layout changes are immediate, with no extra paint
+        // animation/timer, and NEVER reset the song's scroll X position.
+        if (scrollBar == &timelineViewport_->getHorizontalScrollBar()
+            && usesPhoneMixerPresentation() && !phoneTrackRailTransitioning_)
+        {
+            const int scrollX = juce::jmax(0, juce::roundToInt(newRangeStart));
+            const bool collapse = DAW::mobile::shouldCollapsePhoneTrackRail(
+                phoneTrackRailCollapsed_, scrollX);
+            if (collapse != phoneTrackRailCollapsed_)
+            {
+                phoneTrackRailCollapsed_ = collapse;
+                const juce::ScopedValueSetter<bool> guard(phoneTrackRailTransitioning_, true);
+                if (trackList_)
+                    trackList_->setPhoneCollapsedRail(collapse);
+                resized();
+            }
+        }
         if (arrangement_)
             arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
         if (trackList_)
@@ -9007,7 +9025,10 @@ void MainComponent::resized()
     // the bottom for thumb reach and leaves the Arrangement dominant.
     const bool phoneLayout = usesPhoneMixerPresentation();
     if (trackList_)
+    {
         trackList_->setPhonePresentation(phoneLayout);
+        trackList_->setPhoneCollapsedRail(phoneLayout && phoneTrackRailCollapsed_);
+    }
     if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < DAW::mobile::kPhoneTrackDefaultHeight)
         arrangement_->setLaneHeight(0, DAW::mobile::kPhoneTrackDefaultHeight);
     if (menuBar_)
@@ -9120,7 +9141,8 @@ void MainComponent::resized()
         // desktop keep the original user-selected width and Matrix workspace.
         // A tiny split-screen viewport still reserves a sliver for Arrangement.
         const int trackWidth = phoneLayout
-            ? DAW::mobile::phoneTrackListWidth(trackListW_, content.getWidth())
+            ? DAW::mobile::phoneTrackRailWidth(trackListW_, content.getWidth(),
+                                               phoneTrackRailCollapsed_)
             : trackListW_;
         trackListWindow_->setBounds(content.removeFromLeft(trackWidth));
     }
