@@ -349,18 +349,40 @@ struct PhoneTransportTapState
     int pressed = 0;
     int sourceIndex = -1;
     bool eligible = false;
+    // Keep tracking fingers after cancellation: a second touch must not
+    // re-arm a launcher while either finger remains on the Transport.
+    int activeSources[8]{};
+    int activeCount = 0;
+    bool blocked = false;
 
     constexpr void invalidate() noexcept
     {
         pressed = 0;
         sourceIndex = -1;
         eligible = false;
+        activeCount = 0;
+        blocked = false;
     }
     constexpr void begin(int button, int source) noexcept
     {
-        if (eligible) // overlapping fingers cancel both launchers
+        for (int i = 0; i < activeCount; ++i)
+            if (activeSources[i] == source)
+            {
+                blocked = true;
+                eligible = false;
+                return;
+            }
+        if (activeCount == 8)
         {
-            invalidate();
+            blocked = true;
+            eligible = false;
+            return;
+        }
+        activeSources[activeCount++] = source;
+        if (activeCount != 1 || blocked)
+        {
+            blocked = true;
+            eligible = false;
             return;
         }
         pressed = button;
@@ -369,23 +391,40 @@ struct PhoneTransportTapState
     }
     constexpr void move(int source, int dx, int dy) noexcept
     {
-        if (!eligible) return;
-        if (source != sourceIndex)
+        if (activeCount != 1 || source != sourceIndex)
         {
-            invalidate();
+            if (activeCount > 0)
+            {
+                blocked = true;
+                eligible = false;
+            }
             return;
         }
         eligible = phoneTapGestureRemainsEligible(eligible, dx, dy);
     }
     constexpr bool release(int source, int button, int dx, int dy) noexcept
     {
-        const bool activate = eligible && source == sourceIndex
+        const bool activate = activeCount == 1 && !blocked && eligible
+            && source == sourceIndex
             && phoneTransportLauncherTapActivates(pressed, button, dx, dy);
-        invalidate();
+        for (int i = 0; i < activeCount; ++i)
+            if (activeSources[i] == source)
+            {
+                activeSources[i] = activeSources[--activeCount];
+                break;
+            }
+        if (activeCount == 0)
+            invalidate();
+        else
+        {
+            blocked = true;
+            eligible = false;
+            pressed = 0;
+            sourceIndex = -1;
+        }
         return activate;
     }
 };
-
 // Phones already expose a 44-unit maximize button. A second finger tap on
 // the title must not toggle maximize while JUCE is still processing the
 // second mouseDown/drag; desktop double-click-to-maximize remains available.
