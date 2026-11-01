@@ -54,6 +54,8 @@ public:
         if (phonePresentation_ == phone)
             return;
         phonePresentation_ = phone;
+        pendingPhoneButton_.invalidate();
+        isDragging_ = false;
         resized();
         repaint();
     }
@@ -182,6 +184,12 @@ public:
 
     void resized() override
     {
+        // Rotation/parent resize invalidates an in-flight phone title gesture.
+        if (phonePresentation_)
+        {
+            pendingPhoneButton_.invalidate();
+            isDragging_ = false;
+        }
         if (content_)
             content_->setBounds(getLocalBounds().withTrimmedTop(chromeHeight()));
     }
@@ -195,10 +203,10 @@ public:
         auto hit = hitTestButtons(e.position, titleBar);
         // On phones, defer window actions until a stationary release over
         // the same button. A swipe must not accidentally close an FX window.
-        pendingPhoneButton_ = BtnHit::None;
+        pendingPhoneButton_.invalidate();
         if (phonePresentation_ && hit != BtnHit::None)
         {
-            pendingPhoneButton_ = hit;
+            pendingPhoneButton_.begin(static_cast<int>(hit));
             return;
         }
         if (hit == BtnHit::Close)    { closePanel(); return; }
@@ -223,24 +231,22 @@ public:
         // A swipe that returns to its starting button is still a swipe.
         // Cancel the pending phone action permanently once the touch travels
         // beyond the tap slop, even if mouseUp lands on the same button.
-        if (phonePresentation_ && pendingPhoneButton_ != BtnHit::None
-            && !mobile::phoneTapGestureRemainsEligible(
-                true, e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
-            pendingPhoneButton_ = BtnHit::None;
+        if (phonePresentation_)
+            pendingPhoneButton_.move(e.getDistanceFromDragStartX(),
+                                     e.getDistanceFromDragStartY());
         if (!isDragging_) return;
         dragger_.dragComponent(this, e, &constrainer_);
     }
 
     void mouseUp(const juce::MouseEvent& e) override
     {
-        if (phonePresentation_ && pendingPhoneButton_ != BtnHit::None)
+        if (phonePresentation_ && pendingPhoneButton_.pressed != 0)
         {
-            const auto pressed = pendingPhoneButton_;
-            pendingPhoneButton_ = BtnHit::None;
+            const auto pressed = static_cast<BtnHit>(pendingPhoneButton_.pressed);
             const auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
             const auto released = hitTestButtons(e.position, titleBar);
-            if (mobile::phoneChromeButtonTapActivates(
-                    static_cast<int>(pressed), static_cast<int>(released),
+            if (pendingPhoneButton_.release(
+                    static_cast<int>(released),
                     e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
             {
                 if (pressed == BtnHit::Close) closePanel();
@@ -297,7 +303,7 @@ private:
     juce::ComponentBoundsConstrainer constrainer_;
 
     enum class BtnHit { None, Close, Minimize, Maximize };
-    BtnHit pendingPhoneButton_ = BtnHit::None;
+    mobile::PhoneChromeTapState pendingPhoneButton_;
 
     struct BtnRects
     {
