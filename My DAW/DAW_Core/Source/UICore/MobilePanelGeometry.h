@@ -327,4 +327,14 @@ constexpr bool floatingMixerFits(const FloatingMixerFit& fit, PanelBounds curren
             <= static_cast<long long>(fit.safe.y) + fit.safe.height;
 }
 
+// Desktop Quick Send historically expands a collapsed Mixer to 800x260.
+// A phone in landscape can have less than 260 units above its Transport;
+// applying that desktop recovery would push the floating Mixer off-screen.
+constexpr bool quickSendNeedsDesktopMixerMinimum(bool phonePresentation,
+                                                  int currentHeight,
+                                                  int desktopMinimumHeight) noexcept
+{
+    return !phonePresentation && currentHeight < desktopMinimumHeight;
+}
+
 }

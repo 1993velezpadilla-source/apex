@@ -4071,6 +4071,9 @@ MainComponent::MainComponent()
         mixerWindow_->setVisible(true);
         mixerWindow_->toFront(false);
         if (mixerBubble_) mixerBubble_->setVisible(false);
+        // A restored desktop-sized Mixer may exceed a phone's safe area.
+        // Refit only through the existing responsive layout after opening.
+        if (usesPhoneMixerPresentation()) resized();
     };
     transportBar_->onOpenBubblegumSends = [this]
     {
@@ -6354,7 +6357,11 @@ void MainComponent::toggleQuickSendMode(const DAW::TrackID& sourceId)
             if (auto* mw = dynamic_cast<DAW::MixerWindow*>(mixerWindow_.get()))
             {
                 mw->restoreIfMinimized();
-                if (mw->getHeight() < DAW::MixerWindow::kMixerMinH)
+                // Quick Send's desktop 800x260 recovery must never enlarge
+                // the phone Mixer beyond its portrait/landscape safe area.
+                if (DAW::mobile::quickSendNeedsDesktopMixerMinimum(
+                        usesPhoneMixerPresentation(), mw->getHeight(),
+                        DAW::MixerWindow::kMixerMinH))
                     mw->setSize(juce::jmax(mw->getWidth(), 800),
                                 DAW::MixerWindow::kMixerMinH);
                 // Force a re-layout of the content viewport. When the window
@@ -6364,6 +6371,9 @@ void MainComponent::toggleQuickSendMode(const DAW::TrackID& sourceId)
                 // The explicit call guarantees the strips (not just the header)
                 // are visible and sized before the user starts clicking.
                 mw->resized();
+                // Restore a valid phone window after opening Quick Send.
+                // The desktop branch retains its existing sizing behavior.
+                if (usesPhoneMixerPresentation()) resized();
             }
         }
         if (mixerPanel_ != nullptr)

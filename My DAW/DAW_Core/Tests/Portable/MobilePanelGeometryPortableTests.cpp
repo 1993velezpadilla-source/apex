@@ -454,6 +454,17 @@ int main()
     static_assert(inside(mixerLandscape.safe, 852, 300));
     static_assert(mixerLandscape.window.y + mixerLandscape.window.height <= 300 - 96);
     static_assert(mixerLandscape.window.height > 0);
+    // Quick Send must not force desktop's 260-high Mixer onto a short phone
+    // landscape viewport. Desktop/iPad retain their legacy recovery.
+    using DAW::mobile::quickSendNeedsDesktopMixerMinimum;
+    static_assert(!quickSendNeedsDesktopMixerMinimum(
+        true, mixerLandscape.window.height, 260));
+    static_assert(!quickSendNeedsDesktopMixerMinimum(true, 0, 260));
+    static_assert(quickSendNeedsDesktopMixerMinimum(
+        false, mixerLandscape.window.height, 260));
+    static_assert(quickSendNeedsDesktopMixerMinimum(false, 259, 260));
+    static_assert(!quickSendNeedsDesktopMixerMinimum(false, 260, 260));
+    static_assert(!quickSendNeedsDesktopMixerMinimum(false, 340, 260));
     constexpr auto mixerTiny = fitFloatingMixer(360, 96, 50, 46);
     static_assert(mixerTiny.window.width == 0 && mixerTiny.window.height == 0);
     constexpr auto mixerExtreme = fitFloatingMixer(
