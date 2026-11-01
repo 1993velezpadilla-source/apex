@@ -7238,6 +7238,93 @@ void MainComponent::trackOrderChanged()
     cableOverlay_.repaint();
 }
 
+void MainComponent::handlePhoneTimelineScroll(int scrollX)
+{
+    if (!usesPhoneMixerPresentation() || !trackListWindow_
+        || !trackListWindow_->isVisible() || trackListWindow_->isMaximized()
+        || !timelineWindow_ || !timelineWindow_->isVisible())
+        return;
+
+    const bool collapse = DAW::mobile::shouldCollapsePhoneTrackRail(
+        phoneTrackRailCollapsed_, juce::jmax(0, scrollX));
+    if (collapse == phoneTrackRailCollapsed_) return;
+
+    // Reversible animation: when the finger scrolls back across the threshold,
+    // restart from the CURRENT interpolated width, never snap to an endpoint.
+    const int workspace = trackListWindow_->getWidth() + timelineWindow_->getWidth();
+    if (workspace <= 1) return;
+    const int target = DAW::mobile::phoneTrackRailWidth(trackListW_, workspace, collapse);
+    const int current = phoneRailAnimatedWidth_ >= 0 ? phoneRailAnimatedWidth_
+                                                        : trackListWindow_->getWidth();
+    phoneTrackRailCollapsed_ = collapse;
+    phoneRailAnimationFrom_ = current;
+    phoneRailAnimationTo_ = target;
+    phoneRailAnimatedWidth_ = current;
+    phoneRailVisualFrom_ = phoneRailVisualProgress_;
+    phoneRailVisualTo_ = collapse ? 1.0f : 0.0f;
+    phoneRailAnimationStartMs_ = juce::Time::getMillisecondCounterHiRes();
+    phoneTrackRailTransitioning_ = true;
+    startTimerHz(30);
+}
+
+void MainComponent::timerCallback()
+{
+    if (!phoneTrackRailTransitioning_ || !usesPhoneMixerPresentation()
+        || !trackListWindow_ || !timelineWindow_)
+    {
+        stopTimer();
+        phoneTrackRailTransitioning_ = false;
+        phoneRailAnimatedWidth_ = -1;
+        return;
+    }
+
+    // Time-based smoothstep completes despite missed frames on slow phones.
+    const double elapsedMs = juce::Time::getMillisecondCounterHiRes()
+                             - phoneRailAnimationStartMs_;
+    const float t = juce::jlimit(0.0f, 1.0f, (float)(elapsedMs / 180.0));
+    const float ease = t * t * (3.0f - 2.0f * t);
+    phoneRailAnimatedWidth_ = juce::roundToInt(
+        (float)phoneRailAnimationFrom_
+        + ((float)(phoneRailAnimationTo_ - phoneRailAnimationFrom_) * ease));
+    phoneRailVisualProgress_ = phoneRailVisualFrom_
+        + (phoneRailVisualTo_ - phoneRailVisualFrom_) * ease;
+    if (trackList_)
+        trackList_->setPhoneRailProgress(phoneRailVisualProgress_);
+
+    // Animate ONLY the arranger split, not all floating windows, routing
+    // overlays, plugin UIs, and transports. The previous full resized() on
+    // every scroll event stalled slow Android rendering.
+    const auto rail = trackListWindow_->getBounds();
+    const auto timeline = timelineWindow_->getBounds();
+    const int totalW = rail.getWidth() + timeline.getWidth();
+    const int w = juce::jlimit(0, juce::jmax(0, totalW - 1), phoneRailAnimatedWidth_);
+    if (w != rail.getWidth())
+    {
+        trackListWindow_->setBounds(rail.withWidth(w));
+        timelineWindow_->setBounds(rail.getX() + w, timeline.getY(),
+                                   juce::jmax(1, totalW - w), timeline.getHeight());
+        // Viewport retains its source time and track scroll while the visible
+        // waveform canvas gains/loses width. No playhead seek or audio mutation.
+        updateTimelineViewportContentBounds();
+        repaint(rail.getX(), rail.getY(), totalW, rail.getHeight());
+    }
+
+    if (t >= 1.0f)
+    {
+        stopTimer();
+        phoneTrackRailTransitioning_ = false;
+        phoneRailAnimatedWidth_ = -1;
+        phoneRailVisualProgress_ = phoneRailVisualTo_;
+        if (trackList_)
+        {
+            trackList_->setPhoneCollapsedRail(phoneTrackRailCollapsed_);
+            trackList_->setPhoneRailProgress(phoneRailVisualProgress_);
+        }
+        // One final authoritative layout pass, not repeated per swipe pixel.
+        resized();
+    }
+}
+
 void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeStart)
 {
     // Mixer horizontal scroll - sync cables and offscreen indicators immediately
@@ -7255,24 +7342,8 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeSt
         && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
             || scrollBar == &timelineViewport_->getVerticalScrollBar()))
     {
-        // React ONLY to crossing a horizontal threshold, not every pixel
-        // during a swipe. Layout changes are immediate, with no extra paint
-        // animation/timer, and NEVER reset the song's scroll X position.
-        if (scrollBar == &timelineViewport_->getHorizontalScrollBar()
-            && usesPhoneMixerPresentation() && !phoneTrackRailTransitioning_)
-        {
-            const int scrollX = juce::jmax(0, juce::roundToInt(newRangeStart));
-            const bool collapse = DAW::mobile::shouldCollapsePhoneTrackRail(
-                phoneTrackRailCollapsed_, scrollX);
-            if (collapse != phoneTrackRailCollapsed_)
-            {
-                phoneTrackRailCollapsed_ = collapse;
-                const juce::ScopedValueSetter<bool> guard(phoneTrackRailTransitioning_, true);
-                if (trackList_)
-                    trackList_->setPhoneCollapsedRail(collapse);
-                resized();
-            }
-        }
+        if (scrollBar == &timelineViewport_->getHorizontalScrollBar())
+            handlePhoneTimelineScroll(juce::jmax(0, juce::roundToInt(newRangeStart)));
         if (arrangement_)
             arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
         if (trackList_)
@@ -9056,7 +9127,8 @@ void MainComponent::resized()
     if (trackList_)
     {
         trackList_->setPhonePresentation(phoneLayout);
-        trackList_->setPhoneCollapsedRail(phoneLayout && phoneTrackRailCollapsed_);
+        if (!phoneTrackRailTransitioning_)
+            trackList_->setPhoneCollapsedRail(phoneLayout && phoneTrackRailCollapsed_);
     }
     if (phoneLayout && arrangement_ && arrangement_->getPhysicalTrackHeight() < DAW::mobile::kPhoneTrackDefaultHeight)
         arrangement_->setLaneHeight(0, DAW::mobile::kPhoneTrackDefaultHeight);
@@ -9170,8 +9242,11 @@ void MainComponent::resized()
         // desktop keep the original user-selected width and Matrix workspace.
         // A tiny split-screen viewport still reserves a sliver for Arrangement.
         const int trackWidth = phoneLayout
-            ? DAW::mobile::phoneTrackRailWidth(trackListW_, content.getWidth(),
-                                               phoneTrackRailCollapsed_)
+            ? (phoneTrackRailTransitioning_ && phoneRailAnimatedWidth_ >= 0
+                ? juce::jlimit(0, juce::jmax(0, content.getWidth() - 1),
+                               phoneRailAnimatedWidth_)
+                : DAW::mobile::phoneTrackRailWidth(trackListW_, content.getWidth(),
+                                                   phoneTrackRailCollapsed_))
             : trackListW_;
         trackListWindow_->setBounds(content.removeFromLeft(trackWidth));
     }
