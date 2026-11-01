@@ -1522,7 +1522,8 @@ namespace ArrangementEditor
             if (wasLightweight)
             {
                 for (const auto& clip : m_clipRenderers)
-                    if (clip != nullptr && clip->isShowing()) clip->repaint();
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterNavigation();
                 repaint();
             }
         }
