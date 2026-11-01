@@ -111,6 +111,31 @@ int main()
         assert(width < workspace || workspace <= 1);
     }
 
+    // Horizontal swipe hides NAMES, never waveforms; scrolling back to the
+    // beginning restores them. Hysteresis protects against viewport jitter.
+    using DAW::mobile::phoneTrackRailWidth;
+    using DAW::mobile::shouldCollapsePhoneTrackRail;
+    static_assert(phoneTrackRailWidth(220, 393, false) == 128);
+    static_assert(phoneTrackRailWidth(220, 393, true) == 48);
+    static_assert(phoneTrackRailWidth(220, 360, false) == 120);
+    static_assert(phoneTrackRailWidth(220, 360, true) == 48);
+    static_assert(phoneTrackRailWidth(220, 100, true) == 48);
+    static_assert(phoneTrackRailWidth(220, 1, true) == 0);
+    static_assert(!shouldCollapsePhoneTrackRail(false, 0));
+    static_assert(!shouldCollapsePhoneTrackRail(false, 47));
+    static_assert(shouldCollapsePhoneTrackRail(false, 48));
+    static_assert(shouldCollapsePhoneTrackRail(true, 48));
+    static_assert(shouldCollapsePhoneTrackRail(true, 11));
+    static_assert(!shouldCollapsePhoneTrackRail(true, 10));
+    static_assert(!shouldCollapsePhoneTrackRail(true, 0));
+    for (int space = 0; space <= 1000; ++space)
+    {
+        const int full = phoneTrackRailWidth(220, space, false);
+        const int mini = phoneTrackRailWidth(220, space, true);
+        assert(mini >= 0 && mini <= full);
+        assert(full < space || space <= 1);
+    }
+
     // Phone track controls must NEVER overlap or reach beyond the row.
     // At the target 360dp screen: 180dp side panel, 3 x 50dp touch columns,
     // 44dp tall controls in an 180dp track lane.
