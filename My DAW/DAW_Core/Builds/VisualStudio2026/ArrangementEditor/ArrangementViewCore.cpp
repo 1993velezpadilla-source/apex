@@ -1156,6 +1156,7 @@ namespace ArrangementEditor
             // Two fingers share a single navigation owner. Switching from one
             // finger to two must cancel its hold/fling, never inherit its anchor.
             m_touchScrollActive = false;
+            m_touchHorizontalPanOccurred = false; // pinch is NOT a track rail swipe
             m_smoothedTouchValid = false;
             m_holdActive = false;
             m_holdDragging = false;
@@ -1170,6 +1171,7 @@ namespace ArrangementEditor
             {
                 ++m_touchGestureEpoch; // cancel any pending selected-clip tap menu
                 m_twoFingerGestureActive = true;
+                m_pinchAxis = PinchAxis::None;
                 m_lastTwoFingerPos = centreScreen;
                 m_lastPinchSepX = sepX;
                 m_lastPinchSepY = sepY;
@@ -1177,8 +1179,22 @@ namespace ArrangementEditor
             }
 
             const auto delta = centreScreen - m_lastTwoFingerPos;
-            const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
-            const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
+            // A natural finger spread always contains small X and Y jitter.
+            // Previously each pinch could change BOTH zoom dimensions
+            // dozens of times per second, shaking tracks and timeline.
+            // Wait for an unambiguous displacement then lock one axis until
+            // both fingers lift; pan with the centroid remains supported.
+            if (m_pinchAxis == PinchAxis::None)
+            {
+                const double dx = std::abs(sepX - m_lastPinchSepX);
+                const double dy = std::abs(sepY - m_lastPinchSepY);
+                if (juce::jmax(dx, dy) >= 6.0)
+                    m_pinchAxis = dx >= dy ? PinchAxis::Horizontal : PinchAxis::Vertical;
+            }
+            const bool zoomingX = m_pinchAxis == PinchAxis::Horizontal
+                && TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
+            const bool zoomingY = m_pinchAxis == PinchAxis::Vertical
+                && TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
             if (delta.getDistanceFromOrigin() >= 1.0f || zoomingX || zoomingY)
                 ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
             const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
@@ -1238,6 +1254,7 @@ namespace ArrangementEditor
         // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
         // than jumping to the obsolete single-finger pan origin.
         m_twoFingerGestureActive = false;
+        m_pinchAxis = PinchAxis::None;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
 
@@ -1251,6 +1268,12 @@ namespace ArrangementEditor
         if (touchCount == 0 && m_touchScrollActive)
         {
             m_touchScrollActive  = false;
+            // Do not postpone name/icon rail feedback until the end of a
+            // potentially long kinetic fling. Finger release is safe for
+            // geometry changes (no more anchored touch positions), and the
+            // final callback below handles a fling that reaches X=0 later.
+            if (m_touchHorizontalPanOccurred && onTouchNavigationSettled)
+                onTouchNavigationSettled();
             m_smoothedTouchValid = false;
 
             // A clip renderer owns clip-long-press dispatch on its OWN
@@ -1274,7 +1297,11 @@ namespace ArrangementEditor
             // is no fling at all, and the release velocity is clamped so a fast
             // flick cannot fly off. (Velocity is px per 60 Hz frame.)
             constexpr double kMinFlingVelocity = 1.0;    // ≈ 60 px/s
-            constexpr double kMaxFlingVelocity = 120.0;  // ≈ 7200 px/s
+           #if JUCE_ANDROID
+            constexpr double kMaxFlingVelocity = 56.0; // capped phone fling
+           #else
+            constexpr double kMaxFlingVelocity = 120.0;
+           #endif
             if (std::abs(m_touchPanVelocityX) < kMinFlingVelocity
                 && std::abs(m_touchPanVelocityY) < kMinFlingVelocity)
             {
@@ -1339,6 +1366,7 @@ namespace ArrangementEditor
                 m_touchPanDownScreenPos = posScreen;
                 m_gestureStartViewX = viewport->getViewPositionX();
                 m_gestureStartViewY = viewport->getViewPositionY();
+                m_touchHorizontalPanOccurred = false;
                 m_lastTouchPanPos    = posScreen;
                 m_lastTouchPanTimeMs = juce::Time::getMillisecondCounterHiRes();
                 m_touchPanVelocityX  = 0.0;
@@ -1400,6 +1428,7 @@ namespace ArrangementEditor
             }
 
             ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+            const int scrollXBefore = viewport->getViewPositionX();
             viewport->setViewPosition(
                 TouchNavigationMath::panPosition(m_gestureStartViewX,
                     pos.x - m_touchPanDownScreenPos.x,
@@ -1407,6 +1436,9 @@ namespace ArrangementEditor
                 TouchNavigationMath::panPosition(m_gestureStartViewY,
                     pos.y - m_touchPanDownScreenPos.y,
                     juce::jmax(0, getHeight() - viewport->getViewHeight())));
+            if (scrollXBefore != viewport->getViewPositionX()
+                && std::abs(pos.x - m_touchPanDownScreenPos.x) >= 10)
+                m_touchHorizontalPanOccurred = true;
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
@@ -1423,11 +1455,15 @@ namespace ArrangementEditor
 
         m_gestureIsPinch = false;
 
-        // Exponential decay per frame. 0.967 per 16 ms frame is the iOS
-        // UIScrollView "normal" deceleration (0.998 per ms) — the natural,
-        // long glide. 0.93 was stopping noticeably short.
-        m_touchPanVelocityX *= 0.967;
-        m_touchPanVelocityY *= 0.967;
+        // Android release should coast, not drift several screens after a
+        // short flick. Keep previous iOS physics untouched.
+       #if JUCE_ANDROID
+        constexpr double kFriction = 0.90;
+       #else
+        constexpr double kFriction = 0.967;
+       #endif
+        m_touchPanVelocityX *= kFriction;
+        m_touchPanVelocityY *= kFriction;
 
         if (std::abs(m_touchPanVelocityX) < 0.35 && std::abs(m_touchPanVelocityY) < 0.35)
         {
@@ -1443,8 +1479,9 @@ namespace ArrangementEditor
             }
             // Touch/pinch or inertial scroll has stopped: resizing the rail
             // here does not interfere with gesture-anchored viewport math.
-            if (onTouchNavigationSettled)
+            if (m_touchHorizontalPanOccurred && onTouchNavigationSettled)
                 onTouchNavigationSettled();
+            m_touchHorizontalPanOccurred = false;
             return false;
         }
 
@@ -1493,6 +1530,8 @@ namespace ArrangementEditor
     void ArrangementViewCore::endTouchPanGesture()
     {
         m_touchScrollActive = false;
+        if (m_touchHorizontalPanOccurred && onTouchNavigationSettled)
+            onTouchNavigationSettled(); // immediate after release, not delayed
 
         // Momentum only after a REAL swipe. A tiny nudge used to fling on a
         // spurious velocity spike, which is what made small movements jitter.
@@ -1516,8 +1555,9 @@ namespace ArrangementEditor
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
             ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
-            if (onTouchNavigationSettled)
-                onTouchNavigationSettled();
+            // The release callback already updated track rail presentation.
+            // No second update is needed when momentum is absent.
+            m_touchHorizontalPanOccurred = false;
         }
     }
 
