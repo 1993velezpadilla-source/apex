@@ -85,6 +85,7 @@ int main()
     assert(!phoneLauncherTap.release(7, 2, 0, 0));
     phoneLauncherTap.begin(4, 7);
     assert(!phoneLauncherTap.release(8, 4, 0, 0)); // wrong pointer
+    assert(!phoneLauncherTap.release(7, 4, 0, 0)); // cannot re-arm after foreign up
     phoneLauncherTap.begin(4, 7);
     phoneLauncherTap.move(8, 0, 0); // foreign drag cancels
     assert(!phoneLauncherTap.release(7, 4, 0, 0));
