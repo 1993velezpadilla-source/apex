@@ -2418,7 +2418,7 @@ MainComponent::MainComponent()
         if (!usesPhoneMixerPresentation() || !arrangement_ || !timelineViewport_)
         {
             syncTrackHeaders();
-            return;
+            return true;
         }
         // Horizontal pinch changes ONLY timeline pixels/second. Reusing the
         // existing cached song extent avoids an O(clips + tracks) rebuild
@@ -2429,10 +2429,12 @@ MainComponent::MainComponent()
         const double timeSpan = juce::jmax(30.0, lastTimelineContentLengthSeconds_);
         const int width = juce::jmax(viewportW + 1,
             juce::roundToInt(juce::jmin(2147483000.0, std::ceil(timeSpan * pps))));
-        if (width != arrangement_->getWidth())
+        const bool changed = width != arrangement_->getWidth();
+        if (changed)
             arrangement_->setSize(width, arrangement_->getHeight());
         // Do not touch vertical lane heights, TrackList child bounds, or
         // transport seek here. The gesture keeps its musical time anchor.
+        return changed;
     };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
