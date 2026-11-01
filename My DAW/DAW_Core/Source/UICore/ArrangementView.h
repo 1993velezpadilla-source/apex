@@ -192,6 +192,17 @@ public:
                 repaint();
                 return;
             }
+            if (laneHeightChanged && inlinePlaylistPanel_ == nullptr
+                && onPhoneVerticalZoomChanged)
+            {
+                // Phone vertical pinch: update the actual arranger/track
+                // geometry and visible rail headers, without doing a full
+                // song-length clip extent scan on every finger sample.
+                if (!onPhoneVerticalZoomChanged() && core_ != nullptr)
+                    core_->resized();
+                repaint();
+                return;
+            }
             if (core_ != nullptr)
                 core_->resized();
             // Vertical zoom must still synchronize every physical header,
@@ -866,6 +877,7 @@ trackManager_.addListener(this);
     // Optional phone fast path for HORIZONTAL time zoom only. Desktop/iPad
     // retain their existing full header/playlist synchronization.
     std::function<bool()> onPhoneHorizontalZoomChanged;
+    std::function<bool()> onPhoneVerticalZoomChanged;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;
