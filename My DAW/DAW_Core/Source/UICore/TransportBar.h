@@ -395,7 +395,7 @@ public:
     void resized() override
     {
         // A rotation or resized Transport invalidates an in-flight launcher tap.
-        pendingPhoneLauncher_ = PhoneLauncher::None;
+        phoneLauncherTap_.invalidate();
         if (phoneLayout_)
         {
             // Portrait-first layout: every important transport action stays visible.
@@ -557,7 +557,8 @@ public:
         {
             // A swipe over the persistent Transport must not open a floating
             // panel on mouseDown. Defer all four phone launchers to mouseUp.
-            pendingPhoneLauncher_ = phoneLauncherAt(e.position);
+            phoneLauncherTap_.begin(static_cast<int>(phoneLauncherAt(e.position)),
+                                    e.source.getIndex());
             return;
         }
 
@@ -578,10 +579,9 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
-        if (phoneLayout_ && pendingPhoneLauncher_ != PhoneLauncher::None
-            && !mobile::phoneTapGestureRemainsEligible(
-                true, e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
-            pendingPhoneLauncher_ = PhoneLauncher::None;
+        if (phoneLayout_)
+            phoneLauncherTap_.move(e.source.getIndex(),
+                e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY());
     }
 
     void mouseUp(const juce::MouseEvent& e) override
@@ -589,13 +589,11 @@ public:
         if (!phoneLayout_)
             return;
 
-        const auto pressed = pendingPhoneLauncher_;
-        pendingPhoneLauncher_ = PhoneLauncher::None;
-        if (mobile::phoneTransportLauncherTapActivates(
-                static_cast<int>(pressed),
+        const int pressed = phoneLauncherTap_.pressed;
+        if (phoneLauncherTap_.release(e.source.getIndex(),
                 static_cast<int>(phoneLauncherAt(e.position)),
                 e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
-            activatePhoneLauncher(pressed);
+            activatePhoneLauncher(static_cast<PhoneLauncher>(pressed));
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -669,7 +667,7 @@ private:
     juce::Rectangle<int> mobileMixerBounds_, mobileSendsBounds_;
 
     enum class PhoneLauncher { None, Mixer, Sends, SidePanel, Browser };
-    PhoneLauncher pendingPhoneLauncher_ = PhoneLauncher::None;
+    mobile::PhoneTransportTapState phoneLauncherTap_;
 
     PhoneLauncher phoneLauncherAt(juce::Point<float> p) const noexcept
     {

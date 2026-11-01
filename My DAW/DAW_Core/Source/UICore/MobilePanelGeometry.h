@@ -342,6 +342,50 @@ constexpr bool phoneTransportLauncherTapActivates(int pressed, int released,
     return phoneChromeButtonTapActivates(pressed, released, dragX, dragY);
 }
 
+// A second touch cannot replace a pending floating-panel launcher tap.
+// Bind the entire gesture to the initiating JUCE MouseInputSource index.
+struct PhoneTransportTapState
+{
+    int pressed = 0;
+    int sourceIndex = -1;
+    bool eligible = false;
+
+    constexpr void invalidate() noexcept
+    {
+        pressed = 0;
+        sourceIndex = -1;
+        eligible = false;
+    }
+    constexpr void begin(int button, int source) noexcept
+    {
+        if (eligible) // overlapping fingers cancel both launchers
+        {
+            invalidate();
+            return;
+        }
+        pressed = button;
+        sourceIndex = source;
+        eligible = button != 0;
+    }
+    constexpr void move(int source, int dx, int dy) noexcept
+    {
+        if (!eligible) return;
+        if (source != sourceIndex)
+        {
+            invalidate();
+            return;
+        }
+        eligible = phoneTapGestureRemainsEligible(eligible, dx, dy);
+    }
+    constexpr bool release(int source, int button, int dx, int dy) noexcept
+    {
+        const bool activate = eligible && source == sourceIndex
+            && phoneTransportLauncherTapActivates(pressed, button, dx, dy);
+        invalidate();
+        return activate;
+    }
+};
+
 // Phones already expose a 44-unit maximize button. A second finger tap on
 // the title must not toggle maximize while JUCE is still processing the
 // second mouseDown/drag; desktop double-click-to-maximize remains available.

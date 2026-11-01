@@ -70,6 +70,30 @@ int main()
     mixerChromeTap.begin(102);
     assert(mixerChromeTap.release(102, 0, 0)); // stationary tap
 
+    // The phone's Mixer/Sends/FX/Browser launchers must not cross-activate
+    // when two fingers overlap, even if one returns to its starting point.
+    DAW::mobile::PhoneTransportTapState phoneLauncherTap;
+    phoneLauncherTap.begin(1, 7);
+    assert(phoneLauncherTap.release(7, 1, 0, 0)); // stationary one-finger tap
+    phoneLauncherTap.begin(1, 7);
+    phoneLauncherTap.move(7, 20, 0);
+    phoneLauncherTap.move(7, 0, 0);
+    assert(!phoneLauncherTap.release(7, 1, 0, 0)); // swipe and return
+    phoneLauncherTap.begin(2, 7);
+    phoneLauncherTap.begin(3, 8); // second finger cancels both
+    assert(!phoneLauncherTap.release(8, 3, 0, 0));
+    assert(!phoneLauncherTap.release(7, 2, 0, 0));
+    phoneLauncherTap.begin(4, 7);
+    assert(!phoneLauncherTap.release(8, 4, 0, 0)); // wrong pointer
+    phoneLauncherTap.begin(4, 7);
+    phoneLauncherTap.move(8, 0, 0); // foreign drag cancels
+    assert(!phoneLauncherTap.release(7, 4, 0, 0));
+    phoneLauncherTap.begin(4, 7);
+    assert(!phoneLauncherTap.release(7, 3, 0, 0)); // wrong target
+    phoneLauncherTap.begin(4, 7);
+    phoneLauncherTap.invalidate(); // rotation or resize
+    assert(!phoneLauncherTap.release(7, 4, 0, 0));
+
     // Header energy must not overpaint either the original left chrome or
     // the phone toolbar. Desktop/iPad keep the original full-width rendering.
     using DAW::mobile::phoneMixerHeaderEnergyRegion;
