@@ -61,6 +61,13 @@ public:
     }
 
     juce::String getTooltip() override { return currentTooltip_; }
+    void setPhoneCompact(bool compact)
+    {
+        if (phoneCompact_ == compact) return;
+        phoneCompact_ = compact;
+        resized();
+        repaint();
+    }
 
     void setIndentLevel(int level)
     {
@@ -352,6 +359,34 @@ public:
 
     void paint(juce::Graphics& g) override
     {
+        if (phoneCompact_)
+        {
+            const auto area = getLocalBounds();
+            const auto primary = area.withHeight(getPrimaryHeight());
+            const auto colour = track_.isMaster()
+                ? masterAccentColour() : track_.getColor();
+            g.setColour(juce::Colour(0xFF090D17));
+            g.fillRect(area);
+            if (selected_)
+            {
+                g.setColour(colour.withAlpha(0.15f));
+                g.fillRect(primary);
+            }
+            g.setColour(colour);
+            g.fillRect(0, 0, 3, getPrimaryHeight());
+            g.setFont(juce::Font(juce::FontOptions(13.f, juce::Font::bold)));
+            g.setColour(juce::Colours::white);
+            if (getWidth() < 70)
+                g.drawText(track_.isMaster() ? "M" : "MIC",
+                           primary.reduced(3, 3), juce::Justification::centred);
+            else
+                g.drawFittedText(track_.isMaster() ? "MASTER" : track_.getName(),
+                    primary.reduced(7, 6), juce::Justification::centredLeft, 1, 0.72f);
+            g.setColour(juce::Colour(0xFF242B3C));
+            g.fillRect(0, getPrimaryHeight() - 1, getWidth(), 1);
+            return;
+        }
+
         const int primaryHeight = getPrimaryHeight();
         // Real mixer/track controls cannot extend over virtual take rows.
         g.saveState();
@@ -741,6 +776,16 @@ public:
     
     void resized() override
     {
+        if (phoneCompact_)
+        {
+            muteBounds_ = soloBounds_ = monitorBounds_ = armBounds_ = {};
+            preFaderBounds_ = trimBounds_ = automationBounds_ = {};
+            automationTargetBounds_ = inputBounds_ = pianoRollBounds_ = {};
+            playlistBounds_ = colorStripBounds_ = chevronBounds_ = {};
+            vu_.setVisible(false);
+            vu_.setBounds({});
+            return;
+        }
         auto bounds = getLocalBounds().toFloat().withHeight((float)getPrimaryHeight());
         if (indentLevel_ > 0 && !track_.isMaster())
             bounds.removeFromLeft((float)(indentLevel_ * kIndentStepPx));
@@ -845,6 +890,13 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (phoneCompact_)
+        {
+            notifySelectionForInteraction(e.mods);
+            if (e.mods.isPopupMenu() && !track_.isMaster())
+                showContextMenu();
+            return;
+        }
         if (!track_.isMaster() && playlistExtraHeight_ > 0
             && e.y >= getPrimaryHeight() && e.y < getHeight())
         {
@@ -1076,6 +1128,7 @@ public:
 
     void mouseMove(const juce::MouseEvent& e) override
     {
+        if (phoneCompact_) return;
         if (track_.isMaster())
             masterLivingEye_.setGazeTarget(e.position, true);
 
@@ -1827,6 +1880,7 @@ public:
     juce::Point<int> touchRowDownScreen_;
     double touchRowDownMs_ = 0.0;
     int touchRowViewportStartY_ = 0;
+    bool phoneCompact_ = false;
     bool selected_    = false;
     bool resizeHover_ = false;
     bool pluginDropHover_ = false;
@@ -2527,6 +2581,14 @@ public:
         juce::String clipEditInfo_;
     };
 
+    void setPhoneCompactRows(bool enabled)
+    {
+        if (phoneCompactRows_ == enabled) return;
+        phoneCompactRows_ = enabled;
+        for (auto* row : trackRows_)
+            if (row != nullptr) row->setPhoneCompact(enabled);
+        repaint();
+    }
     std::function<void(int deltaX)> onWidthDrag;  // callback for resize
     std::function<void(const TrackID&, const juce::ModifierKeys&)> onTrackSelectedWithModifiers;
 
@@ -3130,6 +3192,7 @@ public:
 private:
     TrackManager& trackManager_;
     juce::OwnedArray<TrackRow> trackRows_;
+    bool phoneCompactRows_ = false;
     TrackListHeaderBar headerBar_;   // pinned overlay with the real TRACKS "+"
     int  dragStartX_ = -1;
     bool dragHover_  = false;
@@ -3411,6 +3474,7 @@ private:
         {
             auto* masterRow = new TrackRow(*trackManager_.getMasterTrack());
             masterRow->setDesiredHeight(108);
+            masterRow->setPhoneCompact(phoneCompactRows_);
             masterRow->setSelected(selectedTrackIds_.count(masterRow->getTrackID()) > 0);
             masterRow->onPresentationDemandChanged = [this]
             {
@@ -3501,6 +3565,7 @@ private:
             {
                 const int visibleRowIndex = trackRows_.size() - (trackManager_.hasMasterTrack() ? 1 : 0);
                 auto* row = new TrackRow(*track);
+                row->setPhoneCompact(phoneCompactRows_);
                 row->setSelected(selectedTrackIds_.count(row->getTrackID()) > 0);
                 row->setIndentLevel(depth);
                 row->onPresentationDemandChanged = [this]
