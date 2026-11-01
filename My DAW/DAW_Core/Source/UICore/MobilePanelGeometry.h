@@ -84,7 +84,10 @@ struct PhoneMixerToolbarLayout
 constexpr PhoneMixerToolbarLayout phoneMixerToolbarLayout(int zoneW, int zoneH) noexcept
 {
     PhoneMixerToolbarLayout out{};
-    constexpr int pad = 2, gap = 4, targetW = 44, targetH = 28;
+    // A 1-unit edge inset preserves all three 44-wide actions in a 142-unit
+    // phone toolbar zone (common ~390-wide portrait Mixer), without shrinking
+    // touch targets or reducing the 4-unit separation between actions.
+    constexpr int pad = 1, gap = 4, targetW = 44, targetH = 28;
     if (zoneW < targetW + 2 * pad || zoneH < targetH)
         return out;
     const int available = zoneW - 2 * pad;
