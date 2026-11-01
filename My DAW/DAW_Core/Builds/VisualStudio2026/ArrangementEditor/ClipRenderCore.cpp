@@ -288,7 +288,12 @@ namespace ArrangementEditor
         const bool waveformGeometryChanged = oldWidth != m_lastWaveformRequestWidth
             || oldWaveformLod != m_lastWaveformRenderable;
         if (waveformGeometryChanged && isShowing() && shouldRenderWaveform())
-            refresh();
+        {
+            if (s_lightweightPaint.load(std::memory_order_relaxed))
+                m_waveformNeedsUpdate = true;
+            else
+                refresh();
+        }
     }
 
     // -----------------------------------------------------------------------
