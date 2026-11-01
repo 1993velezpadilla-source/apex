@@ -290,6 +290,24 @@ int main()
     chromeTap.begin(3);
     assert(chromeTap.release(3, 0, 0)); // Fresh press after rotation.
 
+    // Bubblegum Sends uses this same state for its phone close orb. A
+    // scroll/drag that returns to the orb must not close the Sends panel;
+    // rotation or safe-inset changes invalidate an outstanding close press.
+    PhoneChromeTapState sendsClose;
+    sendsClose.begin(1);
+    sendsClose.move(0, 9);
+    sendsClose.move(0, 0);
+    assert(!sendsClose.release(1, 0, 0));
+    sendsClose.begin(1);
+    assert(!sendsClose.release(0, 0, 0)); // Finger lifted outside orb.
+    sendsClose.begin(1);
+    sendsClose.invalidate(); // Parent resized or safe insets changed.
+    assert(!sendsClose.release(1, 0, 0));
+    sendsClose.begin(1);
+    sendsClose.move(6, 4);
+    assert(sendsClose.release(1, 6, 4)); // Fresh stationary phone tap.
+    assert(!sendsClose.release(1, 0, 0)); // No duplicate close.
+
     // Phone Transport panel launchers must not open Mixer/Sends/FX/Browser
     // on swipe, on release over a different launcher, or after a drag that
     // returns to its origin. Desktop launchers are intentionally unchanged.
