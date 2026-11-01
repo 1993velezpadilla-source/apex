@@ -90,9 +90,18 @@ int main()
                   && mixerToolbarLandscape.buttons[0].action == phoneMixerBrowser
                   && mixerToolbarLandscape.buttons[1].action == phoneMixerFXChain
                   && mixerToolbarLandscape.buttons[2].action == phoneMixerReset);
-    static_assert(phoneMixerToolbarLayout(48, 32).count == 1
-                  && phoneMixerToolbarLayout(48, 32).buttons[0].action == phoneMixerOverflow);
-    static_assert(phoneMixerToolbarLayout(47, 32).count == 0);
+    // A 390-unit portrait window yields ~143 units of right toolbar space.
+    // Preserve Browser, FX Chain and Reset instead of needlessly overflowing.
+    constexpr auto mixerToolbarNarrowPortrait = phoneMixerToolbarLayout(143, 32);
+    static_assert(mixerToolbarNarrowPortrait.count == 3
+                  && mixerToolbarNarrowPortrait.buttons[0].action == phoneMixerBrowser
+                  && mixerToolbarNarrowPortrait.buttons[1].action == phoneMixerFXChain
+                  && mixerToolbarNarrowPortrait.buttons[2].action == phoneMixerReset);
+    static_assert(phoneMixerToolbarLayout(142, 32).count == 3);
+    static_assert(phoneMixerToolbarLayout(141, 32).count == 2);
+    static_assert(phoneMixerToolbarLayout(46, 32).count == 1
+                  && phoneMixerToolbarLayout(46, 32).buttons[0].action == phoneMixerOverflow);
+    static_assert(phoneMixerToolbarLayout(45, 32).count == 0);
     static_assert(phoneMixerToolbarLayout(108, 20).count == 0);
     for (int w = 0; w <= 500; ++w)
         for (int h : {0, 20, 28, 32, 48})
