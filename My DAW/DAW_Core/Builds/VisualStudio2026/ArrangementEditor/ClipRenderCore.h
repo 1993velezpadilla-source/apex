@@ -29,6 +29,11 @@ namespace ArrangementEditor
 
         void setModel(ArrangementClipModel& model);
         void refresh();
+        void restoreWaveformAfterNavigation()
+        {
+            if (m_waveformNeedsUpdate && isShowing()) refresh();
+            else repaint();
+        }
         void setCachedAudioHandle(DAW::AudioFileManager::CachedAudioHandle cachedAudio,
                                   bool allowFileFallback);
 
