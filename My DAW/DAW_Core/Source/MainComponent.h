@@ -201,11 +201,10 @@ private:
         {
             if (!getPixelsPerSecond) return;
             const auto pps = juce::jmax(1, juce::roundToInt(getPixelsPerSecond()));
-            const auto next = "ZOOM " + juce::String(pps) + "% / " +
-                              juce::String(pps) + "px/s";
+            const auto next = "ZOOM " + juce::String(pps) + "%";
             if (label_ != next) { label_ = next; repaint(); }
         }
-        juce::String label_ = "ZOOM 100% / 100px/s";
+        juce::String label_ = "ZOOM 100%";
     } phoneZoomIndicator_;
 
     // Panels
