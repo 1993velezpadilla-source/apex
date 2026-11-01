@@ -21,7 +21,8 @@ constexpr PhoneTransportPrimaryLayout phoneTransportPrimaryLayout(int w, int h) 
 {
     PhoneTransportPrimaryLayout out{};
     if (w < 29 || h < 20) return out;
-    constexpr int margin = 5, gap = 3;
+    // 320dp phones still get seven >=44dp touch targets (including |<).
+    constexpr int margin = 3, gap = 1;
     const int usable = w - 2 * margin;
     const int rowHeight = (h - 3 * margin) / 2;
     const int buttonWidth = (usable - 6 * gap) / 7;
