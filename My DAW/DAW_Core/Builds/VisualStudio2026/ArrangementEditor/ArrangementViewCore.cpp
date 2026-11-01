@@ -2110,7 +2110,10 @@ namespace ArrangementEditor
         for (auto& owned : m_clipRenderers)
         {
             if (!owned) continue;
-            auto* clip = m_clipState.findClip(owned->getClipId());
+            // ClipRenderCore owns a stable value snapshot. Never perform a
+            // linear ClipState lookup for EVERY renderer in every pinch frame:
+            // that would turn our fast path back into O(N²) on large sessions.
+            const auto* clip = owned->getClip();
             if (!clip) continue;
             const int x = timeToScreenX(clip->startTime);
             const int w = juce::jmax(4,
