@@ -2436,6 +2436,40 @@ MainComponent::MainComponent()
         // transport seek here. The gesture keeps its musical time anchor.
         return changed;
     };
+    arrangement_->onPhoneVerticalZoomChanged = [this, syncTrackHeaders]()
+    {
+        if (!usesPhoneMixerPresentation() || !arrangement_ || !trackList_
+            || !timelineViewport_)
+        {
+            syncTrackHeaders();
+            return true;
+        }
+        // A vertical pinch changes track pixel heights, NOT the duration of
+        // the song. Compute vertical extent directly from lane geometry;
+        // don't walk every clip, rebuild routing, or resize all floaters.
+        const int laneCount = juce::jmax(1, arrangement_->getNumLanes());
+        int contentH = 80; // shared arranger toolbar (48) + ruler (32)
+        for (int i = 0; i < laneCount; ++i)
+            contentH += arrangement_->getLaneHeight(i);
+        const int desiredH = juce::jmax(timelineViewport_->getViewHeight() + 1, contentH);
+        const bool changed = desiredH != arrangement_->getHeight();
+        if (changed)
+            arrangement_->setSize(arrangement_->getWidth(), desiredH);
+        const int masterOffset = appCore_.getTrackManager().hasMasterTrack() ? 1 : 0;
+        if (masterOffset)
+            trackList_->setMasterRowHeight(arrangement_->getLaneHeight(0));
+        const int normalTracks = juce::jmin(trackList_->getNumRows(), laneCount - masterOffset);
+        for (int i = 0; i < normalTracks; ++i)
+        {
+            trackList_->setRowHeight(i, arrangement_->getLaneHeight(i + masterOffset));
+            if (auto* row = trackList_->getRow(i))
+                row->setPlaylistExtraHeight(
+                    arrangement_->getInlinePlaylistExtraForLane(i + masterOffset));
+        }
+        trackList_->resized();
+        // main viewport visibleAreaChanged keeps Y aligned after pinch
+        return changed;
+    };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
                                                   DAW::TrackID selectedTrackId,
