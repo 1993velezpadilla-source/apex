@@ -309,6 +309,10 @@ private:
     static constexpr int kMixerHMax    = 500;
 
     int trackListW_ = 220;  // resizable via drag
+    // Phone-only arrangement rail state. The horizontal timeline remains
+    // at the SAME time offset when the name rail collapses/expands.
+    bool phoneTrackRailCollapsed_ = false;
+    bool phoneTrackRailTransitioning_ = false;
     int mixerH_     = 276;  // resizable via drag
 
     // ActionManager RAII registrations — auto-unregister on destruction
