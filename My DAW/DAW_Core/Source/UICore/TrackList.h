@@ -158,6 +158,14 @@ public:
         repaint();
     }
 
+    void setPhoneRailProgress(float progress)
+    {
+        const float p = juce::jlimit(0.0f, 1.0f, progress);
+        if (std::abs(phoneRailProgress_ - p) < 0.0001f) return;
+        phoneRailProgress_ = p;
+        repaint();
+    }
+
     int getDesiredHeight() const { return height_; }
     void setDesiredHeight(int h) { height_ = h; }
     void setPlaylistExtraHeight(int extra)
@@ -395,8 +403,10 @@ public:
         if (phonePresentation_)
         {
             const auto c = master ? a.color.magenta : track_.getColor();
-            if (phoneCollapsedRail_)
+            if (phoneCollapsedRail_ || phoneRailProgress_ > 0.001f)
             {
+                g.saveState();
+                g.setOpacity(phoneRailProgress_);
                 // Horizontal-scroll mini rail: the actual waveform owns almost
                 // all viewport width. Keep each row selectable with a
                 // colour-coded microphone and a truthful loaded-FX badge.
@@ -451,9 +461,12 @@ public:
                 }
                 g.setColour(a.color.borderSoftA.withAlpha(0.40f));
                 g.fillRect(0.f, bounds.getBottom() - 1.f, bounds.getWidth(), 1.f);
+                g.restoreState();
             }
-            else
+            if (!phoneCollapsedRail_ || phoneRailProgress_ < 0.999f)
             {
+            g.saveState();
+            g.setOpacity(1.0f - phoneRailProgress_);
             g.setColour(master ? a.color.magentaDeep.darker(0.8f)
                                : a.color.panelA);
             g.fillRect(bounds);
@@ -516,6 +529,7 @@ public:
             g.setColour(a.color.borderSoftA.withAlpha(0.50f));
             g.fillRect(0.0f, bounds.getBottom() - 1.0f,
                        bounds.getWidth(), 1.0f);
+            g.restoreState();
             }
         }
         else
@@ -2141,6 +2155,7 @@ public:
     int  height_      = 72;
     bool phonePresentation_ = false;
     bool phoneCollapsedRail_ = false;
+    float phoneRailProgress_ = 0.0f;
     int  playlistExtraHeight_ = 0;
     int  dragStartY_  = -1;
     juce::Point<int> contextScreenPoint_; // exact mouse/touch position for wheel
@@ -2811,6 +2826,14 @@ public:
             repaint();
         }
 
+        void setPhoneRailProgress(float p)
+        {
+            const float value = juce::jlimit(0.0f, 1.0f, p);
+            if (std::abs(phoneRailProgress_ - value) < 0.0001f) return;
+            phoneRailProgress_ = value;
+            repaint(0, 0, getWidth(), 80);
+        }
+
         void paint(juce::Graphics& g) override
         {
             auto& theme = Theme::getInstance();
@@ -2827,7 +2850,7 @@ public:
             // Top 48px — matches the ArrangementViewCore toolbar height.
             g.setColour(a.color.deepestB);
             g.fillRect(0, 0, getWidth(), 48);
-            g.setColour(a.color.textPrimary);
+            g.setColour(a.color.textPrimary.withAlpha(1.0f - phoneRailProgress_));
             g.setFont(theme.fonts.bold);
             g.drawText("TRACKS", 8, 0, getWidth() - 56, 48, juce::Justification::centredLeft);
             // Next 32px — matches the ruler height.
@@ -2868,6 +2891,7 @@ public:
     private:
         juce::String clipEditInfo_;
         bool collapsedPhoneRail_ = false;
+        float phoneRailProgress_ = 0.0f;
     };
 
     std::function<void(int deltaX)> onWidthDrag;  // callback for resize
@@ -2931,6 +2955,17 @@ public:
         for (auto* row : trackRows_)
             if (row != nullptr) row->setPhoneCollapsedRail(collapsed);
         resized();
+    }
+
+    void setPhoneRailProgress(float p)
+    {
+        const float progress = juce::jlimit(0.0f, 1.0f, p);
+        if (std::abs(phoneRailProgress_ - progress) < 0.0001f) return;
+        phoneRailProgress_ = progress;
+        headerBar_.setPhoneRailProgress(progress);
+        for (auto* row : trackRows_)
+            if (row != nullptr && row->isShowing())
+                row->setPhoneRailProgress(progress);
     }
 
     TrackList(TrackManager& trackManager)
@@ -3494,6 +3529,7 @@ private:
     TrackManager& trackManager_;
     bool phonePresentation_ = false;
     bool phoneCollapsedRail_ = false;
+    float phoneRailProgress_ = 0.0f;
     juce::OwnedArray<TrackRow> trackRows_;
     TrackListHeaderBar headerBar_;   // pinned overlay with the real TRACKS "+"
     int  dragStartX_ = -1;
@@ -3777,6 +3813,7 @@ private:
             auto* masterRow = new TrackRow(*trackManager_.getMasterTrack());
             masterRow->setPhonePresentation(phonePresentation_);
             masterRow->setPhoneCollapsedRail(phoneCollapsedRail_);
+            masterRow->setPhoneRailProgress(phoneRailProgress_);
             masterRow->setDesiredHeight(108);
             masterRow->setSelected(selectedTrackIds_.count(masterRow->getTrackID()) > 0);
             masterRow->onPresentationDemandChanged = [this]
@@ -3870,6 +3907,7 @@ private:
                 auto* row = new TrackRow(*track);
             row->setPhonePresentation(phonePresentation_);
                 row->setPhoneCollapsedRail(phoneCollapsedRail_);
+                row->setPhoneRailProgress(phoneRailProgress_);
                 row->setSelected(selectedTrackIds_.count(row->getTrackID()) > 0);
                 row->setIndentLevel(depth);
                 row->onPresentationDemandChanged = [this]
