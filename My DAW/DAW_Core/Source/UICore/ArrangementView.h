@@ -237,9 +237,15 @@ trackManager_.addListener(this);
         transport_.addListener(this);
         mirrorAllEngineClipsIntoArrangement();
         syncAutomationLanesFromTracks();
-        // Timer is for playhead repaint only — clip mirroring is event-driven
-        // via clipAdded/clipRemoved to avoid the repaint storm.
+        // Phone playback meters/playhead do not need 60 UI updates every
+        // second ON TOP of 60-Hz touch navigation and a 30-Hz rail tween.
+        // Preserve desktop/iPad 60-Hz presentation; recording/audio engine
+        // sample processing is completely independent of this UI timer.
+       #if JUCE_ANDROID
+        startTimerHz(30);
+       #else
         startTimerHz(60);
+       #endif
     }
 
     void setMetronomeBindings(std::function<bool()> isEnabled, std::function<void()> toggle)
@@ -1475,7 +1481,7 @@ void trackPropertyChanged(Track* track) override
         wasRecording_ = hasActiveTakes;
 
         // Record message-thread frame interval for benchmark metrics.
-        // This is the arrangement's 60 Hz timer callback — the closest
+        // This is the arrangement's UI timer callback — the closest
         // message-thread presentation signal. Label: message-thread tick
         // interval, NOT OS-presented FPS or VSync timing.
         TimelinePaintMetrics::frameSampler.tick();
