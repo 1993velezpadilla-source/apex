@@ -17,6 +17,7 @@ on:
       - 'My DAW/DAW_Core/Source/MainComponent.cpp'
       - 'My DAW/DAW_Core/Source/UICore/MobileTransportPortrait.h'
       - 'My DAW/DAW_Core/Source/UICore/TransportBar.h'
+      - 'My DAW/DAW_Core/Source/UICore/MixerWindow.h'
       - 'My DAW/DAW_Core/Tests/Portable/MobileTransportPortraitPortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/MobilePanelGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/BubblegumV2PanelUI.h'
