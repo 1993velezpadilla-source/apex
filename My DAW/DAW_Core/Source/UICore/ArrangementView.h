@@ -178,18 +178,22 @@ public:
             const int laneHeight = (int)core_->getZoom().getTrackHeightPx();
             const bool laneHeightChanged = laneHeight != defaultLaneHeight_;
             defaultLaneHeight_ = laneHeight;
-            if (core_ != nullptr)
-                core_->resized();
             // A two-finger horizontal pinch modifies pixels/second at 60 Hz.
             // Relaying out EVERY track header/playlist and rescanning all
             // clips each frame causes extreme lag and breaks scroll anchors.
             // Only the time extent changes, not the lane topology.
             if (!laneHeightChanged && onPhoneHorizontalZoomChanged)
             {
-                onPhoneHorizontalZoomChanged();
+                // setSize() in the callback already resizes core_ if the
+                // timeline width changed. Avoid doing that twice per pinch
+                // frame; handle the minimum-extent case where width stays put.
+                if (!onPhoneHorizontalZoomChanged() && core_ != nullptr)
+                    core_->resized();
                 repaint();
                 return;
             }
+            if (core_ != nullptr)
+                core_->resized();
             // Vertical zoom must still synchronize every physical header,
             // including expanded playlist virtual lanes.
             if (inlinePlaylistPanel_ != nullptr)
@@ -853,7 +857,7 @@ trackManager_.addListener(this);
     std::function<void()> onLaneLayoutChanged;
     // Optional phone fast path for HORIZONTAL time zoom only. Desktop/iPad
     // retain their existing full header/playlist synchronization.
-    std::function<void()> onPhoneHorizontalZoomChanged;
+    std::function<bool()> onPhoneHorizontalZoomChanged;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;
