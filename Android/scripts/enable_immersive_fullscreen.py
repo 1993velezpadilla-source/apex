@@ -37,8 +37,8 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Match manifest + JUCE Desktop orientation to prevent landscape restarts.
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        // JUCE allows sensor rotation; keep both portrait and landscape usable.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         applyApexImmersiveMode();
     }
 
@@ -124,7 +124,7 @@ def main() -> int:
     if old not in ("com.rmsl.juce.JuceActivity", android_activity):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     activity.set(f"{{{ANDROID_NS}}}name", android_activity)
-    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "portrait")
+    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "fullSensor")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
     java = (generated / "app/src/main/java" / package.replace(".", "/")
@@ -137,10 +137,10 @@ def main() -> int:
     app_activity = again.getroot().find("./application/activity")
     assert app_activity is not None
     assert app_activity.get(f"{{{ANDROID_NS}}}name") == android_activity
-    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "portrait"
+    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "fullSensor"
     assert "WindowInsetsController" in java.read_text(encoding="utf-8")
     print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {android_activity}")
-    print("[APEX ANDROID PORTRAIT] manifest=portrait; Java=portrait; JUCE=upright")
+    print("[APEX ANDROID ROTATION] manifest=fullSensor; Java=fullSensor; JUCE=allOrientations")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
     print(f"[APEX ANDROID IMMERSIVE] source={java}")
     print("[APEX ANDROID IMMERSIVE] lifecycle: onCreate/onResume/onWindowFocusChanged")

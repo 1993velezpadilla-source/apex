@@ -856,11 +856,11 @@ public:
     {
        #if JUCE_ANDROID
         apexAndroidBootLog ("01 JUCEApplication initialise entered");
-        // APEX Mobile on phones is PORTRAIT FIRST.  The original Android
-        // full-shell was explicitly forcing both landscape rotations here.
-        // Match the generated Android Activity's portrait orientation policy.
+        // Portrait-first refers to the phone layout, not an orientation lock.
+        // Keep both landscape rotations and reverse portrait available, in
+        // agreement with the generated Android fullSensor Activity.
         juce::Desktop::getInstance().setOrientationsEnabled (
-            juce::Desktop::upright);
+            juce::Desktop::allOrientations);
        #endif
         const auto processArguments = getCommandLineParameterArray();
        #if JUCE_ANDROID
