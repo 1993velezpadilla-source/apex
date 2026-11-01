@@ -490,6 +490,8 @@ namespace ArrangementEditor
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
         bool m_touchHorizontalPanOccurred = false; // NOT triggered by zoom
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
+        enum class PinchAxis { None, Horizontal, Vertical };
+        PinchAxis m_pinchAxis = PinchAxis::None;
         std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
         double m_lastPinchDistance = 0.0; // legacy pinch scratch state
         juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
