@@ -37,6 +37,28 @@ constexpr PanelBounds phoneCloseTouchBounds(int panelW, int panelH) noexcept
              clampInt(25 - h / 2, 0, panelH - h), w, h };
 }
 
+// MixerWindow hides its close light, leaving minimize/maximize at the two
+// left-side JUCE chrome centres. Phone-only hit zones expand each 12x12 orb
+// to a non-overlapping 20-wide, full-title-height target. Return 1/2 for
+// minimize/maximize; zero means title dragging may proceed. The caller
+// supplies FloatingWindowBase's geometry constants to avoid drift.
+constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
+                                           int padLeft, int buttonSize,
+                                           int buttonGap, int titleHeight) noexcept
+{
+    if (buttonSize <= 0 || buttonGap < 0 || titleHeight <= 0
+        || y < 0.0f || y >= static_cast<float>(titleHeight))
+        return 0;
+    const float halfWidth = static_cast<float>(buttonSize + buttonGap) * 0.5f;
+    const float firstCentre = static_cast<float>(padLeft)
+                            + static_cast<float>(buttonSize) * 0.5f;
+    if (x >= firstCentre - halfWidth && x < firstCentre + halfWidth)
+        return 1;
+    const float secondCentre = firstCentre
+                             + static_cast<float>(buttonSize + buttonGap);
+    return x >= secondCentre - halfWidth && x < secondCentre + halfWidth ? 2 : 0;
+}
+
 // Phone Mixer title bar is 32 units tall. Use the full available height for
 // 44-wide, 28-high touch targets; a true 44-high target needs a separate chrome
 // redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.
