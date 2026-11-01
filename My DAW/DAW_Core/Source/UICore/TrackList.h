@@ -143,6 +143,10 @@ public:
     {
         if (phonePresentation_ == enabled) return;
         phonePresentation_ = enabled;
+        // The collapsing rail changes alpha on a few frames only. Cached
+        // images for EVERY row force full bitmap allocation and re-upload
+        // on each animated frame on Android. Desktop retains its cache.
+        setBufferedToImage(!enabled);
         // MASTER eye changes vertical placement in phone mode, so invalidate
         // its cached geometry even if the surrounding bounds are identical.
         masterDecorBounds_ = { -1.0f, -1.0f, -1.0f, -1.0f };
@@ -2966,7 +2970,7 @@ public:
         phoneRailProgress_ = progress;
         headerBar_.setPhoneRailProgress(progress);
         for (auto* row : trackRows_)
-            if (row != nullptr && row->isShowing())
+            if (row != nullptr && row->getBounds().intersects(getLocalBounds()))
                 row->setPhoneRailProgress(progress);
     }
 
@@ -3564,6 +3568,8 @@ private:
 
             TimelinePaintMetrics::inc(TimelinePaintMetrics::trackListScrollRowPositionUpdates);
             row->setTopLeftPosition(0, y);
+            if (row->getBounds().intersects(getLocalBounds()))
+                row->setPhoneRailProgress(phoneRailProgress_);
             y += row->getDesiredHeight();
         }
 
