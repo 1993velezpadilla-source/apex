@@ -134,11 +134,17 @@ def main() -> int:
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)
-    app_activity = again.getroot().find("./application/activity")
-    assert app_activity is not None
-    assert app_activity.get(f"{{{ANDROID_NS}}}name") == android_activity
-    assert app_activity.get(f"{{{ANDROID_NS}}}screenOrientation") == "user"
-    assert "WindowInsetsController" in java.read_text(encoding="utf-8")
+    # A generated manifest can contain other activities before the launcher.
+    # Verify the patched activity by its exact name, never by XML position.
+    matching = [
+        a for a in again.getroot().findall("./application/activity")
+        if a.get(f"{{{ANDROID_NS}}}name") == android_activity
+    ]
+    if (len(matching) != 1
+            or matching[0].get(f"{{{ANDROID_NS}}}screenOrientation") != "user"):
+        raise RuntimeError("Immersive launcher verification failed")
+    if "WindowInsetsController" not in java.read_text(encoding="utf-8"):
+        raise RuntimeError("Immersive activity Java verification failed")
     print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {android_activity}")
     print("[APEX ANDROID ROTATION] manifest=user; Java=user; JUCE=allOrientations")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
