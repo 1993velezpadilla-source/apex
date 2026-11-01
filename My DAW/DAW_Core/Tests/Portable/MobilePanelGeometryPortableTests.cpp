@@ -252,6 +252,29 @@ int main()
         for (bool overButton : {false, true})
             assert(chromeTitleDoubleClickMaximizes(phone, overButton)
                    == (!phone && !overButton));
+    // Filtering and orientation change can show/hide the vertical scrollbar.
+    // Reserve its actual thickness based on row overflow, not stale state.
+    using DAW::mobile::pluginBrowserListWidth;
+    static_assert(pluginBrowserListWidth(377, 46, 1, 44, 14) == 377);
+    static_assert(pluginBrowserListWidth(377, 46, 2, 44, 14) == 363);
+    static_assert(pluginBrowserListWidth(377, 44, 1, 44, 14) == 377);
+    static_assert(pluginBrowserListWidth(377, 43, 1, 44, 14) == 363);
+    static_assert(pluginBrowserListWidth(100, 50, 4, 22, 12) == 88);
+    static_assert(pluginBrowserListWidth(100, 50, 0, 44, 12) == 100);
+    static_assert(pluginBrowserListWidth(5, 50, 4, 44, 12) == 0);
+    static_assert(pluginBrowserListWidth(0, 50, 4, 44, 12) == 0);
+    static_assert(pluginBrowserListWidth(100, 0, 4, 44, 12) == 0);
+    static_assert(pluginBrowserListWidth(100, 50, 4, 44, -10) == 100);
+    for (int width : {0, 1, 5, 100, 377, 852})
+        for (int height : {0, 1, 43, 44, 46, 200})
+            for (int rows : {0, 1, 2, 50})
+            {
+                const int listWidth = pluginBrowserListWidth(width, height,
+                                                             rows, 44, 14);
+                assert(listWidth >= 0 && listWidth <= width);
+                if (width > 0 && height > 0 && rows * 44 <= height)
+                    assert(listWidth == width);
+            }
     using DAW::mobile::pluginBrowserChromeHeight;
     using DAW::mobile::phoneChromeControlSize;
     static_assert(pluginBrowserChromeHeight(true) == 44);
