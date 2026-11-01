@@ -1216,6 +1216,15 @@ namespace ArrangementEditor
                 {
                     const juce::ScopedValueSetter<bool> fastResize(m_fastTouchPinchResize, true);
                     m_zoom.setPixelsPerSecond(newPps);
+                    // Horizontal zoom previously changed only the numeric PPS.
+                    // Unlike vertical zoom, setPixelsPerSecond() does NOT fire
+                    // onZoomChanged. The view extent and clip hit rectangles
+                    // therefore stayed at the OLD scale until another layout.
+                    // Notify the owner while the pinch fast-path is armed:
+                    // phone resizes its timeline width and updates cheap clip
+                    // geometry, without a full renderer/waveform rebuild.
+                    if (m_zoom.onZoomChanged)
+                        m_zoom.onZoomChanged();
                 }
                 viewport->setViewPosition(
                     TouchNavigationMath::zoomPosition(focusX, focusViewportX,
