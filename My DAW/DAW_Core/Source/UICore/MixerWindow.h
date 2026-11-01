@@ -3,6 +3,7 @@
 #include "../ThemeCore/Theme.h"
 #include "../FloatingWindowCore/FloatingWindowBase.h"
 #include "GlassMixerLookAndFeel.h"
+#include "MobilePanelGeometry.h"
 
 namespace DAW {
 
@@ -182,6 +183,13 @@ std::function<void()> onBubblegumClicked;
         };
     }
 
+    /** Phone toolbar actions are deferred until a stationary finger release. */
+    void setPhonePresentation(bool phone) noexcept
+    {
+        phonePresentation_ = phone;
+        pendingPhoneToolbarTap_.invalidate();
+    }
+
     void setContent(juce::Component* content)
     {
         content_ = content;
@@ -227,11 +235,66 @@ protected:
         }
     }
 
-    void mouseDrag(const juce::MouseEvent& e) override { FloatingWindowBase::mouseDrag(e); clampTop(); }
-    void mouseUp  (const juce::MouseEvent& e) override { FloatingWindowBase::mouseUp(e);   clampTop(); }
+    void resized() override
+    {
+        if (phonePresentation_)
+            pendingPhoneToolbarTap_.invalidate(); // rotation / window resize
+        FloatingWindowBase::resized();
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_)
+        {
+            pendingPhoneToolbarTap_.invalidate();
+            const int button = toolbarButtonAt(e.position);
+            if (button != 0)
+            {
+                toFront(true);
+                pendingPhoneToolbarTap_.begin(button);
+                return; // Do not invoke a Mixer action on finger-down.
+            }
+        }
+        FloatingWindowBase::mouseDown(e);
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_ && pendingPhoneToolbarTap_.pressed != 0)
+        {
+            pendingPhoneToolbarTap_.move(e.getDistanceFromDragStartX(),
+                                         e.getDistanceFromDragStartY());
+            return;
+        }
+        FloatingWindowBase::mouseDrag(e);
+        clampTop();
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_ && pendingPhoneToolbarTap_.pressed != 0)
+        {
+            const int pressed = pendingPhoneToolbarTap_.pressed;
+            if (pendingPhoneToolbarTap_.release(
+                    toolbarButtonAt(e.position),
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+                invokeToolbarAction(pressed - 1);
+            return;
+        }
+        FloatingWindowBase::mouseUp(e);
+        clampTop();
+    }
+
+    void mouseDoubleClick(const juce::MouseEvent& e) override
+    {
+        if (!phonePresentation_)
+            FloatingWindowBase::mouseDoubleClick(e);
+    }
 
 private:
     GlassMixerLookAndFeel glassStyle_;
+    bool phonePresentation_ = false;
+    mobile::PhoneChromeTapState pendingPhoneToolbarTap_;
     juce::Component* content_ = nullptr;
     void clampTop() { if (getBounds().getY() < kMinTopY) setTopLeftPosition(getBounds().getX(), kMinTopY); }
 
@@ -515,6 +578,14 @@ case kBG:
                 break;
             }
         }
+    }
+
+    // +1 reserves zero for no button; kSettings itself has ID zero.
+    int toolbarButtonAt(juce::Point<float> p) const
+    {
+        for (const auto& btn : buildBtns(getTitleBarRightZone()))
+            if (btn.bounds.contains(p)) return btn.id + 1;
+        return 0;
     }
 
     bool toolbarHitTest(juce::Point<float> p) const
