@@ -2413,6 +2413,27 @@ MainComponent::MainComponent()
             trackList_->setScrollOffset(y);
     };
     arrangement_->onLaneLayoutChanged = syncTrackHeaders;
+    arrangement_->onPhoneHorizontalZoomChanged = [this, syncTrackHeaders]()
+    {
+        if (!usesPhoneMixerPresentation() || !arrangement_ || !timelineViewport_)
+        {
+            syncTrackHeaders();
+            return;
+        }
+        // Horizontal pinch changes ONLY timeline pixels/second. Reusing the
+        // existing cached song extent avoids an O(clips + tracks) rebuild
+        // on every digitizer/zoom frame; structural mutations still call
+        // updateTimelineViewportContentBounds() normally.
+        const int viewportW = juce::jmax(1, timelineViewport_->getViewWidth());
+        const double pps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
+        const double timeSpan = juce::jmax(30.0, lastTimelineContentLengthSeconds_);
+        const int width = juce::jmax(viewportW + 1,
+            juce::roundToInt(juce::jmin(2147483000.0, std::ceil(timeSpan * pps))));
+        if (width != arrangement_->getWidth())
+            arrangement_->setSize(width, arrangement_->getHeight());
+        // Do not touch vertical lane heights, TrackList child bounds, or
+        // transport seek here. The gesture keeps its musical time anchor.
+    };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
                                                   DAW::TrackID selectedTrackId,
