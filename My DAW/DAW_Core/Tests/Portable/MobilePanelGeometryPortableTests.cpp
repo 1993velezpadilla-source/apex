@@ -40,6 +40,20 @@ int main()
             assert(target.height == (h < 44 ? h : 44));
         }
 
+    // The Mixer hides the close traffic light. Its two remaining JUCE
+    // chrome orbs must use enlarged, non-overlapping phone hit regions and
+    // never fire during mouseDown. Desktop keeps the original 12x12 hits.
+    using DAW::mobile::phoneMixerLeftChromeButtonAt;
+    static_assert(phoneMixerLeftChromeButtonAt(10.f, 0.f, 14, 12, 8, 32) == 1);
+    static_assert(phoneMixerLeftChromeButtonAt(29.99f, 31.99f, 14, 12, 8, 32) == 1);
+    static_assert(phoneMixerLeftChromeButtonAt(30.f, 16.f, 14, 12, 8, 32) == 2);
+    static_assert(phoneMixerLeftChromeButtonAt(49.99f, 31.f, 14, 12, 8, 32) == 2);
+    static_assert(phoneMixerLeftChromeButtonAt(9.99f, 16.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(50.f, 16.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(20.f, -1.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(40.f, 32.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(20.f, 16.f, 14, 12, 8, 0) == 0);
+
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
     // The 32-high title bar caps the phone target height at 28, while 44-wide
     // targets and overflow avoid invisible/overlapping actions on narrow phones.
@@ -356,6 +370,23 @@ int main()
     mixerToolbar.begin(8);
     mixerToolbar.move(4, 3);
     assert(mixerToolbar.release(8, 4, 3)); // Legitimate short tap.
+
+    // Left Mixer minimize/maximize use distinct IDs above toolbar IDs.
+    // Swipe-out-and-back, releasing over the other button, and rotation
+    // must all suppress the action; a stationary release fires once.
+    PhoneChromeTapState mixerLeftChrome;
+    mixerLeftChrome.begin(101); // Minimize.
+    assert(!mixerLeftChrome.release(102, 0, 0)); // Released on maximize.
+    mixerLeftChrome.begin(102);
+    mixerLeftChrome.move(0, 12);
+    mixerLeftChrome.move(0, 0);
+    assert(!mixerLeftChrome.release(102, 0, 0));
+    mixerLeftChrome.begin(101);
+    mixerLeftChrome.invalidate(); // Orientation changed.
+    assert(!mixerLeftChrome.release(101, 0, 0));
+    mixerLeftChrome.begin(102);
+    assert(mixerLeftChrome.release(102, 0, 0));
+    assert(!mixerLeftChrome.release(102, 0, 0));
 
     // Bubblegum Sends uses this same state for its phone close orb. A
     // scroll/drag that returns to the orb must not close the Sends panel;
