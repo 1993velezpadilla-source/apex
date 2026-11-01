@@ -125,6 +125,9 @@ def main() -> int:
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     activity.set(f"{{{ANDROID_NS}}}name", android_activity)
     activity.set(f"{{{ANDROID_NS}}}screenOrientation", "user")
+    # Android 12+ requires an explicit exported launcher. An existing false
+    # value also makes the home-screen entry unable to start this Activity.
+    activity.set(f"{{{ANDROID_NS}}}exported", "true")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
     java = (generated / "app/src/main/java" / package.replace(".", "/")
@@ -141,7 +144,8 @@ def main() -> int:
         if a.get(f"{{{ANDROID_NS}}}name") == android_activity
     ]
     if (len(matching) != 1
-            or matching[0].get(f"{{{ANDROID_NS}}}screenOrientation") != "user"):
+            or matching[0].get(f"{{{ANDROID_NS}}}screenOrientation") != "user"
+            or matching[0].get(f"{{{ANDROID_NS}}}exported") != "true"):
         raise RuntimeError("Immersive launcher verification failed")
     if "WindowInsetsController" not in java.read_text(encoding="utf-8"):
         raise RuntimeError("Immersive activity Java verification failed")
