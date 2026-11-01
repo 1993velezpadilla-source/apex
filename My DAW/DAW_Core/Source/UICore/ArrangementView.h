@@ -447,11 +447,19 @@ trackManager_.addListener(this);
 
     void setViewportScrollOffsets(int scrollX, int scrollY)
     {
-        horizontalScrollOffset_ = juce::jmax(0, scrollX);
-        verticalScrollOffset_ = juce::jmax(0, scrollY);
+        const int x = juce::jmax(0, scrollX);
+        const int y = juce::jmax(0, scrollY);
+        // Hidden JUCE scrollbars may notify both Viewport::visibleAreaChanged
+        // and ScrollBar::Listener for the SAME movement. A duplicate layout
+        // invalidation per input frame is unacceptable on a phone.
+        if (horizontalScrollOffset_ == x && verticalScrollOffset_ == y)
+            return;
+        horizontalScrollOffset_ = x;
+        verticalScrollOffset_ = y;
         if (core_ != nullptr)
-            core_->setViewportScrollOffset(scrollX, scrollY);
-        updateImportOverlayBounds();
+            core_->setViewportScrollOffset(x, y);
+        if (importOverlay_.isVisible())
+            updateImportOverlayBounds();
     }
 
     bool isInterestedInFileDrag(const juce::StringArray& files) override
