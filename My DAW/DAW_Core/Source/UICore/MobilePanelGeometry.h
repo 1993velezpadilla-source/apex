@@ -131,6 +131,15 @@ constexpr bool shouldCollapsePhoneTrackRail(bool wasCollapsed,
     return wasCollapsed ? timelineScrollX > 10 : timelineScrollX >= 48;
 }
 
+/** Reversible phone-rail animation curve (0..1), no JUCE state or timers.
+ *  Smoothstep starts/ends at zero velocity and is safe after dropped frames.
+ */
+constexpr float smoothPhoneRailProgress(float t) noexcept
+{
+    const float x = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    return x * x * (3.0f - 2.0f * x);
+}
+
 constexpr int phoneTrackRailWidth(int requestedWidth, int workspaceWidth,
                                   bool isCollapsed) noexcept
 {
