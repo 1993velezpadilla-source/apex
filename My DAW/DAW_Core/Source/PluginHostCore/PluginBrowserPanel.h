@@ -301,11 +301,20 @@ private:
         void mouseDown(const juce::MouseEvent& e) override
         {
             suppressNextActivation_ = false;
+            phoneTapEligible_ = true;
             if (e.mods.isPopupMenu())
             {
                 suppressNextActivation_ = true;
                 owner_.showRowContextMenu(index_);
             }
+        }
+
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if (owner_.phonePresentation_)
+                phoneTapEligible_ = mobile::phoneTapGestureRemainsEligible(
+                    phoneTapEligible_,
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY());
         }
 
         void mouseUp(const juce::MouseEvent& e) override
@@ -321,7 +330,7 @@ private:
             if (!mobile::pluginBrowserRowTapActivates(
                     owner_.phonePresentation_,
                     e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY(),
-                    getLocalBounds().contains(e.getPosition())))
+                    getLocalBounds().contains(e.getPosition()) && phoneTapEligible_))
                 return;
             owner_.activateRow(index_);
         }
@@ -331,6 +340,7 @@ private:
         int  index_;
         bool hovered_ = false;
         bool suppressNextActivation_ = false;
+        bool phoneTapEligible_ = true;
     };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginBrowserPanel)
