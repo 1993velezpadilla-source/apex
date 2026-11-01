@@ -220,6 +220,10 @@ namespace ArrangementEditor
         };
 
         m_toolbar.setSelectedSnapModeIndex(getSnapModeIndex());
+        m_ruler.onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            if (onLoopRegionChanged) onLoopRegionChanged(beginSeconds, endSeconds);
+        };
         m_toolbar.onSnapModeSelected = [this](int index)
         {
             switch (index)
