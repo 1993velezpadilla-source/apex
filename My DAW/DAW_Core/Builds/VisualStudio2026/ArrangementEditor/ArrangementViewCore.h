@@ -813,7 +813,7 @@ namespace ArrangementEditor
                 if (m_owner.m_deferredRebuildRequested)
                 {
                     m_owner.m_deferredRebuildRequested = false;
-                    m_owner.rebuildClipRenderersInternal();
+                    m_owner.rebuildClipRenderers();
                 }
             }
         private:
