@@ -221,6 +221,29 @@ int main()
             assert(pluginBrowserRowTapActivates(true, dx, dy, true) == expected);
             assert(!pluginBrowserRowTapActivates(true, dx, dy, false));
         }
+    // Regression: swipe far away and return to the original row/control.
+    // The final displacement is zero, but the gesture must stay cancelled.
+    using DAW::mobile::phoneTapGestureRemainsEligible;
+    static_assert(phoneTapGestureRemainsEligible(true, 0, 0));
+    static_assert(phoneTapGestureRemainsEligible(true, 8, 0));
+    static_assert(!phoneTapGestureRemainsEligible(true, 9, 0));
+    static_assert(!phoneTapGestureRemainsEligible(false, 0, 0));
+    static_assert(!phoneTapGestureRemainsEligible(true,
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
+    bool phoneRowTapEligible = true;
+    phoneRowTapEligible = phoneTapGestureRemainsEligible(phoneRowTapEligible, 24, 0);
+    phoneRowTapEligible = phoneTapGestureRemainsEligible(phoneRowTapEligible, 0, 0);
+    assert(!phoneRowTapEligible);
+    assert(!pluginBrowserRowTapActivates(true, 0, 0, phoneRowTapEligible));
+    bool phoneButtonTapEligible = true;
+    phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 30);
+    phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 0);
+    assert(!phoneButtonTapEligible);
+    assert(!(phoneButtonTapEligible && phoneChromeButtonTapActivates(1, 1, 0, 0)));
+    // A short stationary touch remains eligible.
+    bool shortPhoneTap = phoneTapGestureRemainsEligible(true, 4, 3);
+    shortPhoneTap = phoneTapGestureRemainsEligible(shortPhoneTap, 0, 0);
+    assert(shortPhoneTap);
     // Phone title-bar buttons must activate on a stationary release over
     // the same control, not on mouseDown or after swiping across controls.
     using DAW::mobile::phoneChromeButtonTapActivates;
