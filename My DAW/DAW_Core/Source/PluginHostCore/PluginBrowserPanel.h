@@ -244,8 +244,11 @@ private:
     void layoutList()
     {
         int y = 0;
-        int w = viewport_.getWidth() - (viewport_.isVerticalScrollBarShown() ? 10 : 0);
         const int rowHeight = mobile::pluginBrowserRowHeight(phonePresentation_);
+        const int w = mobile::pluginBrowserListWidth(
+            viewport_.getWidth(), viewport_.getHeight(),
+            static_cast<int>(rowWidgets_.size()), rowHeight,
+            viewport_.getScrollBarThickness());
         for (auto* widget : rowWidgets_)
         {
             widget->setBounds(0, y, w, rowHeight);
