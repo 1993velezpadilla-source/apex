@@ -63,6 +63,21 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
     return x >= boundary && x < boundary + touchWidth ? 2 : 0;
 }
 
+// Keep the phone mixer's original left traffic lights and right toolbar
+// unobscured by the cyan/violet header energy overlay. The overlay is a
+// decoration, never an input surface; preserve the full original hit zones.
+// Desktop/iPad deliberately retain the existing full-width energy treatment.
+constexpr PanelBounds phoneMixerHeaderEnergyRegion(int windowWidth,
+                                                   int leftChromeEnd,
+                                                   int toolbarStart,
+                                                   int titleHeight) noexcept
+{
+    const int width = maxInt(0, windowWidth);
+    const int left = clampInt(leftChromeEnd, 0, width);
+    const int right = clampInt(toolbarStart, left, width);
+    return { left, 0, right - left, maxInt(0, titleHeight) };
+}
+
 // Phone Mixer title bar is 32 units tall. Use the full available height for
 // 44-wide, full 32-high touch targets; a true 44-high target needs a
 // separate chrome redesign. Only wired phone actions are exposed: Browser, FX Chain and Reset.

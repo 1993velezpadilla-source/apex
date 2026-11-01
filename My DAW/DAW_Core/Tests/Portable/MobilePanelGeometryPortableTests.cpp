@@ -70,6 +70,28 @@ int main()
     mixerChromeTap.begin(102);
     assert(mixerChromeTap.release(102, 0, 0)); // stationary tap
 
+    // Header energy must not overpaint either the original left chrome or
+    // the phone toolbar. Desktop/iPad keep the original full-width rendering.
+    using DAW::mobile::phoneMixerHeaderEnergyRegion;
+    constexpr auto energyPortrait = phoneMixerHeaderEnergyRegion(390, 60, 237, 32);
+    static_assert(energyPortrait.x == 60 && energyPortrait.y == 0
+                  && energyPortrait.width == 177 && energyPortrait.height == 32);
+    constexpr auto energyLandscape = phoneMixerHeaderEnergyRegion(852, 60, 622, 32);
+    static_assert(energyLandscape.x == 60 && energyLandscape.width == 562);
+    constexpr auto energyNarrow = phoneMixerHeaderEnergyRegion(40, 60, 24, 32);
+    static_assert(energyNarrow.x == 40 && energyNarrow.width == 0);
+    constexpr auto energyInvalid = phoneMixerHeaderEnergyRegion(-10, 60, 237, -1);
+    static_assert(energyInvalid.width == 0 && energyInvalid.height == 0);
+    for (int w : {0, 1, 40, 60, 200, 390, 852})
+        for (int toolbarStart : {-100, 0, 24, 60, 142, 237, 622, 2000})
+        {
+            const auto energy = phoneMixerHeaderEnergyRegion(w, 60, toolbarStart, 32);
+            assert(inside(energy, DAW::mobile::maxInt(0, w), 32));
+            assert(energy.x >= DAW::mobile::minInt(60, w));
+            assert(energy.x + energy.width <=
+                   DAW::mobile::maxInt(energy.x, toolbarStart));
+        }
+
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
     // The 32-high title bar caps phone targets at 44x32; fill that height
     // without spilling the pill into Mixer content. Overflow prevents

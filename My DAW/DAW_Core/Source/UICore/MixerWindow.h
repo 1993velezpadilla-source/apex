@@ -207,9 +207,21 @@ std::function<void()> onBubblegumClicked;
 protected:
     void paint(juce::Graphics& g) override
     {
-        // Chrome first, then the blue/cyan header energy as a GUARANTEED final
-        // pass of this window's own paint — no base-chrome layer can cover it.
+        // Retain the original APEX blue/cyan energy over the chrome.
+        // On phones, protect the left traffic lights and right touch toolbar:
+        // painting the energy image over them made the icons harder to see.
         FloatingWindowBase::paint(g);
+        juce::Graphics::ScopedSaveState saved(g);
+        if (phonePresentation_)
+        {
+            constexpr int leftChromeEnd = kBtnPadL + kBtnSize / 2
+                                        + 2 * (kBtnSize + kBtnGap);
+            const auto safe = mobile::phoneMixerHeaderEnergyRegion(
+                getWidth(), leftChromeEnd,
+                juce::roundToInt(getTitleBarRightZone().getX()), kTitleH);
+            g.reduceClipRegion(juce::Rectangle<int>(
+                safe.x, safe.y, safe.width, safe.height));
+        }
         paintHeaderEnergy(g, juce::Rectangle<float>(0.f, 0.f,
                                                     (float)getWidth(),
                                                     (float)kTitleH));
