@@ -290,6 +290,29 @@ int main()
     chromeTap.begin(3);
     assert(chromeTap.release(3, 0, 0)); // Fresh press after rotation.
 
+    // MixerWindow's phone toolbar uses IDs + 1 (Settings is ID 0), so
+    // pressing Settings cannot be confused with an absent touch. All
+    // toolbar actions must wait for release; a swipe/rotation cancels them.
+    PhoneChromeTapState mixerToolbar;
+    assert(!mixerToolbar.release(1, 0, 0));
+    mixerToolbar.begin(1); // Settings (toolbar ID 0 + 1).
+    assert(mixerToolbar.release(1, 0, 0));
+    assert(!mixerToolbar.release(1, 0, 0)); // Exactly one action.
+    mixerToolbar.begin(8); // Overflow.
+    assert(!mixerToolbar.release(7, 0, 0)); // Different action.
+    mixerToolbar.begin(6); // Bubblegum.
+    mixerToolbar.move(16, 0);
+    mixerToolbar.move(0, 0);
+    assert(!mixerToolbar.release(6, 0, 0)); // Drag out and back.
+    mixerToolbar.begin(2);
+    mixerToolbar.invalidate(); // Mixer rotated or resized.
+    assert(!mixerToolbar.release(2, 0, 0));
+    mixerToolbar.begin(8);
+    assert(!mixerToolbar.release(0, 0, 0)); // Lift outside.
+    mixerToolbar.begin(8);
+    mixerToolbar.move(4, 3);
+    assert(mixerToolbar.release(8, 4, 3)); // Legitimate short tap.
+
     // Bubblegum Sends uses this same state for its phone close orb. A
     // scroll/drag that returns to the orb must not close the Sends panel;
     // rotation or safe-inset changes invalidate an outstanding close press.
