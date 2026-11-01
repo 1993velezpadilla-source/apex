@@ -1427,6 +1427,9 @@ MainComponent::MainComponent()
 
     // Track list (headers on left)
     trackList_ = std::make_unique<DAW::TrackList>(appCore_.getTrackManager());
+    // Always compact on phones; the desktop WAV/M/S/Input/R grid regressed
+    // into a full-width track card and obscured the actual waveform editor.
+    trackList_->setPhoneCompactRows(usesPhoneMixerPresentation());
     appendMainStartupTrace("ctor.track-list.created");
     trackList_->onWidthDrag = [this](int deltaX)
     {
@@ -2890,8 +2893,11 @@ MainComponent::MainComponent()
     };
 
     timelineViewport->setViewedComponent(arrangement_.get(), false);
-    timelineViewport->setScrollBarsShown(true, true);
-    timelineViewport->setScrollBarThickness(14);
+    // Phone scroll/pinch is gesture-owned. Desktop scrollbars and the corner
+    // +/- buttons covered the audio and consumed narrow-screen touch targets.
+    timelineViewport->setScrollBarsShown(!usesPhoneMixerPresentation(),
+                                         !usesPhoneMixerPresentation());
+    timelineViewport->setScrollBarThickness(usesPhoneMixerPresentation() ? 0 : 14);
     timelineViewport->setSingleStepSizes(32, 32);
     timelineViewport->getPixelsPerSecond = [this]() -> double
     {
