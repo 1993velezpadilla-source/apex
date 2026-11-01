@@ -407,12 +407,21 @@ struct PhoneTransportTapState
         const bool activate = activeCount == 1 && !blocked && eligible
             && source == sourceIndex
             && phoneTransportLauncherTapActivates(pressed, button, dx, dy);
+        bool matched = false;
         for (int i = 0; i < activeCount; ++i)
             if (activeSources[i] == source)
             {
                 activeSources[i] = activeSources[--activeCount];
+                matched = true;
                 break;
             }
+        // A foreign mouseUp must cancel, not leave the original finger
+        // eligible to open a panel on its subsequent release.
+        if (!matched && activeCount > 0)
+        {
+            blocked = true;
+            eligible = false;
+        }
         if (activeCount == 0)
             invalidate();
         else
