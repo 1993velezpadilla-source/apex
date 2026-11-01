@@ -462,6 +462,17 @@ private:
     // ── Paint ─────────────────────────────────────────────────────────────
     void paintToolbar(juce::Graphics& g, juce::Rectangle<float> zone)
     {
+        // Phone hover/active glows extend beyond their 32-high hit targets.
+        // Keep them inside the title bar and clear of the Mixer strips and
+        // centred APEX title; desktop/iPad rendering is unchanged.
+        juce::Graphics::ScopedSaveState paintState(g);
+        if (phonePresentation_)
+        {
+            const auto clip = mobile::phoneMixerToolbarPaintClip(
+                getWidth(), kTitleH, juce::roundToInt(zone.getX()));
+            g.reduceClipRegion(juce::Rectangle<int>(
+                clip.x, clip.y, clip.width, clip.height));
+        }
         auto& t    = Theme::getInstance();
         auto mouse = getMouseXYRelative().toFloat();
         auto btns  = buildBtns(zone);
