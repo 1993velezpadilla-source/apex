@@ -406,7 +406,7 @@ public:
             if (phoneCollapsedRail_ || phoneRailProgress_ > 0.001f)
             {
                 g.saveState();
-                g.setOpacity(phoneRailProgress_);
+                g.beginTransparencyLayer(phoneRailProgress_);
                 // Horizontal-scroll mini rail: the actual waveform owns almost
                 // all viewport width. Keep each row selectable with a
                 // colour-coded microphone and a truthful loaded-FX badge.
@@ -461,12 +461,13 @@ public:
                 }
                 g.setColour(a.color.borderSoftA.withAlpha(0.40f));
                 g.fillRect(0.f, bounds.getBottom() - 1.f, bounds.getWidth(), 1.f);
+                g.endTransparencyLayer();
                 g.restoreState();
             }
             if (!phoneCollapsedRail_ || phoneRailProgress_ < 0.999f)
             {
             g.saveState();
-            g.setOpacity(1.0f - phoneRailProgress_);
+            g.beginTransparencyLayer(1.0f - phoneRailProgress_);
             g.setColour(master ? a.color.magentaDeep.darker(0.8f)
                                : a.color.panelA);
             g.fillRect(bounds);
@@ -529,6 +530,7 @@ public:
             g.setColour(a.color.borderSoftA.withAlpha(0.50f));
             g.fillRect(0.0f, bounds.getBottom() - 1.0f,
                        bounds.getWidth(), 1.0f);
+            g.endTransparencyLayer();
             g.restoreState();
             }
         }
