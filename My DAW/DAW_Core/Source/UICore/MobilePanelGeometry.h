@@ -351,7 +351,10 @@ struct PhoneTransportTapState
     bool eligible = false;
     // Keep tracking fingers after cancellation: a second touch must not
     // re-arm a launcher while either finger remains on the Transport.
-    int activeSources[8]{};
+    // Android may deliver ten simultaneous contacts; reserve additional
+    // slots so a ninth finger cannot be forgotten while the others lift.
+    static constexpr int maxTrackedSources = 16;
+    int activeSources[maxTrackedSources]{};
     int activeCount = 0;
     bool blocked = false;
 
@@ -372,7 +375,7 @@ struct PhoneTransportTapState
                 eligible = false;
                 return;
             }
-        if (activeCount == 8)
+        if (activeCount == maxTrackedSources)
         {
             blocked = true;
             eligible = false;
