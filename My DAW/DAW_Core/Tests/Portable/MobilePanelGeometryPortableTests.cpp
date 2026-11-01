@@ -40,19 +40,35 @@ int main()
             assert(target.height == (h < 44 ? h : 44));
         }
 
-    // The Mixer hides the close traffic light. Its two remaining JUCE
-    // chrome orbs must use enlarged, non-overlapping phone hit regions and
-    // never fire during mouseDown. Desktop keeps the original 12x12 hits.
+    // The Mixer hides the close traffic light. Expand the two 12x12 orbs
+    // to adjacent 30x32 phone targets without moving the APEX title artwork.
+    // The boundary at x=30 belongs ONLY to maximize, never both controls.
+    // Desktop retains its original painted 12x12 hit regions.
     using DAW::mobile::phoneMixerLeftChromeButtonAt;
-    static_assert(phoneMixerLeftChromeButtonAt(10.f, 0.f, 14, 12, 8, 32) == 1);
+    static_assert(phoneMixerLeftChromeButtonAt(0.f, 0.f, 14, 12, 8, 32) == 1);
     static_assert(phoneMixerLeftChromeButtonAt(29.99f, 31.99f, 14, 12, 8, 32) == 1);
     static_assert(phoneMixerLeftChromeButtonAt(30.f, 16.f, 14, 12, 8, 32) == 2);
-    static_assert(phoneMixerLeftChromeButtonAt(49.99f, 31.f, 14, 12, 8, 32) == 2);
-    static_assert(phoneMixerLeftChromeButtonAt(9.99f, 16.f, 14, 12, 8, 32) == 0);
-    static_assert(phoneMixerLeftChromeButtonAt(50.f, 16.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(59.99f, 31.f, 14, 12, 8, 32) == 2);
+    static_assert(phoneMixerLeftChromeButtonAt(-0.01f, 16.f, 14, 12, 8, 32) == 0);
+    static_assert(phoneMixerLeftChromeButtonAt(60.f, 16.f, 14, 12, 8, 32) == 0);
     static_assert(phoneMixerLeftChromeButtonAt(20.f, -1.f, 14, 12, 8, 32) == 0);
     static_assert(phoneMixerLeftChromeButtonAt(40.f, 32.f, 14, 12, 8, 32) == 0);
     static_assert(phoneMixerLeftChromeButtonAt(20.f, 16.f, 14, 12, 8, 0) == 0);
+    for (int x = -1; x <= 61; ++x)
+    {
+        const int hit = phoneMixerLeftChromeButtonAt(
+            static_cast<float>(x), 16.f, 14, 12, 8, 32);
+        assert(hit == (x < 0 || x >= 60 ? 0 : x < 30 ? 1 : 2));
+    }
+    DAW::mobile::PhoneChromeTapState mixerChromeTap;
+    mixerChromeTap.begin(101); // minimize
+    assert(!mixerChromeTap.release(102, 0, 0)); // release on maximize
+    mixerChromeTap.begin(102);
+    mixerChromeTap.move(12, 0);
+    mixerChromeTap.move(0, 0); // a swipe returning to the orb stays cancelled
+    assert(!mixerChromeTap.release(102, 0, 0));
+    mixerChromeTap.begin(102);
+    assert(mixerChromeTap.release(102, 0, 0)); // stationary tap
 
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
     // The 32-high title bar caps the phone target height at 28, while 44-wide
