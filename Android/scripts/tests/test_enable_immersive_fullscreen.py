@@ -43,11 +43,11 @@ class ImmersiveManifestTests(unittest.TestCase):
                 self.assertEqual(patched.get(f"{{{ANDROID_NS}}}name"),
                                  bundle + ".ApexImmersiveActivity")
                 self.assertEqual(patched.get(f"{{{ANDROID_NS}}}screenOrientation"),
-                                 "fullSensor")
+                                 "user")
                 self.assertTrue(java.is_file())
                 source = java.read_text(encoding="utf-8")
                 self.assertIn("WindowInsetsController", source)
-                self.assertIn("SCREEN_ORIENTATION_FULL_SENSOR", source)
+                self.assertIn("SCREEN_ORIENTATION_USER", source)
                 self.assertNotIn("SCREEN_ORIENTATION_PORTRAIT", source)
             return run
 

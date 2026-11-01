@@ -114,9 +114,9 @@ jobs:
           # bars and re-applies after focus changes from plugin dialogs.
           python3 Android/scripts/enable_immersive_fullscreen.py
           MANIFEST="My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
-          # Require sensor rotation (portrait + landscape), immersive Activity,
-          # and separate mobile package; packaging is NOT a device rotation test.
-          grep -q 'android:screenOrientation="fullSensor"' "$MANIFEST"
+          # Allow portrait + landscape under Android auto-rotate preferences;
+          # packaging is NOT a device rotation test.
+          grep -q 'android:screenOrientation="user"' "$MANIFEST"
           if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then
             grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
