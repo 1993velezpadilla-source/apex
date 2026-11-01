@@ -7303,10 +7303,12 @@ void MainComponent::timerCallback()
         trackListWindow_->setBounds(rail.withWidth(w));
         timelineWindow_->setBounds(rail.getX() + w, timeline.getY(),
                                    juce::jmax(1, totalW - w), timeline.getHeight());
-        // Viewport retains its source time and track scroll while the visible
-        // waveform canvas gains/loses width. No playhead seek or audio mutation.
-        updateTimelineViewportContentBounds();
-        repaint(rail.getX(), rail.getY(), totalW, rail.getHeight());
+        // The Viewport remeasures its own visible area on setBounds. Do NOT
+        // rescan every audio clip / rebuild the entire arrangement extent and
+        // repaint all windows on each animation frame. The one final resized()
+        // below refreshes content bounds when the width has settled.
+        repaint(rail.getRight() - 3, rail.getY(), 6, rail.getHeight());
+        repaint(rail.getX() + w - 3, rail.getY(), 6, rail.getHeight());
     }
 
     if (t >= 1.0f)
