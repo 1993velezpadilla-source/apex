@@ -182,6 +182,14 @@ constexpr bool pluginBrowserRowTapActivates(bool phone, int dragX, int dragY,
     return dragX * dragX + dragY * dragY <= 64;
 }
 
+// Remember the full phone gesture, not just its final displacement. A finger
+// can travel far and return to the pressed row/button before mouseUp.
+// Once outside the 8-unit tap radius, the gesture can never activate.
+constexpr bool phoneTapGestureRemainsEligible(bool eligible, int dragX, int dragY) noexcept
+{
+    return eligible && pluginBrowserRowTapActivates(true, dragX, dragY, true);
+}
+
 // A phone window control must not close/minimize/maximize during a swipe,
 // or when the finger is released over a different title-bar button. This
 // shares the FX row's bounded 8-unit tap threshold (no overflow on extremes).
