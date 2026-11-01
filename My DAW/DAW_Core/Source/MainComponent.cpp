@@ -529,6 +529,7 @@ public:
                     pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
 
                 setViewPosition(pos);
+                return; // No second JUCE default scroll: it doubles the swipe.
             }
         }
 
@@ -2891,7 +2892,10 @@ MainComponent::MainComponent()
     // listen to Viewport's actual visible-area changes for touch scrolling.
     timelineViewport->onVisiblePositionChanged = [this](juce::Point<int> pos)
     {
-        handlePhoneTimelineScroll(pos.x);
+        // Every zoom operation and viewport resize also updates visibleArea.
+        // NEVER infer a deliberate horizontal SWIPE from that notification.
+        // Rail collapse is initiated only by the arranger's touch-settled
+        // event, after pinch and inertia finish (see below).
         if (arrangement_)
             arrangement_->setViewportScrollOffsets(pos.x, pos.y);
         if (trackList_)
@@ -2997,6 +3001,12 @@ MainComponent::MainComponent()
         applyTimelineZoom(isVertical, zoomIn);
     };
     timelineViewport_ = std::move(timelineViewport);
+    if (arrangement_)
+        arrangement_->setPhoneNavigationSettledCallback([this]()
+        {
+            if (timelineViewport_)
+                handlePhoneTimelineScroll(timelineViewport_->getViewPositionX());
+        });
     timelineViewport_->getVerticalScrollBar().addListener(this);
     timelineViewport_->getHorizontalScrollBar().addListener(this);
     addAndMakeVisible(*timelineViewport_);
@@ -7344,8 +7354,9 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeSt
         && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
             || scrollBar == &timelineViewport_->getVerticalScrollBar()))
     {
-        if (scrollBar == &timelineViewport_->getHorizontalScrollBar())
-            handlePhoneTimelineScroll(juce::jmax(0, juce::roundToInt(newRangeStart)));
+        // Hidden scrollbars still report programmatic movement during pinch
+        // zoom and anchored seeks. They must not collapse the track names.
+        juce::ignoreUnused(newRangeStart);
         if (arrangement_)
             arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
         if (trackList_)
