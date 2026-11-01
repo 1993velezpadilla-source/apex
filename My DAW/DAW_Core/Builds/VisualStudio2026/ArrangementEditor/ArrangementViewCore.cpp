@@ -1197,7 +1197,10 @@ namespace ArrangementEditor
                     oldPps * TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX));
                 const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
                 const double focusViewportX = focusX - viewport->getViewPositionX();
-                m_zoom.setPixelsPerSecond(newPps);
+                {
+                    const juce::ScopedValueSetter<bool> fastResize(m_fastTouchPinchResize, true);
+                    m_zoom.setPixelsPerSecond(newPps);
+                }
                 viewport->setViewPosition(
                     TouchNavigationMath::zoomPosition(focusX, focusViewportX,
                         newPps / juce::jmax(1.0, oldPps),
@@ -1216,7 +1219,10 @@ namespace ArrangementEditor
                 const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
                 const double focusViewportY = focusY - viewport->getViewPositionY();
                 const double contentTop = (double) arrangementContentTop();
-                m_zoom.setTrackHeightPx(newH);
+                {
+                    const juce::ScopedValueSetter<bool> fastResize(m_fastTouchPinchResize, true);
+                    m_zoom.setTrackHeightPx(newH);
+                }
                 const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
                 viewport->setViewPosition(viewport->getViewPositionX(),
                     juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
@@ -2041,8 +2047,51 @@ namespace ArrangementEditor
     {
         updatePinnedViewportControls();
 
+        // A live phone pinch changes zoom up to 60 times/second. The normal
+        // rebuild invokes expensive audio snapshot, plugin/selection and
+        // waveform scheduling for ALL clips on every frame. Only clip
+        // rectangles need to follow the fingers; full authoritative rebuild
+        // is done once when the touch gesture finishes.
+        if (m_fastTouchPinchResize)
+        {
+            updateClipGeometryForFastPinch();
+            return;
+        }
         rebuildClipRenderers();
         updateAutomationLayout();
+    }
+
+    void ArrangementViewCore::updateClipGeometryForFastPinch()
+    {
+        const int h = juce::jmax(1, (int)m_zoom.getTrackHeightPx() - 2);
+        const double pps = m_zoom.getPixelsPerSecond();
+        const int masterOffset = m_engineTrackManager != nullptr
+            && m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+        for (auto& owned : m_clipRenderers)
+        {
+            if (!owned) continue;
+            auto* clip = m_clipState.findClip(owned->getClipId());
+            if (!clip) continue;
+            const int x = timeToScreenX(clip->startTime);
+            const int w = juce::jmax(4,
+                juce::roundToInt(juce::jmin(2147480000.0,
+                    juce::jmax(0.0, clip->visualLength() * pps))));
+            int y = getLaneTopForIndex(clip->trackIndex);
+            int height = h;
+            if (m_engineTrackManager != nullptr && clip->trackIndex >= masterOffset)
+                if (auto* track = m_engineTrackManager->getTrack(clip->trackIndex - masterOffset))
+                    if (isTrackHiddenByCollapsedFolder(track))
+                    {
+                        y = -100000;
+                        height = 1;
+                    }
+            const juce::Rectangle<int> bounds(x, y, w, height);
+            if (owned->getBounds() != bounds)
+                owned->setBounds(bounds);
+            const bool visible = shouldShowClipRenderer(*owned);
+            if (owned->isVisible() != visible)
+                owned->setVisible(visible);
+        }
     }
 
     void ArrangementViewCore::updatePinnedViewportControls()
