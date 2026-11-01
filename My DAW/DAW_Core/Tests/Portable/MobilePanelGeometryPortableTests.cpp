@@ -263,6 +263,33 @@ int main()
             assert(phoneChromeButtonTapActivates(1, 1, dx, dy) == tap);
             assert(!phoneChromeButtonTapActivates(1, 2, dx, dy));
         }
+    // Regression: a phone rotation during a pressed chrome control must
+    // never close/minimize/maximize the newly repositioned floating window.
+    using DAW::mobile::PhoneChromeTapState;
+    PhoneChromeTapState chromeTap;
+    assert(!chromeTap.release(1, 0, 0)); // No press.
+    chromeTap.begin(1);
+    assert(chromeTap.release(1, 0, 0)); // Stationary close.
+    assert(!chromeTap.release(1, 0, 0)); // Single activation.
+    chromeTap.begin(2);
+    chromeTap.move(3, 4);
+    assert(chromeTap.release(2, 3, 4)); // Short movement.
+    chromeTap.begin(3);
+    chromeTap.move(12, 0);
+    chromeTap.move(0, 0);
+    assert(!chromeTap.release(3, 0, 0)); // Swipe and return.
+    chromeTap.begin(1);
+    chromeTap.invalidate(); // Parent resized on rotation.
+    assert(!chromeTap.release(1, 0, 0));
+    chromeTap.begin(3);
+    assert(!chromeTap.release(1, 0, 0)); // Different button.
+    chromeTap.begin(2);
+    chromeTap.move(std::numeric_limits<int>::min(),
+                   std::numeric_limits<int>::max());
+    assert(!chromeTap.release(2, 0, 0)); // Extreme drag.
+    chromeTap.begin(3);
+    assert(chromeTap.release(3, 0, 0)); // Fresh press after rotation.
+
     // Phone Transport panel launchers must not open Mixer/Sends/FX/Browser
     // on swipe, on release over a different launcher, or after a drag that
     // returns to its origin. Desktop launchers are intentionally unchanged.
