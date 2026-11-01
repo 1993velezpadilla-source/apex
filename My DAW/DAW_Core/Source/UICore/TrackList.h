@@ -2803,10 +2803,27 @@ public:
             };
         }
 
+        void setCollapsedPhoneRail(bool collapsed)
+        {
+            if (collapsedPhoneRail_ == collapsed) return;
+            collapsedPhoneRail_ = collapsed;
+            resized();
+            repaint();
+        }
+
         void paint(juce::Graphics& g) override
         {
             auto& theme = Theme::getInstance();
             auto& a = theme.apex;
+            if (collapsedPhoneRail_)
+            {
+                // Preserve the single add-track button, but no clipped
+                // "TRACKS" text behind the waveform/ruler during a swipe.
+                g.fillAll(a.color.deepestA);
+                g.setColour(a.color.borderSoftA.withAlpha(0.6f));
+                g.fillRect(0, 79, getWidth(), 1);
+                return;
+            }
             // Top 48px — matches the ArrangementViewCore toolbar height.
             g.setColour(a.color.deepestB);
             g.fillRect(0, 0, getWidth(), 48);
@@ -2832,7 +2849,10 @@ public:
 
         void resized() override
         {
-            addBtn_.setBounds(getWidth() - 44, 10, 34, 28);
+            if (collapsedPhoneRail_)
+                addBtn_.setBounds(5, 8, juce::jmax(0, getWidth() - 10), 34);
+            else
+                addBtn_.setBounds(getWidth() - 44, 10, 34, 28);
         }
 
         void setClipEditInfo(const juce::String& info)
@@ -2847,6 +2867,7 @@ public:
         QuickAddButton addBtn_;
     private:
         juce::String clipEditInfo_;
+        bool collapsedPhoneRail_ = false;
     };
 
     std::function<void(int deltaX)> onWidthDrag;  // callback for resize
@@ -2898,6 +2919,17 @@ public:
         phonePresentation_ = enabled;
         for (auto* row : trackRows_)
             if (row != nullptr) row->setPhonePresentation(enabled);
+        resized();
+    }
+
+    void setPhoneCollapsedRail(bool collapsed)
+    {
+        collapsed = phonePresentation_ && collapsed;
+        if (phoneCollapsedRail_ == collapsed) return;
+        phoneCollapsedRail_ = collapsed;
+        headerBar_.setCollapsedPhoneRail(collapsed);
+        for (auto* row : trackRows_)
+            if (row != nullptr) row->setPhoneCollapsedRail(collapsed);
         resized();
     }
 
@@ -3461,6 +3493,7 @@ public:
 private:
     TrackManager& trackManager_;
     bool phonePresentation_ = false;
+    bool phoneCollapsedRail_ = false;
     juce::OwnedArray<TrackRow> trackRows_;
     TrackListHeaderBar headerBar_;   // pinned overlay with the real TRACKS "+"
     int  dragStartX_ = -1;
@@ -3743,6 +3776,7 @@ private:
         {
             auto* masterRow = new TrackRow(*trackManager_.getMasterTrack());
             masterRow->setPhonePresentation(phonePresentation_);
+            masterRow->setPhoneCollapsedRail(phoneCollapsedRail_);
             masterRow->setDesiredHeight(108);
             masterRow->setSelected(selectedTrackIds_.count(masterRow->getTrackID()) > 0);
             masterRow->onPresentationDemandChanged = [this]
@@ -3835,6 +3869,7 @@ private:
                 const int visibleRowIndex = trackRows_.size() - (trackManager_.hasMasterTrack() ? 1 : 0);
                 auto* row = new TrackRow(*track);
             row->setPhonePresentation(phonePresentation_);
+                row->setPhoneCollapsedRail(phoneCollapsedRail_);
                 row->setSelected(selectedTrackIds_.count(row->getTrackID()) > 0);
                 row->setIndentLevel(depth);
                 row->onPresentationDemandChanged = [this]
