@@ -251,12 +251,16 @@ protected:
         if (phonePresentation_)
         {
             pendingPhoneToolbarTap_.invalidate();
-            const int button = toolbarButtonAt(e.position);
+            // Base chrome minimizes/maximizes on mouseDown. On phones, also
+            // defer those left-side controls so a swipe cannot toggle them.
+            const int leftChrome = phoneLeftChromeButtonAt(e.position);
+            const int button = leftChrome != 0 ? 100 + leftChrome
+                                               : toolbarButtonAt(e.position);
             if (button != 0)
             {
                 toFront(true);
                 pendingPhoneToolbarTap_.begin(button);
-                return; // Do not invoke a Mixer action on finger-down.
+                return; // Never invoke a phone chrome action on finger-down.
             }
         }
         FloatingWindowBase::mouseDown(e);
@@ -279,10 +283,26 @@ protected:
         if (phonePresentation_ && pendingPhoneToolbarTap_.pressed != 0)
         {
             const int pressed = pendingPhoneToolbarTap_.pressed;
+            const int released = pressed >= 100
+                ? (phoneLeftChromeButtonAt(e.position) != 0
+                    ? 100 + phoneLeftChromeButtonAt(e.position) : 0)
+                : toolbarButtonAt(e.position);
             if (pendingPhoneToolbarTap_.release(
-                    toolbarButtonAt(e.position),
+                    released,
                     e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
-                invokeToolbarAction(pressed - 1);
+            {
+                if (pressed >= 100)
+                {
+                    // Dispatch at the original painted orb centre; the
+                    // expanded phone hit zone may extend beyond its 12px art.
+                    const float centreX = (float) kBtnPadL + (float) kBtnSize * 0.5f
+                                        + (pressed == 102 ? (float)(kBtnSize + kBtnGap) : 0.0f);
+                    FloatingWindowBase::mouseDown(e.withNewPosition(
+                        juce::Point<float>(centreX, (float) kTitleH * 0.5f)));
+                }
+                else
+                    invokeToolbarAction(pressed - 1);
+            }
             return;
         }
         FloatingWindowBase::mouseUp(e);
@@ -299,6 +319,11 @@ private:
     GlassMixerLookAndFeel glassStyle_;
     bool phonePresentation_ = false;
     mobile::PhoneChromeTapState pendingPhoneToolbarTap_;
+    int phoneLeftChromeButtonAt(juce::Point<float> p) const noexcept
+    {
+        return isEmbedded() ? 0 : mobile::phoneMixerLeftChromeButtonAt(
+            p.x, p.y, kBtnPadL, kBtnSize, kBtnGap, kTitleH);
+    }
     juce::Component* content_ = nullptr;
     void clampTop() { if (getBounds().getY() < kMinTopY) setTopLeftPosition(getBounds().getX(), kMinTopY); }
 
