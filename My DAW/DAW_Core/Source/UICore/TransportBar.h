@@ -239,7 +239,13 @@ public:
         recBtn_->tooltipText = "Record\nStart recording on all armed tracks. Press again to stop.";
 
         loopBtn_  = addBtn("~",  t.apex.color.violet,          TransportIcon::Loop,
-               []{ ActionManager::getInstance().dispatch(ActionID::TransportToggleLoop); });
+               [this]
+               {
+                   // This button previously dispatched an ActionID that had
+                   // no registered handler on Android. A second tap could
+                   // not turn the audible loop off, even if the icon changed.
+                   transport_.setLooping(!transport_.isLooping());
+               });
         loopBtn_->tooltipText = "Loop\nToggle loop mode. Playback loops between the left and right locators.";
 
         returnBtn_ = addBtn(juce::String(juce::CharPointer_UTF8("↩")),  t.apex.color.cyan, TransportIcon::Return,
