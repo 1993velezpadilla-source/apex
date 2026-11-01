@@ -104,6 +104,14 @@ jobs:
         shell: bash
         run: python3 Android/Tests/test_immersive_fullscreen.py
 
+      - name: Guard BandLab-style mobile rail layout and scroll hysteresis
+        shell: bash
+        run: |
+          c++ -std=c++17 -O2 -Wall -Wextra -pedantic \
+            "My DAW/DAW_Core/Tests/Portable/MobilePanelGeometryPortableTests.cpp" \
+            -o "$RUNNER_TEMP/apex-mobile-rail-geometry"
+          "$RUNNER_TEMP/apex-mobile-rail-geometry"
+
       - name: Generate Android exporter from ORIGINAL APEX .jucer
         shell: bash
         run: |
