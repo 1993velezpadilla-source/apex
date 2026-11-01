@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None):
+                  launcher_exported=None, decoy_launcher_only_first=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -30,12 +30,20 @@ class ImmersiveManifestTests(unittest.TestCase):
             if extra_activity_first:
                 ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.UnrelatedActivity"})
+            if decoy_launcher_only_first:
+                decoy = ET.SubElement(app, "activity", {
+                    f"{{{ANDROID_NS}}}name": "com.example.CategoryOnlyDecoy"})
+                decoy_filter = ET.SubElement(decoy, "intent-filter")
+                ET.SubElement(decoy_filter, "category", {
+                    f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             launcher_attributes = {
                 f"{{{ANDROID_NS}}}name": "com.rmsl.juce.JuceActivity"}
             if launcher_exported is not None:
                 launcher_attributes[f"{{{ANDROID_NS}}}exported"] = launcher_exported
             activity = ET.SubElement(app, "activity", launcher_attributes)
             filt = ET.SubElement(activity, "intent-filter")
+            ET.SubElement(filt, "action", {
+                f"{{{ANDROID_NS}}}name": "android.intent.action.MAIN"})
             ET.SubElement(filt, "category", {
                 f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             ET.ElementTree(root).write(manifest, encoding="utf-8")
@@ -77,6 +85,13 @@ class ImmersiveManifestTests(unittest.TestCase):
             with self.subTest(bundle=bundle):
                 self.assertEqual(
                     self.run_patch(bundle, extra_activity_first=True).returncode, 0)
+
+    def test_launcher_category_without_main_action_is_ignored(self):
+        # A decoy category must not trigger a false multiple-launcher error.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                self.assertEqual(
+                    self.run_patch(bundle, decoy_launcher_only_first=True).returncode, 0)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
