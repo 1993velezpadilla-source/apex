@@ -318,6 +318,12 @@ trackManager_.addListener(this);
 
     int getVerticalScrollOffset() const noexcept { return verticalScrollOffset_; }
 
+    void setPhoneNavigationSettledCallback(std::function<void()> callback)
+    {
+        if (core_ != nullptr)
+            core_->onTouchNavigationSettled = std::move(callback);
+    }
+
     /** Access the ArrangementViewCore for benchmarking and diagnostics use ONLY.
      *  Returns nullptr if not yet initialized.
      *  Do NOT use this accessor to bypass normal production authority outside
