@@ -1435,6 +1435,10 @@ namespace ArrangementEditor
                 updateAutomationLayout();
                 repaint();
             }
+            // Touch/pinch or inertial scroll has stopped: resizing the rail
+            // here does not interfere with gesture-anchored viewport math.
+            if (onTouchNavigationSettled)
+                onTouchNavigationSettled();
             return false;
         }
 
@@ -1506,6 +1510,8 @@ namespace ArrangementEditor
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
             ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            if (onTouchNavigationSettled)
+                onTouchNavigationSettled();
         }
     }
 
