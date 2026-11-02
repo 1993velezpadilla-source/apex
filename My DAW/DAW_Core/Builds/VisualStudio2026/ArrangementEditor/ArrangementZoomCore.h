@@ -144,11 +144,16 @@ namespace ArrangementEditor
         // -----------------------------------------------------------------------
         double getTrackHeightPx() const { return m_trackHeightPx; }
 
+        // Shared clamp for touch/wheel anchors and the actual lane setter.
+        // Never anchor the viewport to a height the setter cannot apply.
+        static double clampTrackHeightPx(double requested, double current) noexcept
+        {
+            return std::isfinite(requested) ? juce::jlimit(24.0, 180.0, requested) : current;
+        }
+
         void setTrackHeightPx(double height)
         {
-            if (!std::isfinite(height))
-                return;
-            const double clamped = juce::jlimit(24.0, 180.0, height);
+            const double clamped = clampTrackHeightPx(height, m_trackHeightPx);
             if (clamped == m_trackHeightPx)
                 return;
             m_trackHeightPx = clamped;

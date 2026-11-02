@@ -64,6 +64,20 @@ int main()
     assert(zoom.getTrackHeightPx() == 80.0);
     assert(rebuildCallbacks == 3);
 
+    // Mouse-wheel zoom must anchor to the SAME clamped height that the setter
+    // applies (old wheel path used 240 while the setter capped at 180).
+    const double wheelHeight = ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(240.0, 80.0);
+    assert(wheelHeight == 180.0);
+    zoom.setTrackHeightPx(wheelHeight);
+    assert(zoom.getTrackHeightPx() == wheelHeight);
+    assert(rebuildCallbacks == 4);
+    for (int i = 0; i < 1000; ++i)
+        zoom.setTrackHeightPx(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(240.0, zoom.getTrackHeightPx()));
+    assert(rebuildCallbacks == 4);
+    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(nan, 180.0) == 180.0);
+    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(inf, 180.0) == 180.0);
+    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(-999.0, 180.0) == 24.0);
+
     // Horizontal zoom has no callback, but must remain finite after invalid
     // input and respect both bounds when the requested value is finite.
     assert(zoom.getPixelsPerSecond() == 100.0);

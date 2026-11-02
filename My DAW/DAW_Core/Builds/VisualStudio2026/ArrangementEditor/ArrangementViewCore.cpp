@@ -3679,7 +3679,11 @@ namespace ArrangementEditor
                 const double anchorTrackY = (double)(e.y);  // content-local Y
                 const int mouseYInViewport = e.y - viewport->getViewPositionY();
                 const double zoomFactor = std::pow(1.2, (double)wheel.deltaY * 2.0);
-                const double newH = juce::jlimit(24.0, 240.0, oldH * zoomFactor);
+                const double newH = ArrangementZoomCore::clampTrackHeightPx(oldH * zoomFactor, oldH);
+                // A saturated wheel gesture must not move the viewport anchor
+                // or rebuild the renderers when the effective height is fixed.
+                if (newH == oldH)
+                    return;
 
                 m_zoom.setTrackHeightPx(newH);
 
