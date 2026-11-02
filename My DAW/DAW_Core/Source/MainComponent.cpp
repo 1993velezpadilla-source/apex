@@ -9458,6 +9458,13 @@ void MainComponent::updateTimelineViewportContentBounds()
     const auto loopRange = appCore_.getTransport().getLoopRange();
     projectLengthSeconds = juce::jmax(projectLengthSeconds,
         (double) loopRange.second / sampleRate + 2.0);
+    // A phone's playback may cross the last clip while positionChanged()
+    // fires many times per second. With only +2s of visible headroom, each
+    // tick would rescan every clip and resize/repaint the Arrangement.
+    // Grow phone-only scroll runway in 30s chunks; leave desktop/iPad intact.
+    if (usesPhoneMixerPresentation())
+        projectLengthSeconds = DAW::mobile::timelinePhonePlaybackExtentSeconds(
+            projectLengthSeconds, (double)appCore_.getTransport().getPosition() / sampleRate);
     lastTimelineContentLengthSeconds_ = projectLengthSeconds;
 
     // Content width = zoom * project length, but never below viewportW + 1.

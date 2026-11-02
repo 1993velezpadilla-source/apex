@@ -146,6 +146,17 @@ constexpr int timelineWheelClampedPosition(int current, int contentSpan,
     return target < 0 ? 0 : target > limit ? limit : static_cast<int>(target);
 }
 
+// While playback runs past the end of visible clips, extending the phone
+// Arrangement by only two seconds causes a full clip scan, resize and
+// scrollbar repaint on every transport tick. Reserve 30 seconds of runway
+// whenever the extent is refreshed. Desktop/iPad keep their old extent.
+constexpr double timelinePhonePlaybackExtentSeconds(
+    double projectExtentSeconds, double playheadSeconds) noexcept
+{
+    const double withRunway = playheadSeconds + 30.0;
+    return projectExtentSeconds > withRunway ? projectExtentSeconds : withRunway;
+}
+
 // The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
 // restore bubbles must stay hidden after closing a floating phone panel.
 constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept

@@ -163,6 +163,29 @@ int main()
                     assert(result <= (content > view ? content - view : 0));
                 }
 
+    // Once playback approaches the end of the Arrangement, extending the
+    // phone scroll range by only 2s would rebuild clip bounds every tick.
+    // A 30s phone runway amortizes those costly GUI updates; long projects
+    // still retain their full clip/loop extent.
+    using DAW::mobile::timelinePhonePlaybackExtentSeconds;
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.1) == 58.1);
+    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 28.1) == 200.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 199.0) == 229.0);
+    double phoneExtent = 30.0;
+    int refreshes = 0;
+    for (int tick = 0; tick < 1200; ++tick) // 60s at 20 transport ticks/s
+    {
+        const double playhead = static_cast<double>(tick) / 20.0;
+        if (playhead + 2.0 > phoneExtent)
+        {
+            phoneExtent = timelinePhonePlaybackExtentSeconds(30.0, playhead);
+            ++refreshes;
+        }
+    }
+    assert(refreshes <= 2); // Previously ~600 rebuilds after 28s.
+    assert(phoneExtent >= 60.0);
+
     // Regression: closing Sends or the floating Mixer must not resurrect
     // desktop draggable launchers over the phone Arrangement. The desktop
     // restore affordance remains available for iPad/Windows/macOS.
