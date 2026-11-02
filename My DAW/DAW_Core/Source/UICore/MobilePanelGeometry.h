@@ -1,4 +1,5 @@
 #pragma once
+#include <limits>
 
 // JUCE-independent panel sizing logic (owning component logical units).
 namespace DAW::mobile
@@ -40,18 +41,28 @@ struct TimelinePhoneWheelIntent
 // High-resolution trackpads may deliver spikes (or invalid values) while
 // the phone Arrangement is zooming/rotating. Bound each wheel event to one
 // unit so the existing viewport-relative step cannot jump across the song.
+// Ignore non-finite wheel samples, including +/-Inf. Treating Inf as a
+// clamped unit delta used to jump 65% of the viewport on a malformed event.
+// Keep this constexpr for C++17 portable geometry tests.
+constexpr float timelinePhoneFiniteWheelDelta(float delta) noexcept
+{
+    return delta >= -std::numeric_limits<float>::max()
+        && delta <= std::numeric_limits<float>::max() ? delta : 0.0f;
+}
 constexpr float timelinePhoneBoundWheelDelta(float delta) noexcept
 {
-    if (delta != delta) return 0.0f; // NaN: no movement.
-    return delta > 1.0f ? 1.0f : delta < -1.0f ? -1.0f : delta;
+    const float finite = timelinePhoneFiniteWheelDelta(delta);
+    return finite > 1.0f ? 1.0f : finite < -1.0f ? -1.0f : finite;
 }
 constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
     bool shift, float deltaX, float deltaY) noexcept
 {
     // Select the dominant axis BEFORE bounding its magnitude. Otherwise
     // a large diagonal gesture (50, 20) becomes (1, 1) and wrongly pans Y.
-    const float x = deltaX != deltaX ? 0.0f : deltaX;
-    const float y = deltaY != deltaY ? 0.0f : deltaY;
+    // Sanitize before choosing the dominant axis: a malformed X must not
+    // suppress a valid Y gesture (and vice versa).
+    const float x = timelinePhoneFiniteWheelDelta(deltaX);
+    const float y = timelinePhoneFiniteWheelDelta(deltaY);
     if (shift)
         return { true, timelinePhoneBoundWheelDelta(x != 0.0f ? x : y) };
     const float absX = x < 0.0f ? -x : x;

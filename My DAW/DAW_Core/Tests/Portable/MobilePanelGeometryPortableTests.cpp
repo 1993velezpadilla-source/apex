@@ -55,16 +55,25 @@ int main()
     static_assert(timelinePhoneWheelIntent(false, 50.0f, 20.0f).delta == 1.0f);
     static_assert(!timelinePhoneWheelIntent(false, 20.0f, 50.0f).horizontal);
     static_assert(timelinePhoneWheelIntent(false, 20.0f, 50.0f).delta == 1.0f);
-    static_assert(timelinePhoneWheelIntent(false,
+    static_assert(!timelinePhoneWheelIntent(false,
         std::numeric_limits<float>::infinity(), 20.0f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false,
+        std::numeric_limits<float>::infinity(), 20.0f).delta == 1.0f);
     static_assert(timelinePhoneWheelIntent(false, 0.0f, -50.0f).delta == -1.0f);
     static_assert(timelinePhoneWheelIntent(true, 0.0f, -50.0f).delta == -1.0f);
     static_assert(timelinePhoneWheelIntent(false,
         std::numeric_limits<float>::quiet_NaN(), 0.4f).delta == 0.4f);
+    // Infinite wheel samples are invalid, not full-speed pan commands.
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(
+        std::numeric_limits<float>::infinity()) == 0.0f);
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(
+        -std::numeric_limits<float>::infinity()) == 0.0f);
     static_assert(timelinePhoneWheelIntent(false,
-        std::numeric_limits<float>::infinity(), 0.0f).delta == 1.0f);
+        std::numeric_limits<float>::infinity(), 0.0f).delta == 0.0f);
     static_assert(timelinePhoneWheelIntent(false, 0.0f,
-        -std::numeric_limits<float>::infinity()).delta == -1.0f);
+        -std::numeric_limits<float>::infinity()).delta == 0.0f);
+    static_assert(timelinePhoneWheelIntent(true,
+        std::numeric_limits<float>::infinity(), 0.4f).delta == 0.4f);
 
     // Zooming changes the viewed component size even when the viewport itself
     // is unchanged. Do not carry subpixel wheel movement across that zoom.
@@ -111,6 +120,10 @@ int main()
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).pixels == 0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).remainder == 0.0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.0f, 0.5).remainder == 0.5);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, std::numeric_limits<float>::infinity(), 0.0).pixels == 0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, -std::numeric_limits<float>::infinity(), 0.0).pixels == 0);
     // Corrupt wheel carry must not overflow integer conversion or move the
     // viewport after a rotation/restore. Valid fractional carry is preserved.
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
