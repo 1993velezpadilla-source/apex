@@ -1434,24 +1434,35 @@ namespace ArrangementEditor
 
         if (std::abs(m_touchPanVelocityX) < 0.35 && std::abs(m_touchPanVelocityY) < 0.35)
         {
-            // Gesture (and its momentum) finished: restore full detail and
-            // re-lay-out the clips once, not every frame.
+            // End of touch momentum: the zoom callback has already rebuilt
+            // clip geometry, and viewport scrolling updates renderer visibility.
+            // Rebuilding every clip here adds a full-project hitch to a pure
+            // pan. Keep the automation layout refresh for pinch/track zoom.
             const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
                 false, std::memory_order_relaxed);
             if (wasLightweight)
             {
-                rebuildClipRenderers();
                 updateAutomationLayout();
-                repaint();
+                repaint(getViewportVisibleBounds());
             }
             return false;
         }
 
         const int maxX = juce::jmax(0, getWidth()  - viewport->getViewWidth());
         const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-        viewport->setViewPosition(
-            juce::jlimit(0, maxX, viewport->getViewPositionX() - juce::roundToInt(m_touchPanVelocityX)),
-            juce::jlimit(0, maxY, viewport->getViewPositionY() - juce::roundToInt(m_touchPanVelocityY)));
+        const int beforeX = viewport->getViewPositionX();
+        const int beforeY = viewport->getViewPositionY();
+        const int nextX = TouchNavigationMath::panPosition(beforeX, m_touchPanVelocityX, maxX);
+        const int nextY = TouchNavigationMath::panPosition(beforeY, m_touchPanVelocityY, maxY);
+        viewport->setViewPosition(nextX, nextY);
+
+        // An axis pinned at the start/end (or too slow to move one pixel)
+        // must not keep a 60 Hz inertia timer alive for hundreds of frames.
+        // Stop only the blocked axis so diagonal flings still glide freely.
+        m_touchPanVelocityX = TouchNavigationMath::inertiaVelocityAfterMove(
+            m_touchPanVelocityX, beforeX, viewport->getViewPositionX());
+        m_touchPanVelocityY = TouchNavigationMath::inertiaVelocityAfterMove(
+            m_touchPanVelocityY, beforeY, viewport->getViewPositionY());
         return true;
     }
 

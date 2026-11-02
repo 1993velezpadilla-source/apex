@@ -25,6 +25,23 @@ int main()
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, true));
 
+    // At an edge, a 60 Hz fling must stop immediately instead of spending
+    // hundreds of deceleration ticks repainting an unmoving viewport.
+    // A diagonal fling must preserve motion on the unblocked axis.
+    static_assert(TouchNavigationMath::inertiaVelocityAfterMove(80.0, 0, 0) == 0.0);
+    static_assert(TouchNavigationMath::inertiaVelocityAfterMove(-80.0, 1000, 1000) == 0.0);
+    static_assert(TouchNavigationMath::inertiaVelocityAfterMove(80.0, 200, 160) == 80.0);
+    static_assert(TouchNavigationMath::inertiaVelocityAfterMove(-40.0, 200, 240) == -40.0);
+    static_assert(TouchNavigationMath::inertiaVelocityAfterMove(0.4, 200, 200) == 0.0);
+    assert(TouchNavigationMath::inertiaVelocityAfterMove(
+        90.0, 0, TouchNavigationMath::panPosition(0, 90.0, 1000)) == 0.0);
+    assert(TouchNavigationMath::inertiaVelocityAfterMove(
+        -90.0, 500, TouchNavigationMath::panPosition(500, -90.0, 1000)) == -90.0);
+    assert(TouchNavigationMath::inertiaVelocityAfterMove(
+        90.0, 500, TouchNavigationMath::panPosition(500, 90.0, 1000)) == 90.0);
+    assert(TouchNavigationMath::inertiaVelocityAfterMove(
+        -90.0, 1000, TouchNavigationMath::panPosition(1000, -90.0, 1000)) == 0.0);
+
     // A swipe is measured in screen coordinates, so viewport motion does not
     // become new finger motion. The same finger displacement gives the same
     // result regardless of the current content zoom or view origin.

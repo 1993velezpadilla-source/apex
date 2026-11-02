@@ -57,6 +57,16 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // A viewport axis cannot continue inertial motion when the clamped
+        // destination equals its current pixel. Stop only that axis, preserving
+        // diagonal movement on the other axis.
+        static constexpr double inertiaVelocityAfterMove(double velocity,
+                                                         int beforePx,
+                                                         int afterPx) noexcept
+        {
+            return beforePx == afterPx ? 0.0 : velocity;
+        }
+
         // A pan-only gesture never changes clip geometry. Once lightweight
         // waveform painting is disabled, repaint the visible viewport instead
         // of rebuilding all clip renderers. An active fling owns its own end.
