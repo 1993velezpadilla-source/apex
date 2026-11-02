@@ -20,6 +20,26 @@ constexpr TimelineViewportChrome timelineViewportChrome(bool phone) noexcept
     return { !phone, !phone, phone, phone, !phone };
 }
 
+// TimelineViewport applies its own clamped wheel displacement. Letting JUCE's
+// Viewport process that same wheel again can scroll twice on a phone. Keep the
+// existing desktop/iPad wheel delegation unchanged.
+constexpr bool timelineWheelDelegatesToViewport(bool phone) noexcept
+{
+    return !phone;
+}
+
+// Phone wheel navigation uses 64-bit addition so an out-of-range restored
+// scroll position or extreme step cannot overflow before clamping.
+constexpr int timelineWheelClampedPosition(int current, int contentSpan,
+                                           int viewSpan, int step) noexcept
+{
+    if (contentSpan <= 0 || viewSpan <= 0 || contentSpan <= viewSpan)
+        return 0;
+    const int limit = contentSpan - viewSpan;
+    const long long target = static_cast<long long>(current) + step;
+    return target < 0 ? 0 : target > limit ? limit : static_cast<int>(target);
+}
+
 // The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
 // restore bubbles must stay hidden after closing a floating phone panel.
 constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept

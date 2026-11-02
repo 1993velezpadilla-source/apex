@@ -25,6 +25,35 @@ int main()
     assert(!DAW::mobile::timelineViewportChrome(true).showCornerZoom);
     assert(DAW::mobile::timelineViewportChrome(false).showCornerZoom);
 
+    // Phone Arrangement must consume each wheel gesture once, even with
+    // hidden scrollbars; desktop/iPad keep their original JUCE wheel path.
+    using DAW::mobile::timelineWheelDelegatesToViewport;
+    using DAW::mobile::timelineWheelClampedPosition;
+    static_assert(!timelineWheelDelegatesToViewport(true));
+    static_assert(timelineWheelDelegatesToViewport(false));
+    static_assert(timelineWheelClampedPosition(200, 2000, 400, 120) == 320);
+    static_assert(timelineWheelClampedPosition(200, 2000, 400, -300) == 0);
+    static_assert(timelineWheelClampedPosition(1500, 2000, 400, 300) == 1600);
+    static_assert(timelineWheelClampedPosition(400, 400, 400, 50) == 0);
+    static_assert(timelineWheelClampedPosition(400, 400, 0, 50) == 0);
+    static_assert(timelineWheelClampedPosition(400, 0, 200, 50) == 0);
+    static_assert(timelineWheelClampedPosition(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
+        400, std::numeric_limits<int>::max()) == std::numeric_limits<int>::max() - 400);
+    static_assert(timelineWheelClampedPosition(
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max(),
+        400, std::numeric_limits<int>::min()) == 0);
+    for (int content : { 1, 200, 400, 2000 })
+        for (int view : { 1, 200, 400, 1000 })
+            for (int current : { -1000000, 0, 150, 1000000 })
+                for (int step : { -1000000, -1, 0, 1, 1000000 })
+                {
+                    const int result = timelineWheelClampedPosition(
+                        current, content, view, step);
+                    assert(result >= 0);
+                    assert(result <= (content > view ? content - view : 0));
+                }
+
     // Regression: closing Sends or the floating Mixer must not resurrect
     // desktop draggable launchers over the phone Arrangement. The desktop
     // restore affordance remains available for iPad/Windows/macOS.

@@ -517,7 +517,18 @@ public:
 
             if (step != 0)
             {
-                if (shift)
+                if (phonePresentation_)
+                {
+                    // Hidden scrollbars do not imply a second wheel pass.
+                    // Keep wheel navigation bounded after zoom/rotation.
+                    if (shift)
+                        pos.x = DAW::mobile::timelineWheelClampedPosition(
+                            pos.x, contentW, viewW, step);
+                    else
+                        pos.y = DAW::mobile::timelineWheelClampedPosition(
+                            pos.y, contentH, viewH, step);
+                }
+                else if (shift)
                     pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
                 else
                     pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
@@ -526,7 +537,10 @@ public:
             }
         }
 
-        juce::Viewport::mouseWheelMove(e, wheel);
+        // JUCE's default Viewport wheel handler scrolls again. Preserve the
+        // desktop/iPad path, but consume the phone wheel exactly once.
+        if (DAW::mobile::timelineWheelDelegatesToViewport(phonePresentation_))
+            juce::Viewport::mouseWheelMove(e, wheel);
     }
 
 protected:
