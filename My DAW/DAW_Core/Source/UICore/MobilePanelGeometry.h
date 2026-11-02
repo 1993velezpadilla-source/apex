@@ -60,6 +60,29 @@ constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
     return { horizontal, timelinePhoneBoundWheelDelta(horizontal ? x : y) };
 }
 
+// A zoom changes the Arrangement content dimensions without necessarily
+// resizing the viewport. Old subpixel wheel carry belongs to the old scale;
+// clear it before processing the next gesture to avoid post-zoom drift.
+struct TimelinePhoneWheelCarryState
+{
+    double x = 0.0, y = 0.0;
+    int contentWidth = -1, contentHeight = -1;
+    constexpr void reset() noexcept
+    {
+        x = y = 0.0;
+        contentWidth = contentHeight = -1;
+    }
+    constexpr void observeContentSize(int width, int height) noexcept
+    {
+        if (width != contentWidth || height != contentHeight)
+        {
+            x = y = 0.0;
+            contentWidth = width;
+            contentHeight = height;
+        }
+    }
+};
+
 // Fractional trackpad deltas must accumulate on phones: rounding every tiny
 // wheel event independently loses motion and makes slow pans feel stuck.
 // Keep a separate remainder for each axis in the owning viewport.
