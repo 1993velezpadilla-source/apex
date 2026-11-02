@@ -51,6 +51,12 @@ int main()
     static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(
         std::numeric_limits<float>::quiet_NaN()) == 0.0f);
     static_assert(timelinePhoneWheelIntent(false, 50.0f, 0.0f).delta == 1.0f);
+    static_assert(timelinePhoneWheelIntent(false, 50.0f, 20.0f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false, 50.0f, 20.0f).delta == 1.0f);
+    static_assert(!timelinePhoneWheelIntent(false, 20.0f, 50.0f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false, 20.0f, 50.0f).delta == 1.0f);
+    static_assert(timelinePhoneWheelIntent(false,
+        std::numeric_limits<float>::infinity(), 20.0f).horizontal);
     static_assert(timelinePhoneWheelIntent(false, 0.0f, -50.0f).delta == -1.0f);
     static_assert(timelinePhoneWheelIntent(true, 0.0f, -50.0f).delta == -1.0f);
     static_assert(timelinePhoneWheelIntent(false,

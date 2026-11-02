@@ -48,14 +48,16 @@ constexpr float timelinePhoneBoundWheelDelta(float delta) noexcept
 constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
     bool shift, float deltaX, float deltaY) noexcept
 {
-    const float safeX = timelinePhoneBoundWheelDelta(deltaX);
-    const float safeY = timelinePhoneBoundWheelDelta(deltaY);
+    // Select the dominant axis BEFORE bounding its magnitude. Otherwise
+    // a large diagonal gesture (50, 20) becomes (1, 1) and wrongly pans Y.
+    const float x = deltaX != deltaX ? 0.0f : deltaX;
+    const float y = deltaY != deltaY ? 0.0f : deltaY;
     if (shift)
-        return { true, safeX != 0.0f ? safeX : safeY };
-    const float absX = safeX < 0.0f ? -safeX : safeX;
-    const float absY = safeY < 0.0f ? -safeY : safeY;
+        return { true, timelinePhoneBoundWheelDelta(x != 0.0f ? x : y) };
+    const float absX = x < 0.0f ? -x : x;
+    const float absY = y < 0.0f ? -y : y;
     const bool horizontal = absX > absY;
-    return { horizontal, horizontal ? safeX : safeY };
+    return { horizontal, timelinePhoneBoundWheelDelta(horizontal ? x : y) };
 }
 
 // Phone wheel navigation uses 64-bit addition so an out-of-range restored
