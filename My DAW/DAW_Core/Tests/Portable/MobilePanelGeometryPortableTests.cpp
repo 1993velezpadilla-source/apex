@@ -43,6 +43,23 @@ int main()
     static_assert(timelinePhoneWheelIntent(false, 0.2f, 0.9f).delta == 0.9f);
     static_assert(timelinePhoneWheelIntent(true, 0.2f, 0.9f).delta == 0.2f);
     static_assert(!timelinePhoneWheelIntent(false, 0.0f, 0.0f).horizontal);
+    // Regression: extreme/invalid touchpad wheel values cannot create
+    // runaway viewport-relative jumps or hide a valid other-axis gesture.
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(2.5f) == 1.0f);
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(-2.5f) == -1.0f);
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(0.25f) == 0.25f);
+    static_assert(DAW::mobile::timelinePhoneBoundWheelDelta(
+        std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    static_assert(timelinePhoneWheelIntent(false, 50.0f, 0.0f).delta == 1.0f);
+    static_assert(timelinePhoneWheelIntent(false, 0.0f, -50.0f).delta == -1.0f);
+    static_assert(timelinePhoneWheelIntent(true, 0.0f, -50.0f).delta == -1.0f);
+    static_assert(timelinePhoneWheelIntent(false,
+        std::numeric_limits<float>::quiet_NaN(), 0.4f).delta == 0.4f);
+    static_assert(timelinePhoneWheelIntent(false,
+        std::numeric_limits<float>::infinity(), 0.0f).delta == 1.0f);
+    static_assert(timelinePhoneWheelIntent(false, 0.0f,
+        -std::numeric_limits<float>::infinity()).delta == -1.0f);
+
     static_assert(!timelineWheelDelegatesToViewport(true));
     static_assert(timelineWheelDelegatesToViewport(false));
     static_assert(timelineWheelClampedPosition(200, 2000, 400, 120) == 320);

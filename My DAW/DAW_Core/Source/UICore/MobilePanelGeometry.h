@@ -37,15 +37,25 @@ struct TimelinePhoneWheelIntent
     bool horizontal;
     float delta;
 };
+// High-resolution trackpads may deliver spikes (or invalid values) while
+// the phone Arrangement is zooming/rotating. Bound each wheel event to one
+// unit so the existing viewport-relative step cannot jump across the song.
+constexpr float timelinePhoneBoundWheelDelta(float delta) noexcept
+{
+    if (delta != delta) return 0.0f; // NaN: no movement.
+    return delta > 1.0f ? 1.0f : delta < -1.0f ? -1.0f : delta;
+}
 constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
     bool shift, float deltaX, float deltaY) noexcept
 {
+    const float safeX = timelinePhoneBoundWheelDelta(deltaX);
+    const float safeY = timelinePhoneBoundWheelDelta(deltaY);
     if (shift)
-        return { true, deltaX != 0.0f ? deltaX : deltaY };
-    const float absX = deltaX < 0.0f ? -deltaX : deltaX;
-    const float absY = deltaY < 0.0f ? -deltaY : deltaY;
+        return { true, safeX != 0.0f ? safeX : safeY };
+    const float absX = safeX < 0.0f ? -safeX : safeX;
+    const float absY = safeY < 0.0f ? -safeY : safeY;
     const bool horizontal = absX > absY;
-    return { horizontal, horizontal ? deltaX : deltaY };
+    return { horizontal, horizontal ? safeX : safeY };
 }
 
 // Phone wheel navigation uses 64-bit addition so an out-of-range restored
