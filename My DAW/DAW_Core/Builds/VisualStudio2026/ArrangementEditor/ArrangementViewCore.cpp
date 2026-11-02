@@ -1179,13 +1179,20 @@ namespace ArrangementEditor
             const auto delta = centreScreen - m_lastTwoFingerPos;
             const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
             const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
-            if (delta.getDistanceFromOrigin() >= 1.0f || zoomingX || zoomingY)
-                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
             const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
             const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-            viewport->setViewPosition(
-                TouchNavigationMath::panPosition(viewport->getViewPositionX(), delta.x, maxX),
-                TouchNavigationMath::panPosition(viewport->getViewPositionY(), delta.y, maxY));
+            const int beforeX = viewport->getViewPositionX();
+            const int beforeY = viewport->getViewPositionY();
+            const int nextX = TouchNavigationMath::panPosition(beforeX, delta.x, maxX);
+            const int nextY = TouchNavigationMath::panPosition(beforeY, delta.y, maxY);
+            // At an edge, a saturated pinch may change finger separation but
+            // neither viewport position nor zoom. Avoid redundant viewport
+            // layout and low-detail waveform paint in that case.
+            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            {
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                viewport->setViewPosition(nextX, nextY);
+            }
 
             // Horizontal spread = time zoom. Keep the musical time under the
             // two-finger midpoint fixed rather than zooming toward song start.
@@ -1198,6 +1205,7 @@ namespace ArrangementEditor
                     2.0, 4000.0);
                 if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
                 {
+                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                     const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
                     const double focusViewportX = focusX - viewport->getViewPositionX();
                     m_zoom.setPixelsPerSecond(newPps);
@@ -1221,6 +1229,7 @@ namespace ArrangementEditor
                     24.0, 180.0);
                 if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
                 {
+                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                     const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
                     const double focusViewportY = focusY - viewport->getViewPositionY();
                     const double contentTop = (double) arrangementContentTop();
