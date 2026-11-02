@@ -74,7 +74,9 @@ namespace ArrangementEditor
         // distance. Tiny slow movements must accumulate rather than vanish.
         static bool pinchReady(double appliedSeparationPx, double currentSeparationPx) noexcept
         {
-            return appliedSeparationPx > 1.0
+            return std::isfinite(appliedSeparationPx)
+                && std::isfinite(currentSeparationPx)
+                && appliedSeparationPx > 1.0
                 && std::abs(currentSeparationPx - appliedSeparationPx) >= 2.0;
         }
 
@@ -83,6 +85,12 @@ namespace ArrangementEditor
         static double pinchZoomTarget(double current, double ratio,
                                       double minimum, double maximum) noexcept
         {
+            // Malformed touch coordinates must not feed NaN/Inf into JUCE zoom
+            // setters or cause an unnecessary renderer rebuild.
+            if (!std::isfinite(current))
+                return minimum;
+            if (!std::isfinite(ratio))
+                return std::clamp(current, minimum, maximum);
             return std::clamp(current * ratio, minimum, maximum);
         }
 
@@ -93,7 +101,9 @@ namespace ArrangementEditor
 
         static double pinchRatio(double appliedSeparationPx, double currentSeparationPx) noexcept
         {
-            if (appliedSeparationPx <= 1.0)
+            if (!std::isfinite(appliedSeparationPx)
+                || !std::isfinite(currentSeparationPx)
+                || appliedSeparationPx <= 1.0)
                 return 1.0;
             return std::clamp(currentSeparationPx / appliedSeparationPx, 0.85, 1.18);
         }
