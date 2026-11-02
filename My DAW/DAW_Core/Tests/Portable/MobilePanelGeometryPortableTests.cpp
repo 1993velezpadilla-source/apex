@@ -79,8 +79,32 @@ int main()
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).pixels == 0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).remainder == 0.0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.0f, 0.5).remainder == 0.5);
+    // A direction reversal must not first consume old subpixel carry.
+    // Without the reset this positive fine tick would remain negative.
+    constexpr auto reversed = DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, -0.001f, -0.9);
+    static_assert(reversed.pixels == 0 && reversed.remainder > 0.0);
+    constexpr auto reversedAgain = DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.001f, 0.9);
+    static_assert(reversedAgain.pixels == 0 && reversedAgain.remainder < 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, -0.5).remainder == -0.5);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
         std::numeric_limits<int>::max(), 1.0f, 0.0).pixels < 0);
+
+    // Edge-clamped subpixel gestures should be discarded immediately,
+    // including content smaller than its viewport and invalid deltas.
+    using DAW::mobile::timelinePhoneWheelBlockedAtEdge;
+    static_assert(timelinePhoneWheelBlockedAtEdge(0, 2000, 400, 0.001f));
+    static_assert(!timelinePhoneWheelBlockedAtEdge(0, 2000, 400, -0.001f));
+    static_assert(timelinePhoneWheelBlockedAtEdge(1600, 2000, 400, -0.001f));
+    static_assert(!timelinePhoneWheelBlockedAtEdge(1600, 2000, 400, 0.001f));
+    static_assert(!timelinePhoneWheelBlockedAtEdge(200, 2000, 400, 0.001f));
+    static_assert(timelinePhoneWheelBlockedAtEdge(0, 200, 400, 0.001f));
+    static_assert(timelinePhoneWheelBlockedAtEdge(0, 0, 400, 0.001f));
+    static_assert(!timelinePhoneWheelBlockedAtEdge(0, 2000, 400, 0.0f));
+    static_assert(!timelinePhoneWheelBlockedAtEdge(0, 2000, 400,
+        std::numeric_limits<float>::quiet_NaN()));
 
     static_assert(!timelineWheelDelegatesToViewport(true));
     static_assert(timelineWheelDelegatesToViewport(false));

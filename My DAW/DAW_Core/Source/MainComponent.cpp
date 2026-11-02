@@ -523,10 +523,19 @@ public:
             if (phonePresentation_)
             {
                 auto& carry = horizontal ? wheelCarryX_ : wheelCarryY_;
-                const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
-                    horizontal ? viewW : viewH, primary, carry);
-                carry = motion.remainder;
-                step = motion.pixels;
+                const int axisPosition = horizontal ? pos.x : pos.y;
+                const int contentSpan = horizontal ? contentW : contentH;
+                const int viewSpan = horizontal ? viewW : viewH;
+                if (DAW::mobile::timelinePhoneWheelBlockedAtEdge(
+                        axisPosition, contentSpan, viewSpan, primary))
+                    carry = 0.0;
+                else
+                {
+                    const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
+                        viewSpan, primary, carry);
+                    carry = motion.remainder;
+                    step = motion.pixels;
+                }
             }
             else
                 step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);

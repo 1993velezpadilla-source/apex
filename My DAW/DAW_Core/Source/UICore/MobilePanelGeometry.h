@@ -73,10 +73,29 @@ constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
 {
     if (viewSpan <= 0)
         return { 0, 0.0 };
-    const double movement = -0.65 * static_cast<double>(viewSpan)
-        * static_cast<double>(timelinePhoneBoundWheelDelta(delta)) + remainder;
+    const double requested = -0.65 * static_cast<double>(viewSpan)
+        * static_cast<double>(timelinePhoneBoundWheelDelta(delta));
+    // Do not make a reversed fine gesture first cancel fractional motion
+    // left over from the previous direction. Zero-delta events preserve it.
+    const bool reversed = (requested > 0.0 && remainder < 0.0)
+                       || (requested < 0.0 && remainder > 0.0);
+    const double movement = requested + (reversed ? 0.0 : remainder);
     const int wholePixels = static_cast<int>(movement); // truncate only after accumulation
     return { wholePixels, movement - static_cast<double>(wholePixels) };
+}
+
+// Subpixel ticks at the start/end of a song must not accumulate a stale
+// remainder while the viewport cannot move in that direction. Otherwise
+// reversing a slow swipe can feel stuck until the old motion is consumed.
+constexpr bool timelinePhoneWheelBlockedAtEdge(
+    int current, int contentSpan, int viewSpan, float delta) noexcept
+{
+    if (contentSpan <= 0 || viewSpan <= 0 || contentSpan <= viewSpan)
+        return true;
+    const int limit = contentSpan - viewSpan;
+    const float bounded = timelinePhoneBoundWheelDelta(delta);
+    return (current <= 0 && bounded > 0.0f)
+        || (current >= limit && bounded < 0.0f);
 }
 
 // Phone wheel navigation uses 64-bit addition so an out-of-range restored
