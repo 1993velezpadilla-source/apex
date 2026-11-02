@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/ArrangementZoomPortableTests.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp'
@@ -47,6 +49,10 @@ jobs:
           cd "My DAW/DAW_Core"
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/TouchNavigationMathPortableTests.cpp -o /tmp/apex_touch_navigation_tests
           /tmp/apex_touch_navigation_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_tests
+          /tmp/apex_arrangement_zoom_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_ubsan
+          /tmp/apex_arrangement_zoom_ubsan
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ApexRadialGeometryPortableTests.cpp -o /tmp/apex_radial_geometry_tests
           /tmp/apex_radial_geometry_tests
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
