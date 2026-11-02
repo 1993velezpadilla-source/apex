@@ -127,6 +127,8 @@ namespace ArrangementEditor
             return !isFingerInput && !isRightButton;
         }
 
+        // Ignore collapsed/crossed finger-axis separations (<=1 px) so a
+        // transient zero at an axis crossing cannot trigger a phantom zoom.
         // Compare to the LAST APPLIED pinch distance, not the last sampled
         // distance. Tiny slow movements must accumulate rather than vanish.
         static bool pinchReady(double appliedSeparationPx, double currentSeparationPx) noexcept
@@ -134,6 +136,7 @@ namespace ArrangementEditor
             return std::isfinite(appliedSeparationPx)
                 && std::isfinite(currentSeparationPx)
                 && appliedSeparationPx > 1.0
+                && currentSeparationPx > 1.0
                 && std::abs(currentSeparationPx - appliedSeparationPx) >= 2.0;
         }
 
@@ -146,7 +149,7 @@ namespace ArrangementEditor
             // setters or cause an unnecessary renderer rebuild.
             if (!std::isfinite(current))
                 return minimum;
-            if (!std::isfinite(ratio))
+            if (!std::isfinite(ratio) || ratio <= 0.0)
                 return std::clamp(current, minimum, maximum);
             return std::clamp(current * ratio, minimum, maximum);
         }
@@ -160,7 +163,8 @@ namespace ArrangementEditor
         {
             if (!std::isfinite(appliedSeparationPx)
                 || !std::isfinite(currentSeparationPx)
-                || appliedSeparationPx <= 1.0)
+                || appliedSeparationPx <= 1.0
+                || currentSeparationPx <= 1.0)
                 return 1.0;
             return std::clamp(currentSeparationPx / appliedSeparationPx, 0.85, 1.18);
         }
