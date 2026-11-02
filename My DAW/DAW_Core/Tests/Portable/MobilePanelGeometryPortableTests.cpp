@@ -70,10 +70,23 @@ int main()
     // is unchanged. Do not carry subpixel wheel movement across that zoom.
     DAW::mobile::TimelinePhoneWheelCarryState zoomCarry;
     zoomCarry.observeContentSize(2000, 1200);
+    zoomCarry.observeContentScale(100.0, 60.0);
     zoomCarry.x = -0.8;
     zoomCarry.y = 0.6;
     zoomCarry.observeContentSize(2000, 1200); // no zoom: retain fine motion
     assert(zoomCarry.x == -0.8 && zoomCarry.y == 0.6);
+    zoomCarry.observeContentScale(100.0, 60.0); // unchanged zoom retains carry
+    assert(zoomCarry.x == -0.8 && zoomCarry.y == 0.6);
+    // At minimum content width or integer rounding, zoom changes but size
+    // stays identical: the old fractional wheel remainder must be discarded.
+    zoomCarry.observeContentScale(125.0, 60.0);
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+    zoomCarry.x = 0.7;
+    zoomCarry.y = -0.3;
+    zoomCarry.observeContentScale(125.0, 70.0); // physical lane zoom
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+    zoomCarry.x = -0.8;
+    zoomCarry.y = 0.6;
     zoomCarry.observeContentSize(4000, 1200); // horizontal zoom
     assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
     zoomCarry.y = -0.4;

@@ -505,7 +505,12 @@ public:
             const int contentH = juce::jmax(1, c->getHeight());
 
             if (phonePresentation_)
+            {
                 wheelCarry_.observeContentSize(contentW, contentH);
+                wheelCarry_.observeContentScale(
+                    getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
+                    getLaneHeight ? getLaneHeight() : 0.0);
+            }
 
             const int viewW = juce::jmax(1, getViewWidth());
             const int viewH = juce::jmax(1, getViewHeight());

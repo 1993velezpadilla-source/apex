@@ -67,10 +67,12 @@ struct TimelinePhoneWheelCarryState
 {
     double x = 0.0, y = 0.0;
     int contentWidth = -1, contentHeight = -1;
+    double pixelsPerSecond = -1.0, laneHeight = -1.0;
     constexpr void reset() noexcept
     {
         x = y = 0.0;
         contentWidth = contentHeight = -1;
+        pixelsPerSecond = laneHeight = -1.0;
     }
     constexpr void observeContentSize(int width, int height) noexcept
     {
@@ -79,6 +81,17 @@ struct TimelinePhoneWheelCarryState
             x = y = 0.0;
             contentWidth = width;
             contentHeight = height;
+        }
+    }
+    // Zoom may change while the integer content size remains unchanged
+    // (e.g. minimum-width Arrangement at extreme zoom-out).
+    constexpr void observeContentScale(double pps, double physicalLaneHeight) noexcept
+    {
+        if (pps != pixelsPerSecond || physicalLaneHeight != laneHeight)
+        {
+            x = y = 0.0;
+            pixelsPerSecond = pps;
+            laneHeight = physicalLaneHeight;
         }
     }
 };
