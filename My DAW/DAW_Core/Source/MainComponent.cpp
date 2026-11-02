@@ -510,10 +510,12 @@ public:
             const float dy = wheel.deltaY;
 
             const bool shift = e.mods.isShiftDown();
-            const float primary = shift ? dx : dy;
+            const auto phoneIntent = DAW::mobile::timelinePhoneWheelIntent(shift, dx, dy);
+            const bool horizontal = phonePresentation_ ? phoneIntent.horizontal : shift;
+            const float primary = phonePresentation_ ? phoneIntent.delta : (shift ? dx : dy);
 
             // Normalize to pixels; keep it feeling consistent across wheel types.
-            const int step = (int)std::lround((float)(shift ? viewW : viewH) * primary * -0.65f);
+            const int step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);
 
             if (step != 0)
             {
@@ -521,7 +523,7 @@ public:
                 {
                     // Hidden scrollbars do not imply a second wheel pass.
                     // Keep wheel navigation bounded after zoom/rotation.
-                    if (shift)
+                    if (horizontal)
                         pos.x = DAW::mobile::timelineWheelClampedPosition(
                             pos.x, contentW, viewW, step);
                     else
