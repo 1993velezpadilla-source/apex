@@ -111,6 +111,24 @@ int main()
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).pixels == 0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).remainder == 0.0);
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.0f, 0.5).remainder == 0.5);
+    // Corrupt wheel carry must not overflow integer conversion or move the
+    // viewport after a rotation/restore. Valid fractional carry is preserved.
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, std::numeric_limits<double>::quiet_NaN()).pixels == 0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, std::numeric_limits<double>::quiet_NaN()).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, std::numeric_limits<double>::infinity()).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, -std::numeric_limits<double>::infinity()).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, std::numeric_limits<double>::max()).pixels == 0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, 1.0).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.0f, -1.0).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        400, 0.01f, std::numeric_limits<double>::max()).pixels == -2);
     // A direction reversal must not first consume old subpixel carry.
     // Without the reset this positive fine tick would remain negative.
     constexpr auto reversed = DAW::mobile::timelinePhoneWheelPixelMotion(

@@ -111,11 +111,16 @@ constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
         return { 0, 0.0 };
     const double requested = -0.65 * static_cast<double>(viewSpan)
         * static_cast<double>(timelinePhoneBoundWheelDelta(delta));
+    // Carry is always a fractional pixel. A malformed/restored NaN, infinity
+    // or out-of-range carry must never reach the double-to-int conversion.
+    // This also prevents a stale carry from jumping the phone Arrangement.
+    const double safeRemainder = remainder > -1.0 && remainder < 1.0
+        ? remainder : 0.0;
     // Do not make a reversed fine gesture first cancel fractional motion
     // left over from the previous direction. Zero-delta events preserve it.
-    const bool reversed = (requested > 0.0 && remainder < 0.0)
-                       || (requested < 0.0 && remainder > 0.0);
-    const double movement = requested + (reversed ? 0.0 : remainder);
+    const bool reversed = (requested > 0.0 && safeRemainder < 0.0)
+                       || (requested < 0.0 && safeRemainder > 0.0);
+    const double movement = requested + (reversed ? 0.0 : safeRemainder);
     const int wholePixels = static_cast<int>(movement); // truncate only after accumulation
     return { wholePixels, movement - static_cast<double>(wholePixels) };
 }
