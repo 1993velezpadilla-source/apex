@@ -124,6 +124,8 @@ namespace ArrangementEditor
         {
             // Extended zoom-out range: down to 2 px/second (~2x farther than
             // before) so whole songs fit comfortably on one screen.
+            if (!std::isfinite(pps))
+                return;
             m_pixelsPerSecond = juce::jlimit(2.0, 4000.0, pps);
         }
 
@@ -144,7 +146,12 @@ namespace ArrangementEditor
 
         void setTrackHeightPx(double height)
         {
-            m_trackHeightPx = juce::jlimit(24.0, 180.0, height);
+            if (!std::isfinite(height))
+                return;
+            const double clamped = juce::jlimit(24.0, 180.0, height);
+            if (clamped == m_trackHeightPx)
+                return;
+            m_trackHeightPx = clamped;
             if (onZoomChanged) onZoomChanged();
         }
 
