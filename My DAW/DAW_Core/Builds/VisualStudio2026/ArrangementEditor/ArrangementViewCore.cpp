@@ -1411,14 +1411,22 @@ namespace ArrangementEditor
                 return true;
             }
 
-            ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-            viewport->setViewPosition(
-                TouchNavigationMath::panPosition(m_gestureStartViewX,
-                    pos.x - m_touchPanDownScreenPos.x,
-                    juce::jmax(0, getWidth() - viewport->getViewWidth())),
-                TouchNavigationMath::panPosition(m_gestureStartViewY,
-                    pos.y - m_touchPanDownScreenPos.y,
-                    juce::jmax(0, getHeight() - viewport->getViewHeight())));
+            // A one-finger drag pinned at an edge (or moving < 1 pixel)
+            // must not trigger low-detail waveform painting or redundant
+            // Viewport notifications. A free axis still scrolls normally.
+            const int beforeX = viewport->getViewPositionX();
+            const int beforeY = viewport->getViewPositionY();
+            const int nextX = TouchNavigationMath::panPosition(m_gestureStartViewX,
+                pos.x - m_touchPanDownScreenPos.x,
+                juce::jmax(0, getWidth() - viewport->getViewWidth()));
+            const int nextY = TouchNavigationMath::panPosition(m_gestureStartViewY,
+                pos.y - m_touchPanDownScreenPos.y,
+                juce::jmax(0, getHeight() - viewport->getViewHeight()));
+            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            {
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                viewport->setViewPosition(nextX, nextY);
+            }
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
