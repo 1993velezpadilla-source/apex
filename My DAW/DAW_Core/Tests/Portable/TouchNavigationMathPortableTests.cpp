@@ -42,6 +42,22 @@ int main()
         TouchNavigationMath::panPosition(400, -40.0, 400),
         TouchNavigationMath::panPosition(100, 20.0, 200)));
 
+    // One-finger screen-anchored drags use the same viewport-change guard.
+    // Dragging outward from either hard edge must not downgrade waveforms,
+    // but diagonal movement along a free axis must still be applied.
+    assert(!TouchNavigationMath::touchPanChangesViewport(0, 0,
+        TouchNavigationMath::panPosition(0, 32.0, 640),
+        TouchNavigationMath::panPosition(0, 18.0, 300)));
+    assert(!TouchNavigationMath::touchPanChangesViewport(640, 300,
+        TouchNavigationMath::panPosition(640, -30.0, 640),
+        TouchNavigationMath::panPosition(300, -25.0, 300)));
+    assert(TouchNavigationMath::touchPanChangesViewport(640, 120,
+        TouchNavigationMath::panPosition(640, -30.0, 640),
+        TouchNavigationMath::panPosition(120, 25.0, 300)));
+    assert(!TouchNavigationMath::touchPanChangesViewport(150, 120,
+        TouchNavigationMath::panPosition(150, 0.2, 640),
+        TouchNavigationMath::panPosition(120, -0.2, 300)));
+
     // At an edge, a 60 Hz fling must stop immediately instead of spending
     // hundreds of deceleration ticks repainting an unmoving viewport.
     // A diagonal fling must preserve motion on the unblocked axis.
