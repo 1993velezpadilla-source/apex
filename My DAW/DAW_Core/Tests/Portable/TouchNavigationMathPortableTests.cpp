@@ -25,6 +25,22 @@ int main()
     assert(TouchNavigationMath::panPosition(5, 50.0, 2000) == 0);
     assert(TouchNavigationMath::panPosition(999, -50.0, 1000) == 1000);
 
+    // Adversarial Android/iPhone touch coordinates: NaN/Inf should be ignored,
+    // while extreme finite motion saturates at viewport bounds without
+    // overflowing lround-to-int or wrapping to the opposite edge.
+    const double panNan = std::numeric_limits<double>::quiet_NaN();
+    const double panInf = std::numeric_limits<double>::infinity();
+    assert(TouchNavigationMath::panPosition(250, panNan, 2000) == 250);
+    assert(TouchNavigationMath::panPosition(250, panInf, 2000) == 250);
+    assert(TouchNavigationMath::panPosition(250, -panInf, 2000) == 250);
+    assert(TouchNavigationMath::panPosition(250, 1e300, 2000) == 0);
+    assert(TouchNavigationMath::panPosition(250, -1e300, 2000) == 2000);
+    assert(TouchNavigationMath::panPosition(250, 5.5, 2000) == 245);
+    assert(TouchNavigationMath::panPosition(250, 0.0, -1) == 0);
+    assert(TouchNavigationMath::panPosition(std::numeric_limits<int>::max(), -1e300,
+        std::numeric_limits<int>::max()) == std::numeric_limits<int>::max());
+
+
     // The world coordinate under a pinch centroid remains screen-stationary:
     // anchor at content pixel 320, viewport pixel 120, doubling zoom moves
     // scroll offset to 520 (640 - 120).

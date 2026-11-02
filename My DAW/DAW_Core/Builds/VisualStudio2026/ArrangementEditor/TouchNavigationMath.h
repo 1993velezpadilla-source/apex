@@ -15,8 +15,21 @@ namespace ArrangementEditor
         // shift when a Viewport scrolls, feeding its own motion back into a pan.
         static int panPosition(int startViewPx, double screenDeltaPx, int maxViewPx) noexcept
         {
-            return std::clamp(startViewPx - static_cast<int>(std::lround(screenDeltaPx)),
-                              0, std::max(0, maxViewPx));
+            const int maxScrollPx = std::max(0, maxViewPx);
+            const int safeStartPx = std::clamp(startViewPx, 0, maxScrollPx);
+
+            // Malformed touch samples must not move the viewport. Clamp in
+            // double precision BEFORE rounding so very large finite deltas
+            // cannot overflow the integer conversion and snap to song start.
+            if (!std::isfinite(screenDeltaPx))
+                return safeStartPx;
+
+            const double targetPx = static_cast<double>(safeStartPx) - screenDeltaPx;
+            if (targetPx <= 0.0)
+                return 0;
+            if (targetPx >= static_cast<double>(maxScrollPx))
+                return maxScrollPx;
+            return static_cast<int>(std::lround(targetPx));
         }
 
         // Keep the timeline point under the gesture centroid fixed on screen.
