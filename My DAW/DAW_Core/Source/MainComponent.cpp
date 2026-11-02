@@ -479,7 +479,7 @@ public:
     {
         const auto chrome = DAW::mobile::timelineViewportChrome(phone);
         phonePresentation_ = phone;
-        wheelCarryX_ = wheelCarryY_ = 0.0;
+        wheelCarry_.reset();
         // JUCE must explicitly allow scrolling when its scrollbars are hidden.
         // Arrangement still drives setViewPosition() for touch navigation.
         setScrollBarsShown(chrome.showVerticalBar, chrome.showHorizontalBar,
@@ -491,7 +491,7 @@ public:
     void resized() override
     {
         // A rotation or viewport resize changes the pixels-per-wheel-unit scale.
-        wheelCarryX_ = wheelCarryY_ = 0.0;
+        wheelCarry_.reset();
         juce::Viewport::resized();
         layoutCornerZoomButtons();
     }
@@ -503,6 +503,9 @@ public:
         {
             const int contentW = juce::jmax(1, c->getWidth());
             const int contentH = juce::jmax(1, c->getHeight());
+
+            if (phonePresentation_)
+                wheelCarry_.observeContentSize(contentW, contentH);
 
             const int viewW = juce::jmax(1, getViewWidth());
             const int viewH = juce::jmax(1, getViewHeight());
@@ -522,7 +525,7 @@ public:
             int step = 0;
             if (phonePresentation_)
             {
-                auto& carry = horizontal ? wheelCarryX_ : wheelCarryY_;
+                auto& carry = horizontal ? wheelCarry_.x : wheelCarry_.y;
                 const int axisPosition = horizontal ? pos.x : pos.y;
                 const int contentSpan = horizontal ? contentW : contentH;
                 const int viewSpan = horizontal ? viewW : viewH;
@@ -560,7 +563,7 @@ public:
                         (horizontal ? contentW - viewW : contentH - viewH));
                     if (next == (horizontal ? originalPos.x : originalPos.y)
                         || next == 0 || next == maxAxis)
-                        (horizontal ? wheelCarryX_ : wheelCarryY_) = 0.0;
+                        (horizontal ? wheelCarry_.x : wheelCarry_.y) = 0.0;
                 }
                 else if (shift)
                     pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
@@ -692,8 +695,7 @@ private:
     BarListener barListener_;
     bool layoutGuard_ = false;
     bool phonePresentation_ = false;
-    double wheelCarryX_ = 0.0;
-    double wheelCarryY_ = 0.0;
+    DAW::mobile::TimelinePhoneWheelCarryState wheelCarry_{};
 };
 
 class TimelineTrackHeightHandle final : public juce::Component
