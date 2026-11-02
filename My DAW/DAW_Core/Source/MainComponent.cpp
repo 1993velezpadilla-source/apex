@@ -475,6 +475,18 @@ public:
     /** (isVertical, zoomIn) — fired by the corner zoom buttons. */
     std::function<void(bool, bool)> onZoomButton;
 
+    void setPhonePresentation(bool phone)
+    {
+        const auto chrome = DAW::mobile::timelineViewportChrome(phone);
+        phonePresentation_ = phone;
+        // JUCE must explicitly allow scrolling when its scrollbars are hidden.
+        // Arrangement still drives setViewPosition() for touch navigation.
+        setScrollBarsShown(chrome.showVerticalBar, chrome.showHorizontalBar,
+                           chrome.allowVerticalScrollWithoutBar,
+                           chrome.allowHorizontalScrollWithoutBar);
+        layoutCornerZoomButtons();
+    }
+
     void resized() override
     {
         juce::Viewport::resized();
@@ -581,7 +593,8 @@ private:
         const int th = getScrollBarThickness();
         const int btn = th; // square buttons matching scrollbar thickness
 
-        const bool showButtons = hVisible && vVisible && getWidth() > btn * 6 && getHeight() > btn * 6;
+        const bool showButtons = !phonePresentation_ && hVisible && vVisible
+            && getWidth() > btn * 6 && getHeight() > btn * 6;
 
         hZoomInBtn_.setVisible(showButtons);
         hZoomOutBtn_.setVisible(showButtons);
@@ -629,6 +642,7 @@ private:
     TimelineCornerZoomButton vZoomOutBtn_ { false };
     BarListener barListener_;
     bool layoutGuard_ = false;
+    bool phonePresentation_ = false;
 };
 
 class TimelineTrackHeightHandle final : public juce::Component
@@ -2873,7 +2887,7 @@ MainComponent::MainComponent()
     };
 
     timelineViewport->setViewedComponent(arrangement_.get(), false);
-    timelineViewport->setScrollBarsShown(true, true);
+    timelineViewport->setPhonePresentation(usesPhoneMixerPresentation());
     timelineViewport->setScrollBarThickness(14);
     timelineViewport->setSingleStepSizes(32, 32);
     timelineViewport->getPixelsPerSecond = [this]() -> double

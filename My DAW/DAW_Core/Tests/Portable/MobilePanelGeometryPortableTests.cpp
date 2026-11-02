@@ -10,6 +10,21 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Portrait and landscape phones hide desktop scrollbars/corner zoom
+    // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
+    constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
+    constexpr auto desktopChrome = DAW::mobile::timelineViewportChrome(false);
+    static_assert(!phoneChrome.showVerticalBar && !phoneChrome.showHorizontalBar);
+    static_assert(phoneChrome.allowVerticalScrollWithoutBar
+                  && phoneChrome.allowHorizontalScrollWithoutBar);
+    static_assert(!phoneChrome.showCornerZoom);
+    static_assert(desktopChrome.showVerticalBar && desktopChrome.showHorizontalBar);
+    static_assert(!desktopChrome.allowVerticalScrollWithoutBar
+                  && !desktopChrome.allowHorizontalScrollWithoutBar);
+    static_assert(desktopChrome.showCornerZoom);
+    assert(!DAW::mobile::timelineViewportChrome(true).showCornerZoom);
+    assert(DAW::mobile::timelineViewportChrome(false).showCornerZoom);
+
     // Regression: closing Sends or the floating Mixer must not resurrect
     // desktop draggable launchers over the phone Arrangement. The desktop
     // restore affordance remains available for iPad/Windows/macOS.

@@ -5,6 +5,21 @@ namespace DAW::mobile
 {
 struct PanelBounds { int x, y, width, height; };
 
+// Phone Arrangement keeps programmatic/swipe navigation without showing the
+// desktop scrollbar/zoom chrome. Desktop and iPad retain both scrollbars.
+struct TimelineViewportChrome
+{
+    bool showVerticalBar;
+    bool showHorizontalBar;
+    bool allowVerticalScrollWithoutBar;
+    bool allowHorizontalScrollWithoutBar;
+    bool showCornerZoom;
+};
+constexpr TimelineViewportChrome timelineViewportChrome(bool phone) noexcept
+{
+    return { !phone, !phone, phone, phone, !phone };
+}
+
 // The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
 // restore bubbles must stay hidden after closing a floating phone panel.
 constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept
