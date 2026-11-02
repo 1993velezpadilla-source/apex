@@ -66,6 +66,22 @@ int main()
     static_assert(timelinePhoneWheelIntent(false, 0.0f,
         -std::numeric_limits<float>::infinity()).delta == -1.0f);
 
+    // A stream of high-resolution wheel ticks must move eventually instead
+    // of each fractional pixel being rounded to zero and discarded.
+    constexpr auto fine1 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, 0.0);
+    constexpr auto fine2 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, fine1.remainder);
+    constexpr auto fine3 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, fine2.remainder);
+    constexpr auto fine4 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, fine3.remainder);
+    static_assert(fine1.pixels == 0 && fine2.pixels == 0 && fine3.pixels == 0);
+    static_assert(fine4.pixels == -1);
+    static_assert(fine4.remainder < 0.0 && fine4.remainder > -1.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(400, -0.01f, 0.0).pixels == 2);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).pixels == 0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(0, 1.0f, 0.9).remainder == 0.0);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.0f, 0.5).remainder == 0.5);
+    static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
+        std::numeric_limits<int>::max(), 1.0f, 0.0).pixels < 0);
+
     static_assert(!timelineWheelDelegatesToViewport(true));
     static_assert(timelineWheelDelegatesToViewport(false));
     static_assert(timelineWheelClampedPosition(200, 2000, 400, 120) == 320);
