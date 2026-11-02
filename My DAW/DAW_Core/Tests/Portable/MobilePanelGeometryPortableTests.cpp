@@ -66,6 +66,25 @@ int main()
     static_assert(timelinePhoneWheelIntent(false, 0.0f,
         -std::numeric_limits<float>::infinity()).delta == -1.0f);
 
+    // Zooming changes the viewed component size even when the viewport itself
+    // is unchanged. Do not carry subpixel wheel movement across that zoom.
+    DAW::mobile::TimelinePhoneWheelCarryState zoomCarry;
+    zoomCarry.observeContentSize(2000, 1200);
+    zoomCarry.x = -0.8;
+    zoomCarry.y = 0.6;
+    zoomCarry.observeContentSize(2000, 1200); // no zoom: retain fine motion
+    assert(zoomCarry.x == -0.8 && zoomCarry.y == 0.6);
+    zoomCarry.observeContentSize(4000, 1200); // horizontal zoom
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+    zoomCarry.y = -0.4;
+    zoomCarry.observeContentSize(4000, 1800); // lane height/vertical zoom
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+    zoomCarry.x = 0.5;
+    zoomCarry.reset(); // rotation or presentation change
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+    zoomCarry.observeContentSize(4000, 1800);
+    assert(zoomCarry.x == 0.0 && zoomCarry.y == 0.0);
+
     // A stream of high-resolution wheel ticks must move eventually instead
     // of each fractional pixel being rounded to zero and discarded.
     constexpr auto fine1 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, 0.0);
