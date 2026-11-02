@@ -57,6 +57,15 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // A touch sample at a viewport edge (or subpixel jitter) must not
+        // schedule an unchanged Viewport position or enter low-detail paint.
+        // This applies to two-finger translation independently of zoom.
+        static constexpr bool touchPanChangesViewport(int beforeX, int beforeY,
+                                                       int afterX, int afterY) noexcept
+        {
+            return beforeX != afterX || beforeY != afterY;
+        }
+
         // A viewport axis cannot continue inertial motion when the clamped
         // destination equals its current pixel. Stop only that axis, preserving
         // diagonal movement on the other axis.
