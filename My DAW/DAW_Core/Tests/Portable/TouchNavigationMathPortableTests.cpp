@@ -25,6 +25,23 @@ int main()
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, true));
 
+    // Two-finger pan at a hard viewport boundary must not request a
+    // redundant setViewPosition or switch waveforms to low-detail paint.
+    // Genuine motion on either axis still needs the viewport update.
+    static_assert(!TouchNavigationMath::touchPanChangesViewport(0, 0, 0, 0));
+    static_assert(TouchNavigationMath::touchPanChangesViewport(0, 0, 1, 0));
+    static_assert(TouchNavigationMath::touchPanChangesViewport(0, 0, 0, 1));
+    static_assert(TouchNavigationMath::touchPanChangesViewport(400, 200, 399, 200));
+    assert(!TouchNavigationMath::touchPanChangesViewport(0, 0,
+        TouchNavigationMath::panPosition(0, 40.0, 400),
+        TouchNavigationMath::panPosition(0, 60.0, 200)));
+    assert(!TouchNavigationMath::touchPanChangesViewport(400, 200,
+        TouchNavigationMath::panPosition(400, -40.0, 400),
+        TouchNavigationMath::panPosition(200, -60.0, 200)));
+    assert(TouchNavigationMath::touchPanChangesViewport(400, 100,
+        TouchNavigationMath::panPosition(400, -40.0, 400),
+        TouchNavigationMath::panPosition(100, 20.0, 200)));
+
     // At an edge, a 60 Hz fling must stop immediately instead of spending
     // hundreds of deceleration ticks repainting an unmoving viewport.
     // A diagonal fling must preserve motion on the unblocked axis.
