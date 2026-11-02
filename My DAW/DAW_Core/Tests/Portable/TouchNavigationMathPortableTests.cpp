@@ -11,6 +11,7 @@ static_assert(!DAW::BeatMakingFeaturePolicy::kPianoRollEnabled,
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 using ArrangementEditor::TouchNavigationMath;
 
@@ -45,6 +46,22 @@ int main()
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 200.0) - 1.18) < 1e-8);
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 10.0) - 0.85) < 1e-8);
     assert(TouchNavigationMath::pinchRatio(0.0, 200.0) == 1.0);
+
+    // A malformed touch sample must not propagate NaN/Inf to JUCE zoom,
+    // trigger a phantom pinch, or request a clip-renderer rebuild.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    assert(!TouchNavigationMath::pinchReady(100.0, nan));
+    assert(!TouchNavigationMath::pinchReady(100.0, inf));
+    assert(!TouchNavigationMath::pinchReady(inf, 120.0));
+    assert(TouchNavigationMath::pinchRatio(100.0, nan) == 1.0);
+    assert(TouchNavigationMath::pinchRatio(100.0, inf) == 1.0);
+    assert(TouchNavigationMath::pinchRatio(inf, 120.0) == 1.0);
+    assert(TouchNavigationMath::pinchZoomTarget(100.0, nan, 2.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::pinchZoomTarget(100.0, inf, 2.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::pinchZoomTarget(nan, 1.1, 2.0, 4000.0) == 2.0);
+    assert(!TouchNavigationMath::pinchZoomChanges(100.0,
+        TouchNavigationMath::pinchZoomTarget(100.0, nan, 2.0, 4000.0)));
 
     // Saturated phone pinch must not rebuild every clip renderer at the
     // horizontal/vertical zoom limits. A reversed pinch can zoom again.
