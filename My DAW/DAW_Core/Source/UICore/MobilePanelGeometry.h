@@ -28,6 +28,26 @@ constexpr bool timelineWheelDelegatesToViewport(bool phone) noexcept
     return !phone;
 }
 
+// Trackpads and horizontal wheel gestures report deltaX without Shift.
+// Phones must select the dominant gesture axis; Shift+vertical wheel is a
+// horizontal navigation fallback for external keyboards. Desktop stays on
+// its existing JUCE wheel policy.
+struct TimelinePhoneWheelIntent
+{
+    bool horizontal;
+    float delta;
+};
+constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
+    bool shift, float deltaX, float deltaY) noexcept
+{
+    if (shift)
+        return { true, deltaX != 0.0f ? deltaX : deltaY };
+    const float absX = deltaX < 0.0f ? -deltaX : deltaX;
+    const float absY = deltaY < 0.0f ? -deltaY : deltaY;
+    const bool horizontal = absX > absY;
+    return { horizontal, horizontal ? deltaX : deltaY };
+}
+
 // Phone wheel navigation uses 64-bit addition so an out-of-range restored
 // scroll position or extreme step cannot overflow before clamping.
 constexpr int timelineWheelClampedPosition(int current, int contentSpan,
