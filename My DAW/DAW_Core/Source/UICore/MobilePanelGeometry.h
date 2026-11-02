@@ -60,6 +60,25 @@ constexpr TimelinePhoneWheelIntent timelinePhoneWheelIntent(
     return { horizontal, timelinePhoneBoundWheelDelta(horizontal ? x : y) };
 }
 
+// Fractional trackpad deltas must accumulate on phones: rounding every tiny
+// wheel event independently loses motion and makes slow pans feel stuck.
+// Keep a separate remainder for each axis in the owning viewport.
+struct TimelinePhoneWheelPixelMotion
+{
+    int pixels;
+    double remainder;
+};
+constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
+    int viewSpan, float delta, double remainder) noexcept
+{
+    if (viewSpan <= 0)
+        return { 0, 0.0 };
+    const double movement = -0.65 * static_cast<double>(viewSpan)
+        * static_cast<double>(timelinePhoneBoundWheelDelta(delta)) + remainder;
+    const int wholePixels = static_cast<int>(movement); // truncate only after accumulation
+    return { wholePixels, movement - static_cast<double>(wholePixels) };
+}
+
 // Phone wheel navigation uses 64-bit addition so an out-of-range restored
 // scroll position or extreme step cannot overflow before clamping.
 constexpr int timelineWheelClampedPosition(int current, int contentSpan,
