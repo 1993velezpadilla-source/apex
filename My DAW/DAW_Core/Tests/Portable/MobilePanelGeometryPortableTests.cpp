@@ -29,6 +29,20 @@ int main()
     // hidden scrollbars; desktop/iPad keep their original JUCE wheel path.
     using DAW::mobile::timelineWheelDelegatesToViewport;
     using DAW::mobile::timelineWheelClampedPosition;
+    using DAW::mobile::timelinePhoneWheelIntent;
+    // Horizontal trackpad gestures must not be lost without Shift; a
+    // Shift+vertical wheel must also pan horizontally on external keyboards.
+    static_assert(timelinePhoneWheelIntent(false, 0.75f, 0.0f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false, 0.75f, 0.0f).delta == 0.75f);
+    static_assert(!timelinePhoneWheelIntent(false, 0.0f, -0.5f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false, 0.0f, -0.5f).delta == -0.5f);
+    static_assert(timelinePhoneWheelIntent(true, 0.0f, -0.5f).horizontal);
+    static_assert(timelinePhoneWheelIntent(true, 0.0f, -0.5f).delta == -0.5f);
+    static_assert(timelinePhoneWheelIntent(false, 0.9f, 0.2f).horizontal);
+    static_assert(!timelinePhoneWheelIntent(false, 0.2f, 0.9f).horizontal);
+    static_assert(timelinePhoneWheelIntent(false, 0.2f, 0.9f).delta == 0.9f);
+    static_assert(timelinePhoneWheelIntent(true, 0.2f, 0.9f).delta == 0.2f);
+    static_assert(!timelinePhoneWheelIntent(false, 0.0f, 0.0f).horizontal);
     static_assert(!timelineWheelDelegatesToViewport(true));
     static_assert(timelineWheelDelegatesToViewport(false));
     static_assert(timelineWheelClampedPosition(200, 2000, 400, 120) == 320);
