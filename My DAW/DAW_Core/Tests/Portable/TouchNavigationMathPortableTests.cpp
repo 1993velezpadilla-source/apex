@@ -120,6 +120,25 @@ int main()
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 10.0) - 0.85) < 1e-8);
     assert(TouchNavigationMath::pinchRatio(0.0, 200.0) == 1.0);
 
+    // Two fingers can briefly line up on an axis (separation <= 1px)
+    // while rotating/crossing. Do not treat that singularity as a real
+    // 15% zoom-out or move the last-applied pinch anchor to zero.
+    assert(!TouchNavigationMath::pinchReady(100.0, 0.0));
+    assert(!TouchNavigationMath::pinchReady(100.0, 1.0));
+    assert(!TouchNavigationMath::pinchReady(100.0, -1.0));
+    assert(TouchNavigationMath::pinchRatio(100.0, 0.0) == 1.0);
+    assert(TouchNavigationMath::pinchRatio(100.0, 1.0) == 1.0);
+    assert(TouchNavigationMath::pinchRatio(100.0, -1.0) == 1.0);
+    assert(!TouchNavigationMath::pinchZoomChanges(100.0,
+        TouchNavigationMath::pinchZoomTarget(100.0,
+            TouchNavigationMath::pinchRatio(100.0, 0.0), 2.0, 4000.0)));
+    // A valid new separation still zooms normally after the axis crossing.
+    assert(TouchNavigationMath::pinchReady(100.0, 90.0));
+    assert(TouchNavigationMath::pinchRatio(100.0, 90.0) == 0.90);
+    // Direct malformed ratios must not jump to the minimum zoom either.
+    assert(TouchNavigationMath::pinchZoomTarget(100.0, 0.0, 2.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::pinchZoomTarget(100.0, -1.0, 2.0, 4000.0) == 100.0);
+
     // A malformed touch sample must not propagate NaN/Inf to JUCE zoom,
     // trigger a phantom pinch, or request a clip-renderer rebuild.
     const double nan = std::numeric_limits<double>::quiet_NaN();
