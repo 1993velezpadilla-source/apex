@@ -479,6 +479,7 @@ public:
     {
         const auto chrome = DAW::mobile::timelineViewportChrome(phone);
         phonePresentation_ = phone;
+        wheelCarryX_ = wheelCarryY_ = 0.0;
         // JUCE must explicitly allow scrolling when its scrollbars are hidden.
         // Arrangement still drives setViewPosition() for touch navigation.
         setScrollBarsShown(chrome.showVerticalBar, chrome.showHorizontalBar,
@@ -489,6 +490,8 @@ public:
 
     void resized() override
     {
+        // A rotation or viewport resize changes the pixels-per-wheel-unit scale.
+        wheelCarryX_ = wheelCarryY_ = 0.0;
         juce::Viewport::resized();
         layoutCornerZoomButtons();
     }
@@ -514,11 +517,23 @@ public:
             const bool horizontal = phonePresentation_ ? phoneIntent.horizontal : shift;
             const float primary = phonePresentation_ ? phoneIntent.delta : (shift ? dx : dy);
 
-            // Normalize to pixels; keep it feeling consistent across wheel types.
-            const int step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);
+            // Preserve fractional high-resolution wheel motion on phones.
+            // Desktop/iPad keep their original per-event rounding.
+            int step = 0;
+            if (phonePresentation_)
+            {
+                auto& carry = horizontal ? wheelCarryX_ : wheelCarryY_;
+                const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
+                    horizontal ? viewW : viewH, primary, carry);
+                carry = motion.remainder;
+                step = motion.pixels;
+            }
+            else
+                step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);
 
             if (step != 0)
             {
+                const auto originalPos = pos;
                 if (phonePresentation_)
                 {
                     // Hidden scrollbars do not imply a second wheel pass.
@@ -529,13 +544,22 @@ public:
                     else
                         pos.y = DAW::mobile::timelineWheelClampedPosition(
                             pos.y, contentH, viewH, step);
+                    // At the end of a song/lane range, discard unconsumed
+                    // fractional motion rather than bouncing on reversal.
+                    const int next = horizontal ? pos.x : pos.y;
+                    const int maxAxis = juce::jmax(0,
+                        (horizontal ? contentW - viewW : contentH - viewH));
+                    if (next == (horizontal ? originalPos.x : originalPos.y)
+                        || next == 0 || next == maxAxis)
+                        (horizontal ? wheelCarryX_ : wheelCarryY_) = 0.0;
                 }
                 else if (shift)
                     pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
                 else
                     pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
 
-                setViewPosition(pos);
+                if (!phonePresentation_ || pos != originalPos)
+                    setViewPosition(pos);
             }
         }
 
@@ -659,6 +683,8 @@ private:
     BarListener barListener_;
     bool layoutGuard_ = false;
     bool phonePresentation_ = false;
+    double wheelCarryX_ = 0.0;
+    double wheelCarryY_ = 0.0;
 };
 
 class TimelineTrackHeightHandle final : public juce::Component
