@@ -78,6 +78,19 @@ namespace ArrangementEditor
                 && std::abs(currentSeparationPx - appliedSeparationPx) >= 2.0;
         }
 
+        // Avoid a full clip-renderer rebuild when a pinch is already at a
+        // zoom limit. Gesture anchors still advance so reversing feels immediate.
+        static double pinchZoomTarget(double current, double ratio,
+                                      double minimum, double maximum) noexcept
+        {
+            return std::clamp(current * ratio, minimum, maximum);
+        }
+
+        static bool pinchZoomChanges(double current, double target) noexcept
+        {
+            return current != target;
+        }
+
         static double pinchRatio(double appliedSeparationPx, double currentSeparationPx) noexcept
         {
             if (appliedSeparationPx <= 1.0)

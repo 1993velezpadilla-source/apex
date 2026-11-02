@@ -46,6 +46,26 @@ int main()
     assert(std::abs(TouchNavigationMath::pinchRatio(100.0, 10.0) - 0.85) < 1e-8);
     assert(TouchNavigationMath::pinchRatio(0.0, 200.0) == 1.0);
 
+    // Saturated phone pinch must not rebuild every clip renderer at the
+    // horizontal/vertical zoom limits. A reversed pinch can zoom again.
+    assert(TouchNavigationMath::pinchZoomTarget(4000.0, 1.18, 2.0, 4000.0) == 4000.0);
+    assert(TouchNavigationMath::pinchZoomTarget(2.0, 0.85, 2.0, 4000.0) == 2.0);
+    assert(TouchNavigationMath::pinchZoomTarget(180.0, 1.18, 24.0, 180.0) == 180.0);
+    assert(TouchNavigationMath::pinchZoomTarget(24.0, 0.85, 24.0, 180.0) == 24.0);
+    assert(!TouchNavigationMath::pinchZoomChanges(4000.0,
+        TouchNavigationMath::pinchZoomTarget(4000.0, 1.18, 2.0, 4000.0)));
+    assert(!TouchNavigationMath::pinchZoomChanges(180.0,
+        TouchNavigationMath::pinchZoomTarget(180.0, 1.18, 24.0, 180.0)));
+    assert(TouchNavigationMath::pinchZoomChanges(180.0,
+        TouchNavigationMath::pinchZoomTarget(180.0, 0.85, 24.0, 180.0)));
+    assert(TouchNavigationMath::pinchZoomChanges(4000.0,
+        TouchNavigationMath::pinchZoomTarget(4000.0, 0.85, 2.0, 4000.0)));
+    assert(std::abs(TouchNavigationMath::pinchZoomTarget(100.0, 1.1, 2.0, 4000.0)
+                    - 110.0) < 1e-8);
+    for (int i = 0; i < 1000; ++i)
+        assert(!TouchNavigationMath::pinchZoomChanges(180.0,
+            TouchNavigationMath::pinchZoomTarget(180.0, 1.18, 24.0, 180.0)));
+
     // Selected-region second tap => menu. A drag must cancel it, including
     // diagonal movements that stay below the per-axis threshold.
     assert(TouchNavigationMath::withinTapSlop(100, 100, 100, 100));

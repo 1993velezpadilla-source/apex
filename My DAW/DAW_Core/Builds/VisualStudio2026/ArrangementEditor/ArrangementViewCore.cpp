@@ -1193,36 +1193,44 @@ namespace ArrangementEditor
             if (zoomingX)
             {
                 const double oldPps = m_zoom.getPixelsPerSecond();
-                const double newPps = juce::jlimit(2.0, 4000.0,
-                    oldPps * TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX));
-                const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
-                const double focusViewportX = focusX - viewport->getViewPositionX();
-                m_zoom.setPixelsPerSecond(newPps);
-                viewport->setViewPosition(
-                    TouchNavigationMath::zoomPosition(focusX, focusViewportX,
-                        newPps / juce::jmax(1.0, oldPps),
-                        juce::jmax(0, getWidth() - viewport->getViewWidth())),
-                    viewport->getViewPositionY());
+                const double newPps = TouchNavigationMath::pinchZoomTarget(
+                    oldPps, TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX),
+                    2.0, 4000.0);
+                if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
+                {
+                    const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
+                    const double focusViewportX = focusX - viewport->getViewPositionX();
+                    m_zoom.setPixelsPerSecond(newPps);
+                    viewport->setViewPosition(
+                        TouchNavigationMath::zoomPosition(focusX, focusViewportX,
+                            newPps / juce::jmax(1.0, oldPps),
+                            juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                        viewport->getViewPositionY());
+                    repaint();
+                }
                 m_lastPinchSepX = sepX;
-                repaint();
             }
 
             // Vertical spread = lane zoom; preserve the lane beneath fingers.
             if (zoomingY)
             {
                 const double oldH = m_zoom.getTrackHeightPx();
-                const double newH = juce::jlimit(24.0, 180.0,
-                    oldH * TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY));
-                const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
-                const double focusViewportY = focusY - viewport->getViewPositionY();
-                const double contentTop = (double) arrangementContentTop();
-                m_zoom.setTrackHeightPx(newH);
-                const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
-                viewport->setViewPosition(viewport->getViewPositionX(),
-                    juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
-                        juce::roundToInt(newFocusY - focusViewportY)));
+                const double newH = TouchNavigationMath::pinchZoomTarget(
+                    oldH, TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY),
+                    24.0, 180.0);
+                if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
+                {
+                    const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
+                    const double focusViewportY = focusY - viewport->getViewPositionY();
+                    const double contentTop = (double) arrangementContentTop();
+                    m_zoom.setTrackHeightPx(newH);
+                    const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
+                    viewport->setViewPosition(viewport->getViewPositionX(),
+                        juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
+                            juce::roundToInt(newFocusY - focusViewportY)));
+                    repaint();
+                }
                 m_lastPinchSepY = sepY;
-                repaint();
             }
 
             m_lastTwoFingerPos = centreScreen;
