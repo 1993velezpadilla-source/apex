@@ -171,7 +171,16 @@ int main()
     static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.1) == 58.1);
     static_assert(timelinePhonePlaybackExtentSeconds(200.0, 28.1) == 200.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 1.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 27.9) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 198.0) == 200.0);
     static_assert(timelinePhonePlaybackExtentSeconds(200.0, 199.0) == 229.0);
+    // Repeated unrelated phone layout refreshes during the first 28s must
+    // not extend a 30s Arrangement or trigger a resize on each refresh.
+    for (int tick = 0; tick <= 560; ++tick) // 0..28s at 20 Hz
+        assert(timelinePhonePlaybackExtentSeconds(30.0,
+                   static_cast<double>(tick) / 20.0) == 30.0);
     double phoneExtent = 30.0;
     int refreshes = 0;
     for (int tick = 0; tick < 1200; ++tick) // 60s at 20 transport ticks/s

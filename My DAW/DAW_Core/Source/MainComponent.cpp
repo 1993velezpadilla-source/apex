@@ -9453,18 +9453,18 @@ void MainComponent::updateTimelineViewportContentBounds()
     // The timeline must never clamp at the last clip: the playhead and the
     // loop-region end also deserve scroll room, otherwise scrubbing/looping
     // past the material hits a hard scrollbar limit.
-    projectLengthSeconds = juce::jmax(projectLengthSeconds,
-        (double) appCore_.getTransport().getPosition() / sampleRate + 2.0);
+    const double playheadSeconds =
+        (double) appCore_.getTransport().getPosition() / sampleRate;
     const auto loopRange = appCore_.getTransport().getLoopRange();
     projectLengthSeconds = juce::jmax(projectLengthSeconds,
         (double) loopRange.second / sampleRate + 2.0);
-    // A phone's playback may cross the last clip while positionChanged()
-    // fires many times per second. With only +2s of visible headroom, each
-    // tick would rescan every clip and resize/repaint the Arrangement.
-    // Grow phone-only scroll runway in 30s chunks; leave desktop/iPad intact.
+    // Pass only clip/loop extent to the phone runway policy. Including
+    // playhead+2s first would defeat its near-end threshold on every tick.
     if (usesPhoneMixerPresentation())
         projectLengthSeconds = DAW::mobile::timelinePhonePlaybackExtentSeconds(
-            projectLengthSeconds, (double)appCore_.getTransport().getPosition() / sampleRate);
+            projectLengthSeconds, playheadSeconds);
+    else
+        projectLengthSeconds = juce::jmax(projectLengthSeconds, playheadSeconds + 2.0);
     lastTimelineContentLengthSeconds_ = projectLengthSeconds;
 
     // Content width = zoom * project length, but never below viewportW + 1.

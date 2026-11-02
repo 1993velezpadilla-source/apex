@@ -146,13 +146,15 @@ constexpr int timelineWheelClampedPosition(int current, int contentSpan,
     return target < 0 ? 0 : target > limit ? limit : static_cast<int>(target);
 }
 
-// While playback runs past the end of visible clips, extending the phone
-// Arrangement by only two seconds causes a full clip scan, resize and
-// scrollbar repaint on every transport tick. Reserve 30 seconds of runway
-// whenever the extent is refreshed. Desktop/iPad keep their old extent.
+// Extend the phone Arrangement in 30-second chunks only when the playhead
+// approaches its existing clip/loop extent. Unconditional runway would grow
+// content width on unrelated layout refreshes early in a short project.
+// Caller must pass the clip/loop extent BEFORE adding playhead headroom.
 constexpr double timelinePhonePlaybackExtentSeconds(
     double projectExtentSeconds, double playheadSeconds) noexcept
 {
+    if (playheadSeconds + 2.0 <= projectExtentSeconds)
+        return projectExtentSeconds;
     const double withRunway = playheadSeconds + 30.0;
     return projectExtentSeconds > withRunway ? projectExtentSeconds : withRunway;
 }
