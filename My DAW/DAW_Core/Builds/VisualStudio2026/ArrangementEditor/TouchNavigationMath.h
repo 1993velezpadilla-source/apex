@@ -57,6 +57,15 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // A pan-only gesture never changes clip geometry. Once lightweight
+        // waveform painting is disabled, repaint the visible viewport instead
+        // of rebuilding all clip renderers. An active fling owns its own end.
+        static constexpr bool touchPanNeedsDetailRepaint(bool wasLightweight,
+                                                          bool momentumActive) noexcept
+        {
+            return wasLightweight && !momentumActive;
+        }
+
         // Distinguish a region tap from a drag using Euclidean SCREEN
         // displacement. A tap opens the contextual menu only when the region
         // was already selected at pointer-down; higher-level code enforces

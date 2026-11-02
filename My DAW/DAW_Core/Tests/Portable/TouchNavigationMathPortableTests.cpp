@@ -17,6 +17,14 @@ using ArrangementEditor::TouchNavigationMath;
 
 int main()
 {
+    // A short phone pan and an interrupted fling must restore full-detail
+    // waveform paint without a structural renderer rebuild. A stationary
+    // tap or an ongoing fling must not schedule that extra repaint.
+    static_assert(TouchNavigationMath::touchPanNeedsDetailRepaint(true, false));
+    static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, false));
+    static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));
+    static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, true));
+
     // A swipe is measured in screen coordinates, so viewport motion does not
     // become new finger motion. The same finger displacement gives the same
     // result regardless of the current content zoom or view origin.

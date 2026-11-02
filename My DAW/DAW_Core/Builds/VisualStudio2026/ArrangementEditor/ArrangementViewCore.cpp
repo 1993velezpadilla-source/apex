@@ -1470,7 +1470,12 @@ namespace ArrangementEditor
         m_skipSlop = false;
         m_touchPanVelocityX = 0.0;
         m_touchPanVelocityY = 0.0;
-        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+        const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+            false, std::memory_order_relaxed);
+        // A new clip press interrupts inertia. Restore detailed waveforms in
+        // the visible viewport without rebuilding every clip in the project.
+        if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+            repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
@@ -1514,7 +1519,13 @@ namespace ArrangementEditor
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            // No fling follows this release. Restore waveform detail now;
+            // otherwise the last low-detail frame can remain on screen until
+            // an unrelated redraw. Pure pan does not require a clip rebuild.
+            if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+                repaint(getViewportVisibleBounds());
         }
     }
 
