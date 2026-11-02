@@ -92,5 +92,42 @@ int main()
     zoom.setPixelsPerSecond(100.0);
     assert(zoom.getPixelsPerSecond() == 100.0);
 
+    // Grid density is used on every Arrangement paint. A very small
+    // px-per-bar used to overflow the ceil(24 / density) -> int conversion.
+    // Invalid input must also suppress beat detail rather than drawing it.
+    using ArrangementEditor::GridLodPolicy;
+    assert(GridLodPolicy::barStep(24.0) == 1);
+    assert(GridLodPolicy::barStep(23.0) == 2);
+    assert(GridLodPolicy::barStep(12.0) == 2);
+    assert(GridLodPolicy::barStep(11.0) == 4);
+    assert(GridLodPolicy::barStep(6.0) == 4);
+    assert(GridLodPolicy::barStep(5.0) == 8);
+    assert(GridLodPolicy::barStep(3.0) == 8);
+    assert(GridLodPolicy::barStep(2.0) == 16);
+    assert(GridLodPolicy::barStep(1.5) == 16);
+    assert(GridLodPolicy::barStep(1.0) == 32);
+    assert(GridLodPolicy::barStep(std::numeric_limits<double>::denorm_min()) == 32);
+    assert(GridLodPolicy::barStep(1e-300) == 32);
+    assert(GridLodPolicy::barStep(0.0) == 1);
+    assert(GridLodPolicy::barStep(-1.0) == 1);
+    assert(GridLodPolicy::barStep(nan) == 1);
+    assert(GridLodPolicy::barStep(inf) == 1);
+    assert(GridLodPolicy::barStep(-inf) == 1);
+    assert(GridLodPolicy::suppressBeats(nan));
+    assert(GridLodPolicy::suppressBeats(-inf));
+    assert(GridLodPolicy::suppressBeats(5.9));
+    assert(!GridLodPolicy::suppressBeats(6.0));
+    assert(!GridLodPolicy::suppressBeats(inf));
+    // For ordinary finite densities, preserve the previous power-of-two
+    // step mapping exactly (including all the transition boundaries).
+    for (int quarter = 1; quarter <= 400; ++quarter)
+    {
+        const double density = quarter * 0.25;
+        const int raw = static_cast<int>(std::ceil(24.0 / density));
+        const int expected = raw <= 1 ? 1 : raw <= 2 ? 2 : raw <= 4 ? 4
+                           : raw <= 8 ? 8 : raw <= 16 ? 16 : 32;
+        assert(GridLodPolicy::barStep(density) == expected);
+    }
+
     std::cout << "ArrangementZoomCore: saturated/invalid UI zoom regression passed\n";
 }

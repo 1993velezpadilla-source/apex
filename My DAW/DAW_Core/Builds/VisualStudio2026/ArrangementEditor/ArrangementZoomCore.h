@@ -29,20 +29,22 @@ namespace ArrangementEditor
         /** True when beat subdivision lines should be suppressed entirely. */
         static bool suppressBeats(double pixelsPerBeat) noexcept
         {
-            return pixelsPerBeat < kMinPxPerBeat;
+            // Invalid density must not enable unreadable beat subdivisions.
+            return !(pixelsPerBeat >= kMinPxPerBeat);
         }
 
         /** Musically natural bar step for the given pixel density.
-         *  Guarantees major spacing >= kMinMajorSpacing. */
+         *  Cap the step at 32 bars. Compare spacing thresholds directly:
+         *  ceil(24 / pxPerBar) can overflow int at extreme zoom-out or
+         *  convert NaN to int after malformed tempo/viewport input. */
         static int barStep(double pixelsPerBar) noexcept
         {
-            if (pixelsPerBar <= 0.0) return 1;
-            const int raw = static_cast<int>(std::ceil(kMinMajorSpacing / pixelsPerBar));
-            if (raw <= 1) return 1;
-            if (raw <= 2) return 2;
-            if (raw <= 4) return 4;
-            if (raw <= 8) return 8;
-            if (raw <= 16) return 16;
+            if (!(pixelsPerBar > 0.0)) return 1; // also rejects NaN
+            if (pixelsPerBar >= kMinMajorSpacing) return 1;
+            if (pixelsPerBar >= kMinMajorSpacing / 2.0) return 2;
+            if (pixelsPerBar >= kMinMajorSpacing / 4.0) return 4;
+            if (pixelsPerBar >= kMinMajorSpacing / 8.0) return 8;
+            if (pixelsPerBar >= kMinMajorSpacing / 16.0) return 16;
             return 32;
         }
     };
