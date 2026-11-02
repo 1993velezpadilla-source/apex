@@ -44,10 +44,25 @@ int main()
     // The world coordinate under a pinch centroid remains screen-stationary:
     // anchor at content pixel 320, viewport pixel 120, doubling zoom moves
     // scroll offset to 520 (640 - 120).
-    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, 4000) == 520);
-    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 0.5, 4000) == 40);
-    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, 400) == 400);
-    assert(TouchNavigationMath::zoomPosition(5.0, 120.0, 0.5, 400) == 0);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, 4000, 200) == 520);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 0.5, 4000, 200) == 40);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, 400, 200) == 400);
+    assert(TouchNavigationMath::zoomPosition(5.0, 120.0, 0.5, 400, 200) == 0);
+
+    // A malformed pinch centroid/ratio must preserve the current scroll
+    // position; extreme finite zoom math must saturate, never overflow int.
+    const double zoomNan = std::numeric_limits<double>::quiet_NaN();
+    const double zoomInf = std::numeric_limits<double>::infinity();
+    assert(TouchNavigationMath::zoomPosition(zoomNan, 120.0, 2.0, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(320.0, zoomInf, 2.0, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, zoomNan, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, zoomInf, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 0.0, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(1e300, 0.0, 1e300, 4000, 250) == 4000);
+    assert(TouchNavigationMath::zoomPosition(-1e300, 0.0, 1e300, 4000, 250) == 0);
+    assert(TouchNavigationMath::zoomPosition(1e308, 1e308, 1e308, 4000, 250) == 4000);
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, -1, 250) == 0);
+    assert(TouchNavigationMath::zoomPosition(zoomNan, 120.0, 2.0, 4000, -5) == 0);
 
     // Slow pinch motion accumulates against the last APPLIED distance.
     // A 0.75px/frame motion should eventually trigger, not be discarded.

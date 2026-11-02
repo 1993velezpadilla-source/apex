@@ -34,11 +34,27 @@ namespace ArrangementEditor
 
         // Keep the timeline point under the gesture centroid fixed on screen.
         static int zoomPosition(double contentAnchorPx, double viewAnchorPx,
-                                double newToOldZoom, int maxViewPx) noexcept
+                                double newToOldZoom, int maxViewPx,
+                                int currentViewPx) noexcept
         {
-            return std::clamp(
-                static_cast<int>(std::lround(contentAnchorPx * newToOldZoom - viewAnchorPx)),
-                0, std::max(0, maxViewPx));
+            const int maxScrollPx = std::max(0, maxViewPx);
+            const int safeCurrentPx = std::clamp(currentViewPx, 0, maxScrollPx);
+
+            // Reject malformed pinch anchors without snapping the viewport to
+            // song start. Finite-but-huge coordinates may overflow the double
+            // product: saturate BEFORE converting to int, as with touch pan.
+            if (!std::isfinite(contentAnchorPx) || !std::isfinite(viewAnchorPx)
+                || !std::isfinite(newToOldZoom) || newToOldZoom <= 0.0)
+                return safeCurrentPx;
+
+            const double targetPx = contentAnchorPx * newToOldZoom - viewAnchorPx;
+            if (std::isnan(targetPx))
+                return safeCurrentPx;
+            if (targetPx <= 0.0)
+                return 0;
+            if (targetPx >= static_cast<double>(maxScrollPx))
+                return maxScrollPx;
+            return static_cast<int>(std::lround(targetPx));
         }
 
         // Distinguish a region tap from a drag using Euclidean SCREEN

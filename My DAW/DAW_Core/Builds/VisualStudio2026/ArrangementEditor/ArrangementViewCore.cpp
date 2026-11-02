@@ -1204,7 +1204,8 @@ namespace ArrangementEditor
                     viewport->setViewPosition(
                         TouchNavigationMath::zoomPosition(focusX, focusViewportX,
                             newPps / juce::jmax(1.0, oldPps),
-                            juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                            juce::jmax(0, getWidth() - viewport->getViewWidth()),
+                            viewport->getViewPositionX()),
                         viewport->getViewPositionY());
                     repaint();
                 }
