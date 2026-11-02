@@ -129,12 +129,12 @@ namespace ArrangementEditor
             m_pixelsPerSecond = juce::jlimit(2.0, 4000.0, pps);
         }
 
-        void zoomIn(double centreTime = 0.0)
+        void zoomIn([[maybe_unused]] double centreTime = 0.0)
         {
             setPixelsPerSecond(m_pixelsPerSecond * 1.2);
         }
 
-        void zoomOut(double centreTime = 0.0)
+        void zoomOut([[maybe_unused]] double centreTime = 0.0)
         {
             setPixelsPerSecond(m_pixelsPerSecond / 1.2);
         }
