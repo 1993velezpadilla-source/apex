@@ -34,6 +34,12 @@ constexpr bool valid(int w, int h)
         if (!inside(bottom[i], w, h)) return false;
         for (int j = 0; j < i; ++j)
             if (!separated(bottom[j], bottom[i])) return false;
+        // The bottom shortcuts must not cover any of the six transport actions.
+        // Prior tests only compared controls within their own row.
+        if (bottom[i].width > 0 && bottom[i].height > 0)
+            for (int j = 0; j < 6; ++j)
+                if (r.transport[j].width > 0 && r.transport[j].height > 0
+                    && !separated(bottom[i], r.transport[j])) return false;
     }
     return true;
 }
