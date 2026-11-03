@@ -186,7 +186,21 @@ public:
         // in sync with ArrangementViewCore track height at all times.
         core_->getZoom().onZoomChanged = [this]()
         {
-            defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
+            const int nextLaneHeight = (int)core_->getZoom().getTrackHeightPx();
+            const bool laneHeightChanged = nextLaneHeight != defaultLaneHeight_;
+            defaultLaneHeight_ = nextLaneHeight;
+            if (core_->isFastTouchPinchResize() && !laneHeightChanged)
+            {
+                // Horizontal phone pinch changes TIME ONLY. Do not rescan
+                // every engine clip, playlist and track header each frame.
+                // The host updates content width from the cached extent;
+                // the core updates clip rectangles, not their audio data.
+                const bool hostResized = onPhoneHorizontalZoomChanged
+                    ? onPhoneHorizontalZoomChanged() : false;
+                if (!hostResized) core_->resized();
+                repaint();
+                return;
+            }
             if (core_ != nullptr)
                 core_->resized();
             // Dynamic take rows must be re-laid out on vertical zoom too.
@@ -853,6 +867,9 @@ trackManager_.addListener(this);
     std::function<void(int,int)> onLaneHeightChanged;
     std::function<void(int)> onVerticalScrollChanged;
     std::function<void()> onLaneLayoutChanged;
+    // Lightweight host callback for live horizontal phone pinch.
+    // Returns true if it changed the arrangement bounds (triggering resized).
+    std::function<bool()> onPhoneHorizontalZoomChanged;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;
