@@ -82,9 +82,14 @@ namespace ArrangementEditor
             return;
         }
 
-        // New source: invalidate immediately so stale audio never paints.
+        // New source: publish an invalid immutable generation under the
+        // SAME lock as readers; never race the swap-chain paint thread.
         if (m_sourcePath != sourcePath)
-            m_peaks = std::make_shared<WaveformPeakData>();
+        {
+            auto empty = std::make_shared<WaveformPeakData>();
+            juce::CriticalSection::ScopedLockType lock(peaksLock_);
+            m_peaks = std::move(empty);
+        }
 
         m_sourcePath = sourcePath;
         m_targetWidth = targetWidth;
