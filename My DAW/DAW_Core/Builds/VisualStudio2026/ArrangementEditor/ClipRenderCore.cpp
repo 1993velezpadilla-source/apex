@@ -1315,6 +1315,134 @@ namespace ArrangementEditor
                 static_cast<uint64_t>(peakBucketsRead));
     }
 
+
+    static juce::ThreadPool& waveformTilePool()
+    {
+        // Bounded pool across ALL clips: two software raster jobs maximum,
+        // rather than one renderer thread per audio region.
+        static juce::ThreadPool pool(2);
+        return pool;
+    }
+
+    struct WaveformRasterTileJob final : public juce::ThreadPoolJob
+    {
+        WaveformRasterTileJob(std::shared_ptr<WaveformRasterAsyncState> mailbox,
+                              std::shared_ptr<const WaveformPeakData> source,
+                              ArrangementClipModel clip,
+                              int tileLeft, int tileWidth,
+                              int clipWidth, int clipHeight,
+                              double rate, bool isSelected,
+                              int headerHeight,
+                              std::uint64_t buildGeneration,
+                              std::uint64_t buildSerial)
+            : juce::ThreadPoolJob("APEX Waveform Tile"),
+              state(std::move(mailbox)), peaks(std::move(source)),
+              model(std::move(clip)),
+              tileX(tileLeft), tileW(tileWidth),
+              width(clipWidth), height(clipHeight),
+              sampleRate(rate), selected(isSelected),
+              headerH(headerHeight),
+              generation(buildGeneration), serial(buildSerial)
+        {}
+
+        JobStatus runJob() override
+        {
+            juce::Image tile;
+            if (state->generation.load(std::memory_order_acquire) == generation
+                && state->owner.load(std::memory_order_acquire) != nullptr
+                && peaks && peaks->valid && !peaks->minPeaks.empty()
+                && tileW > 0 && height > headerH)
+            {
+                // Graphics for an owned CPU image uses the software renderer.
+                // No JUCE Component, OpenGL context, AudioClip or audio-thread
+                // object is touched on this worker.
+                tile = juce::Image(juce::Image::ARGB, tileW, height - headerH, true);
+                juce::Graphics graphics(tile);
+                graphics.setOrigin(-tileX, -headerH);
+                renderWaveformPeaks(graphics, *peaks, model, width, height,
+                                    sampleRate, selected, headerH);
+            }
+
+            // Always complete the matching serial, even if cancelled by a
+            // gain/fade/source edit. The message thread clears the pending
+            // flag; stale generations never replace visible correct pixels.
+            juce::MessageManager::callAsync(
+                [mailbox = state, finished = std::move(tile),
+                 x = tileX, w = width, h = height,
+                 g = generation, s = serial]() mutable
+                {
+                    if (auto* owner = mailbox->owner.load(std::memory_order_acquire))
+                        owner->acceptWaveformRasterAsync(
+                            std::move(finished), x, w, h, g, s);
+                });
+            return jobHasFinished;
+        }
+
+        std::shared_ptr<WaveformRasterAsyncState> state;
+        std::shared_ptr<const WaveformPeakData> peaks;
+        ArrangementClipModel model;
+        int tileX = 0, tileW = 0, width = 0, height = 0;
+        double sampleRate = 44100.0;
+        bool selected = false;
+        int headerH = 16;
+        std::uint64_t generation = 0, serial = 0;
+    };
+
+    void ClipRenderCore::requestWaveformRasterAsync(int tileX, int tileWidth)
+    {
+        // Called with m_dataMutex locked by paint(). Avoid queuing thousands
+        // of obsolete jobs when inertia/pinch/gain drags fire many repaints.
+        if (m_waveformRasterPending || m_waveformAsyncState == nullptr
+            || s_lightweightPaint.load(std::memory_order_relaxed))
+            return;
+
+        const int clipWidth = getWidth();
+        const int clipHeight = getHeight();
+        if (tileWidth <= 0 || clipHeight <= kNameH)
+            return;
+        auto source = m_waveformCache->snapshotPeaks();
+        if (!source || !source->valid
+            || source->minPeaks.empty() || source->maxPeaks.empty())
+            return;
+
+        auto mailbox = m_waveformAsyncState;
+        const auto generation = mailbox->generation.load(std::memory_order_acquire);
+        const auto serial = ++m_waveformRasterSerial;
+        m_waveformRasterPending = true;
+        auto* job = new WaveformRasterTileJob(
+            std::move(mailbox), std::move(source), *m_model,
+            tileX, tileWidth, clipWidth, clipHeight,
+            engineSampleRate_, m_selected, kNameH,
+            generation, serial);
+        waveformTilePool().addJob(job, true);
+    }
+
+    void ClipRenderCore::acceptWaveformRasterAsync(juce::Image image,
+        int tileX, int clipW, int clipH,
+        std::uint64_t generation, std::uint64_t serial)
+    {
+        // This runs on the message thread only, never on the raster worker.
+        std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        if (serial != m_waveformRasterSerial)
+            return;
+        m_waveformRasterPending = false;
+        if (!m_waveformAsyncState
+            || generation != m_waveformAsyncState->generation.load(std::memory_order_acquire)
+            || clipW != getWidth() || clipH != getHeight() || !image.isValid())
+        {
+            repaint(); // Requeue for current visible geometry if necessary.
+            return;
+        }
+
+        // Keep the old viewport tile alive until the new one is needed.
+        // A pan reversal can reuse either tile without any redraw.
+        m_nextWaveformRaster = std::move(image);
+        m_nextWaveformRasterX = tileX;
+        m_nextWaveformRasterClipW = clipW;
+        m_nextWaveformRasterClipH = clipH;
+        repaint();
+    }
+
     void ClipRenderCore::drawWaveformUncached(juce::Graphics& g)
     {
         if (!shouldRenderWaveform())
