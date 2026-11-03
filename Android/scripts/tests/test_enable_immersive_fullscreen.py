@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False):
+                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -46,7 +46,16 @@ class ImmersiveManifestTests(unittest.TestCase):
                 f"{{{ANDROID_NS}}}name": "android.intent.action.MAIN"})
             ET.SubElement(filt, "category", {
                 f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
+            if duplicate_launcher:
+                other = ET.SubElement(app, "activity", {
+                    f"{{{ANDROID_NS}}}name": "com.example.OtherLauncher"})
+                other_filter = ET.SubElement(other, "intent-filter")
+                ET.SubElement(other_filter, "action", {
+                    f"{{{ANDROID_NS}}}name": "android.intent.action.MAIN"})
+                ET.SubElement(other_filter, "category", {
+                    f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             ET.ElementTree(root).write(manifest, encoding="utf-8")
+            original_manifest = manifest.read_bytes()
 
             run = subprocess.run(
                 [sys.executable, str(SCRIPT), "--project", str(generated)],
@@ -81,6 +90,11 @@ class ImmersiveManifestTests(unittest.TestCase):
                     self.assertEqual(second.returncode, 0, second.stderr)
                     self.assertEqual(manifest.read_bytes(), first_manifest)
                     self.assertEqual(java.read_bytes(), first_java)
+            if run.returncode != 0:
+                self.assertEqual(manifest.read_bytes(), original_manifest,
+                                 "Rejected manifests must not be rewritten")
+                self.assertFalse(java.exists(),
+                                 "Rejected manifests must not create an Activity")
             return run
 
     def test_juce8_manifest_without_package_uses_generated_project(self):
@@ -107,6 +121,13 @@ class ImmersiveManifestTests(unittest.TestCase):
         for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
             with self.subTest(bundle=bundle):
                 self.assertEqual(self.run_patch(bundle, rerun=True).returncode, 0)
+
+    def test_duplicate_launcher_is_rejected_without_mutation(self):
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, duplicate_launcher=True)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn("Expected exactly one launcher Activity, found 2", run.stderr)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
