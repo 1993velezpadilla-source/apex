@@ -1031,7 +1031,7 @@ namespace ArrangementEditor
             // section before it enters view; never perform a 2k-column image
             // creation or Graphics::fillRect loop in this cached paint.
             if (canCache && tileW > visibleW + kPrefetchThreshold
-                && !m_waveformRasterPending && !m_nextWaveformRaster.isValid()
+                && !m_waveformRasterPending
                 && !s_pinchZoomActive.load(std::memory_order_relaxed))
             {
                 const int frontLeft = m_waveformRasterX;
@@ -1045,7 +1045,22 @@ namespace ArrangementEditor
                     prefetchX = juce::jlimit(0, maxTileX,
                                              dirty.getRight() - tileW);
                 if (prefetchX != frontLeft)
-                    requestWaveformRasterAsync(prefetchX, tileW);
+                {
+                    // Keep the previous viewport tile for an immediate
+                    // reverse swipe, but don't let that obsolete back tile
+                    // suppress ALL forward prefetch forever.
+                    const bool nextAlreadyCovers = m_nextWaveformRaster.isValid()
+                        && m_nextWaveformRasterClipW == clipW
+                        && m_nextWaveformRasterClipH == clipH
+                        && prefetchX >= m_nextWaveformRasterX
+                        && prefetchX + tileW <= m_nextWaveformRasterX
+                                               + m_nextWaveformRaster.getWidth();
+                    if (!nextAlreadyCovers)
+                    {
+                        m_nextWaveformRaster = {};
+                        requestWaveformRasterAsync(prefetchX, tileW);
+                    }
+                }
             }
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
@@ -1466,7 +1481,6 @@ namespace ArrangementEditor
         const auto generation = mailbox->generation.load(std::memory_order_acquire);
         const auto serial = ++m_waveformRasterSerial;
         m_waveformRasterPending = true;
-        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncJobsQueued);
         // Keep the global queue finite even when many tracks enter view
         // together. No busy waits on the UI; misses draw real visible peaks.
         if (waveformTilePool().getNumJobs() >= 12)
@@ -1474,6 +1488,7 @@ namespace ArrangementEditor
             m_waveformRasterPending = false;
             return;
         }
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncJobsQueued);
         auto* job = new WaveformRasterTileJob(
             std::move(mailbox), std::move(source), *m_model,
             tileX, tileWidth, clipWidth, clipHeight,
