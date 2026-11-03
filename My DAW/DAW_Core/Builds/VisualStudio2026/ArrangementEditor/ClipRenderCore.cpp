@@ -1030,28 +1030,20 @@ namespace ArrangementEditor
         g.drawImageAt(m_waveformRaster, tileX, kNameH);
     }
 
-    void ClipRenderCore::drawWaveformUncached(juce::Graphics& g)
+    // The exact waveform renderer is independent of ClipRenderCore and its
+    // component/lifetime. The UI thread draws the visible fallback only when
+    // needed; a background tile worker draws the same projection into images.
+    // This keeps gain/fades/reverse/transients consistent across both paths.
+    static void renderWaveformPeaks(juce::Graphics& g,
+                                    const WaveformPeakData& peaks,
+                                    const ArrangementClipModel& model,
+                                    int clipWidth, int clipHeight,
+                                    double sampleRate, bool selected,
+                                    int headerHeight)
     {
-        if (!shouldRenderWaveform())
-            return;
-
-        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
-        if (metricsActive)
-            TimelinePaintMetrics::waveformDrawCalls.fetch_add(1);
-
-        if (!m_waveformCache->isReady())
-            return;
-
-        // Thread-safe peak access: lock to prevent race with background waveform generation
-        juce::CriticalSection::ScopedLockType lock(m_waveformCache->getPeaksLock());
-
-        auto& peaks = m_waveformCache->getPeaks();
-        if (peaks.minPeaks.empty() || peaks.maxPeaks.empty())
-            return;
-
         // Waveform area starts BELOW the name bar so they never overlap.
-        const auto  full      = getLocalBounds();
-        const float areaTop   = (float)(full.getY() + kNameH);
+        const auto  full      = juce::Rectangle<int>(0, 0, clipWidth, clipHeight);
+        const float areaTop   = (float)(full.getY() + headerHeight);
         const float areaBot   = (float)full.getBottom();
         const float areaH     = areaBot - areaTop;
         if (areaH < 4.f) return;
@@ -1082,7 +1074,7 @@ namespace ArrangementEditor
         //
         // This makes the waveform look correct relative to what you hear.
 
-        const auto& tp   = m_model->timePitch;
+        const auto& tp   = model.timePitch;
         const int   mode = static_cast<int>(tp.mode);
 
         double readRatio = 1.0;
@@ -1105,14 +1097,14 @@ namespace ArrangementEditor
         int visiblePeakCount = totalPeaks;
         if (peaks.samplesPerPeak > 0)
         {
-            int64_t visibleStartSample = m_model->sourceStartSample;
-            int64_t visibleEndSample = m_model->sourceEndSample;
+            int64_t visibleStartSample = model.sourceStartSample;
+            int64_t visibleEndSample = model.sourceEndSample;
 
             if (visibleEndSample <= visibleStartSample)
             {
                 const double sourceRate = peaks.sourceSampleRate > 0.0 ? peaks.sourceSampleRate : 44100.0;
-                visibleStartSample = (int64_t)std::llround(juce::jmax(0.0, m_model->sourceOffset) * sourceRate);
-                visibleEndSample = visibleStartSample + (int64_t)std::llround(juce::jmax(0.0, m_model->length) * sourceRate);
+                visibleStartSample = (int64_t)std::llround(juce::jmax(0.0, model.sourceOffset) * sourceRate);
+                visibleEndSample = visibleStartSample + (int64_t)std::llround(juce::jmax(0.0, model.length) * sourceRate);
             }
 
             if (peaks.totalSamples > 0)
@@ -1144,15 +1136,15 @@ namespace ArrangementEditor
         // We apply the clip gain + fade envelope visually at draw time.
         // This makes gain/fade knobs update instantly without async peak regen.
 
-        const float clipGainLinear = m_model->gain; // already in linear 0..4
+        const float clipGainLinear = model.gain; // already in linear 0..4
 
         // For fade visual: clip length in samples at the engine rate
         // (cancels against clipLengthSamples for pixel mapping; previously
         // hardcoded 44.1k as "approximation for visual").
-        const double visualSampleRate = engineSampleRate_;
-        const int64_t clipLengthSamples = (int64_t)std::llround(m_model->length * visualSampleRate);
-        const int64_t fadeInSamp  = m_model->fadeInSamples(visualSampleRate);
-        const int64_t fadeOutSamp = m_model->fadeOutSamples(visualSampleRate);
+        const double visualSampleRate = sampleRate;
+        const int64_t clipLengthSamples = (int64_t)std::llround(model.length * visualSampleRate);
+        const int64_t fadeInSamp  = model.fadeInSamples(visualSampleRate);
+        const int64_t fadeOutSamp = model.fadeOutSamples(visualSampleRate);
 
         // Helper: compute fade gain for a given pixel position
         auto getFadeGainAtPixel = [&](int px) -> float
@@ -1180,11 +1172,11 @@ namespace ArrangementEditor
         };
 
         // Waveform follows the TRACK colour (canonical authority â€” mirrored
-        // into m_model->trackColour), with the canonical small contrast
+        // into model.trackColour), with the canonical small contrast
         // adjustment. Clip colour and the audio analysis cache are NOT
         // involved: changing a track colour only changes this paint colour.
         g.setColour(ClipWaveformColourCore::resolveWaveformColour(
-            m_model->trackColour, m_model->muted, m_selected));
+            model.trackColour, model.muted, selected));
 
         // â”€â”€ Pro waveform rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         TimelinePaintMetrics::ScopedTimer waveformTimer(TimelinePaintMetrics::waveformDurationNs);
@@ -1214,7 +1206,7 @@ namespace ArrangementEditor
         for (int px = startPx; px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
-            const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
+            const int visualPx = model.reversed ? ((int)clipW - 1 - px) : px;
             const double fStart = (double)visualPx * peaksPerPixel;
 
             float rawMin, rawMax;
@@ -1294,6 +1286,28 @@ namespace ArrangementEditor
             TimelinePaintMetrics::waveformPeaksWalked.fetch_add(
                 static_cast<uint64_t>(peakBucketsRead));
     }
+
+    void ClipRenderCore::drawWaveformUncached(juce::Graphics& g)
+    {
+        if (!shouldRenderWaveform())
+            return;
+
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+        if (metricsActive)
+            TimelinePaintMetrics::waveformDrawCalls.fetch_add(1);
+
+        // Hold an immutable generation instead of the peak-cache lock for
+        // every painted column. Background decoding can publish a newer
+        // generation without waiting on thousands of pixel draw calls.
+        auto peaks = m_waveformCache->snapshotPeaks();
+        if (peaks == nullptr || !peaks->valid
+            || peaks->minPeaks.empty() || peaks->maxPeaks.empty())
+            return;
+
+        renderWaveformPeaks(g, *peaks, *m_model, getWidth(), getHeight(),
+                            engineSampleRate_, m_selected, kNameH);
+    }
+
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
     {
