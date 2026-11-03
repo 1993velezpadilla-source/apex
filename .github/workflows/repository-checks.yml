@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Exact waveform pyramid: C++17 correctness, boundaries and UBSan
+      - name: "Exact waveform pyramid - C++17 correctness, boundaries and UBSan"
         shell: bash
         run: |
           cd "My DAW/DAW_Core"
