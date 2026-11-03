@@ -119,6 +119,27 @@ static_assert(validCompact(189, 94));
 static_assert(validCompact(188, 94));
 static_assert(validCompact(320, 94));
 static_assert(validCompact(360, 94));
+// At the 189-unit compact breakpoint the four shortcuts must not shrink
+// below the intended 44-unit hit width. Just below it they must remain
+// bounded rather than overlapping the clock/readouts.
+constexpr auto compactAtThreshold = DAW::mobile::compactPhoneTransportLayout(189, 94);
+constexpr auto compactBelowThreshold = DAW::mobile::compactPhoneTransportLayout(188, 94);
+static_assert(compactAtThreshold.fx.width == 44
+              && compactAtThreshold.browser.width == 44
+              && compactAtThreshold.mixer.width == 44
+              && compactAtThreshold.sends.width == 44);
+static_assert(compactBelowThreshold.fx.width < 44
+              && compactBelowThreshold.sends.width < 44);
+static_assert(compactAtThreshold.transport[0].height >= 44
+              && compactBelowThreshold.transport[0].height >= 44);
+// Landscape rotation must preserve the six transport hit targets and
+// phone-only floating Mixer / Sends shortcuts at accessible dimensions.
+constexpr auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
+static_assert(rotated.transport[0].width >= 44
+              && rotated.transport[5].width >= 44
+              && rotated.transport[0].height >= 44);
+static_assert(rotated.mixer.width >= 44 && rotated.mixer.height >= 44);
+static_assert(rotated.sends.width >= 44 && rotated.sends.height >= 44);
 
 int main()
 {
