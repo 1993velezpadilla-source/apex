@@ -1032,7 +1032,7 @@ namespace ArrangementEditor
             // creation or Graphics::fillRect loop in this cached paint.
             if (canCache && tileW > visibleW + kPrefetchThreshold
                 && !m_waveformRasterPending && !m_nextWaveformRaster.isValid()
-                && !s_lightweightPaint.load(std::memory_order_relaxed))
+                && !s_pinchZoomActive.load(std::memory_order_relaxed))
             {
                 const int frontLeft = m_waveformRasterX;
                 const int frontRight = frontLeft + m_waveformRaster.getWidth();
@@ -1078,7 +1078,9 @@ namespace ArrangementEditor
             }
         }
 
-        if (canCache && !s_lightweightPaint.load(std::memory_order_relaxed))
+        // Unlike a pinch, one-finger scrolling is geometrically stable:
+        // allow the background pool to refill tiles WHILE the finger moves.
+        if (canCache && !s_pinchZoomActive.load(std::memory_order_relaxed))
         {
             // If the finger reversed away from an old prefetch, discard that
             // obsolete NEXT image; the current visible range takes priority.
@@ -1448,7 +1450,7 @@ namespace ArrangementEditor
         // Called with m_dataMutex locked by paint(). Avoid queuing thousands
         // of obsolete jobs when inertia/pinch/gain drags fire many repaints.
         if (m_waveformRasterPending || m_waveformAsyncState == nullptr
-            || s_lightweightPaint.load(std::memory_order_relaxed))
+            || s_pinchZoomActive.load(std::memory_order_relaxed))
             return;
 
         const int clipWidth = getWidth();
