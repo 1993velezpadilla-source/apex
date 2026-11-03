@@ -220,6 +220,10 @@ namespace ArrangementEditor
         };
 
         m_toolbar.setSelectedSnapModeIndex(getSnapModeIndex());
+        m_ruler.onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            if (onLoopRegionChanged) onLoopRegionChanged(beginSeconds, endSeconds);
+        };
         m_toolbar.onSnapModeSelected = [this](int index)
         {
             switch (index)
@@ -2323,12 +2327,10 @@ namespace ArrangementEditor
         juce::ScopedValueSetter<bool> guard(m_rebuildInProgress, true);
         rebuildClipRenderersInternal();
 
-        // If another rebuild was requested while we were running, defer it
-        if (m_deferredRebuildRequested)
-        {
-            m_deferredRebuildRequested = false;
-            m_rebuildDeferTimer->startTimer(1);  // Defer 1ms to avoid immediate recursion
-        }
+        // Keep the pending flag for RebuildDeferTimer. Clearing it
+        // *before* the timer checked it silently dropped rebuild requests.
+        if (m_deferredRebuildRequested && m_rebuildDeferTimer != nullptr)
+            m_rebuildDeferTimer->startTimer(1);
     }
 
     void ArrangementViewCore::rebuildClipRenderersInternal()
