@@ -62,16 +62,17 @@ namespace ArrangementEditor
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             cachedOverviewSource_.reset();
         }
-        if (m_sourcePath == sourcePath && m_peaks.valid)
+        const auto currentPeaks = snapshotPeaks();
+        if (m_sourcePath == sourcePath && currentPeaks->valid)
         {
             m_targetWidth = targetWidth;
             m_visibleSamplesHint = visibleSamplesHint;
 
             // Re-generate only when the cache is meaningfully coarser than
             // this zoom level needs (1.5x hysteresis prevents regen thrash).
-            const int required = computeSamplesPerPeak(m_peaks.totalSamples,
+            const int required = computeSamplesPerPeak(currentPeaks->totalSamples,
                                                        targetWidth, visibleSamplesHint);
-            if ((juce::int64)m_peaks.samplesPerPeak <= (juce::int64)required * 3 / 2)
+            if ((juce::int64)currentPeaks->samplesPerPeak <= (juce::int64)required * 3 / 2)
                 return; // cached resolution is fine for this zoom
 
             m_requestPending = true;
@@ -83,7 +84,7 @@ namespace ArrangementEditor
 
         // New source: invalidate immediately so stale audio never paints.
         if (m_sourcePath != sourcePath)
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
 
         m_sourcePath = sourcePath;
         m_targetWidth = targetWidth;
@@ -102,7 +103,7 @@ namespace ArrangementEditor
 
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            if (cachedOverviewSource_ == cachedAudio && m_peaks.valid)
+            if (cachedOverviewSource_ == cachedAudio && m_peaks->valid)
                 return true;
         }
 
@@ -127,8 +128,9 @@ namespace ArrangementEditor
         fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         fresh.valid = true;
 
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         juce::CriticalSection::ScopedLockType lock(peaksLock_);
-        m_peaks = std::move(fresh);
+        m_peaks = std::move(published);
         cachedOverviewSource_ = cachedAudio;
         return true;
     }
@@ -191,7 +193,7 @@ namespace ArrangementEditor
         if (!file.existsAsFile())
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -202,7 +204,7 @@ namespace ArrangementEditor
         if (!reader)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -210,7 +212,7 @@ namespace ArrangementEditor
         if (totalSamples <= 0 || m_targetWidth <= 0)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -280,11 +282,11 @@ namespace ArrangementEditor
 
         // Thread-safe peak update: lock while swapping in the new data
         // This ensures paint() never accesses partially-written peak data
+        fresh.valid = true;
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
-            fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::move(published);
         }
     }
 
@@ -335,10 +337,11 @@ namespace ArrangementEditor
             return;
 
         // Thread-safe update: lock while swapping in the new data
+        fresh.valid = true;
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::move(published);
         }
     }
 
