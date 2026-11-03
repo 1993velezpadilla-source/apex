@@ -137,6 +137,16 @@ int main()
     assert(TouchNavigationMath::wheelZoomTarget(100.0, 1e300, 10.0, 4000.0) == 4000.0);
     assert(TouchNavigationMath::wheelZoomTarget(100.0, -1e300, 10.0, 4000.0) == 10.0);
 
+    // Ctrl/Alt wheel anchor must use the same bounded conversion as pinch.
+    // Large finite coordinates must saturate without undefined int conversion;
+    // malformed coordinates preserve the existing viewport offset.
+    assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 1.2, 4000, 200) == 264);
+    assert(TouchNavigationMath::zoomPosition(100.0, 50.0, 1.5, 4000, 50) == 100);
+    assert(TouchNavigationMath::zoomPosition(1e300, 40.0, 1.2, 4000, 250) == 4000);
+    assert(TouchNavigationMath::zoomPosition(-1e300, 40.0, 1.2, 4000, 250) == 0);
+    assert(TouchNavigationMath::zoomPosition(panNan, 40.0, 1.2, 4000, 250) == 250);
+    assert(TouchNavigationMath::zoomPosition(320.0, panInf, 1.2, 4000, 250) == 250);
+
     // Slow pinch motion accumulates against the last APPLIED distance.
     // A 0.75px/frame motion should eventually trigger, not be discarded.
     const double applied = 100.0;
