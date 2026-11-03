@@ -67,6 +67,9 @@ namespace ArrangementEditor
         void setSelected(bool selected);
         void setSoloActive(bool active) { if (m_soloActive != active) { m_soloActive = active; repaint(); } }
         bool isSelected() const { return m_selected; }
+        // Gain dragging changes amplitude only: keep a hot waveform raster
+        // and never rebuild clip/peak ownership for each pointer movement.
+        bool isGainDragging() const { return m_gainDragActive; }
         void setAutomationActive(bool active) { if (m_automationActive != active) { m_automationActive = active; repaint(); } }
 
         ArrangementClipModel* getClip() { return &m_clipData; }
