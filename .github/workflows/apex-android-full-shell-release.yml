@@ -10,6 +10,8 @@ on:
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
+      - "Android/scripts/pin_full_exporter_ndk.py"
+      - "Android/scripts/tests/test_pin_full_exporter_ndk.py"
       - ".github/workflows/apex-android-full-shell-release.yml"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"

@@ -16,11 +16,18 @@ APP_GRADLE = (Path(__file__).resolve().parents[2] / "My DAW" / "DAW_Core"
 
 
 def pin_ndk_version(content: str, version: str = NDK_VERSION) -> str:
-    existing = re.compile(r"(?m)^(?P<indent>[ \t]*)ndkVersion\s*(?:=\s*)?['\"][^'\"\n]+['\"]\s*$")
+    # JUCE 8.0.12 emits `ndkVersion ndkVersionString`, not a quoted
+    # literal. Replacing only literals inserted a second earlier pin that
+    # this later generated assignment immediately overwrote. Match the
+    # generated DSL assignment regardless of its value expression, without
+    # consuming newlines or matching the ndkVersionString definition.
+    existing = re.compile(
+        r"(?m)^(?P<indent>[ \t]*)ndkVersion(?:[ \t]*=[ \t]*|[ \t]+)[^\r\n]+(?P<cr>\r?)$")
     match = existing.search(content)
     if match:
-        indent = match.group("indent")
-        return existing.sub(f'{indent}ndkVersion "{version}"', content, count=1)
+        return existing.sub(
+            lambda m: f'{m.group("indent")}ndkVersion "{version}"{m.group("cr")}',
+            content)
 
     android = re.compile(r"(?m)^(?P<indent>[ \t]*)android\s*\{")
     match = android.search(content)

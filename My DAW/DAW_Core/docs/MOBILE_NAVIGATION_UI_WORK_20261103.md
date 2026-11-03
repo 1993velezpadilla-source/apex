@@ -43,6 +43,17 @@ owners. Waveforms remain visible during navigation.
 The portable assertions count actual grid candidates, not milliseconds or FPS.
 There is no physical Android device connected in this environment.
 
+## Native build follow-up
+
+The first debug CI run at `6458bebb` stopped before native compilation: AGP
+tried to download NDK 28.1 and received an invalid archive. Inspection of the
+pinned JUCE 8.0.12 exporter proved it emits `ndkVersion ndkVersionString` after
+the old pin helper's inserted literal. That later assignment overrode 26.3.
+The helper now replaces generated expression assignments as well as literals,
+including later overrides. Tests use the actual JUCE exporter syntax. This
+changes the generated build configuration, not the SDK source. Both Android
+workflows trigger on pin-helper/test changes. Native builds must be repeated.
+
 ## Device diagnostics
 
 The separate `com.xziel.apex.mobileportrait` preview manifest is profileable by
