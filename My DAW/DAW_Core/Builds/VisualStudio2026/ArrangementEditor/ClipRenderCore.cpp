@@ -1106,6 +1106,9 @@ namespace ArrangementEditor
                                     double sampleRate, bool selected,
                                     int headerHeight)
     {
+        // The standalone projection runs on both the UI fallback and the
+        // software raster workers; keep metrics scoped to this generation.
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
         // Waveform area starts BELOW the name bar so they never overlap.
         const auto  full      = juce::Rectangle<int>(0, 0, clipWidth, clipHeight);
         const float areaTop   = (float)(full.getY() + headerHeight);
