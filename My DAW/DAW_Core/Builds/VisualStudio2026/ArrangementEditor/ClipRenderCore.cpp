@@ -1088,6 +1088,7 @@ namespace ArrangementEditor
             requestWaveformRasterAsync(x, tileW);
         }
 
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformVisibleFallbackDraws);
         // Correct fallback is only the ON-SCREEN region, not a full 2048px
         // tile! Our exact indexed peak lookup keeps it cheap until an async
         // raster arrives. No waveform pixels are ever intentionally hidden.
@@ -1243,7 +1244,6 @@ namespace ArrangementEditor
             model.trackColour, model.muted, selected));
 
         // â”€â”€ Pro waveform rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        TimelinePaintMetrics::ScopedTimer waveformTimer(TimelinePaintMetrics::waveformDurationNs);
         // Each pixel column covers a fractional RANGE of peak columns.
         //  â€¢ Zoomed out (>=1 peak per pixel): aggregate min/max across ALL
         //    covered peaks so no transient is ever skipped (no aliasing).
@@ -1395,6 +1395,8 @@ namespace ArrangementEditor
                 tile = juce::Image(juce::Image::ARGB, tileW, height - headerH, true);
                 juce::Graphics graphics(tile);
                 graphics.setOrigin(-tileX, -headerH);
+                TimelinePaintMetrics::ScopedTimer tileTimer(
+                    TimelinePaintMetrics::waveformWorkerTileDurationNs);
                 renderWaveformPeaks(graphics, *peaks, model, width, height,
                                     sampleRate, selected, headerH);
             }
@@ -1445,6 +1447,7 @@ namespace ArrangementEditor
         const auto generation = mailbox->generation.load(std::memory_order_acquire);
         const auto serial = ++m_waveformRasterSerial;
         m_waveformRasterPending = true;
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncJobsQueued);
         auto* job = new WaveformRasterTileJob(
             std::move(mailbox), std::move(source), *m_model,
             tileX, tileWidth, clipWidth, clipHeight,
@@ -1466,9 +1469,11 @@ namespace ArrangementEditor
             || generation != m_waveformAsyncState->generation.load(std::memory_order_acquire)
             || clipW != getWidth() || clipH != getHeight() || !image.isValid())
         {
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncTilesRejected);
             repaint(); // Requeue for current visible geometry if necessary.
             return;
         }
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncTilesDelivered);
 
         // Keep the old viewport tile alive until the new one is needed.
         // A pan reversal can reuse either tile without any redraw.
@@ -1496,6 +1501,8 @@ namespace ArrangementEditor
             || peaks->minPeaks.empty() || peaks->maxPeaks.empty())
             return;
 
+        TimelinePaintMetrics::ScopedTimer visibleTimer(
+            TimelinePaintMetrics::waveformDurationNs);
         renderWaveformPeaks(g, *peaks, *m_model, getWidth(), getHeight(),
                             engineSampleRate_, m_selected, kNameH);
     }
