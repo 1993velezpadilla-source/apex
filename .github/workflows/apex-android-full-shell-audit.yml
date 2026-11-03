@@ -111,6 +111,9 @@ jobs:
           xvfb-run -a "$PROJUCER" --resave \
             "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
           test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
+          python3 -m unittest discover -s Android/scripts/tests -p 'test_pin_full_exporter_ndk.py' -v
+          python3 Android/scripts/pin_full_exporter_ndk.py
+          grep -q 'ndkVersion "26.3.11579264"' "My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle"
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
