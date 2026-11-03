@@ -3679,8 +3679,10 @@ namespace ArrangementEditor
                 m_zoom.setPixelsPerSecond(newPps);
 
                 const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-                const int anchoredViewX = juce::roundToInt(anchorTime * newPps) - mouseXInViewport;
-                viewport->setViewPosition(juce::jlimit(0, maxX, anchoredViewX), viewport->getViewPositionY());
+                const int anchoredViewX = TouchNavigationMath::zoomPosition(
+                    (double)e.x, (double)mouseXInViewport, newPps / oldPps,
+                    maxX, viewport->getViewPositionX());
+                viewport->setViewPosition(anchoredViewX, viewport->getViewPositionY());
                 return;
             }
 
@@ -3702,8 +3704,10 @@ namespace ArrangementEditor
                 // Keep the track under the cursor visually stable
                 const double scale = newH / juce::jmax(1.0, oldH);
                 const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-                const int anchoredViewY = juce::roundToInt(anchorTrackY * scale) - mouseYInViewport;
-                viewport->setViewPosition(viewport->getViewPositionX(), juce::jlimit(0, maxY, anchoredViewY));
+                const int anchoredViewY = TouchNavigationMath::zoomPosition(
+                    anchorTrackY, (double)mouseYInViewport, scale,
+                    maxY, viewport->getViewPositionY());
+                viewport->setViewPosition(viewport->getViewPositionX(), anchoredViewY);
                 return;
             }
 
