@@ -125,17 +125,17 @@ namespace ArrangementEditor
                 while (i <= boundedEnd && i % kBlock != 0)
                     useRaw(i++);
                 // Then align to a 1024-peak superblock, without overreading.
-                while (i % kSuper != 0 && boundedEnd - i + 1 >= kBlock)
+                while (i <= boundedEnd && i % kSuper != 0 && boundedEnd - i + 1 >= kBlock)
                 {
                     useBlock(i / kBlock);
                     i += kBlock;
                 }
-                while (boundedEnd - i + 1 >= kSuper)
+                while (i <= boundedEnd && boundedEnd - i + 1 >= kSuper)
                 {
                     useSuper(i / kSuper);
                     i += kSuper;
                 }
-                while (boundedEnd - i + 1 >= kBlock)
+                while (i <= boundedEnd && boundedEnd - i + 1 >= kBlock)
                 {
                     useBlock(i / kBlock);
                     i += kBlock;
