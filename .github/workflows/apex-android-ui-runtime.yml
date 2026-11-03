@@ -229,10 +229,8 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            runtime_apk=$(find android-ui-runtime-apk -name 'APEX-Android-Original-Release-Optimized-X86_64-Preview-*.apk' -print -quit)
-            test -n "$runtime_apk"
-            python3 Android/scripts/run_ui_runtime_benchmark.py --apk "$runtime_apk"
+          # The action launches each script line in a separate shell.
+          script: python3 Android/scripts/run_ui_runtime_benchmark.py --apk "$(find android-ui-runtime-apk -name 'APEX-Android-Original-Release-Optimized-X86_64-Preview-*.apk' -print -quit)"
 
       - name: Upload actual runtime metrics and screen captures
         if: always()
@@ -244,6 +242,7 @@ jobs:
           retention-days: 14
 
       - name: Upload release-optimized ORIGINAL APEX X86_64 preview APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: APEX-Android-Original-Release-Optimized-X86_64-PREVIEW
