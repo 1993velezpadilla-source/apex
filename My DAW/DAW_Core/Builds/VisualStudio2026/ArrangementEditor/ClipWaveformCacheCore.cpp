@@ -117,6 +117,9 @@ namespace ArrangementEditor
         fresh.sourceSampleRate = cachedAudio->sampleRate > 0.0 ? cachedAudio->sampleRate : 44100.0;
         fresh.samplesPerPeak = juce::jmax(1, (int) std::ceil(
             (double) totalSamples / (double) rawMin.size()));
+        // Build a compact EXACT min/max pyramid once from the immutable
+        // source overview, not once per pixel during a mobile scroll.
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         fresh.valid = true;
 
         juce::CriticalSection::ScopedLockType lock(peaksLock_);
@@ -264,6 +267,12 @@ namespace ArrangementEditor
         if (threadShouldExit())
             return;
 
+        // Background work: prepare the exact zoom-out min/max index before
+        // publishing the new peak generation to the paint thread.
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
+        if (threadShouldExit())
+            return;
+
         // Thread-safe peak update: lock while swapping in the new data
         // This ensures paint() never accesses partially-written peak data
         {
@@ -313,6 +322,12 @@ namespace ArrangementEditor
             fresh.minPeaks[i] = minVal;
             fresh.maxPeaks[i] = maxVal;
         }
+
+        if (threadShouldExit())
+            return;
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
+        if (threadShouldExit())
+            return;
 
         // Thread-safe update: lock while swapping in the new data
         {
