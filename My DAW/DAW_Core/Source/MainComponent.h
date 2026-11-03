@@ -170,6 +170,43 @@ public:
 private:
     DAW::ApplicationCore appCore_;
 
+    // Phone-only passive zoom diagnostics. 100% = 100 pixels/second,
+    // independent of the physical screen density. Polling at 10 Hz avoids
+    // binding label layout to every pinch frame or waveform paint.
+    class PhoneZoomIndicator final : public juce::Component, private juce::Timer
+    {
+    public:
+        std::function<double()> getPixelsPerSecond;
+        PhoneZoomIndicator() { setInterceptsMouseClicks(false, false); }
+        void setPhoneActive(bool active)
+        {
+            setVisible(active);
+            if (active) { startTimerHz(10); timerCallback(); }
+            else stopTimer();
+        }
+        void paint(juce::Graphics& g) override
+        {
+            if (getWidth() < 5 || getHeight() < 5) return;
+            g.setColour(juce::Colour(0xEC0B1020));
+            g.fillRoundedRectangle(getLocalBounds().toFloat(), 7.f);
+            g.setColour(juce::Colour(0xFF2DCADB));
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.6f), 7.f, 1.f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(juce::FontOptions(11.f, juce::Font::bold)));
+            g.drawText(label_, getLocalBounds().reduced(4, 1),
+                       juce::Justification::centred, true);
+        }
+    private:
+        void timerCallback() override
+        {
+            if (!getPixelsPerSecond) return;
+            const auto pps = juce::jmax(1, juce::roundToInt(getPixelsPerSecond()));
+            const auto next = "ZOOM " + juce::String(pps) + "%";
+            if (label_ != next) { label_ = next; repaint(); }
+        }
+        juce::String label_ = "ZOOM 100%";
+    } phoneZoomIndicator_;
+
     // Panels
     std::unique_ptr<DAW::DAWMenuBar>       menuBar_;
     std::unique_ptr<DAW::TransportBar>     transportBar_;
