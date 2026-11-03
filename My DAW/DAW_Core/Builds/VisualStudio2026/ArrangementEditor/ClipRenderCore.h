@@ -40,9 +40,16 @@ namespace ArrangementEditor
         }
         void restoreWaveformAfterNavigation()
         {
-            // A pinch may have temporarily scaled the previous tile.
-            // Rebuild exact detailed peaks on release, never hide the waveform.
+            // Only a GEOMETRY-changing pinch needs to drop a scaled image.
             invalidateWaveformRaster();
+            if (m_waveformNeedsUpdate && isShowing()) refresh();
+            else repaint();
+        }
+        void restoreWaveformAfterPan()
+        {
+            // A pure scroll changes neither source peaks nor their geometry.
+            // Keep both precomputed tiles; the old method discarded them at
+            // every finger lift, causing a full redraw at the worst moment.
             if (m_waveformNeedsUpdate && isShowing()) refresh();
             else repaint();
         }
@@ -164,6 +171,10 @@ namespace ArrangementEditor
     // after its background + header, so each frame stays cheap and the gesture
     // is smooth. Full detail (waveform, badges, fades) returns on release.
     static inline std::atomic<bool> s_lightweightPaint { false };
+    // Unlike s_lightweightPaint (set for BOTH scrolling and pinch), this
+    // guard means geometry itself is changing. Continue prefetching during
+    // one-finger scroll; pause speculative raster only during real pinch.
+    static inline std::atomic<bool> s_pinchZoomActive { false };
 
         // Interactive handle callbacks — wired by ArrangementViewCore
         // onEditBegin: called when user starts dragging a fade/resize handle.
