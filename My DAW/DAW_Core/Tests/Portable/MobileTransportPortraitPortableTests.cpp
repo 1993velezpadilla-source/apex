@@ -164,6 +164,37 @@ static_assert(orderedActions(320, 112));
 static_assert(orderedActions(360, 96));
 static_assert(orderedActions(852, 180));
 
+// Compact readouts must never cover phone-only Mixer/Sends shortcuts.
+// Optional readouts are suppressed when the viewport is too narrow; if
+// visible, each must keep its minimum intended width and original order.
+constexpr bool orderedReadouts(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    const PortraitTransportBounds readouts[] = {
+        r.clock, r.tempo, r.key, r.automation, r.click
+    };
+    const int minimums[] = { 54, 54, 54, 44, 44 };
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto a = readouts[i];
+        if (a.width == 0 && a.height == 0) continue;
+        if (a.width < minimums[i] || a.height <= 0) return false;
+        if (!inside(a, w, h)) return false;
+        if (!separated(a, r.fx) || !separated(a, r.browser)
+            || !separated(a, r.mixer) || !separated(a, r.sends))
+            return false;
+        for (int j = 0; j < i; ++j)
+            if (readouts[j].width && readouts[j].x >= a.x)
+                return false;
+    }
+    return true;
+}
+static_assert(orderedReadouts(189, 94));
+static_assert(orderedReadouts(320, 112));
+static_assert(orderedReadouts(360, 96));
+static_assert(orderedReadouts(852, 180));
+static_assert(orderedReadouts(1024, 256));
+
 int main()
 {
     // Exhaustively cross the 189-unit compact shortcut threshold during
@@ -181,5 +212,6 @@ int main()
         {
             assert(valid(w, h));
             assert(validCompact(w, h));
+            assert(orderedReadouts(w, h));
         }
 }
