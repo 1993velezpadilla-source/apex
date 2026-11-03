@@ -53,6 +53,11 @@ namespace ArrangementEditor
     void ClipWaveformCacheCore::requestPeaks(const std::string& sourcePath, int targetWidth,
                                              int64_t visibleSamplesHint)
     {
+        // Keeping the same source while changing zoom must not evict the
+        // engine overview identity. Otherwise the next refresh needlessly
+        // clones thousands of min/max peaks AND rebuilds the range pyramid.
+        // A genuinely new file must evict the old overview immediately.
+        if (m_sourcePath != sourcePath)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             cachedOverviewSource_.reset();
