@@ -973,8 +973,8 @@ namespace ArrangementEditor
                 if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
                     TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
                 g.drawImage(m_waveformRaster,
-                    (float)left, (float)kNameH, (float)width,
-                    (float)(clipH - kNameH),
+                    juce::roundToInt(left), kNameH, juce::jmax(1, juce::roundToInt(width)),
+                    clipH - kNameH,
                     0, 0, m_waveformRaster.getWidth(),
                     m_waveformRaster.getHeight(), false);
                 return;
