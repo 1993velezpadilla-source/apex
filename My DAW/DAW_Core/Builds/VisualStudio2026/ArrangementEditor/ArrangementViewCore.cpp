@@ -1277,15 +1277,22 @@ namespace ArrangementEditor
         m_lastPinchSepY = 0.0;
         if (wasTwoFingerPinch)
         {
-            ClipRenderCore::s_pinchZoomActive.store(false, std::memory_order_relaxed);
+            const bool changedGeometry = ClipRenderCore::s_pinchZoomActive.exchange(
+                false, std::memory_order_relaxed);
             const bool hadNavigationPreview = ClipRenderCore::s_lightweightPaint.exchange(
                 false, std::memory_order_relaxed);
             if (hadNavigationPreview)
             {
                 for (auto& clip : m_clipRenderers)
                     if (clip != nullptr && clip->isShowing())
-                        clip->restoreWaveformAfterNavigation();
-                updateAutomationLayout();
+                    {
+                        if (changedGeometry)
+                            clip->restoreWaveformAfterNavigation();
+                        else
+                            clip->restoreWaveformAfterPan();
+                    }
+                if (changedGeometry)
+                    updateAutomationLayout();
                 repaint(getViewportVisibleBounds());
             }
         }
