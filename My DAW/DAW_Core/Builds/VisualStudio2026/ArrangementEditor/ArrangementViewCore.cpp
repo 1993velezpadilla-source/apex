@@ -2814,10 +2814,16 @@ namespace ArrangementEditor
                                 {
                                     c->gain = entry.second;
                                     c->bumpWaveformVisualVersion();
+                                    // updateClip() already runs the engine-sync bridge.
+                                    // A second sync here doubles full AudioClip setter
+                                    // traffic; the visual snapshot also needs updating
+                                    // so Undo/Redo never repaints an outdated waveform.
                                     v.m_clipState.updateClip(*c);
-                                    v.syncClipToEngine(*c);
                                     if (auto* renderer = v.findClipRendererFor(entry.first))
+                                    {
+                                        renderer->updateClipData(*c);
                                         renderer->repaint();
+                                    }
                                 }
                         }
                         for (const auto& entry : values)
@@ -2847,10 +2853,14 @@ namespace ArrangementEditor
                                         ? entry.second * multiplier
                                         : juce::Decibels::decibelsToGain((float)knob.getValue(), -60.0f));
                                 c->bumpWaveformVisualVersion();
+                                // Keep the source peaks. updateClip() notifies the
+                                // audio bridge ONCE; only its raster changes.
                                 view.m_clipState.updateClip(*c);
-                                view.syncClipToEngine(*c);
                                 if (auto* renderer = view.findClipRendererFor(entry.first))
+                                {
+                                    renderer->updateClipData(*c);
                                     renderer->repaint();
+                                }
                             }
                     }
                     // Refresh the live Clip Properties gain knob, not just the
