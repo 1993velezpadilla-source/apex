@@ -34,6 +34,19 @@ import android.view.WindowInsetsController;
  * system-bar visibility. Android's edge gestures still work normally.
  */
 public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
+    private ApexUiBenchmark uiBenchmark;
+    public native String nativeNavigationState();
+
+    public void startApexUiBenchmark(int x, int y, int width, int height) {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        uiBenchmark = new ApexUiBenchmark(this, x, y, width, height);
+        uiBenchmark.start();
+    }
+
+    @Override protected void onDestroy() {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        super.onDestroy();
+    }
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -148,6 +161,10 @@ def main() -> int:
             / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
     java.write_text(JAVA_SOURCE.replace("__APEX_PACKAGE__", package), encoding="utf-8")
+    benchmark_source = Path(__file__).resolve().parents[1] / "Source/ApexUiBenchmark.java"
+    java.with_name("ApexUiBenchmark.java").write_text(
+        benchmark_source.read_text(encoding="utf-8").replace("__APEX_PACKAGE__", package),
+        encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)

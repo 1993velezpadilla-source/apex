@@ -163,6 +163,12 @@ public:
     DAW::ApplicationCore& getAppCore() { return appCore_; }
     const DAW::ApplicationCore& getAppCore() const { return appCore_; }
 
+   #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+    void prepareAndroidUiBenchmark(bool withClip);
+    juce::var androidUiBenchmarkState();
+    juce::Rectangle<int> androidUiBenchmarkBounds() const;
+   #endif
+
     /** The APEX header (custom title bar). Used by the top-level window shell
      *  for caption hit-testing and window-control routing. */
     DAW::DAWMenuBar* getMenuBar() const noexcept { return menuBar_.get(); }

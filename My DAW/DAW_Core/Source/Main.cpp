@@ -10,6 +10,7 @@
 #include "MainComponent.h"
 #include "SplashScreen.h"
 #include "UICore/ApexPresentationClock.h"
+#include "UICore/AndroidGpuPresenter.h"
 #include "PluginScanCore/PluginScanWorkerProcessCore.h"
 #include "PluginSecurityCore/HostBuildTrustModeCore.h"
 #include "PluginSafetyCore/MessageBoxSuppressorCore.h"
@@ -1878,6 +1879,14 @@ public:
             JUCEApplication::getInstance()->systemRequestedQuit();
         }
 
+        ~MainWindow() override
+        {
+           #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+            DAW::androidUiBenchmarkSnapshot = {};
+            androidGpuPresenter_.reset();
+           #endif
+        }
+
         MainComponent* getMainComponent() const noexcept
         {
             return dynamic_cast<MainComponent*>(getContentComponent());
@@ -1901,6 +1910,42 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
+           #if defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+            const auto scene = DAW::androidLaunchExtra("apex_scene");
+            const bool benchmark = scene == "empty" || scene == "clip";
+            if (benchmark)
+                daw->prepareAndroidUiBenchmark(scene == "clip");
+            androidGpuPresenter_ = std::make_unique<DAW::AndroidGpuPresenter>(*this);
+            if (benchmark)
+            {
+                juce::Component::SafePointer<MainWindow> safe(this);
+                DAW::androidUiBenchmarkSnapshot = [safe]() -> juce::String
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return "{}";
+                    auto state = safe->getMainComponent()->androidUiBenchmarkState();
+                    if (auto* object = state.getDynamicObject())
+                    {
+                        object->setProperty("backend", safe->androidGpuPresenter_->backend());
+                        object->setProperty("gpuReady", safe->androidGpuPresenter_->ready());
+                        object->setProperty("renderCallbacks", static_cast<juce::int64>(safe->androidGpuPresenter_->renderCallbacks()));
+                    }
+                    return juce::JSON::toString(state, true);
+                };
+                juce::Timer::callAfterDelay(3000, [safe]
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return;
+                    const auto bounds = safe->getMainComponent()->androidUiBenchmarkBounds();
+                    auto* env = juce::getEnv();
+                    const auto activity = juce::getMainActivity();
+                    const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));
+                    const auto method = env->GetMethodID(cls.get(), "startApexUiBenchmark", "(IIII)V");
+                    env->CallVoidMethod(activity.get(), method, bounds.getX(), bounds.getY(),
+                                        bounds.getWidth(), bounds.getHeight());
+                });
+            }
+           #endif
             // ResizableWindow::resized() is JUCE's authoritative owner of
             // content bounds. Do not override it with a desktop-sized guess:
             // Android can rotate while MainComponent is being constructed.
@@ -2202,6 +2247,9 @@ public:
         RECT  savedRect_  = {};
        #endif
         DAW::ActionManager::ActionRegistration regFullScreen_;
+       #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+        std::unique_ptr<DAW::AndroidGpuPresenter> androidGpuPresenter_;
+       #endif
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };
 
@@ -2314,3 +2362,12 @@ private:
 //==============================================================================
 // This macro generates the main() routine that launches the app.
 START_JUCE_APPLICATION (DAW_CoreApplication)
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xziel_apex_mobileportrait_ApexImmersiveActivity_nativeNavigationState(JNIEnv* env, jobject)
+{
+    const auto state = DAW::androidUiBenchmarkSnapshot ? DAW::androidUiBenchmarkSnapshot() : "{}";
+    return env->NewStringUTF(state.toRawUTF8());
+}
+#endif

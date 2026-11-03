@@ -30,6 +30,8 @@ def is_portrait_preview(github_ref_name: str, github_head_ref: str = "",
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--benchmark-x86", action="store_true",
+                        help="Build the original app for the CI x86_64 Android runtime benchmark")
     args = parser.parse_args()
     repo = args.repo_root.resolve()
     original = repo / "My DAW" / "DAW_Core" / "DAW_Core.jucer"
@@ -65,6 +67,7 @@ def main() -> int:
         "JUCE_ASIO=0",
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
+        f"APEX_ANDROID_GPU_UI={1 if portrait_preview else 0}",
     ])
     root.set("defines", " ".join(defines))
 
@@ -72,6 +75,11 @@ def main() -> int:
     exports = root.find("EXPORTFORMATS")
     if modules is None or exports is None:
         raise ValueError("Canonical .jucer missing MODULES/EXPORTFORMATS")
+
+    if portrait_preview and not any(m.get("id") == "juce_opengl" for m in modules.findall("MODULE")):
+        ET.SubElement(modules, "MODULE", {
+            "id": "juce_opengl", "showAllCode": "1", "useLocalCopy": "0", "useGlobalPath": "0",
+        })
 
     for exporter in list(exports):
         exports.remove(exporter)
@@ -95,13 +103,14 @@ def main() -> int:
         "../../Source/ThirdParty/signalsmith-linear",
     ))
     configs = ET.SubElement(android, "CONFIGURATIONS")
+    architecture = "x86_64" if args.benchmark_x86 else "arm64-v8a"
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Debug", "isDebug": "1", "androidArchitectures": "arm64-v8a",
+        "name": "Debug", "isDebug": "1", "androidArchitectures": architecture,
         "optimisation": "1", "linkTimeOptimisation": "0",
         "headerPath": shared_headers,
     })
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Release", "isDebug": "0", "androidArchitectures": "arm64-v8a", "optimisation": "3",
+        "name": "Release", "isDebug": "0", "androidArchitectures": architecture, "optimisation": "3",
         "headerPath": shared_headers,
     })
     paths = ET.SubElement(android, "MODULEPATHS")
