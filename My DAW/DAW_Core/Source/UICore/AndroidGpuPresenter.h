@@ -3,6 +3,7 @@
 // Only the generated Android preview exporter adds juce_opengl. Desktop and
 // the canonical Windows project retain their existing rendering backends.
 #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_UI) && APEX_ANDROID_GPU_UI
+#include <jni.h>
 #include <juce_core/native/juce_JNIHelpers_android.h>
 #include <android/log.h>
 #include <atomic>
