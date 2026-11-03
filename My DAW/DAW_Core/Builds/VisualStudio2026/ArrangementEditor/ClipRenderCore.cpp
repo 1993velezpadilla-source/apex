@@ -44,7 +44,14 @@ namespace ArrangementEditor
 
         m_waveformCache = std::make_unique<ClipWaveformCacheCore>();
         auto safe = juce::Component::SafePointer<ClipRenderCore>(this);
-        m_waveformCache->onPeaksReady = [safe]() { if (safe != nullptr) safe->repaint(); };
+        m_waveformCache->onPeaksReady = [safe]()
+        {
+            if (safe != nullptr)
+            {
+                safe->invalidateWaveformRaster();
+                safe->repaint();
+            }
+        };
 
         m_pianoRollBtn = std::make_unique<PianoRollButtonCore>(PianoRollButtonCore::Style::ClipOverlay);
         m_pianoRollBtn->onClick = [this]() {
@@ -76,6 +83,8 @@ namespace ArrangementEditor
     void ClipRenderCore::refresh()
     {
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        // Peak changes alter the pixels, never keep a stale tile.
+        m_waveformRaster = juce::Image();
         if (m_model)
         {
             // Tiny clips retain their block/selection visuals but do not need
@@ -130,6 +139,7 @@ namespace ArrangementEditor
             m_cachedAudio = std::move(cachedAudio);
             m_allowFileFallback = allowFileFallback;
             m_waveformNeedsUpdate = true;
+            m_waveformRaster = juce::Image();
         }
 
         if (isShowing() && shouldRenderWaveform())
@@ -138,7 +148,11 @@ namespace ArrangementEditor
 
     void ClipRenderCore::setSelected(bool selected)
     {
+        std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        if (m_selected == selected) return;
         m_selected = selected;
+        // Selection changes the waveform tint; do not cache the old colour.
+        m_waveformRaster = juce::Image();
         repaint();
     }
 
@@ -152,27 +166,9 @@ namespace ArrangementEditor
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
         if (!m_model) return;
 
-        // P0 Android touch hot-path: drawing one detailed waveform per visible
-        // clip *per scroll frame* walks/locks the peak cache and draws every
-        // handle/name/badge. Those costs scale with visible clip count, not
-        // the displayed zoom percentage. During real movement paint only a
-        // lightweight, stable clip silhouette; restore detail on gesture end.
-        // No peak cache lock, no text layout, no child widget reconstruction.
-        if (s_lightweightPaint.load(std::memory_order_relaxed))
-        {
-            const auto rect = getLocalBounds().toFloat();
-            const auto visible = g.getClipBounds().getIntersection(getLocalBounds());
-            if (visible.isEmpty()) return;
-            g.setColour(juce::Colour(0xFF151923));
-            g.fillRect(visible);
-            const auto accent = m_model->trackColour.withAlpha(0.80f);
-            g.setColour(accent.withAlpha(0.22f));
-            g.fillRect(visible.withY(juce::jmax(visible.getY(), getHeight() / 2 - 2))
-                              .withHeight(juce::jmin(4, visible.getHeight())));
-            g.setColour(accent);
-            g.drawRect(rect.reduced(0.5f), m_selected ? 2.f : 1.f);
-            return;
-        }
+        // Audio waveforms MUST stay visible throughout pan and pinch.
+        // Scroll uses a cached image of the REAL peaks; zoom reuses/scales
+        // that image while moving and repaints exact peaks at gesture end.
 
         // DEBUG: Increment paint counter to verify paint() is being called
         ++m_paintDebugCounter;
@@ -935,6 +931,83 @@ namespace ArrangementEditor
     }
 
     void ClipRenderCore::drawWaveform(juce::Graphics& g)
+    {
+        if (!shouldRenderWaveform() || getHeight() <= kNameH)
+            return;
+
+        // A viewport-sized transparent image tile is rasterised ONCE at the
+        // correct peak resolution, then the same pixels are blitted during
+        // subsequent scroll frames. Never cache a whole-song (huge) image.
+        const auto dirty = g.getClipBounds().getIntersection(
+            getLocalBounds().withTrimmedTop(kNameH));
+        if (dirty.isEmpty()) return;
+
+        const int clipW = getWidth();
+        const int clipH = getHeight();
+        const bool validTile = m_waveformRaster.isValid();
+
+        if (validTile && m_waveformRasterClipW == clipW
+            && m_waveformRasterClipH == clipH
+            && dirty.getX() >= m_waveformRasterX
+            && dirty.getRight() <= m_waveformRasterX + m_waveformRaster.getWidth())
+        {
+            g.drawImageAt(m_waveformRaster, m_waveformRasterX, kNameH);
+            return;
+        }
+
+        // While pinch zoom is moving, scale the ACTUAL previous waveform
+        // pixels when their source range still covers the screen. Unlike the
+        // old "lightweight" silhouette, the audio waveform NEVER disappears.
+        if (validTile && s_lightweightPaint.load(std::memory_order_relaxed)
+            && m_waveformRasterClipW > 0 && m_waveformRasterClipH > kNameH)
+        {
+            const double scale = (double)clipW / (double)m_waveformRasterClipW;
+            const double left = (double)m_waveformRasterX * scale;
+            const double width = (double)m_waveformRaster.getWidth() * scale;
+            if (scale >= 0.25 && scale <= 4.0
+                && left <= (double)dirty.getX()
+                && left + width >= (double)dirty.getRight())
+            {
+                g.drawImage(m_waveformRaster,
+                    (float)left, (float)kNameH, (float)width,
+                    (float)(clipH - kNameH),
+                    0, 0, m_waveformRaster.getWidth(),
+                    m_waveformRaster.getHeight(), false);
+                return;
+            }
+        }
+
+        // A single bounded tile covers the visible screen plus overscan.
+        // The cached tile survives hundreds of normal scroll repaints.
+        constexpr int kMaxTileWidth = 2048;
+        const int dirtyW = dirty.getWidth();
+        if (dirtyW > kMaxTileWidth)
+        {
+            // Unusually wide render target: remain correct and visible
+            // without ever allocating an unbounded bitmap.
+            drawWaveformUncached(g);
+            return;
+        }
+        const int tileW = juce::jmin(clipW, juce::jmin(kMaxTileWidth,
+            juce::jmax(dirtyW + 512, dirtyW * 2)));
+        const int maxTileX = juce::jmax(0, clipW - tileW);
+        const int tileX = juce::jlimit(0, maxTileX,
+            dirty.getX() - (tileW - dirtyW) / 2);
+        juce::Image tile(juce::Image::ARGB, tileW, clipH - kNameH, true);
+        juce::Graphics imageGraphics(tile);
+        // Translate the original source waveform coordinates into the tile,
+        // including its proper peak indices, fades, gain and track colour.
+        imageGraphics.setOrigin(-tileX, -kNameH);
+        drawWaveformUncached(imageGraphics);
+
+        m_waveformRaster = std::move(tile);
+        m_waveformRasterX = tileX;
+        m_waveformRasterClipW = clipW;
+        m_waveformRasterClipH = clipH;
+        g.drawImageAt(m_waveformRaster, tileX, kNameH);
+    }
+
+    void ClipRenderCore::drawWaveformUncached(juce::Graphics& g)
     {
         if (!shouldRenderWaveform())
             return;
