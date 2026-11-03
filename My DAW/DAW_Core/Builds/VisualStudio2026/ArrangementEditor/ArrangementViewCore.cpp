@@ -2180,8 +2180,13 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+        // Moving the z-order for every scrolling pixel triggers expensive
+        // child/sibling repaint invalidations. Lift on layout changes only.
+        if (!m_inViewportScroll)
+        {
+            m_headerButtonShield->toFront(false);
+            m_pianoRollBtn.toFront(false);
+        }
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2225,31 +2230,38 @@ namespace ArrangementEditor
         updatePinnedViewportControls();
         updateClipRendererVisibility();
 
-        // Repaint only the viewport-visible content region.  JUCE coalesces
-        // this with the Viewport's exposed-area invalidation, while keeping
-        // the culling/LOD decisions above authoritative.  Unchanged clip
-        // renderers are not individually invalidated by a pure translation.
-        const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
-        if (!visibleRepaint.isEmpty())
-        {
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
-            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+        // Android Viewport::setViewPosition() already translates the viewed
+        // component and invalidates exposed pixels. The old explicit full-
+        // viewport repaint made even BLANK projects redraw the full grid,
+        // child tree and waveform surfaces on every touch scroll event.
+        // The pinned ruler/toolbar above own their changed child bounds.
+       #if ! JUCE_ANDROID
+            // Repaint only the viewport-visible content region.  JUCE coalesces
+            // this with the Viewport's exposed-area invalidation, while keeping
+            // the culling/LOD decisions above authoritative.  Unchanged clip
+            // renderers are not individually invalidated by a pure translation.
+            const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
+            if (!visibleRepaint.isEmpty())
             {
-                const auto area = static_cast<int64_t>(
-                    static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getWidth()))
-                    * static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getHeight())));
-                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollDirtyAreaPixels, area);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
+                if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                {
+                    const auto area = static_cast<int64_t>(
+                        static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getWidth()))
+                        * static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getHeight())));
+                    TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollDirtyAreaPixels, area);
+                }
+                repaint(visibleRepaint);
             }
-            repaint(visibleRepaint);
-        }
-        else
-        {
-            // Defensive fallback for an invalid/un-sized viewport.  Normal
-            // production scrolls have a non-empty intersection and therefore
-            // never take this broad invalidation path.
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
-            repaint();
-        }
+            else
+            {
+                // Defensive fallback for an invalid/un-sized viewport.  Normal
+                // production scrolls have a non-empty intersection and therefore
+                // never take this broad invalidation path.
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
+                repaint();
+            }
+       #endif
     }
 
     void ArrangementViewCore::setSnapMode(SnapMode mode)
