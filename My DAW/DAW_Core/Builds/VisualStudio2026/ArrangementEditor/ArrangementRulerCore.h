@@ -42,6 +42,7 @@ namespace ArrangementEditor
 
         bool m_draggingPlayhead = false;
         bool m_draggingLoop = false;
+    bool m_touchLoopPending = false;
         juce::Point<int> m_dragStart;
 
         void drawGrid(juce::Graphics& g);
