@@ -29,8 +29,18 @@ namespace ArrangementEditor
 
         void setModel(ArrangementClipModel& model);
         void refresh();
+        // Cache only a bounded, visible waveform image tile, NOT the whole
+        // clip component. The clip chrome and editing overlays remain live.
+        void invalidateWaveformRaster()
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+            m_waveformRaster = juce::Image();
+        }
         void restoreWaveformAfterNavigation()
         {
+            // A pinch may have temporarily scaled the previous tile.
+            // Rebuild exact detailed peaks on release, never hide the waveform.
+            invalidateWaveformRaster();
             if (m_waveformNeedsUpdate && isShowing()) refresh();
             else repaint();
         }
@@ -86,6 +96,9 @@ namespace ArrangementEditor
                 m_clipData = data;
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
+                // Any updated trim/gain/fade/source/colour must never reuse
+                // stale rendered waveform pixels.
+                m_waveformRaster = juce::Image();
                 if (waveformSourceChanged)
                     m_waveformNeedsUpdate = true;
             }
@@ -200,6 +213,12 @@ namespace ArrangementEditor
         mutable std::recursive_mutex m_dataMutex;
 
         std::unique_ptr<ClipWaveformCacheCore> m_waveformCache;
+        // One short, viewport-sized waveform tile per clip. Keeps waveform
+        // visible while scrolling; caps memory independently of song length.
+        juce::Image m_waveformRaster;
+        int m_waveformRasterX = 0;
+        int m_waveformRasterClipW = 0;
+        int m_waveformRasterClipH = 0;
         std::unique_ptr<PianoRollButtonCore>   m_pianoRollBtn;
 
         // Hit-zones for interactive handles inside the clip.
@@ -275,6 +294,7 @@ namespace ArrangementEditor
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);
+        void drawWaveformUncached(juce::Graphics& g);
         void drawFades(juce::Graphics& g);
         void drawGainLine(juce::Graphics& g);
         void drawMuteOverlay(juce::Graphics& g);
