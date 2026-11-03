@@ -2,6 +2,8 @@
 // ArrangementToolbarCore.cpp
 // ===========================================================================
 #include "ArrangementToolbarCore.h"
+#include <array>
+#include <cmath>
 
 namespace ArrangementEditor
 {
@@ -94,6 +96,27 @@ namespace ArrangementEditor
         g.drawHorizontalLine(b.getBottom() - 1, 0.f, (float)b.getWidth());
 
         // ── Functional group separators ─────────────────────────────────────
+        if (m_phonePresentation)
+        {
+            // Paint-only chips: no dynamic allocation, animation timer or
+            // global pointer scan during a touch/scroll. The tool wheel only
+            // exists while opened by an intentional tap.
+            const auto chip = [&](juce::Rectangle<int> r, const juce::String& label,
+                                  juce::Colour tint)
+            {
+                if (r.isEmpty()) return;
+                g.setColour(fromU32(Col::btnNormal));
+                g.fillRoundedRectangle(r.toFloat(), 7.0f);
+                g.setColour(tint);
+                g.drawRoundedRectangle(r.toFloat().reduced(0.5f), 7.0f, 1.0f);
+                g.setFont(juce::Font(juce::FontOptions(13.f, juce::Font::bold)));
+                g.drawText(label, r, juce::Justification::centred, true);
+            };
+            chip(m_phoneToolsBounds, "TOOLS", fromU32(Col::accent));
+            chip(m_phoneSendsBounds, "SENDS", fromU32(Col::text));
+            return;
+        }
+
         // Group 1: edit tools (Select..Scrub). Group 2: snap/metro/auto-arm.
         // Group 3: compact "+" add-track. Subtle vertical hairlines separate
         // the groups so the toolbar reads as functional clusters.
@@ -285,6 +308,23 @@ namespace ArrangementEditor
 
     void ArrangementToolbarCore::resized()
     {
+        if (m_phonePresentation)
+        {
+            const int width = getWidth();
+            m_phoneToolsBounds = { 6, 4, juce::jmin(92, juce::jmax(0, width - 114)), 40 };
+            m_addTrackBounds = { juce::jmax(0, width - 48), 4, 42, 40 };
+            m_addTrackBtn.setBounds(m_addTrackBounds);
+            m_phoneSendsBounds = { juce::jmax(m_phoneToolsBounds.getRight() + 4, width - 124),
+                                   4, juce::jmax(0, m_addTrackBounds.getX()
+                                           - juce::jmax(m_phoneToolsBounds.getRight() + 4, width - 124) - 4), 40 };
+            m_snapButtonBounds = m_metronomeBounds = m_autoArmBounds = m_autoPlaylistBounds = {};
+            // The desktop tools are still registered, but never painted or
+            // hit-tested in compact phone mode.
+            for (auto& button : m_buttons) button.bounds = {};
+            repaint();
+            return;
+        }
+        m_phoneToolsBounds = m_phoneSendsBounds = {};
         buildButtons();
         int x = m_buttons.empty() ? 8 : (m_buttons.back().bounds.getRight() + 10);
 
@@ -369,6 +409,12 @@ namespace ArrangementEditor
 
     void ArrangementToolbarCore::mouseDown(const juce::MouseEvent& e)
     {
+        if (m_phonePresentation)
+        {
+            m_phonePressed = m_phoneToolsBounds.contains(e.getPosition()) ? 1
+                           : m_phoneSendsBounds.contains(e.getPosition()) ? 2 : 0;
+            return; // activate on release; scrolling over chips is safe
+        }
         if (m_snapButtonBounds.contains(e.getPosition()))
         {
             showSnapMenu();
@@ -411,6 +457,101 @@ namespace ArrangementEditor
                 repaint();
                 return;
             }
+        }
+    }
+
+    namespace
+    {
+        class PhoneToolsRadial final : public juce::Component
+        {
+        public:
+            explicit PhoneToolsRadial(std::function<void(EditorTool)> selected)
+                : onSelected(std::move(selected)) { setSize(292, 292); }
+            void paint(juce::Graphics& g) override
+            {
+                const auto center = getLocalBounds().getCentre().toFloat();
+                g.setColour(juce::Colour(0xEE080B14));
+                g.fillEllipse(5.f, 5.f, 282.f, 282.f);
+                g.setColour(juce::Colour(0xFFFF1678));
+                g.drawEllipse(6.f, 6.f, 280.f, 280.f, 2.f);
+                for (size_t i = 0; i < tools.size(); ++i)
+                {
+                    const float angle = (float)(-juce::MathConstants<double>::halfPi
+                                               + i * juce::MathConstants<double>::twoPi / tools.size());
+                    const auto x = center.x + 109.f * std::cos(angle);
+                    const auto y = center.y + 109.f * std::sin(angle);
+                    const juce::Rectangle<float> r(x - 26.f, y - 24.f, 52.f, 48.f);
+                    g.setColour(juce::Colour(0xFF161D2C));
+                    g.fillRoundedRectangle(r, 13.f);
+                    g.setColour(juce::Colour(0xFF8A59D8));
+                    g.drawRoundedRectangle(r, 13.f, 1.0f);
+                    g.setColour(juce::Colours::white);
+                    g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
+                    g.drawText(labels[i], r.toNearestInt(), juce::Justification::centred, true);
+                }
+                g.setColour(juce::Colour(0xFFFF1678));
+                g.setFont(juce::Font(juce::FontOptions(15.f, juce::Font::bold)));
+                g.drawText("TOOLS", getLocalBounds().withSizeKeepingCentre(90, 40),
+                           juce::Justification::centred);
+            }
+            void mouseUp(const juce::MouseEvent& e) override
+            {
+                if (e.getDistanceFromDragStart() > 14) return;
+                const auto c = getLocalBounds().getCentre().toFloat();
+                for (size_t i = 0; i < tools.size(); ++i)
+                {
+                    const float a = (float)(-juce::MathConstants<double>::halfPi
+                                           + i * juce::MathConstants<double>::twoPi / tools.size());
+                    const float x = c.x + 109.f * std::cos(a);
+                    const float y = c.y + 109.f * std::sin(a);
+                    if (e.position.getDistanceFrom({ x, y }) < 30.f)
+                    {
+                        if (onSelected) onSelected(tools[i]);
+                        return;
+                    }
+                }
+            }
+        private:
+            const std::array<EditorTool, 10> tools {
+                EditorTool::Select, EditorTool::Split, EditorTool::RazorEdit,
+                EditorTool::Eraser, EditorTool::Draw, EditorTool::Glue,
+                EditorTool::Mute, EditorTool::Stretch, EditorTool::Zoom,
+                EditorTool::TimeScrub
+            };
+            const std::array<juce::String, 10> labels {
+                "Select", "Blade", "Razor", "Erase", "Draw",
+                "Glue", "Mute", "Stretch", "Zoom", "Scrub"
+            };
+            std::function<void(EditorTool)> onSelected;
+        };
+    }
+
+    void ArrangementToolbarCore::showPhoneToolWheel()
+    {
+        juce::Component::SafePointer<ArrangementToolbarCore> safe(this);
+        auto wheel = std::make_unique<PhoneToolsRadial>(
+            [safe](EditorTool tool)
+            {
+                if (safe == nullptr) return;
+                safe->m_toolState.setActiveTool(tool);
+                if (safe->onToolChanged) safe->onToolChanged(tool);
+                safe->repaint();
+            });
+        juce::CallOutBox::launchAsynchronously(std::move(wheel),
+            localAreaToGlobal(m_phoneToolsBounds), getTopLevelComponent());
+    }
+
+    void ArrangementToolbarCore::mouseUp(const juce::MouseEvent& e)
+    {
+        if (!m_phonePresentation) return;
+        const int pressed = m_phonePressed;
+        m_phonePressed = 0;
+        if (e.getDistanceFromDragStart() > 12) return;
+        if (pressed == 1 && m_phoneToolsBounds.contains(e.getPosition()))
+            showPhoneToolWheel();
+        else if (pressed == 2 && m_phoneSendsBounds.contains(e.getPosition()))
+        {
+            if (m_phoneSendsAction) m_phoneSendsAction();
         }
     }
 
