@@ -197,6 +197,12 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> waveformDrawCalls{0};
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
+    // Bounded mobile software-tile pipeline: distinguish actual paint misses
+    // from background work and stale generations in FPS investigations.
+    static inline std::atomic<uint64_t> waveformAsyncJobsQueued{0};
+    static inline std::atomic<uint64_t> waveformAsyncTilesDelivered{0};
+    static inline std::atomic<uint64_t> waveformAsyncTilesRejected{0};
+    static inline std::atomic<uint64_t> waveformVisibleFallbackDraws{0};
 
     // ── Counter group: automation ───────────────────────────────────────
     static inline std::atomic<uint64_t> automationTimerTicks{0};
@@ -213,7 +219,8 @@ struct TimelinePaintMetrics
     // ── Sample rings for timing/area distributions ──────────────────────
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
-    static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
+    static inline SampleRing waveformDurationNs;            // Visible synchronous fallback only
+    static inline SampleRing waveformWorkerTileDurationNs;  // Off-thread image raster time
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
     static inline SampleRing requestedDirtyAreaPixelsRing;  // Per-repaint-request area (from source call sites)
     static inline SampleRing actualPaintClipAreaPixels;     // Per-paint g.getClipBounds() area
@@ -251,6 +258,10 @@ struct TimelinePaintMetrics
         uint64_t waveformDrawCalls;
         uint64_t waveformPeaksWalked;
         uint64_t waveformCachedDraws;
+        uint64_t waveformAsyncJobsQueued;
+        uint64_t waveformAsyncTilesDelivered;
+        uint64_t waveformAsyncTilesRejected;
+        uint64_t waveformVisibleFallbackDraws;
         uint64_t automationTimerTicks;
         uint64_t automationTimerSkipped;
         uint64_t automationTimerInvalidated;
@@ -292,6 +303,10 @@ struct TimelinePaintMetrics
             waveformDrawCalls.load(),
             waveformPeaksWalked.load(),
             waveformCachedDraws.load(),
+            waveformAsyncJobsQueued.load(),
+            waveformAsyncTilesDelivered.load(),
+            waveformAsyncTilesRejected.load(),
+            waveformVisibleFallbackDraws.load(),
             automationTimerTicks.load(),
             automationTimerSkipped.load(),
             automationTimerInvalidated.load(),
@@ -333,6 +348,10 @@ struct TimelinePaintMetrics
         waveformDrawCalls     = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
+        waveformAsyncJobsQueued = 0;
+        waveformAsyncTilesDelivered = 0;
+        waveformAsyncTilesRejected = 0;
+        waveformVisibleFallbackDraws = 0;
         automationTimerTicks  = 0;
         automationTimerSkipped = 0;
         automationTimerInvalidated = 0;
@@ -345,6 +364,7 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
+        waveformWorkerTileDurationNs.reset();
         frameIntervalNs.reset();
         requestedDirtyAreaPixelsRing.reset();
         actualPaintClipAreaPixels.reset();
