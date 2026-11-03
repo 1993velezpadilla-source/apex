@@ -347,9 +347,13 @@ namespace ArrangementEditor
             repaint();
         };
 
-        // Wire zoom callbacks
+        // A live pinch changes zoom frequently. Never perform a full clip
+        // model/audio snapshot rebuild in its 60 Hz callback.
         m_zoom.onZoomChanged = [this]() {
-            rebuildClipRenderers();
+            if (m_fastTouchPinchResize)
+                updateClipGeometryForFastPinch();
+            else
+                rebuildClipRenderers();
             repaint();
         };
 
@@ -1212,7 +1216,14 @@ namespace ArrangementEditor
                     ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                     const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
                     const double focusViewportX = focusX - viewport->getViewPositionX();
-                    m_zoom.setPixelsPerSecond(newPps);
+                    {
+                        const juce::ScopedValueSetter<bool> pinchGeometryOnly(
+                            m_fastTouchPinchResize, true);
+                        m_zoom.setPixelsPerSecond(newPps);
+                        // Horizontal zoom does not notify automatically.
+                        if (m_zoom.onZoomChanged)
+                            m_zoom.onZoomChanged();
+                    }
                     viewport->setViewPosition(
                         TouchNavigationMath::zoomPosition(focusX, focusViewportX,
                             newPps / juce::jmax(1.0, oldPps),
@@ -1237,7 +1248,11 @@ namespace ArrangementEditor
                     const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
                     const double focusViewportY = focusY - viewport->getViewPositionY();
                     const double contentTop = (double) arrangementContentTop();
-                    m_zoom.setTrackHeightPx(newH);
+                    {
+                        const juce::ScopedValueSetter<bool> pinchGeometryOnly(
+                            m_fastTouchPinchResize, true);
+                        m_zoom.setTrackHeightPx(newH);
+                    }
                     const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
                     viewport->setViewPosition(viewport->getViewPositionX(),
                         juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
@@ -1251,11 +1266,26 @@ namespace ArrangementEditor
             return true;
         }
 
-        // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
-        // than jumping to the obsolete single-finger pan origin.
+        // On 2 -> 1 fingers, acquire a new one-finger screen anchor.
+        // Restore exact waveform pixels after the pinch: at no point was
+        // the waveform hidden, just temporarily scaled from its cached tile.
+        const bool wasTwoFingerPinch = m_twoFingerGestureActive;
         m_twoFingerGestureActive = false;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
+        if (wasTwoFingerPinch)
+        {
+            const bool hadNavigationPreview = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            if (hadNavigationPreview)
+            {
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterNavigation();
+                updateAutomationLayout();
+                repaint(getViewportVisibleBounds());
+            }
+        }
 
         // Fingers lifted: close the gesture HERE. mouseUp is not reliable for
         // touch (a press that started on a clip never reaches the view), and a
@@ -2097,8 +2127,51 @@ namespace ArrangementEditor
     {
         updatePinnedViewportControls();
 
+        if (m_fastTouchPinchResize)
+        {
+            updateClipGeometryForFastPinch();
+            return; // No audio ownership/selection/cache rebuild each frame.
+        }
         rebuildClipRenderers();
         updateAutomationLayout();
+    }
+
+    void ArrangementViewCore::updateClipGeometryForFastPinch()
+    {
+        const int clipHeight = juce::jmax(1, (int)m_zoom.getTrackHeightPx() - 2);
+        const double pps = m_zoom.getPixelsPerSecond();
+        const int masterOffset = m_engineTrackManager != nullptr
+            && m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+
+        // Keep every waveform component physically aligned to its audio
+        // and continue showing the REAL waveforms. Reposition only bounds;
+        // never call updateClipData(), getCachedAudioSnapshot(), or refresh().
+        for (auto& owned : m_clipRenderers)
+        {
+            if (owned == nullptr) continue;
+            const auto* clip = owned->getClip(); // existing stable snapshot
+            if (clip == nullptr) continue;
+
+            const int x = timeToScreenX(clip->startTime);
+            const int width = juce::jmax(4, juce::roundToInt(
+                juce::jmin(2147480000.0,
+                    juce::jmax(0.0, clip->visualLength() * pps))));
+            int y = getLaneTopForIndex(clip->trackIndex);
+            int height = clipHeight;
+            if (m_engineTrackManager != nullptr && clip->trackIndex >= masterOffset)
+                if (auto* track = m_engineTrackManager->getTrack(clip->trackIndex - masterOffset))
+                    if (isTrackHiddenByCollapsedFolder(track))
+                    {
+                        y = -100000;
+                        height = 1;
+                    }
+            const juce::Rectangle<int> bounds(x, y, width, height);
+            if (owned->getBounds() != bounds)
+                owned->setBounds(bounds);
+            const bool visible = shouldShowClipRenderer(*owned);
+            if (owned->isVisible() != visible)
+                owned->setVisible(visible);
+        }
     }
 
     void ArrangementViewCore::updatePinnedViewportControls()
@@ -4573,7 +4646,8 @@ namespace ArrangementEditor
             // visible/overscanned region and only when the current LOD needs it.
             // Tiny or non-audio clips therefore never start a cache worker just
             // because their renderer exists.
-            if (shouldBeVisible && renderer->shouldRenderWaveform()
+            if (!ClipRenderCore::s_lightweightPaint.load(std::memory_order_relaxed)
+                && shouldBeVisible && renderer->shouldRenderWaveform()
                 && renderer->getClip() != nullptr
                 && !renderer->getClip()->sourcePath.empty()
                 && renderer->needsWaveformUpdate())
