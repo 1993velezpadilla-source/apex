@@ -951,6 +951,8 @@ namespace ArrangementEditor
             && dirty.getX() >= m_waveformRasterX
             && dirty.getRight() <= m_waveformRasterX + m_waveformRaster.getWidth())
         {
+            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
             g.drawImageAt(m_waveformRaster, m_waveformRasterX, kNameH);
             return;
         }
@@ -968,6 +970,8 @@ namespace ArrangementEditor
                 && left <= (double)dirty.getX()
                 && left + width >= (double)dirty.getRight())
             {
+                if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                    TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
                 g.drawImage(m_waveformRaster,
                     (float)left, (float)kNameH, (float)width,
                     (float)(clipH - kNameH),
