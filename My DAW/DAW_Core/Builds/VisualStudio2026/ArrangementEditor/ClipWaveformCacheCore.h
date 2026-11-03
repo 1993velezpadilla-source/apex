@@ -87,11 +87,18 @@ namespace ArrangementEditor
 
         // Get cached peaks (call from UI thread)
         // THREAD-SAFE: Must be called with peaksLock_ held
-        const WaveformPeakData& getPeaks() const { return m_peaks; }
+        const WaveformPeakData& getPeaks() const { return *m_peaks; }
+        // Immutable shared snapshot lets the mobile raster worker read peaks
+        // without holding a lock during pixel projection or drawing.
+        std::shared_ptr<const WaveformPeakData> snapshotPeaks() const
+        {
+            juce::CriticalSection::ScopedLockType lock(peaksLock_);
+            return m_peaks;
+        }
         bool isReady() const
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            return m_peaks.valid;
+            return m_peaks->valid;
         }
 
         // Lock for thread-safe access to m_peaks during UI paint and background thread completion
@@ -106,7 +113,7 @@ namespace ArrangementEditor
         std::string      m_sourcePath;
         int              m_targetWidth = 0;
         int64_t          m_visibleSamplesHint = 0;
-        WaveformPeakData m_peaks;
+        std::shared_ptr<const WaveformPeakData> m_peaks = std::make_shared<WaveformPeakData>();
         DAW::AudioFileManager::CachedAudioHandle cachedOverviewSource_;
         bool             m_requestPending = false;
 
