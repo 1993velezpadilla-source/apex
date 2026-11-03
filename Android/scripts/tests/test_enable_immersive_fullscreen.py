@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False):
+                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False, split_launcher_filters=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -46,6 +46,12 @@ class ImmersiveManifestTests(unittest.TestCase):
                 f"{{{ANDROID_NS}}}name": "android.intent.action.MAIN"})
             ET.SubElement(filt, "category", {
                 f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
+            if split_launcher_filters:
+                # MAIN and LAUNCHER in different filters are not a launcher.
+                filt.remove(filt.find("category"))
+                other_filter = ET.SubElement(activity, "intent-filter")
+                ET.SubElement(other_filter, "category", {
+                    f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             if duplicate_launcher:
                 other = ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.OtherLauncher"})
@@ -128,6 +134,14 @@ class ImmersiveManifestTests(unittest.TestCase):
                 run = self.run_patch(bundle, duplicate_launcher=True)
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn("Expected exactly one launcher Activity, found 2", run.stderr)
+
+    def test_split_main_and_launcher_filters_are_rejected(self):
+        # Android intent-filter matching requires action and category together.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, split_launcher_filters=True)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn("Expected exactly one launcher Activity, found 0", run.stderr)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
