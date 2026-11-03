@@ -2577,6 +2577,30 @@ namespace ArrangementEditor
             // so the playback engine reflects the new length/fade/trim immediately.
             if (auto* c = m_clipState.findClip(clipUuid))
             {
+                // Gain-only pointer moves must not do a full upsert, audio
+                // snapshot fetch, fade scan or transport/clip geometry sync.
+                // Adopt the live gain for Save/Reload, update playback gain,
+                // and leave the clip's original min/max peaks in memory.
+                if (auto* liveRenderer = findClipRendererFor(clipUuid);
+                    liveRenderer != nullptr && liveRenderer->isGainDragging())
+                {
+                    c->gain = liveRenderer->getClip()->gain;
+                    c->bumpWaveformVisualVersion();
+                    if (m_engineClipManager != nullptr)
+                    {
+                        const auto mapped = m_uuidToEngineId.find(clipUuid);
+                        if (mapped != m_uuidToEngineId.end())
+                            if (auto* engineClip = dynamic_cast<DAW::AudioClip*>(
+                                    m_engineClipManager->getClip(mapped->second)))
+                            {
+                                juce::ScopedValueSetter<bool> syncGuard(
+                                    m_syncingArrangementToEngine, true);
+                                engineClip->setGain(c->gain);
+                            }
+                    }
+                    return; // ClipRenderCore already invalidated only its raster.
+                }
+
                 // The renderer edits its OWN ArrangementClipModel copy (m_clipData)
                 // during a fade/trim drag. Adopt that edited copy into the
                 // authoritative state model BEFORE syncing. Without this, the stale
@@ -3002,7 +3026,8 @@ namespace ArrangementEditor
                     old.fadeInLength != now.fadeInLength ||
                     old.fadeOutLength != now.fadeOutLength ||
                     old.fadeInCurve != now.fadeInCurve ||
-                    old.fadeOutCurve != now.fadeOutCurve;
+                    old.fadeOutCurve != now.fadeOutCurve ||
+                    old.gain != now.gain;
             }
             if (!anyChanged) return;
 
