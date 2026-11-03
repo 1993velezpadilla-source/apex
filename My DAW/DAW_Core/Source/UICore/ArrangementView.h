@@ -103,6 +103,7 @@ public:
         : trackManager_(trackManager), clipManager_(clipManager), state_(state),
           markers_(markers), transport_(transport), audioFiles_(audioFiles), automation_(automation)
     {
+        setOpaque(true); // paint() covers the complete canvas background.
         core_ = std::make_unique<ArrangementEditor::ArrangementViewCore>();
         core_->setAudioEngineBridge(&clipManager_, audioFiles_, &trackManager_, 44100.0,
                                     clipRegionPlugins, pluginFormatManager);
@@ -111,6 +112,17 @@ public:
         {
             const auto samples = (SamplePosition)std::llround(timeSeconds * juce::jmax(1.0, core_->m_engineSampleRate));
             transport_.setPosition(samples);
+        };
+        core_->onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            const auto sampleRate = juce::jmax(1.0, core_->m_engineSampleRate);
+            const auto begin = (SamplePosition)std::llround(beginSeconds * sampleRate);
+            const auto end = (SamplePosition)std::llround(endSeconds * sampleRate);
+            if (end > begin)
+            {
+                transport_.setLoopRange(begin, end);
+                transport_.setLooping(true);
+            }
         };
         core_->onEngineClipSelected = [this](Clip& clip)
         {
@@ -175,7 +187,17 @@ public:
         // in sync with ArrangementViewCore track height at all times.
         core_->getZoom().onZoomChanged = [this]()
         {
-            defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
+            const int nextLaneHeight = (int)core_->getZoom().getTrackHeightPx();
+            const bool laneHeightChanged = nextLaneHeight != defaultLaneHeight_;
+            defaultLaneHeight_ = nextLaneHeight;
+            if (core_->isFastTouchPinchResize() && inlinePlaylistPanel_ == nullptr
+                && onPhoneZoomChanged && onPhoneZoomChanged(laneHeightChanged))
+            {
+                // The host applies both axes once, using cached extent and
+                // presentation geometry. No engine clip or playlist scan.
+                repaint();
+                return;
+            }
             if (core_ != nullptr)
                 core_->resized();
             // Dynamic take rows must be re-laid out on vertical zoom too.
@@ -212,6 +234,15 @@ trackManager_.addListener(this);
         // Timer is for playhead repaint only — clip mirroring is event-driven
         // via clipAdded/clipRemoved to avoid the repaint storm.
         startTimerHz(60);
+    }
+
+    void configurePhoneToolbar(bool phone, std::function<void()> onSends)
+    {
+        if (core_ != nullptr)
+        {
+            core_->getToolbar().setPhonePresentation(phone);
+            core_->getToolbar().setPhoneSendsAction(std::move(onSends));
+        }
     }
 
     void setMetronomeBindings(std::function<bool()> isEnabled, std::function<void()> toggle)
@@ -281,6 +312,7 @@ trackManager_.addListener(this);
             core_->onEngineClipIsVocalTuneBypassed = nullptr;
             core_->onEngineMidiClipDoubleClicked = nullptr;
             core_->onPlayheadMoved = nullptr;
+            core_->onLoopRegionChanged = nullptr;
         }
     }
 
@@ -832,6 +864,8 @@ trackManager_.addListener(this);
     std::function<void(int,int)> onLaneHeightChanged;
     std::function<void(int)> onVerticalScrollChanged;
     std::function<void()> onLaneLayoutChanged;
+    // Returns true when the phone host handled the complete zoom layout.
+    std::function<bool(bool laneHeightChanged)> onPhoneZoomChanged;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;

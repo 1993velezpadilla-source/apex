@@ -53,20 +53,26 @@ namespace ArrangementEditor
     void ClipWaveformCacheCore::requestPeaks(const std::string& sourcePath, int targetWidth,
                                              int64_t visibleSamplesHint)
     {
+        // Keeping the same source while changing zoom must not evict the
+        // engine overview identity. Otherwise the next refresh needlessly
+        // clones thousands of min/max peaks AND rebuilds the range pyramid.
+        // A genuinely new file must evict the old overview immediately.
+        if (m_sourcePath != sourcePath)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             cachedOverviewSource_.reset();
         }
-        if (m_sourcePath == sourcePath && m_peaks.valid)
+        const auto currentPeaks = snapshotPeaks();
+        if (m_sourcePath == sourcePath && currentPeaks->valid)
         {
             m_targetWidth = targetWidth;
             m_visibleSamplesHint = visibleSamplesHint;
 
             // Re-generate only when the cache is meaningfully coarser than
             // this zoom level needs (1.5x hysteresis prevents regen thrash).
-            const int required = computeSamplesPerPeak(m_peaks.totalSamples,
+            const int required = computeSamplesPerPeak(currentPeaks->totalSamples,
                                                        targetWidth, visibleSamplesHint);
-            if ((juce::int64)m_peaks.samplesPerPeak <= (juce::int64)required * 3 / 2)
+            if ((juce::int64)currentPeaks->samplesPerPeak <= (juce::int64)required * 3 / 2)
                 return; // cached resolution is fine for this zoom
 
             m_requestPending = true;
@@ -76,9 +82,14 @@ namespace ArrangementEditor
             return;
         }
 
-        // New source: invalidate immediately so stale audio never paints.
+        // New source: publish an invalid immutable generation under the
+        // SAME lock as readers; never race the swap-chain paint thread.
         if (m_sourcePath != sourcePath)
-            m_peaks.valid = false;
+        {
+            auto empty = std::make_shared<WaveformPeakData>();
+            juce::CriticalSection::ScopedLockType lock(peaksLock_);
+            m_peaks = std::move(empty);
+        }
 
         m_sourcePath = sourcePath;
         m_targetWidth = targetWidth;
@@ -97,7 +108,7 @@ namespace ArrangementEditor
 
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            if (cachedOverviewSource_ == cachedAudio && m_peaks.valid)
+            if (cachedOverviewSource_ == cachedAudio && m_peaks->valid)
                 return true;
         }
 
@@ -117,10 +128,14 @@ namespace ArrangementEditor
         fresh.sourceSampleRate = cachedAudio->sampleRate > 0.0 ? cachedAudio->sampleRate : 44100.0;
         fresh.samplesPerPeak = juce::jmax(1, (int) std::ceil(
             (double) totalSamples / (double) rawMin.size()));
+        // Build a compact EXACT min/max pyramid once from the immutable
+        // source overview, not once per pixel during a mobile scroll.
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         fresh.valid = true;
 
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         juce::CriticalSection::ScopedLockType lock(peaksLock_);
-        m_peaks = std::move(fresh);
+        m_peaks = std::move(published);
         cachedOverviewSource_ = cachedAudio;
         return true;
     }
@@ -183,7 +198,7 @@ namespace ArrangementEditor
         if (!file.existsAsFile())
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -194,7 +209,7 @@ namespace ArrangementEditor
         if (!reader)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -202,7 +217,7 @@ namespace ArrangementEditor
         if (totalSamples <= 0 || m_targetWidth <= 0)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks = std::make_shared<WaveformPeakData>();
             return;
         }
 
@@ -264,13 +279,19 @@ namespace ArrangementEditor
         if (threadShouldExit())
             return;
 
+        // Background work: prepare the exact zoom-out min/max index before
+        // publishing the new peak generation to the paint thread.
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
+        if (threadShouldExit())
+            return;
+
         // Thread-safe peak update: lock while swapping in the new data
         // This ensures paint() never accesses partially-written peak data
+        fresh.valid = true;
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
-            fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::move(published);
         }
     }
 
@@ -314,11 +335,18 @@ namespace ArrangementEditor
             fresh.maxPeaks[i] = maxVal;
         }
 
+        if (threadShouldExit())
+            return;
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
+        if (threadShouldExit())
+            return;
+
         // Thread-safe update: lock while swapping in the new data
+        fresh.valid = true;
+        auto published = std::make_shared<WaveformPeakData>(std::move(fresh));
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::move(published);
         }
     }
 

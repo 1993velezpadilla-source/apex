@@ -18,6 +18,8 @@
 
 namespace ArrangementEditor
 {
+    struct WaveformRasterAsyncState;
+
     class ClipRenderCore : public juce::Component
     {
     public:
@@ -29,6 +31,28 @@ namespace ArrangementEditor
 
         void setModel(ArrangementClipModel& model);
         void refresh();
+        // Cache only a bounded, visible waveform image tile, NOT the whole
+        // clip component. The clip chrome and editing overlays remain live.
+        void invalidateWaveformRaster()
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+            discardRasterLocked();
+        }
+        void restoreWaveformAfterNavigation()
+        {
+            // Only a GEOMETRY-changing pinch needs to drop a scaled image.
+            invalidateWaveformRaster();
+            if (m_waveformNeedsUpdate && isShowing()) refresh();
+            else repaint();
+        }
+        void restoreWaveformAfterPan()
+        {
+            // A pure scroll changes neither source peaks nor their geometry.
+            // Keep both precomputed tiles; the old method discarded them at
+            // every finger lift, causing a full redraw at the worst moment.
+            if (m_waveformNeedsUpdate && isShowing()) refresh();
+            else repaint();
+        }
         void setCachedAudioHandle(DAW::AudioFileManager::CachedAudioHandle cachedAudio,
                                   bool allowFileFallback);
 
@@ -52,6 +76,9 @@ namespace ArrangementEditor
         void setSelected(bool selected);
         void setSoloActive(bool active) { if (m_soloActive != active) { m_soloActive = active; repaint(); } }
         bool isSelected() const { return m_selected; }
+        // Gain dragging changes amplitude only: keep a hot waveform raster
+        // and never rebuild clip/peak ownership for each pointer movement.
+        bool isGainDragging() const { return m_gainDragActive; }
         void setAutomationActive(bool active) { if (m_automationActive != active) { m_automationActive = active; repaint(); } }
 
         ArrangementClipModel* getClip() { return &m_clipData; }
@@ -78,9 +105,28 @@ namespace ArrangementEditor
                     || m_clipData.sourceEndSample != data.sourceEndSample
                     || m_clipData.processedWaveformVersion != data.processedWaveformVersion;
 
+                // Upsert also runs on non-waveform changes (clip name, track
+                // position, header state, etc). Throwing away the raster on
+                // EVERY upsert made the next pan repaint rescan peaks despite
+                // identical audio. Keep pixels unless their inputs change.
+                const bool waveformVisualChanged = waveformSourceChanged
+                    || m_clipData.gain != data.gain
+                    || m_clipData.fadeInLength != data.fadeInLength
+                    || m_clipData.fadeOutLength != data.fadeOutLength
+                    || m_clipData.fadeInCurve != data.fadeInCurve
+                    || m_clipData.fadeOutCurve != data.fadeOutCurve
+                    || m_clipData.reversed != data.reversed
+                    || m_clipData.muted != data.muted
+                    || m_clipData.trackColour != data.trackColour
+                    || m_clipData.timePitch.mode != data.timePitch.mode
+                    || m_clipData.timePitch.stretchRatio != data.timePitch.stretchRatio
+                    || m_clipData.waveformVisualVersion != data.waveformVisualVersion;
+
                 m_clipData = data;
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
+                if (waveformVisualChanged)
+                    discardRasterLocked();
                 if (waveformSourceChanged)
                     m_waveformNeedsUpdate = true;
             }
@@ -125,6 +171,10 @@ namespace ArrangementEditor
     // after its background + header, so each frame stays cheap and the gesture
     // is smooth. Full detail (waveform, badges, fades) returns on release.
     static inline std::atomic<bool> s_lightweightPaint { false };
+    // Unlike s_lightweightPaint (set for BOTH scrolling and pinch), this
+    // guard means geometry itself is changing. Continue prefetching during
+    // one-finger scroll; pause speculative raster only during real pinch.
+    static inline std::atomic<bool> s_pinchZoomActive { false };
 
         // Interactive handle callbacks — wired by ArrangementViewCore
         // onEditBegin: called when user starts dragging a fade/resize handle.
@@ -182,6 +232,9 @@ namespace ArrangementEditor
         void setCPUDraftForced(bool draft) { m_cpuDraft     = draft;    repaint(); }
 
     private:
+        // Internal tile job is the only non-component entrypoint permitted to
+        // deliver a completed image; lifecycle guards live in the mailbox.
+        friend struct WaveformRasterTileJob;
         ArrangementClipModel  m_clipData;              // owned copy — immune to vector reallocation
         ArrangementClipModel* m_model = &m_clipData;   // always points to m_clipData
         juce::Uuid             m_clipId;                // stable copy of clip ID
@@ -195,6 +248,20 @@ namespace ArrangementEditor
         mutable std::recursive_mutex m_dataMutex;
 
         std::unique_ptr<ClipWaveformCacheCore> m_waveformCache;
+        // One short viewport tile + one speculative tile (both bounded).
+        // The worker never accesses a live Component: only an immutable
+        // model/peak snapshot and a lifetime-guarded mailbox.
+        std::shared_ptr<WaveformRasterAsyncState> m_waveformAsyncState;
+        juce::Image m_waveformRaster;
+        int m_waveformRasterX = 0;
+        int m_waveformRasterClipW = 0;
+        int m_waveformRasterClipH = 0;
+        juce::Image m_nextWaveformRaster;
+        int m_nextWaveformRasterX = 0;
+        int m_nextWaveformRasterClipW = 0;
+        int m_nextWaveformRasterClipH = 0;
+        bool m_waveformRasterPending = false;
+        std::uint64_t m_waveformRasterSerial = 0;
         std::unique_ptr<PianoRollButtonCore>   m_pianoRollBtn;
 
         // Hit-zones for interactive handles inside the clip.
@@ -270,6 +337,15 @@ namespace ArrangementEditor
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);
+        void drawWaveformUncached(juce::Graphics& g);
+        // Called with m_dataMutex already held.
+        void discardRasterLocked();
+        void requestWaveformRasterAsync(int tileX, int tileWidth);
+        // Called only from JUCE's message thread when an off-thread software
+        // raster has completed (never directly from the worker).
+        void acceptWaveformRasterAsync(juce::Image image,
+            int tileX, int clipW, int clipH,
+            std::uint64_t generation, std::uint64_t serial);
         void drawFades(juce::Graphics& g);
         void drawGainLine(juce::Graphics& g);
         void drawMuteOverlay(juce::Graphics& g);

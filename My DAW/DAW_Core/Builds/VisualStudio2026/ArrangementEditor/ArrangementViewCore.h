@@ -236,6 +236,7 @@ namespace ArrangementEditor
         ArrangementClipStateCore& getClipState() { return m_clipState; }
         ArrangementSelectionCore& getSelection() { return m_selection; }
         ArrangementZoomCore& getZoom() { return m_zoom; }
+        bool isFastTouchPinchResize() const noexcept { return m_fastTouchPinchResize; }
         // One native expanded playlist owner, with virtual take bands that
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
@@ -419,6 +420,7 @@ namespace ArrangementEditor
         std::function<void(DAW::MidiClip&)> onEngineMidiClipDoubleClicked;
         std::function<void()> onOpenPianoRollRequested;
         std::function<void(double)> onPlayheadMoved;
+    std::function<void(double, double)> onLoopRegionChanged;
 
         // Test-only control-plane seam. Returning true requests a failure at
         // the named Split transaction stage; production leaves it unset.
@@ -520,6 +522,9 @@ namespace ArrangementEditor
         double m_lastTouchPanTimeMs = 0.0;
         double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
         double m_touchPanVelocityY = 0.0;
+        // Bounds-only pinch path; never re-fetch all audio/clip data per frame.
+        bool m_fastTouchPinchResize = false;
+        void updateClipGeometryForFastPinch();
         bool applyTouchPanInertia();
         void endTouchPanGesture();
 
@@ -812,7 +817,7 @@ namespace ArrangementEditor
                 if (m_owner.m_deferredRebuildRequested)
                 {
                     m_owner.m_deferredRebuildRequested = false;
-                    m_owner.rebuildClipRenderersInternal();
+                    m_owner.rebuildClipRenderers();
                 }
             }
         private:

@@ -6,11 +6,15 @@ on:
     branches:
       - "feature/android-port-*"
       - "feature/mobile-portrait-*"
+      - "integrate/mobile-ui-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
+      - "Android/scripts/pin_full_exporter_ndk.py"
+      - "Android/scripts/tests/test_pin_full_exporter_ndk.py"
       - ".github/workflows/apex-android-full-shell-audit.yml"
       - "My DAW/DAW_Core/Source/**"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
 
 concurrency:
@@ -102,6 +106,7 @@ jobs:
         shell: bash
         run: |
           python3 -m unittest discover -s Android/scripts/tests -p 'test_enable_immersive_fullscreen.py' -v
+          python3 -m unittest discover -s Android/scripts/tests -p 'test_mobile_preview_package.py' -v
           python3 Android/scripts/generate_full_exporter.py \
             2>&1 | tee "$RUNNER_TEMP/apex-android-full-source-audit.txt"
           PROJUCER=$(find /tmp/apex-juce-host -type f -name Projucer -perm /111 | head -n 1)
@@ -109,6 +114,9 @@ jobs:
           xvfb-run -a "$PROJUCER" --resave \
             "My DAW/DAW_Core/DAW_Core_AndroidFull.jucer"
           test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
+          python3 -m unittest discover -s Android/scripts/tests -p 'test_pin_full_exporter_ndk.py' -v
+          python3 Android/scripts/pin_full_exporter_ndk.py
+          grep -q 'ndkVersion "26.3.11579264"' "My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle"
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
@@ -117,7 +125,7 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then
+          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* || "$GITHUB_REF_NAME" == integrate/mobile-ui-* ]]; then
             grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
           else

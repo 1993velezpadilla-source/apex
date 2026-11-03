@@ -6,6 +6,8 @@
 #include <functional>
 #include <cmath>
 #include <cstdint>
+#include <algorithm>
+#include <limits>
 
 namespace ArrangementEditor
 {
@@ -46,6 +48,47 @@ namespace ArrangementEditor
             if (pixelsPerBar >= kMinMajorSpacing / 8.0) return 8;
             if (pixelsPerBar >= kMinMajorSpacing / 16.0) return 16;
             return 32;
+        }
+
+        // Labels need more space than grid lines. In particular, do not
+        // lay out a text label for every bar skipped by the line LOD.
+        static int labelStep(double pixelsPerBar) noexcept
+        {
+            if (!(pixelsPerBar > 0.0) || !std::isfinite(pixelsPerBar))
+                return 1;
+            int step = 1;
+            while (step < (1 << 20) && pixelsPerBar * step < 48.0)
+                step *= 2;
+            return step;
+        }
+
+        struct BarRange
+        {
+            int64_t first = 0;
+            int64_t last = -1;
+            int step = 1;
+        };
+
+        // Pixel bounds must come from the visible Graphics clip, never the
+        // complete song component width. Include the preceding major bar
+        // so its beats/partly clipped label can still enter the dirty strip.
+        static BarRange visibleBars(double left, double right,
+                                    double pixelsPerBar, int step) noexcept
+        {
+            if (!std::isfinite(left) || !std::isfinite(right)
+                || !(right > left) || !(right > 0.0)
+                || !(pixelsPerBar > 0.0) || !std::isfinite(pixelsPerBar))
+                return {};
+            const auto maxBar = std::numeric_limits<int64_t>::max() / 4;
+            const auto bound = [maxBar](double bar) -> int64_t
+            {
+                return static_cast<int64_t>(std::max(0.0,
+                    std::min(static_cast<double>(maxBar), bar)));
+            };
+            const int stride = std::max(1, step);
+            const auto first = bound(std::floor(std::max(0.0, left) / pixelsPerBar));
+            return { first - first % stride,
+                     bound(std::ceil(right / pixelsPerBar)), stride };
         }
     };
 
@@ -160,6 +203,21 @@ namespace ArrangementEditor
                 return;
             m_trackHeightPx = clamped;
             if (onZoomChanged) onZoomChanged();
+        }
+
+        // A diagonal pinch is one presentation transaction. Publish both
+        // axes before notifying: no intermediate horizontal-only layout.
+        bool setZoom(double pixelsPerSecond, double trackHeight)
+        {
+            const double nextPps = std::isfinite(pixelsPerSecond)
+                ? juce::jlimit(2.0, 4000.0, pixelsPerSecond) : m_pixelsPerSecond;
+            const double nextHeight = clampTrackHeightPx(trackHeight, m_trackHeightPx);
+            if (nextPps == m_pixelsPerSecond && nextHeight == m_trackHeightPx)
+                return false;
+            m_pixelsPerSecond = nextPps;
+            m_trackHeightPx = nextHeight;
+            if (onZoomChanged) onZoomChanged();
+            return true;
         }
 
         void zoomVerticalIn()

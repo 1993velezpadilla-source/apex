@@ -4,6 +4,7 @@
 // in the Builds directory, reached via the same include path used by the
 // ArrangementEditor sources.
 #include "../../../Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h"
+#include "../../../Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.h"
 #include "../../../Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.h"
 
 /** GridLodPolicy unit tests (2026-07-30).
@@ -26,6 +27,33 @@ public:
     void runTest() override
     {
         using ArrangementEditor::GridLodPolicy;
+
+        beginTest("unchanged timer tempo does not invalidate the native ruler 60 times per second");
+        {
+            struct CountInvalidations final : juce::CachedComponentImage
+            {
+                explicit CountInvalidations(int& count) : count_(count) {}
+                void paint(juce::Graphics&) override {}
+                bool invalidateAll() override { ++count_; return true; }
+                bool invalidate(const juce::Rectangle<int>&) override { ++count_; return true; }
+                void releaseResources() override {}
+                int& count_;
+            };
+            int invalidations = 0;
+            ArrangementEditor::ArrangementZoomCore zoom;
+            ArrangementEditor::ArrangementRulerCore ruler(zoom);
+            ruler.setVisible(true);
+            ruler.setCachedComponentImage(new CountInvalidations(invalidations));
+            invalidations = 0;
+            for (int i = 0; i < 600; ++i)
+                ruler.setTempo(120.0);
+            expectEquals(invalidations, 0);
+            ruler.setTempo(121.0);
+            expectEquals(invalidations, 1);
+            for (int i = 0; i < 600; ++i)
+                ruler.setTempo(121.0);
+            expectEquals(invalidations, 1);
+        }
 
         // ===============================================================
         // EXTREME ZOOM-OUT: 5 px/sec, 126 BPM (as required)

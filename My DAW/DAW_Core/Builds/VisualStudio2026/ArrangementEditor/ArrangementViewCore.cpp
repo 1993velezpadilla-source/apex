@@ -3,6 +3,7 @@
 // ===========================================================================
 #include "ArrangementViewCore.h"
 #include "TouchNavigationMath.h"
+#include "../../../Source/DiagnosticsCore/AndroidUiTrace.h"
 #include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
@@ -177,6 +178,9 @@ namespace ArrangementEditor
         , m_pianoRollBtn(PianoRollButtonCore::Style::ToolbarButton)
         , m_ghostOverlay(*this)
     {
+        // paint() fills every pixel. Stop each child/scroll invalidation
+        // from also painting the wrapper, floating shell and main window.
+        setOpaque(true);
         // Initialize timers for deferred operations
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
@@ -220,6 +224,10 @@ namespace ArrangementEditor
         };
 
         m_toolbar.setSelectedSnapModeIndex(getSnapModeIndex());
+        m_ruler.onLoopRegionChanged = [this](double beginSeconds, double endSeconds)
+        {
+            if (onLoopRegionChanged) onLoopRegionChanged(beginSeconds, endSeconds);
+        };
         m_toolbar.onSnapModeSelected = [this](int index)
         {
             switch (index)
@@ -343,9 +351,13 @@ namespace ArrangementEditor
             repaint();
         };
 
-        // Wire zoom callbacks
+        // A live pinch changes zoom frequently. Never perform a full clip
+        // model/audio snapshot rebuild in its 60 Hz callback.
         m_zoom.onZoomChanged = [this]() {
-            rebuildClipRenderers();
+            if (m_fastTouchPinchResize)
+                updateClipGeometryForFastPinch();
+            else
+                rebuildClipRenderers();
             repaint();
         };
 
@@ -765,17 +777,9 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::paint(juce::Graphics& g)
     {
-        // Keep the ruler in sync with the real viewport position. The scroll
-        // callback path is not wired, so the ruler's scroll offset went stale
-        // and its bar numbers drifted away from the clip positions while
-        // scrolling.
-        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-        {
-            const int viewX = viewport->getViewPositionX();
-            const int viewY = viewport->getViewPositionY();
-            if (viewX != m_viewportScrollX || viewY != m_viewportScrollY)
-                setViewportScrollOffset(viewX, viewY);
-        }
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.paint");
+        // Viewport::visibleAreaChanged synchronizes controls before paint.
+        // Never move/reshow child components or schedule another layout here.
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
 
         if (metricsActive)
@@ -804,7 +808,7 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
         const int trackCount = getArrangementTrackCount();
         const int contentTop = arrangementContentTop();
-        const auto visibleBounds = getViewportVisibleBounds();
+        const auto visibleBounds = getViewportVisibleBounds().getIntersection(g.getClipBounds());
         // The unfolded take bands consume real vertical content height. Do
         // not cull the physical tracks below using uniform-height division.
         const int firstVisibleTrack = juce::jlimit(0, trackCount,
@@ -850,31 +854,26 @@ namespace ArrangementEditor
             // scrolled content, so it must NOT subtract the scroll offset.
             // Subtracting it shifted every bar line away from the clips and
             // the ruler as soon as the view scrolled.
-            auto timeToLaneX = [this](double t) { return (int) m_zoom.timeToX(t); };
-            const double viewStart = m_zoom.xToTime((double) m_viewportScrollX);
-            const double viewEnd   = m_zoom.xToTime((double) (m_viewportScrollX + getWidth()));
+            auto timeToLaneX = [this](double t) { return m_zoom.timeToX(t); };
             const int    gridVisibleX0 = (int) visibleBounds.getX();
             const int    gridVisibleX1 = (int) visibleBounds.getRight();
 
             const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
             const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-            const int    barStart  = (int) (viewStart / barDuration);
-            const int    barEnd    = (int) (viewEnd   / barDuration) + 1;
             const int    barStep   = GridLodPolicy::barStep(pxPerBar);
             const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
+            const auto bars = GridLodPolicy::visibleBars(
+                gridVisibleX0, gridBottom > gridTop ? gridVisibleX1 : gridVisibleX0,
+                pxPerBar, barStep);
 
-            for (int bar = barStart; bar <= barEnd; ++bar)
+            for (int64_t bar = bars.first; bar <= bars.last; bar += bars.step)
             {
-                // Skip bars at extreme zoom-out to reduce GPU draw calls
-                if (barStep > 1 && (bar % barStep) != 0)
-                    continue;
-
                 const double barTime = bar * barDuration;
-                const int x = timeToLaneX(barTime);
+                const double x = timeToLaneX(barTime);
                 if (x >= gridVisibleX0 && x <= gridVisibleX1)
                 {
                     g.setColour(fromU32(Col::gridBar).withAlpha(0.55f));
-                    g.drawVerticalLine(x, gridTop, gridBottom);
+                    g.drawVerticalLine((int)x, gridTop, gridBottom);
                     if (metricsActive)
                         TimelinePaintMetrics::gridBarsGenerated.fetch_add(1);
                 }
@@ -886,10 +885,10 @@ namespace ArrangementEditor
                 g.setColour(fromU32(Col::gridBeat).withAlpha(0.22f));
                 for (int beat = 1; beat < 4; ++beat)
                 {
-                    const int beatX = timeToLaneX(barTime + beat * beatDuration);
+                    const double beatX = timeToLaneX(barTime + beat * beatDuration);
                     if (beatX >= gridVisibleX0 && beatX <= gridVisibleX1)
                     {
-                        g.drawVerticalLine(beatX, gridTop, gridBottom);
+                        g.drawVerticalLine((int)beatX, gridTop, gridBottom);
                         if (metricsActive)
                             TimelinePaintMetrics::gridBeatsGenerated.fetch_add(1);
                     }
@@ -1065,6 +1064,7 @@ namespace ArrangementEditor
 
     bool ArrangementViewCore::applyTouchPanInertia()
     {
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.gesture");
         auto* viewport = findParentComponentOfClass<juce::Viewport>();
         if (viewport == nullptr)
             return false;
@@ -1176,82 +1176,81 @@ namespace ArrangementEditor
                 return true;
             }
 
-            const auto delta = centreScreen - m_lastTwoFingerPos;
             const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
             const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
-            const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-            const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
             const int beforeX = viewport->getViewPositionX();
             const int beforeY = viewport->getViewPositionY();
-            const int nextX = TouchNavigationMath::panPosition(beforeX, delta.x, maxX);
-            const int nextY = TouchNavigationMath::panPosition(beforeY, delta.y, maxY);
-            // At an edge, a saturated pinch may change finger separation but
-            // neither viewport position nor zoom. Avoid redundant viewport
-            // layout and low-detail waveform paint in that case.
-            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            const double oldPps = m_zoom.getPixelsPerSecond();
+            const double oldH = m_zoom.getTrackHeightPx();
+            const double newPps = zoomingX
+                ? TouchNavigationMath::pinchZoomTarget(
+                    oldPps, TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX),
+                    2.0, 4000.0) : oldPps;
+            const double newH = zoomingY
+                ? TouchNavigationMath::pinchZoomTarget(
+                    oldH, TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY),
+                    24.0, 180.0) : oldH;
+            // Retain the content under the PREVIOUS midpoint and move it to
+            // the current midpoint. This combines translation and both zoom
+            // axes without the old pan -> X-layout -> Y-layout sequence.
+            const auto oldFocus = getLocalPoint(nullptr, m_lastTwoFingerPos.toInt());
+            const auto newFocus = viewport->getLocalPoint(nullptr, centreScreen.toInt());
+            const double contentTop = (double) arrangementContentTop();
+            if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps)
+                || TouchNavigationMath::pinchZoomChanges(oldH, newH))
+            {
+                ClipRenderCore::s_pinchZoomActive.store(true, std::memory_order_relaxed);
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                const juce::ScopedValueSetter<bool> pinchGeometryOnly(m_fastTouchPinchResize, true);
+                m_zoom.setZoom(newPps, newH);
+            }
+            const int nextX = TouchNavigationMath::zoomPosition(
+                oldFocus.x, newFocus.x, newPps / oldPps,
+                juce::jmax(0, getWidth() - viewport->getViewWidth()), beforeX);
+            const int nextY = TouchNavigationMath::zoomPosition(
+                oldFocus.y - contentTop, newFocus.y - contentTop, newH / oldH,
+                juce::jmax(0, getHeight() - viewport->getViewHeight()), beforeY);
+            if (TouchNavigationMath::touchPanChangesViewport(
+                    viewport->getViewPositionX(), viewport->getViewPositionY(), nextX, nextY))
             {
                 ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                 viewport->setViewPosition(nextX, nextY);
             }
-
-            // Horizontal spread = time zoom. Keep the musical time under the
-            // two-finger midpoint fixed rather than zooming toward song start.
-            // Compare to LAST APPLIED separation to catch slow pinches.
-            if (zoomingX)
-            {
-                const double oldPps = m_zoom.getPixelsPerSecond();
-                const double newPps = TouchNavigationMath::pinchZoomTarget(
-                    oldPps, TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX),
-                    2.0, 4000.0);
-                if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
-                {
-                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                    const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
-                    const double focusViewportX = focusX - viewport->getViewPositionX();
-                    m_zoom.setPixelsPerSecond(newPps);
-                    viewport->setViewPosition(
-                        TouchNavigationMath::zoomPosition(focusX, focusViewportX,
-                            newPps / juce::jmax(1.0, oldPps),
-                            juce::jmax(0, getWidth() - viewport->getViewWidth()),
-                            viewport->getViewPositionX()),
-                        viewport->getViewPositionY());
-                    repaint();
-                }
-                m_lastPinchSepX = sepX;
-            }
-
-            // Vertical spread = lane zoom; preserve the lane beneath fingers.
-            if (zoomingY)
-            {
-                const double oldH = m_zoom.getTrackHeightPx();
-                const double newH = TouchNavigationMath::pinchZoomTarget(
-                    oldH, TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY),
-                    24.0, 180.0);
-                if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
-                {
-                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                    const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
-                    const double focusViewportY = focusY - viewport->getViewPositionY();
-                    const double contentTop = (double) arrangementContentTop();
-                    m_zoom.setTrackHeightPx(newH);
-                    const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
-                    viewport->setViewPosition(viewport->getViewPositionX(),
-                        juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
-                            juce::roundToInt(newFocusY - focusViewportY)));
-                    repaint();
-                }
-                m_lastPinchSepY = sepY;
-            }
+            if (zoomingX) m_lastPinchSepX = sepX;
+            if (zoomingY) m_lastPinchSepY = sepY;
 
             m_lastTwoFingerPos = centreScreen;
             return true;
         }
 
-        // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
-        // than jumping to the obsolete single-finger pan origin.
+        // On 2 -> 1 fingers, acquire a new one-finger screen anchor.
+        // Restore exact waveform pixels after the pinch: at no point was
+        // the waveform hidden, just temporarily scaled from its cached tile.
+        const bool wasTwoFingerPinch = m_twoFingerGestureActive;
         m_twoFingerGestureActive = false;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
+        if (wasTwoFingerPinch)
+        {
+            const bool changedGeometry = ClipRenderCore::s_pinchZoomActive.exchange(
+                false, std::memory_order_relaxed);
+            const bool hadNavigationPreview = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            if (hadNavigationPreview)
+            {
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                    {
+                        if (changedGeometry)
+                            clip->restoreWaveformAfterNavigation();
+                        else
+                            clip->restoreWaveformAfterPan();
+                    }
+                if (changedGeometry)
+                    updateAutomationLayout();
+                repaint(getViewportVisibleBounds());
+            }
+        }
 
         // Fingers lifted: close the gesture HERE. mouseUp is not reliable for
         // touch (a press that started on a clip never reaches the view), and a
@@ -1459,7 +1458,13 @@ namespace ArrangementEditor
                 false, std::memory_order_relaxed);
             if (wasLightweight)
             {
-                updateAutomationLayout();
+                // Pure inertia does NOT change waveform geometry. Keep the
+                // hot raster tiles across finger release (old code threw away
+                // every image, forcing synchronous peak drawing immediately
+                // after each scroll). Layout was already updated while moving.
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterPan();
                 repaint(getViewportVisibleBounds());
             }
             return false;
@@ -1553,7 +1558,12 @@ namespace ArrangementEditor
             // otherwise the last low-detail frame can remain on screen until
             // an unrelated redraw. Pure pan does not require a clip rebuild.
             if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+            {
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterPan();
                 repaint(getViewportVisibleBounds());
+            }
         }
     }
 
@@ -1966,6 +1976,7 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::paintOverChildren(juce::Graphics& g)
     {
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.overlays");
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
         if (metricsActive)
             TimelinePaintMetrics::paintOverChildrenCount.fetch_add(1);
@@ -2083,8 +2094,52 @@ namespace ArrangementEditor
     {
         updatePinnedViewportControls();
 
+        if (m_fastTouchPinchResize)
+        {
+            updateClipGeometryForFastPinch();
+            return; // No audio ownership/selection/cache rebuild each frame.
+        }
         rebuildClipRenderers();
         updateAutomationLayout();
+    }
+
+    void ArrangementViewCore::updateClipGeometryForFastPinch()
+    {
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.clipGeometry");
+        const int clipHeight = juce::jmax(1, (int)m_zoom.getTrackHeightPx() - 2);
+        const double pps = m_zoom.getPixelsPerSecond();
+        const int masterOffset = m_engineTrackManager != nullptr
+            && m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+
+        // Keep every waveform component physically aligned to its audio
+        // and continue showing the REAL waveforms. Reposition only bounds;
+        // never call updateClipData(), getCachedAudioSnapshot(), or refresh().
+        for (auto& owned : m_clipRenderers)
+        {
+            if (owned == nullptr) continue;
+            const auto* clip = owned->getClip(); // existing stable snapshot
+            if (clip == nullptr) continue;
+
+            const int x = timeToScreenX(clip->startTime);
+            const int width = juce::jmax(4, juce::roundToInt(
+                juce::jmin(2147480000.0,
+                    juce::jmax(0.0, clip->visualLength() * pps))));
+            int y = getLaneTopForIndex(clip->trackIndex);
+            int height = clipHeight;
+            if (m_engineTrackManager != nullptr && clip->trackIndex >= masterOffset)
+                if (auto* track = m_engineTrackManager->getTrack(clip->trackIndex - masterOffset))
+                    if (isTrackHiddenByCollapsedFolder(track))
+                    {
+                        y = -100000;
+                        height = 1;
+                    }
+            const juce::Rectangle<int> bounds(x, y, width, height);
+            if (owned->getBounds() != bounds)
+                owned->setBounds(bounds);
+            const bool visible = shouldShowClipRenderer(*owned);
+            if (owned->isVisible() != visible)
+                owned->setVisible(visible);
+        }
     }
 
     void ArrangementViewCore::updatePinnedViewportControls()
@@ -2125,8 +2180,13 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+        // Moving the z-order for every scrolling pixel triggers expensive
+        // child/sibling repaint invalidations. Lift on layout changes only.
+        if (!m_inViewportScroll)
+        {
+            m_headerButtonShield->toFront(false);
+            m_pianoRollBtn.toFront(false);
+        }
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2154,6 +2214,8 @@ namespace ArrangementEditor
         if (m_viewportScrollX == scrollX && m_viewportScrollY == scrollY)
             return;
 
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.scroll");
+
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
         m_ruler.setScrollOffsetX(scrollX);
@@ -2168,31 +2230,38 @@ namespace ArrangementEditor
         updatePinnedViewportControls();
         updateClipRendererVisibility();
 
-        // Repaint only the viewport-visible content region.  JUCE coalesces
-        // this with the Viewport's exposed-area invalidation, while keeping
-        // the culling/LOD decisions above authoritative.  Unchanged clip
-        // renderers are not individually invalidated by a pure translation.
-        const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
-        if (!visibleRepaint.isEmpty())
-        {
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
-            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+        // Android Viewport::setViewPosition() already translates the viewed
+        // component and invalidates exposed pixels. The old explicit full-
+        // viewport repaint made even BLANK projects redraw the full grid,
+        // child tree and waveform surfaces on every touch scroll event.
+        // The pinned ruler/toolbar above own their changed child bounds.
+       #if ! JUCE_ANDROID
+            // Repaint only the viewport-visible content region.  JUCE coalesces
+            // this with the Viewport's exposed-area invalidation, while keeping
+            // the culling/LOD decisions above authoritative.  Unchanged clip
+            // renderers are not individually invalidated by a pure translation.
+            const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
+            if (!visibleRepaint.isEmpty())
             {
-                const auto area = static_cast<int64_t>(
-                    static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getWidth()))
-                    * static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getHeight())));
-                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollDirtyAreaPixels, area);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
+                if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                {
+                    const auto area = static_cast<int64_t>(
+                        static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getWidth()))
+                        * static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getHeight())));
+                    TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollDirtyAreaPixels, area);
+                }
+                repaint(visibleRepaint);
             }
-            repaint(visibleRepaint);
-        }
-        else
-        {
-            // Defensive fallback for an invalid/un-sized viewport.  Normal
-            // production scrolls have a non-empty intersection and therefore
-            // never take this broad invalidation path.
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
-            repaint();
-        }
+            else
+            {
+                // Defensive fallback for an invalid/un-sized viewport.  Normal
+                // production scrolls have a non-empty intersection and therefore
+                // never take this broad invalidation path.
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
+                repaint();
+            }
+       #endif
     }
 
     void ArrangementViewCore::setSnapMode(SnapMode mode)
@@ -2307,8 +2376,14 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setTempoBpm(double bpm)
     {
-        m_tempoBpm = juce::jmax(1.0, bpm);
+        if (!std::isfinite(bpm))
+            return;
+        bpm = juce::jmax(1.0, bpm);
+        if (m_tempoBpm == bpm)
+            return;
+        m_tempoBpm = bpm;
         m_ruler.setTempo(m_tempoBpm);
+        repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::rebuildClipRenderers()
@@ -2323,12 +2398,10 @@ namespace ArrangementEditor
         juce::ScopedValueSetter<bool> guard(m_rebuildInProgress, true);
         rebuildClipRenderersInternal();
 
-        // If another rebuild was requested while we were running, defer it
-        if (m_deferredRebuildRequested)
-        {
-            m_deferredRebuildRequested = false;
-            m_rebuildDeferTimer->startTimer(1);  // Defer 1ms to avoid immediate recursion
-        }
+        // Keep the pending flag for RebuildDeferTimer. Clearing it
+        // *before* the timer checked it silently dropped rebuild requests.
+        if (m_deferredRebuildRequested && m_rebuildDeferTimer != nullptr)
+            m_rebuildDeferTimer->startTimer(1);
     }
 
     void ArrangementViewCore::rebuildClipRenderersInternal()
@@ -2492,6 +2565,30 @@ namespace ArrangementEditor
             // so the playback engine reflects the new length/fade/trim immediately.
             if (auto* c = m_clipState.findClip(clipUuid))
             {
+                // Gain-only pointer moves must not do a full upsert, audio
+                // snapshot fetch, fade scan or transport/clip geometry sync.
+                // Adopt the live gain for Save/Reload, update playback gain,
+                // and leave the clip's original min/max peaks in memory.
+                if (auto* liveRenderer = findClipRendererFor(clipUuid);
+                    liveRenderer != nullptr && liveRenderer->isGainDragging())
+                {
+                    c->gain = liveRenderer->getClip()->gain;
+                    c->bumpWaveformVisualVersion();
+                    if (m_engineClipManager != nullptr)
+                    {
+                        const auto mapped = m_uuidToEngineId.find(clipUuid);
+                        if (mapped != m_uuidToEngineId.end())
+                            if (auto* engineClip = dynamic_cast<DAW::AudioClip*>(
+                                    m_engineClipManager->getClip(mapped->second)))
+                            {
+                                juce::ScopedValueSetter<bool> syncGuard(
+                                    m_syncingArrangementToEngine, true);
+                                engineClip->setGain(c->gain);
+                            }
+                    }
+                    return; // ClipRenderCore already invalidated only its raster.
+                }
+
                 // The renderer edits its OWN ArrangementClipModel copy (m_clipData)
                 // during a fade/trim drag. Adopt that edited copy into the
                 // authoritative state model BEFORE syncing. Without this, the stale
@@ -2705,10 +2802,16 @@ namespace ArrangementEditor
                                 {
                                     c->gain = entry.second;
                                     c->bumpWaveformVisualVersion();
+                                    // updateClip() already runs the engine-sync bridge.
+                                    // A second sync here doubles full AudioClip setter
+                                    // traffic; the visual snapshot also needs updating
+                                    // so Undo/Redo never repaints an outdated waveform.
                                     v.m_clipState.updateClip(*c);
-                                    v.syncClipToEngine(*c);
                                     if (auto* renderer = v.findClipRendererFor(entry.first))
+                                    {
+                                        renderer->updateClipData(*c);
                                         renderer->repaint();
+                                    }
                                 }
                         }
                         for (const auto& entry : values)
@@ -2738,10 +2841,14 @@ namespace ArrangementEditor
                                         ? entry.second * multiplier
                                         : juce::Decibels::decibelsToGain((float)knob.getValue(), -60.0f));
                                 c->bumpWaveformVisualVersion();
+                                // Keep the source peaks. updateClip() notifies the
+                                // audio bridge ONCE; only its raster changes.
                                 view.m_clipState.updateClip(*c);
-                                view.syncClipToEngine(*c);
                                 if (auto* renderer = view.findClipRendererFor(entry.first))
+                                {
+                                    renderer->updateClipData(*c);
                                     renderer->repaint();
+                                }
                             }
                     }
                     // Refresh the live Clip Properties gain knob, not just the
@@ -2917,7 +3024,8 @@ namespace ArrangementEditor
                     old.fadeInLength != now.fadeInLength ||
                     old.fadeOutLength != now.fadeOutLength ||
                     old.fadeInCurve != now.fadeInCurve ||
-                    old.fadeOutCurve != now.fadeOutCurve;
+                    old.fadeOutCurve != now.fadeOutCurve ||
+                    old.gain != now.gain;
             }
             if (!anyChanged) return;
 
@@ -4551,7 +4659,11 @@ namespace ArrangementEditor
                     TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollVisibilityChanges);
             }
             if (wasVisible != shouldBeVisible)
+            {
                 renderer->setVisible(shouldBeVisible);
+                if (!shouldBeVisible)
+                    renderer->invalidateWaveformRaster();
+            }
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed)
                 && !shouldBeVisible)
@@ -4561,7 +4673,8 @@ namespace ArrangementEditor
             // visible/overscanned region and only when the current LOD needs it.
             // Tiny or non-audio clips therefore never start a cache worker just
             // because their renderer exists.
-            if (shouldBeVisible && renderer->shouldRenderWaveform()
+            if (!ClipRenderCore::s_lightweightPaint.load(std::memory_order_relaxed)
+                && shouldBeVisible && renderer->shouldRenderWaveform()
                 && renderer->getClip() != nullptr
                 && !renderer->getClip()->sourcePath.empty()
                 && renderer->needsWaveformUpdate())

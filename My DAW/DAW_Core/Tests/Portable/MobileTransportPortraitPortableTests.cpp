@@ -224,6 +224,36 @@ static_assert(orderedReadouts(360, 96));
 static_assert(orderedReadouts(852, 180));
 static_assert(orderedReadouts(1024, 256));
 
+// Regression for seven physical phone transport targets, retaining
+// Return To Start directly between Undo and centre Record.
+constexpr bool validPrimary(int w, int h)
+{
+    const auto r = DAW::mobile::phoneTransportPrimaryLayout(w, h);
+    for (int i = 0; i < 7; ++i)
+    {
+        if (!inside(r.buttons[i], w, h)) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(r.buttons[j], r.buttons[i])) return false;
+    }
+    return true;
+}
+using PhoneAction = DAW::mobile::PhoneTransportPrimaryAction;
+static_assert((int)PhoneAction::Mixer == 0);
+static_assert((int)PhoneAction::Undo == 1);
+static_assert((int)PhoneAction::ReturnToStart == 2);
+static_assert((int)PhoneAction::Record == 3);
+static_assert((int)PhoneAction::Play == 4);
+static_assert((int)PhoneAction::Redo == 5);
+static_assert((int)PhoneAction::Settings == 6);
+static_assert(validPrimary(320, 144));
+static_assert(validPrimary(360, 96));
+static_assert(validPrimary(852, 180));
+static_assert(validPrimary(29, 20));
+static_assert(validPrimary(0, 0));
+constexpr auto primary320 = DAW::mobile::phoneTransportPrimaryLayout(320, 144);
+static_assert(primary320.buttons[(int)PhoneAction::ReturnToStart].width >= 44);
+static_assert(primary320.buttons[(int)PhoneAction::Record].width >= 44);
+
 int main()
 {
     // Exhaustively cross the 189-unit compact shortcut threshold during
@@ -242,5 +272,6 @@ int main()
             assert(valid(w, h));
             assert(validCompact(w, h));
             assert(orderedReadouts(w, h));
+            assert(validPrimary(w, h));
         }
 }

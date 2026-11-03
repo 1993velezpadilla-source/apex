@@ -17,6 +17,14 @@
 
 namespace ArrangementEditor
 {
+    // The worker only owns this mailbox. It never dereferences a Component
+    // until its completion callback runs on JUCE's message thread.
+    struct WaveformRasterAsyncState
+    {
+        std::atomic<ClipRenderCore*> owner{nullptr};
+        std::atomic<std::uint64_t> generation{1};
+    };
+
     namespace Col
     {
         // APEX signal-core tokens (see ThemeCore::ApexTokens)
@@ -42,9 +50,18 @@ namespace ArrangementEditor
         setCachedComponentImage(nullptr);
         setBufferedToImage(false);
 
+        m_waveformAsyncState = std::make_shared<WaveformRasterAsyncState>();
+        m_waveformAsyncState->owner.store(this, std::memory_order_release);
         m_waveformCache = std::make_unique<ClipWaveformCacheCore>();
         auto safe = juce::Component::SafePointer<ClipRenderCore>(this);
-        m_waveformCache->onPeaksReady = [safe]() { if (safe != nullptr) safe->repaint(); };
+        m_waveformCache->onPeaksReady = [safe]()
+        {
+            if (safe != nullptr)
+            {
+                safe->invalidateWaveformRaster();
+                safe->repaint();
+            }
+        };
 
         m_pianoRollBtn = std::make_unique<PianoRollButtonCore>(PianoRollButtonCore::Style::ClipOverlay);
         m_pianoRollBtn->onClick = [this]() {
@@ -62,9 +79,27 @@ namespace ArrangementEditor
 
     ClipRenderCore::~ClipRenderCore()
     {
+        // Invalidates all queued jobs, including a completion already posted
+        // into the message queue. Jobs never own nor touch this component.
+        if (m_waveformAsyncState)
+        {
+            m_waveformAsyncState->owner.store(nullptr, std::memory_order_release);
+            m_waveformAsyncState->generation.fetch_add(1, std::memory_order_acq_rel);
+        }
         DBG("[CRASH TRACE] action=cliprender_destroyed");
         if (m_waveformCache)
             m_waveformCache->onPeaksReady = nullptr;
+    }
+
+
+    void ClipRenderCore::discardRasterLocked()
+    {
+        // Caller holds m_dataMutex. Old jobs are harmlessly ignored; do not
+        // synchronously cancel/wait for a worker from any paint path.
+        m_waveformRaster = {};
+        m_nextWaveformRaster = {};
+        if (m_waveformAsyncState)
+            m_waveformAsyncState->generation.fetch_add(1, std::memory_order_acq_rel);
     }
 
     void ClipRenderCore::setModel(ArrangementClipModel& model)
@@ -76,6 +111,8 @@ namespace ArrangementEditor
     void ClipRenderCore::refresh()
     {
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        // Peak changes alter the pixels, never keep a stale tile.
+        discardRasterLocked();
         if (m_model)
         {
             // Tiny clips retain their block/selection visuals but do not need
@@ -130,6 +167,7 @@ namespace ArrangementEditor
             m_cachedAudio = std::move(cachedAudio);
             m_allowFileFallback = allowFileFallback;
             m_waveformNeedsUpdate = true;
+            discardRasterLocked();
         }
 
         if (isShowing() && shouldRenderWaveform())
@@ -138,7 +176,11 @@ namespace ArrangementEditor
 
     void ClipRenderCore::setSelected(bool selected)
     {
+        std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        if (m_selected == selected) return;
         m_selected = selected;
+        // Selection changes the waveform tint; do not cache the old colour.
+        discardRasterLocked();
         repaint();
     }
 
@@ -151,6 +193,10 @@ namespace ArrangementEditor
         // a dangling stack address during shutdown.
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
         if (!m_model) return;
+
+        // Audio waveforms MUST stay visible throughout pan and pinch.
+        // Scroll uses a cached image of the REAL peaks; zoom reuses/scales
+        // that image while moving and repaints exact peaks at gesture end.
 
         // DEBUG: Increment paint counter to verify paint() is being called
         ++m_paintDebugCounter;
@@ -266,7 +312,12 @@ namespace ArrangementEditor
         const bool waveformGeometryChanged = oldWidth != m_lastWaveformRequestWidth
             || oldWaveformLod != m_lastWaveformRenderable;
         if (waveformGeometryChanged && isShowing() && shouldRenderWaveform())
-            refresh();
+        {
+            if (s_lightweightPaint.load(std::memory_order_relaxed))
+                m_waveformNeedsUpdate = true;
+            else
+                refresh();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -600,10 +651,19 @@ namespace ArrangementEditor
 
         if (m_gainDragActive)
         {
-            // Drag up = louder; 0.01 gain per pixel across the 0..4 range.
+            // Drag up = louder. Reuse ORIGINAL cached audio min/max peaks,
+            // but redraw their gain-scaled *image* live on every actual edit.
             const float dy = m_gainDragStartY - (float)e.getScreenPosition().y;
-            m_model->gain = juce::jlimit(0.0f, 4.0f, m_gainDragStartGain + dy * 0.01f);
-            m_model->bumpWaveformVisualVersion();
+            const float nextGain = juce::jlimit(0.0f, 4.0f,
+                m_gainDragStartGain + dy * 0.01f);
+            if (m_model->gain != nextGain)
+            {
+                m_model->gain = nextGain;
+                m_model->bumpWaveformVisualVersion();
+                discardRasterLocked();
+                if (onEditLive) onEditLive();
+                repaint();
+            }
             return;
         }
 
@@ -615,8 +675,14 @@ namespace ArrangementEditor
                 double newFadeIn = juce::jlimit(0.0,
                                                 m_dragStartLength,
                                                 m_dragStartFadeIn + dxSecs);
-                m_model->fadeInLength = (float)newFadeIn;
-                m_model->bumpWaveformVisualVersion();
+                if (m_model->fadeInLength != (float)newFadeIn)
+                {
+                    m_model->fadeInLength = (float)newFadeIn;
+                    m_model->bumpWaveformVisualVersion();
+                    // A fade changes peak HEIGHTS, not the source peaks.
+                    // Discard only the rendered visual tile; never re-decode.
+                    discardRasterLocked();
+                }
                 break;
             }
             case Zone::FadeOut:
@@ -625,8 +691,12 @@ namespace ArrangementEditor
                 double newFadeOut = juce::jlimit(0.0,
                                                  m_dragStartLength,
                                                  m_dragStartFadeOut - dxSecs);
-                m_model->fadeOutLength = (float)newFadeOut;
-                m_model->bumpWaveformVisualVersion();
+                if (m_model->fadeOutLength != (float)newFadeOut)
+                {
+                    m_model->fadeOutLength = (float)newFadeOut;
+                    m_model->bumpWaveformVisualVersion();
+                    discardRasterLocked();
+                }
                 break;
             }
             case Zone::ResizeRight:
@@ -909,26 +979,159 @@ namespace ArrangementEditor
 
     void ClipRenderCore::drawWaveform(juce::Graphics& g)
     {
-        if (!shouldRenderWaveform())
+        if (!shouldRenderWaveform() || getHeight() <= kNameH)
             return;
 
+        const auto dirty = g.getClipBounds().getIntersection(
+            getLocalBounds().withTrimmedTop(kNameH));
+        if (dirty.isEmpty()) return;
+
+        const int clipW = getWidth();
+        const int clipH = getHeight();
+        const auto covers = [&dirty, clipW, clipH](
+            const juce::Image& tile, int x, int w, int h) -> bool
+        {
+            return tile.isValid() && w == clipW && h == clipH
+                && dirty.getX() >= x && dirty.getRight() <= x + tile.getWidth();
+        };
+
+        // A speculative tile was rendered by our two-worker SOFTWARE pool.
+        // Adopt it only once it actually covers the current viewport.
+        if (!covers(m_waveformRaster, m_waveformRasterX,
+                    m_waveformRasterClipW, m_waveformRasterClipH)
+            && covers(m_nextWaveformRaster, m_nextWaveformRasterX,
+                      m_nextWaveformRasterClipW, m_nextWaveformRasterClipH))
+        {
+            // A reversible two-tile cache: moving the next image into the
+            // front retains the previous section for a reverse swipe.
+            std::swap(m_waveformRaster, m_nextWaveformRaster);
+            std::swap(m_waveformRasterX, m_nextWaveformRasterX);
+            std::swap(m_waveformRasterClipW, m_nextWaveformRasterClipW);
+            std::swap(m_waveformRasterClipH, m_nextWaveformRasterClipH);
+        }
+
+        constexpr int kMaxTileWidth = 2048;
+        constexpr int kMaxTileHeight = 512;
+        constexpr int kPrefetchThreshold = 192;
+        const int visibleW = dirty.getWidth();
+        const bool canCache = visibleW <= kMaxTileWidth
+            && clipH - kNameH <= kMaxTileHeight;
+        // A phone uses a ~1k pixel tile with generous ahead-of-scroll
+        // overscan; a desktop viewport can extend up to 2048px.
+        const int tileW = canCache
+            ? juce::jmin(clipW, juce::jmin(kMaxTileWidth,
+                  juce::jmax(visibleW + 768, visibleW * 2)))
+            : 0;
+        const int maxTileX = juce::jmax(0, clipW - tileW);
+
+        if (covers(m_waveformRaster, m_waveformRasterX,
+                   m_waveformRasterClipW, m_waveformRasterClipH))
+        {
+            // Predict movement toward the front-tile edge. Prepare the NEXT
+            // section before it enters view; never perform a 2k-column image
+            // creation or Graphics::fillRect loop in this cached paint.
+            if (canCache && tileW > visibleW + kPrefetchThreshold
+                && !m_waveformRasterPending
+                && !s_pinchZoomActive.load(std::memory_order_relaxed))
+            {
+                const int frontLeft = m_waveformRasterX;
+                const int frontRight = frontLeft + m_waveformRaster.getWidth();
+                int prefetchX = frontLeft;
+                if (frontRight < clipW
+                    && dirty.getRight() + kPrefetchThreshold >= frontRight)
+                    prefetchX = juce::jlimit(0, maxTileX, dirty.getX());
+                else if (frontLeft > 0
+                         && dirty.getX() - kPrefetchThreshold <= frontLeft)
+                    prefetchX = juce::jlimit(0, maxTileX,
+                                             dirty.getRight() - tileW);
+                if (prefetchX != frontLeft)
+                {
+                    // Keep the previous viewport tile for an immediate
+                    // reverse swipe, but don't let that obsolete back tile
+                    // suppress ALL forward prefetch forever.
+                    const bool nextAlreadyCovers = m_nextWaveformRaster.isValid()
+                        && m_nextWaveformRasterClipW == clipW
+                        && m_nextWaveformRasterClipH == clipH
+                        && prefetchX >= m_nextWaveformRasterX
+                        && prefetchX + tileW <= m_nextWaveformRasterX
+                                               + m_nextWaveformRaster.getWidth();
+                    if (!nextAlreadyCovers)
+                    {
+                        m_nextWaveformRaster = {};
+                        requestWaveformRasterAsync(prefetchX, tileW);
+                    }
+                }
+            }
+
+            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
+            g.drawImageAt(m_waveformRaster, m_waveformRasterX, kNameH);
+            return;
+        }
+
+        // On an active pinch, rescale the previous REAL waveform when it
+        // covers the view. Never hide or replace it with a clip silhouette.
+        if (m_waveformRaster.isValid()
+            && s_lightweightPaint.load(std::memory_order_relaxed)
+            && m_waveformRasterClipW > 0 && m_waveformRasterClipH > kNameH)
+        {
+            const double scale = (double)clipW / (double)m_waveformRasterClipW;
+            const double left = (double)m_waveformRasterX * scale;
+            const double width = (double)m_waveformRaster.getWidth() * scale;
+            if (scale >= 0.25 && scale <= 4.0
+                && left <= (double)dirty.getX()
+                && left + width >= (double)dirty.getRight())
+            {
+                if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                    TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
+                g.drawImage(m_waveformRaster,
+                    juce::roundToInt(left), kNameH,
+                    juce::jmax(1, juce::roundToInt(width)), clipH - kNameH,
+                    0, 0, m_waveformRaster.getWidth(),
+                    m_waveformRaster.getHeight(), false);
+                return;
+            }
+        }
+
+        // Unlike a pinch, one-finger scrolling is geometrically stable:
+        // allow the background pool to refill tiles WHILE the finger moves.
+        if (canCache && !s_pinchZoomActive.load(std::memory_order_relaxed))
+        {
+            // If the finger reversed away from an old prefetch, discard that
+            // obsolete NEXT image; the current visible range takes priority.
+            if (m_nextWaveformRaster.isValid()
+                && !covers(m_nextWaveformRaster, m_nextWaveformRasterX,
+                           m_nextWaveformRasterClipW, m_nextWaveformRasterClipH))
+                m_nextWaveformRaster = {};
+            const int x = juce::jlimit(0, maxTileX,
+                dirty.getX() - (tileW - visibleW) / 2);
+            requestWaveformRasterAsync(x, tileW);
+        }
+
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformVisibleFallbackDraws);
+        // Correct fallback is only the ON-SCREEN region, not a full 2048px
+        // tile! Our exact indexed peak lookup keeps it cheap until an async
+        // raster arrives. No waveform pixels are ever intentionally hidden.
+        drawWaveformUncached(g);
+    }
+
+    // The exact waveform renderer is independent of ClipRenderCore and its
+    // component/lifetime. The UI thread draws the visible fallback only when
+    // needed; a background tile worker draws the same projection into images.
+    // This keeps gain/fades/reverse/transients consistent across both paths.
+    static void renderWaveformPeaks(juce::Graphics& g,
+                                    const WaveformPeakData& peaks,
+                                    const ArrangementClipModel& model,
+                                    int clipWidth, int clipHeight,
+                                    double sampleRate, bool selected,
+                                    int headerHeight)
+    {
+        // The standalone projection runs on both the UI fallback and the
+        // software raster workers; keep metrics scoped to this generation.
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
-        if (metricsActive)
-            TimelinePaintMetrics::waveformDrawCalls.fetch_add(1);
-
-        if (!m_waveformCache->isReady())
-            return;
-
-        // Thread-safe peak access: lock to prevent race with background waveform generation
-        juce::CriticalSection::ScopedLockType lock(m_waveformCache->getPeaksLock());
-
-        auto& peaks = m_waveformCache->getPeaks();
-        if (peaks.minPeaks.empty() || peaks.maxPeaks.empty())
-            return;
-
         // Waveform area starts BELOW the name bar so they never overlap.
-        const auto  full      = getLocalBounds();
-        const float areaTop   = (float)(full.getY() + kNameH);
+        const auto  full      = juce::Rectangle<int>(0, 0, clipWidth, clipHeight);
+        const float areaTop   = (float)(full.getY() + headerHeight);
         const float areaBot   = (float)full.getBottom();
         const float areaH     = areaBot - areaTop;
         if (areaH < 4.f) return;
@@ -959,7 +1162,7 @@ namespace ArrangementEditor
         //
         // This makes the waveform look correct relative to what you hear.
 
-        const auto& tp   = m_model->timePitch;
+        const auto& tp   = model.timePitch;
         const int   mode = static_cast<int>(tp.mode);
 
         double readRatio = 1.0;
@@ -982,14 +1185,14 @@ namespace ArrangementEditor
         int visiblePeakCount = totalPeaks;
         if (peaks.samplesPerPeak > 0)
         {
-            int64_t visibleStartSample = m_model->sourceStartSample;
-            int64_t visibleEndSample = m_model->sourceEndSample;
+            int64_t visibleStartSample = model.sourceStartSample;
+            int64_t visibleEndSample = model.sourceEndSample;
 
             if (visibleEndSample <= visibleStartSample)
             {
                 const double sourceRate = peaks.sourceSampleRate > 0.0 ? peaks.sourceSampleRate : 44100.0;
-                visibleStartSample = (int64_t)std::llround(juce::jmax(0.0, m_model->sourceOffset) * sourceRate);
-                visibleEndSample = visibleStartSample + (int64_t)std::llround(juce::jmax(0.0, m_model->length) * sourceRate);
+                visibleStartSample = (int64_t)std::llround(juce::jmax(0.0, model.sourceOffset) * sourceRate);
+                visibleEndSample = visibleStartSample + (int64_t)std::llround(juce::jmax(0.0, model.length) * sourceRate);
             }
 
             if (peaks.totalSamples > 0)
@@ -1008,8 +1211,10 @@ namespace ArrangementEditor
             }
         }
 
-        if (metricsActive)
-            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(static_cast<uint64_t>(visiblePeakCount));
+        // The old counter reported the WHOLE visible source on each paint,
+        // even when only a narrow tile was rasterised. Count actual peak/index
+        // bucket visits below so performance evidence measures real work.
+        std::size_t peakBucketsRead = 0;
 
         // â”€â”€ Visual gain/fade multipliers (REALTIME, NO CACHE REGEN) â”€â”€â”€â”€â”€â”€
         // This is the KEY FIX:
@@ -1019,15 +1224,15 @@ namespace ArrangementEditor
         // We apply the clip gain + fade envelope visually at draw time.
         // This makes gain/fade knobs update instantly without async peak regen.
 
-        const float clipGainLinear = m_model->gain; // already in linear 0..4
+        const float clipGainLinear = model.gain; // already in linear 0..4
 
         // For fade visual: clip length in samples at the engine rate
         // (cancels against clipLengthSamples for pixel mapping; previously
         // hardcoded 44.1k as "approximation for visual").
-        const double visualSampleRate = engineSampleRate_;
-        const int64_t clipLengthSamples = (int64_t)std::llround(m_model->length * visualSampleRate);
-        const int64_t fadeInSamp  = m_model->fadeInSamples(visualSampleRate);
-        const int64_t fadeOutSamp = m_model->fadeOutSamples(visualSampleRate);
+        const double visualSampleRate = sampleRate;
+        const int64_t clipLengthSamples = (int64_t)std::llround(model.length * visualSampleRate);
+        const int64_t fadeInSamp  = model.fadeInSamples(visualSampleRate);
+        const int64_t fadeOutSamp = model.fadeOutSamples(visualSampleRate);
 
         // Helper: compute fade gain for a given pixel position
         auto getFadeGainAtPixel = [&](int px) -> float
@@ -1055,14 +1260,13 @@ namespace ArrangementEditor
         };
 
         // Waveform follows the TRACK colour (canonical authority â€” mirrored
-        // into m_model->trackColour), with the canonical small contrast
+        // into model.trackColour), with the canonical small contrast
         // adjustment. Clip colour and the audio analysis cache are NOT
         // involved: changing a track colour only changes this paint colour.
         g.setColour(ClipWaveformColourCore::resolveWaveformColour(
-            m_model->trackColour, m_model->muted, m_selected));
+            model.trackColour, model.muted, selected));
 
         // â”€â”€ Pro waveform rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        TimelinePaintMetrics::ScopedTimer waveformTimer(TimelinePaintMetrics::waveformDurationNs);
         // Each pixel column covers a fractional RANGE of peak columns.
         //  â€¢ Zoomed out (>=1 peak per pixel): aggregate min/max across ALL
         //    covered peaks so no transient is ever skipped (no aliasing).
@@ -1089,7 +1293,7 @@ namespace ArrangementEditor
         for (int px = startPx; px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
-            const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
+            const int visualPx = model.reversed ? ((int)clipW - 1 - px) : px;
             const double fStart = (double)visualPx * peaksPerPixel;
 
             float rawMin, rawMax;
@@ -1102,13 +1306,13 @@ namespace ArrangementEditor
                 i0 = juce::jlimit(visibleStartPeak, lastPeak, i0);
                 i1 = juce::jlimit(i0, lastPeak, i1);
 
-                rawMin = peaks.minPeaks[(size_t)i0];
-                rawMax = peaks.maxPeaks[(size_t)i0];
-                for (int i = i0 + 1; i <= i1; ++i)
-                {
-                    rawMin = juce::jmin(rawMin, peaks.minPeaks[(size_t)i]);
-                    rawMax = juce::jmax(rawMax, peaks.maxPeaks[(size_t)i]);
-                }
+                // O(1)-ish min/max across long source ranges using the
+                // immutable 32/1024-peak hierarchy. No downsample averaging:
+                // preserve EVERY transient exactly, including single-bucket
+                // clicks on a long clip at minimum zoom.
+                peaks.rangeIndex.query(peaks.minPeaks, peaks.maxPeaks,
+                    i0, i1, rawMin, rawMax,
+                    metricsActive ? &peakBucketsRead : nullptr);
             }
             else
             {
@@ -1125,6 +1329,8 @@ namespace ArrangementEditor
                        + (peaks.minPeaks[(size_t)ib] - peaks.minPeaks[(size_t)ia]) * t;
                 rawMax = peaks.maxPeaks[(size_t)ia]
                        + (peaks.maxPeaks[(size_t)ib] - peaks.maxPeaks[(size_t)ia]) * t;
+                if (metricsActive)
+                    peakBucketsRead += 2;
             }
 
             // â”€â”€ APPLY VISUAL TRANSFORMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1163,9 +1369,191 @@ namespace ArrangementEditor
             // over-0 dBFS markers, so a limiter/gain change clears them on
             // the next listen pass rather than producing false positives.
         }
-
-
+        if (metricsActive)
+            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(
+                static_cast<uint64_t>(peakBucketsRead));
     }
+
+
+    static juce::ThreadPool& waveformTilePool()
+    {
+        // A phone's render thread competes with native audio and the UI for
+        // a small CPU power/thermal budget. One background raster on Android
+        // prevents two tile renderers from saturating that budget at once.
+        // Desktop keeps two concurrent tile jobs.
+       #if JUCE_ANDROID
+        static juce::ThreadPool pool(1);
+       #else
+        static juce::ThreadPool pool(2);
+       #endif
+        return pool;
+    }
+
+    struct WaveformRasterTileJob final : public juce::ThreadPoolJob
+    {
+        WaveformRasterTileJob(std::shared_ptr<WaveformRasterAsyncState> mailbox,
+                              std::shared_ptr<const WaveformPeakData> source,
+                              ArrangementClipModel clip,
+                              int tileLeft, int tileWidth,
+                              int clipWidth, int clipHeight,
+                              double rate, bool isSelected,
+                              int headerHeight,
+                              std::uint64_t buildGeneration,
+                              std::uint64_t buildSerial)
+            : juce::ThreadPoolJob("APEX Waveform Tile"),
+              state(std::move(mailbox)), peaks(std::move(source)),
+              model(std::move(clip)),
+              tileX(tileLeft), tileW(tileWidth),
+              width(clipWidth), height(clipHeight),
+              sampleRate(rate), selected(isSelected),
+              headerH(headerHeight),
+              generation(buildGeneration), serial(buildSerial)
+        {}
+
+        JobStatus runJob() override
+        {
+            juce::Image tile;
+            std::uint64_t rasterElapsedNs = 0;
+            if (state->generation.load(std::memory_order_acquire) == generation
+                && state->owner.load(std::memory_order_acquire) != nullptr
+                && peaks && peaks->valid && !peaks->minPeaks.empty()
+                && tileW > 0 && height > headerH)
+            {
+                // Graphics for an owned CPU image uses the software renderer.
+                // No JUCE Component, OpenGL context, AudioClip or audio-thread
+                // object is touched on this worker.
+                tile = juce::Image(juce::Image::ARGB, tileW, height - headerH, true);
+                juce::Graphics graphics(tile);
+                graphics.setOrigin(-tileX, -headerH);
+                // SampleRing is a single-writer ring. Measure here, but
+                // PUBLISH the worker duration from the message-thread
+                // completion, never from either background worker.
+                const bool measuring = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+                const auto rasterStart = std::chrono::steady_clock::now();
+                renderWaveformPeaks(graphics, *peaks, model, width, height,
+                                    sampleRate, selected, headerH);
+                if (measuring)
+                    rasterElapsedNs = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - rasterStart).count());
+            }
+
+            // Always complete the matching serial, even if cancelled by a
+            // gain/fade/source edit. The message thread clears the pending
+            // flag; stale generations never replace visible correct pixels.
+            juce::MessageManager::callAsync(
+                [mailbox = state, finished = std::move(tile),
+                 x = tileX, w = width, h = height,
+                 g = generation, s = serial, durationNs = rasterElapsedNs]() mutable
+                {
+                    if (durationNs != 0
+                        && TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                        TimelinePaintMetrics::waveformWorkerTileDurationNs.push(durationNs);
+                    if (auto* owner = mailbox->owner.load(std::memory_order_acquire))
+                        owner->acceptWaveformRasterAsync(
+                            std::move(finished), x, w, h, g, s);
+                });
+            return jobHasFinished;
+        }
+
+        std::shared_ptr<WaveformRasterAsyncState> state;
+        std::shared_ptr<const WaveformPeakData> peaks;
+        ArrangementClipModel model;
+        int tileX = 0, tileW = 0, width = 0, height = 0;
+        double sampleRate = 44100.0;
+        bool selected = false;
+        int headerH = 16;
+        std::uint64_t generation = 0, serial = 0;
+    };
+
+    void ClipRenderCore::requestWaveformRasterAsync(int tileX, int tileWidth)
+    {
+        // Called with m_dataMutex locked by paint(). Avoid queuing thousands
+        // of obsolete jobs when inertia/pinch/gain drags fire many repaints.
+        if (m_waveformRasterPending || m_waveformAsyncState == nullptr
+            || s_pinchZoomActive.load(std::memory_order_relaxed))
+            return;
+
+        const int clipWidth = getWidth();
+        const int clipHeight = getHeight();
+        if (tileWidth <= 0 || clipHeight <= kNameH)
+            return;
+        auto source = m_waveformCache->snapshotPeaks();
+        if (!source || !source->valid
+            || source->minPeaks.empty() || source->maxPeaks.empty())
+            return;
+
+        auto mailbox = m_waveformAsyncState;
+        const auto generation = mailbox->generation.load(std::memory_order_acquire);
+        const auto serial = ++m_waveformRasterSerial;
+        m_waveformRasterPending = true;
+        // Keep the global queue finite even when many tracks enter view
+        // together. No busy waits on the UI; misses draw real visible peaks.
+        if (waveformTilePool().getNumJobs() >= 12)
+        {
+            m_waveformRasterPending = false;
+            return;
+        }
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncJobsQueued);
+        auto* job = new WaveformRasterTileJob(
+            std::move(mailbox), std::move(source), *m_model,
+            tileX, tileWidth, clipWidth, clipHeight,
+            engineSampleRate_, m_selected, kNameH,
+            generation, serial);
+        waveformTilePool().addJob(job, true);
+    }
+
+    void ClipRenderCore::acceptWaveformRasterAsync(juce::Image image,
+        int tileX, int clipW, int clipH,
+        std::uint64_t generation, std::uint64_t serial)
+    {
+        // This runs on the message thread only, never on the raster worker.
+        std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
+        if (serial != m_waveformRasterSerial)
+            return;
+        m_waveformRasterPending = false;
+        if (!m_waveformAsyncState
+            || generation != m_waveformAsyncState->generation.load(std::memory_order_acquire)
+            || clipW != getWidth() || clipH != getHeight() || !image.isValid())
+        {
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncTilesRejected);
+            repaint(); // Requeue for current visible geometry if necessary.
+            return;
+        }
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncTilesDelivered);
+
+        // Keep the old viewport tile alive until the new one is needed.
+        // A pan reversal can reuse either tile without any redraw.
+        m_nextWaveformRaster = std::move(image);
+        m_nextWaveformRasterX = tileX;
+        m_nextWaveformRasterClipW = clipW;
+        m_nextWaveformRasterClipH = clipH;
+        repaint();
+    }
+
+    void ClipRenderCore::drawWaveformUncached(juce::Graphics& g)
+    {
+        if (!shouldRenderWaveform())
+            return;
+
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+        if (metricsActive)
+            TimelinePaintMetrics::waveformDrawCalls.fetch_add(1);
+
+        // Hold an immutable generation instead of the peak-cache lock for
+        // every painted column. Background decoding can publish a newer
+        // generation without waiting on thousands of pixel draw calls.
+        auto peaks = m_waveformCache->snapshotPeaks();
+        if (peaks == nullptr || !peaks->valid
+            || peaks->minPeaks.empty() || peaks->maxPeaks.empty())
+            return;
+
+        TimelinePaintMetrics::ScopedTimer visibleTimer(
+            TimelinePaintMetrics::waveformDurationNs);
+        renderWaveformPeaks(g, *peaks, *m_model, getWidth(), getHeight(),
+                            engineSampleRate_, m_selected, kNameH);
+    }
+
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
     {

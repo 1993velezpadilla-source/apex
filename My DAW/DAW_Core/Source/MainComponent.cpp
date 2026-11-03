@@ -27,6 +27,7 @@
 #include "RecordingCore/RecordingInputValidityCore.h"
 #include "UICore/QuickSendPopup.h"
 #include "UICore/MobilePanelGeometry.h"
+#include "DiagnosticsCore/AndroidUiTrace.h"
 #include <set>
 #include <algorithm>
 #include <cstdlib>
@@ -471,6 +472,7 @@ public:
     std::function<void(const TimelineZoomScrollBar::EdgeDragInfo&)> onThumbEdgeDragged;
     std::function<double()> getPixelsPerSecond;
     std::function<double()> getLaneHeight;
+    std::function<void(const juce::Rectangle<int>&)> onVisibleAreaChanged;
 
     /** (isVertical, zoomIn) — fired by the corner zoom buttons. */
     std::function<void(bool, bool)> onZoomButton;
@@ -587,6 +589,14 @@ public:
     }
 
 protected:
+    void visibleAreaChanged(const juce::Rectangle<int>& area) override
+    {
+        // Synchronous with the real view position, including hidden phone
+        // scrollbars. ScrollBar::Listener notifications can arrive later.
+        if (onVisibleAreaChanged)
+            onVisibleAreaChanged(area);
+    }
+
     juce::ScrollBar* createScrollBarComponent(bool isVertical) override
     {
         auto* bar = new TimelineZoomScrollBar(isVertical);
@@ -1436,6 +1446,15 @@ MainComponent::MainComponent()
     // Transport bar
     // Use the single authoritative click state from ApplicationCore.
     clickState_ = &appCore_.getClickState();
+    // Phone defaults: quiet metronome and return the playhead to the last
+    // explicitly chosen start position after Stop. No desktop/iPad override.
+    if (usesPhoneMixerPresentation())
+    {
+        if (clickState_ != nullptr)
+            clickState_->activeMode.store((int)DAW::ClickActiveMode::Off,
+                                           std::memory_order_relaxed);
+        appCore_.getTransport().setReturnToLastPosition(true);
+    }
     transportBar_ = std::make_unique<DAW::TransportBar>(appCore_.getTransport(), clickState_);
    #if JUCE_ANDROID
     transportBar_->setPhoneLayout(true);
@@ -1445,6 +1464,14 @@ MainComponent::MainComponent()
    #endif
     appendMainStartupTrace("ctor.transport-bar.created");
     addAndMakeVisible(transportBar_.get());
+    // The lag report can now include an exact 100px/sec-relative zoom percent,
+    // even while pinch is active. This HUD never captures touch input.
+    phoneZoomIndicator_.getPixelsPerSecond = [this]() -> double
+    {
+        return arrangement_ ? arrangement_->getPixelsPerSecond() : 100.0;
+    };
+    addAndMakeVisible(phoneZoomIndicator_);
+    phoneZoomIndicator_.setPhoneActive(usesPhoneMixerPresentation());
 
     // Playhead clock: convert transport sample position to seconds at the
     // current device/project sample rate.
@@ -1482,6 +1509,9 @@ MainComponent::MainComponent()
 
     // Track list (headers on left)
     trackList_ = std::make_unique<DAW::TrackList>(appCore_.getTrackManager());
+    // Always compact on phones; the desktop WAV/M/S/Input/R grid regressed
+    // into a full-width track card and obscured the actual waveform editor.
+    trackList_->setPhoneCompactRows(usesPhoneMixerPresentation());
     appendMainStartupTrace("ctor.track-list.created");
     trackList_->onWidthDrag = [this](int deltaX)
     {
@@ -2414,13 +2444,10 @@ MainComponent::MainComponent()
         return &appCore_.getRoutingGraph();
     });
 
-    auto syncTrackHeaders = [this]()
+    auto syncTrackHeaderGeometry = [this]()
     {
         if (!arrangement_ || !trackList_)
             return;
-
-        updateTimelineViewportContentBounds();
-
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
 
         // Master lane is at index 0 in ArrangementView; offset regular tracks by 1
@@ -2439,6 +2466,11 @@ MainComponent::MainComponent()
         trackList_->resized();
         trackList_->repaint();
     };
+    auto syncTrackHeaders = [this, syncTrackHeaderGeometry]()
+    {
+        updateTimelineViewportContentBounds();
+        syncTrackHeaderGeometry();
+    };
 
     // Keep TrackList in sync when Arrangement lanes are resized vertically
     arrangement_->onLaneHeightChanged = [this](int index, int newHeight)
@@ -2455,6 +2487,35 @@ MainComponent::MainComponent()
             trackList_->setScrollOffset(y);
     };
     arrangement_->onLaneLayoutChanged = syncTrackHeaders;
+    arrangement_->onPhoneZoomChanged = [this, syncTrackHeaderGeometry](bool laneHeightChanged) -> bool
+    {
+        if (!usesPhoneMixerPresentation() || arrangement_ == nullptr
+            || timelineViewport_ == nullptr)
+            return false;
+
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.zoomLayout");
+
+        // Both pinch axes use the cached song/playhead/loop extent. Vertical
+        // samples must not fall back to getAllClips()/audio layout either.
+        const int visibleW = juce::jmax(1, timelineViewport_->getViewWidth());
+        const double seconds = juce::jmax(30.0, lastTimelineContentLengthSeconds_);
+        const double rawWidth = arrangement_->getPixelsPerSecond() * seconds;
+        const int contentW = juce::jmax(visibleW + 1,
+            juce::roundToInt(juce::jmin(2147480000.0,
+                juce::jmax(4.0, rawWidth))));
+        int contentH = 80;
+        for (int i = 0; i < arrangement_->getNumLanes(); ++i)
+            contentH += arrangement_->getLaneHeight(i);
+        contentH = juce::jmax(timelineViewport_->getViewHeight() + 1, contentH);
+        const bool sizeChanged = contentW != arrangement_->getWidth()
+            || contentH != arrangement_->getHeight();
+        arrangement_->setSize(contentW, contentH);
+        if (!sizeChanged)
+            arrangement_->resized();
+        if (laneHeightChanged)
+            syncTrackHeaderGeometry();
+        return true;
+    };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
                                                   DAW::TrackID selectedTrackId,
@@ -3047,8 +3108,15 @@ MainComponent::MainComponent()
         applyTimelineZoom(isVertical, zoomIn);
     };
     timelineViewport_ = std::move(timelineViewport);
-    timelineViewport_->getVerticalScrollBar().addListener(this);
-    timelineViewport_->getHorizontalScrollBar().addListener(this);
+    static_cast<TimelineViewport*>(timelineViewport_.get())->onVisibleAreaChanged =
+        [this](const juce::Rectangle<int>& area)
+    {
+        if (arrangement_)
+            arrangement_->setViewportScrollOffsets(area.getX(), area.getY());
+        if (trackList_)
+            trackList_->setScrollOffset(area.getY());
+        syncPlaylistTimeline();
+    };
     addAndMakeVisible(*timelineViewport_);
 
     arrangement_->setCollapsedFolders(collapsedFolderTrackIds_);
@@ -4165,6 +4233,19 @@ MainComponent::MainComponent()
                 mixerPanel_->activateBubblegumMode(source);
         }
     };
+
+    // Phone: a single TOOLS radial wheel replaces the cluttered desktop
+    // tool strip; SENDS still opens the actual Bubblegum controller.
+    // Avoid duplicate launchers across the bottom transport.
+    if (arrangement_)
+    {
+        arrangement_->configurePhoneToolbar(usesPhoneMixerPresentation(),
+            [this]()
+            {
+                if (transportBar_ && transportBar_->onOpenBubblegumSends)
+                    transportBar_->onOpenBubblegumSends();
+            });
+    }
 
     // Wire same quick-access to ArrangementView timeline toolbar
     if (arrangement_)
@@ -7319,18 +7400,6 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
         return;
     }
 
-    if (timelineViewport_ != nullptr
-        && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
-            || scrollBar == &timelineViewport_->getVerticalScrollBar()))
-    {
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        syncPlaylistTimeline();
-        return;
-    }
-
     resized();
 }
 
@@ -8071,8 +8140,7 @@ MainComponent::~MainComponent()
     mixerViewport_.getHorizontalScrollBar().removeListener(this);
     if (timelineViewport_)
     {
-        timelineViewport_->getHorizontalScrollBar().removeListener(this);
-        timelineViewport_->getVerticalScrollBar().removeListener(this);
+        static_cast<TimelineViewport*>(timelineViewport_.get())->onVisibleAreaChanged = nullptr;
     }
     inputWatchdog_.stopTimer();
     DAW::CommandManager::getInstance().setUndoRedoBlockedQuery({});
@@ -9123,7 +9191,11 @@ void MainComponent::resized()
     if (bubblegumTaskbar_)
         bubblegumTaskbar_->setBounds({});
     if (bubbleTaskbar_)
-        bubbleTaskbar_->setBounds(getLocalBounds());
+    {
+        bubbleTaskbar_->setBounds(phoneLayout ? juce::Rectangle<int>{} : getLocalBounds());
+        if (phoneLayout)
+            bubbleTaskbar_->setVisible(false);
+    }
 
     const auto bubbleSize = 54;
     const auto timelineBubbleSize = DAW::TimelineBubble::kBubbleSize;
@@ -9152,7 +9224,18 @@ void MainComponent::resized()
                                      92, bubbleSize, bubbleSize);
     }
     if (masterBubble_)
+    {
         masterBubble_->setBounds(84, getHeight() - bubbleSize - 76, bubbleSize, bubbleSize);
+        if (phoneLayout) masterBubble_->setVisible(false);
+    }
+    // Show live zoom INSIDE the phone header between the APEX wordmark
+    // and the single MENU entry. The old y=53 overlay covered the toolbar's
+    // Add Track/Tools hit targets and made the GUI look broken.
+    const int zoomLeft = 90;
+    phoneZoomIndicator_.setBounds(phoneLayout ? juce::Rectangle<int>{
+        zoomLeft, 12, juce::jmax(0, getWidth() - zoomLeft - 100), 25
+    } : juce::Rectangle<int>{});
+    if (phoneLayout) phoneZoomIndicator_.toFront(false);
 
     // TrackLens peak bubble - top-right, only auto-position if not manually dragged
     {

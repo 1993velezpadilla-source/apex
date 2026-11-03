@@ -24,3 +24,17 @@ jobs:
         run: .\Scripts\test_repository_policy.ps1
       - name: Check evidence validation
         run: .\Scripts\test_validate_test_evidence.ps1
+
+  waveform-peak-range-portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Exact waveform pyramid - C++17 correctness, boundaries and UBSan"
+        shell: bash
+        run: |
+          cd "My DAW/DAW_Core"
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_index
+          /tmp/apex_waveform_peak_index
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_ubsan
+          /tmp/apex_waveform_peak_ubsan

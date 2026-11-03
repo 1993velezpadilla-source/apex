@@ -13,7 +13,8 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False):
+                  launcher_exported=None, decoy_launcher_only_first=False,
+                  existing_profileable=False, repeat=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -27,6 +28,8 @@ class ImmersiveManifestTests(unittest.TestCase):
             attributes = {} if manifest_package is None else {"package": manifest_package}
             root = ET.Element("manifest", attributes)
             app = ET.SubElement(root, "application")
+            if existing_profileable:
+                ET.SubElement(app, "profileable", {f"{{{ANDROID_NS}}}shell": "false"})
             if extra_activity_first:
                 ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.UnrelatedActivity"})
@@ -51,9 +54,21 @@ class ImmersiveManifestTests(unittest.TestCase):
             run = subprocess.run(
                 [sys.executable, str(SCRIPT), "--project", str(generated)],
                 capture_output=True, text=True, check=False)
+            if repeat and run.returncode == 0:
+                run = subprocess.run(
+                    [sys.executable, str(SCRIPT), "--project", str(generated)],
+                    capture_output=True, text=True, check=False)
             java = (generated / "app/src/main/java" /
                     bundle.replace(".", "/") / "ApexImmersiveActivity.java")
             if run.returncode == 0:
+                application = ET.parse(manifest).getroot().find("application")
+                profiles = application.findall("profileable")
+                if bundle == "com.xziel.apex.mobileportrait":
+                    self.assertEqual(len(profiles), 1)
+                    self.assertEqual(profiles[0].get(f"{{{ANDROID_NS}}}shell"), "true")
+                elif not existing_profileable:
+                    self.assertEqual(profiles, [])
+                self.assertIsNone(application.get(f"{{{ANDROID_NS}}}debuggable"))
                 activities = ET.parse(manifest).getroot().findall("./application/activity")
                 patched = next(a for a in activities
                                if a.get(f"{{{ANDROID_NS}}}name")
@@ -78,6 +93,10 @@ class ImmersiveManifestTests(unittest.TestCase):
         for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
             with self.subTest(bundle=bundle):
                 self.assertEqual(self.run_patch(bundle).returncode, 0)
+
+    def test_mobile_release_is_profileable_without_debuggable_and_is_idempotent(self):
+        self.assertEqual(self.run_patch("com.xziel.apex.mobileportrait",
+                                       existing_profileable=True, repeat=True).returncode, 0)
 
     def test_unrelated_activity_before_launcher_is_allowed(self):
         # The generated manifest is not guaranteed to put JUCE's launcher first.
