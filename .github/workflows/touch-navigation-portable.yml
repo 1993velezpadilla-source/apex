@@ -10,6 +10,10 @@ on:
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/WaveformPeakRangeIndexCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/WaveformPeakRangePortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/TouchNavigationMathPortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/ApexRadialGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialGeometry.h'
@@ -49,6 +53,12 @@ jobs:
           cd "My DAW/DAW_Core"
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/TouchNavigationMathPortableTests.cpp -o /tmp/apex_touch_navigation_tests
           /tmp/apex_touch_navigation_tests
+          # Exact min/max across all peak zoom ranges. Never drop a transient,
+          # never scan a whole two-million-column source in the paint loop.
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_range_tests
+          /tmp/apex_waveform_peak_range_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_range_ubsan
+          /tmp/apex_waveform_peak_range_ubsan
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_tests
           /tmp/apex_arrangement_zoom_tests
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_ubsan
