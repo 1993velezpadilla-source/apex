@@ -49,6 +49,8 @@ jobs:
             '.github/workflows/apex-android-ui-runtime-replay.yml',
             'Android/scripts/run_ui_runtime_benchmark.py',
             'Android/scripts/tests/test_ui_runtime_validator.py',
+            'Android/scripts/capture_device_ui_trace.py',
+            'My DAW/DAW_Core/docs/ANDROID_RENDER_BACKEND_20261103.md',
           }
           changed = subprocess.check_output(['git', 'diff', '--name-only', os.environ['NATIVE_SOURCE_SHA'], 'HEAD'], text=True).splitlines()
           unsupported = sorted(set(changed) - allowed)

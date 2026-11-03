@@ -76,3 +76,67 @@ diagnostics; they do not certify physical-device smoothness or a 60 FPS claim.
 - Native ARM64 debug/release, x86_64 compilation, actual runtime captures and
   Pixel Fold testing are pending. Do not distribute this candidate as a
   verified solution before reviewing the actual runtime results.
+
+## Executed comparison — do not approve as a performance fix
+
+ARM64 optimized release and Android full-shell native builds passed at
+`af1bfd9e`. The x86_64 native application at `0775b252` compiled and signed.
+Host-only corrections at `f2d6eeb7` reused that exact signed x86 APK, checking
+the immutable build run and rejecting any changed application inputs.
+
+Runtime replay 41723499506 passed all eight gesture/surface cases (two runs per
+backend/scene in opposite order). Native scroll and zoom values changed, the
+requested backend remained active, clip scenes contained one real imported WAV,
+and the GPU callback counter advanced. Manually inspected before/pinch captures
+show the production timeline and visible waveform in both renderers. Focus
+checks confirmed the APEX window. Earlier runs obscured by system dialogs or
+using an incomplete window dump are discarded.
+
+However, the measured UI callback tails are still unacceptable for a smoothness
+claim. These are p95 Choreographer intervals in milliseconds, showing the range
+across the two repeats (not pooled percentiles and not presented FPS):
+
+| Scene | Renderer | Pan p95 (ms) | Pinch p95 (ms) |
+| --- | --- | ---: | ---: |
+| Empty | Software | 83–283 | 100–183 |
+| Empty | OpenGL | 300–583 | 333–467 |
+| Imported WAV | Software | 100 | 183–200 |
+| Imported WAV | OpenGL | 117 | 250 |
+
+The lower GPU median does not cancel these long stalls. This SwiftShader CI
+emulator cannot establish Pixel Fold GPU performance or attribute its stalls
+to the same cause as the physical device. **Do not approve/distribute the GPU
+candidate as a resolved-lag build. Keep PR #170 draft.** Physical performance
+is still unresolved; no new APK is recommended on this evidence.
+
+Evidence: https://github.com/1993velezpadilla-source/apex/actions/runs/41723499506
+(artifact APEX-Android-UI-Runtime-Replay-Evidence, including JSON, screenshots,
+focused-window dumps, logcat and exact native-build provenance).
+
+## Capture the missing physical-device evidence
+
+The already-shared `31575849` preview includes the native APEX trace sections
+and a profileable Android manifest. Use that installed APK on the Fold's front
+screen. With the phone connected to an authorized ADB computer, open an empty
+timeline and run from the checkout root:
+
+```sh
+python3 Android/scripts/capture_device_ui_trace.py --scene empty
+```
+
+Scroll and pinch during the 20-second recording. Load a clip normally, then run:
+
+```sh
+python3 Android/scripts/capture_device_ui_trace.py --scene clip
+```
+
+The tool captures Perfetto scheduling, CPU-frequency, graphics/view/input,
+SurfaceFlinger FrameTimeline and APEX atrace sections, plus actual model,
+display dimensions/density and installed version metadata. It installs nothing,
+resets no app data and leaves project/audio state under user control. Attach the
+two `.perfetto-trace` files and their matching `.json` metadata for analysis.
+An emulator trace is explicitly labelled as such. `--dry-run` prints the exact
+configuration without contacting a phone or writing files.
+
+Configuration references: https://perfetto.dev/docs/quickstart/android-tracing
+and https://perfetto.dev/docs/getting-started/atrace.
