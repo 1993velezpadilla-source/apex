@@ -122,6 +122,21 @@ int main()
     assert(TouchNavigationMath::zoomPosition(320.0, 120.0, 2.0, -1, 250) == 0);
     assert(TouchNavigationMath::zoomPosition(zoomNan, 120.0, 2.0, 4000, -5) == 0);
 
+    // Ctrl/Alt wheel zoom must preserve the viewport anchor at zoom limits,
+    // ignore invalid OS samples, and clamp extreme finite wheel deltas.
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, 0.0, 10.0, 4000.0) == 100.0);
+    assert(std::abs(TouchNavigationMath::wheelZoomTarget(100.0, 0.5, 10.0, 4000.0)
+                    - 120.0) < 1e-8);
+    assert(TouchNavigationMath::wheelZoomTarget(4000.0, 1.0, 10.0, 4000.0) == 4000.0);
+    assert(TouchNavigationMath::wheelZoomTarget(10.0, -1.0, 10.0, 4000.0) == 10.0);
+    assert(TouchNavigationMath::wheelZoomTarget(180.0, 1.0, 24.0, 180.0) == 180.0);
+    assert(TouchNavigationMath::wheelZoomTarget(24.0, -1.0, 24.0, 180.0) == 24.0);
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, panNan, 10.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, panInf, 10.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, -panInf, 10.0, 4000.0) == 100.0);
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, 1e300, 10.0, 4000.0) == 4000.0);
+    assert(TouchNavigationMath::wheelZoomTarget(100.0, -1e300, 10.0, 4000.0) == 10.0);
+
     // Slow pinch motion accumulates against the last APPLIED distance.
     // A 0.75px/frame motion should eventually trigger, not be discarded.
     const double applied = 100.0;

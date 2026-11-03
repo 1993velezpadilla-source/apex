@@ -140,6 +140,21 @@ namespace ArrangementEditor
                 && std::abs(currentSeparationPx - appliedSeparationPx) >= 2.0;
         }
 
+        // Mouse wheel zoom has the same saturation contract as pinch. Reject
+        // malformed wheel deltas and bound huge finite deltas before pow()
+        // so invalid input cannot poison viewport anchor calculations.
+        static double wheelZoomTarget(double current, double deltaY,
+                                      double minimum, double maximum) noexcept
+        {
+            if (!std::isfinite(current) || current <= 0.0)
+                return minimum;
+            if (!std::isfinite(deltaY) || deltaY == 0.0)
+                return current;
+            const double boundedDelta = std::clamp(deltaY, -100.0, 100.0);
+            const double factor = std::pow(1.2, boundedDelta * 2.0);
+            return std::clamp(current * factor, minimum, maximum);
+        }
+
         // Avoid a full clip-renderer rebuild when a pinch is already at a
         // zoom limit. Gesture anchors still advance so reversing feels immediate.
         static double pinchZoomTarget(double current, double ratio,

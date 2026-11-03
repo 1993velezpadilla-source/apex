@@ -3669,8 +3669,12 @@ namespace ArrangementEditor
                 const double oldPps = m_zoom.getPixelsPerSecond();
                 const double anchorTime = m_zoom.xToTime((double)e.x);
                 const int mouseXInViewport = e.x - viewport->getViewPositionX();
-                const double zoomFactor = std::pow(1.2, (double)wheel.deltaY * 2.0);
-                const double newPps = juce::jlimit(10.0, 4000.0, oldPps * zoomFactor);
+                const double newPps = TouchNavigationMath::wheelZoomTarget(
+                    oldPps, (double)wheel.deltaY, 10.0, 4000.0);
+                // At the zoom limit (or with malformed input), do not shift
+                // the anchor or schedule viewport work for an unchanged zoom.
+                if (newPps == oldPps)
+                    return;
 
                 m_zoom.setPixelsPerSecond(newPps);
 
@@ -3686,8 +3690,8 @@ namespace ArrangementEditor
                 const double oldH = (double)m_zoom.getTrackHeightPx();
                 const double anchorTrackY = (double)(e.y);  // content-local Y
                 const int mouseYInViewport = e.y - viewport->getViewPositionY();
-                const double zoomFactor = std::pow(1.2, (double)wheel.deltaY * 2.0);
-                const double newH = ArrangementZoomCore::clampTrackHeightPx(oldH * zoomFactor, oldH);
+                const double newH = TouchNavigationMath::wheelZoomTarget(
+                    oldH, (double)wheel.deltaY, 24.0, 180.0);
                 // A saturated wheel gesture must not move the viewport anchor
                 // or rebuild the renderers when the effective height is fixed.
                 if (newH == oldH)
