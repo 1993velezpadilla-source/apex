@@ -623,10 +623,19 @@ namespace ArrangementEditor
 
         if (m_gainDragActive)
         {
-            // Drag up = louder; 0.01 gain per pixel across the 0..4 range.
+            // Drag up = louder. Reuse ORIGINAL cached audio min/max peaks,
+            // but redraw their gain-scaled *image* live on every actual edit.
             const float dy = m_gainDragStartY - (float)e.getScreenPosition().y;
-            m_model->gain = juce::jlimit(0.0f, 4.0f, m_gainDragStartGain + dy * 0.01f);
-            m_model->bumpWaveformVisualVersion();
+            const float nextGain = juce::jlimit(0.0f, 4.0f,
+                m_gainDragStartGain + dy * 0.01f);
+            if (m_model->gain != nextGain)
+            {
+                m_model->gain = nextGain;
+                m_model->bumpWaveformVisualVersion();
+                m_waveformRaster = juce::Image();
+                if (onEditLive) onEditLive();
+                repaint();
+            }
             return;
         }
 
@@ -638,8 +647,14 @@ namespace ArrangementEditor
                 double newFadeIn = juce::jlimit(0.0,
                                                 m_dragStartLength,
                                                 m_dragStartFadeIn + dxSecs);
-                m_model->fadeInLength = (float)newFadeIn;
-                m_model->bumpWaveformVisualVersion();
+                if (m_model->fadeInLength != (float)newFadeIn)
+                {
+                    m_model->fadeInLength = (float)newFadeIn;
+                    m_model->bumpWaveformVisualVersion();
+                    // A fade changes peak HEIGHTS, not the source peaks.
+                    // Discard only the rendered visual tile; never re-decode.
+                    m_waveformRaster = juce::Image();
+                }
                 break;
             }
             case Zone::FadeOut:
@@ -648,8 +663,12 @@ namespace ArrangementEditor
                 double newFadeOut = juce::jlimit(0.0,
                                                  m_dragStartLength,
                                                  m_dragStartFadeOut - dxSecs);
-                m_model->fadeOutLength = (float)newFadeOut;
-                m_model->bumpWaveformVisualVersion();
+                if (m_model->fadeOutLength != (float)newFadeOut)
+                {
+                    m_model->fadeOutLength = (float)newFadeOut;
+                    m_model->bumpWaveformVisualVersion();
+                    m_waveformRaster = juce::Image();
+                }
                 break;
             }
             case Zone::ResizeRight:
