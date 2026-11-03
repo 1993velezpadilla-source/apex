@@ -86,6 +86,16 @@ class ImmersiveManifestTests(unittest.TestCase):
                 source = java.read_text(encoding="utf-8")
                 self.assertIn("WindowInsetsController", source)
                 self.assertIn("SCREEN_ORIENTATION_USER", source)
+                # Fullscreen must survive permission dialogs, plugin editors,
+                # notification shade and focus changes without a polling timer.
+                self.assertIn("protected void onResume()", source)
+                self.assertIn("onWindowFocusChanged(boolean hasFocus)", source)
+                self.assertIn("if (hasFocus)", source)
+                self.assertIn("BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE", source)
+                self.assertIn("WindowInsets.Type.statusBars()", source)
+                self.assertIn("WindowInsets.Type.navigationBars()", source)
+                self.assertIn("SYSTEM_UI_FLAG_IMMERSIVE_STICKY", source)
+                self.assertIn("SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION", source)
                 self.assertNotIn("SCREEN_ORIENTATION_PORTRAIT", source)
                 if rerun:
                     first_manifest = manifest.read_bytes()
