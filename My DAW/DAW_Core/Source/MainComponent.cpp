@@ -2475,6 +2475,29 @@ MainComponent::MainComponent()
             trackList_->setScrollOffset(y);
     };
     arrangement_->onLaneLayoutChanged = syncTrackHeaders;
+    arrangement_->onPhoneHorizontalZoomChanged = [this]() -> bool
+    {
+        if (!usesPhoneMixerPresentation() || arrangement_ == nullptr
+            || timelineViewport_ == nullptr)
+            return false;
+
+        // Reuse the already-computed song/playhead/loop extent. The old
+        // onLaneLayoutChanged() path rescanned ALL engine clips and rebuilt
+        // every track/playlist on every horizontal pinch sample.
+        const int visibleW = juce::jmax(1, timelineViewport_->getViewWidth());
+        const double seconds = juce::jmax(30.0, lastTimelineContentLengthSeconds_);
+        const double rawWidth = arrangement_->getPixelsPerSecond() * seconds;
+        const int contentW = juce::jmax(visibleW + 1,
+            juce::roundToInt(juce::jmin(2147480000.0,
+                juce::jmax(4.0, rawWidth))));
+        if (arrangement_->getWidth() == contentW)
+            return false;
+
+        // Changing width calls resized() while the core's fast-pinch guard
+        // is active: update ONLY clip geometry, never rescan audio buffers.
+        arrangement_->setSize(contentW, arrangement_->getHeight());
+        return true;
+    };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
                                                   DAW::TrackID selectedTrackId,
