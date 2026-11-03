@@ -18,6 +18,9 @@ namespace ArrangementEditor
         ArrangementToolbarCore(EditorToolState& toolState);
         void setMetronomeEnabledQuery(std::function<bool()> q) { m_isMetronomeEnabled = std::move(q); repaint(); }
         void setMetronomeToggleAction(std::function<void()> a) { m_toggleMetronome = std::move(a); }
+        // Phones use one calm Tools entry instead of ten always-live edit buttons.
+        void setPhonePresentation(bool enabled) { if (m_phonePresentation != enabled) { m_phonePresentation = enabled; resized(); repaint(); } }
+        void setPhoneSendsAction(std::function<void()> action) { m_phoneSendsAction = std::move(action); }
         ~ArrangementToolbarCore() override;
 
         void paint(juce::Graphics& g) override;
@@ -109,6 +112,11 @@ namespace ArrangementEditor
         std::function<void()> m_toggleAutoArm;
         std::function<bool()> m_isAutoPlaylistEnabled;
         std::function<void()> m_toggleAutoPlaylist;
+        std::function<void()> m_phoneSendsAction;
+        bool m_phonePresentation = false;
+        juce::Rectangle<int> m_phoneToolsBounds, m_phoneSendsBounds;
+        int m_phonePressed = 0;
+        void showPhoneToolWheel();
 
         struct ToolButton
         {
@@ -137,6 +145,7 @@ namespace ArrangementEditor
         void mouseMove(const juce::MouseEvent& e) override;
         void mouseExit(const juce::MouseEvent& e) override;
         void mouseDown(const juce::MouseEvent& e) override;
+        void mouseUp(const juce::MouseEvent& e) override;
         void showSnapMenu();
         void updateTooltip(juce::Point<int> pos);
         static juce::String snapModeLabelForIndex(int index);
