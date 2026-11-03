@@ -982,32 +982,81 @@ namespace ArrangementEditor
         if (!shouldRenderWaveform() || getHeight() <= kNameH)
             return;
 
-        // A viewport-sized transparent image tile is rasterised ONCE at the
-        // correct peak resolution, then the same pixels are blitted during
-        // subsequent scroll frames. Never cache a whole-song (huge) image.
         const auto dirty = g.getClipBounds().getIntersection(
             getLocalBounds().withTrimmedTop(kNameH));
         if (dirty.isEmpty()) return;
 
         const int clipW = getWidth();
         const int clipH = getHeight();
-        const bool validTile = m_waveformRaster.isValid();
-
-        if (validTile && m_waveformRasterClipW == clipW
-            && m_waveformRasterClipH == clipH
-            && dirty.getX() >= m_waveformRasterX
-            && dirty.getRight() <= m_waveformRasterX + m_waveformRaster.getWidth())
+        const auto covers = [&dirty, clipW, clipH](
+            const juce::Image& tile, int x, int w, int h) -> bool
         {
+            return tile.isValid() && w == clipW && h == clipH
+                && dirty.getX() >= x && dirty.getRight() <= x + tile.getWidth();
+        };
+
+        // A speculative tile was rendered by our two-worker SOFTWARE pool.
+        // Adopt it only once it actually covers the current viewport.
+        if (!covers(m_waveformRaster, m_waveformRasterX,
+                    m_waveformRasterClipW, m_waveformRasterClipH)
+            && covers(m_nextWaveformRaster, m_nextWaveformRasterX,
+                      m_nextWaveformRasterClipW, m_nextWaveformRasterClipH))
+        {
+            m_waveformRaster = std::move(m_nextWaveformRaster);
+            m_waveformRasterX = m_nextWaveformRasterX;
+            m_waveformRasterClipW = m_nextWaveformRasterClipW;
+            m_waveformRasterClipH = m_nextWaveformRasterClipH;
+            m_nextWaveformRaster = {};
+        }
+
+        constexpr int kMaxTileWidth = 2048;
+        constexpr int kMaxTileHeight = 512;
+        constexpr int kPrefetchThreshold = 192;
+        const int visibleW = dirty.getWidth();
+        const bool canCache = visibleW <= kMaxTileWidth
+            && clipH - kNameH <= kMaxTileHeight;
+        // A phone uses a ~1k pixel tile with generous ahead-of-scroll
+        // overscan; a desktop viewport can extend up to 2048px.
+        const int tileW = canCache
+            ? juce::jmin(clipW, juce::jmin(kMaxTileWidth,
+                  juce::jmax(visibleW + 768, visibleW * 2)))
+            : 0;
+        const int maxTileX = juce::jmax(0, clipW - tileW);
+
+        if (covers(m_waveformRaster, m_waveformRasterX,
+                   m_waveformRasterClipW, m_waveformRasterClipH))
+        {
+            // Predict movement toward the front-tile edge. Prepare the NEXT
+            // section before it enters view; never perform a 2k-column image
+            // creation or Graphics::fillRect loop in this cached paint.
+            if (canCache && tileW > visibleW + kPrefetchThreshold
+                && !m_waveformRasterPending && !m_nextWaveformRaster.isValid()
+                && !s_lightweightPaint.load(std::memory_order_relaxed))
+            {
+                const int frontLeft = m_waveformRasterX;
+                const int frontRight = frontLeft + m_waveformRaster.getWidth();
+                int prefetchX = frontLeft;
+                if (frontRight < clipW
+                    && dirty.getRight() + kPrefetchThreshold >= frontRight)
+                    prefetchX = juce::jlimit(0, maxTileX, dirty.getX());
+                else if (frontLeft > 0
+                         && dirty.getX() - kPrefetchThreshold <= frontLeft)
+                    prefetchX = juce::jlimit(0, maxTileX,
+                                             dirty.getRight() - tileW);
+                if (prefetchX != frontLeft)
+                    requestWaveformRasterAsync(prefetchX, tileW);
+            }
+
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
                 TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
             g.drawImageAt(m_waveformRaster, m_waveformRasterX, kNameH);
             return;
         }
 
-        // While pinch zoom is moving, scale the ACTUAL previous waveform
-        // pixels when their source range still covers the screen. Unlike the
-        // old "lightweight" silhouette, the audio waveform NEVER disappears.
-        if (validTile && s_lightweightPaint.load(std::memory_order_relaxed)
+        // On an active pinch, rescale the previous REAL waveform when it
+        // covers the view. Never hide or replace it with a clip silhouette.
+        if (m_waveformRaster.isValid()
+            && s_lightweightPaint.load(std::memory_order_relaxed)
             && m_waveformRasterClipW > 0 && m_waveformRasterClipH > kNameH)
         {
             const double scale = (double)clipW / (double)m_waveformRasterClipW;
@@ -1020,42 +1069,29 @@ namespace ArrangementEditor
                 if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
                     TimelinePaintMetrics::waveformCachedDraws.fetch_add(1);
                 g.drawImage(m_waveformRaster,
-                    juce::roundToInt(left), kNameH, juce::jmax(1, juce::roundToInt(width)),
-                    clipH - kNameH,
+                    juce::roundToInt(left), kNameH,
+                    juce::jmax(1, juce::roundToInt(width)), clipH - kNameH,
                     0, 0, m_waveformRaster.getWidth(),
                     m_waveformRaster.getHeight(), false);
                 return;
             }
         }
 
-        // A single bounded tile covers the visible screen plus overscan.
-        // The cached tile survives hundreds of normal scroll repaints.
-        constexpr int kMaxTileWidth = 2048;
-        const int dirtyW = dirty.getWidth();
-        if (dirtyW > kMaxTileWidth)
+        if (canCache && !s_lightweightPaint.load(std::memory_order_relaxed))
         {
-            // Unusually wide render target: remain correct and visible
-            // without ever allocating an unbounded bitmap.
-            drawWaveformUncached(g);
-            return;
+            // If the finger reversed away from an old prefetch, discard that
+            // obsolete NEXT image; the current visible range takes priority.
+            if (m_nextWaveformRaster.isValid())
+                m_nextWaveformRaster = {};
+            const int x = juce::jlimit(0, maxTileX,
+                dirty.getX() - (tileW - visibleW) / 2);
+            requestWaveformRasterAsync(x, tileW);
         }
-        const int tileW = juce::jmin(clipW, juce::jmin(kMaxTileWidth,
-            juce::jmax(dirtyW + 512, dirtyW * 2)));
-        const int maxTileX = juce::jmax(0, clipW - tileW);
-        const int tileX = juce::jlimit(0, maxTileX,
-            dirty.getX() - (tileW - dirtyW) / 2);
-        juce::Image tile(juce::Image::ARGB, tileW, clipH - kNameH, true);
-        juce::Graphics imageGraphics(tile);
-        // Translate the original source waveform coordinates into the tile,
-        // including its proper peak indices, fades, gain and track colour.
-        imageGraphics.setOrigin(-tileX, -kNameH);
-        drawWaveformUncached(imageGraphics);
 
-        m_waveformRaster = std::move(tile);
-        m_waveformRasterX = tileX;
-        m_waveformRasterClipW = clipW;
-        m_waveformRasterClipH = clipH;
-        g.drawImageAt(m_waveformRaster, tileX, kNameH);
+        // Correct fallback is only the ON-SCREEN region, not a full 2048px
+        // tile! Our exact indexed peak lookup keeps it cheap until an async
+        // raster arrives. No waveform pixels are ever intentionally hidden.
+        drawWaveformUncached(g);
     }
 
     // The exact waveform renderer is independent of ClipRenderCore and its
