@@ -6,11 +6,13 @@ on:
     branches:
       - "feature/android-port-*"
       - "feature/mobile-portrait-*"
+      - "integrate/mobile-ui-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - ".github/workflows/apex-android-full-shell-audit.yml"
       - "My DAW/DAW_Core/Source/**"
+      - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
 
 concurrency:
