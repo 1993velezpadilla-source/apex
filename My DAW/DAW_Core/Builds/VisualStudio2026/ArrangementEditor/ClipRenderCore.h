@@ -18,6 +18,8 @@
 
 namespace ArrangementEditor
 {
+    struct WaveformRasterAsyncState;
+
     class ClipRenderCore : public juce::Component
     {
     public:
@@ -34,7 +36,7 @@ namespace ArrangementEditor
         void invalidateWaveformRaster()
         {
             std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
-            m_waveformRaster = juce::Image();
+            discardRasterLocked();
         }
         void restoreWaveformAfterNavigation()
         {
@@ -117,7 +119,7 @@ namespace ArrangementEditor
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
                 if (waveformVisualChanged)
-                    m_waveformRaster = juce::Image();
+                    discardRasterLocked();
                 if (waveformSourceChanged)
                     m_waveformNeedsUpdate = true;
             }
@@ -219,6 +221,9 @@ namespace ArrangementEditor
         void setCPUDraftForced(bool draft) { m_cpuDraft     = draft;    repaint(); }
 
     private:
+        // Internal tile job is the only non-component entrypoint permitted to
+        // deliver a completed image; lifecycle guards live in the mailbox.
+        friend struct WaveformRasterTileJob;
         ArrangementClipModel  m_clipData;              // owned copy — immune to vector reallocation
         ArrangementClipModel* m_model = &m_clipData;   // always points to m_clipData
         juce::Uuid             m_clipId;                // stable copy of clip ID
@@ -232,12 +237,20 @@ namespace ArrangementEditor
         mutable std::recursive_mutex m_dataMutex;
 
         std::unique_ptr<ClipWaveformCacheCore> m_waveformCache;
-        // One short, viewport-sized waveform tile per clip. Keeps waveform
-        // visible while scrolling; caps memory independently of song length.
+        // One short viewport tile + one speculative tile (both bounded).
+        // The worker never accesses a live Component: only an immutable
+        // model/peak snapshot and a lifetime-guarded mailbox.
+        std::shared_ptr<WaveformRasterAsyncState> m_waveformAsyncState;
         juce::Image m_waveformRaster;
         int m_waveformRasterX = 0;
         int m_waveformRasterClipW = 0;
         int m_waveformRasterClipH = 0;
+        juce::Image m_nextWaveformRaster;
+        int m_nextWaveformRasterX = 0;
+        int m_nextWaveformRasterClipW = 0;
+        int m_nextWaveformRasterClipH = 0;
+        bool m_waveformRasterPending = false;
+        std::uint64_t m_waveformRasterSerial = 0;
         std::unique_ptr<PianoRollButtonCore>   m_pianoRollBtn;
 
         // Hit-zones for interactive handles inside the clip.
@@ -314,6 +327,14 @@ namespace ArrangementEditor
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);
         void drawWaveformUncached(juce::Graphics& g);
+        // Called with m_dataMutex already held.
+        void discardRasterLocked();
+        void requestWaveformRasterAsync(int tileX, int tileWidth);
+        // Called only from JUCE's message thread when an off-thread software
+        // raster has completed (never directly from the worker).
+        void acceptWaveformRasterAsync(juce::Image image,
+            int tileX, int clipW, int clipH,
+            std::uint64_t generation, std::uint64_t serial);
         void drawFades(juce::Graphics& g);
         void drawGainLine(juce::Graphics& g);
         void drawMuteOverlay(juce::Graphics& g);
