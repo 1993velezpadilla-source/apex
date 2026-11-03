@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include "../../../Source/AudioEngineCore/AudioFileManager.h"
+#include "WaveformPeakRangeIndexCore.h"
 
 namespace ArrangementEditor
 {
@@ -18,6 +19,9 @@ namespace ArrangementEditor
     {
         std::vector<float> minPeaks;
         std::vector<float> maxPeaks;
+        // Exact, compact 32:1 / 1024:1 min/max hierarchy built when the
+        // underlying source peaks change, NEVER inside UI paint.
+        WaveformPeakRangeIndexCore rangeIndex;
         /** Peak-bucket indices whose source samples reached 0 dBFS
             (|sample| >= 1). Sorted ascending; used to draw the clipped-
             position markers on the clip. */
