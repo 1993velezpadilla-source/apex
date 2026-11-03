@@ -1131,8 +1131,10 @@ namespace ArrangementEditor
             }
         }
 
-        if (metricsActive)
-            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(static_cast<uint64_t>(visiblePeakCount));
+        // The old counter reported the WHOLE visible source on each paint,
+        // even when only a narrow tile was rasterised. Count actual peak/index
+        // bucket visits below so performance evidence measures real work.
+        std::size_t peakBucketsRead = 0;
 
         // â”€â”€ Visual gain/fade multipliers (REALTIME, NO CACHE REGEN) â”€â”€â”€â”€â”€â”€
         // This is the KEY FIX:
@@ -1225,13 +1227,13 @@ namespace ArrangementEditor
                 i0 = juce::jlimit(visibleStartPeak, lastPeak, i0);
                 i1 = juce::jlimit(i0, lastPeak, i1);
 
-                rawMin = peaks.minPeaks[(size_t)i0];
-                rawMax = peaks.maxPeaks[(size_t)i0];
-                for (int i = i0 + 1; i <= i1; ++i)
-                {
-                    rawMin = juce::jmin(rawMin, peaks.minPeaks[(size_t)i]);
-                    rawMax = juce::jmax(rawMax, peaks.maxPeaks[(size_t)i]);
-                }
+                // O(1)-ish min/max across long source ranges using the
+                // immutable 32/1024-peak hierarchy. No downsample averaging:
+                // preserve EVERY transient exactly, including single-bucket
+                // clicks on a long clip at minimum zoom.
+                peaks.rangeIndex.query(peaks.minPeaks, peaks.maxPeaks,
+                    i0, i1, rawMin, rawMax,
+                    metricsActive ? &peakBucketsRead : nullptr);
             }
             else
             {
@@ -1248,6 +1250,8 @@ namespace ArrangementEditor
                        + (peaks.minPeaks[(size_t)ib] - peaks.minPeaks[(size_t)ia]) * t;
                 rawMax = peaks.maxPeaks[(size_t)ia]
                        + (peaks.maxPeaks[(size_t)ib] - peaks.maxPeaks[(size_t)ia]) * t;
+                if (metricsActive)
+                    peakBucketsRead += 2;
             }
 
             // â”€â”€ APPLY VISUAL TRANSFORMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1286,8 +1290,9 @@ namespace ArrangementEditor
             // over-0 dBFS markers, so a limiter/gain change clears them on
             // the next listen pass rather than producing false positives.
         }
-
-
+        if (metricsActive)
+            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(
+                static_cast<uint64_t>(peakBucketsRead));
     }
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
