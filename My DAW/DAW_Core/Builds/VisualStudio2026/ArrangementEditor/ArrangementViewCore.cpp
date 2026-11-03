@@ -1213,6 +1213,7 @@ namespace ArrangementEditor
                     2.0, 4000.0);
                 if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
                 {
+                    ClipRenderCore::s_pinchZoomActive.store(true, std::memory_order_relaxed);
                     ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                     const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
                     const double focusViewportX = focusX - viewport->getViewPositionX();
@@ -1244,6 +1245,7 @@ namespace ArrangementEditor
                     24.0, 180.0);
                 if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
                 {
+                    ClipRenderCore::s_pinchZoomActive.store(true, std::memory_order_relaxed);
                     ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
                     const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
                     const double focusViewportY = focusY - viewport->getViewPositionY();
@@ -1275,6 +1277,7 @@ namespace ArrangementEditor
         m_lastPinchSepY = 0.0;
         if (wasTwoFingerPinch)
         {
+            ClipRenderCore::s_pinchZoomActive.store(false, std::memory_order_relaxed);
             const bool hadNavigationPreview = ClipRenderCore::s_lightweightPaint.exchange(
                 false, std::memory_order_relaxed);
             if (hadNavigationPreview)
@@ -1493,12 +1496,13 @@ namespace ArrangementEditor
                 false, std::memory_order_relaxed);
             if (wasLightweight)
             {
-                // Restore pending waveform peaks ONLY for actually visible
-                // clips after touch inertia; never recreate all renderers.
+                // Pure inertia does NOT change waveform geometry. Keep the
+                // hot raster tiles across finger release (old code threw away
+                // every image, forcing synchronous peak drawing immediately
+                // after each scroll). Layout was already updated while moving.
                 for (auto& clip : m_clipRenderers)
                     if (clip != nullptr && clip->isShowing())
-                        clip->restoreWaveformAfterNavigation();
-                updateAutomationLayout();
+                        clip->restoreWaveformAfterPan();
                 repaint(getViewportVisibleBounds());
             }
             return false;
@@ -1595,7 +1599,7 @@ namespace ArrangementEditor
             {
                 for (auto& clip : m_clipRenderers)
                     if (clip != nullptr && clip->isShowing())
-                        clip->restoreWaveformAfterNavigation();
+                        clip->restoreWaveformAfterPan();
                 repaint(getViewportVisibleBounds());
             }
         }
