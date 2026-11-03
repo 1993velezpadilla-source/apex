@@ -52,10 +52,25 @@ static_assert(valid(852, 300));
 static_assert(valid(13, 25));
 static_assert(valid(1, 1));
 static_assert(valid(0, 0));
-static_assert(valid(-1, 144));
-static_assert(valid(360, -1));
-static_assert(valid(std::numeric_limits<int>::min(), 144));
-static_assert(valid(360, std::numeric_limits<int>::min()));
+// Invalid OS dimensions must produce an empty, non-interactive layout.
+// The normal bounds validator intentionally requires nonnegative viewports.
+constexpr bool emptyLayout(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds controls[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.click, r.fx, r.browser, r.mixer, r.sends,
+        r.clock, r.tempo, r.key, r.automation
+    };
+    for (const auto control : controls)
+        if (control.x || control.y || control.width || control.height)
+            return false;
+    return true;
+}
+static_assert(emptyLayout(portraitTransportLayout(-1, 144)));
+static_assert(emptyLayout(portraitTransportLayout(360, -1)));
+static_assert(emptyLayout(portraitTransportLayout(std::numeric_limits<int>::min(), 144)));
+static_assert(emptyLayout(portraitTransportLayout(360, std::numeric_limits<int>::min())));
 static_assert(valid(std::numeric_limits<int>::max(),
                     std::numeric_limits<int>::max()));
 
@@ -108,10 +123,10 @@ static_assert(validCompact(480, 96));
 static_assert(validCompact(245, 96));
 static_assert(validCompact(20, 8));
 static_assert(validCompact(0, 0));
-static_assert(validCompact(-1, 96));
-static_assert(validCompact(360, -1));
-static_assert(validCompact(std::numeric_limits<int>::min(), 96));
-static_assert(validCompact(360, std::numeric_limits<int>::min()));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(-1, 96)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, -1)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(std::numeric_limits<int>::min(), 96)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, std::numeric_limits<int>::min())));
 static_assert(validCompact(std::numeric_limits<int>::max(),
                            std::numeric_limits<int>::max()));
 constexpr auto compact360 = DAW::mobile::compactPhoneTransportLayout(360, 96);
