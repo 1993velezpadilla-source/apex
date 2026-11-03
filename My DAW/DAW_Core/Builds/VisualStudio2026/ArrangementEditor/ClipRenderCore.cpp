@@ -17,6 +17,14 @@
 
 namespace ArrangementEditor
 {
+    // The worker only owns this mailbox. It never dereferences a Component
+    // until its completion callback runs on JUCE's message thread.
+    struct WaveformRasterAsyncState
+    {
+        std::atomic<ClipRenderCore*> owner{nullptr};
+        std::atomic<std::uint64_t> generation{1};
+    };
+
     namespace Col
     {
         // APEX signal-core tokens (see ThemeCore::ApexTokens)
@@ -42,6 +50,8 @@ namespace ArrangementEditor
         setCachedComponentImage(nullptr);
         setBufferedToImage(false);
 
+        m_waveformAsyncState = std::make_shared<WaveformRasterAsyncState>();
+        m_waveformAsyncState->owner.store(this, std::memory_order_release);
         m_waveformCache = std::make_unique<ClipWaveformCacheCore>();
         auto safe = juce::Component::SafePointer<ClipRenderCore>(this);
         m_waveformCache->onPeaksReady = [safe]()
@@ -69,9 +79,27 @@ namespace ArrangementEditor
 
     ClipRenderCore::~ClipRenderCore()
     {
+        // Invalidates all queued jobs, including a completion already posted
+        // into the message queue. Jobs never own nor touch this component.
+        if (m_waveformAsyncState)
+        {
+            m_waveformAsyncState->owner.store(nullptr, std::memory_order_release);
+            m_waveformAsyncState->generation.fetch_add(1, std::memory_order_acq_rel);
+        }
         DBG("[CRASH TRACE] action=cliprender_destroyed");
         if (m_waveformCache)
             m_waveformCache->onPeaksReady = nullptr;
+    }
+
+
+    void ClipRenderCore::discardRasterLocked()
+    {
+        // Caller holds m_dataMutex. Old jobs are harmlessly ignored; do not
+        // synchronously cancel/wait for a worker from any paint path.
+        m_waveformRaster = {};
+        m_nextWaveformRaster = {};
+        if (m_waveformAsyncState)
+            m_waveformAsyncState->generation.fetch_add(1, std::memory_order_acq_rel);
     }
 
     void ClipRenderCore::setModel(ArrangementClipModel& model)
@@ -84,7 +112,7 @@ namespace ArrangementEditor
     {
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
         // Peak changes alter the pixels, never keep a stale tile.
-        m_waveformRaster = juce::Image();
+        discardRasterLocked();
         if (m_model)
         {
             // Tiny clips retain their block/selection visuals but do not need
@@ -139,7 +167,7 @@ namespace ArrangementEditor
             m_cachedAudio = std::move(cachedAudio);
             m_allowFileFallback = allowFileFallback;
             m_waveformNeedsUpdate = true;
-            m_waveformRaster = juce::Image();
+            discardRasterLocked();
         }
 
         if (isShowing() && shouldRenderWaveform())
@@ -152,7 +180,7 @@ namespace ArrangementEditor
         if (m_selected == selected) return;
         m_selected = selected;
         // Selection changes the waveform tint; do not cache the old colour.
-        m_waveformRaster = juce::Image();
+        discardRasterLocked();
         repaint();
     }
 
@@ -632,7 +660,7 @@ namespace ArrangementEditor
             {
                 m_model->gain = nextGain;
                 m_model->bumpWaveformVisualVersion();
-                m_waveformRaster = juce::Image();
+                discardRasterLocked();
                 if (onEditLive) onEditLive();
                 repaint();
             }
@@ -653,7 +681,7 @@ namespace ArrangementEditor
                     m_model->bumpWaveformVisualVersion();
                     // A fade changes peak HEIGHTS, not the source peaks.
                     // Discard only the rendered visual tile; never re-decode.
-                    m_waveformRaster = juce::Image();
+                    discardRasterLocked();
                 }
                 break;
             }
@@ -667,7 +695,7 @@ namespace ArrangementEditor
                 {
                     m_model->fadeOutLength = (float)newFadeOut;
                     m_model->bumpWaveformVisualVersion();
-                    m_waveformRaster = juce::Image();
+                    discardRasterLocked();
                 }
                 break;
             }
