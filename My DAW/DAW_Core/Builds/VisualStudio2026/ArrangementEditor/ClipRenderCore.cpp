@@ -1377,9 +1377,15 @@ namespace ArrangementEditor
 
     static juce::ThreadPool& waveformTilePool()
     {
-        // Bounded pool across ALL clips: two software raster jobs maximum,
-        // rather than one renderer thread per audio region.
+        // A phone's render thread competes with native audio and the UI for
+        // a small CPU power/thermal budget. One background raster on Android
+        // prevents two tile renderers from saturating that budget at once.
+        // Desktop keeps two concurrent tile jobs.
+       #if JUCE_ANDROID
+        static juce::ThreadPool pool(1);
+       #else
         static juce::ThreadPool pool(2);
+       #endif
         return pool;
     }
 
