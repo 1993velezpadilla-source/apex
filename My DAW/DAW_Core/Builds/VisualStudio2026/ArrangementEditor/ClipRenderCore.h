@@ -96,12 +96,28 @@ namespace ArrangementEditor
                     || m_clipData.sourceEndSample != data.sourceEndSample
                     || m_clipData.processedWaveformVersion != data.processedWaveformVersion;
 
+                // Upsert also runs on non-waveform changes (clip name, track
+                // position, header state, etc). Throwing away the raster on
+                // EVERY upsert made the next pan repaint rescan peaks despite
+                // identical audio. Keep pixels unless their inputs change.
+                const bool waveformVisualChanged = waveformSourceChanged
+                    || m_clipData.gain != data.gain
+                    || m_clipData.fadeInLength != data.fadeInLength
+                    || m_clipData.fadeOutLength != data.fadeOutLength
+                    || m_clipData.fadeInCurve != data.fadeInCurve
+                    || m_clipData.fadeOutCurve != data.fadeOutCurve
+                    || m_clipData.reversed != data.reversed
+                    || m_clipData.muted != data.muted
+                    || m_clipData.trackColour != data.trackColour
+                    || m_clipData.timePitch.mode != data.timePitch.mode
+                    || m_clipData.timePitch.stretchRatio != data.timePitch.stretchRatio
+                    || m_clipData.waveformVisualVersion != data.waveformVisualVersion;
+
                 m_clipData = data;
                 m_clipId   = data.id;
                 m_model    = &m_clipData;  // keep pointer valid
-                // Any updated trim/gain/fade/source/colour must never reuse
-                // stale rendered waveform pixels.
-                m_waveformRaster = juce::Image();
+                if (waveformVisualChanged)
+                    m_waveformRaster = juce::Image();
                 if (waveformSourceChanged)
                     m_waveformNeedsUpdate = true;
             }
