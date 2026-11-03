@@ -236,6 +236,7 @@ namespace ArrangementEditor
         ArrangementClipStateCore& getClipState() { return m_clipState; }
         ArrangementSelectionCore& getSelection() { return m_selection; }
         ArrangementZoomCore& getZoom() { return m_zoom; }
+        bool isFastTouchPinchResize() const noexcept { return m_fastTouchPinchResize; }
         // One native expanded playlist owner, with virtual take bands that
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
@@ -521,6 +522,9 @@ namespace ArrangementEditor
         double m_lastTouchPanTimeMs = 0.0;
         double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
         double m_touchPanVelocityY = 0.0;
+        // Bounds-only pinch path; never re-fetch all audio/clip data per frame.
+        bool m_fastTouchPinchResize = false;
+        void updateClipGeometryForFastPinch();
         bool applyTouchPanInertia();
         void endTouchPanGesture();
 
