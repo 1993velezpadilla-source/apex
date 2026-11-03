@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False):
+                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -72,6 +72,15 @@ class ImmersiveManifestTests(unittest.TestCase):
                 self.assertIn("WindowInsetsController", source)
                 self.assertIn("SCREEN_ORIENTATION_USER", source)
                 self.assertNotIn("SCREEN_ORIENTATION_PORTRAIT", source)
+                if rerun:
+                    first_manifest = manifest.read_bytes()
+                    first_java = java.read_bytes()
+                    second = subprocess.run(
+                        [sys.executable, str(SCRIPT), "--project", str(generated)],
+                        capture_output=True, text=True, check=False)
+                    self.assertEqual(second.returncode, 0, second.stderr)
+                    self.assertEqual(manifest.read_bytes(), first_manifest)
+                    self.assertEqual(java.read_bytes(), first_java)
             return run
 
     def test_juce8_manifest_without_package_uses_generated_project(self):
@@ -92,6 +101,12 @@ class ImmersiveManifestTests(unittest.TestCase):
             with self.subTest(bundle=bundle):
                 self.assertEqual(
                     self.run_patch(bundle, decoy_launcher_only_first=True).returncode, 0)
+
+    def test_reapplying_patch_preserves_generated_files(self):
+        # Android exporter scripts may be rerun; patching must be idempotent.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                self.assertEqual(self.run_patch(bundle, rerun=True).returncode, 0)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
