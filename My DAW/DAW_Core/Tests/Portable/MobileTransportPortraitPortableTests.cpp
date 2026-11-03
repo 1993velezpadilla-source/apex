@@ -141,6 +141,29 @@ static_assert(rotated.transport[0].width >= 44
 static_assert(rotated.mixer.width >= 44 && rotated.mixer.height >= 44);
 static_assert(rotated.sends.width >= 44 && rotated.sends.height >= 44);
 
+// Realistic phone rotation must preserve semantic order as well as bounds.
+// A non-overlapping but permuted transport would still be a broken UI.
+constexpr bool orderedActions(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (r.transport[i].width < 44 || r.transport[i].height < 44)
+            return false;
+        if (i && r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
+            return false;
+    }
+    return r.fx.width >= 44 && r.browser.width >= 44
+        && r.mixer.width >= 44 && r.sends.width >= 44
+        && r.fx.x < r.browser.x && r.browser.x < r.mixer.x
+        && r.mixer.x < r.sends.x
+        && r.fx.y == r.sends.y
+        && r.transport[0].y >= r.sends.y + r.sends.height;
+}
+static_assert(orderedActions(320, 112));
+static_assert(orderedActions(360, 96));
+static_assert(orderedActions(852, 180));
+
 int main()
 {
     // Exhaustively cross the 189-unit compact shortcut threshold during
