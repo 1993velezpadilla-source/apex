@@ -14,6 +14,19 @@ import sys
 import xml.etree.ElementTree as ET
 
 
+def is_portrait_preview(github_ref_name: str, github_head_ref: str = "",
+                        explicit_preview: str = "") -> bool:
+    """Recognize both original mobile branch and its unified integration PR.
+
+    Keep the preview application ID separate from APEX's original fulltest APK
+    so installing an updated build cannot overwrite existing test projects.
+    """
+    return (explicit_preview == "1" or any(
+        ref.startswith(("feature/mobile-portrait-", "integrate/mobile-ui-"))
+        for ref in (github_ref_name, github_head_ref)
+    ))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
@@ -32,8 +45,11 @@ def main() -> int:
     # Mobile GUI PRs produce a DIFFERENT Android application ID. The portrait
     # preview can be installed alongside an existing full-shell APK, without
     # deleting or overwriting the user's saved Android test projects.
-    portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
-                        or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
+    portrait_preview = is_portrait_preview(
+        os.environ.get("GITHUB_REF_NAME", ""),
+        os.environ.get("GITHUB_HEAD_REF", ""),
+        os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW", ""),
+    )
     root.set("name", "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid")
     root.set("bundleIdentifier", "com.xziel.apex.mobileportrait" if portrait_preview
              else "com.xziel.apex.fulltest")
