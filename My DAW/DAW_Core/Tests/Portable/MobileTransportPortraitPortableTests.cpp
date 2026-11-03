@@ -12,8 +12,10 @@ constexpr bool inside(PortraitTransportBounds r, int w, int h)
 }
 constexpr bool separated(PortraitTransportBounds a, PortraitTransportBounds b)
 {
-    return a.x + a.width <= b.x || b.x + b.width <= a.x
-        || a.y + a.height <= b.y || b.y + b.height <= a.y;
+    return static_cast<long long>(a.x) + a.width <= b.x
+        || static_cast<long long>(b.x) + b.width <= a.x
+        || static_cast<long long>(a.y) + a.height <= b.y
+        || static_cast<long long>(b.y) + b.height <= a.y;
 }
 constexpr bool valid(int w, int h)
 {
@@ -32,6 +34,12 @@ constexpr bool valid(int w, int h)
         if (!inside(bottom[i], w, h)) return false;
         for (int j = 0; j < i; ++j)
             if (!separated(bottom[j], bottom[i])) return false;
+        // The bottom shortcuts must not cover any of the six transport actions.
+        // Prior tests only compared controls within their own row.
+        if (bottom[i].width > 0 && bottom[i].height > 0)
+            for (int j = 0; j < 6; ++j)
+                if (r.transport[j].width > 0 && r.transport[j].height > 0
+                    && !separated(bottom[i], r.transport[j])) return false;
     }
     return true;
 }
@@ -117,6 +125,81 @@ static_assert(validCompact(189, 94));
 static_assert(validCompact(188, 94));
 static_assert(validCompact(320, 94));
 static_assert(validCompact(360, 94));
+// At the 189-unit compact breakpoint the four shortcuts must not shrink
+// below the intended 44-unit hit width. Just below it they must remain
+// bounded rather than overlapping the clock/readouts.
+constexpr auto compactAtThreshold = DAW::mobile::compactPhoneTransportLayout(189, 94);
+constexpr auto compactBelowThreshold = DAW::mobile::compactPhoneTransportLayout(188, 94);
+static_assert(compactAtThreshold.fx.width == 44
+              && compactAtThreshold.browser.width == 44
+              && compactAtThreshold.mixer.width == 44
+              && compactAtThreshold.sends.width == 44);
+static_assert(compactBelowThreshold.fx.width < 44
+              && compactBelowThreshold.sends.width < 44);
+static_assert(compactAtThreshold.transport[0].height >= 44
+              && compactBelowThreshold.transport[0].height >= 44);
+// Landscape rotation must preserve the six transport hit targets and
+// phone-only floating Mixer / Sends shortcuts at accessible dimensions.
+constexpr auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
+static_assert(rotated.transport[0].width >= 44
+              && rotated.transport[5].width >= 44
+              && rotated.transport[0].height >= 44);
+static_assert(rotated.mixer.width >= 44 && rotated.mixer.height >= 44);
+static_assert(rotated.sends.width >= 44 && rotated.sends.height >= 44);
+
+// Realistic phone rotation must preserve semantic order as well as bounds.
+// A non-overlapping but permuted transport would still be a broken UI.
+constexpr bool orderedActions(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (r.transport[i].width < 44 || r.transport[i].height < 44)
+            return false;
+        if (i && r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
+            return false;
+    }
+    return r.fx.width >= 44 && r.browser.width >= 44
+        && r.mixer.width >= 44 && r.sends.width >= 44
+        && r.fx.x < r.browser.x && r.browser.x < r.mixer.x
+        && r.mixer.x < r.sends.x
+        && r.fx.y == r.sends.y
+        && r.transport[0].y >= r.sends.y + r.sends.height;
+}
+static_assert(orderedActions(320, 112));
+static_assert(orderedActions(360, 96));
+static_assert(orderedActions(852, 180));
+
+// Compact readouts must never cover phone-only Mixer/Sends shortcuts.
+// Optional readouts are suppressed when the viewport is too narrow; if
+// visible, each must keep its minimum intended width and original order.
+constexpr bool orderedReadouts(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    const PortraitTransportBounds readouts[] = {
+        r.clock, r.tempo, r.key, r.automation, r.click
+    };
+    const int minimums[] = { 54, 54, 54, 44, 44 };
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto a = readouts[i];
+        if (a.width == 0 && a.height == 0) continue;
+        if (a.width < minimums[i] || a.height <= 0) return false;
+        if (!inside(a, w, h)) return false;
+        if (!separated(a, r.fx) || !separated(a, r.browser)
+            || !separated(a, r.mixer) || !separated(a, r.sends))
+            return false;
+        for (int j = 0; j < i; ++j)
+            if (readouts[j].width && readouts[j].x >= a.x)
+                return false;
+    }
+    return true;
+}
+static_assert(orderedReadouts(189, 94));
+static_assert(orderedReadouts(320, 112));
+static_assert(orderedReadouts(360, 96));
+static_assert(orderedReadouts(852, 180));
+static_assert(orderedReadouts(1024, 256));
 
 // Regression for seven physical phone transport targets, retaining
 // Return To Start directly between Undo and centre Record.
@@ -165,6 +248,7 @@ int main()
         {
             assert(valid(w, h));
             assert(validCompact(w, h));
+            assert(orderedReadouts(w, h));
             assert(validPrimary(w, h));
         }
 }
