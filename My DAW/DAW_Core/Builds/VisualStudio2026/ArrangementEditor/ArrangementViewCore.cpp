@@ -1463,6 +1463,11 @@ namespace ArrangementEditor
                 false, std::memory_order_relaxed);
             if (wasLightweight)
             {
+                // Restore pending waveform peaks ONLY for actually visible
+                // clips after touch inertia; never recreate all renderers.
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterNavigation();
                 updateAutomationLayout();
                 repaint(getViewportVisibleBounds());
             }
@@ -1557,7 +1562,12 @@ namespace ArrangementEditor
             // otherwise the last low-detail frame can remain on screen until
             // an unrelated redraw. Pure pan does not require a clip rebuild.
             if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+            {
+                for (auto& clip : m_clipRenderers)
+                    if (clip != nullptr && clip->isShowing())
+                        clip->restoreWaveformAfterNavigation();
                 repaint(getViewportVisibleBounds());
+            }
         }
     }
 
