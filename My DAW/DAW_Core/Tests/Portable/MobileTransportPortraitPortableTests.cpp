@@ -12,8 +12,10 @@ constexpr bool inside(PortraitTransportBounds r, int w, int h)
 }
 constexpr bool separated(PortraitTransportBounds a, PortraitTransportBounds b)
 {
-    return a.x + a.width <= b.x || b.x + b.width <= a.x
-        || a.y + a.height <= b.y || b.y + b.height <= a.y;
+    return static_cast<long long>(a.x) + a.width <= b.x
+        || static_cast<long long>(b.x) + b.width <= a.x
+        || static_cast<long long>(a.y) + a.height <= b.y
+        || static_cast<long long>(b.y) + b.height <= a.y;
 }
 constexpr bool valid(int w, int h)
 {
