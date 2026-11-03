@@ -103,6 +103,7 @@ public:
         : trackManager_(trackManager), clipManager_(clipManager), state_(state),
           markers_(markers), transport_(transport), audioFiles_(audioFiles), automation_(automation)
     {
+        setOpaque(true); // paint() covers the complete canvas background.
         core_ = std::make_unique<ArrangementEditor::ArrangementViewCore>();
         core_->setAudioEngineBridge(&clipManager_, audioFiles_, &trackManager_, 44100.0,
                                     clipRegionPlugins, pluginFormatManager);
@@ -189,15 +190,11 @@ public:
             const int nextLaneHeight = (int)core_->getZoom().getTrackHeightPx();
             const bool laneHeightChanged = nextLaneHeight != defaultLaneHeight_;
             defaultLaneHeight_ = nextLaneHeight;
-            if (core_->isFastTouchPinchResize() && !laneHeightChanged)
+            if (core_->isFastTouchPinchResize() && inlinePlaylistPanel_ == nullptr
+                && onPhoneZoomChanged && onPhoneZoomChanged(laneHeightChanged))
             {
-                // Horizontal phone pinch changes TIME ONLY. Do not rescan
-                // every engine clip, playlist and track header each frame.
-                // The host updates content width from the cached extent;
-                // the core updates clip rectangles, not their audio data.
-                const bool hostResized = onPhoneHorizontalZoomChanged
-                    ? onPhoneHorizontalZoomChanged() : false;
-                if (!hostResized) core_->resized();
+                // The host applies both axes once, using cached extent and
+                // presentation geometry. No engine clip or playlist scan.
                 repaint();
                 return;
             }
@@ -867,9 +864,8 @@ trackManager_.addListener(this);
     std::function<void(int,int)> onLaneHeightChanged;
     std::function<void(int)> onVerticalScrollChanged;
     std::function<void()> onLaneLayoutChanged;
-    // Lightweight host callback for live horizontal phone pinch.
-    // Returns true if it changed the arrangement bounds (triggering resized).
-    std::function<bool()> onPhoneHorizontalZoomChanged;
+    // Returns true when the phone host handled the complete zoom layout.
+    std::function<bool(bool laneHeightChanged)> onPhoneZoomChanged;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;

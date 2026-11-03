@@ -216,6 +216,22 @@ int main()
         assert(!TouchNavigationMath::pinchZoomChanges(180.0,
             TouchNavigationMath::pinchZoomTarget(180.0, 1.18, 24.0, 180.0)));
 
+    // One combined diagonal pan/pinch keeps the old midpoint's musical
+    // time and lane under the NEW midpoint, including the fixed 80px header.
+    const int nextPanZoomX = TouchNavigationMath::zoomPosition(
+        240.0 + 180.0, 190.0, 1.15, 10000, 240);
+    const int nextPanZoomY = TouchNavigationMath::zoomPosition(
+        90.0 + 250.0 - 80.0, 260.0 - 80.0, 1.25, 10000, 90);
+    assert(nextPanZoomX == 293);
+    assert(nextPanZoomY == 145);
+    assert(std::abs((nextPanZoomX + 190.0) / 1.15 - 420.0) <= 0.5);
+    assert(std::abs((nextPanZoomY + 260.0 - 80.0) / 1.25 - 260.0) <= 0.5);
+    // A two-finger pan at unchanged scale is one translation, including
+    // reversal; neither axis gets a second viewport move from zoom math.
+    assert(TouchNavigationMath::zoomPosition(420, 190, 1.0, 10000, 240) == 230);
+    assert(TouchNavigationMath::zoomPosition(260, 180, 1.0, 10000, 90) == 80);
+    assert(TouchNavigationMath::zoomPosition(420, 170, 1.0, 10000, 240) == 250);
+
     // Selected-region second tap => menu. A drag must cancel it, including
     // diagonal movements that stay below the per-axis threshold.
     assert(TouchNavigationMath::withinTapSlop(100, 100, 100, 100));

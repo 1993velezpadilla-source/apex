@@ -129,5 +129,64 @@ int main()
         assert(GridLodPolicy::barStep(density) == expected);
     }
 
-    std::cout << "ArrangementZoomCore: saturated/invalid UI zoom regression passed\n";
+    // Both axes must be visible to the ONE callback, including clamps and
+    // malformed input. A diagonal gesture used to trigger two host layouts.
+    ArrangementEditor::ArrangementZoomCore gestureZoom;
+    int gestureLayouts = 0;
+    gestureZoom.onZoomChanged = [&]
+    {
+        ++gestureLayouts;
+        assert(gestureZoom.getPixelsPerSecond() == 250.0);
+        assert(gestureZoom.getTrackHeightPx() == 120.0);
+    };
+    assert(gestureZoom.setZoom(250.0, 120.0));
+    assert(gestureLayouts == 1);
+    for (int i = 0; i < 1000; ++i)
+        assert(!gestureZoom.setZoom(250.0, 120.0));
+    assert(!gestureZoom.setZoom(nan, inf));
+    assert(gestureLayouts == 1);
+    gestureZoom.onZoomChanged = [&] { ++gestureLayouts; };
+    assert(gestureZoom.setZoom(1e300, -1e300));
+    assert(gestureZoom.getPixelsPerSecond() == 4000.0);
+    assert(gestureZoom.getTrackHeightPx() == 24.0);
+    assert(gestureLayouts == 2);
+    assert(!gestureZoom.setZoom(inf, -inf));
+
+    // Count real generated grid candidates: work must depend on the dirty
+    // viewport width, even many hours into a long, highly zoomed timeline.
+    const auto countBars = [](GridLodPolicy::BarRange range)
+    {
+        return range.last < range.first ? int64_t(0)
+            : (range.last - range.first) / range.step + 1;
+    };
+    for (double pps : {2.0, 5.0, 100.0, 4000.0})
+        for (double bpm : {60.0, 120.0, 300.0})
+        {
+            const double pxPerBar = pps * 240.0 / bpm;
+            const int step = GridLodPolicy::barStep(pxPerBar);
+            for (double origin : {0.0, 43200.0 * pps, 1000000000.0})
+            {
+                const auto visible = GridLodPolicy::visibleBars(origin, origin + 720.0,
+                                                               pxPerBar, step);
+                const auto strip = GridLodPolicy::visibleBars(origin, origin + 7.0,
+                                                             pxPerBar, step);
+                assert(countBars(visible) <= 720.0 / (pxPerBar * step) + 3);
+                assert(countBars(strip) <= 7.0 / (pxPerBar * step) + 3);
+                assert(visible.first % step == 0);
+                assert(visible.first * pxPerBar <= origin);
+                assert(visible.last * pxPerBar >= origin + 720.0);
+            }
+            const int labelStep = GridLodPolicy::labelStep(pxPerBar);
+            assert(labelStep * pxPerBar >= 48.0);
+            assert((labelStep & (labelStep - 1)) == 0);
+        }
+    assert(countBars(GridLodPolicy::visibleBars(5, 5, 10, 1)) == 0);
+    assert(countBars(GridLodPolicy::visibleBars(5, 4, 10, 1)) == 0);
+    assert(countBars(GridLodPolicy::visibleBars(0, 720, nan, 1)) == 0);
+    assert(countBars(GridLodPolicy::visibleBars(0, inf, 10, 1)) == 0);
+    assert(countBars(GridLodPolicy::visibleBars(-80, -10, 10, 1)) == 0);
+    const auto largeRange = GridLodPolicy::visibleBars(1e300, 1.1e300, 1e-300, 0);
+    assert(largeRange.first >= 0 && largeRange.last >= largeRange.first);
+
+    std::cout << "ArrangementZoomCore: bounded grid and batched pinch regressions passed\n";
 }

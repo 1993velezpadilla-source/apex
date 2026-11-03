@@ -27,6 +27,7 @@
 #include "RecordingCore/RecordingInputValidityCore.h"
 #include "UICore/QuickSendPopup.h"
 #include "UICore/MobilePanelGeometry.h"
+#include "DiagnosticsCore/AndroidUiTrace.h"
 #include <set>
 #include <algorithm>
 #include <cstdlib>
@@ -471,6 +472,7 @@ public:
     std::function<void(const TimelineZoomScrollBar::EdgeDragInfo&)> onThumbEdgeDragged;
     std::function<double()> getPixelsPerSecond;
     std::function<double()> getLaneHeight;
+    std::function<void(const juce::Rectangle<int>&)> onVisibleAreaChanged;
 
     /** (isVertical, zoomIn) — fired by the corner zoom buttons. */
     std::function<void(bool, bool)> onZoomButton;
@@ -587,6 +589,14 @@ public:
     }
 
 protected:
+    void visibleAreaChanged(const juce::Rectangle<int>& area) override
+    {
+        // Synchronous with the real view position, including hidden phone
+        // scrollbars. ScrollBar::Listener notifications can arrive later.
+        if (onVisibleAreaChanged)
+            onVisibleAreaChanged(area);
+    }
+
     juce::ScrollBar* createScrollBarComponent(bool isVertical) override
     {
         auto* bar = new TimelineZoomScrollBar(isVertical);
@@ -2434,13 +2444,10 @@ MainComponent::MainComponent()
         return &appCore_.getRoutingGraph();
     });
 
-    auto syncTrackHeaders = [this]()
+    auto syncTrackHeaderGeometry = [this]()
     {
         if (!arrangement_ || !trackList_)
             return;
-
-        updateTimelineViewportContentBounds();
-
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
 
         // Master lane is at index 0 in ArrangementView; offset regular tracks by 1
@@ -2459,6 +2466,11 @@ MainComponent::MainComponent()
         trackList_->resized();
         trackList_->repaint();
     };
+    auto syncTrackHeaders = [this, syncTrackHeaderGeometry]()
+    {
+        updateTimelineViewportContentBounds();
+        syncTrackHeaderGeometry();
+    };
 
     // Keep TrackList in sync when Arrangement lanes are resized vertically
     arrangement_->onLaneHeightChanged = [this](int index, int newHeight)
@@ -2475,27 +2487,33 @@ MainComponent::MainComponent()
             trackList_->setScrollOffset(y);
     };
     arrangement_->onLaneLayoutChanged = syncTrackHeaders;
-    arrangement_->onPhoneHorizontalZoomChanged = [this]() -> bool
+    arrangement_->onPhoneZoomChanged = [this, syncTrackHeaderGeometry](bool laneHeightChanged) -> bool
     {
         if (!usesPhoneMixerPresentation() || arrangement_ == nullptr
             || timelineViewport_ == nullptr)
             return false;
 
-        // Reuse the already-computed song/playhead/loop extent. The old
-        // onLaneLayoutChanged() path rescanned ALL engine clips and rebuilt
-        // every track/playlist on every horizontal pinch sample.
+        DAW::ScopedAndroidUiTrace trace("APEX.timeline.zoomLayout");
+
+        // Both pinch axes use the cached song/playhead/loop extent. Vertical
+        // samples must not fall back to getAllClips()/audio layout either.
         const int visibleW = juce::jmax(1, timelineViewport_->getViewWidth());
         const double seconds = juce::jmax(30.0, lastTimelineContentLengthSeconds_);
         const double rawWidth = arrangement_->getPixelsPerSecond() * seconds;
         const int contentW = juce::jmax(visibleW + 1,
             juce::roundToInt(juce::jmin(2147480000.0,
                 juce::jmax(4.0, rawWidth))));
-        if (arrangement_->getWidth() == contentW)
-            return false;
-
-        // Changing width calls resized() while the core's fast-pinch guard
-        // is active: update ONLY clip geometry, never rescan audio buffers.
-        arrangement_->setSize(contentW, arrangement_->getHeight());
+        int contentH = 80;
+        for (int i = 0; i < arrangement_->getNumLanes(); ++i)
+            contentH += arrangement_->getLaneHeight(i);
+        contentH = juce::jmax(timelineViewport_->getViewHeight() + 1, contentH);
+        const bool sizeChanged = contentW != arrangement_->getWidth()
+            || contentH != arrangement_->getHeight();
+        arrangement_->setSize(contentW, contentH);
+        if (!sizeChanged)
+            arrangement_->resized();
+        if (laneHeightChanged)
+            syncTrackHeaderGeometry();
         return true;
     };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
@@ -3090,8 +3108,15 @@ MainComponent::MainComponent()
         applyTimelineZoom(isVertical, zoomIn);
     };
     timelineViewport_ = std::move(timelineViewport);
-    timelineViewport_->getVerticalScrollBar().addListener(this);
-    timelineViewport_->getHorizontalScrollBar().addListener(this);
+    static_cast<TimelineViewport*>(timelineViewport_.get())->onVisibleAreaChanged =
+        [this](const juce::Rectangle<int>& area)
+    {
+        if (arrangement_)
+            arrangement_->setViewportScrollOffsets(area.getX(), area.getY());
+        if (trackList_)
+            trackList_->setScrollOffset(area.getY());
+        syncPlaylistTimeline();
+    };
     addAndMakeVisible(*timelineViewport_);
 
     arrangement_->setCollapsedFolders(collapsedFolderTrackIds_);
@@ -7375,18 +7400,6 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
         return;
     }
 
-    if (timelineViewport_ != nullptr
-        && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
-            || scrollBar == &timelineViewport_->getVerticalScrollBar()))
-    {
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        syncPlaylistTimeline();
-        return;
-    }
-
     resized();
 }
 
@@ -8127,8 +8140,7 @@ MainComponent::~MainComponent()
     mixerViewport_.getHorizontalScrollBar().removeListener(this);
     if (timelineViewport_)
     {
-        timelineViewport_->getHorizontalScrollBar().removeListener(this);
-        timelineViewport_->getVerticalScrollBar().removeListener(this);
+        static_cast<TimelineViewport*>(timelineViewport_.get())->onVisibleAreaChanged = nullptr;
     }
     inputWatchdog_.stopTimer();
     DAW::CommandManager::getInstance().setUndoRedoBlockedQuery({});

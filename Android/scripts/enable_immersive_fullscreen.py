@@ -133,6 +133,15 @@ def main() -> int:
     # Android 12+ requires an explicit exported launcher. An existing false
     # value also makes the home-screen entry unable to start this Activity.
     activity.set(f"{{{ANDROID_NS}}}exported", "true")
+    if package == "com.xziel.apex.mobileportrait":
+        # Measure the optimized preview with System Trace/Perfetto without
+        # enabling debuggable or its timing overhead. Keep this scoped to
+        # the separate mobile preview package.
+        application = root.find("application")
+        profileable = application.find("profileable")
+        if profileable is None:
+            profileable = ET.SubElement(application, "profileable")
+        profileable.set(f"{{{ANDROID_NS}}}shell", "true")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
     java = (generated / "app/src/main/java" / package.replace(".", "/")
