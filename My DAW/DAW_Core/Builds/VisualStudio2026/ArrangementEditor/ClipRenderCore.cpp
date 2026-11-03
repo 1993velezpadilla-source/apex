@@ -1002,11 +1002,12 @@ namespace ArrangementEditor
             && covers(m_nextWaveformRaster, m_nextWaveformRasterX,
                       m_nextWaveformRasterClipW, m_nextWaveformRasterClipH))
         {
-            m_waveformRaster = std::move(m_nextWaveformRaster);
-            m_waveformRasterX = m_nextWaveformRasterX;
-            m_waveformRasterClipW = m_nextWaveformRasterClipW;
-            m_waveformRasterClipH = m_nextWaveformRasterClipH;
-            m_nextWaveformRaster = {};
+            // A reversible two-tile cache: moving the next image into the
+            // front retains the previous section for a reverse swipe.
+            std::swap(m_waveformRaster, m_nextWaveformRaster);
+            std::swap(m_waveformRasterX, m_nextWaveformRasterX);
+            std::swap(m_waveformRasterClipW, m_nextWaveformRasterClipW);
+            std::swap(m_waveformRasterClipH, m_nextWaveformRasterClipH);
         }
 
         constexpr int kMaxTileWidth = 2048;
@@ -1081,7 +1082,9 @@ namespace ArrangementEditor
         {
             // If the finger reversed away from an old prefetch, discard that
             // obsolete NEXT image; the current visible range takes priority.
-            if (m_nextWaveformRaster.isValid())
+            if (m_nextWaveformRaster.isValid()
+                && !covers(m_nextWaveformRaster, m_nextWaveformRasterX,
+                           m_nextWaveformRasterClipW, m_nextWaveformRasterClipH))
                 m_nextWaveformRaster = {};
             const int x = juce::jlimit(0, maxTileX,
                 dirty.getX() - (tileW - visibleW) / 2);
@@ -1387,6 +1390,7 @@ namespace ArrangementEditor
         JobStatus runJob() override
         {
             juce::Image tile;
+            std::uint64_t rasterElapsedNs = 0;
             if (state->generation.load(std::memory_order_acquire) == generation
                 && state->owner.load(std::memory_order_acquire) != nullptr
                 && peaks && peaks->valid && !peaks->minPeaks.empty()
@@ -1398,10 +1402,17 @@ namespace ArrangementEditor
                 tile = juce::Image(juce::Image::ARGB, tileW, height - headerH, true);
                 juce::Graphics graphics(tile);
                 graphics.setOrigin(-tileX, -headerH);
-                TimelinePaintMetrics::ScopedTimer tileTimer(
-                    TimelinePaintMetrics::waveformWorkerTileDurationNs);
+                // SampleRing is a single-writer ring. Measure here, but
+                // PUBLISH the worker duration from the message-thread
+                // completion, never from either background worker.
+                const bool measuring = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+                const auto rasterStart = std::chrono::steady_clock::now();
                 renderWaveformPeaks(graphics, *peaks, model, width, height,
                                     sampleRate, selected, headerH);
+                if (measuring)
+                    rasterElapsedNs = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - rasterStart).count());
             }
 
             // Always complete the matching serial, even if cancelled by a
@@ -1410,8 +1421,11 @@ namespace ArrangementEditor
             juce::MessageManager::callAsync(
                 [mailbox = state, finished = std::move(tile),
                  x = tileX, w = width, h = height,
-                 g = generation, s = serial]() mutable
+                 g = generation, s = serial, durationNs = rasterElapsedNs]() mutable
                 {
+                    if (durationNs != 0
+                        && TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                        TimelinePaintMetrics::waveformWorkerTileDurationNs.push(durationNs);
                     if (auto* owner = mailbox->owner.load(std::memory_order_acquire))
                         owner->acceptWaveformRasterAsync(
                             std::move(finished), x, w, h, g, s);
@@ -1451,6 +1465,13 @@ namespace ArrangementEditor
         const auto serial = ++m_waveformRasterSerial;
         m_waveformRasterPending = true;
         TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformAsyncJobsQueued);
+        // Keep the global queue finite even when many tracks enter view
+        // together. No busy waits on the UI; misses draw real visible peaks.
+        if (waveformTilePool().getNumJobs() >= 12)
+        {
+            m_waveformRasterPending = false;
+            return;
+        }
         auto* job = new WaveformRasterTileJob(
             std::move(mailbox), std::move(source), *m_model,
             tileX, tileWidth, clipWidth, clipHeight,
