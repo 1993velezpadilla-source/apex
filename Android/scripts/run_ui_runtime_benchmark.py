@@ -58,7 +58,8 @@ def validate_focus(window_dump: str) -> None:
 
 
 def record_focus(path: Path) -> None:
-    dump = adb("shell", "dumpsys", "window", "windows")
+    # The `windows` subcommand omits DisplayContent's mCurrentFocus on API 35.
+    dump = adb("shell", "dumpsys", "window")
     path.write_text(dump)
     validate_focus(dump)
 
