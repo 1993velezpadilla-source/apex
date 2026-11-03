@@ -117,6 +117,11 @@ static_assert(validCompact(360, 94));
 
 int main()
 {
+    // Exhaustively cross the 189-unit compact shortcut threshold during
+    // narrow split-screen resizing; the coarse sweep can skip this boundary.
+    for (int w = 180; w <= 200; ++w)
+        for (int h = 90; h <= 100; ++h)
+            assert(validCompact(w, h));
     for (int w = 0; w < 900; w += 7)
         for (int h = 0; h < 500; h += 9)
         {
