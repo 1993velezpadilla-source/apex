@@ -105,6 +105,15 @@ static_assert(compact360.mixer.width >= 44 && compact360.sends.width >= 44);
 static_assert(compact360.mixer.height >= 44 && compact360.sends.height >= 44);
 static_assert(DAW::mobile::compactPhoneTransportLayout(320, 112).transport[0].height >= 44);
 static_assert(DAW::mobile::compactPhoneTransportLayout(480, 96).sends.width >= 44);
+// Landscape and rotation regression: all compact controls remain inside the
+// viewport even when the OS supplies a taller-than-usual transport deck.
+static_assert(validCompact(393, 144));
+static_assert(validCompact(852, 180));
+static_assert(validCompact(1024, 256));
+static_assert(validCompact(189, 94));
+static_assert(validCompact(188, 94));
+static_assert(validCompact(320, 94));
+static_assert(validCompact(360, 94));
 
 int main()
 {
@@ -112,6 +121,6 @@ int main()
         for (int h = 0; h < 500; h += 9)
         {
             assert(valid(w, h));
-            if (h < 144) assert(validCompact(w, h));
+            assert(validCompact(w, h));
         }
 }
