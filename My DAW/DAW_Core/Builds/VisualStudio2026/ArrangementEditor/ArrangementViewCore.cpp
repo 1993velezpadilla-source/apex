@@ -4636,7 +4636,11 @@ namespace ArrangementEditor
                     TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollVisibilityChanges);
             }
             if (wasVisible != shouldBeVisible)
+            {
                 renderer->setVisible(shouldBeVisible);
+                if (!shouldBeVisible)
+                    renderer->invalidateWaveformRaster();
+            }
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed)
                 && !shouldBeVisible)
