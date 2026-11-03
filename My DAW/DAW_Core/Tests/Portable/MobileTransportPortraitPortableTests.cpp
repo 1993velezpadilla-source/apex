@@ -21,7 +21,8 @@ constexpr bool valid(int w, int h)
     for (int i = 0; i < 6; ++i)
     {
         if (!inside(r.transport[i], w, h)) return false;
-        if (i > 0 && !separated(r.transport[i - 1], r.transport[i])) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(r.transport[j], r.transport[i])) return false;
     }
     const PortraitTransportBounds bottom[5] = {
         r.click, r.fx, r.browser, r.mixer, r.sends
@@ -29,7 +30,8 @@ constexpr bool valid(int w, int h)
     for (int i = 0; i < 5; ++i)
     {
         if (!inside(bottom[i], w, h)) return false;
-        if (i > 0 && !separated(bottom[i - 1], bottom[i])) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(bottom[j], bottom[i])) return false;
     }
     return true;
 }
@@ -69,7 +71,8 @@ constexpr bool validCompact(int w, int h)
     for (int i = 0; i < 6; ++i)
     {
         if (!inside(r.transport[i], w, h)) return false;
-        if (i && !separated(r.transport[i - 1], r.transport[i])) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(r.transport[j], r.transport[i])) return false;
     }
     const PortraitTransportBounds top[] = {
         r.clock, r.tempo, r.key, r.automation, r.click,
@@ -119,6 +122,11 @@ int main()
 {
     // Exhaustively cross the 189-unit compact shortcut threshold during
     // narrow split-screen resizing; the coarse sweep can skip this boundary.
+    // Probe the minimum compact-deck height and the 189-unit shortcut
+    // threshold, including the zero-layout guard immediately below h=8.
+    for (int w = 18; w <= 24; ++w)
+        for (int h = 6; h <= 12; ++h)
+            assert(validCompact(w, h));
     for (int w = 180; w <= 200; ++w)
         for (int h = 90; h <= 100; ++h)
             assert(validCompact(w, h));
