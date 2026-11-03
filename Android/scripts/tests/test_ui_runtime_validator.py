@@ -4,7 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from run_ui_runtime_benchmark import validate_result
+from run_ui_runtime_benchmark import validate_result, validate_focus
 
 
 def real_navigation_result(gpu=True, clip=True):
@@ -25,6 +25,13 @@ def real_navigation_result(gpu=True, clip=True):
 
 
 class RuntimeValidatorTests(unittest.TestCase):
+    def test_rejects_system_dialogs_and_requires_actual_apex_window_focus(self):
+        validate_focus("mCurrentFocus=Window{abc u0 com.xziel.apex.mobileportrait/.ApexImmersiveActivity}")
+        for dump in ("mCurrentFocus=null", "mCurrentFocus=Window{abc Application Error: com.google.android.apps.nexuslauncher}",
+                     "mCurrentFocus=Window{abc ImmersiveModeConfirmation}", "mFocusedApp=com.xziel.apex.mobileportrait"):
+            with self.assertRaises(ValueError):
+                validate_focus(dump)
+
     def test_accepts_real_movement_for_both_backends_and_scenes(self):
         for gpu in (False, True):
             for clip in (False, True):

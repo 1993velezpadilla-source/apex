@@ -1,0 +1,109 @@
+name: APEX Android UI Runtime Replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "integrate/mobile-ui-*"
+    paths:
+      - ".github/workflows/apex-android-ui-runtime-replay.yml"
+      - "Android/scripts/run_ui_runtime_benchmark.py"
+      - "Android/scripts/tests/test_ui_runtime_validator.py"
+
+concurrency:
+  group: apex-android-ui-runtime-replay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay-native-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      NATIVE_BUILD_RUN_ID: '41719638092'
+      NATIVE_SOURCE_SHA: '0775b252ffd45e26681df752cb44298b11346fd0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify immutable native build provenance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: run} = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.NATIVE_BUILD_RUN_ID)
+            });
+            if (run.head_sha !== process.env.NATIVE_SOURCE_SHA)
+              throw new Error('Native build source does not match the pinned SHA');
+
+      - name: Reject replay if application inputs changed
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin "$NATIVE_SOURCE_SHA"
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          allowed = {
+            '.github/workflows/apex-android-ui-runtime.yml',
+            '.github/workflows/apex-android-ui-runtime-replay.yml',
+            'Android/scripts/run_ui_runtime_benchmark.py',
+            'Android/scripts/tests/test_ui_runtime_validator.py',
+          }
+          changed = subprocess.check_output(['git', 'diff', '--name-only', os.environ['NATIVE_SOURCE_SHA'], 'HEAD'], text=True).splitlines()
+          unsupported = sorted(set(changed) - allowed)
+          if unsupported:
+            raise SystemExit('Cannot replay a stale native APK: ' + repr(unsupported))
+          out = Path('android-ui-runtime-evidence')
+          out.mkdir(exist_ok=True)
+          (out / 'native-build-provenance.json').write_text(json.dumps({
+            'native_run_id': os.environ['NATIVE_BUILD_RUN_ID'],
+            'native_source_sha': os.environ['NATIVE_SOURCE_SHA'],
+            'host_source_sha': os.environ['GITHUB_SHA'],
+            'host_cpu_count': len(os.sched_getaffinity(0)),
+            'application_inputs_unchanged': True,
+          }, indent=2))
+          PY
+          python3 -m unittest discover -s Android/scripts/tests -v
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-Android-Original-Release-Optimized-X86_64-PREVIEW
+          path: android-ui-runtime-apk
+          run-id: ${{ env.NATIVE_BUILD_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Enable Android emulator KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Compare existing signed native APK with unobstructed APEX window
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: python3 Android/scripts/run_ui_runtime_benchmark.py --apk "$(find android-ui-runtime-apk -name 'APEX-Android-Original-Release-Optimized-X86_64-Preview-*.apk' -print -quit)"
+
+      - name: Upload runtime results, focus checks, screenshots and logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Android-UI-Runtime-Replay-Evidence
+          path: android-ui-runtime-evidence/
+          if-no-files-found: error
+          retention-days: 14

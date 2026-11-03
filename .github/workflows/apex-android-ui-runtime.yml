@@ -14,7 +14,6 @@ on:
       - "Android/scripts/tests/test_pin_full_exporter_ndk.py"
       - ".github/workflows/apex-android-ui-runtime.yml"
       - "Android/Source/ApexUiBenchmark.java"
-      - "Android/scripts/run_ui_runtime_benchmark.py"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
