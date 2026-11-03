@@ -52,6 +52,10 @@ static_assert(valid(852, 300));
 static_assert(valid(13, 25));
 static_assert(valid(1, 1));
 static_assert(valid(0, 0));
+static_assert(valid(-1, 144));
+static_assert(valid(360, -1));
+static_assert(valid(std::numeric_limits<int>::min(), 144));
+static_assert(valid(360, std::numeric_limits<int>::min()));
 static_assert(valid(std::numeric_limits<int>::max(),
                     std::numeric_limits<int>::max()));
 
@@ -104,6 +108,10 @@ static_assert(validCompact(480, 96));
 static_assert(validCompact(245, 96));
 static_assert(validCompact(20, 8));
 static_assert(validCompact(0, 0));
+static_assert(validCompact(-1, 96));
+static_assert(validCompact(360, -1));
+static_assert(validCompact(std::numeric_limits<int>::min(), 96));
+static_assert(validCompact(360, std::numeric_limits<int>::min()));
 static_assert(validCompact(std::numeric_limits<int>::max(),
                            std::numeric_limits<int>::max()));
 constexpr auto compact360 = DAW::mobile::compactPhoneTransportLayout(360, 96);
