@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False, split_launcher_filters=False):
+                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False, split_launcher_filters=False, launcher_name="com.rmsl.juce.JuceActivity"):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -37,7 +37,7 @@ class ImmersiveManifestTests(unittest.TestCase):
                 ET.SubElement(decoy_filter, "category", {
                     f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             launcher_attributes = {
-                f"{{{ANDROID_NS}}}name": "com.rmsl.juce.JuceActivity"}
+                f"{{{ANDROID_NS}}}name": launcher_name}
             if launcher_exported is not None:
                 launcher_attributes[f"{{{ANDROID_NS}}}exported"] = launcher_exported
             activity = ET.SubElement(app, "activity", launcher_attributes)
@@ -152,6 +152,14 @@ class ImmersiveManifestTests(unittest.TestCase):
                 run = self.run_patch(bundle, split_launcher_filters=True)
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn("Expected exactly one launcher Activity, found 0", run.stderr)
+
+    def test_unexpected_launcher_class_is_rejected_without_mutation(self):
+        # Never replace an unrelated app entry point with the JUCE subclass.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, launcher_name="com.example.CustomActivity")
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn("Unexpected launcher activity; refuse unsafe patch", run.stderr)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
