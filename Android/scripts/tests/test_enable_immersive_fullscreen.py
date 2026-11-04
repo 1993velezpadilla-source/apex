@@ -181,6 +181,13 @@ class ImmersiveManifestTests(unittest.TestCase):
                 self.assertEqual(self.run_patch(bundle, launcher_exported="false",
                                                 rerun=True).returncode, 0)
 
+    def test_launcher_without_exported_is_repaired_idempotently(self):
+        # Some JUCE exports omit android:exported entirely. Android 12+
+        # requires it on launcher activities; patching twice must be stable.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                self.assertEqual(self.run_patch(bundle, rerun=True).returncode, 0)
+
     def test_manifest_package_matching_project_is_allowed(self):
         bundle = "com.xziel.apex.mobileportrait"
         self.assertEqual(self.run_patch(bundle, bundle).returncode, 0)
