@@ -224,6 +224,28 @@ static_assert(orderedReadouts(360, 96));
 static_assert(orderedReadouts(852, 180));
 static_assert(orderedReadouts(1024, 256));
 
+// Portrait deck regression: rotating to a wide viewport must preserve the
+// six action targets and both phone-only floating Mixer / Sends shortcuts.
+// A bounds-only check would miss controls shrinking below touch size.
+constexpr bool portraitTouchTargets(int w, int h)
+{
+    const auto r = portraitTransportLayout(w, h);
+    if (!valid(w, h)) return false;
+    for (const auto action : r.transport)
+        if (action.width < 44 || action.height < 44) return false;
+    return r.fx.width >= 44 && r.fx.height >= 44
+        && r.browser.width >= 44 && r.browser.height >= 44
+        && r.mixer.width >= 44 && r.mixer.height >= 44
+        && r.sends.width >= 44 && r.sends.height >= 44
+        && r.mixer.x < r.sends.x;
+}
+static_assert(portraitTouchTargets(320, 144));
+static_assert(portraitTouchTargets(360, 144));
+static_assert(portraitTouchTargets(393, 144));
+static_assert(portraitTouchTargets(852, 180));
+// A 112-unit deck has three rows and cannot provide 44-unit-high targets.
+static_assert(!portraitTouchTargets(360, 112));
+
 int main()
 {
     // Exhaustively cross the 189-unit compact shortcut threshold during
