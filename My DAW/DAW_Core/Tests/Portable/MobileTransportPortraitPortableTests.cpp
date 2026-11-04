@@ -262,6 +262,41 @@ static_assert(portraitActionsOrdered(320, 144));
 static_assert(portraitActionsOrdered(393, 144));
 static_assert(portraitActionsOrdered(852, 180));
 
+
+// Adversarial tap dispatch: the centre of every visible target must hit
+// exactly that target, never a neighbouring transport or shortcut. This
+// catches accidental touch interception despite otherwise valid bounds.
+constexpr bool contains(PortraitTransportBounds r, int x, int y)
+{
+    return r.width > 0 && r.height > 0
+        && x >= r.x && y >= r.y
+        && static_cast<long long>(x) < static_cast<long long>(r.x) + r.width
+        && static_cast<long long>(y) < static_cast<long long>(r.y) + r.height;
+}
+constexpr bool uniqueHitCentres(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click
+    };
+    for (int i = 0; i < 11; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int cx = a.x + a.width / 2;
+        const int cy = a.y + a.height / 2;
+        if (!contains(a, cx, cy)) return false;
+        for (int j = 0; j < 11; ++j)
+            if (i != j && contains(targets[j], cx, cy)) return false;
+    }
+    return true;
+}
+static_assert(uniqueHitCentres(portraitTransportLayout(320, 144)));
+static_assert(uniqueHitCentres(portraitTransportLayout(852, 180)));
+static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(320, 112)));
+static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180)));
+
 int main()
 {
     for (int w = 10; w <= 32; ++w)
@@ -318,5 +353,7 @@ int main()
             assert(valid(w, h));
             assert(validCompact(w, h));
             assert(orderedReadouts(w, h));
+            assert(uniqueHitCentres(portraitTransportLayout(w, h)));
+            assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
         }
 }
