@@ -246,8 +246,33 @@ static_assert(portraitTouchTargets(852, 180));
 // A 112-unit deck has three rows and cannot provide 44-unit-high targets.
 static_assert(!portraitTouchTargets(360, 112));
 
+// Rotation and Android split-screen resize boundaries: validate every pixel
+// around the portrait layout's 12/24-unit empty-layout guards, and the
+// minimum practical 320px phone width. Coarse 7x9 sweeps skip these edges.
+constexpr bool portraitActionsOrdered(int w, int h)
+{
+    const auto r = portraitTransportLayout(w, h);
+    for (int i = 1; i < 6; ++i)
+        if (r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
+            return false;
+    return r.click.y == r.sends.y && r.fx.x < r.browser.x
+        && r.browser.x < r.mixer.x && r.mixer.x < r.sends.x;
+}
+static_assert(portraitActionsOrdered(320, 144));
+static_assert(portraitActionsOrdered(393, 144));
+static_assert(portraitActionsOrdered(852, 180));
+
 int main()
 {
+    for (int w = 10; w <= 32; ++w)
+        for (int h = 22; h <= 36; ++h)
+            assert(valid(w, h));
+    for (int w = 308; w <= 332; ++w)
+        for (int h = 132; h <= 152; ++h)
+        {
+            assert(valid(w, h));
+            assert(portraitActionsOrdered(w, h));
+        }
     // Exhaustively cross the 189-unit compact shortcut threshold during
     // narrow split-screen resizing; the coarse sweep can skip this boundary.
     // Probe the minimum compact-deck height and the 189-unit shortcut
