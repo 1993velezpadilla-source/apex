@@ -292,6 +292,27 @@ constexpr bool uniqueHitCentres(DAW::mobile::PortraitTransportLayout r)
     }
     return true;
 }
+// Half-open touch bounds: a tap on the right/bottom border belongs to the
+// neighbouring target (or none), never both. Include zero-sized and large
+// coordinates to catch off-by-one and overflow regressions in hit testing.
+constexpr bool hitEdgeSemantics()
+{
+    constexpr PortraitTransportBounds a{ 10, 20, 44, 44 };
+    constexpr PortraitTransportBounds right{ 54, 20, 44, 44 };
+    constexpr PortraitTransportBounds below{ 10, 64, 44, 44 };
+    constexpr PortraitTransportBounds empty{ 10, 20, 0, 44 };
+    constexpr PortraitTransportBounds far{ std::numeric_limits<int>::max() - 44,
+                                            10, 44, 44 };
+    return contains(a, 10, 20) && contains(a, 53, 63)
+        && !contains(a, 9, 20) && !contains(a, 10, 19)
+        && !contains(a, 54, 20) && !contains(a, 10, 64)
+        && contains(right, 54, 20) && contains(below, 10, 64)
+        && !contains(empty, 10, 20)
+        && contains(far, std::numeric_limits<int>::max() - 1, 20)
+        && !contains(far, std::numeric_limits<int>::max(), 20);
+}
+static_assert(hitEdgeSemantics());
+
 static_assert(uniqueHitCentres(portraitTransportLayout(320, 144)));
 static_assert(uniqueHitCentres(portraitTransportLayout(852, 180)));
 static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(320, 112)));
