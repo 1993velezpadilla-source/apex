@@ -409,6 +409,27 @@ int main()
     }
     const auto returnedPortrait = portraitTransportLayout(widths[6], heights[6]);
     const auto returnedCompact = DAW::mobile::compactPhoneTransportLayout(widths[6], heights[6]);
+    // A rotation round-trip must restore the complete hit geometry, not
+    // merely x/width: stale y/height can silently redirect taps after resize.
+    const auto sameRect = [](PortraitTransportBounds a, PortraitTransportBounds b) {
+        return a.x == b.x && a.y == b.y
+            && a.width == b.width && a.height == b.height;
+    };
+    for (int i = 0; i < 6; ++i)
+    {
+        assert(sameRect(initialPortrait.transport[i], returnedPortrait.transport[i]));
+        assert(sameRect(initialCompact.transport[i], returnedCompact.transport[i]));
+    }
+    assert(sameRect(initialPortrait.fx, returnedPortrait.fx));
+    assert(sameRect(initialPortrait.browser, returnedPortrait.browser));
+    assert(sameRect(initialPortrait.mixer, returnedPortrait.mixer));
+    assert(sameRect(initialPortrait.sends, returnedPortrait.sends));
+    assert(sameRect(initialPortrait.click, returnedPortrait.click));
+    assert(sameRect(initialCompact.fx, returnedCompact.fx));
+    assert(sameRect(initialCompact.browser, returnedCompact.browser));
+    assert(sameRect(initialCompact.mixer, returnedCompact.mixer));
+    assert(sameRect(initialCompact.sends, returnedCompact.sends));
+    assert(sameRect(initialCompact.click, returnedCompact.click));
     for (int i = 0; i < 6; ++i)
     {
         assert(initialPortrait.transport[i].x == returnedPortrait.transport[i].x);
