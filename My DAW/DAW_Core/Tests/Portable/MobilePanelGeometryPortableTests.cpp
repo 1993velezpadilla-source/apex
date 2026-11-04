@@ -37,6 +37,31 @@ int main()
         if (shortLayout.count != 0)
             return 4;
     }
+    // Exact narrow-width transitions: never silently drop FX/Reset without
+    // offering Overflow, and never expose an action outside the title bar.
+    // These compile-time checks remain active in Release/NDEBUG builds.
+    constexpr auto tooNarrow = DAW::mobile::phoneMixerToolbarLayout(45, 32);
+    constexpr auto firstFit = DAW::mobile::phoneMixerToolbarLayout(46, 32);
+    constexpr auto twoFit = DAW::mobile::phoneMixerToolbarLayout(94, 32);
+    constexpr auto justShort = DAW::mobile::phoneMixerToolbarLayout(141, 32);
+    constexpr auto allFit = DAW::mobile::phoneMixerToolbarLayout(142, 32);
+    static_assert(tooNarrow.count == 0);
+    static_assert(firstFit.count == 1
+                  && firstFit.buttons[0].action == DAW::mobile::phoneMixerOverflow);
+    static_assert(twoFit.count == 2
+                  && twoFit.buttons[0].action == DAW::mobile::phoneMixerBrowser
+                  && twoFit.buttons[1].action == DAW::mobile::phoneMixerOverflow);
+    static_assert(justShort.count == 3
+                  && justShort.buttons[0].action == DAW::mobile::phoneMixerBrowser
+                  && justShort.buttons[1].action == DAW::mobile::phoneMixerFXChain
+                  && justShort.buttons[2].action == DAW::mobile::phoneMixerOverflow);
+    static_assert(allFit.count == 3
+                  && allFit.buttons[0].action == DAW::mobile::phoneMixerBrowser
+                  && allFit.buttons[1].action == DAW::mobile::phoneMixerFXChain
+                  && allFit.buttons[2].action == DAW::mobile::phoneMixerReset);
+    static_assert(allFit.buttons[2].bounds.x + allFit.buttons[2].bounds.width <= 142);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(142, 31).count == 0);
+
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
     constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
