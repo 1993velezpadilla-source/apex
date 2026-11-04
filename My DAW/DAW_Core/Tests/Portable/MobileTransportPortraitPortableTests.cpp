@@ -374,7 +374,14 @@ int main()
             assert(validCompact(w, h));
     for (int w = 180; w <= 200; ++w)
         for (int h = 90; h <= 100; ++h)
+        {
             assert(validCompact(w, h));
+            // Shortcut widths change at 189 logical units. Probe actual
+            // tap ownership at every size, not just non-overlapping bounds.
+            assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            assert(orderedReadouts(w, h));
+        }
     // Adversarial rotation/split-screen sequences: check every intermediate
     // viewport, not only the portrait and landscape endpoints. The layout
     // is pure geometry and must be deterministic when returning to portrait.
