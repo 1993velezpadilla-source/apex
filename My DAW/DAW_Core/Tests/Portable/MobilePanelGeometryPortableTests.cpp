@@ -56,6 +56,35 @@ int main()
                     return 6;
             }
         }
+    // Adversarial hit-target geometry across rotation-sized title bars: a
+    // taller title must centre every target, preserve 1-unit edge insets,
+    // and leave at least the documented 4-unit gap between touch targets.
+    // Check action identity too: overflow must be last, never duplicated.
+    for (int width = 0; width <= 220; ++width)
+        for (int height : { 32, 33, 44, 63, 96 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto button = layout.buttons[i];
+                if (button.bounds.x < 1
+                    || button.bounds.y != (height - 32) / 2
+                    || button.bounds.x + button.bounds.width > width - 1)
+                    return 7;
+                if (i > 0
+                    && button.bounds.x - (layout.buttons[i - 1].bounds.x
+                                          + layout.buttons[i - 1].bounds.width) < 4)
+                    return 8;
+                const auto expected = layout.count == 3
+                    ? (i == 0 ? DAW::mobile::phoneMixerBrowser
+                       : i == 1 ? DAW::mobile::phoneMixerFXChain
+                                : DAW::mobile::phoneMixerReset)
+                    : (i == layout.count - 1 ? DAW::mobile::phoneMixerOverflow
+                       : DAW::mobile::phoneMixerBrowser);
+                if (button.action != expected)
+                    return 9;
+            }
+        }
     // Exact narrow-width transitions: never silently drop FX/Reset without
     // offering Overflow, and never expose an action outside the title bar.
     // These compile-time checks remain active in Release/NDEBUG builds.
