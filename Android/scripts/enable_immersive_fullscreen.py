@@ -128,6 +128,11 @@ def main() -> int:
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
     if old not in ("com.rmsl.juce.JuceActivity", android_activity):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
+    # Do not leave a second non-launcher Activity with the same class name.
+    # Validate before writing the manifest or generating Java source.
+    if any(a is not activity and a.get(f"{{{ANDROID_NS}}}name") == android_activity
+           for a in candidates):
+        raise RuntimeError("Duplicate immersive Activity in generated manifest")
     activity.set(f"{{{ANDROID_NS}}}name", android_activity)
     activity.set(f"{{{ANDROID_NS}}}screenOrientation", "user")
     # Android 12+ requires an explicit exported launcher. An existing false
