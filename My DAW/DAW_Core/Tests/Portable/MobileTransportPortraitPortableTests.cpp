@@ -449,5 +449,9 @@ int main()
             assert(orderedReadouts(w, h));
             assert(uniqueHitCentres(portraitTransportLayout(w, h)));
             assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            // Broad resize sweep also checks edge/corner ownership. Centre-only
+            // tests miss narrow overlaps introduced at nonstandard viewport sizes.
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
+            assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
         }
 }
