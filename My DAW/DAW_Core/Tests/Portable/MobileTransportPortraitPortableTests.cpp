@@ -361,6 +361,12 @@ int main()
         if (widths[i] >= 320 && heights[i] >= 96)
             assert(orderedActions(widths[i], heights[i]));
     }
+    // Every intermediate orientation must retain uniquely dispatchable targets.
+    for (int i = 0; i < 7; ++i)
+    {
+        assert(uniqueHitCentres(portraitTransportLayout(widths[i], heights[i])));
+        assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i])));
+    }
     const auto returnedPortrait = portraitTransportLayout(widths[6], heights[6]);
     const auto returnedCompact = DAW::mobile::compactPhoneTransportLayout(widths[6], heights[6]);
     for (int i = 0; i < 6; ++i)
