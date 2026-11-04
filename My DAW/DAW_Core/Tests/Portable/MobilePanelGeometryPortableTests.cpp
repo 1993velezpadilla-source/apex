@@ -85,6 +85,28 @@ int main()
                     return 9;
             }
         }
+    // Landscape / unfolded phone widths: resizing must not introduce a fourth
+    // action, lose Reset, or place a target beyond the available toolbar.
+    // Earlier sweeps ended at 220, below common landscape toolbar widths.
+    for (int width = 221; width <= 1200; width += 7)
+        for (int height : { 32, 44, 64 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (layout.count != 3)
+                return 10;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto b = layout.buttons[i].bounds;
+                if (b.x < 1 || b.y < 0 || b.width != 44 || b.height != 32
+                    || b.x + b.width > width - 1 || b.y + b.height > height)
+                    return 11;
+                const auto expected = i == 0 ? DAW::mobile::phoneMixerBrowser
+                    : i == 1 ? DAW::mobile::phoneMixerFXChain
+                             : DAW::mobile::phoneMixerReset;
+                if (layout.buttons[i].action != expected)
+                    return 12;
+            }
+        }
     // Exact narrow-width transitions: never silently drop FX/Reset without
     // offering Overflow, and never expose an action outside the title bar.
     // These compile-time checks remain active in Release/NDEBUG builds.
