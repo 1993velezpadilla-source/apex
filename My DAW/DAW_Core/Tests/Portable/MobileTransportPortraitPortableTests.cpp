@@ -283,6 +283,35 @@ int main()
     for (int w = 180; w <= 200; ++w)
         for (int h = 90; h <= 100; ++h)
             assert(validCompact(w, h));
+    // Adversarial rotation/split-screen sequences: check every intermediate
+    // viewport, not only the portrait and landscape endpoints. The layout
+    // is pure geometry and must be deterministic when returning to portrait.
+    constexpr int widths[] = { 360, 393, 852, 393, 320, 852, 360 };
+    constexpr int heights[] = { 144, 144, 180, 96, 112, 180, 144 };
+    const auto initialPortrait = portraitTransportLayout(widths[0], heights[0]);
+    const auto initialCompact = DAW::mobile::compactPhoneTransportLayout(widths[0], heights[0]);
+    for (int i = 0; i < 7; ++i)
+    {
+        assert(valid(widths[i], heights[i]));
+        assert(validCompact(widths[i], heights[i]));
+        assert(orderedReadouts(widths[i], heights[i]));
+        if (heights[i] >= 144)
+            assert(portraitTouchTargets(widths[i], heights[i]));
+        if (widths[i] >= 320 && heights[i] >= 96)
+            assert(orderedActions(widths[i], heights[i]));
+    }
+    const auto returnedPortrait = portraitTransportLayout(widths[6], heights[6]);
+    const auto returnedCompact = DAW::mobile::compactPhoneTransportLayout(widths[6], heights[6]);
+    for (int i = 0; i < 6; ++i)
+    {
+        assert(initialPortrait.transport[i].x == returnedPortrait.transport[i].x);
+        assert(initialPortrait.transport[i].width == returnedPortrait.transport[i].width);
+        assert(initialCompact.transport[i].y == returnedCompact.transport[i].y);
+    }
+    assert(initialPortrait.mixer.x == returnedPortrait.mixer.x);
+    assert(initialPortrait.sends.x == returnedPortrait.sends.x);
+    assert(initialCompact.mixer.x == returnedCompact.mixer.x);
+    assert(initialCompact.sends.x == returnedCompact.sends.x);
     for (int w = 0; w < 900; w += 7)
         for (int h = 0; h < 500; h += 9)
         {
