@@ -1,6 +1,11 @@
 #include "../../Source/UICore/MobileTransportPortrait.h"
 #include <cassert>
+#include <cstdlib>
 #include <limits>
+// Portable CI may compile with NDEBUG: never compile away runtime sweeps.
+// Keep the test executable meaningful in both Debug and Release builds.
+#undef assert
+#define assert(condition) do { if (!(condition)) std::abort(); } while (false)
 using DAW::mobile::PortraitTransportBounds;
 using DAW::mobile::portraitTransportLayout;
 
