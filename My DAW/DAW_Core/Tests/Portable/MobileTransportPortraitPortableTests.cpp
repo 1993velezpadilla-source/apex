@@ -362,6 +362,8 @@ int main()
         {
             assert(valid(w, h));
             assert(portraitActionsOrdered(w, h));
+            // Pixel-by-pixel resize must not create edge-only touch overlaps.
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
         }
     // Exhaustively cross the 189-unit compact shortcut threshold during
     // narrow split-screen resizing; the coarse sweep can skip this boundary.
