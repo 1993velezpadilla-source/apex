@@ -10,6 +10,33 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Portrait Mixer toolbar must never expose two overlapping hit regions,
+    // including its overflow replacement on narrow phones.
+    for (int width = 0; width <= 220; ++width)
+    {
+        const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        if (layout.count > 0)
+        {
+            const auto last = layout.buttons[layout.count - 1].bounds;
+            if (last.x < 0 || last.x + last.width > width)
+                return 1;
+        }
+        for (int i = 0; i < layout.count; ++i)
+        {
+            const auto a = layout.buttons[i].bounds;
+            if (a.width != 44 || a.height != 32 || a.x < 0)
+                return 2;
+            for (int j = i + 1; j < layout.count; ++j)
+            {
+                const auto b = layout.buttons[j].bounds;
+                if (a.x + a.width > b.x)
+                    return 3;
+            }
+        }
+        const auto shortLayout = DAW::mobile::phoneMixerToolbarLayout(width, 31);
+        if (shortLayout.count != 0)
+            return 4;
+    }
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
     constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
