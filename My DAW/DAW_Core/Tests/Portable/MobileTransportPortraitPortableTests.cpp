@@ -430,16 +430,17 @@ int main()
     assert(sameRect(initialCompact.mixer, returnedCompact.mixer));
     assert(sameRect(initialCompact.sends, returnedCompact.sends));
     assert(sameRect(initialCompact.click, returnedCompact.click));
-    for (int i = 0; i < 6; ++i)
-    {
-        assert(initialPortrait.transport[i].x == returnedPortrait.transport[i].x);
-        assert(initialPortrait.transport[i].width == returnedPortrait.transport[i].width);
-        assert(initialCompact.transport[i].y == returnedCompact.transport[i].y);
-    }
-    assert(initialPortrait.mixer.x == returnedPortrait.mixer.x);
-    assert(initialPortrait.sends.x == returnedPortrait.sends.x);
-    assert(initialCompact.mixer.x == returnedCompact.mixer.x);
-    assert(initialCompact.sends.x == returnedCompact.sends.x);
+    // Readout geometry is also stateful at the UI boundary: a stale clock,
+    // tempo, key or automation hit region after rotation can steal touches.
+    // Verify the full geometry on both layouts, not just action shortcuts.
+    assert(sameRect(initialPortrait.clock, returnedPortrait.clock));
+    assert(sameRect(initialPortrait.tempo, returnedPortrait.tempo));
+    assert(sameRect(initialPortrait.key, returnedPortrait.key));
+    assert(sameRect(initialPortrait.automation, returnedPortrait.automation));
+    assert(sameRect(initialCompact.clock, returnedCompact.clock));
+    assert(sameRect(initialCompact.tempo, returnedCompact.tempo));
+    assert(sameRect(initialCompact.key, returnedCompact.key));
+    assert(sameRect(initialCompact.automation, returnedCompact.automation));
     for (int w = 0; w < 900; w += 7)
         for (int h = 0; h < 500; h += 9)
         {
