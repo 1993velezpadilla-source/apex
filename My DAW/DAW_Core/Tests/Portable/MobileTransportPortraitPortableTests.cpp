@@ -297,6 +297,35 @@ constexpr bool uniqueHitCentres(DAW::mobile::PortraitTransportLayout r)
     }
     return true;
 }
+// Probe actual adjacent controls at every corner and edge, not only centres.
+// This catches one-pixel overlaps that centre-only dispatch checks can miss.
+constexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click
+    };
+    for (int i = 0; i < 11; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+        const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 11; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+static_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
+static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(320, 112)));
+static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(852, 180)));
+
 // Half-open touch bounds: a tap on the right/bottom border belongs to the
 // neighbouring target (or none), never both. Include zero-sized and large
 // coordinates to catch off-by-one and overflow regressions in hit testing.
@@ -365,7 +394,9 @@ int main()
     for (int i = 0; i < 7; ++i)
     {
         assert(uniqueHitCentres(portraitTransportLayout(widths[i], heights[i])));
+        assert(exclusiveHitEdges(portraitTransportLayout(widths[i], heights[i])));
         assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i])));
+        assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i])));
     }
     const auto returnedPortrait = portraitTransportLayout(widths[6], heights[6]);
     const auto returnedCompact = DAW::mobile::compactPhoneTransportLayout(widths[6], heights[6]);
