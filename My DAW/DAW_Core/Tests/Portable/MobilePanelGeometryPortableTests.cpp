@@ -37,6 +37,25 @@ int main()
         if (shortLayout.count != 0)
             return 4;
     }
+    // Rotation and title-bar resizing can increase toolbar height without
+    // changing its width. Every hit rectangle must remain vertically bounded,
+    // and the action set must not depend on spare vertical space.
+    for (int width = 0; width <= 220; ++width)
+        for (int height : { 0, 1, 31, 32, 33, 44, 64, 96 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            const auto baseline = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+            if (layout.count != (height < 32 ? 0 : baseline.count))
+                return 5;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto b = layout.buttons[i].bounds;
+                if (b.y < 0 || b.height != 32 || b.y + b.height > height
+                    || b.x < 0 || b.x + b.width > width
+                    || layout.buttons[i].action != baseline.buttons[i].action)
+                    return 6;
+            }
+        }
     // Exact narrow-width transitions: never silently drop FX/Reset without
     // offering Overflow, and never expose an action outside the title bar.
     // These compile-time checks remain active in Release/NDEBUG builds.
