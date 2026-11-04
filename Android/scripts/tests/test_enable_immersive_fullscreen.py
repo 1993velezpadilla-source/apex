@@ -174,9 +174,12 @@ class ImmersiveManifestTests(unittest.TestCase):
                 self.assertIn("Duplicate immersive Activity", run.stderr)
 
     def test_launcher_exported_false_is_repaired(self):
-        # Android 12+ requires exported=true for the launcher to start.
-        self.assertEqual(self.run_patch("com.xziel.apex.mobileportrait",
-                                        launcher_exported="false").returncode, 0)
+        # Android 12+ requires exported=true for both launchers. Reapplying
+        # the patch must not regress the repaired manifest or Java activity.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                self.assertEqual(self.run_patch(bundle, launcher_exported="false",
+                                                rerun=True).returncode, 0)
 
     def test_manifest_package_matching_project_is_allowed(self):
         bundle = "com.xziel.apex.mobileportrait"
