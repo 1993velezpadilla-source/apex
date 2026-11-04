@@ -51,10 +51,11 @@ int main()
     static_assert(twoFit.count == 2
                   && twoFit.buttons[0].action == DAW::mobile::phoneMixerBrowser
                   && twoFit.buttons[1].action == DAW::mobile::phoneMixerOverflow);
-    static_assert(justShort.count == 3
+    // At 141 units, three 44-wide targets plus two 4-unit gaps and
+    // two 1-unit insets require 142 units: keep Browser + Overflow.
+    static_assert(justShort.count == 2
                   && justShort.buttons[0].action == DAW::mobile::phoneMixerBrowser
-                  && justShort.buttons[1].action == DAW::mobile::phoneMixerFXChain
-                  && justShort.buttons[2].action == DAW::mobile::phoneMixerOverflow);
+                  && justShort.buttons[1].action == DAW::mobile::phoneMixerOverflow);
     static_assert(allFit.count == 3
                   && allFit.buttons[0].action == DAW::mobile::phoneMixerBrowser
                   && allFit.buttons[1].action == DAW::mobile::phoneMixerFXChain
