@@ -81,6 +81,15 @@ int main()
                   && allFit.buttons[2].action == DAW::mobile::phoneMixerReset);
     static_assert(allFit.buttons[2].bounds.x + allFit.buttons[2].bounds.width <= 142);
     static_assert(DAW::mobile::phoneMixerToolbarLayout(142, 31).count == 0);
+    // Verify both sides of each action-set threshold after rotation/resizing.
+    // These checks also execute in Release, unlike runtime assert().
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(0, 32).count == 0);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(93, 32).count == 1);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(95, 32).count == 2);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(140, 32).count == 2);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(143, 32).count == 3);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(220, 32).count == 3);
+
 
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
