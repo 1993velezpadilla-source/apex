@@ -13,7 +13,7 @@ ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 class ImmersiveManifestTests(unittest.TestCase):
     def run_patch(self, bundle, manifest_package=None, extra_activity_first=False,
-                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False, split_launcher_filters=False, launcher_name="com.rmsl.juce.JuceActivity"):
+                  launcher_exported=None, decoy_launcher_only_first=False, rerun=False, duplicate_launcher=False, split_launcher_filters=False, launcher_name="com.rmsl.juce.JuceActivity", duplicate_target_activity=False):
         with tempfile.TemporaryDirectory() as temporary:
             core = Path(temporary) / "DAW_Core"
             generated = core / "Builds" / "AndroidFull"
@@ -52,6 +52,9 @@ class ImmersiveManifestTests(unittest.TestCase):
                 other_filter = ET.SubElement(activity, "intent-filter")
                 ET.SubElement(other_filter, "category", {
                     f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
+            if duplicate_target_activity:
+                ET.SubElement(app, "activity", {
+                    f"{{{ANDROID_NS}}}name": bundle + ".ApexImmersiveActivity"})
             if duplicate_launcher:
                 other = ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.OtherLauncher"})
@@ -160,6 +163,15 @@ class ImmersiveManifestTests(unittest.TestCase):
                 run = self.run_patch(bundle, launcher_name="com.example.CustomActivity")
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn("Unexpected launcher activity; refuse unsafe patch", run.stderr)
+
+    def test_existing_duplicate_immersive_activity_is_rejected(self):
+        # A non-launcher duplicate would otherwise survive the patch and
+        # make the final Android manifest ambiguous or fail its build.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, duplicate_target_activity=True)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn("Duplicate immersive Activity", run.stderr)
 
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for the launcher to start.
