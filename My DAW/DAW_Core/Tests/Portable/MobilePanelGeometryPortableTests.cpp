@@ -363,6 +363,16 @@ int main()
     // still retain their full clip/loop extent.
     using DAW::mobile::timelinePhonePlaybackExtentSeconds;
     static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.1) == 58.1);
+    // Invalid restored transport positions must not make the viewport
+    // infinite/NaN or grow the Arrangement on every transport tick.
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, -1.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0,
+        std::numeric_limits<double>::quiet_NaN()) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0,
+        std::numeric_limits<double>::infinity()) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0,
+        std::numeric_limits<double>::max()) == 30.0);
+
     static_assert(timelinePhonePlaybackExtentSeconds(200.0, 28.1) == 200.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 30.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0, 1.0) == 30.0);
