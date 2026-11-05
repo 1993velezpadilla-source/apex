@@ -572,6 +572,32 @@ int main()
     phoneLauncherTap.begin(3, 7);
     assert(phoneLauncherTap.release(7, 3, 0, 0));
 
+    // Interleaved primary/overflow releases must not lose pointer identity.
+    // Reusing a freed primary slot while overflow fingers remain down must
+    // never re-arm a floating-panel launcher.
+    for (int source = 0; source < 18; ++source)
+        phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
+    assert(phoneLauncherTap.activeCount == 16);
+    assert(phoneLauncherTap.overflowCount == 2);
+    assert(!phoneLauncherTap.release(3, 1, 0, 0));
+    phoneLauncherTap.begin(2, 100); // reuse the freed primary slot
+    assert(phoneLauncherTap.activeCount == 16);
+    assert(phoneLauncherTap.overflowCount == 2);
+    assert(!phoneLauncherTap.release(999, 2, 0, 0)); // unknown release
+    assert(phoneLauncherTap.overflowCount == 2);
+    assert(!phoneLauncherTap.release(17, 2, 0, 0));
+    assert(phoneLauncherTap.overflowCount == 1);
+    assert(!phoneLauncherTap.release(17, 2, 0, 0)); // duplicate release
+    assert(phoneLauncherTap.overflowCount == 1);
+    for (int source = 0; source < 18; ++source)
+        if (source != 3 && source != 17)
+            assert(!phoneLauncherTap.release(source, 1, 0, 0));
+    assert(!phoneLauncherTap.release(100, 2, 0, 0));
+    assert(phoneLauncherTap.activeCount == 0);
+    assert(phoneLauncherTap.overflowCount == 0);
+    phoneLauncherTap.begin(2, 100);
+    assert(phoneLauncherTap.release(100, 2, 0, 0));
+
     // A cancelled swipe cannot be re-armed by another finger.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
