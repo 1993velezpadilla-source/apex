@@ -545,6 +545,8 @@ struct PhoneTransportTapState
     static constexpr int maxTrackedSources = 16;
     int activeSources[maxTrackedSources]{};
     int activeCount = 0;
+    // Contacts beyond the fixed ID array still hold the gesture blocked.
+    int overflowCount = 0;
     bool blocked = false;
 
     constexpr void invalidate() noexcept
@@ -553,6 +555,7 @@ struct PhoneTransportTapState
         sourceIndex = -1;
         eligible = false;
         activeCount = 0;
+        overflowCount = 0;
         blocked = false;
     }
     constexpr void begin(int button, int source) noexcept
@@ -566,6 +569,7 @@ struct PhoneTransportTapState
             }
         if (activeCount == maxTrackedSources)
         {
+            ++overflowCount;
             blocked = true;
             eligible = false;
             return;
@@ -609,12 +613,18 @@ struct PhoneTransportTapState
             }
         // A foreign mouseUp must cancel, not leave the original finger
         // eligible to open a panel on its subsequent release.
-        if (!matched && activeCount > 0)
+        if (!matched && overflowCount > 0)
+        {
+            --overflowCount;
+            blocked = true;
+            eligible = false;
+        }
+        else if (!matched && activeCount > 0)
         {
             blocked = true;
             eligible = false;
         }
-        if (activeCount == 0)
+        if (activeCount == 0 && overflowCount == 0)
             invalidate();
         else
         {
