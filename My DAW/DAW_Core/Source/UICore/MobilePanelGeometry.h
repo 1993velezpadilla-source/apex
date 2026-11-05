@@ -546,7 +546,11 @@ struct PhoneTransportTapState
     int activeSources[maxTrackedSources]{};
     int activeCount = 0;
     // Contacts beyond the fixed ID array still hold the gesture blocked.
+    static constexpr int maxOverflowSources = 32;
+    int overflowSources[maxOverflowSources]{};
     int overflowCount = 0;
+    // If even the overflow ID array fills, require explicit gesture reset.
+    bool untrackedOverflow = false;
     bool blocked = false;
 
     constexpr void invalidate() noexcept
@@ -556,6 +560,7 @@ struct PhoneTransportTapState
         eligible = false;
         activeCount = 0;
         overflowCount = 0;
+        untrackedOverflow = false;
         blocked = false;
     }
     constexpr void begin(int button, int source) noexcept
@@ -567,9 +572,19 @@ struct PhoneTransportTapState
                 eligible = false;
                 return;
             }
+        for (int i = 0; i < overflowCount; ++i)
+            if (overflowSources[i] == source)
+            {
+                blocked = true;
+                eligible = false;
+                return;
+            }
         if (activeCount == maxTrackedSources)
         {
-            ++overflowCount;
+            if (overflowCount < maxOverflowSources)
+                overflowSources[overflowCount++] = source;
+            else
+                untrackedOverflow = true;
             blocked = true;
             eligible = false;
             return;
@@ -613,18 +628,20 @@ struct PhoneTransportTapState
             }
         // A foreign mouseUp must cancel, not leave the original finger
         // eligible to open a panel on its subsequent release.
-        if (!matched && overflowCount > 0)
+        if (!matched)
+            for (int i = 0; i < overflowCount; ++i)
+                if (overflowSources[i] == source)
+                {
+                    overflowSources[i] = overflowSources[--overflowCount];
+                    matched = true;
+                    break;
+                }
+        if (!matched && (activeCount > 0 || overflowCount > 0 || untrackedOverflow))
         {
-            --overflowCount;
             blocked = true;
             eligible = false;
         }
-        else if (!matched && activeCount > 0)
-        {
-            blocked = true;
-            eligible = false;
-        }
-        if (activeCount == 0 && overflowCount == 0)
+        if (activeCount == 0 && overflowCount == 0 && !untrackedOverflow)
             invalidate();
         else
         {
