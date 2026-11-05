@@ -150,6 +150,29 @@ int main()
     static_assert(DAW::mobile::phoneMixerToolbarLayout(220, 32).count == 3);
 
 
+    // Rotation/restore regression: a 32-high Mixer toolbar must not expose
+    // partially clipped controls, even at extreme width or height.
+    // Verify the exact action transition at every narrow threshold.
+    for (int w = 0; w <= 160; ++w)
+    {
+        const auto layout = DAW::mobile::phoneMixerToolbarLayout(w, 32);
+        const int expected = w < 46 ? 0 : w < 94 ? 1 : w < 142 ? 2 : 3;
+        if (layout.count != expected)
+            return 13;
+        for (int i = 0; i < layout.count; ++i)
+        {
+            const auto& b = layout.buttons[i].bounds;
+            if (b.x < 0 || b.y != 0 || b.width != 44 || b.height != 32
+                || static_cast<long long>(b.x) + b.width > w)
+                return 14;
+        }
+    }
+    // In short split-screen title bars, zero buttons are valid; a partial
+    // button must never be made clickable.
+    for (int h = 0; h < 32; ++h)
+        if (DAW::mobile::phoneMixerToolbarLayout(142, h).count != 0)
+            return 15;
+
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
     constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
