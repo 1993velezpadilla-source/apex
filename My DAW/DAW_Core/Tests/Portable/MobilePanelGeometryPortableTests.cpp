@@ -10,6 +10,23 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Android source IDs are opaque signed integers, not small touch-slot
+    // indices. Extreme IDs and a duplicate release must never arm another
+    // floating-panel launcher while the original finger is still down.
+    for (int first : { std::numeric_limits<int>::min(),
+                       std::numeric_limits<int>::max() })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        const int second = first == std::numeric_limits<int>::min()
+            ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
+        taps.begin(1, first);
+        taps.begin(2, second);
+        assert(!taps.release(second, 2, 0, 0));
+        assert(!taps.release(second, 2, 0, 0));
+        assert(!taps.release(first, 1, 0, 0));
+        taps.begin(3, second);
+        assert(taps.release(second, 3, 0, 0));
+    }
     // Portrait Mixer toolbar must never expose two overlapping hit regions,
     // including its overflow replacement on narrow phones.
     for (int width = 0; width <= 220; ++width)
