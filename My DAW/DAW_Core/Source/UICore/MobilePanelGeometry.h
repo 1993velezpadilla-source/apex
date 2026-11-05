@@ -173,7 +173,7 @@ constexpr double timelinePhonePlaybackExtentSeconds(
     // poison the Arrangement extent or trigger repeated viewport rebuilds.
     // A negative playhead is not a reason to extend the song either.
     if (!(playheadSeconds >= 0.0)
-        || playheadSeconds > std::numeric_limits<double>::max() - 30.0)
+        || playheadSeconds > 86400.0)
         return projectExtentSeconds;
     if (playheadSeconds + 2.0 <= projectExtentSeconds)
         return projectExtentSeconds;
