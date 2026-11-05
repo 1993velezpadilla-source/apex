@@ -105,8 +105,16 @@ int main()
                              : DAW::mobile::phoneMixerReset;
                 if (layout.buttons[i].action != expected)
                     return 12;
+                // A wide toolbar must keep the same 4-unit touch separation
+                // and centre its targets after a portrait/landscape resize.
+                if (b.y != (height - 32) / 2
+                    || (i > 0 && b.x - (layout.buttons[i - 1].bounds.x
+                                        + layout.buttons[i - 1].bounds.width) < 4))
+                    return 13;
             }
         }
+    // The stepped sweep above skips its upper endpoint: test it explicitly.
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(1200, 32).count == 3);
     // Exact narrow-width transitions: never silently drop FX/Reset without
     // offering Overflow, and never expose an action outside the title bar.
     // These compile-time checks remain active in Release/NDEBUG builds.
