@@ -172,17 +172,30 @@ constexpr double timelinePhonePlaybackExtentSeconds(
     // Invalid transport timestamps (e.g. during project restore) must not
     // poison the Arrangement extent or trigger repeated viewport rebuilds.
     // A negative playhead is not a reason to extend the song either.
+    // A corrupt clip/loop extent can also arrive during project restore.
+    // Never propagate NaN/Inf/negative content widths to the phone viewport.
+    const double safeExtent = projectExtentSeconds >= 0.0
+        && projectExtentSeconds <= std::numeric_limits<double>::max()
+        ? projectExtentSeconds : 0.0;
     if (!(playheadSeconds >= 0.0)
         || playheadSeconds > 86400.0)
-        return projectExtentSeconds;
-    if (playheadSeconds + 2.0 <= projectExtentSeconds)
-        return projectExtentSeconds;
+        return safeExtent;
+    if (playheadSeconds + 2.0 <= safeExtent)
+        return safeExtent;
     const double withRunway = playheadSeconds + 30.0;
-    return projectExtentSeconds > withRunway ? projectExtentSeconds : withRunway;
+    return safeExtent > withRunway ? safeExtent : withRunway;
 }
 
 // The bottom phone Transport owns Mixer/Sends launch actions. Desktop-only
 // restore bubbles must stay hidden after closing a floating phone panel.
+// Portable C++17 regression gates: corrupted restored clip/loop extents.
+static_assert(timelinePhonePlaybackExtentSeconds(
+    std::numeric_limits<double>::quiet_NaN(), 0.0) == 30.0);
+static_assert(timelinePhonePlaybackExtentSeconds(
+    std::numeric_limits<double>::infinity(), -1.0) == 0.0);
+static_assert(timelinePhonePlaybackExtentSeconds(-50.0, 20.0) == 50.0);
+static_assert(timelinePhonePlaybackExtentSeconds(200.0, 20.0) == 200.0);
+
 constexpr bool desktopRestoreBubbleVisible(bool phonePresentation) noexcept
 {
     return !phonePresentation;
