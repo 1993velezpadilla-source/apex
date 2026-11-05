@@ -553,6 +553,25 @@ int main()
     phoneLauncherTap.begin(3, 7);
     assert(phoneLauncherTap.release(7, 3, 0, 0));
 
+    // Beyond 48 contacts there is no room for another source ID. Keep all
+    // phone panel launchers disabled until an explicit cancel/rotation reset;
+    // unknown releases must not accidentally clear that safety latch.
+    for (int source = 0; source < 49; ++source)
+        phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
+    assert(phoneLauncherTap.activeCount == 16);
+    assert(phoneLauncherTap.overflowCount == 32);
+    assert(phoneLauncherTap.untrackedOverflow);
+    for (int source = 0; source < 49; ++source)
+        assert(!phoneLauncherTap.release(source, 1, 0, 0));
+    assert(phoneLauncherTap.untrackedOverflow);
+    assert(!phoneLauncherTap.release(999, 1, 0, 0));
+    phoneLauncherTap.begin(2, 77);
+    assert(!phoneLauncherTap.release(77, 2, 0, 0));
+    phoneLauncherTap.invalidate(); // OS cancellation or orientation reset
+    assert(!phoneLauncherTap.untrackedOverflow);
+    phoneLauncherTap.begin(3, 7);
+    assert(phoneLauncherTap.release(7, 3, 0, 0));
+
     // A cancelled swipe cannot be re-armed by another finger.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
