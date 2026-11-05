@@ -518,6 +518,23 @@ int main()
     phoneLauncherTap.begin(4, 7);
     assert(phoneLauncherTap.release(7, 4, 0, 0));
 
+    // A 17th touch exceeds the fixed source-ID array. Releasing the first
+    // sixteen must NOT re-arm a launcher while the overflow touch remains.
+    for (int source = 0; source < 17; ++source)
+        phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
+    assert(phoneLauncherTap.activeCount == 16);
+    assert(phoneLauncherTap.overflowCount == 1);
+    for (int source = 0; source < 16; ++source)
+        assert(!phoneLauncherTap.release(source, 1, 0, 0));
+    assert(phoneLauncherTap.activeCount == 0);
+    assert(phoneLauncherTap.overflowCount == 1);
+    phoneLauncherTap.begin(2, 30);
+    assert(!phoneLauncherTap.release(30, 2, 0, 0));
+    assert(!phoneLauncherTap.release(16, 0, 0, 0));
+    assert(phoneLauncherTap.overflowCount == 0);
+    phoneLauncherTap.begin(3, 7);
+    assert(phoneLauncherTap.release(7, 3, 0, 0));
+
     // A cancelled swipe cannot be re-armed by another finger.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
