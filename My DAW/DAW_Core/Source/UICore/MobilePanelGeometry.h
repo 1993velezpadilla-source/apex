@@ -169,6 +169,12 @@ constexpr int timelineWheelClampedPosition(int current, int contentSpan,
 constexpr double timelinePhonePlaybackExtentSeconds(
     double projectExtentSeconds, double playheadSeconds) noexcept
 {
+    // Invalid transport timestamps (e.g. during project restore) must not
+    // poison the Arrangement extent or trigger repeated viewport rebuilds.
+    // A negative playhead is not a reason to extend the song either.
+    if (!(playheadSeconds >= 0.0)
+        || playheadSeconds > std::numeric_limits<double>::max() - 30.0)
+        return projectExtentSeconds;
     if (playheadSeconds + 2.0 <= projectExtentSeconds)
         return projectExtentSeconds;
     const double withRunway = playheadSeconds + 30.0;
