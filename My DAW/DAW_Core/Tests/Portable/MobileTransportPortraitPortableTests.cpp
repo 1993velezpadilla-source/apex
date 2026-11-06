@@ -1,6 +1,7 @@
 #include "../../Source/UICore/MobileTransportPortrait.h"
 #include <cassert>
 #include <cstdlib>
+#include <initializer_list>
 #include <limits>
 // Portable CI may compile with NDEBUG: never compile away runtime sweeps.
 // Keep the test executable meaningful in both Debug and Release builds.
