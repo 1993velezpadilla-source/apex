@@ -126,7 +126,8 @@ def main() -> int:
         raise RuntimeError("Unexpected APEX Android package: " + package)
     android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
-    if old not in ("com.rmsl.juce.JuceActivity", android_activity):
+    if old not in ("com.rmsl.juce.JuceActivity", android_activity,
+                   "." + ACTIVITY_SIMPLE_NAME):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
     # Do not leave a second non-launcher Activity with the same class name.
     # Validate before writing the manifest or generating Java source.
