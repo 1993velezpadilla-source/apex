@@ -132,7 +132,7 @@ def main() -> int:
     # Do not leave a second non-launcher Activity with the same class name.
     # Validate before writing the manifest or generating Java source.
     if any(a is not activity and a.get(f"{{{ANDROID_NS}}}name") in
-           (android_activity, "." + ACTIVITY_SIMPLE_NAME)
+           (android_activity, "." + ACTIVITY_SIMPLE_NAME, ACTIVITY_SIMPLE_NAME)
            for a in candidates):
         raise RuntimeError("Duplicate immersive Activity in generated manifest")
     activity.set(f"{{{ANDROID_NS}}}name", android_activity)
