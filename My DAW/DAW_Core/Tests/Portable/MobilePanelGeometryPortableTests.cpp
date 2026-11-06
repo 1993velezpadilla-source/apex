@@ -27,6 +27,24 @@ int main()
         taps.begin(3, second);
         assert(taps.release(second, 3, 0, 0));
     }
+    // Boundary regression for compact phone Mixer toolbar: a one-unit
+    // resize must not expose an unreachable action or remove Overflow.
+    // These exact thresholds matter when portrait split-screen changes width.
+    for (int width : { 0, 45, 46, 93, 94, 141, 142, 143 })
+    {
+        const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        const int expectedCount = width < 46 ? 0 : width < 94 ? 1
+                                : width < 142 ? 2 : 3;
+        if (layout.count != expectedCount)
+            return 30;
+        if (layout.count > 0)
+        {
+            const auto lastAction = layout.buttons[layout.count - 1].action;
+            if (lastAction != (width < 142 ? DAW::mobile::phoneMixerOverflow
+                                           : DAW::mobile::phoneMixerReset))
+                return 31;
+        }
+    }
     // Portrait Mixer toolbar must never expose two overlapping hit regions,
     // including its overflow replacement on narrow phones.
     for (int width = 0; width <= 220; ++width)
