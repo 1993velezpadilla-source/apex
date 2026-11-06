@@ -387,6 +387,16 @@ static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180
 
 int main()
 {
+    // Portrait deck: exercise every width across the minimum-size guard and
+    // phone split-screen range. Compact geometry has a separate exhaustive
+    // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 25, 48, 96, 112, 144, 180 })
+        {
+            assert(valid(w, h));
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
+            assert(uniqueHitCentres(portraitTransportLayout(w, h)));
+        }
     // Pixel-by-pixel compact transport sweep across phone split-screen widths.
     // Check every shortcut/readout hit region, not only representative sizes:
     // a one-unit resize must not create a dead or overlapping touch target.
