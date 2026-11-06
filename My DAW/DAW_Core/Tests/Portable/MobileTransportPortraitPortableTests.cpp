@@ -387,6 +387,16 @@ static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180
 
 int main()
 {
+    // Finger-size regression across every practical phone width, not only
+    // sampled devices. Rotation must not silently shrink Mixer/Sends or
+    // the six transport targets below 44 logical units.
+    for (int w = 320; w <= 600; ++w)
+    {
+        for (const int h : { 144, 180, 256 })
+            assert(portraitTouchTargets(w, h));
+        for (const int h : { 96, 112, 180 })
+            assert(orderedActions(w, h));
+    }
     // Portrait deck: exercise every width across the minimum-size guard and
     // phone split-screen range. Compact geometry has a separate exhaustive
     // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
