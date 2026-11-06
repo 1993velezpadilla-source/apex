@@ -54,7 +54,7 @@ class ImmersiveManifestTests(unittest.TestCase):
                     f"{{{ANDROID_NS}}}name": "android.intent.category.LAUNCHER"})
             if duplicate_target_activity:
                 ET.SubElement(app, "activity", {
-                    f"{{{ANDROID_NS}}}name": bundle + ".ApexImmersiveActivity"})
+                    f"{{{ANDROID_NS}}}name": (".ApexImmersiveActivity" if duplicate_target_activity == "relative" else bundle + ".ApexImmersiveActivity")})
             if duplicate_launcher:
                 other = ET.SubElement(app, "activity", {
                     f"{{{ANDROID_NS}}}name": "com.example.OtherLauncher"})
@@ -170,6 +170,15 @@ class ImmersiveManifestTests(unittest.TestCase):
         for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
             with self.subTest(bundle=bundle):
                 run = self.run_patch(bundle, duplicate_target_activity=True)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn("Duplicate immersive Activity", run.stderr)
+
+    def test_relative_duplicate_immersive_activity_is_rejected(self):
+        # Android resolves .Class relative to the application package.
+        # Reject a second declaration before touching generated files.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, duplicate_target_activity="relative")
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn("Duplicate immersive Activity", run.stderr)
 
