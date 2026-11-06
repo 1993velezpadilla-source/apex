@@ -218,6 +218,37 @@ int main()
         if (DAW::mobile::phoneMixerToolbarLayout(142, h).count != 0)
             return 15;
 
+    // Adversarial toolbar hit geometry: across rotation/split-screen widths,
+    // no two Mixer actions may claim the same touch point. The overflow
+    // action must be the last visible target, never a Send Matrix launcher.
+    for (int w = 0; w <= 600; ++w)
+    {
+        const auto layout = DAW::mobile::phoneMixerToolbarLayout(w, 32);
+        if (layout.count < 0 || layout.count > 3)
+            return 16;
+        for (int i = 0; i < layout.count; ++i)
+        {
+            const auto& button = layout.buttons[i];
+            if (!inside(button.bounds, w, 32))
+                return 17;
+            if (button.action == DAW::mobile::phoneMixerOverflow
+                && i != layout.count - 1)
+                return 18;
+            for (int j = i + 1; j < layout.count; ++j)
+            {
+                const auto& other = layout.buttons[j].bounds;
+                const long long right = static_cast<long long>(button.bounds.x)
+                                      + button.bounds.width;
+                const long long otherRight = static_cast<long long>(other.x)
+                                           + other.width;
+                if (button.bounds.x < otherRight && other.x < right
+                    && button.bounds.y < other.y + other.height
+                    && other.y < button.bounds.y + button.bounds.height)
+                    return 19;
+            }
+        }
+    }
+
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
     constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
