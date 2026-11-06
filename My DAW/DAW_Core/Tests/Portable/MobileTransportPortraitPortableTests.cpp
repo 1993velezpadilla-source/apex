@@ -397,6 +397,16 @@ int main()
         for (const int h : { 96, 112, 180 })
             assert(orderedActions(w, h));
     }
+    // Readout hit regions were absent from the portrait-only bounds sweep.
+    // A clipped clock/tempo/key/automation control can steal taps after resize.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 25, 48, 96, 112, 144, 180 })
+        {
+            const auto layout = portraitTransportLayout(w, h);
+            for (const auto readout : { layout.clock, layout.tempo,
+                                        layout.key, layout.automation })
+                assert(inside(readout, w, h));
+        }
     // Portrait deck: exercise every width across the minimum-size guard and
     // phone split-screen range. Compact geometry has a separate exhaustive
     // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
