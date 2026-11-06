@@ -173,6 +173,15 @@ class ImmersiveManifestTests(unittest.TestCase):
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn("Duplicate immersive Activity", run.stderr)
 
+    def test_relative_immersive_launcher_is_normalized_idempotently(self):
+        # Android permits relative activity names; a previously generated
+        # manifest can use this form when the exporter is rerun.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, launcher_name=".ApexImmersiveActivity",
+                                     rerun=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for both launchers. Reapplying
         # the patch must not regress the repaired manifest or Java activity.
