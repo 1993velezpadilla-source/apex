@@ -326,6 +326,38 @@ static_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(320, 112)));
 static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(852, 180)));
 
+// Readouts can also receive touches. Verify exclusive ownership across ALL
+// compact controls, including clock/tempo/key/automation, during resize.
+// Previous edge checks only covered transport actions and shortcuts.
+constexpr bool exclusiveCompactAllTargets(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click,
+        r.clock, r.tempo, r.key, r.automation
+    };
+    for (int i = 0; i < 15; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+        const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 15; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+static_assert(exclusiveCompactAllTargets(189, 94));
+static_assert(exclusiveCompactAllTargets(320, 112));
+static_assert(exclusiveCompactAllTargets(852, 180));
+
 // Half-open touch bounds: a tap on the right/bottom border belongs to the
 // neighbouring target (or none), never both. Include zero-sized and large
 // coordinates to catch off-by-one and overflow regressions in hit testing.
@@ -381,6 +413,7 @@ int main()
             assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
             assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
             assert(orderedReadouts(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
         }
     // Adversarial rotation/split-screen sequences: check every intermediate
     // viewport, not only the portrait and landscape endpoints. The layout
@@ -447,6 +480,7 @@ int main()
             assert(valid(w, h));
             assert(validCompact(w, h));
             assert(orderedReadouts(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
             assert(uniqueHitCentres(portraitTransportLayout(w, h)));
             assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
             // Broad resize sweep also checks edge/corner ownership. Centre-only
