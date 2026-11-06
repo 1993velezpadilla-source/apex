@@ -6,10 +6,20 @@ using DAW::mobile::fitBubblegumSends;
 using DAW::mobile::phoneCloseTouchBounds;
 constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 {
-    return p.x >= 0 && p.y >= 0 && p.x + p.width <= w && p.y + p.height <= h;
+    return p.x >= 0 && p.y >= 0 && p.width >= 0 && p.height >= 0
+        && static_cast<long long>(p.x) + p.width <= w
+        && static_cast<long long>(p.y) + p.height <= h;
 }
 int main()
 {
+    // The test oracle itself must reject overflowed restored window edges.
+    // A 32-bit addition here could wrap and falsely accept an offscreen panel.
+    static_assert(!inside({ std::numeric_limits<int>::max(), 0, 20, 20 },
+                          std::numeric_limits<int>::max(), 100));
+    static_assert(!inside({ 0, std::numeric_limits<int>::max(), 20, 20 },
+                          100, std::numeric_limits<int>::max()));
+    static_assert(!inside({ 0, 0, -1, 20 }, 100, 100));
+    static_assert(inside({ 0, 0, 100, 100 }, 100, 100));
     // Android source IDs are opaque signed integers, not small touch-slot
     // indices. Extreme IDs and a duplicate release must never arm another
     // floating-panel launcher while the original finger is still down.
