@@ -386,6 +386,16 @@ static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180
 
 int main()
 {
+    // Pixel-by-pixel compact transport sweep across phone split-screen widths.
+    // Check every shortcut/readout hit region, not only representative sizes:
+    // a one-unit resize must not create a dead or overlapping touch target.
+    for (int w = 20; w <= 600; ++w)
+        for (const int h : { 8, 24, 48, 94, 96, 112, 180 })
+        {
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+        }
+
     for (int w = 10; w <= 32; ++w)
         for (int h = 22; h <= 36; ++h)
             assert(valid(w, h));
