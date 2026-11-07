@@ -23,8 +23,10 @@ constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
     const int rowH = (h - 4 * margin) / 3;
     int cursor = margin;
     int remaining = w - 2 * margin;
-    const auto take = [&](int wanted) -> PortraitTransportBounds
+    const auto take = [&](int wanted, int minimum) -> PortraitTransportBounds
     {
+        // Never expose a sliver as a tappable readout during split-screen resize.
+        if (remaining < minimum) return {};
         const int width = remaining < wanted ? remaining : wanted;
         const PortraitTransportBounds r{cursor, margin, width, rowH};
         cursor += width;
@@ -37,10 +39,10 @@ constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
     const int keyW = w / 5 < 54 ? 54 : (w / 5 > 95 ? 95 : w / 5);
     const int tempoW = w / 5 < 54 ? 54 : (w / 5 > 85 ? 85 : w / 5);
     const int clockW = w / 4 < 82 ? 82 : (w / 4 > 130 ? 130 : w / 4);
-    out.key = take(keyW);
-    out.tempo = take(tempoW);
-    out.clock = take(clockW);
-    const auto automation = take(72);
+    out.key = take(keyW, 44);
+    out.tempo = take(tempoW, 44);
+    out.clock = take(clockW, 44);
+    const auto automation = take(72, 46);
     if (automation.width > 2 && automation.height > 4)
         out.automation = {automation.x + 1, automation.y + 2,
                           automation.width - 2, automation.height - 4};
