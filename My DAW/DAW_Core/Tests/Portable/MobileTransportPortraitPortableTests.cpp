@@ -70,6 +70,12 @@ static_assert(portraitReadoutsSafe(360, 144));
 static_assert(portraitReadoutsSafe(852, 180));
 static_assert(DAW::mobile::portraitReadoutLayout(189, 144).automation.width == 0);
 static_assert(DAW::mobile::portraitReadoutLayout(360, 144).clock.width >= 82);
+// The clock must survive narrow portrait split-screen resizing; optional
+// tonal/tempo readouts yield space before the essential time display.
+static_assert(DAW::mobile::portraitReadoutLayout(100, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(160, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(189, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(56, 144).clock.width >= 44);
 
 static_assert(valid(320, 144));
 static_assert(valid(360, 112));
@@ -436,6 +442,8 @@ int main()
         for (const int h : { 144, 180, 256 })
         {
             assert(portraitReadoutsSafe(w, h));
+            if (w >= 56)
+                assert(DAW::mobile::portraitReadoutLayout(w, h).clock.width >= 44);
             // A visible readout must never be a tiny accidental tap target.
             const auto touchReadouts = DAW::mobile::portraitReadoutLayout(w, h);
             for (const auto item : { touchReadouts.key, touchReadouts.tempo,
