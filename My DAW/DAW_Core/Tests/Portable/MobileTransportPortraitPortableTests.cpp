@@ -49,6 +49,28 @@ constexpr bool valid(int w, int h)
     }
     return true;
 }
+// Portrait readouts must be bounded and non-overlapping at split-screen widths.
+constexpr bool portraitReadoutsSafe(int w, int h)
+{
+    const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+    const PortraitTransportBounds items[] = {r.key, r.tempo, r.clock, r.automation};
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!inside(items[i], w, h)) return false;
+        if (items[i].width <= 0 || items[i].height <= 0) continue;
+        for (int j = 0; j < i; ++j)
+            if (items[j].width > 0 && items[j].height > 0
+                && !separated(items[i], items[j])) return false;
+    }
+    return true;
+}
+static_assert(portraitReadoutsSafe(189, 144));
+static_assert(portraitReadoutsSafe(320, 144));
+static_assert(portraitReadoutsSafe(360, 144));
+static_assert(portraitReadoutsSafe(852, 180));
+static_assert(DAW::mobile::portraitReadoutLayout(189, 144).automation.width == 0);
+static_assert(DAW::mobile::portraitReadoutLayout(360, 144).clock.width >= 82);
+
 static_assert(valid(320, 144));
 static_assert(valid(360, 112));
 static_assert(valid(360, 144));
