@@ -436,6 +436,11 @@ int main()
         for (const int h : { 144, 180, 256 })
         {
             assert(portraitReadoutsSafe(w, h));
+            // A visible readout must never be a tiny accidental tap target.
+            const auto touchReadouts = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto item : { touchReadouts.key, touchReadouts.tempo,
+                                     touchReadouts.clock, touchReadouts.automation })
+                assert(item.width == 0 || item.width >= 44);
             const auto readouts = DAW::mobile::portraitReadoutLayout(w, h);
             const auto actions = portraitTransportLayout(w, h);
             for (const auto readout : { readouts.key, readouts.tempo,
