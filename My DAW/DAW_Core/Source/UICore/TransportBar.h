@@ -447,6 +447,18 @@ public:
                 // Eight controls cannot all provide 44-unit targets on a
                 // 360-unit phone. Keep six transport buttons in the action
                 // row and move FX/Browser to the bottom beside Mixer/Sends.
+                const auto readouts = mobile::portraitReadoutLayout(w, h);
+                const auto readoutRect = [](mobile::PortraitTransportBounds b)
+                {
+                    return juce::Rectangle<int>(b.x, b.y, b.width, b.height);
+                };
+                projectKey_.setBounds(readoutRect(readouts.key));
+                tempo_.setBounds(readoutRect(readouts.tempo));
+                posReadoutBounds_ = readoutRect(readouts.clock);
+                automArmBtn_.setBounds(readoutRect(readouts.automation));
+                projectKey_.setVisible(readouts.key.width > 0);
+                tempo_.setVisible(readouts.tempo.width > 0);
+                automArmBtn_.setVisible(readouts.automation.width > 0);
                 const auto layout = mobile::portraitTransportLayout(w, h);
                 const auto asRect = [](mobile::PortraitTransportBounds b)
                 {
