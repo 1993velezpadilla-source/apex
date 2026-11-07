@@ -64,6 +64,26 @@ constexpr bool portraitReadoutsSafe(int w, int h)
     }
     return true;
 }
+// Android keyboard/inset resize can cross the 144-unit readout threshold.
+// Hidden readouts must have no tappable geometry; restoring height must
+// restore the clock without placing a hit target outside the viewport.
+constexpr bool readoutHeightBoundary(int w)
+{
+    const auto hidden = DAW::mobile::portraitReadoutLayout(w, 143);
+    const auto visible = DAW::mobile::portraitReadoutLayout(w, 144);
+    const PortraitTransportBounds before[] = {
+        hidden.key, hidden.tempo, hidden.clock, hidden.automation
+    };
+    for (const auto r : before)
+        if (r.width != 0 || r.height != 0) return false;
+    return portraitReadoutsSafe(w, 144)
+        && visible.clock.width >= 44
+        && inside(visible.clock, w, 144);
+}
+static_assert(readoutHeightBoundary(56));
+static_assert(readoutHeightBoundary(189));
+static_assert(readoutHeightBoundary(360));
+
 static_assert(portraitReadoutsSafe(189, 144));
 static_assert(portraitReadoutsSafe(320, 144));
 static_assert(portraitReadoutsSafe(360, 144));
