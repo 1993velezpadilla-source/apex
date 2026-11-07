@@ -13,6 +13,40 @@ struct PortraitTransportLayout
     PortraitTransportBounds key{}, tempo{}, clock{}, automation{};
 };
 
+// Mirrors the portrait top readout row in TransportBar without JUCE.
+// A clipped optional readout is hidden rather than accepting a zero-width tap.
+constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
+{
+    PortraitTransportLayout out{};
+    if (w <= 12 || h < 144) return out;
+    constexpr int margin = 6, gap = 3;
+    const int rowH = (h - 4 * margin) / 3;
+    int cursor = margin;
+    int remaining = w - 2 * margin;
+    const auto take = [&](int wanted) -> PortraitTransportBounds
+    {
+        const int width = remaining < wanted ? remaining : wanted;
+        const PortraitTransportBounds r{cursor, margin, width, rowH};
+        cursor += width;
+        remaining -= width;
+        const int spacing = remaining < gap ? remaining : gap;
+        cursor += spacing;
+        remaining -= spacing;
+        return r;
+    };
+    const int keyW = w / 5 < 54 ? 54 : (w / 5 > 95 ? 95 : w / 5);
+    const int tempoW = w / 5 < 54 ? 54 : (w / 5 > 85 ? 85 : w / 5);
+    const int clockW = w / 4 < 82 ? 82 : (w / 4 > 130 ? 130 : w / 4);
+    out.key = take(keyW);
+    out.tempo = take(tempoW);
+    out.clock = take(clockW);
+    const auto automation = take(72);
+    if (automation.width > 2 && automation.height > 4)
+        out.automation = {automation.x + 1, automation.y + 2,
+                          automation.width - 2, automation.height - 4};
+    return out;
+}
+
 constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int viewportH) noexcept
 {
     PortraitTransportLayout out{};
