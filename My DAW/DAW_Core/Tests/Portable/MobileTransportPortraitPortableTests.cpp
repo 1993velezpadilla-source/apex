@@ -435,6 +435,30 @@ static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180
 
 int main()
 {
+    // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
+    // transition rather than checking only the 143/144 boundary. A hidden
+    // readout must have no hit region; visible targets must remain exclusive.
+    for (const int w : { 56, 100, 189, 320, 360 })
+        for (int h = 0; h <= 200; ++h)
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.key, r.tempo, r.clock, r.automation
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto a = targets[i];
+                assert(inside(a, w, h));
+                if (h < 144)
+                    assert(a.width == 0 && a.height == 0);
+                if (a.width == 0 || a.height == 0) continue;
+                assert(a.width >= 44);
+                for (int j = 0; j < i; ++j)
+                    assert(separated(a, targets[j]));
+            }
+            if (h >= 144)
+                assert(r.clock.width >= 44);
+        }
     // Finger-size regression across every practical phone width, not only
     // sampled devices. Rotation must not silently shrink Mixer/Sends or
     // the six transport targets below 44 logical units.
