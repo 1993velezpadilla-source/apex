@@ -200,6 +200,15 @@ class ImmersiveManifestTests(unittest.TestCase):
                                      rerun=True)
                 self.assertEqual(run.returncode, 0, run.stderr)
 
+    def test_bare_immersive_launcher_is_normalized_idempotently(self):
+        # A class name without a leading dot is also package-relative.
+        # Keep previously generated manifests patchable on repeated exports.
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+            with self.subTest(bundle=bundle):
+                run = self.run_patch(bundle, launcher_name="ApexImmersiveActivity",
+                                     rerun=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+
     def test_launcher_exported_false_is_repaired(self):
         # Android 12+ requires exported=true for both launchers. Reapplying
         # the patch must not regress the repaired manifest or Java activity.
