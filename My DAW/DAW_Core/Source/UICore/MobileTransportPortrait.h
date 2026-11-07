@@ -39,8 +39,13 @@ constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
     const int keyW = w / 5 < 54 ? 54 : (w / 5 > 95 ? 95 : w / 5);
     const int tempoW = w / 5 < 54 ? 54 : (w / 5 > 85 ? 85 : w / 5);
     const int clockW = w / 4 < 82 ? 82 : (w / 4 > 130 ? 130 : w / 4);
-    out.key = take(keyW, 44);
-    out.tempo = take(tempoW, 44);
+    // Reserve a tappable clock before optional key/tempo readouts. At narrow
+    // split-screen widths the old greedy order hid the essential clock while
+    // leaving key and tempo visible.
+    if (remaining >= keyW + gap + 44)
+        out.key = take(keyW, 44);
+    if (remaining >= tempoW + gap + 44)
+        out.tempo = take(tempoW, 44);
     out.clock = take(clockW, 44);
     const auto automation = take(72, 46);
     if (automation.width > 2 && automation.height > 4)
