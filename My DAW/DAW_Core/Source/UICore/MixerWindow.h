@@ -3,6 +3,7 @@
 #include "../ThemeCore/Theme.h"
 #include "../FloatingWindowCore/FloatingWindowBase.h"
 #include "GlassMixerLookAndFeel.h"
+#include "MobilePanelGeometry.h"
 
 namespace DAW {
 
@@ -182,6 +183,13 @@ std::function<void()> onBubblegumClicked;
         };
     }
 
+    /** Phone toolbar actions are deferred until a stationary finger release. */
+    void setPhonePresentation(bool phone) noexcept
+    {
+        phonePresentation_ = phone;
+        pendingPhoneToolbarTap_.invalidate();
+    }
+
     void setContent(juce::Component* content)
     {
         content_ = content;
@@ -199,9 +207,21 @@ std::function<void()> onBubblegumClicked;
 protected:
     void paint(juce::Graphics& g) override
     {
-        // Chrome first, then the blue/cyan header energy as a GUARANTEED final
-        // pass of this window's own paint — no base-chrome layer can cover it.
+        // Retain the original APEX blue/cyan energy over the chrome.
+        // On phones, protect the left traffic lights and right touch toolbar:
+        // painting the energy image over them made the icons harder to see.
         FloatingWindowBase::paint(g);
+        juce::Graphics::ScopedSaveState saved(g);
+        if (phonePresentation_)
+        {
+            constexpr int leftChromeEnd = kBtnPadL + kBtnSize / 2
+                                        + 2 * (kBtnSize + kBtnGap);
+            const auto safe = mobile::phoneMixerHeaderEnergyRegion(
+                getWidth(), leftChromeEnd,
+                juce::roundToInt(getTitleBarRightZone().getX()), kTitleH);
+            g.reduceClipRegion(juce::Rectangle<int>(
+                safe.x, safe.y, safe.width, safe.height));
+        }
         paintHeaderEnergy(g, juce::Rectangle<float>(0.f, 0.f,
                                                     (float)getWidth(),
                                                     (float)kTitleH));
@@ -227,11 +247,95 @@ protected:
         }
     }
 
-    void mouseDrag(const juce::MouseEvent& e) override { FloatingWindowBase::mouseDrag(e); clampTop(); }
-    void mouseUp  (const juce::MouseEvent& e) override { FloatingWindowBase::mouseUp(e);   clampTop(); }
+public:
+    // MainComponent explicitly relayouts the floating Mixer after opening it.
+    // Keep this override public, matching FloatingWindowBase::resized().
+    void resized() override
+    {
+        if (phonePresentation_)
+            pendingPhoneToolbarTap_.invalidate(); // rotation / window resize
+        FloatingWindowBase::resized();
+    }
+
+protected:
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_)
+        {
+            pendingPhoneToolbarTap_.invalidate();
+            // Base chrome minimizes/maximizes on mouseDown. On phones, also
+            // defer those left-side controls so a swipe cannot toggle them.
+            const int leftChrome = phoneLeftChromeButtonAt(e.position);
+            const int button = leftChrome != 0 ? 100 + leftChrome
+                                               : toolbarButtonAt(e.position);
+            if (button != 0)
+            {
+                toFront(true);
+                pendingPhoneToolbarTap_.begin(button);
+                return; // Never invoke a phone chrome action on finger-down.
+            }
+        }
+        FloatingWindowBase::mouseDown(e);
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_ && pendingPhoneToolbarTap_.pressed != 0)
+        {
+            pendingPhoneToolbarTap_.move(e.getDistanceFromDragStartX(),
+                                         e.getDistanceFromDragStartY());
+            return;
+        }
+        FloatingWindowBase::mouseDrag(e);
+        clampTop();
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (phonePresentation_ && pendingPhoneToolbarTap_.pressed != 0)
+        {
+            const int pressed = pendingPhoneToolbarTap_.pressed;
+            const int released = pressed >= 100
+                ? (phoneLeftChromeButtonAt(e.position) != 0
+                    ? 100 + phoneLeftChromeButtonAt(e.position) : 0)
+                : toolbarButtonAt(e.position);
+            if (pendingPhoneToolbarTap_.release(
+                    released,
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            {
+                if (pressed >= 100)
+                {
+                    // Dispatch at the original painted orb centre; the
+                    // expanded phone hit zone may extend beyond its 12px art.
+                    const float centreX = (float) kBtnPadL + (float) kBtnSize * 0.5f
+                                        + (pressed == 102 ? (float)(kBtnSize + kBtnGap) : 0.0f);
+                    FloatingWindowBase::mouseDown(e.withNewPosition(
+                        juce::Point<float>(centreX, (float) kTitleH * 0.5f)));
+                }
+                else
+                    invokeToolbarAction(pressed - 1);
+            }
+            return;
+        }
+        FloatingWindowBase::mouseUp(e);
+        clampTop();
+    }
+
+    void mouseDoubleClick(const juce::MouseEvent& e) override
+    {
+        if (!phonePresentation_)
+            FloatingWindowBase::mouseDoubleClick(e);
+    }
 
 private:
     GlassMixerLookAndFeel glassStyle_;
+    bool phonePresentation_ = false;
+    mobile::PhoneChromeTapState pendingPhoneToolbarTap_;
+    int phoneLeftChromeButtonAt(juce::Point<float> p) const noexcept
+    {
+        return isEmbedded() ? 0 : mobile::phoneMixerLeftChromeButtonAt(
+            p.x, p.y, kBtnPadL, kBtnSize, kBtnGap, kTitleH);
+    }
     juce::Component* content_ = nullptr;
     void clampTop() { if (getBounds().getY() < kMinTopY) setTopLeftPosition(getBounds().getX(), kMinTopY); }
 
@@ -324,7 +428,25 @@ private:
 
     std::vector<Btn> buildBtns(juce::Rectangle<float> zone) const
     {
-        return computeToolbarLayout(zone);
+        if (!phonePresentation_)
+            return computeToolbarLayout(zone); // Desktop/iPad: unchanged.
+
+        const auto phone = mobile::phoneMixerToolbarLayout(
+            juce::roundToInt(zone.getWidth()), juce::roundToInt(zone.getHeight()));
+        std::vector<Btn> buttons;
+        buttons.reserve((size_t) phone.count);
+        for (int i = 0; i < phone.count; ++i)
+        {
+            const auto& item = phone.buttons[i];
+            const int id = item.action == mobile::phoneMixerBrowser ? kBrowser
+                         : item.action == mobile::phoneMixerFXChain ? kSidePanel
+                         : item.action == mobile::phoneMixerReset ? kReset : kOverflow;
+            const auto& b = item.bounds;
+            buttons.push_back({ { zone.getX() + (float) b.x,
+                                  zone.getY() + (float) b.y,
+                                  (float) b.width, (float) b.height }, id });
+        }
+        return buttons;
     }
 
     bool isOn(int id) const
@@ -340,6 +462,17 @@ private:
     // ── Paint ─────────────────────────────────────────────────────────────
     void paintToolbar(juce::Graphics& g, juce::Rectangle<float> zone)
     {
+        // Phone hover/active glows extend beyond their 32-high hit targets.
+        // Keep them inside the title bar and clear of the Mixer strips and
+        // centred APEX title; desktop/iPad rendering is unchanged.
+        juce::Graphics::ScopedSaveState paintState(g);
+        if (phonePresentation_)
+        {
+            const auto clip = mobile::phoneMixerToolbarPaintClip(
+                getWidth(), kTitleH, juce::roundToInt(zone.getX()));
+            g.reduceClipRegion(juce::Rectangle<int>(
+                clip.x, clip.y, clip.width, clip.height));
+        }
         auto& t    = Theme::getInstance();
         auto mouse = getMouseXYRelative().toFloat();
         auto btns  = buildBtns(zone);
@@ -348,9 +481,13 @@ private:
         auto pillBg = [&](juce::Rectangle<float> r)
         {
             g.setColour(juce::Colours::black.withAlpha(0.28f));
-            g.fillRoundedRectangle(r.expanded(4.f, 2.f), 6.f);
+            // Phone targets already fill the 32-unit title bar vertically;
+            // never paint the pill beyond the header into Mixer content.
+            const auto pill = r.expanded(phonePresentation_ ? 1.f : 4.f,
+                                         phonePresentation_ ? 0.f : 2.f);
+            g.fillRoundedRectangle(pill, 6.f);
             g.setColour(juce::Colours::white.withAlpha(0.06f));
-            g.drawRoundedRectangle(r.expanded(4.f, 2.f), 6.f, 0.8f);
+            g.drawRoundedRectangle(pill, 6.f, 0.8f);
         };
         // Keep every hit target on the same single row.  The old fixed-index
         // grouping assumed all seven actions were present, which made the
@@ -517,6 +654,14 @@ case kBG:
         }
     }
 
+    // +1 reserves zero for no button; kSettings itself has ID zero.
+    int toolbarButtonAt(juce::Point<float> p) const
+    {
+        for (const auto& btn : buildBtns(getTitleBarRightZone()))
+            if (btn.bounds.contains(p)) return btn.id + 1;
+        return 0;
+    }
+
     bool toolbarHitTest(juce::Point<float> p) const
     {
         for (auto& btn : buildBtns(getTitleBarRightZone()))
@@ -555,6 +700,11 @@ case kBG:
         bool addedAny = false;
         for (int id = kSettings; id <= kReset; ++id)
         {
+            // The phone toolbar must not offer unbound desktop actions or
+            // routing-cable visuals. Sends remains in the phone Transport.
+            if (phonePresentation_ && id != kBrowser
+                                   && id != kSidePanel && id != kReset)
+                continue;
             if (isVisible(id))
                 continue;
 

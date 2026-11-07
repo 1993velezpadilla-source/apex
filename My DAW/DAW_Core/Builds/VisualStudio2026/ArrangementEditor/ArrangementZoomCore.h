@@ -29,20 +29,22 @@ namespace ArrangementEditor
         /** True when beat subdivision lines should be suppressed entirely. */
         static bool suppressBeats(double pixelsPerBeat) noexcept
         {
-            return pixelsPerBeat < kMinPxPerBeat;
+            // Invalid density must not enable unreadable beat subdivisions.
+            return !(pixelsPerBeat >= kMinPxPerBeat);
         }
 
         /** Musically natural bar step for the given pixel density.
-         *  Guarantees major spacing >= kMinMajorSpacing. */
+         *  Cap the step at 32 bars. Compare spacing thresholds directly:
+         *  ceil(24 / pxPerBar) can overflow int at extreme zoom-out or
+         *  convert NaN to int after malformed tempo/viewport input. */
         static int barStep(double pixelsPerBar) noexcept
         {
-            if (pixelsPerBar <= 0.0) return 1;
-            const int raw = static_cast<int>(std::ceil(kMinMajorSpacing / pixelsPerBar));
-            if (raw <= 1) return 1;
-            if (raw <= 2) return 2;
-            if (raw <= 4) return 4;
-            if (raw <= 8) return 8;
-            if (raw <= 16) return 16;
+            if (!(pixelsPerBar > 0.0)) return 1; // also rejects NaN
+            if (pixelsPerBar >= kMinMajorSpacing) return 1;
+            if (pixelsPerBar >= kMinMajorSpacing / 2.0) return 2;
+            if (pixelsPerBar >= kMinMajorSpacing / 4.0) return 4;
+            if (pixelsPerBar >= kMinMajorSpacing / 8.0) return 8;
+            if (pixelsPerBar >= kMinMajorSpacing / 16.0) return 16;
             return 32;
         }
     };
@@ -124,15 +126,17 @@ namespace ArrangementEditor
         {
             // Extended zoom-out range: down to 2 px/second (~2x farther than
             // before) so whole songs fit comfortably on one screen.
+            if (!std::isfinite(pps))
+                return;
             m_pixelsPerSecond = juce::jlimit(2.0, 4000.0, pps);
         }
 
-        void zoomIn(double centreTime = 0.0)
+        void zoomIn([[maybe_unused]] double centreTime = 0.0)
         {
             setPixelsPerSecond(m_pixelsPerSecond * 1.2);
         }
 
-        void zoomOut(double centreTime = 0.0)
+        void zoomOut([[maybe_unused]] double centreTime = 0.0)
         {
             setPixelsPerSecond(m_pixelsPerSecond / 1.2);
         }
@@ -142,9 +146,19 @@ namespace ArrangementEditor
         // -----------------------------------------------------------------------
         double getTrackHeightPx() const { return m_trackHeightPx; }
 
+        // Shared clamp for touch/wheel anchors and the actual lane setter.
+        // Never anchor the viewport to a height the setter cannot apply.
+        static double clampTrackHeightPx(double requested, double current) noexcept
+        {
+            return std::isfinite(requested) ? juce::jlimit(24.0, 180.0, requested) : current;
+        }
+
         void setTrackHeightPx(double height)
         {
-            m_trackHeightPx = juce::jlimit(24.0, 180.0, height);
+            const double clamped = clampTrackHeightPx(height, m_trackHeightPx);
+            if (clamped == m_trackHeightPx)
+                return;
+            m_trackHeightPx = clamped;
             if (onZoomChanged) onZoomChanged();
         }
 

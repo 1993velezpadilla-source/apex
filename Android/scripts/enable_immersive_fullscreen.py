@@ -13,11 +13,14 @@ import argparse
 import xml.etree.ElementTree as ET
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
-ANDROID_ACTIVITY = "com.xziel.apex.fulltest.ApexImmersiveActivity"
-JAVA_SOURCE = r"""package com.xziel.apex.fulltest;
+# The actual activity name is derived from the generated Projucer manifest.
+# Portrait previews have a separate package from the existing landscape build.
+ACTIVITY_SIMPLE_NAME = "ApexImmersiveActivity"
+JAVA_SOURCE = r"""package __APEX_PACKAGE__;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.content.pm.ActivityInfo;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -34,6 +37,8 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Match JUCE 8 allOrientations: USER follows Android auto-rotate settings.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER);
         applyApexImmersiveMode();
     }
 
@@ -89,10 +94,15 @@ def main() -> int:
     tree = ET.parse(manifest)
     root = tree.getroot()
     candidates = root.findall("./application/activity")
+    # A LAUNCHER category alone does not make an activity launchable: the
+    # MAIN action must appear in the same intent-filter. Ignore decoys.
     launcher = [
         a for a in candidates
         if any(
-            any(category.get(f"{{{ANDROID_NS}}}name")
+            any(action.get(f"{{{ANDROID_NS}}}name")
+                    == "android.intent.action.MAIN"
+                    for action in filt.findall("action"))
+            and any(category.get(f"{{{ANDROID_NS}}}name")
                     == "android.intent.category.LAUNCHER"
                     for category in filt.findall("category"))
             for filt in a.findall("intent-filter"))
@@ -100,24 +110,59 @@ def main() -> int:
     if len(launcher) != 1:
         raise RuntimeError(f"Expected exactly one launcher Activity, found {len(launcher)}")
     activity = launcher[0]
+    # JUCE 8/modern Android Gradle Plugin may omit the manifest's package
+    # attribute entirely. Read the generated .jucer bundleIdentifier instead;
+    # never guess a package or silently accept a mismatch.
+    generated_jucer = generated.parent.parent / "DAW_Core_AndroidFull.jucer"
+    if not generated_jucer.is_file():
+        raise RuntimeError("Missing generated APEX Android .jucer: " + str(generated_jucer))
+    project_package = ET.parse(generated_jucer).getroot().get("bundleIdentifier", "")
+    manifest_package = root.get("package", "").strip()
+    if manifest_package and manifest_package != project_package:
+        raise RuntimeError("Android manifest/.jucer package mismatch: "
+                           + manifest_package + " != " + project_package)
+    package = manifest_package or project_package
+    if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+        raise RuntimeError("Unexpected APEX Android package: " + package)
+    android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
-    if old not in ("com.rmsl.juce.JuceActivity", ANDROID_ACTIVITY):
+    if old not in ("com.rmsl.juce.JuceActivity", android_activity,
+                   "." + ACTIVITY_SIMPLE_NAME, ACTIVITY_SIMPLE_NAME):
         raise RuntimeError("Unexpected launcher activity; refuse unsafe patch: " + old)
-    activity.set(f"{{{ANDROID_NS}}}name", ANDROID_ACTIVITY)
+    # Do not leave a second non-launcher Activity with the same class name.
+    # Validate before writing the manifest or generating Java source.
+    if any(a is not activity and a.get(f"{{{ANDROID_NS}}}name") in
+           (android_activity, "." + ACTIVITY_SIMPLE_NAME, ACTIVITY_SIMPLE_NAME)
+           for a in candidates):
+        raise RuntimeError("Duplicate immersive Activity in generated manifest")
+    activity.set(f"{{{ANDROID_NS}}}name", android_activity)
+    activity.set(f"{{{ANDROID_NS}}}screenOrientation", "user")
+    # Android 12+ requires an explicit exported launcher. An existing false
+    # value also makes the home-screen entry unable to start this Activity.
+    activity.set(f"{{{ANDROID_NS}}}exported", "true")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
-    java = (generated / "app/src/main/java/com/xziel/apex/fulltest"
-            / "ApexImmersiveActivity.java")
+    java = (generated / "app/src/main/java" / package.replace(".", "/")
+            / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
-    java.write_text(JAVA_SOURCE, encoding="utf-8")
+    java.write_text(JAVA_SOURCE.replace("__APEX_PACKAGE__", package), encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)
-    app_activity = again.getroot().find("./application/activity")
-    assert app_activity is not None
-    assert app_activity.get(f"{{{ANDROID_NS}}}name") == ANDROID_ACTIVITY
-    assert "WindowInsetsController" in java.read_text(encoding="utf-8")
-    print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {ANDROID_ACTIVITY}")
+    # A generated manifest can contain other activities before the launcher.
+    # Verify the patched activity by its exact name, never by XML position.
+    matching = [
+        a for a in again.getroot().findall("./application/activity")
+        if a.get(f"{{{ANDROID_NS}}}name") == android_activity
+    ]
+    if (len(matching) != 1
+            or matching[0].get(f"{{{ANDROID_NS}}}screenOrientation") != "user"
+            or matching[0].get(f"{{{ANDROID_NS}}}exported") != "true"):
+        raise RuntimeError("Immersive launcher verification failed")
+    if "WindowInsetsController" not in java.read_text(encoding="utf-8"):
+        raise RuntimeError("Immersive activity Java verification failed")
+    print(f"[APEX ANDROID IMMERSIVE] activity {old} -> {android_activity}")
+    print("[APEX ANDROID ROTATION] manifest=user; Java=user; JUCE=allOrientations")
     print(f"[APEX ANDROID IMMERSIVE] manifest={manifest}")
     print(f"[APEX ANDROID IMMERSIVE] source={java}")
     print("[APEX ANDROID IMMERSIVE] lifecycle: onCreate/onResume/onWindowFocusChanged")

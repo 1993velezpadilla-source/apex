@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../PluginScanCore/PluginScanAuditLogCore.h"
 #include "../ThemeCore/Theme.h"
+#include "../UICore/MobilePanelGeometry.h"
 #include "PluginScannerCore.h"
 #include "PluginHostingProductPolicyCore.h"
 
@@ -44,6 +45,16 @@ public:
         rebuildList();
     }
 
+    /** Only phone presentation enlarges FX search and plugin row hit targets. */
+    void setPhonePresentation(bool phone)
+    {
+        if (phonePresentation_ == phone)
+            return;
+        phonePresentation_ = phone;
+        resized();
+        repaint();
+    }
+
     /** Refresh from scanner's known plugin list. */
     void refresh() { rebuildList(); }
 
@@ -61,7 +72,10 @@ public:
         auto& t = Theme::getInstance();
         g.fillAll(t.colors.backgroundDark.darker(0.05f));
 
-        // Header
+        // The decorative summary header is omitted on phones to leave a
+        // complete touch row visible in short landscape browser windows.
+        if (phonePresentation_)
+            return;
         auto header = getLocalBounds().removeFromTop(28).toFloat();
         g.setColour(t.colors.surface.darker(0.1f));
         g.fillRect(header);
@@ -76,14 +90,16 @@ public:
     void resized() override
     {
         auto b = getLocalBounds();
-        b.removeFromTop(28); // header
-        searchBox_.setBounds(b.removeFromTop(26).reduced(4, 2));
+        b.removeFromTop(mobile::pluginBrowserHeaderHeight(phonePresentation_));
+        searchBox_.setBounds(
+            b.removeFromTop(mobile::pluginBrowserSearchSlotHeight(phonePresentation_)).reduced(4, 2));
         viewport_.setBounds(b);
         layoutList();
     }
 
 private:
     PluginScannerCore& scanner_;
+    bool phonePresentation_ = false;
     juce::TextEditor searchBox_;
     juce::Viewport   viewport_;
     juce::Component  listContent_;
@@ -228,11 +244,15 @@ private:
     void layoutList()
     {
         int y = 0;
-        int w = viewport_.getWidth() - (viewport_.isVerticalScrollBarShown() ? 10 : 0);
+        const int rowHeight = mobile::pluginBrowserRowHeight(phonePresentation_);
+        const int w = mobile::pluginBrowserListWidth(
+            viewport_.getWidth(), viewport_.getHeight(),
+            static_cast<int>(rowWidgets_.size()), rowHeight,
+            viewport_.getScrollBarThickness());
         for (auto* widget : rowWidgets_)
         {
-            widget->setBounds(0, y, w, kRowH);
-            y += kRowH;
+            widget->setBounds(0, y, w, rowHeight);
+            y += rowHeight;
         }
         listContent_.setSize(juce::jmax(1, w), juce::jmax(y, viewport_.getHeight()));
     }
@@ -281,11 +301,20 @@ private:
         void mouseDown(const juce::MouseEvent& e) override
         {
             suppressNextActivation_ = false;
+            phoneTapEligible_ = true;
             if (e.mods.isPopupMenu())
             {
                 suppressNextActivation_ = true;
                 owner_.showRowContextMenu(index_);
             }
+        }
+
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if (owner_.phonePresentation_)
+                phoneTapEligible_ = mobile::phoneTapGestureRemainsEligible(
+                    phoneTapEligible_,
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY());
         }
 
         void mouseUp(const juce::MouseEvent& e) override
@@ -295,6 +324,14 @@ private:
                 suppressNextActivation_ = false;
                 return;
             }
+            // On phones, JUCE can deliver mouseUp to the original row after
+            // a finger swipe or an off-row release. Never load an FX as a
+            // side effect of scrolling; desktop selection is unchanged.
+            if (!mobile::pluginBrowserRowTapActivates(
+                    owner_.phonePresentation_,
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY(),
+                    getLocalBounds().contains(e.getPosition()) && phoneTapEligible_))
+                return;
             owner_.activateRow(index_);
         }
 
@@ -303,6 +340,7 @@ private:
         int  index_;
         bool hovered_ = false;
         bool suppressNextActivation_ = false;
+        bool phoneTapEligible_ = true;
     };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginBrowserPanel)
