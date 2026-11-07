@@ -429,6 +429,29 @@ int main()
                                         layout.key, layout.automation })
                 assert(inside(readout, w, h));
         }
+    // The portrait readout row uses independent geometry from the action row.
+    // Sweep every split-screen width, including the 189-unit boundary, so
+    // clipped readouts cannot overlap transport/shortcuts or escape viewport.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 144, 180, 256 })
+        {
+            assert(portraitReadoutsSafe(w, h));
+            const auto readouts = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto actions = portraitTransportLayout(w, h);
+            for (const auto readout : { readouts.key, readouts.tempo,
+                                        readouts.clock, readouts.automation })
+            {
+                if (readout.width <= 0 || readout.height <= 0) continue;
+                for (const auto action : actions.transport)
+                    if (action.width > 0 && action.height > 0)
+                        assert(separated(readout, action));
+                for (const auto shortcut : { actions.fx, actions.browser,
+                                             actions.mixer, actions.sends,
+                                             actions.click })
+                    if (shortcut.width > 0 && shortcut.height > 0)
+                        assert(separated(readout, shortcut));
+            }
+        }
     // Portrait deck: exercise every width across the minimum-size guard and
     // phone split-screen range. Compact geometry has a separate exhaustive
     // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
