@@ -435,6 +435,31 @@ int main()
                                         layout.key, layout.automation })
                 assert(inside(readout, w, h));
         }
+    // Tap ownership at portrait readout edges, including one-pixel resizes.
+    // Bounds-only tests do not catch an adjacent readout stealing a border tap.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 144, 180, 256 })
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.key, r.tempo, r.clock, r.automation
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto a = targets[i];
+                if (a.width <= 0 || a.height <= 0) continue;
+                const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+                const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+                for (const int x : xs)
+                    for (const int y : ys)
+                    {
+                        assert(contains(a, x, y));
+                        for (int j = 0; j < 4; ++j)
+                            if (i != j)
+                                assert(!contains(targets[j], x, y));
+                    }
+            }
+        }
     // The portrait readout row uses independent geometry from the action row.
     // Sweep every split-screen width, including the 189-unit boundary, so
     // clipped readouts cannot overlap transport/shortcuts or escape viewport.
