@@ -534,6 +534,7 @@ int main()
     {
         const auto hidden = DAW::mobile::portraitReadoutLayout(w, 143);
         assert(emptyLayout(hidden));
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
         for (int h : { 144, 145, 180 })
         {
             const auto visible = DAW::mobile::portraitReadoutLayout(w, h);
@@ -542,7 +543,10 @@ int main()
             assert(inside(visible.clock, w, h));
         }
         const auto recovered = DAW::mobile::portraitReadoutLayout(w, 144);
-        assert(recovered.clock.width == DAW::mobile::portraitReadoutLayout(w, 144).clock.width);
+        assert(recovered.clock.x == before.clock.x
+               && recovered.clock.y == before.clock.y
+               && recovered.clock.width == before.clock.width
+               && recovered.clock.height == before.clock.height);
     }
     // Adversarial split-screen width sweep: a narrow phone deck must never
     // leave a ghost clock hit region over the floating Mixer/Sends shortcuts.
