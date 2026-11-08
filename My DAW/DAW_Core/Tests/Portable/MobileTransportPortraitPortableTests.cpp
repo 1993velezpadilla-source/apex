@@ -506,6 +506,25 @@ constexpr bool orientationRoundTrip()
 }
 static_assert(orientationRoundTrip());
 
+// A split-screen transition can remove the clock while preserving the four
+// phone shortcuts. Returning to portrait must restore the clock, without
+// leaving a phantom readout over Mixer or Bubblegum Sends.
+constexpr bool compactClockResizeRecovery()
+{
+    constexpr auto wide = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    constexpr auto narrow = DAW::mobile::compactPhoneTransportLayout(189, 94);
+    constexpr auto restored = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    return wide.clock.width >= 54 && wide.clock.height > 0
+        && narrow.clock.width == 0 && narrow.clock.height == 0
+        && narrow.mixer.width == 44 && narrow.sends.width == 44
+        && exclusiveCompactAllTargets(189, 94)
+        && exclusiveCompactAllTargets(360, 96)
+        && sameBounds(wide.clock, restored.clock)
+        && sameBounds(wide.mixer, restored.mixer)
+        && sameBounds(wide.sends, restored.sends);
+}
+static_assert(compactClockResizeRecovery());
+
 int main()
 {
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
