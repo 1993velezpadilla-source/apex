@@ -549,6 +549,29 @@ constexpr bool compactHeightTouchThreshold()
 }
 static_assert(compactHeightTouchThreshold());
 
+// Six compact transport actions need 44-unit widths after the 1-unit
+// horizontal inset on each side. At w=294 the computed action width is
+// 43; at w=295 it becomes 44. This is distinct from the 189-unit
+// shortcut breakpoint and must survive keyboard/split-screen resizing.
+constexpr bool compactActionWidthBoundary()
+{
+    for (const int h : {94, 96, 112, 180})
+    {
+        const auto below = DAW::mobile::compactPhoneTransportLayout(294, h);
+        const auto at = DAW::mobile::compactPhoneTransportLayout(295, h);
+        if (!validCompact(294, h) || !validCompact(295, h)) return false;
+        if (!exclusiveCompactAllTargets(294, h)
+            || !exclusiveCompactAllTargets(295, h)) return false;
+        for (int i = 0; i < 6; ++i)
+            if (below.transport[i].width != 43
+                || at.transport[i].width != 44
+                || at.transport[i].height < 44) return false;
+        if (at.mixer.width < 44 || at.sends.width < 44) return false;
+    }
+    return true;
+}
+static_assert(compactActionWidthBoundary());
+
 int main()
 {
     // Portrait readout height transition under keyboard/inset resize: the
