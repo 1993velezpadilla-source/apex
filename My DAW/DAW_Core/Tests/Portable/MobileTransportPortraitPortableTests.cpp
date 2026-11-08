@@ -597,6 +597,29 @@ constexpr bool compactCombinedTouchBoundary()
 }
 static_assert(compactCombinedTouchBoundary());
 
+// Adversarial keyboard-inset oscillation around both 44-unit touch thresholds.
+// Test every intermediate size, not only the endpoints, and verify that
+// returning to a usable deck recreates the exact original hit rectangles.
+constexpr bool compactTouchThresholdRoundTrip()
+{
+    constexpr auto baseline = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    for (int w = 291; w <= 299; ++w)
+        for (int h = 90; h <= 98; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if ((action.width >= 44 && action.height >= 44)
+                    != (w >= 295 && h >= 94)) return false;
+            if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
+                || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
+                return false;
+        }
+    return sameLayout(baseline, DAW::mobile::compactPhoneTransportLayout(360, 96));
+}
+static_assert(compactTouchThresholdRoundTrip());
+
 int main()
 {
     // Portrait readout height transition under keyboard/inset resize: the
