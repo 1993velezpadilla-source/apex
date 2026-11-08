@@ -433,6 +433,39 @@ static_assert(uniqueHitCentres(portraitTransportLayout(852, 180)));
 static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(320, 112)));
 static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180)));
 
+// Probe all portrait readout hit edges, not only their bounding boxes. A
+// readout that overlaps its neighbour by one pixel can steal a touch even
+// when its centre and the transport row remain valid.
+constexpr bool exclusivePortraitReadoutEdges(int w, int h)
+{
+    const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+    const PortraitTransportBounds targets[] = {r.key, r.tempo, r.clock, r.automation};
+    if (!portraitReadoutsSafe(w, h)) return false;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = {a.x, a.x + a.width / 2, a.x + a.width - 1};
+        const int ys[] = {a.y, a.y + a.height / 2, a.y + a.height - 1};
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 4; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+constexpr bool portraitReadoutResizeSweep()
+{
+    for (const int h : {143, 144, 145, 180})
+        for (int w = 13; w <= 400; ++w)
+            if (!exclusivePortraitReadoutEdges(w, h)) return false;
+    return true;
+}
+static_assert(portraitReadoutResizeSweep());
+
 // Boundary contract for OS split-screen and keyboard inset transitions:
 // a 55-unit viewport cannot fit a 44-unit clock plus 12-unit margins,
 // while 56 units can. The 143/144 height boundary must not leave a
