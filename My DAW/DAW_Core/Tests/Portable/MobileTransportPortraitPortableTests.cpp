@@ -525,6 +525,30 @@ constexpr bool compactClockResizeRecovery()
 }
 static_assert(compactClockResizeRecovery());
 
+// A two-row compact deck needs at least 94 logical units for 44-unit
+// touch height: (94 - 6) / 2 == 44. Bounds-only tests at h=8 must not
+// accidentally be interpreted as proof of usable finger targets.
+constexpr bool compactHeightTouchThreshold()
+{
+    for (const int w : {320, 360, 393, 852})
+    {
+        const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto usableDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (!validCompact(w, 93) || !validCompact(w, 94)) return false;
+        if (shortDeck.transport[0].height >= 44
+            || shortDeck.mixer.height >= 44
+            || shortDeck.sends.height >= 44) return false;
+        for (const auto action : usableDeck.transport)
+            if (action.width < 44 || action.height < 44) return false;
+        if (usableDeck.mixer.width < 44 || usableDeck.mixer.height < 44
+            || usableDeck.sends.width < 44 || usableDeck.sends.height < 44)
+            return false;
+        if (!exclusiveCompactAllTargets(w, 94)) return false;
+    }
+    return true;
+}
+static_assert(compactHeightTouchThreshold());
+
 int main()
 {
     // Portrait readout height transition under keyboard/inset resize: the
