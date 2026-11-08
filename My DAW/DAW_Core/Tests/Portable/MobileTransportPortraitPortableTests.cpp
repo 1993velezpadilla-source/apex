@@ -467,6 +467,45 @@ static_assert(compactHeightActivation(189));
 static_assert(compactHeightActivation(320));
 static_assert(compactHeightActivation(852));
 
+// Exercise a full OS inset/orientation sequence rather than isolated sizes.
+// Compact and portrait geometry are pure functions: returning to the original
+// viewport must reproduce identical hit rectangles, with no stale tap targets.
+constexpr bool sameBounds(PortraitTransportBounds a, PortraitTransportBounds b)
+{
+    return a.x == b.x && a.y == b.y
+        && a.width == b.width && a.height == b.height;
+}
+constexpr bool sameLayout(DAW::mobile::PortraitTransportLayout a,
+                          DAW::mobile::PortraitTransportLayout b)
+{
+    for (int i = 0; i < 6; ++i)
+        if (!sameBounds(a.transport[i], b.transport[i])) return false;
+    const PortraitTransportBounds left[] = {a.fx, a.browser, a.mixer, a.sends,
+        a.click, a.clock, a.tempo, a.key, a.automation};
+    const PortraitTransportBounds right[] = {b.fx, b.browser, b.mixer, b.sends,
+        b.click, b.clock, b.tempo, b.key, b.automation};
+    for (int i = 0; i < 9; ++i)
+        if (!sameBounds(left[i], right[i])) return false;
+    return true;
+}
+constexpr bool orientationRoundTrip()
+{
+    constexpr auto compactStart = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    constexpr auto portraitStart = portraitTransportLayout(360, 144);
+    const int widths[] = {360, 852, 189, 320, 360};
+    const int heights[] = {96, 180, 8, 112, 96};
+    for (int i = 0; i < 5; ++i)
+    {
+        if (!validCompact(widths[i], heights[i])) return false;
+        if (!exclusiveCompactAllTargets(widths[i], heights[i])) return false;
+    }
+    return sameLayout(compactStart, DAW::mobile::compactPhoneTransportLayout(360, 96))
+        && sameLayout(portraitStart, portraitTransportLayout(360, 144))
+        && emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, 7))
+        && validCompact(360, 8);
+}
+static_assert(orientationRoundTrip());
+
 int main()
 {
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
