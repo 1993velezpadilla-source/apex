@@ -433,6 +433,25 @@ static_assert(uniqueHitCentres(portraitTransportLayout(852, 180)));
 static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(320, 112)));
 static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180)));
 
+// Boundary contract for OS split-screen and keyboard inset transitions:
+// a 55-unit viewport cannot fit a 44-unit clock plus 12-unit margins,
+// while 56 units can. The 143/144 height boundary must not leave a
+// phantom hit target after the top readout row disappears.
+constexpr bool readoutActivationBoundaries()
+{
+    for (int w = 13; w <= 56; ++w)
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 143);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (before.clock.width != 0 || before.clock.height != 0) return false;
+        if (!portraitReadoutsSafe(w, 144)) return false;
+        if (w < 56 && (after.clock.width != 0 || after.clock.height != 0)) return false;
+        if (w == 56 && (after.clock.width != 44 || after.clock.height <= 0)) return false;
+    }
+    return true;
+}
+static_assert(readoutActivationBoundaries());
+
 int main()
 {
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
