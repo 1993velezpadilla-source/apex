@@ -527,6 +527,23 @@ static_assert(compactClockResizeRecovery());
 
 int main()
 {
+    // Portrait readout height transition under keyboard/inset resize: the
+    // clock must never leave a ghost hit target at 143, and must recover at
+    // 144 without colliding with optional key/tempo/automation readouts.
+    for (int w = 56; w <= 400; ++w)
+    {
+        const auto hidden = DAW::mobile::portraitReadoutLayout(w, 143);
+        assert(emptyLayout(hidden));
+        for (int h : { 144, 145, 180 })
+        {
+            const auto visible = DAW::mobile::portraitReadoutLayout(w, h);
+            assert(portraitReadoutsSafe(w, h));
+            assert(visible.clock.width >= 44);
+            assert(inside(visible.clock, w, h));
+        }
+        const auto recovered = DAW::mobile::portraitReadoutLayout(w, 144);
+        assert(recovered.clock.width == DAW::mobile::portraitReadoutLayout(w, 144).clock.width);
+    }
     // Adversarial split-screen width sweep: a narrow phone deck must never
     // leave a ghost clock hit region over the floating Mixer/Sends shortcuts.
     // Check every width across the 189-unit shortcut breakpoint, not just
