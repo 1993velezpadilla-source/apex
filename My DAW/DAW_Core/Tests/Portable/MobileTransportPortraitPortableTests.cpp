@@ -572,6 +572,31 @@ constexpr bool compactActionWidthBoundary()
 }
 static_assert(compactActionWidthBoundary());
 
+// The two independent compact touch thresholds must hold together during
+// keyboard/inset resizing: 295 units wide and 94 units tall. A bounds-only
+// pass would miss a control that becomes a tiny but still clickable sliver.
+constexpr bool compactCombinedTouchBoundary()
+{
+    for (const int w : {294, 295, 296, 320})
+        for (const int h : {93, 94, 95, 96})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            const bool expectedActionsTouchable = w >= 295 && h >= 94;
+            for (const auto action : r.transport)
+                if ((action.width >= 44 && action.height >= 44)
+                    != expectedActionsTouchable) return false;
+            // Mixer and Sends have a lower width threshold than the six
+            // transport actions; height remains shared across both rows.
+            if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
+                || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
+                return false;
+        }
+    return true;
+}
+static_assert(compactCombinedTouchBoundary());
+
 int main()
 {
     // Portrait readout height transition under keyboard/inset resize: the
