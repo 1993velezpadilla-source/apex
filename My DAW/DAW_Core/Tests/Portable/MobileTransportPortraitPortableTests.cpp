@@ -527,6 +527,22 @@ static_assert(compactClockResizeRecovery());
 
 int main()
 {
+    // Adversarial split-screen width sweep: a narrow phone deck must never
+    // leave a ghost clock hit region over the floating Mixer/Sends shortcuts.
+    // Check every width across the 189-unit shortcut breakpoint, not just
+    // its two endpoints; also exercise minimum-height keyboard insets.
+    for (int w = 20; w <= 320; ++w)
+        for (const int h : { 8, 94, 96, 112 })
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(inside(r.clock, w, h));
+            assert(inside(r.mixer, w, h));
+            assert(inside(r.sends, w, h));
+            assert(r.clock.width == 0 || r.clock.width >= 54);
+            assert(r.mixer.width > 0 && r.sends.width > 0);
+        }
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
     // transition rather than checking only the 143/144 boundary. A hidden
     // readout must have no hit region; visible targets must remain exclusive.
