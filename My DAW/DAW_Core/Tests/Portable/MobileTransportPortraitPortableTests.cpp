@@ -452,6 +452,21 @@ constexpr bool readoutActivationBoundaries()
 }
 static_assert(readoutActivationBoundaries());
 
+// Compact deck activation is independent of the portrait 144-unit threshold.
+// A keyboard/inset collapse below h=8 must remove every touch target; when
+// the deck returns, no old readout or shortcut may intercept another control.
+constexpr bool compactHeightActivation(int w)
+{
+    const auto hidden = DAW::mobile::compactPhoneTransportLayout(w, 7);
+    const auto shown = DAW::mobile::compactPhoneTransportLayout(w, 8);
+    return emptyLayout(hidden) && validCompact(w, 8)
+        && exclusiveCompactAllTargets(w, 8)
+        && shown.mixer.width > 0 && shown.sends.width > 0;
+}
+static_assert(compactHeightActivation(189));
+static_assert(compactHeightActivation(320));
+static_assert(compactHeightActivation(852));
+
 int main()
 {
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
