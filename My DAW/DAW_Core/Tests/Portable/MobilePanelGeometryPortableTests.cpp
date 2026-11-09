@@ -1542,6 +1542,18 @@ int main()
                   && static_cast<long long>(sendsLandscapeEdge.x) + sendsLandscapeEdge.width <= 852);
 
 
+    // Adversarial FX list boundaries: one pixel of overflow must reserve the
+    // scrollbar; exact-fit content must retain the full row hit width.
+    // Extreme row counts/thicknesses must not overflow signed arithmetic.
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 131, 3, 44, 12) == 381);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 132, 3, 44, 12) == 393);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 133, 3, 44, 12) == 393);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 1,
+        std::numeric_limits<int>::max(), 44, 12) == 381);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 1, 1, 44,
+        std::numeric_limits<int>::max()) == 0);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 1, -1, 44, 12) == 393);
+
     // FX list scrollbar transition after rotation or search filtering: the
     // final fully visible row must not lose width to a stale scrollbar.
     // Overflow begins only when one additional row exceeds the viewport.
