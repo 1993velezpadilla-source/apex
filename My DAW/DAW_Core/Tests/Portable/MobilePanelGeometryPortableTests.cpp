@@ -1542,4 +1542,18 @@ int main()
                   && static_cast<long long>(sendsLandscapeEdge.x) + sendsLandscapeEdge.width <= 852);
 
 
+    // FX list scrollbar transition after rotation or search filtering: the
+    // final fully visible row must not lose width to a stale scrollbar.
+    // Overflow begins only when one additional row exceeds the viewport.
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 132, 3, 44, 12) == 393);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 132, 4, 44, 12) == 381);
+    static_assert(DAW::mobile::pluginBrowserListWidth(852, 88, 2, 44, 12) == 852);
+    static_assert(DAW::mobile::pluginBrowserListWidth(852, 88, 3, 44, 12) == 840);
+    // A hidden/empty list and desktop-sized rows must not reserve scrollbar
+    // space; malformed thickness cannot make a negative-width touch row.
+    static_assert(DAW::mobile::pluginBrowserListWidth(100, 44, 0, 44, 12) == 100);
+    static_assert(DAW::mobile::pluginBrowserListWidth(100, 44, 2, 44, -10) == 100);
+    static_assert(DAW::mobile::pluginBrowserListWidth(100, 44, 2, 44, 200) == 0);
+    static_assert(DAW::mobile::pluginBrowserListWidth(0, 44, 2, 44, 12) == 0);
+    static_assert(DAW::mobile::pluginBrowserListWidth(100, 0, 2, 44, 12) == 0);
 }
