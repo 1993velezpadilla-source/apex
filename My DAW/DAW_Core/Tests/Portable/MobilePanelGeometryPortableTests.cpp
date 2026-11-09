@@ -1495,5 +1495,12 @@ int main()
     static_assert(sendsLandscapeEdge.y >= 50
                   && static_cast<long long>(sendsLandscapeEdge.y) + sendsLandscapeEdge.height <= 204);
     static_assert(sendsNoWorkspace.width == 0 && sendsNoWorkspace.height == 0);
+    // Rotation must also clamp the horizontal edge, including restored INT_MIN/MAX
+    // positions; vertical-only checks miss off-screen Sends chrome.
+    static_assert(sendsPortraitEdge.x >= 0
+                  && static_cast<long long>(sendsPortraitEdge.x) + sendsPortraitEdge.width <= 393);
+    static_assert(sendsLandscapeEdge.x >= 0
+                  && static_cast<long long>(sendsLandscapeEdge.x) + sendsLandscapeEdge.width <= 852);
+
 
 }
