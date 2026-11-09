@@ -956,6 +956,34 @@ constexpr bool automationRotationVisibilityContract()
 static_assert(automationRotationVisibilityContract());
 
 
+// Clock is the essential compact readout: keyboard inset changes and
+// portrait/landscape round-trips must not sacrifice its touch target to
+// optional Tempo/Key/Automation, or let it intercept Mixer/Sends taps.
+constexpr bool compactClockInsetRotationContract()
+{
+    for (int w : {320, 360, 393, 600, 852, 1024})
+    {
+        for (int h : {93, 94, 96, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (r.clock.width < 54 || r.clock.height <= 0)
+                return false;
+            if (!inside(r.clock, w, h) || !separated(r.clock, r.mixer)
+                || !separated(r.clock, r.sends))
+                return false;
+        }
+        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        const auto after = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (before.clock.x != after.clock.x || before.clock.y != after.clock.y
+            || before.clock.width != after.clock.width
+            || before.clock.height != after.clock.height)
+            return false;
+    }
+    return true;
+}
+static_assert(compactClockInsetRotationContract());
+
+
 // Compact Automation must not remain tappable with a 43-unit row when the
 // keyboard or OS insets reduce deck height; it returns at the 44-unit edge.
 // Use widths that actually fit clock, tempo, key AND Automation; at 480
