@@ -466,6 +466,27 @@ constexpr bool portraitReadoutResizeSweep()
 }
 static_assert(portraitReadoutResizeSweep());
 
+// Automation is inset by 2 horizontal and 4 vertical units after allocation.
+// The raw 44-unit row at h=144 is therefore NOT a 44-unit automation target.
+// Lock down the real 167/168 height boundary before changing JUCE hit areas.
+constexpr bool automationInsetHeightBoundary()
+{
+    for (const int w : {320, 360, 393, 852})
+    {
+        const auto shortRow = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto touchRow = DAW::mobile::portraitReadoutLayout(w, 168);
+        if (!portraitReadoutsSafe(w, 167) || !portraitReadoutsSafe(w, 168))
+            return false;
+        if (shortRow.automation.width < 44 || shortRow.automation.height != 43)
+            return false;
+        if (touchRow.automation.width < 44 || touchRow.automation.height != 44)
+            return false;
+        if (!inside(touchRow.automation, w, 168)) return false;
+    }
+    return true;
+}
+static_assert(automationInsetHeightBoundary());
+
 // Boundary contract for OS split-screen and keyboard inset transitions:
 // a 55-unit viewport cannot fit a 44-unit clock plus 12-unit margins,
 // while 56 units can. The 143/144 height boundary must not leave a
