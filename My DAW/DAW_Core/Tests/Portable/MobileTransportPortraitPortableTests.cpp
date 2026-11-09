@@ -958,9 +958,11 @@ static_assert(automationRotationVisibilityContract());
 
 // Compact Automation must not remain tappable with a 43-unit row when the
 // keyboard or OS insets reduce deck height; it returns at the 44-unit edge.
+// Use widths that actually fit clock, tempo, key AND Automation; at 480
+// the optional Automation is correctly omitted even at full deck height.
 constexpr bool compactAutomationHeightBoundary()
 {
-    for (int w : {480, 852, 1024})
+    for (int w : {600, 852, 1024})
     {
         const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
         const auto touchDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
