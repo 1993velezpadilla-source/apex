@@ -1495,6 +1495,30 @@ int main()
     static_assert(sendsLandscapeEdge.y >= 50
                   && static_cast<long long>(sendsLandscapeEdge.y) + sendsLandscapeEdge.height <= 204);
     static_assert(sendsNoWorkspace.width == 0 && sendsNoWorkspace.height == 0);
+    // Phone-only reserved-area policy: desktop/iPad Matrix geometry must
+    // ignore phone header/Transport reservations, while phone Sends must
+    // collapse rather than overlap them when split-screen leaves no room.
+    constexpr auto desktopSendsBaseline = fitBubblegumSends(
+        393, 300, 200, 180, false);
+    constexpr auto desktopSendsWithPhoneInsets = fitBubblegumSends(
+        393, 300, 200, 180, false, 250, 250);
+    static_assert(desktopSendsBaseline.x == desktopSendsWithPhoneInsets.x
+                  && desktopSendsBaseline.y == desktopSendsWithPhoneInsets.y
+                  && desktopSendsBaseline.width == desktopSendsWithPhoneInsets.width
+                  && desktopSendsBaseline.height == desktopSendsWithPhoneInsets.height);
+    constexpr auto phoneSendsFullyReserved = fitBubblegumSends(
+        393, 300, 200, 180, true, 250, 250);
+    static_assert(phoneSendsFullyReserved.width == 0
+                  && phoneSendsFullyReserved.height == 0);
+    constexpr auto phoneSendsNegativeInsets = fitBubblegumSends(
+        393, 300, 200, 180, true, -100, -100);
+    constexpr auto phoneSendsZeroInsets = fitBubblegumSends(
+        393, 300, 200, 180, true, 0, 0);
+    static_assert(phoneSendsNegativeInsets.x == phoneSendsZeroInsets.x
+                  && phoneSendsNegativeInsets.y == phoneSendsZeroInsets.y
+                  && phoneSendsNegativeInsets.width == phoneSendsZeroInsets.width
+                  && phoneSendsNegativeInsets.height == phoneSendsZeroInsets.height);
+
     // Rotation must also clamp the horizontal edge, including restored INT_MIN/MAX
     // positions; vertical-only checks miss off-screen Sends chrome.
     static_assert(sendsPortraitEdge.x >= 0
