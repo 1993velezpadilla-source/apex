@@ -48,7 +48,9 @@ constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
         out.tempo = take(tempoW, 44);
     out.clock = take(clockW, 44);
     const auto automation = take(72, 46);
-    if (automation.width > 2 && automation.height > 4)
+    // Do not expose a sub-44-unit Automation hit target during resize.
+    // TransportBar uses this rectangle directly for the JUCE button.
+    if (automation.width >= 46 && automation.height >= 48)
         out.automation = {automation.x + 1, automation.y + 2,
                           automation.width - 2, automation.height - 4};
     return out;
