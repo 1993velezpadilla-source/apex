@@ -1519,6 +1519,21 @@ int main()
                   && phoneSendsNegativeInsets.width == phoneSendsZeroInsets.width
                   && phoneSendsNegativeInsets.height == phoneSendsZeroInsets.height);
 
+    // Split-window boundary: a single available logical unit must not leak
+    // into the reserved header/Transport, and invalid viewports stay empty.
+    // Compile-time checks also run when NDEBUG removes runtime assertions.
+    constexpr auto sendsOneUnitWorkspace = fitBubblegumSends(
+        393, 301, std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), true, 150, 150);
+    static_assert(sendsOneUnitWorkspace.width == 0
+                  && sendsOneUnitWorkspace.height == 0);
+    constexpr auto sendsInvalidWidth = fitBubblegumSends(
+        -1, 852, 10, 10, true, 50, 144);
+    constexpr auto sendsInvalidHeight = fitBubblegumSends(
+        393, 0, 10, 10, true, 50, 144);
+    static_assert(sendsInvalidWidth.width == 0 && sendsInvalidWidth.height == 0);
+    static_assert(sendsInvalidHeight.width == 0 && sendsInvalidHeight.height == 0);
+
     // Rotation must also clamp the horizontal edge, including restored INT_MIN/MAX
     // positions; vertical-only checks miss off-screen Sends chrome.
     static_assert(sendsPortraitEdge.x >= 0
