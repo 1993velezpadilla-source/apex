@@ -954,3 +954,23 @@ constexpr bool automationRotationVisibilityContract()
         && restored.automation.height >= 44;
 }
 static_assert(automationRotationVisibilityContract());
+
+
+// Compact Automation must not remain tappable with a 43-unit row when the
+// keyboard or OS insets reduce deck height; it returns at the 44-unit edge.
+constexpr bool compactAutomationHeightBoundary()
+{
+    for (int w : {480, 852, 1024})
+    {
+        const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto touchDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (shortDeck.automation.width != 0 || shortDeck.automation.height != 0)
+            return false;
+        if (touchDeck.automation.width < 44 || touchDeck.automation.height < 44)
+            return false;
+        if (!validCompact(w, 93) || !validCompact(w, 94))
+            return false;
+    }
+    return true;
+}
+static_assert(compactAutomationHeightBoundary());
