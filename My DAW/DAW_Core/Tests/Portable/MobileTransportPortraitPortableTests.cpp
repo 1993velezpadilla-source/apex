@@ -936,3 +936,21 @@ int main()
             assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
         }
 }
+
+
+// Automation visibility must be recalculated on every portrait/compact
+// transition. TransportBar uses these bounds to set JUCE visibility.
+constexpr bool automationRotationVisibilityContract()
+{
+    const auto narrow = DAW::mobile::portraitReadoutLayout(360, 144);
+    const auto compactWide = DAW::mobile::compactPhoneTransportLayout(852, 180);
+    const auto compactNarrow = DAW::mobile::compactPhoneTransportLayout(320, 96);
+    const auto restored = DAW::mobile::portraitReadoutLayout(852, 180);
+    return narrow.automation.width == 0
+        && compactWide.automation.width >= 44
+        && compactWide.automation.height >= 44
+        && compactNarrow.automation.width == 0
+        && restored.automation.width >= 44
+        && restored.automation.height >= 44;
+}
+static_assert(automationRotationVisibilityContract());
