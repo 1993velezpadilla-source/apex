@@ -468,7 +468,8 @@ static_assert(portraitReadoutResizeSweep());
 
 // Automation is inset by 2 horizontal and 4 vertical units after allocation.
 // The raw 44-unit row at h=144 is therefore NOT a 44-unit automation target.
-// Lock down the real 167/168 height boundary before changing JUCE hit areas.
+// Below the 168-unit threshold, hide Automation instead of exposing a
+// subminimum touch target; TransportBar consumes this exact rectangle.
 constexpr bool automationInsetHeightBoundary()
 {
     for (const int w : {320, 360, 393, 852})
@@ -477,7 +478,7 @@ constexpr bool automationInsetHeightBoundary()
         const auto touchRow = DAW::mobile::portraitReadoutLayout(w, 168);
         if (!portraitReadoutsSafe(w, 167) || !portraitReadoutsSafe(w, 168))
             return false;
-        if (shortRow.automation.width < 44 || shortRow.automation.height != 43)
+        if (shortRow.automation.width != 0 || shortRow.automation.height != 0)
             return false;
         if (touchRow.automation.width < 44 || touchRow.automation.height != 44)
             return false;
