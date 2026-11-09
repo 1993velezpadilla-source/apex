@@ -143,7 +143,11 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
     out.clock = take(130, 54);
     out.tempo = take(85, 54);
     out.key = take(95, 54);
-    out.automation = take(72, 44);
+    // A narrow keyboard/inset deck must not expose an undersized arm target.
+    // Preserve the readout cursor allocation so adjacent controls do not jump.
+    const auto automation = take(72, 44);
+    if (automation.height >= 44)
+        out.automation = automation;
     out.click = take(132, 44);
     return out;
 }
