@@ -1476,4 +1476,24 @@ int main()
                     assert(phoneClipPropertiesFits(clip, clip.window));
             }
 
+
+    // Release-mode regression: a restored Sends panel must never cover the
+    // reserved phone header or bottom Transport after portrait/landscape.
+    // Compile-time checks survive NDEBUG (unlike assert()).
+    constexpr auto sendsPortraitEdge = fitBubblegumSends(
+        393, 852, std::numeric_limits<int>::max(),
+        std::numeric_limits<int>::min(), true, 50, 144);
+    constexpr auto sendsLandscapeEdge = fitBubblegumSends(
+        852, 300, std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), true, 50, 96);
+    constexpr auto sendsNoWorkspace = fitBubblegumSends(
+        393, 144, 100, 100, true, 50, 94);
+    static_assert(sendsPortraitEdge.width > 0 && sendsPortraitEdge.height > 0);
+    static_assert(sendsPortraitEdge.y >= 50
+                  && static_cast<long long>(sendsPortraitEdge.y) + sendsPortraitEdge.height <= 708);
+    static_assert(sendsLandscapeEdge.width > 0 && sendsLandscapeEdge.height > 0);
+    static_assert(sendsLandscapeEdge.y >= 50
+                  && static_cast<long long>(sendsLandscapeEdge.y) + sendsLandscapeEdge.height <= 204);
+    static_assert(sendsNoWorkspace.width == 0 && sendsNoWorkspace.height == 0);
+
 }
