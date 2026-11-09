@@ -498,6 +498,8 @@ public:
                     clickStrip_->setBounds(asRect(layout.click));
                 projectKey_.setVisible(layout.key.width > 0);
                 tempo_.setVisible(layout.tempo.width > 0);
+                // Restore Automation visibility after portrait/landscape resize.
+                automArmBtn_.setVisible(layout.automation.width > 0);
             }
             repaint();
             return;
