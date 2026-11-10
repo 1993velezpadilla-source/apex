@@ -1643,6 +1643,20 @@ int main()
     static_assert(DAW::mobile::pluginBrowserListWidth(0, 44, 2, 44, 12) == 0);
     static_assert(DAW::mobile::pluginBrowserListWidth(100, 0, 2, 44, 12) == 0);
 
+    // Adversarial FX list overflow: the scrollbar decision must avoid
+    // multiplying row count by row height (signed overflow at INT_MAX).
+    // Exactly fitting rows keep their full hit width; one extra row reserves
+    // the scrollbar, including at the largest representable dimensions.
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 132, 3, 44, 12) == 393);
+    static_assert(DAW::mobile::pluginBrowserListWidth(393, 131, 3, 44, 12) == 381);
+    static_assert(DAW::mobile::pluginBrowserListWidth(
+        393, std::numeric_limits<int>::max(),
+        std::numeric_limits<int>::max(),
+        std::numeric_limits<int>::max(), 12) == 381);
+    static_assert(DAW::mobile::pluginBrowserListWidth(
+        393, std::numeric_limits<int>::max(), 1,
+        std::numeric_limits<int>::max(), 12) == 393);
+
     // Tiny split-screen / rotated FX Browser: zero-sized workspaces must
     // never produce an interactive off-screen panel or a negative hit area.
     constexpr auto fxOnePixel = DAW::mobile::fitPhonePluginBrowser(1, 1, 0, 0);
