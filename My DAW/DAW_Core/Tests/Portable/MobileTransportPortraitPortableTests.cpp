@@ -1004,3 +1004,16 @@ constexpr bool compactAutomationHeightBoundary()
     return true;
 }
 static_assert(compactAutomationHeightBoundary());
+
+// Automation readout becomes a real 44-unit hit target only when the
+// portrait readout row reaches 48 units (168-unit deck). At 167 units
+// it must stay hidden rather than exposing a too-short touch target.
+constexpr auto automationBelowHeight = DAW::mobile::portraitReadoutLayout(852, 167);
+constexpr auto automationAtHeight = DAW::mobile::portraitReadoutLayout(852, 168);
+static_assert(automationBelowHeight.automation.width == 0
+              && automationBelowHeight.automation.height == 0);
+static_assert(automationAtHeight.automation.width >= 44
+              && automationAtHeight.automation.height >= 44);
+static_assert(inside(automationAtHeight.automation, 852, 168));
+static_assert(portraitReadoutsSafe(852, 167)
+              && portraitReadoutsSafe(852, 168));
