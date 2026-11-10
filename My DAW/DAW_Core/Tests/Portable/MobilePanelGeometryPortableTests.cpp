@@ -1564,6 +1564,15 @@ int main()
     static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 0, 0, false));
     static_assert(DAW::mobile::pluginBrowserRowTapActivates(false, 100, 100, false));
 
+    // Circular touch slop must be evaluated as a radius, not an 8x8 box.
+    // A diagonal 5x6 gesture is still inside the radius (61 <= 64),
+    // whereas 6x6 is outside (72 > 64). Both signs behave symmetrically.
+    static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, 5, 6, true));
+    static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, -5, -6, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 6, 6, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, -6, -6, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 5, 6, false));
+
     // FX list scrollbar transition after rotation or search filtering: the
     // final fully visible row must not lose width to a stale scrollbar.
     // Overflow begins only when one additional row exceeds the viewport.
