@@ -82,6 +82,19 @@ int main()
         if (shortLayout.count != 0)
             return 4;
     }
+    // Restored/corrupt viewport dimensions can reach the geometry helper
+    // before JUCE has completed a rotation. Keep action counts and bounds
+    // valid even at signed integer extremes (also in Release builds).
+    constexpr auto extremeToolbar = DAW::mobile::phoneMixerToolbarLayout(
+        std::numeric_limits<int>::max(), std::numeric_limits<int>::max());
+    static_assert(extremeToolbar.count == 3);
+    static_assert(extremeToolbar.buttons[2].action == DAW::mobile::phoneMixerReset);
+    static_assert(static_cast<long long>(extremeToolbar.buttons[2].bounds.y)
+                  + extremeToolbar.buttons[2].bounds.height
+                  <= std::numeric_limits<int>::max());
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(-1, 32).count == 0);
+    static_assert(DAW::mobile::phoneMixerToolbarLayout(142, -1).count == 0);
+
     // Rotation and title-bar resizing can increase toolbar height without
     // changing its width. Every hit rectangle must remain vertically bounded,
     // and the action set must not depend on spare vertical space.
