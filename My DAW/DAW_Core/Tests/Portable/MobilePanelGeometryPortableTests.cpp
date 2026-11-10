@@ -1554,6 +1554,16 @@ int main()
         std::numeric_limits<int>::max()) == 0);
     static_assert(DAW::mobile::pluginBrowserListWidth(393, 1, -1, 44, 12) == 393);
 
+    // Phone FX swipe-vs-tap boundary: a diagonal drag beyond the circular
+    // 8-unit radius must not instantiate a plugin on release. Desktop mouse
+    // activation keeps its existing behavior, even outside the row.
+    static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, 8, 0, true));
+    static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, 0, -8, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 8, 1, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 6, 6, true));
+    static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 0, 0, false));
+    static_assert(DAW::mobile::pluginBrowserRowTapActivates(false, 100, 100, false));
+
     // FX list scrollbar transition after rotation or search filtering: the
     // final fully visible row must not lose width to a stale scrollbar.
     // Overflow begins only when one additional row exceeds the viewport.
