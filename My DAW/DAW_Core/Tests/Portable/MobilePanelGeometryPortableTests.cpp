@@ -37,6 +37,24 @@ int main()
         taps.begin(3, second);
         assert(taps.release(second, 3, 0, 0));
     }
+    // More simultaneous touch sources than the fixed + overflow arrays can
+    // represent must fail closed. A late mouseUp must not launch a panel,
+    // even after the tracked contacts have lifted; explicit reset recovers.
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        constexpr int contacts =
+            DAW::mobile::PhoneTransportTapState::maxTrackedSources
+            + DAW::mobile::PhoneTransportTapState::maxOverflowSources + 1;
+        for (int source = 0; source < contacts; ++source)
+            taps.begin(1, source);
+        for (int source = contacts - 1; source >= 0; --source)
+            assert(!taps.release(source, 1, 0, 0));
+        taps.begin(2, 1000);
+        assert(!taps.release(1000, 2, 0, 0));
+        taps.invalidate();
+        taps.begin(2, 1000);
+        assert(taps.release(1000, 2, 0, 0));
+    }
     // Boundary regression for compact phone Mixer toolbar: a one-unit
     // resize must not expose an unreachable action or remove Overflow.
     // These exact thresholds matter when portrait split-screen changes width.
