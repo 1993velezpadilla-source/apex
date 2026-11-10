@@ -1573,6 +1573,32 @@ int main()
     static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, -6, -6, true));
     static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 5, 6, false));
 
+
+    // Phone FX browser: rotation must clamp an off-screen dragged window
+    // without placing chrome over the persistent Transport or header.
+    // Maximizing intentionally discards the old drag position.
+    constexpr auto fxPortraitRestored = DAW::mobile::fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144, { 1000000, -1000000, 340, 560 });
+    static_assert(fxPortraitRestored.x >= 0 && fxPortraitRestored.y >= 50);
+    static_assert(fxPortraitRestored.x + fxPortraitRestored.width <= 393);
+    static_assert(fxPortraitRestored.y + fxPortraitRestored.height <= 708);
+    constexpr auto fxLandscapeRestored = DAW::mobile::fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96, fxPortraitRestored);
+    static_assert(fxLandscapeRestored.x >= 0 && fxLandscapeRestored.y >= 50);
+    static_assert(fxLandscapeRestored.x + fxLandscapeRestored.width <= 852);
+    static_assert(fxLandscapeRestored.y + fxLandscapeRestored.height <= 204);
+    constexpr auto fxLandscapeMaximized = DAW::mobile::fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96, { 1000000, -1000000, 340, 560 }, true);
+    constexpr auto fxLandscapeDefaultMaximized = DAW::mobile::fitPhonePluginBrowser(
+        852, 300, 50, 96, true);
+    static_assert(fxLandscapeMaximized.x == fxLandscapeDefaultMaximized.x
+                  && fxLandscapeMaximized.y == fxLandscapeDefaultMaximized.y
+                  && fxLandscapeMaximized.width == fxLandscapeDefaultMaximized.width
+                  && fxLandscapeMaximized.height == fxLandscapeDefaultMaximized.height);
+    constexpr auto fxNoWorkspace = DAW::mobile::fitPhonePluginBrowserPlacement(
+        393, 144, 50, 94, { 1000000, -1000000, 340, 560 });
+    static_assert(fxNoWorkspace.width == 0 && fxNoWorkspace.height == 0);
+
     // FX list scrollbar transition after rotation or search filtering: the
     // final fully visible row must not lose width to a stale scrollbar.
     // Overflow begins only when one additional row exceeds the viewport.
