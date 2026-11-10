@@ -1599,6 +1599,22 @@ int main()
         393, 144, 50, 94, { 1000000, -1000000, 340, 560 });
     static_assert(fxNoWorkspace.width == 0 && fxNoWorkspace.height == 0);
 
+    // Restored FX Browser coordinates may be corrupted at either signed-int
+    // extreme. Clamp both axes through rotation without signed overflow or
+    // allowing the title bar to cover the persistent phone Transport.
+    constexpr auto fxIntMin = DAW::mobile::fitPhonePluginBrowserPlacement(
+        393, 852, 50, 144,
+        { std::numeric_limits<int>::min(), std::numeric_limits<int>::min(), 340, 560 });
+    constexpr auto fxIntMax = DAW::mobile::fitPhonePluginBrowserPlacement(
+        852, 300, 50, 96,
+        { std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 340, 560 });
+    static_assert(fxIntMin.x >= 0 && fxIntMin.y >= 50);
+    static_assert(static_cast<long long>(fxIntMin.x) + fxIntMin.width <= 393
+                  && static_cast<long long>(fxIntMin.y) + fxIntMin.height <= 708);
+    static_assert(fxIntMax.x >= 0 && fxIntMax.y >= 50);
+    static_assert(static_cast<long long>(fxIntMax.x) + fxIntMax.width <= 852
+                  && static_cast<long long>(fxIntMax.y) + fxIntMax.height <= 204);
+
     // FX list scrollbar transition after rotation or search filtering: the
     // final fully visible row must not lose width to a stale scrollbar.
     // Overflow begins only when one additional row exceeds the viewport.
