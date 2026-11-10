@@ -972,11 +972,16 @@ constexpr bool compactClockInsetRotationContract()
                 || !separated(r.clock, r.sends))
                 return false;
         }
-        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 94);
-        const auto after = DAW::mobile::compactPhoneTransportLayout(w, 94);
-        if (before.clock.x != after.clock.x || before.clock.y != after.clock.y
-            || before.clock.width != after.clock.width
-            || before.clock.height != after.clock.height)
+        // Cross the 93/94-unit Automation threshold, then return to 93.
+        // The clock must remain stable while Automation appears/disappears.
+        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto expanded = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        if (before.clock.x != expanded.clock.x
+            || before.clock.width != expanded.clock.width
+            || before.clock.y != expanded.clock.y
+            || expanded.clock.height != before.clock.height + 1
+            || !sameBounds(before.clock, restored.clock))
             return false;
     }
     return true;
