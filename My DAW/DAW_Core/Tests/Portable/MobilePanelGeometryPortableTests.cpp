@@ -1642,4 +1642,19 @@ int main()
     static_assert(DAW::mobile::pluginBrowserListWidth(100, 44, 2, 44, 200) == 0);
     static_assert(DAW::mobile::pluginBrowserListWidth(0, 44, 2, 44, 12) == 0);
     static_assert(DAW::mobile::pluginBrowserListWidth(100, 0, 2, 44, 12) == 0);
+
+    // Tiny split-screen / rotated FX Browser: zero-sized workspaces must
+    // never produce an interactive off-screen panel or a negative hit area.
+    constexpr auto fxOnePixel = DAW::mobile::fitPhonePluginBrowser(1, 1, 0, 0);
+    constexpr auto fxTwoPixels = DAW::mobile::fitPhonePluginBrowser(2, 2, 0, 0);
+    constexpr auto fxFullyReserved = DAW::mobile::fitPhonePluginBrowser(
+        393, 852, 852, 144);
+    static_assert(fxOnePixel.width == 1 && fxOnePixel.height == 1);
+    static_assert(fxTwoPixels.width == 2 && fxTwoPixels.height == 2);
+    static_assert(fxFullyReserved.width == 0 && fxFullyReserved.height == 0);
+    constexpr auto fxTinyRestored = DAW::mobile::fitPhonePluginBrowserPlacement(
+        2, 2, 0, 0, { std::numeric_limits<int>::max(),
+                       std::numeric_limits<int>::min(), 340, 560 });
+    static_assert(fxTinyRestored.x == 0 && fxTinyRestored.y == 0);
+    static_assert(fxTinyRestored.width == 2 && fxTinyRestored.height == 2);
 }
