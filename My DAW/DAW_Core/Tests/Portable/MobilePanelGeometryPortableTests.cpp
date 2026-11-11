@@ -1689,4 +1689,27 @@ int main()
                        std::numeric_limits<int>::min(), 340, 560 });
     static_assert(fxTinyRestored.x == 0 && fxTinyRestored.y == 0);
     static_assert(fxTinyRestored.width == 2 && fxTinyRestored.height == 2);
+    // Adversarial portrait/split-screen sweep: every restored FX browser
+    // must remain inside the unreserved viewport after an inset change.
+    for (int width : { 1, 2, 3, 8, 46, 94, 393, 852 })
+        for (int height : { 1, 2, 8, 50, 144, 300, 852 })
+            for (int top : { 0, 1, 50, 144 })
+                for (int bottom : { 0, 1, 96, 144 })
+                {
+                    const auto panel = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom,
+                        { std::numeric_limits<int>::max(),
+                          std::numeric_limits<int>::min(), 340, 560 });
+                    assert(inside(panel, width, height));
+                    if (panel.width > 0 && panel.height > 0)
+                    {
+                        const int safeTop = DAW::mobile::clampInt(top, 0, height);
+                        const int safeBottom = DAW::mobile::clampInt(
+                            bottom, 0, height - safeTop);
+                        assert(panel.y >= safeTop);
+                        assert(static_cast<long long>(panel.y) + panel.height
+                               <= height - safeBottom);
+                    }
+                }
+
 }
