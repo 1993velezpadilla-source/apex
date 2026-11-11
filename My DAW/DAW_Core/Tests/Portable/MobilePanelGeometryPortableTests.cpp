@@ -12,6 +12,24 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Platform policy gate: phone Arrangement hides desktop scroll/zoom chrome
+    // while retaining both scroll axes; iPad/PC/Mac keep desktop chrome.
+    // The wheel event must be consumed only once on phones.
+    constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
+    constexpr auto desktopChrome = DAW::mobile::timelineViewportChrome(false);
+    static_assert(!phoneChrome.showVerticalBar && !phoneChrome.showHorizontalBar
+                  && phoneChrome.allowVerticalScrollWithoutBar
+                  && phoneChrome.allowHorizontalScrollWithoutBar
+                  && !phoneChrome.showCornerZoom);
+    static_assert(desktopChrome.showVerticalBar && desktopChrome.showHorizontalBar
+                  && !desktopChrome.allowVerticalScrollWithoutBar
+                  && !desktopChrome.allowHorizontalScrollWithoutBar
+                  && desktopChrome.showCornerZoom);
+    static_assert(!DAW::mobile::timelineWheelDelegatesToViewport(true));
+    static_assert(DAW::mobile::timelineWheelDelegatesToViewport(false));
+    static_assert(!DAW::mobile::desktopRestoreBubbleVisible(true));
+    static_assert(DAW::mobile::desktopRestoreBubbleVisible(false));
+
     // The test oracle itself must reject overflowed restored window edges.
     // A 32-bit addition here could wrap and falsely accept an offscreen panel.
     static_assert(!inside({ std::numeric_limits<int>::max(), 0, 20, 20 },
