@@ -530,8 +530,9 @@ int main()
     // Repeated unrelated phone layout refreshes during the first 28s must
     // not extend a 30s Arrangement or trigger a resize on each refresh.
     for (int tick = 0; tick <= 560; ++tick) // 0..28s at 20 Hz
-        assert(timelinePhonePlaybackExtentSeconds(30.0,
-                   static_cast<double>(tick) / 20.0) == 30.0);
+        if (timelinePhonePlaybackExtentSeconds(30.0,
+                static_cast<double>(tick) / 20.0) != 30.0)
+            return 88;
     double phoneExtent = 30.0;
     int refreshes = 0;
     for (int tick = 0; tick < 1200; ++tick) // 60s at 20 transport ticks/s
@@ -543,8 +544,10 @@ int main()
             ++refreshes;
         }
     }
-    assert(refreshes <= 2); // Previously ~600 rebuilds after 28s.
-    assert(phoneExtent >= 60.0);
+    if (refreshes > 2) // Previously ~600 rebuilds after 28s.
+        return 89;
+    if (phoneExtent < 60.0)
+        return 90;
 
     // Regression: closing Sends or the floating Mixer must not resurrect
     // desktop draggable launchers over the phone Arrangement. The desktop
@@ -552,8 +555,9 @@ int main()
     using DAW::mobile::desktopRestoreBubbleVisible;
     static_assert(!desktopRestoreBubbleVisible(true));
     static_assert(desktopRestoreBubbleVisible(false));
-    assert(!desktopRestoreBubbleVisible(true));
-    assert(desktopRestoreBubbleVisible(false));
+    if (desktopRestoreBubbleVisible(true)
+        || !desktopRestoreBubbleVisible(false))
+        return 91;
     // The painted 30x30 close orb gets a 44x44 touch target on phones.
     constexpr auto closePortrait = phoneCloseTouchBounds(360, 420);
     static_assert(closePortrait.x == 313 && closePortrait.y == 3
