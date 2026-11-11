@@ -486,8 +486,11 @@ int main()
                 {
                     const int result = timelineWheelClampedPosition(
                         current, content, view, step);
-                    assert(result >= 0);
-                    assert(result <= (content > view ? content - view : 0));
+                    // Keep Arrangement wheel bounds checked in Release/NDEBUG.
+                    if (result < 0)
+                        return 60;
+                    if (result > (content > view ? content - view : 0))
+                        return 61;
                 }
 
     // Once playback approaches the end of the Arrangement, extending the
