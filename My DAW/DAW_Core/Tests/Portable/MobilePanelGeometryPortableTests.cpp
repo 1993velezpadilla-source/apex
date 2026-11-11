@@ -781,10 +781,14 @@ int main()
         for (int toolbarStart : {-100, 0, 24, 60, 142, 237, 622, 2000})
         {
             const auto energy = phoneMixerHeaderEnergyRegion(w, 60, toolbarStart, 32);
-            assert(inside(energy, DAW::mobile::maxInt(0, w), 32));
-            assert(energy.x >= DAW::mobile::minInt(60, w));
-            assert(energy.x + energy.width <=
-                   DAW::mobile::maxInt(energy.x, toolbarStart));
+            // Preserve these Mixer header bounds checks in Release/NDEBUG.
+            if (!inside(energy, DAW::mobile::maxInt(0, w), 32))
+                return 98;
+            if (energy.x < DAW::mobile::minInt(60, w))
+                return 99;
+            if (static_cast<long long>(energy.x) + energy.width >
+                DAW::mobile::maxInt(energy.x, toolbarStart))
+                return 100;
         }
 
     // The toolbar's hover and active glows extend 2 units beyond the
