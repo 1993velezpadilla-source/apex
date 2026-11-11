@@ -610,12 +610,25 @@ public:
         bumpCacheGeneration();
     }
 
-    /** Clear all cached data. */
+    /** Clear ALL audio caches at a project boundary.
+     *  Per-clip and decoded-source data have separate owners. Keeping decoded
+     *  WAVs from previously opened songs alive after a New/Open Project was
+     *  unbounded retained memory: clearAll() previously released only clips.
+     *  This is invoked from ApplicationCore::reloadAudioFiles() while project
+     *  callbacks are suspended, not from the realtime audio thread.
+     *  unloadClip() deliberately retains within-project decoded sources for
+     *  Undo/Redo; only a full-project clear discards them. */
     void clearAll()
     {
-        const juce::ScopedWriteLock sl(cacheLock_);
-        cache_.clear();
-        bumpCacheGeneration();
+        {
+            const juce::ScopedWriteLock sl(cacheLock_);
+            cache_.clear();
+            bumpCacheGeneration();
+        }
+        {
+            const juce::ScopedWriteLock sl(sourceCacheLock_);
+            sourceCache_.clear();
+        }
     }
 
     /**
