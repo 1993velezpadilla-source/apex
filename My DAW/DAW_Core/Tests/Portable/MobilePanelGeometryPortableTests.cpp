@@ -1081,17 +1081,17 @@ int main()
     // never close/minimize/maximize the newly repositioned floating window.
     using DAW::mobile::PhoneChromeTapState;
     PhoneChromeTapState chromeTap;
-    assert(!chromeTap.release(1, 0, 0)); // No press.
+    if (chromeTap.release(1, 0, 0)) return 69; // No press.
     chromeTap.begin(1);
-    assert(chromeTap.release(1, 0, 0)); // Stationary close.
-    assert(!chromeTap.release(1, 0, 0)); // Single activation.
+    if (!chromeTap.release(1, 0, 0)) return 70; // Stationary close.
+    if (chromeTap.release(1, 0, 0)) return 71; // Single activation.
     chromeTap.begin(2);
     chromeTap.move(3, 4);
-    assert(chromeTap.release(2, 3, 4)); // Short movement.
+    if (!chromeTap.release(2, 3, 4)) return 72; // Short movement.
     chromeTap.begin(3);
     chromeTap.move(12, 0);
     chromeTap.move(0, 0);
-    assert(!chromeTap.release(3, 0, 0)); // Swipe and return.
+    if (chromeTap.release(3, 0, 0)) return 73; // Swipe and return.
     chromeTap.begin(1);
     chromeTap.invalidate(); // Parent resized on rotation.
     assert(!chromeTap.release(1, 0, 0));
