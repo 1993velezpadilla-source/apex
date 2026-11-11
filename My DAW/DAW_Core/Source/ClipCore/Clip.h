@@ -467,6 +467,10 @@ public:
     
     // Clip deletion
     bool deleteClip(const ClipID& id);
+    /** Delete every clip owned by an actually deleted track ID.  The caller
+     *  must confirm the track deletion first; lane positions are not owners.
+     *  Returns deleted stable clip IDs for selection/diagnostic cleanup. */
+    std::vector<ClipID> deleteClipsOnTracks(const std::vector<TrackID>& deletedTrackIds);
     void deleteAllClips();
     
     // Clip access
