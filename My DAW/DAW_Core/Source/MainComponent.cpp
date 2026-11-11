@@ -6127,8 +6127,11 @@ bool MainComponent::deleteTracksAsOneTopologyTransaction(
     // the deleted track and its clips together.
     auto& clipManager = appCore_.getClipManager();
     const auto removedClipIds = clipManager.deleteClipsOnTracks(deleted);
-    for (const auto& clipId : removedClipIds)
-        multiSelection_.remove(DAW::SelectionTarget::clip(clipId));
+    const auto selectedClips = multiSelection_.getSelected(DAW::SelectionKind::Clip);
+    for (const auto& selection : selectedClips)
+        if (std::find(removedClipIds.begin(), removedClipIds.end(), selection.clipId)
+            != removedClipIds.end())
+            multiSelection_.remove(selection);
 
     // Recompute every surviving clip's visible lane from its unchanged
     // stable TrackID.  Merely reindexing TrackManager without this remirror
