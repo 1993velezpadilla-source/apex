@@ -184,7 +184,7 @@ public:
 
             AudioFileManager manager;
             std::weak_ptr<AudioFileManager::CachedAudio> oldDecoded;
-            std::weak_ptr<AudioFileManager::CachedAudio> oldNormalizedClip;
+            std::weak_ptr<const AudioFileManager::CachedAudio> oldNormalizedClip;
 
             {
                 auto prepared = manager.prepareAudioFile (sourceFile, true);
