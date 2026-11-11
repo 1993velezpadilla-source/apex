@@ -813,11 +813,16 @@ int main()
             for (int start : {-100, 0, 60, 237, 622, 2000})
             {
                 const auto clip = phoneMixerToolbarPaintClip(w, h, start);
-                assert(inside(clip, DAW::mobile::maxInt(0, w),
-                                    DAW::mobile::maxInt(0, h)));
-                assert(clip.x == DAW::mobile::clampInt(
-                    start, 0, DAW::mobile::maxInt(0, w)));
-                assert(clip.x + clip.width == DAW::mobile::maxInt(0, w));
+                // Keep paint clipping checks active in Release/NDEBUG.
+                if (!inside(clip, DAW::mobile::maxInt(0, w),
+                                  DAW::mobile::maxInt(0, h)))
+                    return 101;
+                if (clip.x != DAW::mobile::clampInt(
+                        start, 0, DAW::mobile::maxInt(0, w)))
+                    return 102;
+                if (static_cast<long long>(clip.x) + clip.width
+                    != DAW::mobile::maxInt(0, w))
+                    return 103;
             }
 
     // Mixer title-bar phone targets: the desktop 22x20 toolbar was too small.
