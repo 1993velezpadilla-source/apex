@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <vector>
 #include "../../Builds/VisualStudio2026/ArrangementEditor/TimePitchQualityCore.h"
 
 namespace DAW {
