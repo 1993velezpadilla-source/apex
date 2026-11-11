@@ -1067,8 +1067,11 @@ int main()
         for (int dy = -12; dy <= 12; ++dy)
         {
             const bool expected = dx * dx + dy * dy <= 64;
-            assert(pluginBrowserRowTapActivates(true, dx, dy, true) == expected);
-            assert(!pluginBrowserRowTapActivates(true, dx, dy, false));
+            // Execute the full swipe/tap grid in Release/NDEBUG as well.
+            if (pluginBrowserRowTapActivates(true, dx, dy, true) != expected)
+                return 110;
+            if (pluginBrowserRowTapActivates(true, dx, dy, false))
+                return 111;
         }
     // Regression: swipe far away and return to the original row/control.
     // The final displacement is zero, but the gesture must stay cancelled.
