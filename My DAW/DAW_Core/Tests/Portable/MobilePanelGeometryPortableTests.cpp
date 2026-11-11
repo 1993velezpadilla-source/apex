@@ -861,25 +861,32 @@ int main()
     static_assert(phoneMixerToolbarLayout(108, 20).count == 0);
     static_assert(phoneMixerToolbarLayout(108, 31).count == 0);
     static_assert(phoneMixerToolbarLayout(108, 32).buttons[0].bounds.height == 32);
+    // Release/NDEBUG must exercise every Mixer toolbar geometry check.
     for (int w = 0; w <= 500; ++w)
         for (int h : {0, 20, 28, 31, 32, 48})
         {
             const auto layout = phoneMixerToolbarLayout(w, h);
-            assert(layout.count >= 0 && layout.count <= 3);
+            if (layout.count < 0 || layout.count > 3)
+                return 104;
             for (int i = 0; i < layout.count; ++i)
             {
                 const auto b = layout.buttons[i];
-                assert(inside(b.bounds, w, h));
-                assert(b.bounds.width == 44 && b.bounds.height == 32);
-                assert(b.bounds.y >= 0 && b.bounds.y + b.bounds.height <= h);
+                if (!inside(b.bounds, w, h))
+                    return 105;
+                if (b.bounds.width != 44 || b.bounds.height != 32)
+                    return 106;
+                if (b.bounds.y < 0 || static_cast<long long>(b.bounds.y) + b.bounds.height > h)
+                    return 107;
                 if (i > 0)
                 {
                     const auto previous = layout.buttons[i - 1].bounds;
-                    assert(previous.x + previous.width < b.bounds.x);
+                    if (static_cast<long long>(previous.x) + previous.width >= b.bounds.x)
+                        return 108;
                 }
             }
             if (layout.count > 0 && layout.count < 3)
-                assert(layout.buttons[layout.count - 1].action == phoneMixerOverflow);
+                if (layout.buttons[layout.count - 1].action != phoneMixerOverflow)
+                    return 109;
         }
 
     // A phone Sends window must never cover the APEX header or the bottom
