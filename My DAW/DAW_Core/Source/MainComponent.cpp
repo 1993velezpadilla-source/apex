@@ -4937,6 +4937,36 @@ MainComponent::MainComponent()
             }
         }
 
+        // Reopened-project dropout forensics: playback can remain clean while
+        // the first overdub fails because the newly granted device backend,
+        // sample rate, buffer or input channel set differs from the clean take.
+        // Capture the authoritative values ONLY on the message thread, before
+        // Record; never poll the driver or build Strings in the audio callback.
+        {
+            auto& deviceManager = getOwnedDeviceManager();
+            const auto* device = deviceManager.getCurrentAudioDevice();
+            const auto lastLoad = appCore_.getProjectManager().getLastLoadRateReport();
+            const double deviceRate = device != nullptr ? device->getCurrentSampleRate() : 0.0;
+            const int deviceBlock = device != nullptr ? device->getCurrentBufferSizeSamples() : 0;
+            const int deviceInputs = device != nullptr
+                ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
+            const int deviceOutputs = device != nullptr
+                ? device->getActiveOutputChannels().countNumberOfSetBits() : 0;
+            juce::Logger::writeToLog("[APEX-RECORD-PREFLIGHT] backend="
+                + deviceManager.getCurrentAudioDeviceType()
+                + " device=" + (device != nullptr ? device->getName() : juce::String("NONE"))
+                + " sr=" + juce::String(deviceRate, 1)
+                + " block=" + juce::String(deviceBlock)
+                + " activeIn=" + juce::String(deviceInputs)
+                + " activeOut=" + juce::String(deviceOutputs)
+                + " xruns=" + juce::String(deviceManager.getXRunCount())
+                + " projectRate=" + juce::String(lastLoad.projectRate, 1)
+                + " loadDeviceRate=" + juce::String(lastLoad.deviceRate, 1)
+                + " loadRateAction=" + juce::String(lastLoad.action)
+                + " tracks=" + juce::String(appCore_.getTrackManager().getNumTracks())
+                + " clips=" + juce::String(appCore_.getClipManager().getAllClips().size()));
+        }
+
         auto warnings = appCore_.checkRecordArmSafety();
         if (warnings.empty())
         {
