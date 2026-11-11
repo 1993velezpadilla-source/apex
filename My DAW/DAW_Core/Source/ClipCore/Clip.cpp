@@ -3,6 +3,7 @@
 #include "../UtilityCore/Types.h"
 #include "../MidiCore/MidiClip.h"
 #include "PatternClip.h"
+#include <algorithm>
 
 namespace DAW {
 
@@ -552,6 +553,30 @@ bool ClipManager::deleteClip(const ClipID& id)
             listeners_.call([&id](Listener& l) { l.clipRemoved(id); });
     }
     return found;
+}
+
+std::vector<ClipID> ClipManager::deleteClipsOnTracks(
+    const std::vector<TrackID>& deletedTrackIds)
+{
+    std::vector<ClipID> ownedClipIds;
+    if (deletedTrackIds.empty())
+        return ownedClipIds;
+
+    // Collect immutable IDs before firing any callbacks.  Deleting one clip
+    // notifies the arrangement and plugin/automation owners, which may re-enter
+    // ClipManager; never retain Clip* or an array iterator across callbacks.
+    {
+        juce::ScopedLock lock(clipLock_);
+        for (auto* clip : clips_)
+            if (clip != nullptr
+                && std::find(deletedTrackIds.begin(), deletedTrackIds.end(),
+                             clip->getTrackID()) != deletedTrackIds.end())
+                ownedClipIds.push_back(clip->getID());
+    }
+
+    for (const auto& clipId : ownedClipIds)
+        deleteClip(clipId);
+    return ownedClipIds;
 }
 
 void ClipManager::deleteAllClips()
