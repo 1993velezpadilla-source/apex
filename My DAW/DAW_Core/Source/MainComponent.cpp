@@ -4944,7 +4944,7 @@ MainComponent::MainComponent()
         // Record; never poll the driver or build Strings in the audio callback.
         {
             auto& deviceManager = getOwnedDeviceManager();
-            const auto* device = deviceManager.getCurrentAudioDevice();
+            auto* device = deviceManager.getCurrentAudioDevice();
             const auto lastLoad = appCore_.getProjectManager().getLastLoadRateReport();
             const double deviceRate = device != nullptr ? device->getCurrentSampleRate() : 0.0;
             const int deviceBlock = device != nullptr ? device->getCurrentBufferSizeSamples() : 0;
