@@ -49,11 +49,17 @@ int main()
             ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
         taps.begin(1, first);
         taps.begin(2, second);
-        assert(!taps.release(second, 2, 0, 0));
-        assert(!taps.release(second, 2, 0, 0));
-        assert(!taps.release(first, 1, 0, 0));
+        // Must execute in Release/NDEBUG too: duplicate and out-of-order
+        // releases must not launch a phone panel from the wrong source.
+        if (taps.release(second, 2, 0, 0))
+            return 48;
+        if (taps.release(second, 2, 0, 0))
+            return 49;
+        if (taps.release(first, 1, 0, 0))
+            return 50;
         taps.begin(3, second);
-        assert(taps.release(second, 3, 0, 0));
+        if (!taps.release(second, 3, 0, 0))
+            return 51;
     }
     // More simultaneous touch sources than the fixed + overflow arrays can
     // represent must fail closed. A late mouseUp must not launch a panel,
