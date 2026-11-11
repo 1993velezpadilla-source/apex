@@ -318,8 +318,11 @@ int main()
     static_assert(!desktopChrome.allowVerticalScrollWithoutBar
                   && !desktopChrome.allowHorizontalScrollWithoutBar);
     static_assert(desktopChrome.showCornerZoom);
-    assert(!DAW::mobile::timelineViewportChrome(true).showCornerZoom);
-    assert(DAW::mobile::timelineViewportChrome(false).showCornerZoom);
+    // Keep runtime viewport chrome checks active in Release/NDEBUG builds.
+    if (DAW::mobile::timelineViewportChrome(true).showCornerZoom)
+        return 78;
+    if (!DAW::mobile::timelineViewportChrome(false).showCornerZoom)
+        return 79;
 
     // Phone Arrangement must consume each wheel gesture once, even with
     // hidden scrollbars; desktop/iPad keep their original JUCE wheel path.
