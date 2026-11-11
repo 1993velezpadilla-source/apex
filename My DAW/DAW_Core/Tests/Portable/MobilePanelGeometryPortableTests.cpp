@@ -300,8 +300,7 @@ int main()
 
     // Portrait and landscape phones hide desktop scrollbars/corner zoom
     // without disabling setViewPosition() navigation; iPad/PC/Mac retain it.
-    constexpr auto phoneChrome = DAW::mobile::timelineViewportChrome(true);
-    constexpr auto desktopChrome = DAW::mobile::timelineViewportChrome(false);
+    // Reuse the phoneChrome/desktopChrome constants declared above.
     static_assert(!phoneChrome.showVerticalBar && !phoneChrome.showHorizontalBar);
     static_assert(phoneChrome.allowVerticalScrollWithoutBar
                   && phoneChrome.allowHorizontalScrollWithoutBar);
