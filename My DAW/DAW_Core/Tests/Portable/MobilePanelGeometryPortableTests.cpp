@@ -1717,15 +1717,18 @@ int main()
                         width, height, top, bottom,
                         { std::numeric_limits<int>::max(),
                           std::numeric_limits<int>::min(), 340, 560 });
-                    assert(inside(panel, width, height));
+                    // Keep the rotation sweep active in Release/NDEBUG CI.
+                    if (!inside(panel, width, height))
+                        return 40;
                     if (panel.width > 0 && panel.height > 0)
                     {
                         const int safeTop = DAW::mobile::clampInt(top, 0, height);
                         const int safeBottom = DAW::mobile::clampInt(
                             bottom, 0, height - safeTop);
-                        assert(panel.y >= safeTop);
-                        assert(static_cast<long long>(panel.y) + panel.height
-                               <= height - safeBottom);
+                        if (panel.y < safeTop
+                            || static_cast<long long>(panel.y) + panel.height
+                                   > height - safeBottom)
+                            return 41;
                     }
                 }
 
