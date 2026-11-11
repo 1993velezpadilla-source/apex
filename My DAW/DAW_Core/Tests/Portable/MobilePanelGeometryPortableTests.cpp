@@ -66,12 +66,15 @@ int main()
         for (int source = 0; source < contacts; ++source)
             taps.begin(1, source);
         for (int source = contacts - 1; source >= 0; --source)
-            assert(!taps.release(source, 1, 0, 0));
+            if (taps.release(source, 1, 0, 0))
+                return 45;
         taps.begin(2, 1000);
-        assert(!taps.release(1000, 2, 0, 0));
+        if (taps.release(1000, 2, 0, 0))
+            return 46;
         taps.invalidate();
         taps.begin(2, 1000);
-        assert(taps.release(1000, 2, 0, 0));
+        if (!taps.release(1000, 2, 0, 0))
+            return 47;
     }
     // Boundary regression for compact phone Mixer toolbar: a one-unit
     // resize must not expose an unreachable action or remove Overflow.
