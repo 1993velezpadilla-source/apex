@@ -1519,18 +1519,27 @@ int main()
                 const auto sends = fitBubblegumSends(
                     w, h, 1000000, -1000000, true, top, bottom);
                 const auto clip = fitPhoneClipProperties(w, h, top, bottom);
-                assert(browser.x >= 0 && browser.y >= top);
-                assert(static_cast<long long>(browser.y) + browser.height <= h - bottom);
-                assert(inside(browser, w, h));
-                assert(inside(sends, w, h));
-                assert(inside(clip.window, w, h));
-                if (sends.height > 0)
-                    assert(sends.y >= top
-                           && static_cast<long long>(sends.y) + sends.height <= h - bottom);
-                if (mixer.safe.width > 0 && mixer.safe.height > 0)
-                    assert(floatingMixerFits(mixer, mixer.window));
-                if (clip.safe.width > 0 && clip.safe.height > 0)
-                    assert(phoneClipPropertiesFits(clip, clip.window));
+                // Keep multi-panel rotation checks active in Release/NDEBUG.
+                if (browser.x < 0 || browser.y < top)
+                    return 52;
+                if (static_cast<long long>(browser.y) + browser.height > h - bottom)
+                    return 53;
+                if (!inside(browser, w, h))
+                    return 54;
+                if (!inside(sends, w, h))
+                    return 55;
+                if (!inside(clip.window, w, h))
+                    return 56;
+                if (sends.height > 0
+                    && (sends.y < top
+                        || static_cast<long long>(sends.y) + sends.height > h - bottom))
+                    return 57;
+                if (mixer.safe.width > 0 && mixer.safe.height > 0
+                    && !floatingMixerFits(mixer, mixer.window))
+                    return 58;
+                if (clip.safe.width > 0 && clip.safe.height > 0
+                    && !phoneClipPropertiesFits(clip, clip.window))
+                    return 59;
             }
 
 
