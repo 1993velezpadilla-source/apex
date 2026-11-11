@@ -1490,10 +1490,15 @@ int main()
         {
             const auto placed = DAW::mobile::fitPhonePluginBrowserPlacement(
                 852, 300, 50, 96, { x, y, 340, 560 });
-            assert(placed.width == 340 && placed.height == 138);
-            assert(placed.x >= 0 && placed.y >= 50);
-            assert(static_cast<long long>(placed.x) + placed.width <= 852);
-            assert(static_cast<long long>(placed.y) + placed.height <= 204);
+            // Keep this restored-plugin-browser rotation sweep active with NDEBUG.
+            if (placed.width != 340 || placed.height != 138)
+                return 65;
+            if (placed.x < 0 || placed.y < 50)
+                return 66;
+            if (static_cast<long long>(placed.x) + placed.width > 852)
+                return 67;
+            if (static_cast<long long>(placed.y) + placed.height > 204)
+                return 68;
         }
 
     // Cross-panel rotation gauntlet: a portrait FX Browser and Mixer may both
