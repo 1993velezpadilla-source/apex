@@ -177,6 +177,66 @@ public:
             expectEquals (retained->getTrackID(), juce::String ("TRK_1"),
                           "the first valid persisted owner is retained");
 
+        beginTest ("middle-track deletion removes its clips, never clips on shifted lanes");
+        {
+            DAW::ClipManager managed;
+            auto* deletedA = managed.createAudioClip ("Deleted voice A", beatFile);
+            auto* deletedB = managed.createAudioClip ("Deleted voice B", takeFile);
+            auto* surviving8 = managed.createAudioClip ("Voice on old track 8", beatFile);
+            auto* surviving9 = managed.createAudioClip ("Voice on old track 9", takeFile);
+            expect (deletedA && deletedB && surviving8 && surviving9);
+            if (deletedA && deletedB && surviving8 && surviving9)
+            {
+                deletedA->setTrackID ("TRK_3");
+                deletedB->setTrackID ("TRK_3");
+                surviving8->setTrackID ("TRK_8");
+                surviving9->setTrackID ("TRK_9");
+                surviving8->setStartPosition (12345);
+                surviving9->setStartPosition (67890);
+
+                const auto deletedIdA = deletedA->getID();
+                const auto deletedIdB = deletedB->getID();
+                const auto survivingId8 = surviving8->getID();
+                const auto survivingId9 = surviving9->getID();
+                const auto before = managed.getState().createCopy();
+
+                const auto deleted = managed.deleteClipsOnTracks ({ "TRK_3" });
+                expectEquals ((int) deleted.size(), 2);
+                expect (managed.getClip (deletedIdA) == nullptr);
+                expect (managed.getClip (deletedIdB) == nullptr);
+                expect (managed.getClip (survivingId8) != nullptr);
+                expect (managed.getClip (survivingId9) != nullptr);
+                expectEquals (managed.getAllClips().size(), 2);
+                expectEquals ((int) managed.deleteClipsOnTracks ({ "TRK_UNUSED" }).size(), 0);
+
+                DAW::ClipManager reopened;
+                reopened.restoreState (managed.getState());
+                const auto* restored8 = reopened.getClip (survivingId8);
+                const auto* restored9 = reopened.getClip (survivingId9);
+                expect (restored8 != nullptr && restored9 != nullptr,
+                        "save/reopen retains clips by stable owner, not old lane number");
+                if (restored8)
+                {
+                    expectEquals (restored8->getTrackID(), juce::String ("TRK_8"));
+                    expectEquals (restored8->getStartPosition(), (DAW::SamplePosition) 12345);
+                }
+                if (restored9)
+                {
+                    expectEquals (restored9->getTrackID(), juce::String ("TRK_9"));
+                    expectEquals (restored9->getStartPosition(), (DAW::SamplePosition) 67890);
+                }
+
+                // The enclosing project topology command uses the same
+                // before-state to restore both the deleted track and clips.
+                DAW::ClipManager undone;
+                undone.restoreState (before);
+                expect (undone.getClip (deletedIdA) != nullptr);
+                expect (undone.getClip (deletedIdB) != nullptr);
+                expect (undone.getClip (survivingId8) != nullptr);
+                expect (undone.getClip (survivingId9) != nullptr);
+            }
+        }
+
         tempDir.deleteRecursively();
     }
 };

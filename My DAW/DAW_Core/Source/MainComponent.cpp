@@ -4937,6 +4937,36 @@ MainComponent::MainComponent()
             }
         }
 
+        // Reopened-project dropout forensics: playback can remain clean while
+        // the first overdub fails because the newly granted device backend,
+        // sample rate, buffer or input channel set differs from the clean take.
+        // Capture the authoritative values ONLY on the message thread, before
+        // Record; never poll the driver or build Strings in the audio callback.
+        {
+            auto& deviceManager = getOwnedDeviceManager();
+            auto* device = deviceManager.getCurrentAudioDevice();
+            const auto lastLoad = appCore_.getProjectManager().getLastLoadRateReport();
+            const double deviceRate = device != nullptr ? device->getCurrentSampleRate() : 0.0;
+            const int deviceBlock = device != nullptr ? device->getCurrentBufferSizeSamples() : 0;
+            const int deviceInputs = device != nullptr
+                ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
+            const int deviceOutputs = device != nullptr
+                ? device->getActiveOutputChannels().countNumberOfSetBits() : 0;
+            juce::Logger::writeToLog("[APEX-RECORD-PREFLIGHT] backend="
+                + deviceManager.getCurrentAudioDeviceType()
+                + " device=" + (device != nullptr ? device->getName() : juce::String("NONE"))
+                + " sr=" + juce::String(deviceRate, 1)
+                + " block=" + juce::String(deviceBlock)
+                + " activeIn=" + juce::String(deviceInputs)
+                + " activeOut=" + juce::String(deviceOutputs)
+                + " xruns=" + juce::String(deviceManager.getXRunCount())
+                + " projectRate=" + juce::String(lastLoad.projectRate, 1)
+                + " loadDeviceRate=" + juce::String(lastLoad.deviceRate, 1)
+                + " loadRateAction=" + juce::String(lastLoad.action)
+                + " tracks=" + juce::String(appCore_.getTrackManager().getNumTracks())
+                + " clips=" + juce::String(appCore_.getClipManager().getAllClips().size()));
+        }
+
         auto warnings = appCore_.checkRecordArmSafety();
         if (warnings.empty())
         {
@@ -6118,6 +6148,26 @@ bool MainComponent::deleteTracksAsOneTopologyTransaction(
     // a command for a mutation that did not actually remove a track.
     if (deleted.empty())
         return false;
+
+    // Clip ownership is the persistent TrackID, NOT the display lane index.
+    // TrackManager has already confirmed exactly which IDs were deleted.
+    // Remove only those tracks' audio/MIDI/pattern clips from the engine and
+    // arrangement; the source WAV files on disk are deliberately untouched.
+    // Doing this before the 'after' snapshot also makes one Undo/Redo restore
+    // the deleted track and its clips together.
+    auto& clipManager = appCore_.getClipManager();
+    const auto removedClipIds = clipManager.deleteClipsOnTracks(deleted);
+    const auto selectedClips = multiSelection_.getSelected(DAW::SelectionKind::Clip);
+    for (const auto& selection : selectedClips)
+        if (std::find(removedClipIds.begin(), removedClipIds.end(), selection.clipId)
+            != removedClipIds.end())
+            multiSelection_.remove(selection);
+
+    // Recompute every surviving clip's visible lane from its unchanged
+    // stable TrackID.  Merely reindexing TrackManager without this remirror
+    // previously left voices visually shifted to unrelated tracks.
+    if (arrangement_)
+        arrangement_->requestClipRemirror();
 
     // Existing APEX post-delete behavior clears the track selection.  Remove
     // IDs individually first so no dead stable ID survives, then clear any
