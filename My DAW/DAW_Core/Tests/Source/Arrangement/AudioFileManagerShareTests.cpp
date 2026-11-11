@@ -152,6 +152,74 @@ public:
             tempDir.deleteRecursively();
         }
 
+        beginTest ("New/Open Project releases decoded sources and normalized clip buffers");
+        {
+            // User regression: open a large old song, fail while overdubbing,
+            // choose New Project in the SAME process. The previous song's
+            // decoded WAV cache must not remain strongly owned indefinitely.
+            const auto tempDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                .getChildFile ("apex_project_cache_boundary_" + juce::Uuid().toString());
+            expect (tempDir.createDirectory());
+            const auto sourceFile = tempDir.getChildFile ("old-song.wav");
+
+            {
+                std::unique_ptr<juce::OutputStream> stream (sourceFile.createOutputStream());
+                juce::WavAudioFormat wav;
+                auto writer = std::unique_ptr<juce::AudioFormatWriter> (
+                    wav.createWriterFor (stream,
+                        juce::AudioFormatWriterOptions()
+                            .withSampleRate (48000.0)
+                            .withNumChannels (1)
+                            .withBitsPerSample (16)));
+                expect (writer != nullptr, "test song WAV must be writable");
+                if (writer != nullptr)
+                {
+                    juce::AudioBuffer<float> samples (1, 2048);
+                    for (int sample = 0; sample < samples.getNumSamples(); ++sample)
+                        samples.setSample (0, sample, 0.25f);
+                    expect (writer->writeFromAudioSampleBuffer (
+                        samples, 0, samples.getNumSamples()));
+                }
+            }
+
+            AudioFileManager manager;
+            std::weak_ptr<AudioFileManager::CachedAudio> oldDecoded;
+            std::weak_ptr<AudioFileManager::CachedAudio> oldNormalizedClip;
+
+            {
+                auto prepared = manager.prepareAudioFile (sourceFile, true);
+                expect (prepared.result.success, "decode old song before project transition");
+                oldDecoded = prepared.decodedSource;
+                expect (manager.publishPreparedForClip ("old-song-clip", prepared).success);
+                expect (manager.togglePeakNormalize ("old-song-clip", 0, 2048, 0.0f)
+                            == AudioFileManager::NormalizeResult::Applied);
+                oldNormalizedClip = manager.getCachedAudioSnapshot ("old-song-clip");
+            }
+
+            expect (! oldDecoded.expired(), "decoded WAV is retained within active project");
+            expect (! oldNormalizedClip.expired(),
+                    "normalized clip cache is retained within active project");
+
+            const auto generation = manager.getChangeGeneration();
+            manager.clearAll(); // The same call made by ProjectManager via reloadAudioFiles.
+            expect (manager.getChangeGeneration() > generation,
+                    "project transition publishes clip cache invalidation");
+            expect (manager.getCachedAudioSnapshot ("old-song-clip") == nullptr,
+                    "old project's clips must be absent in new project");
+            expect (oldDecoded.expired(),
+                    "decoded WAV must NOT survive a full project clear");
+            expect (oldNormalizedClip.expired(),
+                    "normalized clip buffers must NOT survive a full project clear");
+
+            auto nextProjectAudio = manager.prepareAudioFile (sourceFile, false);
+            expect (nextProjectAudio.result.success,
+                    "same WAV can be freshly decoded in the next project");
+            expect (manager.publishPreparedForClip ("new-project-clip", nextProjectAudio).success);
+            expect (manager.getCachedAudioSnapshot ("new-project-clip") != nullptr);
+
+            tempDir.deleteRecursively();
+        }
+
         beginTest ("audio clip peak Normalize state survives ValueTree save and restore");
         {
             AudioClip clip ("normalize-persist-clip", "Normalize Persistence");
