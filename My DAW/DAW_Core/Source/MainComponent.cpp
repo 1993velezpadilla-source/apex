@@ -6119,6 +6119,23 @@ bool MainComponent::deleteTracksAsOneTopologyTransaction(
     if (deleted.empty())
         return false;
 
+    // Clip ownership is the persistent TrackID, NOT the display lane index.
+    // TrackManager has already confirmed exactly which IDs were deleted.
+    // Remove only those tracks' audio/MIDI/pattern clips from the engine and
+    // arrangement; the source WAV files on disk are deliberately untouched.
+    // Doing this before the 'after' snapshot also makes one Undo/Redo restore
+    // the deleted track and its clips together.
+    auto& clipManager = appCore_.getClipManager();
+    const auto removedClipIds = clipManager.deleteClipsOnTracks(deleted);
+    for (const auto& clipId : removedClipIds)
+        multiSelection_.remove(DAW::SelectionTarget::clip(clipId));
+
+    // Recompute every surviving clip's visible lane from its unchanged
+    // stable TrackID.  Merely reindexing TrackManager without this remirror
+    // previously left voices visually shifted to unrelated tracks.
+    if (arrangement_)
+        arrangement_->requestClipRemirror();
+
     // Existing APEX post-delete behavior clears the track selection.  Remove
     // IDs individually first so no dead stable ID survives, then clear any
     // protected/non-deleted members in the same way the prior UI paths did.
