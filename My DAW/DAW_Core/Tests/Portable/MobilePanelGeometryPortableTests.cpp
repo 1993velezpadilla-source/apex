@@ -1744,10 +1744,14 @@ int main()
                       std::numeric_limits<int>::max(), 340, 560 }, true);
                 const auto expected = DAW::mobile::fitPhonePluginBrowser(
                     width, height, top, 96, true);
-                assert(maximized.x == expected.x && maximized.y == expected.y);
-                assert(maximized.width == expected.width
-                       && maximized.height == expected.height);
-                assert(inside(maximized, width, height));
+                // Runtime checks must also execute in Release/NDEBUG CI.
+                if (maximized.x != expected.x || maximized.y != expected.y)
+                    return 42;
+                if (maximized.width != expected.width
+                    || maximized.height != expected.height)
+                    return 43;
+                if (!inside(maximized, width, height))
+                    return 44;
             }
 
 }
