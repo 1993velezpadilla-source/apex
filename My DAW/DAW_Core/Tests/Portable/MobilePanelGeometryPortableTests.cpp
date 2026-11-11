@@ -560,9 +560,13 @@ int main()
         for (int h = 1; h <= 500; h += 9)
         {
             const auto target = phoneCloseTouchBounds(w, h);
-            assert(inside(target, w, h));
-            assert(target.width == (w < 44 ? w : 44));
-            assert(target.height == (h < 44 ? h : 44));
+            // Keep close-button hit-area checks active in Release/NDEBUG.
+            if (!inside(target, w, h))
+                return 62;
+            if (target.width != (w < 44 ? w : 44))
+                return 63;
+            if (target.height != (h < 44 ? h : 44))
+                return 64;
         }
 
     // The Mixer hides the close traffic light. Expand the two 12x12 orbs
