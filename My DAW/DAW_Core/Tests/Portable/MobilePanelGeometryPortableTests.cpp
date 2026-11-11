@@ -1712,4 +1712,22 @@ int main()
                     }
                 }
 
+    // Maximized FX browser must ignore stale restored drag coordinates after
+    // portrait/landscape changes, including a fully reserved workspace.
+    for (int width : { 1, 393, 852 })
+        for (int height : { 1, 300, 852 })
+            for (int top : { 0, 50, 852 })
+            {
+                const auto maximized = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, top, 96,
+                    { std::numeric_limits<int>::min(),
+                      std::numeric_limits<int>::max(), 340, 560 }, true);
+                const auto expected = DAW::mobile::fitPhonePluginBrowser(
+                    width, height, top, 96, true);
+                assert(maximized.x == expected.x && maximized.y == expected.y);
+                assert(maximized.width == expected.width
+                       && maximized.height == expected.height);
+                assert(inside(maximized, width, height));
+            }
+
 }
