@@ -587,17 +587,21 @@ int main()
     {
         const int hit = phoneMixerLeftChromeButtonAt(
             static_cast<float>(x), 16.f, 14, 12, 8, 32);
-        assert(hit == (x < 0 || x >= 60 ? 0 : x < 30 ? 1 : 2));
+        if (hit != (x < 0 || x >= 60 ? 0 : x < 30 ? 1 : 2))
+            return 74;
     }
     DAW::mobile::PhoneChromeTapState mixerChromeTap;
     mixerChromeTap.begin(101); // minimize
-    assert(!mixerChromeTap.release(102, 0, 0)); // release on maximize
+    if (mixerChromeTap.release(102, 0, 0)) // release on maximize
+        return 75;
     mixerChromeTap.begin(102);
     mixerChromeTap.move(12, 0);
     mixerChromeTap.move(0, 0); // a swipe returning to the orb stays cancelled
-    assert(!mixerChromeTap.release(102, 0, 0));
+    if (mixerChromeTap.release(102, 0, 0))
+        return 76;
     mixerChromeTap.begin(102);
-    assert(mixerChromeTap.release(102, 0, 0)); // stationary tap
+    if (!mixerChromeTap.release(102, 0, 0)) // stationary tap
+        return 77;
 
     // The phone's Mixer/Sends/FX/Browser launchers must not cross-activate
     // when two fingers overlap, even if one returns to its starting point.
