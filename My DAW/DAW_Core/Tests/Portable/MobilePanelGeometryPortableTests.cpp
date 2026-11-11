@@ -622,18 +622,18 @@ int main()
     // when two fingers overlap, even if one returns to its starting point.
     DAW::mobile::PhoneTransportTapState phoneLauncherTap;
     phoneLauncherTap.begin(1, 7);
-    assert(phoneLauncherTap.release(7, 1, 0, 0)); // stationary one-finger tap
+    if (!phoneLauncherTap.release(7, 1, 0, 0)) return 92; // stationary one-finger tap
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
     phoneLauncherTap.move(7, 0, 0);
-    assert(!phoneLauncherTap.release(7, 1, 0, 0)); // swipe and return
+    if (phoneLauncherTap.release(7, 1, 0, 0)) return 93; // swipe and return
     phoneLauncherTap.begin(2, 7);
     phoneLauncherTap.begin(3, 8); // second finger cancels both
-    assert(!phoneLauncherTap.release(8, 3, 0, 0));
-    assert(!phoneLauncherTap.release(7, 2, 0, 0));
+    if (phoneLauncherTap.release(8, 3, 0, 0)) return 94;
+    if (phoneLauncherTap.release(7, 2, 0, 0)) return 95;
     phoneLauncherTap.begin(4, 7);
-    assert(!phoneLauncherTap.release(8, 4, 0, 0)); // wrong pointer
-    assert(!phoneLauncherTap.release(7, 4, 0, 0)); // cannot re-arm after foreign up
+    if (phoneLauncherTap.release(8, 4, 0, 0)) return 96; // wrong pointer
+    if (phoneLauncherTap.release(7, 4, 0, 0)) return 97; // cannot re-arm after foreign up
     phoneLauncherTap.begin(4, 7);
     phoneLauncherTap.move(8, 0, 0); // foreign drag cancels
     assert(!phoneLauncherTap.release(7, 4, 0, 0));
