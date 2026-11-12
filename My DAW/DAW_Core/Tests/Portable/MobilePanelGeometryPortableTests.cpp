@@ -1472,25 +1472,26 @@ int main()
                     const auto fit = fitFloatingMixer(w, h, top, bottom);
                     if (fit.safe.width <= 0 || fit.safe.height <= 0)
                     {
-                        assert(fit.window.width == 0 && fit.window.height == 0);
+                        if (fit.window.width != 0 || fit.window.height != 0)
+                            return 201;
                         continue;
                     }
-                    assert(inside(fit.safe, w, h));
-                    assert(inside(fit.window, w, h));
-                    assert(fit.window.x >= fit.safe.x && fit.window.y >= fit.safe.y);
-                    assert(fit.window.x + fit.window.width <= fit.safe.x + fit.safe.width);
-                    assert(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height);
-                    assert(fit.minimumWidth <= fit.window.width);
-                    assert(fit.minimumHeight <= fit.window.height);
+                    if (!inside(fit.safe, w, h)) return 202;
+                    if (!inside(fit.window, w, h)) return 203;
+                    if (fit.window.x < fit.safe.x || fit.window.y < fit.safe.y) return 204;
+                    if (static_cast<long long>(fit.window.x) + fit.window.width > static_cast<long long>(fit.safe.x) + fit.safe.width) return 205;
+                    if (static_cast<long long>(fit.window.y) + fit.window.height > static_cast<long long>(fit.safe.y) + fit.safe.height) return 206;
+                    if (fit.minimumWidth > fit.window.width) return 207;
+                    if (fit.minimumHeight > fit.window.height) return 208;
                     // Arbitrary out-of-bounds restored positions must
                     // recover to a usable window without losing a fitting size.
                     for (int offset : { -1000000, -1, 0, 1000000 })
                     {
                         const auto moved = constrainFloatingMixerPlacement(
                             fit, { offset, -offset, fit.window.width, fit.window.height });
-                        assert(floatingMixerFits(fit, moved));
-                        assert(moved.width == fit.window.width
-                               && moved.height == fit.window.height);
+                        if (!floatingMixerFits(fit, moved)) return 209;
+                        if (moved.width != fit.window.width
+                            || moved.height != fit.window.height) return 210;
                     }
                 }
     // Clip Properties contains clip-region FX. A desktop 420x360 dialog
