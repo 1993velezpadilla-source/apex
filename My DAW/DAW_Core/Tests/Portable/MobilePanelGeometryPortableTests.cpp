@@ -1162,41 +1162,41 @@ int main()
     // pressing Settings cannot be confused with an absent touch. All
     // toolbar actions must wait for release; a swipe/rotation cancels them.
     PhoneChromeTapState mixerToolbar;
-    assert(!mixerToolbar.release(1, 0, 0));
+    if (!mixerToolbar.release(1, 0, 0)) return 188;
     mixerToolbar.begin(1); // Settings (toolbar ID 0 + 1).
-    assert(mixerToolbar.release(1, 0, 0));
-    assert(!mixerToolbar.release(1, 0, 0)); // Exactly one action.
+    if (mixerToolbar.release(1, 0, 0)) return 189;
+    if (!mixerToolbar.release(1, 0, 0)) return 190; // Exactly one action.
     mixerToolbar.begin(8); // Overflow.
-    assert(!mixerToolbar.release(7, 0, 0)); // Different action.
+    if (!mixerToolbar.release(7, 0, 0)) return 191; // Different action.
     mixerToolbar.begin(6); // Bubblegum.
     mixerToolbar.move(16, 0);
     mixerToolbar.move(0, 0);
-    assert(!mixerToolbar.release(6, 0, 0)); // Drag out and back.
+    if (!mixerToolbar.release(6, 0, 0)) return 192; // Drag out and back.
     mixerToolbar.begin(2);
     mixerToolbar.invalidate(); // Mixer rotated or resized.
-    assert(!mixerToolbar.release(2, 0, 0));
+    if (!mixerToolbar.release(2, 0, 0)) return 193;
     mixerToolbar.begin(8);
-    assert(!mixerToolbar.release(0, 0, 0)); // Lift outside.
+    if (!mixerToolbar.release(0, 0, 0)) return 194; // Lift outside.
     mixerToolbar.begin(8);
     mixerToolbar.move(4, 3);
-    assert(mixerToolbar.release(8, 4, 3)); // Legitimate short tap.
+    if (mixerToolbar.release(8, 4, 3)) return 195; // Legitimate short tap.
 
     // Left Mixer minimize/maximize use distinct IDs above toolbar IDs.
     // Swipe-out-and-back, releasing over the other button, and rotation
     // must all suppress the action; a stationary release fires once.
     PhoneChromeTapState mixerLeftChrome;
     mixerLeftChrome.begin(101); // Minimize.
-    assert(!mixerLeftChrome.release(102, 0, 0)); // Released on maximize.
+    if (!mixerLeftChrome.release(102, 0, 0)) return 196; // Released on maximize.
     mixerLeftChrome.begin(102);
     mixerLeftChrome.move(0, 12);
     mixerLeftChrome.move(0, 0);
-    assert(!mixerLeftChrome.release(102, 0, 0));
+    if (!mixerLeftChrome.release(102, 0, 0)) return 197;
     mixerLeftChrome.begin(101);
     mixerLeftChrome.invalidate(); // Orientation changed.
-    assert(!mixerLeftChrome.release(101, 0, 0));
+    if (!mixerLeftChrome.release(101, 0, 0)) return 198;
     mixerLeftChrome.begin(102);
-    assert(mixerLeftChrome.release(102, 0, 0));
-    assert(!mixerLeftChrome.release(102, 0, 0));
+    if (mixerLeftChrome.release(102, 0, 0)) return 199;
+    if (!mixerLeftChrome.release(102, 0, 0)) return 200;
 
     // Bubblegum Sends uses this same state for its phone close orb. A
     // scroll/drag that returns to the orb must not close the Sends panel;
