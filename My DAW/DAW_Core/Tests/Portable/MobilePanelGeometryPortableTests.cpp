@@ -470,6 +470,25 @@ int main()
     static_assert(DAW::mobile::timelinePhoneWheelPixelMotion(
         std::numeric_limits<int>::max(), 1.0f, 0.0).pixels < 0);
 
+    // Release-active adversarial Arrangement wheel sweep: fractional carry
+    // must remain bounded after rapid portrait/landscape viewport changes.
+    // This checks both directions, zero-width views and stale restored carry.
+    for (int span : { -1, 0, 1, 393, 852, 1200 })
+        for (float delta : { -2.0f, -0.001f, 0.0f, 0.001f, 2.0f })
+            for (double carry : { -2.0, -0.9, 0.0, 0.9, 2.0 })
+            {
+                const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
+                    span, delta, carry);
+                if (!(motion.remainder > -1.0 && motion.remainder < 1.0))
+                    return 240;
+                if (span <= 0 && (motion.pixels != 0 || motion.remainder != 0.0))
+                    return 241;
+                if (span > 0 && delta > 0.0f && motion.pixels > 0)
+                    return 242;
+                if (span > 0 && delta < 0.0f && motion.pixels < 0)
+                    return 243;
+            }
+
     // Edge-clamped subpixel gestures should be discarded immediately,
     // including content smaller than its viewport and invalid deltas.
     using DAW::mobile::timelinePhoneWheelBlockedAtEdge;
