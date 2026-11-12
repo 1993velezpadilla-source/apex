@@ -1260,8 +1260,9 @@ int main()
     static_assert(!chromeTitleDoubleClickMaximizes(false, true));
     for (bool phone : {false, true})
         for (bool overButton : {false, true})
-            assert(chromeTitleDoubleClickMaximizes(phone, overButton)
-                   == (!phone && !overButton));
+            if (chromeTitleDoubleClickMaximizes(phone, overButton)
+                != (!phone && !overButton))
+                return 220;
     // Filtering and orientation change can show/hide the vertical scrollbar.
     // Reserve its actual thickness based on row overflow, not stale state.
     using DAW::mobile::pluginBrowserListWidth;
@@ -1281,9 +1282,11 @@ int main()
             {
                 const int listWidth = pluginBrowserListWidth(width, height,
                                                              rows, 44, 14);
-                assert(listWidth >= 0 && listWidth <= width);
+                if (listWidth < 0 || listWidth > width)
+                    return 221;
                 if (width > 0 && height > 0 && rows * 44 <= height)
-                    assert(listWidth == width);
+                    if (listWidth != width)
+                        return 222;
             }
     using DAW::mobile::pluginBrowserChromeHeight;
     using DAW::mobile::phoneChromeControlSize;
@@ -1297,7 +1300,8 @@ int main()
     for (int w : {0, 1, 2, 10, 100, 245, 393, 852})
     {
         const int side = phoneChromeControlSize(w);
-        assert(side >= 0 && side <= 44 && 3 * side <= w);
+        if (side < 0 || side > 44 || 3 * side > w)
+            return 223;
     }
     static_assert(browserMaxLandscape.height - pluginBrowserChromeHeight(true)
                   - pluginBrowserHeaderHeight(true)
@@ -1316,11 +1320,14 @@ int main()
                     const auto fit = fitPhonePluginBrowser(w, h, top, bottom, true);
                     const int safeTop = DAW::mobile::clampInt(top, 0, h);
                     const int safeBottom = DAW::mobile::clampInt(bottom, 0, h - safeTop);
-                    assert(inside(fit, w, h));
+                    if (!inside(fit, w, h))
+                        return 224;
                     if (fit.height > 0)
                     {
-                        assert(fit.y >= safeTop);
-                        assert(fit.y + fit.height <= h - safeBottom);
+                        if (fit.y < safeTop)
+                            return 225;
+                        if (static_cast<long long>(fit.y) + fit.height > h - safeBottom)
+                            return 226;
                     }
                 }
     constexpr auto browserNarrow = fitPhonePluginBrowser(320, 640, 50, 144);
