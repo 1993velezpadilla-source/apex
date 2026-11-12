@@ -1353,15 +1353,20 @@ int main()
                     const auto fit = fitPhonePluginBrowser(w, h, top, bottom);
                     if (fit.width == 0 || fit.height == 0)
                     {
-                        assert(fit.width == 0 && fit.height == 0);
+                        if (!(fit.width == 0 && fit.height == 0))
+                            return 227;
                         continue;
                     }
                     const int reservedTop = DAW::mobile::clampInt(top, 0, h);
                     const int reservedBottom = DAW::mobile::clampInt(bottom, 0, h - reservedTop);
-                    assert(inside(fit, w, h));
-                    assert(fit.y >= reservedTop);
-                    assert(fit.y + fit.height <= h - reservedBottom);
-                    assert(fit.width <= 340 && fit.height <= 560);
+                    if (!(inside(fit, w, h)))
+                        return 228;
+                    if (!(fit.y >= reservedTop))
+                        return 229;
+                    if (!(fit.y + fit.height <= h - reservedBottom))
+                        return 230;
+                    if (!(fit.width <= 340 && fit.height <= 560))
+                        return 231;
                 }
 
     // iPhone previously used desktop's 220-unit Track List at 393 units,
@@ -1380,8 +1385,10 @@ int main()
     for (int workspace = 0; workspace <= 900; ++workspace)
     {
         const int width = phoneTrackListWidth(220, workspace);
-        assert(width >= 0 && width <= 220);
-        assert(width < workspace || workspace <= 1);
+        if (!(width >= 0 && width <= 220))
+            return 232;
+        if (!(width < workspace || workspace <= 1))
+            return 233;
     }
 
     // Floating phone Mixer must not cover the persistent bottom Transport,
@@ -1543,14 +1550,20 @@ int main()
                     const auto fit = fitPhoneClipProperties(w, h, top, bottom);
                     if (fit.safe.width <= 0 || fit.safe.height <= 0)
                     {
-                        assert(fit.window.width == 0 && fit.window.height == 0);
+                        if (!(fit.window.width == 0 && fit.window.height == 0))
+                            return 234;
                         continue;
                     }
-                    assert(inside(fit.safe, w, h));
-                    assert(inside(fit.window, w, h));
-                    assert(fit.window.y >= fit.safe.y);
-                    assert(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height);
-                    assert(phoneClipPropertiesFits(fit, fit.window));
+                    if (!(inside(fit.safe, w, h)))
+                        return 235;
+                    if (!(inside(fit.window, w, h)))
+                        return 236;
+                    if (!(fit.window.y >= fit.safe.y))
+                        return 237;
+                    if (!(fit.window.y + fit.window.height <= fit.safe.y + fit.safe.height))
+                        return 238;
+                    if (!(phoneClipPropertiesFits(fit, fit.window)))
+                        return 239;
                 }
 
     // A restored FX browser may carry extreme coordinates from a different
