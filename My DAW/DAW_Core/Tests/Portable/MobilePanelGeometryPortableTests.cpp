@@ -961,7 +961,8 @@ int main()
             for (int anchor : {-20000, -100, 0, 100, 20000})
             {
                 const auto fitted = fitBubblegumSends(w, h, anchor, anchor, true);
-                assert(inside(fitted, w, h));
+                if (!inside(fitted, w, h))
+                    return 216;
             }
     // Extreme coordinates from restored windows or drag gesture corruption
     // previously caused signed-int overflow in anchorX - width - 16.
@@ -986,7 +987,8 @@ int main()
             for (bool isPhone : {false, true})
             {
                 const auto fitted = fitBubblegumSends(w, h, w + 50, -100, isPhone);
-                assert(inside(fitted, w, h));
+                if (!inside(fitted, w, h))
+                    return 217;
             }
 
     // FX browser used a desktop 340x560 rect at x=24 and a top offset
@@ -1047,10 +1049,13 @@ int main()
         {
             const auto fitted = fitPhonePluginBrowserPlacement(
                 w, h, 50, 96, { 100000, -100000, 340, 560 });
-            assert(inside(fitted, w, h));
+            if (!inside(fitted, w, h))
+                return 218;
             if (fitted.height > 0)
-                assert(fitted.y + fitted.height <= h - DAW::mobile::clampInt(
-                    96, 0, h - DAW::mobile::clampInt(50, 0, h)));
+                if (static_cast<long long>(fitted.y) + fitted.height
+                    > h - DAW::mobile::clampInt(96, 0,
+                        h - DAW::mobile::clampInt(50, 0, h)))
+                    return 219;
         }
     // Browser rows were 22 high and the search field only 22 high. Phones
     // now use 44-unit row hit targets and a 44-unit search input; desktop
