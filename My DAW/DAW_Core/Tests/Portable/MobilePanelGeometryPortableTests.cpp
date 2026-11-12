@@ -1,5 +1,4 @@
 #include "../../Source/UICore/MobilePanelGeometry.h"
-#include <cassert>
 #include <initializer_list>
 #include <limits>
 using DAW::mobile::fitBubblegumSends;
@@ -38,6 +37,15 @@ int main()
                           100, std::numeric_limits<int>::max()));
     static_assert(!inside({ 0, 0, -1, 20 }, 100, 100));
     static_assert(inside({ 0, 0, 100, 100 }, 100, 100));
+    // A zero-area viewport has no actionable hit region. Reject a panel
+    // displaced by one pixel on either edge, including INT_MAX dimensions.
+    static_assert(inside({ 0, 0, 0, 0 }, 0, 0));
+    static_assert(!inside({ 1, 0, 0, 0 }, 0, 0));
+    static_assert(!inside({ 0, 1, 0, 0 }, 0, 0));
+    static_assert(inside({ std::numeric_limits<int>::max() - 1, 0, 1, 1 },
+                         std::numeric_limits<int>::max(), 1));
+    static_assert(!inside({ std::numeric_limits<int>::max() - 1, 0, 2, 1 },
+                          std::numeric_limits<int>::max(), 1));
     // Android source IDs are opaque signed integers, not small touch-slot
     // indices. Extreme IDs and a duplicate release must never arm another
     // floating-panel launcher while the original finger is still down.
