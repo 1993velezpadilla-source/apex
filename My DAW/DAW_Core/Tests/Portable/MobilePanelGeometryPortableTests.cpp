@@ -1227,17 +1227,17 @@ int main()
     using DAW::mobile::phoneTransportLauncherTapActivates;
     for (int launcher = 1; launcher <= 4; ++launcher)
     {
-        assert(phoneTransportLauncherTapActivates(launcher, launcher, 0, 0));
-        assert(phoneTransportLauncherTapActivates(launcher, launcher, 6, 5));
-        assert(!phoneTransportLauncherTapActivates(launcher, launcher, 9, 0));
-        assert(!phoneTransportLauncherTapActivates(launcher, launcher, 8, 8));
-        assert(!phoneTransportLauncherTapActivates(launcher, 0, 0, 0));
-        assert(!phoneTransportLauncherTapActivates(0, launcher, 0, 0));
-        assert(!phoneTransportLauncherTapActivates(launcher, launcher % 4 + 1, 0, 0));
+        if (!phoneTransportLauncherTapActivates(launcher, launcher, 0, 0)) return 208;
+        if (!phoneTransportLauncherTapActivates(launcher, launcher, 6, 5)) return 209;
+        if (phoneTransportLauncherTapActivates(launcher, launcher, 9, 0)) return 210;
+        if (phoneTransportLauncherTapActivates(launcher, launcher, 8, 8)) return 211;
+        if (phoneTransportLauncherTapActivates(launcher, 0, 0, 0)) return 212;
+        if (phoneTransportLauncherTapActivates(0, launcher, 0, 0)) return 213;
+        if (phoneTransportLauncherTapActivates(launcher, launcher % 4 + 1, 0, 0)) return 214;
         bool eligible = DAW::mobile::phoneTapGestureRemainsEligible(true, 20, 0);
         eligible = DAW::mobile::phoneTapGestureRemainsEligible(eligible, 0, 0);
-        assert(!eligible && !(eligible && phoneTransportLauncherTapActivates(
-            launcher, launcher, 0, 0)));
+        if (eligible || (eligible && phoneTransportLauncherTapActivates(
+            launcher, launcher, 0, 0))) return 215;
     }
     static_assert(phoneTransportLauncherTapActivates(1, 1, 0, 0));
     static_assert(phoneTransportLauncherTapActivates(4, 4, 8, 0));
