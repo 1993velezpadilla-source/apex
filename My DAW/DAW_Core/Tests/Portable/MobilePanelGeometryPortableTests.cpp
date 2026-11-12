@@ -732,15 +732,15 @@ int main()
     if (phoneLauncherTap.overflowCount != 32) return 153;
     if (!phoneLauncherTap.untrackedOverflow) return 154;
     for (int source = 0; source < 49; ++source)
-        assert(!phoneLauncherTap.release(source, 1, 0, 0));
-    assert(phoneLauncherTap.untrackedOverflow);
-    assert(!phoneLauncherTap.release(999, 1, 0, 0));
+        if (phoneLauncherTap.release(source, 1, 0, 0)) return 155;
+    if (!phoneLauncherTap.untrackedOverflow) return 156;
+    if (phoneLauncherTap.release(999, 1, 0, 0)) return 157;
     phoneLauncherTap.begin(2, 77);
-    assert(!phoneLauncherTap.release(77, 2, 0, 0));
+    if (phoneLauncherTap.release(77, 2, 0, 0)) return 158;
     phoneLauncherTap.invalidate(); // OS cancellation or orientation reset
-    assert(!phoneLauncherTap.untrackedOverflow);
+    if (phoneLauncherTap.untrackedOverflow) return 159;
     phoneLauncherTap.begin(3, 7);
-    assert(phoneLauncherTap.release(7, 3, 0, 0));
+    if (!phoneLauncherTap.release(7, 3, 0, 0)) return 160;
 
     // Interleaved primary/overflow releases must not lose pointer identity.
     // Reusing a freed primary slot while overflow fingers remain down must
