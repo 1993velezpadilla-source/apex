@@ -489,6 +489,23 @@ int main()
                     return 243;
             }
 
+    // Rotation/resize invariant: scrolling to either Arrangement boundary
+    // must stay clamped even when restored positions and wheel steps are
+    // corrupted. Exercise this at runtime so Release/NDEBUG also checks it.
+    for (int content : { 0, 1, 393, 852, 2000 })
+        for (int viewport : { 0, 1, 393, 852, 2000 })
+            for (int restored : { -1000000, -1, 0, 1, 1000000 })
+                for (int step : { -1000000, -1, 0, 1, 1000000 })
+                {
+                    const int result = DAW::mobile::timelineWheelClampedPosition(
+                        restored, content, viewport, step);
+                    const int maximum = content > viewport ? content - viewport : 0;
+                    if (result < 0 || result > maximum)
+                        return 244;
+                    if (content <= viewport && result != 0)
+                        return 245;
+                }
+
     // Edge-clamped subpixel gestures should be discarded immediately,
     // including content smaller than its viewport and invalid deltas.
     using DAW::mobile::timelinePhoneWheelBlockedAtEdge;
