@@ -636,12 +636,16 @@ int main()
     if (phoneLauncherTap.release(7, 4, 0, 0)) return 97; // cannot re-arm after foreign up
     phoneLauncherTap.begin(4, 7);
     phoneLauncherTap.move(8, 0, 0); // foreign drag cancels
-    assert(!phoneLauncherTap.release(7, 4, 0, 0));
+    // Release/NDEBUG must still execute release() to clear gesture state.
+    if (phoneLauncherTap.release(7, 4, 0, 0))
+        return 112;
     phoneLauncherTap.begin(4, 7);
-    assert(!phoneLauncherTap.release(7, 3, 0, 0)); // wrong target
+    if (phoneLauncherTap.release(7, 3, 0, 0)) // wrong target
+        return 113;
     phoneLauncherTap.begin(4, 7);
     phoneLauncherTap.invalidate(); // rotation or resize
-    assert(!phoneLauncherTap.release(7, 4, 0, 0));
+    if (phoneLauncherTap.release(7, 4, 0, 0))
+        return 114;
     // A non-launcher touch also occupies the Transport: a second finger
     // must not turn a previously ineligible gesture into a panel launch.
     phoneLauncherTap.begin(0, 7);
