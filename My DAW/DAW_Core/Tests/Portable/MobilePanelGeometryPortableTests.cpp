@@ -689,18 +689,19 @@ int main()
     // sixteen must NOT re-arm a launcher while the overflow touch remains.
     for (int source = 0; source < 17; ++source)
         phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
-    assert(phoneLauncherTap.activeCount == 16);
-    assert(phoneLauncherTap.overflowCount == 1);
+    // Keep overflow and release transitions executable under NDEBUG.
+    if (phoneLauncherTap.activeCount != 16) return 132;
+    if (phoneLauncherTap.overflowCount != 1) return 133;
     for (int source = 0; source < 16; ++source)
-        assert(!phoneLauncherTap.release(source, 1, 0, 0));
-    assert(phoneLauncherTap.activeCount == 0);
-    assert(phoneLauncherTap.overflowCount == 1);
+        if (phoneLauncherTap.release(source, 1, 0, 0)) return 134;
+    if (phoneLauncherTap.activeCount != 0) return 135;
+    if (phoneLauncherTap.overflowCount != 1) return 136;
     phoneLauncherTap.begin(2, 30);
-    assert(!phoneLauncherTap.release(30, 2, 0, 0));
-    assert(!phoneLauncherTap.release(16, 0, 0, 0));
-    assert(phoneLauncherTap.overflowCount == 0);
+    if (phoneLauncherTap.release(30, 2, 0, 0)) return 137;
+    if (phoneLauncherTap.release(16, 0, 0, 0)) return 138;
+    if (phoneLauncherTap.overflowCount != 0) return 139;
     phoneLauncherTap.begin(3, 7);
-    assert(phoneLauncherTap.release(7, 3, 0, 0));
+    if (!phoneLauncherTap.release(7, 3, 0, 0)) return 140;
 
     // Foreign and duplicate releases must not consume an overflow ID.
     for (int source = 0; source < 18; ++source)
