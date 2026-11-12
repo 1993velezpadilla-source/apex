@@ -1935,4 +1935,23 @@ int main()
                     return 44;
             }
 
+    // Rotation and split-screen can reduce the floating Mixer's title zone
+    // below its 32-unit touch target. Never expose a partially clipped
+    // button; once the zone recovers, every action must fit completely.
+    for (int zoneWidth : { 0, 45, 46, 93, 94, 141, 142, 393, 852 })
+        for (int zoneHeight : { 0, 1, 31, 32, 33, 48, 96 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(
+                zoneWidth, zoneHeight);
+            if ((zoneWidth < 46 || zoneHeight < 32) && layout.count != 0)
+                return 248;
+            for (int index = 0; index < layout.count; ++index)
+            {
+                const auto button = layout.buttons[index].bounds;
+                if (!inside(button, zoneWidth, zoneHeight))
+                    return 249;
+                if (button.width != 44 || button.height != 32)
+                    return 250;
+            }
+        }
 }
