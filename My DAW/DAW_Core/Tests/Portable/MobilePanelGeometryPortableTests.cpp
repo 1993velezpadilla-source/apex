@@ -727,9 +727,10 @@ int main()
     // unknown releases must not accidentally clear that safety latch.
     for (int source = 0; source < 49; ++source)
         phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
-    assert(phoneLauncherTap.activeCount == 16);
-    assert(phoneLauncherTap.overflowCount == 32);
-    assert(phoneLauncherTap.untrackedOverflow);
+    // Execute overflow-state checks in Release/NDEBUG too.
+    if (phoneLauncherTap.activeCount != 16) return 152;
+    if (phoneLauncherTap.overflowCount != 32) return 153;
+    if (!phoneLauncherTap.untrackedOverflow) return 154;
     for (int source = 0; source < 49; ++source)
         assert(!phoneLauncherTap.release(source, 1, 0, 0));
     assert(phoneLauncherTap.untrackedOverflow);
