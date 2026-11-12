@@ -1101,17 +1101,17 @@ int main()
     bool phoneRowTapEligible = true;
     phoneRowTapEligible = phoneTapGestureRemainsEligible(phoneRowTapEligible, 24, 0);
     phoneRowTapEligible = phoneTapGestureRemainsEligible(phoneRowTapEligible, 0, 0);
-    assert(!phoneRowTapEligible);
-    assert(!pluginBrowserRowTapActivates(true, 0, 0, phoneRowTapEligible));
+    if (phoneRowTapEligible) return 201;
+    if (pluginBrowserRowTapActivates(true, 0, 0, phoneRowTapEligible)) return 202;
     bool phoneButtonTapEligible = true;
     phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 30);
     phoneButtonTapEligible = phoneTapGestureRemainsEligible(phoneButtonTapEligible, 0, 0);
-    assert(!phoneButtonTapEligible);
-    assert(!(phoneButtonTapEligible && DAW::mobile::phoneChromeButtonTapActivates(1, 1, 0, 0)));
+    if (phoneButtonTapEligible) return 203;
+    if (phoneButtonTapEligible && DAW::mobile::phoneChromeButtonTapActivates(1, 1, 0, 0)) return 204;
     // A short stationary touch remains eligible.
     bool shortPhoneTap = phoneTapGestureRemainsEligible(true, 4, 3);
     shortPhoneTap = phoneTapGestureRemainsEligible(shortPhoneTap, 0, 0);
-    assert(shortPhoneTap);
+    if (!shortPhoneTap) return 205;
     // Phone title-bar buttons must activate on a stationary release over
     // the same control, not on mouseDown or after swiping across controls.
     using DAW::mobile::phoneChromeButtonTapActivates;
@@ -1128,8 +1128,8 @@ int main()
         for (int dy = -12; dy <= 12; ++dy)
         {
             const bool tap = dx * dx + dy * dy <= 64;
-            assert(phoneChromeButtonTapActivates(1, 1, dx, dy) == tap);
-            assert(!phoneChromeButtonTapActivates(1, 2, dx, dy));
+            if (phoneChromeButtonTapActivates(1, 1, dx, dy) != tap) return 206;
+            if (phoneChromeButtonTapActivates(1, 2, dx, dy)) return 207;
         }
     // Regression: a phone rotation during a pressed chrome control must
     // never close/minimize/maximize the newly repositioned floating window.
