@@ -1205,16 +1205,21 @@ int main()
     sendsClose.begin(1);
     sendsClose.move(0, 9);
     sendsClose.move(0, 0);
-    assert(!sendsClose.release(1, 0, 0));
+    if (sendsClose.release(1, 0, 0))
+        return 183;
     sendsClose.begin(1);
-    assert(!sendsClose.release(0, 0, 0)); // Finger lifted outside orb.
+    if (sendsClose.release(0, 0, 0)) // Finger lifted outside orb.
+        return 184;
     sendsClose.begin(1);
     sendsClose.invalidate(); // Parent resized or safe insets changed.
-    assert(!sendsClose.release(1, 0, 0));
+    if (sendsClose.release(1, 0, 0))
+        return 185;
     sendsClose.begin(1);
     sendsClose.move(6, 4);
-    assert(sendsClose.release(1, 6, 4)); // Fresh stationary phone tap.
-    assert(!sendsClose.release(1, 0, 0)); // No duplicate close.
+    if (!sendsClose.release(1, 6, 4)) // Fresh stationary phone tap.
+        return 186;
+    if (sendsClose.release(1, 0, 0)) // No duplicate close.
+        return 187;
 
     // Phone Transport panel launchers must not open Mixer/Sends/FX/Browser
     // on swipe, on release over a different launcher, or after a drag that
