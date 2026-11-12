@@ -1148,15 +1148,15 @@ int main()
     if (chromeTap.release(3, 0, 0)) return 73; // Swipe and return.
     chromeTap.begin(1);
     chromeTap.invalidate(); // Parent resized on rotation.
-    assert(!chromeTap.release(1, 0, 0));
+    if (chromeTap.release(1, 0, 0)) return 179;
     chromeTap.begin(3);
-    assert(!chromeTap.release(1, 0, 0)); // Different button.
+    if (chromeTap.release(1, 0, 0)) return 180; // Different button.
     chromeTap.begin(2);
     chromeTap.move(std::numeric_limits<int>::min(),
                    std::numeric_limits<int>::max());
-    assert(!chromeTap.release(2, 0, 0)); // Extreme drag.
+    if (chromeTap.release(2, 0, 0)) return 181; // Extreme drag.
     chromeTap.begin(3);
-    assert(chromeTap.release(3, 0, 0)); // Fresh press after rotation.
+    if (!chromeTap.release(3, 0, 0)) return 182; // Fresh press after rotation.
 
     // MixerWindow's phone toolbar uses IDs + 1 (Settings is ID 0), so
     // pressing Settings cannot be confused with an absent touch. All
