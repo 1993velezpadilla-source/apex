@@ -672,16 +672,18 @@ int main()
     // unrelated new finger can accidentally open a floating panel.
     for (int source = 0; source < 10; ++source)
         phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
-    assert(phoneLauncherTap.activeCount == 10);
+    // Execute every release in Release/NDEBUG: assert() would skip the
+    // transition and invalidate this multi-contact overflow regression.
+    if (phoneLauncherTap.activeCount != 10) return 125;
     for (int source = 0; source < 8; ++source)
-        assert(!phoneLauncherTap.release(source, 1, 0, 0));
-    assert(phoneLauncherTap.activeCount == 2);
+        if (phoneLauncherTap.release(source, 1, 0, 0)) return 126;
+    if (phoneLauncherTap.activeCount != 2) return 127;
     phoneLauncherTap.begin(2, 12); // Must not re-arm while 8 and 9 remain.
-    assert(!phoneLauncherTap.release(12, 2, 0, 0));
-    assert(!phoneLauncherTap.release(8, 1, 0, 0));
-    assert(!phoneLauncherTap.release(9, 1, 0, 0));
+    if (phoneLauncherTap.release(12, 2, 0, 0)) return 128;
+    if (phoneLauncherTap.release(8, 1, 0, 0)) return 129;
+    if (phoneLauncherTap.release(9, 1, 0, 0)) return 130;
     phoneLauncherTap.begin(4, 7);
-    assert(phoneLauncherTap.release(7, 4, 0, 0));
+    if (!phoneLauncherTap.release(7, 4, 0, 0)) return 131;
 
     // A 17th touch exceeds the fixed source-ID array. Releasing the first
     // sixteen must NOT re-arm a launcher while the overflow touch remains.
