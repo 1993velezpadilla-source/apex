@@ -916,11 +916,15 @@ int main()
                         std::numeric_limits<int>::min(), true, top, bottom);
                     const int safeTop = DAW::mobile::clampInt(top, 0, h);
                     const int safeBottom = DAW::mobile::clampInt(bottom, 0, h - safeTop);
-                    assert(inside(fitted, w, h));
+                    // Keep rotation/inset geometry checks active under NDEBUG.
+                    if (!inside(fitted, w, h))
+                        return 115;
                     if (fitted.height > 0)
                     {
-                        assert(fitted.y >= safeTop);
-                        assert(static_cast<long long>(fitted.y) + fitted.height <= h - safeBottom);
+                        if (fitted.y < safeTop)
+                            return 116;
+                        if (static_cast<long long>(fitted.y) + fitted.height > h - safeBottom)
+                            return 117;
                     }
                 }
 
