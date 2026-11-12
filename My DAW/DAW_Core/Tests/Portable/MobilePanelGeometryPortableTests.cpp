@@ -506,6 +506,28 @@ int main()
                         return 245;
                 }
 
+    // A wheel gesture must be monotonic relative to the clamped restored
+    // position, even when rotation changes the visible Arrangement width.
+    // Zero wheel motion must not move the restored viewport unexpectedly.
+    for (int content : { 0, 1, 393, 852, 2000 })
+        for (int viewport : { 0, 1, 393, 852, 2000 })
+            for (int restored : { -1000000, -1, 0, 1, 1000000 })
+            {
+                const int baseline = DAW::mobile::timelineWheelClampedPosition(
+                    restored, content, viewport, 0);
+                if (DAW::mobile::timelineWheelClampedPosition(
+                        baseline, content, viewport, 0) != baseline)
+                    return 246;
+                for (int step : { -1000000, -1, 1, 1000000 })
+                {
+                    const int moved = DAW::mobile::timelineWheelClampedPosition(
+                        restored, content, viewport, step);
+                    if ((step < 0 && moved > baseline)
+                        || (step > 0 && moved < baseline))
+                        return 247;
+                }
+            }
+
     // Edge-clamped subpixel gestures should be discarded immediately,
     // including content smaller than its viewport and invalid deltas.
     using DAW::mobile::timelinePhoneWheelBlockedAtEdge;
