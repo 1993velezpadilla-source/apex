@@ -657,14 +657,15 @@ int main()
     if (!phoneLauncherTap.release(7, 1, 0, 0)) return 120;
 
     // A cancelled two-finger gesture stays blocked until BOTH fingers lift.
+    // Evaluate releases in Release/NDEBUG as well as Debug.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.begin(2, 8);
-    assert(!phoneLauncherTap.release(7, 1, 0, 0));
+    if (phoneLauncherTap.release(7, 1, 0, 0)) return 121;
     phoneLauncherTap.begin(3, 9); // third finger cannot re-arm
-    assert(!phoneLauncherTap.release(9, 3, 0, 0));
-    assert(!phoneLauncherTap.release(8, 2, 0, 0));
+    if (phoneLauncherTap.release(9, 3, 0, 0)) return 122;
+    if (phoneLauncherTap.release(8, 2, 0, 0)) return 123;
     phoneLauncherTap.begin(4, 7);
-    assert(phoneLauncherTap.release(7, 4, 0, 0));
+    if (!phoneLauncherTap.release(7, 4, 0, 0)) return 124;
 
     // Nine or ten contacts can coexist on Android. If only eight are
     // tracked, the state resets while the ninth is still down and an
