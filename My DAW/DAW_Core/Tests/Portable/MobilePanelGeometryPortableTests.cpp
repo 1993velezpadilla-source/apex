@@ -650,10 +650,11 @@ int main()
     // must not turn a previously ineligible gesture into a panel launch.
     phoneLauncherTap.begin(0, 7);
     phoneLauncherTap.begin(1, 8);
-    assert(!phoneLauncherTap.release(8, 1, 0, 0));
-    assert(!phoneLauncherTap.release(7, 0, 0, 0));
+    // Release must consume each finger even when NDEBUG disables assert().
+    if (phoneLauncherTap.release(8, 1, 0, 0)) return 118;
+    if (phoneLauncherTap.release(7, 0, 0, 0)) return 119;
     phoneLauncherTap.begin(1, 7);
-    assert(phoneLauncherTap.release(7, 1, 0, 0));
+    if (!phoneLauncherTap.release(7, 1, 0, 0)) return 120;
 
     // A cancelled two-finger gesture stays blocked until BOTH fingers lift.
     phoneLauncherTap.begin(1, 7);
