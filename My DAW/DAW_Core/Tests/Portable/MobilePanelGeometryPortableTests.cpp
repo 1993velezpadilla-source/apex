@@ -743,37 +743,38 @@ int main()
     if (!phoneLauncherTap.release(7, 3, 0, 0)) return 160;
 
     // Interleaved primary/overflow releases must not lose pointer identity.
+    // These state transitions must execute even in Release/NDEBUG builds.
     // Reusing a freed primary slot while overflow fingers remain down must
     // never re-arm a floating-panel launcher.
     for (int source = 0; source < 18; ++source)
         phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
-    assert(phoneLauncherTap.activeCount == 16);
-    assert(phoneLauncherTap.overflowCount == 2);
-    assert(!phoneLauncherTap.release(3, 1, 0, 0));
+    if (phoneLauncherTap.activeCount != 16) return 161;
+    if (phoneLauncherTap.overflowCount != 2) return 162;
+    if (phoneLauncherTap.release(3, 1, 0, 0)) return 163;
     phoneLauncherTap.begin(2, 100); // reuse the freed primary slot
-    assert(phoneLauncherTap.activeCount == 16);
-    assert(phoneLauncherTap.overflowCount == 2);
-    assert(!phoneLauncherTap.release(999, 2, 0, 0)); // unknown release
-    assert(phoneLauncherTap.overflowCount == 2);
-    assert(!phoneLauncherTap.release(17, 2, 0, 0));
-    assert(phoneLauncherTap.overflowCount == 1);
-    assert(!phoneLauncherTap.release(17, 2, 0, 0)); // duplicate release
-    assert(phoneLauncherTap.overflowCount == 1);
+    if (phoneLauncherTap.activeCount != 16) return 164;
+    if (phoneLauncherTap.overflowCount != 2) return 165;
+    if (phoneLauncherTap.release(999, 2, 0, 0)) return 166; // unknown release
+    if (phoneLauncherTap.overflowCount != 2) return 167;
+    if (phoneLauncherTap.release(17, 2, 0, 0)) return 168;
+    if (phoneLauncherTap.overflowCount != 1) return 169;
+    if (phoneLauncherTap.release(17, 2, 0, 0)) return 170; // duplicate release
+    if (phoneLauncherTap.overflowCount != 1) return 171;
     for (int source = 0; source < 18; ++source)
         if (source != 3 && source != 17)
-            assert(!phoneLauncherTap.release(source, 1, 0, 0));
-    assert(!phoneLauncherTap.release(100, 2, 0, 0));
-    assert(phoneLauncherTap.activeCount == 0);
-    assert(phoneLauncherTap.overflowCount == 0);
+            if (phoneLauncherTap.release(source, 1, 0, 0)) return 172;
+    if (phoneLauncherTap.release(100, 2, 0, 0)) return 173;
+    if (phoneLauncherTap.activeCount != 0) return 174;
+    if (phoneLauncherTap.overflowCount != 0) return 175;
     phoneLauncherTap.begin(2, 100);
-    assert(phoneLauncherTap.release(100, 2, 0, 0));
+    if (!phoneLauncherTap.release(100, 2, 0, 0)) return 176;
 
     // A cancelled swipe cannot be re-armed by another finger.
     phoneLauncherTap.begin(1, 7);
     phoneLauncherTap.move(7, 20, 0);
     phoneLauncherTap.begin(2, 8);
-    assert(!phoneLauncherTap.release(7, 1, 0, 0));
-    assert(!phoneLauncherTap.release(8, 2, 0, 0));
+    if (phoneLauncherTap.release(7, 1, 0, 0)) return 177;
+    if (phoneLauncherTap.release(8, 2, 0, 0)) return 178;
 
 
     // Header energy must not overpaint either the original left chrome or
