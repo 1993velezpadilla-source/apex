@@ -706,20 +706,21 @@ int main()
     // Foreign and duplicate releases must not consume an overflow ID.
     for (int source = 0; source < 18; ++source)
         phoneLauncherTap.begin(source == 0 ? 1 : 0, source);
-    assert(phoneLauncherTap.overflowCount == 2);
-    assert(!phoneLauncherTap.release(999, 0, 0, 0));
-    assert(phoneLauncherTap.overflowCount == 2);
-    assert(!phoneLauncherTap.release(16, 0, 0, 0));
-    assert(phoneLauncherTap.overflowCount == 1);
-    assert(!phoneLauncherTap.release(16, 0, 0, 0)); // duplicate
-    assert(phoneLauncherTap.overflowCount == 1);
+    // Overflow and duplicate releases must execute in NDEBUG builds too.
+    if (phoneLauncherTap.overflowCount != 2) return 141;
+    if (phoneLauncherTap.release(999, 0, 0, 0)) return 142;
+    if (phoneLauncherTap.overflowCount != 2) return 143;
+    if (phoneLauncherTap.release(16, 0, 0, 0)) return 144;
+    if (phoneLauncherTap.overflowCount != 1) return 145;
+    if (phoneLauncherTap.release(16, 0, 0, 0)) return 146; // duplicate
+    if (phoneLauncherTap.overflowCount != 1) return 147;
     for (int source = 0; source < 16; ++source)
-        assert(!phoneLauncherTap.release(source, 0, 0, 0));
+        if (phoneLauncherTap.release(source, 0, 0, 0)) return 148;
     phoneLauncherTap.begin(2, 50);
-    assert(!phoneLauncherTap.release(50, 2, 0, 0));
-    assert(!phoneLauncherTap.release(17, 0, 0, 0));
+    if (phoneLauncherTap.release(50, 2, 0, 0)) return 149;
+    if (phoneLauncherTap.release(17, 0, 0, 0)) return 150;
     phoneLauncherTap.begin(3, 7);
-    assert(phoneLauncherTap.release(7, 3, 0, 0));
+    if (!phoneLauncherTap.release(7, 3, 0, 0)) return 151;
 
     // Beyond 48 contacts there is no room for another source ID. Keep all
     // phone panel launchers disabled until an explicit cancel/rotation reset;
