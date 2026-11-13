@@ -2308,4 +2308,28 @@ int main()
                 previous = usable;
             }
         }
+
+
+    // FX row-height changes (font scaling and portrait/landscape) must
+    // never widen a touch target as rows become taller. Exact fit is not
+    // overflow, and malformed nonpositive heights must not reserve space.
+    for (int width : { 1, 11, 12, 44, 393 })
+        for (int viewport : { 1, 43, 44, 88, 393 })
+            for (int rows : { -1, 0, 1, 2, 9, 1000000 })
+            {
+                int previous = width;
+                for (int rowHeight = 0; rowHeight <= 128; ++rowHeight)
+                {
+                    const int usable = DAW::mobile::pluginBrowserListWidth(
+                        width, viewport, rows, rowHeight, 12);
+                    if (usable < 0 || usable > width || usable > previous)
+                        return 301;
+                    const bool overflow = rows > 0 && rowHeight > 0
+                        && rows > viewport / rowHeight;
+                    const int reserved = overflow ? (width < 12 ? width : 12) : 0;
+                    if (usable != width - reserved)
+                        return 302;
+                    previous = usable;
+                }
+            }
 }
