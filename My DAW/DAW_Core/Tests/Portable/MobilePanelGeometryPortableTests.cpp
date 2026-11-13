@@ -2403,4 +2403,34 @@ int main()
                             return 309;
                     }
                 }
+    // Restored FX browser dimensions can be zero or corrupt after process
+    // recreation. They must fall back to responsive placement, not retain a
+    // stale origin; valid sizes should settle after a second layout pass.
+    for (int width : { 1, 44, 320, 393, 852 })
+        for (int height : { 1, 44, 128, 480, 852 })
+            for (int size : { std::numeric_limits<int>::min(), -1, 0,
+                              1, 340, std::numeric_limits<int>::max() })
+            {
+                const DAW::mobile::PanelBounds restored{
+                    std::numeric_limits<int>::max(),
+                    std::numeric_limits<int>::min(), size, size };
+                const auto fitted = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, 44, 64, restored);
+                const auto fallback = DAW::mobile::fitPhonePluginBrowser(
+                    width, height, 44, 64);
+                if (size <= 0 && (fitted.x != fallback.x
+                    || fitted.y != fallback.y || fitted.width != fallback.width
+                    || fitted.height != fallback.height))
+                    return 310;
+                if (fitted.width > 0 && fitted.height > 0
+                    && !inside(fitted, width, height))
+                    return 311;
+                const auto settled = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, 44, 64, fitted);
+                if (settled.x != fitted.x || settled.y != fitted.y
+                    || settled.width != fitted.width
+                    || settled.height != fitted.height)
+                    return 312;
+            }
+
 }
