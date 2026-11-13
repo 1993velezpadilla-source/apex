@@ -2465,4 +2465,39 @@ int main()
                     }
                 }
 
+
+    // Phone-only Sends safe-area changes must not alter the desktop/iPad
+    // layout. Conversely, phone panels must stay clear of both reservations
+    // even if a stale drag anchor lies far outside the rotated viewport.
+    for (int width : { 1, 44, 320, 393, 852 })
+        for (int height : { 1, 96, 300, 852 })
+            for (int anchor : { std::numeric_limits<int>::min(), -1,
+                                0, 1000, std::numeric_limits<int>::max() })
+        {
+            const auto desktop = fitBubblegumSends(
+                width, height, anchor, anchor, false);
+            for (int top : { -1, 0, 50, 1000 })
+                for (int bottom : { -1, 0, 96, 1000 })
+                {
+                    const auto unchanged = fitBubblegumSends(
+                        width, height, anchor, anchor, false, top, bottom);
+                    if (unchanged.x != desktop.x || unchanged.y != desktop.y
+                        || unchanged.width != desktop.width
+                        || unchanged.height != desktop.height)
+                        return 315;
+
+                    const auto phone = fitBubblegumSends(
+                        width, height, anchor, anchor, true, top, bottom);
+                    const int safeTop = DAW::mobile::clampInt(top, 0, height);
+                    const int safeBottom = DAW::mobile::clampInt(
+                        bottom, 0, height - safeTop);
+                    if (phone.width > 0 && phone.height > 0
+                        && (!inside(phone, width, height)
+                            || phone.y < safeTop
+                            || static_cast<long long>(phone.y) + phone.height
+                                > height - safeBottom))
+                        return 316;
+                }
+        }
+
 }
