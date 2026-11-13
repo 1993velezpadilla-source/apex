@@ -2165,6 +2165,26 @@ int main()
             }
         }
 
+
+    // Restored Track List widths can change one unit at a time while the
+    // Arrangement is live. Increasing the requested width must never shrink
+    // the visible list, overflow the viewport, or erase the timeline.
+    for (int workspace : { 0, 1, 2, 3, 46, 108, 393, 852 })
+    {
+        int previousTrack = 0;
+        for (int requested = 0; requested <= 512; ++requested)
+        {
+            const int track = DAW::mobile::phoneTrackListWidth(requested, workspace);
+            if (track < previousTrack)
+                return 287;
+            if (track < 0 || track > requested)
+                return 288;
+            if (workspace > 1 && requested > 0 && track >= workspace)
+                return 289;
+            previousTrack = track;
+        }
+    }
+
     // Rotating a phone must not change Mixer toolbar actions merely because
     // the title region becomes taller. Buttons stay vertically centered and
     // the horizontal hit map remains identical across title heights.
