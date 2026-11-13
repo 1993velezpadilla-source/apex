@@ -60,6 +60,28 @@ int main()
                 && layout.buttons[layout.count - 1].action != DAW::mobile::phoneMixerOverflow)
                 return 255;
         }
+    // Toolbar breakpoints must preserve action identity across rotation and
+    // split-screen resizing. A hidden FX/Reset action must not silently become
+    // another button; the overflow control must remain the last visible one.
+    for (int width : { 45, 46, 93, 94, 141, 142, 393, 852 })
+    {
+        const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        const int expectedCount = width < 46 ? 0 : width < 94 ? 1
+                                : width < 142 ? 2 : 3;
+        if (layout.count != expectedCount)
+            return 259;
+        for (int i = 0; i < layout.count; ++i)
+        {
+            const auto expectedAction = expectedCount == 3
+                ? (i == 0 ? DAW::mobile::phoneMixerBrowser
+                   : i == 1 ? DAW::mobile::phoneMixerFXChain
+                            : DAW::mobile::phoneMixerReset)
+                : (i == layout.count - 1 ? DAW::mobile::phoneMixerOverflow
+                                         : DAW::mobile::phoneMixerBrowser);
+            if (layout.buttons[i].action != expectedAction)
+                return 260;
+        }
+    }
     // Platform policy gate: phone Arrangement hides desktop scroll/zoom chrome
     // while retaining both scroll axes; iPad/PC/Mac keep desktop chrome.
     // The wheel event must be consumed only once on phones.
