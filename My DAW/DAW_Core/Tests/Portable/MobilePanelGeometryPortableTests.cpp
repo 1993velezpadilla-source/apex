@@ -2139,4 +2139,29 @@ int main()
     if (static_cast<long long>(hugeWorkspace) - hugeTrack < 1)
         return 278;
 
+
+    // Android can briefly report extreme window bounds during orientation
+    // changes. The floating Mixer toolbar must not overflow or create
+    // phantom controls when its available zone is malformed.
+    for (int zoneWidth : { std::numeric_limits<int>::min(), -1, 0, 1,
+                           45, 46, 93, 94, 141, 142,
+                           std::numeric_limits<int>::max() })
+        for (int zoneHeight : { std::numeric_limits<int>::min(), -1, 0,
+                                31, 32, 33, std::numeric_limits<int>::max() })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(
+                zoneWidth, zoneHeight);
+            if (layout.count < 0 || layout.count > 4)
+                return 279;
+            if ((zoneWidth < 46 || zoneHeight < 32) && layout.count != 0)
+                return 280;
+            for (int index = 0; index < layout.count; ++index)
+            {
+                const auto bounds = layout.buttons[index].bounds;
+                if (!inside(bounds, zoneWidth, zoneHeight))
+                    return 281;
+                if (bounds.width != 44 || bounds.height != 32)
+                    return 282;
+            }
+        }
 }
