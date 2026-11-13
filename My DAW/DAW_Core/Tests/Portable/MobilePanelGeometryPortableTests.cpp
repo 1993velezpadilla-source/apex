@@ -2287,4 +2287,25 @@ int main()
         }
     }
 
+
+    // FX browser: adding plugin rows cannot increase the touch width.
+    // At the exact overflow threshold the scrollbar appears once, and
+    // further additions must leave the hit target unchanged.
+    for (int width : { 1, 11, 12, 44, 393 })
+        for (int height : { 1, 43, 44, 45, 88, 393 })
+        {
+            int previous = width;
+            for (int rows = 0; rows <= 32; ++rows)
+            {
+                const int usable = DAW::mobile::pluginBrowserListWidth(
+                    width, height, rows, 44, 12);
+                if (usable < 0 || usable > previous)
+                    return 299;
+                const bool overflow = rows > height / 44;
+                const int reserved = overflow ? (width < 12 ? width : 12) : 0;
+                if (usable != width - reserved)
+                    return 300;
+                previous = usable;
+            }
+        }
 }
