@@ -2164,4 +2164,31 @@ int main()
                     return 282;
             }
         }
+
+    // Rotating a phone must not change Mixer toolbar actions merely because
+    // the title region becomes taller. Buttons stay vertically centered and
+    // the horizontal hit map remains identical across title heights.
+    for (int width : { 0, 45, 46, 93, 94, 141, 142, 393, 852 })
+    {
+        const auto baseline = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        for (int height : { 32, 33, 47, 48, 96, 852 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (layout.count != baseline.count)
+                return 283;
+            for (int index = 0; index < layout.count; ++index)
+            {
+                const auto bounds = layout.buttons[index].bounds;
+                const auto original = baseline.buttons[index];
+                if (layout.buttons[index].action != original.action)
+                    return 284;
+                if (bounds.x != original.bounds.x
+                    || bounds.width != original.bounds.width)
+                    return 285;
+                if (bounds.y != (height - bounds.height) / 2
+                    || !inside(bounds, width, height))
+                    return 286;
+            }
+        }
+    }
 }
