@@ -239,7 +239,7 @@ constexpr int phoneMixerLeftChromeButtonAt(float x, float y,
                                            int buttonGap, int titleHeight) noexcept
 {
     if (buttonSize <= 0 || buttonGap < 0 || titleHeight <= 0
-        || y < 0.0f || y >= static_cast<float>(titleHeight))
+        || !(y >= 0.0f && y < static_cast<float>(titleHeight)))
         return 0;
     const float firstCentre = static_cast<float>(padLeft)
                             + static_cast<float>(buttonSize) * 0.5f;
