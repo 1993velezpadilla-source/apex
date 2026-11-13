@@ -2036,6 +2036,33 @@ int main()
         previousChromeSize = size;
     }
 
+    // FX row and Transport launcher share the same circular tap threshold.
+    // Exhaust the +/-9 boundary after a portrait/landscape transition:
+    // diagonal drags outside radius 8 must never activate a plugin.
+    for (int dx = -9; dx <= 9; ++dx)
+        for (int dy = -9; dy <= 9; ++dy)
+        {
+            const bool expected = dx * dx + dy * dy <= 64;
+            if (DAW::mobile::pluginBrowserRowTapActivates(true, dx, dy, true)
+                != expected)
+                return 267;
+            if (DAW::mobile::phoneTransportLauncherTapActivates(1, 1, dx, dy)
+                != expected)
+                return 268;
+            if (DAW::mobile::pluginBrowserRowTapActivates(true, dx, dy, false))
+                return 269;
+        }
+    // A swipe that leaves the circle and returns to its origin is not a tap.
+    // This guards against accidental plugin loading after scrolling.
+    for (int dx : { -9, 9 })
+        for (int dy : { -9, 9 })
+        {
+            bool eligible = DAW::mobile::phoneTapGestureRemainsEligible(true, dx, dy);
+            eligible = DAW::mobile::phoneTapGestureRemainsEligible(eligible, 0, 0);
+            if (eligible)
+                return 270;
+        }
+
     // Rotation and split-screen can reduce the floating Mixer's title zone
     // below its 32-unit touch target. Never expose a partially clipped
     // button; once the zone recovers, every action must fit completely.
