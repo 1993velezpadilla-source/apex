@@ -2500,4 +2500,26 @@ int main()
                 }
         }
 
+
+    // Phone Arrangement track-list width must never consume the last timeline
+    // unit after a fold/unfold, rotation, or tiny split-screen resize.
+    // Desktop/iPad layout does not use this phone-only helper.
+    for (int workspace : { std::numeric_limits<int>::min(), -1, 0, 1,
+                           2, 44, 108, 320, 393, 852,
+                           std::numeric_limits<int>::max() })
+        for (int requested : { std::numeric_limits<int>::min(), -1, 0,
+                               1, 44, 108, 320, 852,
+                               std::numeric_limits<int>::max() })
+        {
+            const int width = DAW::mobile::phoneTrackListWidth(
+                requested, workspace);
+            if (width < 0 || width > (requested > 0 ? requested : 0))
+                return 317;
+            if (workspace <= 1 ? width != 0
+                : (width > workspace - 1))
+                return 318;
+            if (requested > 0 && workspace > 1 && width == 0)
+                return 319;
+        }
+
 }
