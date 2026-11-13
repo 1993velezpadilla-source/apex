@@ -2211,4 +2211,30 @@ int main()
             }
         }
     }
+
+    // FX browser scrollbar: resizing by one logical unit must never
+    // increase the usable row width, then decrease it again. The sole
+    // transition is from a reserved scrollbar to the full row width.
+    // Check exact-fit boundaries and malformed row counts in Release too.
+    for (int rows : { -1, 0, 1, 2, 3, 44, 1000000 })
+        for (int rowHeight : { -1, 0, 1, 22, 44, 1000000 })
+        {
+            int previousWidth = 0;
+            for (int viewportHeight = 0; viewportHeight <= 256; ++viewportHeight)
+            {
+                const int usable = DAW::mobile::pluginBrowserListWidth(
+                    393, viewportHeight, rows, rowHeight, 12);
+                if (usable < 0 || usable > 393)
+                    return 290;
+                if (viewportHeight > 0 && usable < previousWidth)
+                    return 291;
+                if (viewportHeight > 0 && rows > 0 && rowHeight > 0)
+                {
+                    const bool overflow = rows > viewportHeight / rowHeight;
+                    if (usable != (overflow ? 381 : 393))
+                        return 292;
+                }
+                previousWidth = usable;
+            }
+        }
 }
