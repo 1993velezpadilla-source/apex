@@ -11,6 +11,27 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Phone Mixer chrome: reject malformed touch coordinates and preserve
+    // exclusive boundaries after rotation. No ghost minimize/maximize hit.
+    for (int titleHeight : { 1, 31, 32, 44, 96 })
+    {
+        const auto hit = [titleHeight](float x, float y) {
+            return DAW::mobile::phoneMixerLeftChromeButtonAt(
+                x, y, 14, 12, 8, titleHeight);
+        };
+        if (hit(29.999f, 0.0f) != 1 || hit(30.0f, 0.0f) != 2
+            || hit(60.0f, 0.0f) != 0)
+            return 256;
+        if (hit(20.0f, static_cast<float>(titleHeight)) != 0
+            || hit(40.0f, -0.001f) != 0)
+            return 257;
+        constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+        constexpr float inf = std::numeric_limits<float>::infinity();
+        if (hit(nan, 1.0f) != 0 || hit(inf, 1.0f) != 0
+            || hit(-inf, 1.0f) != 0 || hit(20.0f, nan) != 0
+            || hit(20.0f, inf) != 0 || hit(20.0f, -inf) != 0)
+            return 258;
+    }
     // Exhaustive compact Mixer toolbar hit-map across portrait resize widths.
     // Every visible control must remain fully tappable, non-overlapping, and
     // within the 32-high title region; hidden actions must not leave hit zones.
