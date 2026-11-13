@@ -2433,4 +2433,36 @@ int main()
                     return 312;
             }
 
+    // Phone FX browser: safe-area changes from immersive mode or rotation
+    // must never leak a maximized panel into the system/Transport regions.
+    // Maximization must also be independent of a saved dragged origin.
+    for (int width : { 1, 44, 320, 393, 852 })
+        for (int height : { 1, 44, 128, 480, 852 })
+            for (int top : { 0, 24, 44, 1000 })
+                for (int bottom : { 0, 24, 64, 1000 })
+                {
+                    const DAW::mobile::PanelBounds stale{
+                        std::numeric_limits<int>::min(),
+                        std::numeric_limits<int>::max(), 1, 1 };
+                    const auto maximized = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom, stale, true);
+                    const auto expected = DAW::mobile::fitPhonePluginBrowser(
+                        width, height, top, bottom, true);
+                    if (maximized.x != expected.x || maximized.y != expected.y
+                        || maximized.width != expected.width
+                        || maximized.height != expected.height)
+                        return 313;
+                    if (maximized.width > 0 && maximized.height > 0)
+                    {
+                        const int safeTop = DAW::mobile::clampInt(top, 0, height);
+                        const int safeBottom = DAW::mobile::clampInt(
+                            bottom, 0, height - safeTop);
+                        if (!inside(maximized, width, height)
+                            || maximized.y < safeTop
+                            || static_cast<long long>(maximized.y) + maximized.height
+                                > height - safeBottom)
+                            return 314;
+                    }
+                }
+
 }
