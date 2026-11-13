@@ -2376,4 +2376,31 @@ int main()
                 || once.width != twice.width || once.height != twice.height)
                 return 306;
         }
+
+    // A rotated FX browser must never cover the phone header or persistent
+    // Transport. Verify safe-area containment, not merely viewport bounds.
+    for (int width : { 1, 44, 320, 393, 852 })
+        for (int height : { 1, 44, 128, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+                {
+                    const DAW::mobile::PanelBounds stale{
+                        std::numeric_limits<int>::max(),
+                        std::numeric_limits<int>::min(), 340, 560 };
+                    const auto fitted = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom, stale);
+                    const int safeTop = DAW::mobile::clampInt(top, 0, height);
+                    const int safeBottom = DAW::mobile::clampInt(
+                        bottom, 0, height - safeTop);
+                    if (fitted.width > 0 && fitted.height > 0)
+                    {
+                        if (fitted.y < safeTop)
+                            return 307;
+                        if (static_cast<long long>(fitted.y) + fitted.height
+                            > height - safeBottom)
+                            return 308;
+                        if (!inside(fitted, width, height))
+                            return 309;
+                    }
+                }
 }
