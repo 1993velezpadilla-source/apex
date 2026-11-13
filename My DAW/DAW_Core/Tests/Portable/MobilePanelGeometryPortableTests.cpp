@@ -2237,4 +2237,34 @@ int main()
                 previousWidth = usable;
             }
         }
+
+    // FX browser scrollbar geometry must remain bounded when Android
+    // supplies malformed dimensions or a corrupted saved scrollbar width.
+    // An exact-fit list must not reserve a scrollbar.
+    for (int width : { std::numeric_limits<int>::min(), -1, 0, 1,
+                       11, 12, 44, 393, std::numeric_limits<int>::max() })
+        for (int height : { -1, 0, 1, 43, 44, 45,
+                            std::numeric_limits<int>::max() })
+            for (int thickness : { std::numeric_limits<int>::min(), -1, 0,
+                                   1, 12, 393, std::numeric_limits<int>::max() })
+            {
+                const int usable = DAW::mobile::pluginBrowserListWidth(
+                    width, height, 1, 44, thickness);
+                if (usable < 0 || (width >= 0 && usable > width))
+                    return 293;
+                if (width <= 0 || height <= 0)
+                {
+                    if (usable != 0)
+                        return 294;
+                }
+                else if (height >= 44 && usable != width)
+                    return 295;
+                else if (height < 44)
+                {
+                    const int reserved = thickness <= 0 ? 0
+                        : (thickness > width ? width : thickness);
+                    if (usable != width - reserved)
+                        return 296;
+                }
+            }
 }
