@@ -11,6 +11,34 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Exhaustive compact Mixer toolbar hit-map across portrait resize widths.
+    // Every visible control must remain fully tappable, non-overlapping, and
+    // within the 32-high title region; hidden actions must not leave hit zones.
+    for (int width = 0; width <= 320; ++width)
+        for (int height : { 0, 31, 32, 33, 48, 64 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (layout.count < 0 || layout.count > 4)
+                return 251;
+            if (height < 32 && layout.count != 0)
+                return 252;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto bounds = layout.buttons[i].bounds;
+                if (!inside(bounds, width, height)
+                    || bounds.width != 44 || bounds.height != 32)
+                    return 253;
+                if (i > 0)
+                {
+                    const auto prev = layout.buttons[i - 1].bounds;
+                    if (static_cast<long long>(prev.x) + prev.width + 4 > bounds.x)
+                        return 254;
+                }
+            }
+            if (layout.count > 0 && layout.count < 3
+                && layout.buttons[layout.count - 1].action != DAW::mobile::phoneMixerOverflow)
+                return 255;
+        }
     // Platform policy gate: phone Arrangement hides desktop scroll/zoom chrome
     // while retaining both scroll axes; iPad/PC/Mac keep desktop chrome.
     // The wheel event must be consumed only once on phones.
