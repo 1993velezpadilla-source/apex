@@ -2089,7 +2089,7 @@ int main()
         for (int requested : { -1, 0, 1, 108, 256, 512, 1000000 })
         {
             const int track = DAW::mobile::phoneTrackListWidth(requested, workspace);
-            if (track < 0 || track > requested && requested >= 0)
+            if (track < 0 || (track > requested && requested >= 0))
                 return 271;
             if (workspace <= 1 || requested <= 0)
             {
