@@ -2267,4 +2267,24 @@ int main()
                         return 296;
                 }
             }
+
+    // A split-screen resize changes the FX browser width independently of
+    // its row count. The scrollbar must consume only its fixed thickness,
+    // never produce a shrinking hit target as the viewport grows.
+    for (int height : { 1, 43, 44, 45, 393 })
+    {
+        int previous = 0;
+        for (int width = 0; width <= 512; ++width)
+        {
+            const int usable = DAW::mobile::pluginBrowserListWidth(
+                width, height, 2, 44, 12);
+            if (usable < previous || usable > width)
+                return 297;
+            const int reserved = height < 88 ? (width < 12 ? width : 12) : 0;
+            if (usable != width - reserved)
+                return 298;
+            previous = usable;
+        }
+    }
+
 }
