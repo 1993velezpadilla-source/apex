@@ -2006,6 +2006,22 @@ int main()
                     return 44;
             }
 
+    // Three floating-window chrome controls share a narrow phone title bar.
+    // Sweep every width around the 132-unit full-size threshold: rounding
+    // must never let their combined hit regions exceed the panel.
+    for (int width = 0; width <= 200; ++width)
+    {
+        const int control = DAW::mobile::phoneChromeControlSize(width);
+        if (control < 0 || control > 44)
+            return 261;
+        if (3LL * control > width)
+            return 262;
+        if (width >= 132 && control != 44)
+            return 263;
+        if (width < 3 && control != 0)
+            return 264;
+    }
+
     // Rotation and split-screen can reduce the floating Mixer's title zone
     // below its 32-unit touch target. Never expose a partially clipped
     // button; once the zone recovers, every action must fit completely.
