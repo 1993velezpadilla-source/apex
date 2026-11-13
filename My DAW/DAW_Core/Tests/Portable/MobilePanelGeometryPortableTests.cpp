@@ -2082,4 +2082,34 @@ int main()
                     return 250;
             }
         }
+    // Track-list/Arrangement split during one-unit portrait resizes:
+    // reserve a positive timeline whenever the workspace can display both.
+    // A restored oversized track width must never consume the Arrangement.
+    for (int workspace = 0; workspace <= 512; ++workspace)
+        for (int requested : { -1, 0, 1, 108, 256, 512, 1000000 })
+        {
+            const int track = DAW::mobile::phoneTrackListWidth(requested, workspace);
+            if (track < 0 || track > requested && requested >= 0)
+                return 271;
+            if (workspace <= 1 || requested <= 0)
+            {
+                if (track != 0)
+                    return 272;
+            }
+            else if (track >= workspace || track <= 0)
+                return 273;
+        }
+    // Restored track widths must not grow as a narrow split view shrinks.
+    for (int requested : { 1, 108, 256, 1000000 })
+    {
+        int previous = 0;
+        for (int workspace = 0; workspace <= 512; ++workspace)
+        {
+            const int track = DAW::mobile::phoneTrackListWidth(requested, workspace);
+            if (track < previous)
+                return 274;
+            previous = track;
+        }
+    }
+
 }
