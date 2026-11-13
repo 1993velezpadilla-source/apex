@@ -2332,4 +2332,48 @@ int main()
                     previous = usable;
                 }
             }
+
+    // FX Browser placement after phone rotation: corrupted saved origins
+    // must be clamped to the safe workspace without changing panel size.
+    // A maximized browser must ignore its stale dragged coordinates.
+    for (int width : { 1, 2, 44, 320, 393, 852 })
+        for (int height : { 1, 44, 128, 480, 852 })
+            for (int origin : { std::numeric_limits<int>::min(), -1000,
+                                0, 1000, std::numeric_limits<int>::max() })
+            {
+                const auto expected = DAW::mobile::fitPhonePluginBrowser(
+                    width, height, 44, 64);
+                const DAW::mobile::PanelBounds restored{
+                    origin, origin, 340, 560 };
+                const auto fitted = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, 44, 64, restored);
+                if (fitted.width != expected.width
+                    || fitted.height != expected.height)
+                    return 303;
+                if (fitted.width > 0 && fitted.height > 0
+                    && !inside(fitted, width, height))
+                    return 304;
+                const auto maximized = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, 44, 64, restored, true);
+                const auto maxExpected = DAW::mobile::fitPhonePluginBrowser(
+                    width, height, 44, 64, true);
+                if (maximized.x != maxExpected.x
+                    || maximized.y != maxExpected.y
+                    || maximized.width != maxExpected.width
+                    || maximized.height != maxExpected.height)
+                    return 305;
+            }
+    // Repeated layout passes after orientation settle must be idempotent.
+    for (int width : { 320, 393, 852 })
+        for (int height : { 480, 852 })
+        {
+            const DAW::mobile::PanelBounds stale{ 1000000, -1000000, 340, 560 };
+            const auto once = DAW::mobile::fitPhonePluginBrowserPlacement(
+                width, height, 44, 64, stale);
+            const auto twice = DAW::mobile::fitPhonePluginBrowserPlacement(
+                width, height, 44, 64, once);
+            if (once.x != twice.x || once.y != twice.y
+                || once.width != twice.width || once.height != twice.height)
+                return 306;
+        }
 }
