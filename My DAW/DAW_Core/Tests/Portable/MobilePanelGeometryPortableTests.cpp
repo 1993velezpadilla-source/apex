@@ -2112,4 +2112,31 @@ int main()
         }
     }
 
+    // A corrupted/restored Track List width can be INT_MAX while Android
+    // reports a transient one-unit viewport during rotation. The timeline
+    // must remain reachable and the result must never overflow signed int.
+    for (int workspace : { -1, 0, 1, 2, 3, 108, 393, 852,
+                           std::numeric_limits<int>::max() })
+        for (int requested : { std::numeric_limits<int>::min(), -1, 0, 1,
+                               108, std::numeric_limits<int>::max() })
+        {
+            const int track = DAW::mobile::phoneTrackListWidth(requested, workspace);
+            if (track < 0 || (requested > 0 && track > requested))
+                return 275;
+            if (workspace <= 1 || requested <= 0)
+            {
+                if (track != 0)
+                    return 276;
+            }
+            else if (track <= 0 || track >= workspace)
+                return 277;
+        }
+    // A restored enormous Track List must not hide the timeline on the
+    // largest representable viewport (avoid overflowing workspace - track).
+    const int hugeWorkspace = std::numeric_limits<int>::max();
+    const int hugeTrack = DAW::mobile::phoneTrackListWidth(hugeWorkspace,
+                                                            hugeWorkspace);
+    if (static_cast<long long>(hugeWorkspace) - hugeTrack < 1)
+        return 278;
+
 }
