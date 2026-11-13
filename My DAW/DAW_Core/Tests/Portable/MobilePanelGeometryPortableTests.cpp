@@ -2522,4 +2522,26 @@ int main()
                 return 319;
         }
 
+    // Phone Arrangement: expanding the available workspace must never shrink
+    // the track-list hit region, nor consume the final timeline unit.
+    // Check transitions across the 108-unit minimum and quarter-width rule.
+    for (int requested : { 1, 44, 108, 320, 852,
+                           std::numeric_limits<int>::max() })
+    {
+        int previous = 0;
+        for (int workspace = 0; workspace <= 2048; ++workspace)
+        {
+            const int current = DAW::mobile::phoneTrackListWidth(
+                requested, workspace);
+            if (current < previous)
+                return 320;
+            if (current < 0 || current > requested
+                || (workspace > 1 && current > workspace - 1))
+                return 321;
+            if (workspace <= 1 && current != 0)
+                return 322;
+            previous = current;
+        }
+    }
+
 }
