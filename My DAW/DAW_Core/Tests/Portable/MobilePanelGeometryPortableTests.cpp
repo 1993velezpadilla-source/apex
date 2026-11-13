@@ -2022,6 +2022,20 @@ int main()
             return 264;
     }
 
+    // A one-pixel portrait resize must never make floating-window chrome
+    // controls shrink or jump backward. This protects drag/close hit regions
+    // while Android system insets change incrementally.
+    int previousChromeSize = 0;
+    for (int width = 0; width <= 200; ++width)
+    {
+        const int size = DAW::mobile::phoneChromeControlSize(width);
+        if (size < previousChromeSize)
+            return 265;
+        if (width >= 132 && size != previousChromeSize && width > 132)
+            return 266;
+        previousChromeSize = size;
+    }
+
     // Rotation and split-screen can reduce the floating Mixer's title zone
     // below its 32-unit touch target. Never expose a partially clipped
     // button; once the zone recovers, every action must fit completely.
