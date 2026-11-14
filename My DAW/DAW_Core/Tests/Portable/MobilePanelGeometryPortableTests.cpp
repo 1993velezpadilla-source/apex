@@ -2740,4 +2740,23 @@ int main()
             return 345;
     }
 
+    // Transport: overflow touch contacts must not re-arm a launcher while
+    // any other finger remains down, even beyond the inline 16-source array.
+    for (int count : { 2, 16, 17, 32, 48, 49, 64 })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        for (int source = 0; source < count; ++source)
+            taps.begin(1, source);
+        if (taps.release(0, 1, 0, 0))
+            return 346;
+        for (int source = count - 1; source >= 1; --source)
+            if (taps.release(source, 1, 0, 0))
+                return 347;
+        // Untracked overflow deliberately requires a lifecycle reset.
+        taps.invalidate();
+        taps.begin(1, 0);
+        if (!taps.release(0, 1, 0, 0))
+            return 348;
+    }
+
 }
