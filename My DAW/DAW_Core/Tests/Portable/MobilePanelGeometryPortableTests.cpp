@@ -2696,4 +2696,25 @@ int main()
                     || once.width != twice.width || once.height != twice.height)
                     return 338;
             }
+    // A phone Transport gesture interrupted by orientation/fullscreen resize
+    // must not open a stale floating Mixer/Sends/FX/Browser launcher. Reset
+    // also clears a blocked multi-touch gesture before the next fresh tap.
+    for (int launcher : { 1, 2, 3, 4 })
+        for (int source : { 0, 7, std::numeric_limits<int>::max() })
+        {
+            DAW::mobile::PhoneTransportTapState taps;
+            taps.begin(launcher, source);
+            taps.invalidate(); // parent resized/rotated before mouseUp
+            if (taps.release(source, launcher, 0, 0))
+                return 339;
+            taps.begin(launcher, source);
+            taps.begin(launcher, source + (source == std::numeric_limits<int>::max() ? -1 : 1));
+            taps.invalidate(); // multi-touch cancellation on recreation
+            if (taps.release(source, launcher, 0, 0))
+                return 340;
+            taps.begin(launcher, source);
+            if (!taps.release(source, launcher, 0, 0))
+                return 341;
+        }
+
 }
