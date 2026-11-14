@@ -2671,4 +2671,29 @@ int main()
                             > viewportH - safeBottom)
                         return 335;
                 }
+
+    // Phone FX Browser: a stale drag position after portrait/landscape rotation
+    // must be clamped, and a second layout pass must not shift the window.
+    // Invalid restored sizes fall back to the same safe default.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+            {
+                const auto fitted = DAW::mobile::fitPhonePluginBrowser(
+                    width, height, top, bottom);
+                const auto once = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, top, bottom,
+                    { std::numeric_limits<int>::max(),
+                      std::numeric_limits<int>::min(), 340, 560 });
+                if (!inside(once, width, height))
+                    return 336;
+                if (once.width != fitted.width || once.height != fitted.height)
+                    return 337;
+                const auto twice = DAW::mobile::fitPhonePluginBrowserPlacement(
+                    width, height, top, bottom, once);
+                if (once.x != twice.x || once.y != twice.y
+                    || once.width != twice.width || once.height != twice.height)
+                    return 338;
+            }
 }
