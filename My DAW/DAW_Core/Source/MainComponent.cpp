@@ -9597,6 +9597,96 @@ void MainComponent::startPluginScanIfNeeded()
     });
 }
 
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+void MainComponent::prepareAndroidUiBenchmark(bool withClip)
+{
+    // Called only by an explicit adb benchmark launch in a clean CI install.
+    // Never clear or load a user's project to manufacture a benchmark result.
+    if (!appCore_.getProjectManager().getProjectFile().getFullPathName().isEmpty()
+        || !appCore_.getClipManager().getAllClips().isEmpty())
+        return;
+    startupPanelMayBeShown_ = false;
+    if (startupPanel_)
+        startupPanel_->dismiss();
+    if (mixerWindow_)
+        mixerWindow_->setVisible(false);
+    if (timelineWindow_)
+        timelineWindow_->setVisible(true);
+
+
+    if (withClip)
+    {
+        const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("apex-ui-benchmark", ".wav");
+        auto output = file.createOutputStream();
+        juce::WavAudioFormat format;
+        const double sr = juce::jmax(44100.0, appCore_.getCurrentSampleRate());
+        std::unique_ptr<juce::AudioFormatWriter> writer(output == nullptr ? nullptr
+            : format.createWriterFor(output.release(), sr, 1, 16, {}, 0));
+        if (writer != nullptr)
+        {
+            juce::AudioBuffer<float> block(1, 4096);
+            const int length = (int)(sr * 24.0);
+            bool written = true;
+            for (int start = 0; start < length && written; start += block.getNumSamples())
+            {
+                const int count = juce::jmin(block.getNumSamples(), length - start);
+                for (int i = 0; i < count; ++i)
+                {
+                    const double t = (start + i) / sr;
+                    block.setSample(0, i, (float)(0.7 * std::sin(t * 1382.30076758)
+                        * (0.2 + 0.8 * std::abs(std::sin(t * 2.3)))));
+                }
+                written = writer->writeFromAudioSampleBuffer(block, 0, count);
+            }
+            writer.reset();
+            if (written)
+            {
+                juce::Array<juce::File> files;
+                files.add(file);
+                auto& tracks = appCore_.getTrackManager();
+                auto* track = tracks.getNumTracks() > 0 ? tracks.getTrack(0)
+                                                       : tracks.createTrack("UI benchmark");
+                if (track != nullptr)
+                    DAW::CommandManager::getInstance().execute(
+                        std::make_unique<DAW::ImportAudioFilesCommand>(tracks,
+                            appCore_.getClipManager(), appCore_.getAudioFileManager(),
+                            std::move(files), track->getID(), 0, sr));
+            }
+        }
+    }
+    resized();
+    updateTimelineViewportContentBounds();
+    TimelinePaintMetrics::reset();
+    TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
+    repaint();
+}
+
+juce::var MainComponent::androidUiBenchmarkState()
+{
+    auto* state = new juce::DynamicObject();
+    state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
+    state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
+    state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
+    state->setProperty("backend", "software");
+    state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
+    state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
+    state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
+    state->setProperty("windowWidth", getWidth());
+    state->setProperty("windowHeight", getHeight());
+    return juce::var(state);
+}
+
+juce::Rectangle<int> MainComponent::androidUiBenchmarkBounds() const
+{
+    if (timelineViewport_ == nullptr)
+        return {};
+    const auto logical = timelineViewport_->getScreenBounds().withTrimmedTop(90).toFloat();
+    return juce::Desktop::getInstance().getDisplays().logicalToPhysical(logical).toNearestInt();
+}
+#endif
+
 void MainComponent::openPianoRollForClip(DAW::MidiClip& clip)
 {
     juce::ignoreUnused(clip);

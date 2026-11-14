@@ -112,6 +112,11 @@ class MainComponent : public juce::Component,
                       private DAW::TransportController::Listener
 {
 public:
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void prepareAndroidUiBenchmark(bool withClip);
+    juce::var androidUiBenchmarkState();
+    juce::Rectangle<int> androidUiBenchmarkBounds() const;
+   #endif
     MainComponent();
     ~MainComponent() override;
 

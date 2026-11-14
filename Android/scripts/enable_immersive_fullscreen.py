@@ -80,10 +80,28 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
 """
 
 
+BENCHMARK_ACTIVITY = """
+    private ApexUiBenchmark uiBenchmark;
+    public native String nativeNavigationState();
+
+    public void startApexUiBenchmark(int x, int y, int width, int height) {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        uiBenchmark = new ApexUiBenchmark(this, x, y, width, height);
+        uiBenchmark.start();
+    }
+
+    @Override protected void onDestroy() {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        super.onDestroy();
+    }
+"""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", type=Path,
         default=Path("My DAW/DAW_Core/Builds/AndroidFull"))
+    parser.add_argument("--benchmark", action="store_true")
     args = parser.parse_args()
     generated = args.project.resolve()
     manifest = generated / "app/src/main/AndroidManifest.xml"
@@ -145,7 +163,17 @@ def main() -> int:
     java = (generated / "app/src/main/java" / package.replace(".", "/")
             / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
-    java.write_text(JAVA_SOURCE.replace("__APEX_PACKAGE__", package), encoding="utf-8")
+    source = JAVA_SOURCE.replace("__APEX_PACKAGE__", package)
+    if args.benchmark:
+        if package != "com.xziel.apex.mobileportrait":
+            raise RuntimeError("The runtime benchmark requires the portrait preview")
+        benchmark = Path(__file__).resolve().parents[1] / "Source/ApexUiBenchmark.java"
+        (java.parent / "ApexUiBenchmark.java").write_text(
+            benchmark.read_text(encoding="utf-8").replace("__APEX_PACKAGE__", package),
+            encoding="utf-8")
+        marker = "    @Override\n    protected void onCreate"
+        source = source.replace(marker, BENCHMARK_ACTIVITY + marker, 1)
+    java.write_text(source, encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)

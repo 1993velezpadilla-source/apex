@@ -8,6 +8,37 @@
 
 #include <JuceHeader.h>
 #include "MainComponent.h"
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+#include <jni.h>
+#include <juce_core/native/juce_JNIHelpers_android.h>
+namespace DAW
+{
+    inline juce::String androidLaunchExtra(const char* key)
+    {
+        auto* env = juce::getEnv();
+        const auto activity = juce::getMainActivity();
+        if (activity == nullptr)
+            return {};
+        const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));
+        const auto getIntent = env->GetMethodID(cls.get(), "getIntent", "()Landroid/content/Intent;");
+        const juce::LocalRef<jobject> intent(env->CallObjectMethod(activity.get(), getIntent));
+        if (intent == nullptr)
+            return {};
+        const juce::LocalRef<jclass> intentClass(env->GetObjectClass(intent.get()));
+        const auto getString = env->GetMethodID(intentClass.get(), "getStringExtra",
+                                               "(Ljava/lang/String;)Ljava/lang/String;");
+        const juce::LocalRef<jstring> name(env->NewStringUTF(key));
+        const juce::LocalRef<jstring> value(static_cast<jstring>(
+            env->CallObjectMethod(intent.get(), getString, name.get())));
+        return value == nullptr ? juce::String() : juce::juceString(env, value.get());
+    }
+
+    // Used only by explicit adb benchmark launches, never by normal user flows.
+    inline std::function<juce::String()> androidUiBenchmarkSnapshot;
+
+}
+#endif
 #include "SplashScreen.h"
 #include "UICore/ApexPresentationClock.h"
 #include "PluginScanCore/PluginScanWorkerProcessCore.h"
@@ -1901,6 +1932,35 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            const auto scene = DAW::androidLaunchExtra("apex_scene");
+            const bool benchmark = scene == "empty" || scene == "clip";
+            if (benchmark)
+                daw->prepareAndroidUiBenchmark(scene == "clip");
+            if (benchmark)
+            {
+                juce::Component::SafePointer<MainWindow> safe(this);
+                DAW::androidUiBenchmarkSnapshot = [safe]() -> juce::String
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return "{}";
+                    return juce::JSON::toString(
+                        safe->getMainComponent()->androidUiBenchmarkState(), true);
+                };
+                juce::Timer::callAfterDelay(3000, [safe]
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return;
+                    const auto bounds = safe->getMainComponent()->androidUiBenchmarkBounds();
+                    auto* env = juce::getEnv();
+                    const auto activity = juce::getMainActivity();
+                    const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));
+                    const auto method = env->GetMethodID(cls.get(), "startApexUiBenchmark", "(IIII)V");
+                    env->CallVoidMethod(activity.get(), method, bounds.getX(), bounds.getY(),
+                                        bounds.getWidth(), bounds.getHeight());
+                });
+            }
+           #endif
             // ResizableWindow::resized() is JUCE's authoritative owner of
             // content bounds. Do not override it with a desktop-sized guess:
             // Android can rotate while MainComponent is being constructed.
@@ -2314,3 +2374,12 @@ private:
 //==============================================================================
 // This macro generates the main() routine that launches the app.
 START_JUCE_APPLICATION (DAW_CoreApplication)
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xziel_apex_mobileportrait_ApexImmersiveActivity_nativeNavigationState(JNIEnv* env, jobject)
+{
+    const auto state = DAW::androidUiBenchmarkSnapshot ? DAW::androidUiBenchmarkSnapshot() : "{}";
+    return env->NewStringUTF(state.toRawUTF8());
+}
+#endif
