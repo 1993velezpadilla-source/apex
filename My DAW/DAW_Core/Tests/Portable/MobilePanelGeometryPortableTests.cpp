@@ -2819,7 +2819,7 @@ int main()
                 return 355;
 
             taps.begin(launcher, source);
-            taps.move(source, 6, 5);
+            taps.move(source, 7, 5); // sqrt(74) > 8-unit tap radius
             if (taps.release(source, launcher, 0, 0))
                 return 356;
 
