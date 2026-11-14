@@ -32,11 +32,17 @@ def main() -> int:
     # Mobile GUI PRs produce a DIFFERENT Android application ID. The portrait
     # preview can be installed alongside an existing full-shell APK, without
     # deleting or overwriting the user's saved Android test projects.
+    branch = os.environ.get("GITHUB_REF_NAME", "")
+    fold_qa = branch == "feature/mobile-portrait-zoom-pixel-fold-qa"
     portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
-                        or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
-    root.set("name", "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid")
-    root.set("bundleIdentifier", "com.xziel.apex.mobileportrait" if portrait_preview
-             else "com.xziel.apex.fulltest")
+                        or branch.startswith("feature/mobile-portrait-"))
+    name = "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid"
+    package = "com.xziel.apex.mobileportrait" if portrait_preview else "com.xziel.apex.fulltest"
+    if fold_qa:
+        name = "APEX Zoom Test"
+        package = "com.xziel.apex.zoomqa"
+    root.set("name", name)
+    root.set("bundleIdentifier", package)
     root.set("version", "0.1.0")
     # Do not let this experimental build generate VST3/ASIO host code on Android.
     defines = [

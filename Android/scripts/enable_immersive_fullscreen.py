@@ -122,7 +122,7 @@ def main() -> int:
         raise RuntimeError("Android manifest/.jucer package mismatch: "
                            + manifest_package + " != " + project_package)
     package = manifest_package or project_package
-    if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+    if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait", "com.xziel.apex.zoomqa"):
         raise RuntimeError("Unexpected APEX Android package: " + package)
     android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
