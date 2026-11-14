@@ -22,6 +22,7 @@ namespace ArrangementEditor
     ArrangementRulerCore::ArrangementRulerCore(ArrangementZoomCore& zoom)
         : m_zoom(zoom)
     {
+        setOpaque(true);
         setSize(800, 32);
     }
 
