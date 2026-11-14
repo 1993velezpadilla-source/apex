@@ -3047,6 +3047,42 @@ int main()
             != 120.0)
             return 378;
 
+
+    // Floating phone Mixer: after rotation or inset changes, clamp a
+    // restored off-screen position without losing a valid manual size.
+    // Collapsed/oversized saved windows must use the responsive fallback.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 52, 1000 })
+                for (int bottom : { -1, 0, 96, 1000 })
+            {
+                const auto fit = DAW::mobile::fitFloatingMixer(
+                    width, height, top, bottom);
+                for (int x : { std::numeric_limits<int>::min(), -1, 0,
+                               std::numeric_limits<int>::max() })
+                    for (int y : { std::numeric_limits<int>::min(), -1, 0,
+                                   std::numeric_limits<int>::max() })
+                        for (int size : { -1, 0, 1, 210, 9999 })
+                        {
+                            const DAW::mobile::PanelBounds saved{ x, y, size, size };
+                            const auto restored =
+                                DAW::mobile::constrainFloatingMixerPlacement(fit, saved);
+                            if (fit.safe.width > 0 && fit.safe.height > 0
+                                && !DAW::mobile::floatingMixerFits(fit, restored))
+                                return 382;
+                            const auto again =
+                                DAW::mobile::constrainFloatingMixerPlacement(fit, restored);
+                            if (again.x != restored.x || again.y != restored.y
+                                || again.width != restored.width
+                                || again.height != restored.height)
+                                return 383;
+                            if (size >= fit.minimumWidth && size >= fit.minimumHeight
+                                && size <= fit.safe.width && size <= fit.safe.height
+                                && (restored.width != size || restored.height != size))
+                                return 384;
+                        }
+            }
+
     // Transport: a 49th simultaneous contact exceeds both tracked arrays.
     // No release may open a panel until an explicit gesture reset after
     // the untracked overflow, including when all known fingers lift.
