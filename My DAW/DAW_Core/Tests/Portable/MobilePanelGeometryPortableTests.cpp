@@ -2830,4 +2830,36 @@ int main()
                 return 357;
         }
     }
+
+    // Adversarial gesture coordinates: avoid treating an axis-aligned
+    // boundary plus one orthogonal unit as an eligible panel launcher tap.
+    // Extreme signed displacements must never overflow into a valid tap.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        for (int source : { 0, 7, 15 })
+        {
+            DAW::mobile::PhoneTransportTapState taps;
+            taps.begin(launcher, source);
+            taps.move(source, 8, 1);
+            if (taps.release(source, launcher, 0, 0))
+                return 358;
+
+            taps.begin(launcher, source);
+            taps.move(source, std::numeric_limits<int>::min(),
+                      std::numeric_limits<int>::max());
+            if (taps.release(source, launcher, 0, 0))
+                return 359;
+
+            // Rotation/recreation must discard a pending press, and a
+            // subsequent fresh tap must remain operational.
+            taps.begin(launcher, source);
+            taps.invalidate();
+            if (taps.release(source, launcher, 0, 0))
+                return 360;
+            taps.begin(launcher, source);
+            if (!taps.release(source, launcher, 0, 0))
+                return 361;
+        }
+    }
+
 }
