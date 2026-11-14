@@ -182,7 +182,7 @@ namespace ArrangementEditor
         addAndMakeVisible(m_headerClipGuard);
         addAndMakeVisible(m_toolbar);
         addAndMakeVisible(m_ruler);
-        addAndMakeVisible(m_rubberBand);
+        addChildComponent(m_rubberBand);
         addAndMakeVisible(m_splitIndicator);
         // Keep the existing Piano Roll component, but do not display or
         // activate it during APEX's audio-first release.
