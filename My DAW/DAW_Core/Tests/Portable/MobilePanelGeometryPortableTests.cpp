@@ -2862,4 +2862,25 @@ int main()
         }
     }
 
+    // Arrangement: restored scroll offsets and wheel steps may originate
+    // from different screen orientations. Clamp using a wide intermediate
+    // instead of overflowing when a saved position is near INT_MIN/MAX.
+    for (int content : { 0, 1, 320, 2048, std::numeric_limits<int>::max() })
+        for (int viewport : { 0, 1, 320, 2048, std::numeric_limits<int>::max() })
+            for (int current : { std::numeric_limits<int>::min(), -1, 0, 1,
+                                 std::numeric_limits<int>::max() })
+                for (int step : { std::numeric_limits<int>::min(), -1, 0, 1,
+                                  std::numeric_limits<int>::max() })
+                {
+                    const int actual = DAW::mobile::timelineWheelClampedPosition(
+                        current, content, viewport, step);
+                    const long long limit = content > viewport && viewport > 0
+                        ? static_cast<long long>(content) - viewport : 0;
+                    const long long target = static_cast<long long>(current) + step;
+                    const int expected = static_cast<int>(
+                        target < 0 ? 0 : target > limit ? limit : target);
+                    if (actual != expected)
+                        return 362;
+                }
+
 }
