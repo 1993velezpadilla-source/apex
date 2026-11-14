@@ -155,13 +155,10 @@ public:
         // Stable reference values captured once at mouseDown
         double referencePixelsPerSecond = 100.0;
         double referenceLaneHeight      = 60.0;
-        int    referenceViewX           = 0;
-        int    referenceViewY           = 0;
-        int    referenceContentWidth    = 1;
-        int    referenceContentHeight   = 1;
     };
 
     // Callbacks set by TimelineViewport
+    std::function<void(const EdgeDragInfo&)> onThumbEdgeStarted;
     std::function<void(const EdgeDragInfo&)> onThumbEdgeDragged;
     std::function<double()> getPixelsPerSecond;
     std::function<double()> getLaneHeight;
@@ -307,12 +304,8 @@ private:
             cachedDragStart_  = (float)pos;
             cachedRefPps_     = getPixelsPerSecond ? getPixelsPerSecond() : 100.0;
             cachedRefLaneH_   = getLaneHeight       ? getLaneHeight()      : 60.0;
-            const auto vp = getViewPosition ? getViewPosition() : juce::Point<int>{};
-            cachedRefViewX_   = vp.x;
-            cachedRefViewY_   = vp.y;
-            const auto cs = getContentSize ? getContentSize() : juce::Point<int>{1,1};
-            cachedRefContentW_ = juce::jmax(1, cs.x);
-            cachedRefContentH_ = juce::jmax(1, cs.y);
+            if (onThumbEdgeStarted)
+                onThumbEdgeStarted(edgeDragInfo(pos));
             setMouseCursor(edgeCursor());
             return;
         }
@@ -326,30 +319,7 @@ private:
         {
             setMouseCursor(edgeCursor());
             if (onThumbEdgeDragged)
-            {
-                const int length = isVertical() ? getHeight() : getWidth();
-                auto& laf = getLookAndFeel();
-                const bool hasBtns = laf.areScrollbarButtonsVisible();
-                const int btnSz = hasBtns ? juce::jmin(laf.getScrollbarButtonSize(*this), length / 2) : 0;
-
-                EdgeDragInfo info;
-                info.isVertical             = isVertical();
-                info.isStartEdge            = (dragMode_ == DragMode::StartEdgeZoom);
-                info.trackStartPixels       = btnSz;
-                info.trackSizePixels        = length - 2 * btnSz;
-                info.minThumbSizePixels     = laf.getMinimumScrollbarThumbSize(*this);
-                info.initialThumbStartPixels = cachedThumbStart_;
-                info.initialThumbSizePixels  = cachedThumbSize_;
-                info.dragStartPosPixels      = cachedDragStart_;
-                info.currentPosPixels        = (float)axisPos(e);
-                info.referencePixelsPerSecond = cachedRefPps_;
-                info.referenceLaneHeight      = cachedRefLaneH_;
-                info.referenceViewX           = cachedRefViewX_;
-                info.referenceViewY           = cachedRefViewY_;
-                info.referenceContentWidth    = cachedRefContentW_;
-                info.referenceContentHeight   = cachedRefContentH_;
-                onThumbEdgeDragged(info);
-            }
+                onThumbEdgeDragged(edgeDragInfo(axisPos(e)));
             return;
         }
         juce::ScrollBar::mouseDrag(e);
@@ -363,6 +333,27 @@ private:
             juce::ScrollBar::mouseUp(e);
     }
 
+    EdgeDragInfo edgeDragInfo(int axisPosition)
+    {
+        const int length = isVertical() ? getHeight() : getWidth();
+        auto& laf = getLookAndFeel();
+        const int buttonSize = laf.areScrollbarButtonsVisible()
+            ? juce::jmin(laf.getScrollbarButtonSize(*this), length / 2) : 0;
+        EdgeDragInfo info;
+        info.isVertical = isVertical();
+        info.isStartEdge = dragMode_ == DragMode::StartEdgeZoom;
+        info.trackStartPixels = buttonSize;
+        info.trackSizePixels = length - 2 * buttonSize;
+        info.minThumbSizePixels = laf.getMinimumScrollbarThumbSize(*this);
+        info.initialThumbStartPixels = cachedThumbStart_;
+        info.initialThumbSizePixels = cachedThumbSize_;
+        info.dragStartPosPixels = cachedDragStart_;
+        info.currentPosPixels = static_cast<float>(axisPosition);
+        info.referencePixelsPerSecond = cachedRefPps_;
+        info.referenceLaneHeight = cachedRefLaneH_;
+        return info;
+    }
+
     // ------------------------------------------------------------------ state
     DragMode dragMode_      = DragMode::None;
     float cachedThumbStart_ = 0.0f;
@@ -370,10 +361,6 @@ private:
     float cachedDragStart_  = 0.0f;
     double cachedRefPps_    = 100.0;
     double cachedRefLaneH_  = 60.0;
-    int    cachedRefViewX_  = 0;
-    int    cachedRefViewY_  = 0;
-    int    cachedRefContentW_ = 1;
-    int    cachedRefContentH_ = 1;
 };
 
 // Small square zoom button docked where the two timeline scrollbars meet
@@ -446,7 +433,10 @@ public:
         getVerticalScrollBar().removeComponentListener(&barListener_);
     }
 
+    std::function<void(const TimelineZoomScrollBar::EdgeDragInfo&)> onThumbEdgeStarted;
     std::function<void(const TimelineZoomScrollBar::EdgeDragInfo&)> onThumbEdgeDragged;
+    std::function<void()> onVisibleAreaChanged;
+    DAW::ArrangementView::ViewportZoomAnchor edgeAnchor;
     std::function<double()> getPixelsPerSecond;
     std::function<double()> getLaneHeight;
 
@@ -459,46 +449,21 @@ public:
         layoutCornerZoomButtons();
     }
 
-    void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+protected:
+    void visibleAreaChanged(const juce::Rectangle<int>&) override
     {
-        // Vertical wheel scrolls lanes; Shift+wheel scrolls horizontally.
-        if (auto* c = getViewedComponent())
-        {
-            const int contentW = juce::jmax(1, c->getWidth());
-            const int contentH = juce::jmax(1, c->getHeight());
-
-            const int viewW = juce::jmax(1, getViewWidth());
-            const int viewH = juce::jmax(1, getViewHeight());
-
-            auto pos = getViewPosition();
-
-            const float dx = wheel.deltaX;
-            const float dy = wheel.deltaY;
-
-            const bool shift = e.mods.isShiftDown();
-            const float primary = shift ? dx : dy;
-
-            // Normalize to pixels; keep it feeling consistent across wheel types.
-            const int step = (int)std::lround((float)(shift ? viewW : viewH) * primary * -0.65f);
-
-            if (step != 0)
-            {
-                if (shift)
-                    pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
-                else
-                    pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
-
-                setViewPosition(pos);
-            }
-        }
-
-        juce::Viewport::mouseWheelMove(e, wheel);
+        if (onVisibleAreaChanged)
+            onVisibleAreaChanged();
     }
 
-protected:
     juce::ScrollBar* createScrollBarComponent(bool isVertical) override
     {
         auto* bar = new TimelineZoomScrollBar(isVertical);
+        bar->onThumbEdgeStarted = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
+        {
+            if (onThumbEdgeStarted)
+                onThumbEdgeStarted(info);
+        };
         bar->onThumbEdgeDragged = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
         {
             if (onThumbEdgeDragged)
@@ -2316,10 +2281,6 @@ MainComponent::MainComponent()
         if (!arrangement_ || !trackList_)
             return;
 
-        updateTimelineViewportContentBounds();
-
-        trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
-
         // Master lane is at index 0 in ArrangementView; offset regular tracks by 1
         const int masterOffset = appCore_.getTrackManager().hasMasterTrack() ? 1 : 0;
         if (masterOffset > 0)
@@ -2337,21 +2298,23 @@ MainComponent::MainComponent()
         trackList_->repaint();
     };
 
-    // Keep TrackList in sync when Arrangement lanes are resized vertically
-    arrangement_->onLaneHeightChanged = [this](int index, int newHeight)
+    arrangement_->onLaneLayoutChanged = [this, syncTrackHeaders]()
     {
-        if (auto* row = trackList_->getRow(index))
-        {
-            row->setDesiredHeight(newHeight);
-            trackList_->resized();
-        }
+        syncTrackHeaders();
+        updateTimelineViewportContentBounds();
     };
-    arrangement_->onVerticalScrollChanged = [this](int y)
+    arrangement_->onClipExtentChanged = [this] { updateTimelineViewportContentBounds(); };
+    arrangement_->onViewportZoomLayout = [this, syncTrackHeaders](bool vertical)
     {
-        if (trackList_)
-            trackList_->setScrollOffset(y);
+        if (vertical)
+            syncTrackHeaders();
+        updateTimelineViewportContentBounds();
     };
-    arrangement_->onLaneLayoutChanged = syncTrackHeaders;
+    arrangement_->onViewportZoomCommitted = [this]
+    {
+        syncTimelineViewportPosition();
+        syncPlaylistTimeline();
+    };
     arrangement_->onPreparedAudioImport = [this](juce::Array<juce::File> files,
                                                   std::vector<DAW::AudioFileManager::PreparedAudio> preparedAudio,
                                                   DAW::TrackID selectedTrackId,
@@ -2834,91 +2797,40 @@ MainComponent::MainComponent()
     };
     timelineViewport->getLaneHeight = [this]() -> double
     {
-        return arrangement_ ? (double)arrangement_->getPhysicalTrackHeight() : 60.0;
+        return arrangement_ ? arrangement_->getTrackZoomHeight() : 80.0;
     };
-    // Single callback handles both horizontal and vertical edge-drag zoom
-    timelineViewport->onThumbEdgeDragged = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
+    auto scrollbarFocus = [this](const TimelineZoomScrollBar::EdgeDragInfo& info)
     {
-        if (!arrangement_ || !timelineViewport_)
-            return;
+        if (!info.isStartEdge)
+            return juce::Point<double>();
+        return info.isVertical ? juce::Point<double>(0.0, timelineViewport_->getViewHeight())
+                               : juce::Point<double>(timelineViewport_->getViewWidth(), 0.0);
+    };
+    auto* viewport = timelineViewport.get();
+    timelineViewport->onThumbEdgeStarted = [this, scrollbarFocus, viewport]
+        (const TimelineZoomScrollBar::EdgeDragInfo& info)
+    {
+        viewport->edgeAnchor = arrangement_->captureViewportZoomAnchor(scrollbarFocus(info));
+    };
+    timelineViewport->onThumbEdgeDragged = [this, scrollbarFocus, viewport]
+        (const TimelineZoomScrollBar::EdgeDragInfo& info)
+    {
         if (info.trackSizePixels <= 0 || info.initialThumbSizePixels <= 0.0f)
             return;
 
-        const double delta     = (double)info.currentPosPixels - (double)info.dragStartPosPixels;
-        const double trackSz   = (double)info.trackSizePixels;
-        const double minSz     = juce::jmax(20.0, (double)info.minThumbSizePixels);
-        const double initStart = (double)info.initialThumbStartPixels;
-        const double initEnd   = initStart + (double)info.initialThumbSizePixels;
-
-        double newStart = initStart, newEnd = initEnd;
-        if (info.isStartEdge)
-            newStart = juce::jlimit((double)info.trackStartPixels, initEnd - minSz, initStart + delta);
-        else
-            newEnd = juce::jlimit(initStart + minSz, (double)(info.trackStartPixels + info.trackSizePixels), initEnd + delta);
-
-        const double newThumbSize = juce::jmax(minSz, newEnd - newStart);
-        const double zoomRatio    = (double)info.initialThumbSizePixels / newThumbSize;
-
-        if (!info.isVertical)
-        {
-            const double refPps   = juce::jmax(1.0, info.referencePixelsPerSecond);
-            const double newPps   = juce::jlimit(10.0, 4000.0, refPps * zoomRatio);
-            const double vpWidth  = (double)timelineViewport_->getViewWidth();
-
-            // Anchor: the edge that does NOT move stays at the same time position.
-            // Start edge drag ? right side of viewport is anchor.
-            // End edge drag   ? left  side of viewport is anchor.
-            double anchorTime;
-            if (info.isStartEdge)
-                anchorTime = ((double)info.referenceViewX + vpWidth) / refPps;
-            else
-                anchorTime = (double)info.referenceViewX / refPps;
-
-            arrangement_->setPixelsPerSecond(newPps);
-            updateTimelineViewportContentBounds();
-
-            int newViewX;
-            if (info.isStartEdge)
-                newViewX = juce::roundToInt(anchorTime * newPps - vpWidth);
-            else
-                newViewX = juce::roundToInt(anchorTime * newPps);
-
-            const auto va = timelineViewport_->getViewArea();
-            const int maxX = juce::jmax(0, arrangement_->getWidth() - va.getWidth());
-            timelineViewport_->setViewPosition(juce::jlimit(0, maxX, newViewX), va.getY());
-        }
-        else
-        {
-            const double refLaneH  = juce::jmax(1.0, info.referenceLaneHeight);
-            const double newLaneH  = juce::jlimit(24.0, 240.0, refLaneH * zoomRatio);
-            const double vpHeight  = (double)timelineViewport_->getViewHeight();
-
-            double anchorContentY;
-            if (info.isStartEdge)
-                anchorContentY = ((double)info.referenceViewY + vpHeight) / juce::jmax(1.0, refLaneH);
-            else
-                anchorContentY = (double)info.referenceViewY / juce::jmax(1.0, refLaneH);
-
-            arrangement_->setLaneHeight(0, juce::roundToInt(newLaneH));
-            updateTimelineViewportContentBounds();
-
-            int newViewY;
-            if (info.isStartEdge)
-                newViewY = juce::roundToInt(anchorContentY * newLaneH - vpHeight);
-            else
-                newViewY = juce::roundToInt(anchorContentY * newLaneH);
-
-            const auto va = timelineViewport_->getViewArea();
-            const int maxY = juce::jmax(0, arrangement_->getHeight() - va.getHeight());
-            timelineViewport_->setViewPosition(va.getX(), juce::jlimit(0, maxY, newViewY));
-
-            if (trackList_)
-                trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        }
-
-        // Force scrollbar repaint so thumb redraws at the new size immediately
-        timelineViewport_->getHorizontalScrollBar().repaint();
-        timelineViewport_->getVerticalScrollBar().repaint();
+        const double delta = info.currentPosPixels - info.dragStartPosPixels;
+        const double initialSize = info.initialThumbSizePixels;
+        const double minSize = juce::jmin(initialSize, juce::jmax(20.0, (double) info.minThumbSizePixels));
+        const double available = info.isStartEdge
+            ? info.initialThumbStartPixels + initialSize - info.trackStartPixels
+            : info.trackStartPixels + info.trackSizePixels - info.initialThumbStartPixels;
+        const double newSize = juce::jlimit(minSize, juce::jmax(initialSize, available),
+                                           initialSize + (info.isStartEdge ? -delta : delta));
+        const double ratio = initialSize / newSize;
+        arrangement_->zoomViewport(
+            info.isVertical ? arrangement_->getPixelsPerSecond() : info.referencePixelsPerSecond * ratio,
+            info.isVertical ? info.referenceLaneHeight * ratio : arrangement_->getTrackZoomHeight(),
+            scrollbarFocus(info), &viewport->edgeAnchor);
     };
     // Corner zoom buttons and Ctrl+arrow keyboard zoom share one operation.
     // Zoom keeps the viewport centre anchored — pro-DAW behaviour.
@@ -2926,13 +2838,13 @@ MainComponent::MainComponent()
     {
         applyTimelineZoom(isVertical, zoomIn);
     };
+    timelineViewport->onVisibleAreaChanged = [this] { syncTimelineViewportPosition(); };
     timelineViewport_ = std::move(timelineViewport);
-    timelineViewport_->getVerticalScrollBar().addListener(this);
-    timelineViewport_->getHorizontalScrollBar().addListener(this);
     addAndMakeVisible(*timelineViewport_);
 
     arrangement_->setCollapsedFolders(collapsedFolderTrackIds_);
     syncTrackHeaders();
+    updateTimelineViewportContentBounds();
 
     // Timeline floating window (visible by default)
     timelineWindow_ = std::make_unique<DAW::TimelineWindow>();
@@ -7064,18 +6976,6 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
         return;
     }
 
-    if (timelineViewport_ != nullptr
-        && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
-            || scrollBar == &timelineViewport_->getVerticalScrollBar()))
-    {
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        syncPlaylistTimeline();
-        return;
-    }
-
     resized();
 }
 
@@ -7778,11 +7678,6 @@ MainComponent::~MainComponent()
     if (mixerWindow_)
         mixerWindow_->removeComponentListener(this);
     mixerViewport_.getHorizontalScrollBar().removeListener(this);
-    if (timelineViewport_)
-    {
-        timelineViewport_->getHorizontalScrollBar().removeListener(this);
-        timelineViewport_->getVerticalScrollBar().removeListener(this);
-    }
     inputWatchdog_.stopTimer();
     DAW::CommandManager::getInstance().setUndoRedoBlockedQuery({});
     DAW::CommandManager::getInstance().removeListener(this);
@@ -8977,82 +8872,44 @@ void MainComponent::syncPlaylistTimeline()
         || !timelineViewport_ || !arrangement_)
         return;
     const double pps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
-    const double projectRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
-    // The take editor lives IN the horizontally scrolled arrangement,
-    // not in screen space. The viewport already scrolls its x=0 origin.
-    // An additional first-visible-sample offset would double-scroll clips.
-    juce::ignoreUnused(projectRate);
+    // Inline takes share the arrangement content origin.
     playlistPanel_->followArrangementTimeline(0.0, pps);
+}
+
+void MainComponent::syncTimelineViewportPosition()
+{
+    if (!timelineViewport_ || !arrangement_ || arrangement_->isApplyingViewportZoom())
+        return;
+
+    const auto position = timelineViewport_->getViewPosition();
+    arrangement_->setViewportScrollOffsets(position.x, position.y);
+    if (trackList_)
+        trackList_->setScrollOffset(position.y);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()
 {
-    if (!arrangement_)
+    if (!arrangement_ || !timelineViewport_)
         return;
 
-    const auto viewportBounds = timelineWindow_ != nullptr && timelineWindow_->isVisible()
-        ? timelineWindow_->getContentArea()
-        : (timelineViewport_ != nullptr && timelineViewport_->getParentComponent() != nullptr ? timelineViewport_->getBounds() : juce::Rectangle<int>());
-
-    const int viewportW = juce::jmax(1, viewportBounds.getWidth());
-    const int viewportH = juce::jmax(1, viewportBounds.getHeight());
-
-    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
-    int contentH = 80;
-    for (int i = 0; i < trackCount; ++i)
-        contentH += arrangement_->getLaneHeight(i);
-
-    const auto zoomPxPerSecond = arrangement_->getPixelsPerSecond();
-    double projectLengthSeconds = 30.0;
     const auto sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
-    for (auto* clip : appCore_.getClipManager().getAllClips())
+    const auto& transport = appCore_.getTransport();
+    const auto loopRange = transport.getLoopRange();
+    const auto lastSample = std::max({ arrangement_->getLastClipEnd(),
+                                     transport.getPosition(), loopRange.second });
+    lastTimelineContentLengthSeconds_ = juce::jmax(30.0, (double) lastSample / sampleRate + 2.0);
+
+    const int viewportW = juce::jmax(1, timelineViewport_->getWidth());
+    const int viewportH = juce::jmax(1, timelineViewport_->getHeight());
+    const int contentW = ArrangementEditor::ArrangementZoomCore::contentWidth(
+        arrangement_->getPixelsPerSecond(), lastTimelineContentLengthSeconds_, viewportW);
+    arrangement_->setSize(contentW, juce::jmax(viewportH + 1, arrangement_->getLaneContentHeight()));
+
+    if (!arrangement_->isApplyingViewportZoom())
     {
-        if (clip == nullptr)
-            continue;
-
-        const double clipEndSeconds = (double)clip->getEndPosition() / sampleRate;
-        projectLengthSeconds = juce::jmax(projectLengthSeconds, clipEndSeconds + 2.0);
+        syncTimelineViewportPosition();
+        syncPlaylistTimeline();
     }
-
-    // The timeline must never clamp at the last clip: the playhead and the
-    // loop-region end also deserve scroll room, otherwise scrubbing/looping
-    // past the material hits a hard scrollbar limit.
-    projectLengthSeconds = juce::jmax(projectLengthSeconds,
-        (double) appCore_.getTransport().getPosition() / sampleRate + 2.0);
-    const auto loopRange = appCore_.getTransport().getLoopRange();
-    projectLengthSeconds = juce::jmax(projectLengthSeconds,
-        (double) loopRange.second / sampleRate + 2.0);
-    lastTimelineContentLengthSeconds_ = projectLengthSeconds;
-
-    // Content width = zoom * project length, but never below viewportW + 1.
-    // At extreme zoom-out the raw length would shrink under the viewport and
-    // collapse into an empty void with the horizontal scrollbar hidden — the
-    // same way the vertical clamp to viewportH + 1 keeps the vertical bar
-    // alive. Keeping one extra pixel of scroll range means the timeline
-    // always fills the view and the scrollbar never disappears.
-    const int contentW = juce::jmax(viewportW + 1,
-        juce::jmax(4, (int)std::ceil(zoomPxPerSecond * projectLengthSeconds)));
-
-    arrangement_->setSize(contentW, juce::jmax(viewportH + 1, contentH));
-
-    // Force the viewport to re-sync its scrollbar ranges and repaint the thumbs.
-    // JUCE only does this when the view position is set, not on content resize alone.
-    if (timelineViewport_ != nullptr)
-    {
-        const auto cur = timelineViewport_->getViewPosition();
-        const int maxX = juce::jmax(0, contentW    - timelineViewport_->getViewWidth());
-        const int maxY = juce::jmax(0, contentH    - timelineViewport_->getViewHeight());
-        timelineViewport_->setViewPosition(juce::jlimit(0, maxX, cur.x),
-                                           juce::jlimit(0, maxY, cur.y));
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        timelineViewport_->getHorizontalScrollBar().repaint();
-        timelineViewport_->getVerticalScrollBar().repaint();
-    }
-
-    if (trackList_)
-        trackList_->setScrollOffset(timelineViewport_ != nullptr ? timelineViewport_->getViewPosition().y : 0);
-    syncPlaylistTimeline();
 }
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)
@@ -9065,6 +8922,11 @@ void MainComponent::positionChanged(DAW::SamplePosition newPosition)
     const double playheadSeconds = (double) newPosition / sampleRate;
     if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
         updateTimelineViewportContentBounds();
+}
+
+void MainComponent::loopRangeChanged(DAW::SamplePosition, DAW::SamplePosition)
+{
+    updateTimelineViewportContentBounds();
 }
 
 void MainComponent::transportStateChanged()
@@ -9238,58 +9100,13 @@ void MainComponent::applyTimelineZoom(bool isVertical, bool zoomIn)
     if (!arrangement_ || !timelineViewport_)
         return;
 
-    if (!isVertical)
-    {
-        const double oldPps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
-        const double newPps = juce::jlimit(5.0, 4000.0,
-                                           zoomIn ? oldPps * 1.25 : oldPps / 1.25);
-        if (juce::approximatelyEqual(oldPps, newPps))
-            return;
-
-        const double vpW       = (double) timelineViewport_->getViewWidth();
-        const double centreSec = ((double) timelineViewport_->getViewPositionX()
-                                  + vpW * 0.5) / oldPps;
-
-        arrangement_->setPixelsPerSecond(newPps);
-        updateTimelineViewportContentBounds();
-
-        const int maxX = juce::jmax(0, arrangement_->getWidth()
-                                       - timelineViewport_->getViewWidth());
-        const int newX = juce::jlimit(0, maxX,
-                                      juce::roundToInt(centreSec * newPps - vpW * 0.5));
-        timelineViewport_->setViewPosition(newX, timelineViewport_->getViewPositionY());
-    }
-    else
-    {
-        // The first arranger lane can itself be expanded if there is no
-        // Master track. Zoom the PHYSICAL strip, never strip+all take rows.
-        const double oldLaneH = juce::jmax(1.0,
-                                           (double) arrangement_->getPhysicalTrackHeight());
-        const double newLaneH = juce::jlimit(24.0, 240.0,
-                                             zoomIn ? oldLaneH * 1.15
-                                                    : oldLaneH / 1.15);
-        if (juce::approximatelyEqual(oldLaneH, newLaneH))
-            return;
-
-        const double vpH        = (double) timelineViewport_->getViewHeight();
-        const double centreLane = ((double) timelineViewport_->getViewPositionY()
-                                   + vpH * 0.5) / oldLaneH;
-
-        arrangement_->setLaneHeight(0, juce::roundToInt(newLaneH));
-        updateTimelineViewportContentBounds();
-
-        const int maxY = juce::jmax(0, arrangement_->getHeight()
-                                       - timelineViewport_->getViewHeight());
-        const int newY = juce::jlimit(0, maxY,
-                                      juce::roundToInt(centreLane * newLaneH - vpH * 0.5));
-        timelineViewport_->setViewPosition(timelineViewport_->getViewPositionX(), newY);
-
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-    }
-
-    timelineViewport_->getHorizontalScrollBar().repaint();
-    timelineViewport_->getVerticalScrollBar().repaint();
+    const juce::Point<double> centre(timelineViewport_->getViewWidth() * 0.5,
+                                     timelineViewport_->getViewHeight() * 0.5);
+    const double factor = isVertical ? 1.15 : 1.25;
+    const double ratio = zoomIn ? factor : 1.0 / factor;
+    arrangement_->zoomViewport(arrangement_->getPixelsPerSecond() * (isVertical ? 1.0 : ratio),
+                               arrangement_->getTrackZoomHeight() * (isVertical ? ratio : 1.0),
+                               centre);
 }
 
 void MainComponent::parentHierarchyChanged()

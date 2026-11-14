@@ -145,9 +145,6 @@ void ArrangementRulerCore::drawGrid(juce::Graphics& g)
         double beatDuration = 60.0 / m_bpm;
         double barDuration = beatDuration * 4.0;
 
-        double viewStart = xToTime(0);
-        double viewEnd = xToTime(getWidth());
-
         // Compute pixels-per-beat / pixels-per-bar from actual BPM + zoom
         const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
         const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
@@ -158,70 +155,43 @@ void ArrangementRulerCore::drawGrid(juce::Graphics& g)
         // ~44 px label cannot collide with its neighbours — bars-only beyond.
         const bool drawSeconds = pxPerBar >= 60.0;
 
-        int barStart = (int)(viewStart / barDuration);
-        int barEnd = (int)(viewEnd / barDuration) + 1;
+        const auto dirty = g.getClipBounds();
+        const int step = noBeats ? barStep : 1;
+        const auto bars = GridLodPolicy::visibleBars(
+            m_scrollOffsetX + juce::jmax(0, dirty.getX() - 46),
+            m_scrollOffsetX + dirty.getRight(), pxPerBar, step);
 
-        for (int bar = barStart; bar <= barEnd; ++bar)
+        for (auto bar = bars.first; bar <= bars.last; bar += step)
         {
-            // Skip bars at extreme zoom-out to reduce GPU draw calls
-            if (barStep > 1 && (bar % barStep) != 0)
+            const double barTime = bar * barDuration;
+            const int x = timeToX(barTime);
+            if (bar % barStep == 0 && x >= 0 && x < getWidth())
             {
-                // Still draw bar numbers for skipped bars if they are
-                // far enough apart to be legible
-                double barTime = bar * barDuration;
-                int x = timeToX(barTime);
-                if (x >= 0 && x <= getWidth())
-                {
-                    g.setColour(fromU32(Col::text));
-                    g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-                    g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                               juce::Justification::centredLeft);
-                    if (drawSeconds)
-                    {
-                        g.setColour(fromU32(Col::textDim));
-                        g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                        g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                                   juce::Justification::centredLeft);
-                    }
-                }
-                continue;
-            }
-
-            double barTime = bar * barDuration;
-            int x = timeToX(barTime);
-
-            if (x < 0 || x > getWidth())
-                continue;
-
-            // Bar line — major divisions read above minor ones
-            g.setColour(fromU32(Col::gridLineMajor));
-            g.drawVerticalLine(x, 20.f, (float)getHeight());
-
-            // Bar number
-            g.setColour(fromU32(Col::text));
-            g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-            g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                       juce::Justification::centredLeft);
-
-            // Song-time seconds label (m:ss) — the user's audible clock
-            if (drawSeconds)
-            {
-                g.setColour(fromU32(Col::textDim));
-                g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
+                g.setColour(fromU32(Col::gridLineMajor));
+                g.drawVerticalLine(x, 20.f, (float)getHeight());
+                g.setColour(fromU32(Col::text));
+                g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
+                g.drawText(juce::String(static_cast<juce::int64>(bar + 1)), x + 2, 4, 40, 14,
                            juce::Justification::centredLeft);
+
+                if (drawSeconds)
+                {
+                    g.setColour(fromU32(Col::textDim));
+                    g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
+                    g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
+                               juce::Justification::centredLeft);
+                }
             }
 
-            // Beat lines — suppressed when beats are too dense
             if (noBeats)
                 continue;
 
+            // A partially visible bar can still have visible beats.
             g.setColour(fromU32(Col::gridLine).withAlpha(0.3f));
             for (int beat = 1; beat < 4; ++beat)
             {
-                double beatTime = barTime + beat * beatDuration;
-                int beatX = timeToX(beatTime);
-                if (beatX >= 0 && beatX <= getWidth())
+                const int beatX = timeToX(barTime + beat * beatDuration);
+                if (beatX >= dirty.getX() && beatX < dirty.getRight())
                     g.drawVerticalLine(beatX, 24.f, (float)getHeight());
             }
         }

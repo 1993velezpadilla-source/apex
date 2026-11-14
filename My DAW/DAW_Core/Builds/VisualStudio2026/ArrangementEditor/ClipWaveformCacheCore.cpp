@@ -117,6 +117,7 @@ namespace ArrangementEditor
         fresh.sourceSampleRate = cachedAudio->sampleRate > 0.0 ? cachedAudio->sampleRate : 44100.0;
         fresh.samplesPerPeak = juce::jmax(1, (int) std::ceil(
             (double) totalSamples / (double) rawMin.size()));
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         fresh.valid = true;
 
         juce::CriticalSection::ScopedLockType lock(peaksLock_);
@@ -264,6 +265,7 @@ namespace ArrangementEditor
         if (threadShouldExit())
             return;
 
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         // Thread-safe peak update: lock while swapping in the new data
         // This ensures paint() never accesses partially-written peak data
         {
@@ -314,6 +316,7 @@ namespace ArrangementEditor
             fresh.maxPeaks[i] = maxVal;
         }
 
+        fresh.rangeIndex.rebuild(fresh.minPeaks, fresh.maxPeaks);
         // Thread-safe update: lock while swapping in the new data
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
