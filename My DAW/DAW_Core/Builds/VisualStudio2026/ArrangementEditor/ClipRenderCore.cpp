@@ -87,7 +87,11 @@ namespace ArrangementEditor
                 return;
             }
 
-            const int widthPx = (int)(m_model->length * m_zoom.getPixelsPerSecond());
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformRefreshes);
+            // Reuse the engine overview at every scale. A legacy file
+            // fallback builds its peak detail once for the full zoom range.
+            const int widthPx = ArrangementZoomCore::contentWidth(
+                ArrangementZoomCore::maxPixelsPerSecond, m_model->length, 0);
 
             // Visible-source hint â†’ zoom-adaptive peak resolution.
             int64_t visibleSamples = m_model->sourceEndSample - m_model->sourceStartSample;
@@ -238,11 +242,6 @@ namespace ArrangementEditor
 
     void ClipRenderCore::resized()
     {
-        const int oldWidth = m_lastWaveformRequestWidth;
-        const bool oldWaveformLod = m_lastWaveformRenderable;
-        m_lastWaveformRequestWidth = getWidth();
-        m_lastWaveformRenderable = shouldRenderWaveform();
-
         // Position Piano Roll button in top-right corner only when the clip is
         // wide enough to keep header controls usable and avoid overlapping the
         // lock icon (drawn at x=4, width=16).
@@ -258,15 +257,6 @@ namespace ArrangementEditor
                 : juce::Rectangle<int>());
         }
 
-        // setBounds() is also used for every scroll reposition.  Refreshing
-        // the waveform from resized() made a horizontal scroll walk every
-        // cache even though the clip width did not change.  Only refresh when
-        // width or waveform LOD changes, and only for a renderer currently
-        // shown in the viewport.
-        const bool waveformGeometryChanged = oldWidth != m_lastWaveformRequestWidth
-            || oldWaveformLod != m_lastWaveformRenderable;
-        if (waveformGeometryChanged && isShowing() && shouldRenderWaveform())
-            refresh();
     }
 
     // -----------------------------------------------------------------------
@@ -427,12 +417,15 @@ namespace ArrangementEditor
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
             return;
 
-        // Touching a region claims the prior fling even on a stationary tap.
-        // A clip owns this pointer, so parent mouseDown is not guaranteed to
-        // see it; stop the old inertia before selection callbacks run.
+        // Start the sampler when a clip handle captures touch so a second
+        // finger can claim navigation even if neither reaches the canvas.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+            {
                 view->stopTouchMomentumOnClipPress();
+                view->beginTouchNavigation();
+                m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
+            }
 
         // Right-click must reach the parent context menu without selecting,
         // trimming, muting or disturbing an existing multi-selection.
@@ -584,6 +577,11 @@ namespace ArrangementEditor
                 parent->mouseDrag(e.getEventRelativeTo(parent));
             return;
         }
+
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            if (const auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                if (view->getTouchGestureEpoch() != m_touchMenuGestureEpoch)
+                    return;
 
         const double pps     = juce::jmax(1.0, m_zoom.getPixelsPerSecond());
         // Use SCREEN x for the drag delta. Left-edge trim calls setBounds() on
@@ -1008,9 +1006,6 @@ namespace ArrangementEditor
             }
         }
 
-        if (metricsActive)
-            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(static_cast<uint64_t>(visiblePeakCount));
-
         // â”€â”€ Visual gain/fade multipliers (REALTIME, NO CACHE REGEN) â”€â”€â”€â”€â”€â”€
         // This is the KEY FIX:
         //   displayPeak = cachedPeak * clipGainLinear * fadeMultiplier
@@ -1085,8 +1080,13 @@ namespace ArrangementEditor
                                      dirty.getRight() - full.getX());
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
+        std::size_t peakReads = 0;
+        juce::RectangleList<float> waveformColumns;
+        waveformColumns.ensureStorageAllocated(endPx - startPx);
 
-        for (int px = startPx; px < endPx; ++px)
+        // The first dirty column connects to its predecessor just as it
+        // would during a full repaint.
+        for (int px = juce::jmax(0, startPx - 1); px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
             const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
@@ -1102,24 +1102,21 @@ namespace ArrangementEditor
                 i0 = juce::jlimit(visibleStartPeak, lastPeak, i0);
                 i1 = juce::jlimit(i0, lastPeak, i1);
 
-                rawMin = peaks.minPeaks[(size_t)i0];
-                rawMax = peaks.maxPeaks[(size_t)i0];
-                for (int i = i0 + 1; i <= i1; ++i)
-                {
-                    rawMin = juce::jmin(rawMin, peaks.minPeaks[(size_t)i]);
-                    rawMax = juce::jmax(rawMax, peaks.maxPeaks[(size_t)i]);
-                }
+                peaks.rangeIndex.query(peaks.minPeaks, peaks.maxPeaks, i0, i1,
+                                       rawMin, rawMax, metricsActive ? &peakReads : nullptr);
             }
             else
             {
+                if (metricsActive)
+                    peakReads += 2;
                 // Sub-peak zoom: smooth interpolation between neighbours
                 const double centre = fStart + peaksPerPixel * 0.5 - 0.5;
                 const double fl     = std::floor(centre);
                 const float  t      = (float)(centre - fl);
 
-                const int ia = juce::jlimit(visibleStartPeak, lastPeak,
-                                            visibleStartPeak + (int)fl);
-                const int ib = juce::jlimit(visibleStartPeak, lastPeak, ia + 1);
+                const int leftPeak = visibleStartPeak + static_cast<int>(fl);
+                const int ia = juce::jlimit(visibleStartPeak, lastPeak, leftPeak);
+                const int ib = juce::jlimit(visibleStartPeak, lastPeak, leftPeak + 1);
 
                 rawMin = peaks.minPeaks[(size_t)ia]
                        + (peaks.minPeaks[(size_t)ib] - peaks.minPeaks[(size_t)ia]) * t;
@@ -1155,16 +1152,13 @@ namespace ArrangementEditor
                 bot = mid + 0.5f;
             }
 
-            const float x = (float)(full.getX() + px);
-            g.fillRect(x, top, 1.0f, bot - top);
-
-            // Red clipping markers are NOT a source-waveform decoration.
-            // ArrangementViewCore now paints only playback-observed output
-            // over-0 dBFS markers, so a limiter/gain change clears them on
-            // the next listen pass rather than producing false positives.
+            if (px >= startPx)
+                waveformColumns.addWithoutMerging({ (float)(full.getX() + px), top, 1.0f, bot - top });
         }
 
-
+        g.fillRectList(waveformColumns);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformPeaksWalked,
+                                  static_cast<uint64_t>(peakReads));
     }
 
     void ClipRenderCore::drawFades(juce::Graphics& g)

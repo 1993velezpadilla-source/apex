@@ -121,11 +121,6 @@ namespace ArrangementEditor
     // wiring and leave a clip editable while the mode is on.
     static inline std::atomic<bool> s_viewOnlyMode { false };
 
-    // Scroll/gesture LOD: while a pan or pinch is running every renderer stops
-    // after its background + header, so each frame stays cheap and the gesture
-    // is smooth. Full detail (waveform, badges, fades) returns on release.
-    static inline std::atomic<bool> s_lightweightPaint { false };
-
         // Interactive handle callbacks — wired by ArrangementViewCore
         // onEditBegin: called when user starts dragging a fade/resize handle.
         //              Parent should capture a pre-edit snapshot for undo.
@@ -144,6 +139,13 @@ namespace ArrangementEditor
         // Call these after receiving background render callbacks.
         void setRenderingStretch(bool rendering) { m_renderingStretch = rendering; repaint(); }
         void setUsingFallback(bool fallback)      { m_usingFallback    = fallback;  repaint(); }
+
+        void setTimelineBounds(juce::Rectangle<int> bounds) noexcept { m_timelineBounds = bounds; }
+        juce::Rectangle<int> getTimelineBounds() const noexcept { return m_timelineBounds; }
+        juce::Rectangle<int> getDisplayedOrTimelineBounds() const noexcept
+        {
+            return isVisible() ? getBounds() : m_timelineBounds;
+        }
 
         bool shouldRenderWaveform() const noexcept
         {
@@ -261,8 +263,7 @@ namespace ArrangementEditor
 
         // DEBUG: Paint counter to verify paint() is actually being called
         mutable int m_paintDebugCounter = 0;
-        int m_lastWaveformRequestWidth = -1;
-        bool m_lastWaveformRenderable = false;
+        juce::Rectangle<int> m_timelineBounds;
 
         // NAME_H: height reserved at top for clip name label
         // Waveform starts below this so name never overlaps waveform.

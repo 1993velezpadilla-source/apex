@@ -12,6 +12,8 @@
 #include "ArrangementClipStateCore.h"
 #include "ArrangementSelectionCore.h"
 #include "ArrangementZoomCore.h"
+#include "TouchNavigationMath.h"
+#include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "ArrangementUndoCore.h"
 #include <optional>
 #include "EditorToolCore.h"
@@ -235,7 +237,21 @@ namespace ArrangementEditor
         // Access to subsystems
         ArrangementClipStateCore& getClipState() { return m_clipState; }
         ArrangementSelectionCore& getSelection() { return m_selection; }
-        ArrangementZoomCore& getZoom() { return m_zoom; }
+        const ArrangementZoomCore& getZoom() const noexcept { return m_zoom; }
+
+        struct ViewportZoomAnchor
+        {
+            double seconds = 0.0;
+            DAW::TrackPlaylistInlineLayoutCore::Anchor lane;
+        };
+
+        ViewportZoomAnchor captureViewportZoomAnchor(juce::Point<double> focus) const;
+        void zoomViewport(double pixelsPerSecond, double trackHeight,
+                          juce::Point<double> focusBefore, juce::Point<double> focusAfter,
+                          const ViewportZoomAnchor* capturedAnchor = nullptr);
+        bool isApplyingViewportZoom() const noexcept { return m_applyingViewportZoom; }
+        std::function<void(bool)> onViewportZoomLayout;
+        std::function<void()> onViewportZoomCommitted;
         // One native expanded playlist owner, with virtual take bands that
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
@@ -256,6 +272,7 @@ namespace ArrangementEditor
         // scrolling immediately on DOWN, before selection listeners rebuild
         // renderers; a stationary selection must never fling the timeline.
         void stopTouchMomentumOnClipPress() noexcept;
+        void beginTouchNavigation();
         void finishUnselectedClipTouchPan() noexcept;
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
@@ -400,6 +417,7 @@ namespace ArrangementEditor
         void mouseDoubleClick(const juce::MouseEvent& e) override;
         void mouseWheelMove(const juce::MouseEvent& e,
                             const juce::MouseWheelDetails& wheel) override;
+        void mouseMagnify(const juce::MouseEvent& e, float magnifyAmount) override;
 
         bool keyPressed(const juce::KeyPress& key) override;
 
@@ -479,14 +497,10 @@ namespace ArrangementEditor
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
         std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
-        double m_lastPinchDistance = 0.0; // legacy pinch scratch state
-        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
-        // Gesture classification: decided once per gesture (pan by default,
-        // promoted to pinch on a clear separation change) so the two never
-        // flip-flop mid-gesture.
-        bool m_gestureIsPinch = false;
+        juce::Point<float> m_lastPinchCentre; // Viewport-local centroid
         double m_lastPinchSepX = 0.0;   // last horizontal finger separation
         double m_lastPinchSepY = 0.0;   // last vertical finger separation
+        TouchNavigationMath::PinchAxis m_pinchAxis = TouchNavigationMath::PinchAxis::undecided;
         // Low-pass filtered touch position: touch digitizers jitter ±1 px even
         // on a nearly still finger, which made slow pans shake.
         juce::Point<float> m_smoothedTouchPos;
@@ -615,7 +629,12 @@ namespace ArrangementEditor
         void updatePinnedViewportControls();
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
-        void updateClipRendererVisibility();
+        void updateClipRendererVisibility(bool updateBounds = false);
+        juce::Rectangle<int> getClipLayoutBounds(const ArrangementClipModel& clip,
+                                                int expandedLane, bool hiddenByFolder) const;
+        bool isClipLaneHiddenByFolder(int lane) const;
+        juce::Point<double> getPreciseViewportOrigin() const;
+        void refreshViewportPresentation(int scrollX, int scrollY, bool zoomChanged);
         ClipRenderCore* findClipRendererAt(juce::Point<int> pos);
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);
@@ -793,6 +812,9 @@ namespace ArrangementEditor
         int m_viewportScrollX = 0;
         int m_viewportScrollY = 0;
         bool m_inViewportScroll = false;
+        bool m_applyingViewportZoom = false;
+        juce::Point<int> m_viewportSize;
+        juce::Point<double> m_viewportRemainder;
         bool m_middleMousePanActive = false;
         juce::Point<int> m_middleMousePanScreenPos;
 

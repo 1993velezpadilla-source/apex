@@ -15,7 +15,13 @@ namespace DAW {
 class TimelineWindow : public FloatingWindowBase
 {
 public:
-    TimelineWindow() : FloatingWindowBase("TIMELINE") { setSize(900, 500); }
+    TimelineWindow() : FloatingWindowBase("TIMELINE")
+    {
+        // Navigation already invalidates the visible timeline. Drawing into the
+        // inherited window buffer first adds a full-surface intermediate copy.
+        setBufferedToImage(false);
+        setSize(900, 500);
+    }
 
     std::function<void()> onDockRequested;
 

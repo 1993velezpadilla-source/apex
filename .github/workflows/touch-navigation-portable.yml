@@ -4,6 +4,13 @@ on:
   pull_request:
     paths:
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.cpp'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/WaveformPeakRangeIndexCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp'
+      - 'My DAW/DAW_Core/Source/UICore/TrackPlaylistInlineLayoutCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/ArrangementZoomPortableTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Portable/WaveformPeakRangePortableTests.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp'
@@ -36,3 +43,7 @@ jobs:
           /tmp/apex_touch_navigation_tests
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ApexRadialGeometryPortableTests.cpp -o /tmp/apex_radial_geometry_tests
           /tmp/apex_radial_geometry_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_tests
+          /tmp/apex_arrangement_zoom_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_range_tests
+          /tmp/apex_waveform_peak_range_tests
