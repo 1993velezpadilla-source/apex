@@ -2583,4 +2583,36 @@ int main()
                     || twice.width != once.width || twice.height != once.height)
                     return 326;
             }
+
+    // Phone Mixer: immersive/fullscreen inset changes and extreme restored
+    // drag origins must not place the floating window over header/Transport.
+    // Keep these runtime checks active in Release/NDEBUG.
+    for (int viewportW : { 1, 44, 320, 393, 852, 2048 })
+        for (int viewportH : { 1, 44, 96, 300, 852 })
+            for (int top : { -1, 0, 24, 44, 1000,
+                             std::numeric_limits<int>::max() })
+                for (int bottom : { -1, 0, 24, 64, 1000,
+                                    std::numeric_limits<int>::max() })
+                {
+                    const auto fit = DAW::mobile::fitFloatingMixer(
+                        viewportW, viewportH, top, bottom);
+                    const auto restored = DAW::mobile::constrainFloatingMixerPlacement(
+                        fit, { std::numeric_limits<int>::min(),
+                               std::numeric_limits<int>::max(), 200, 180 });
+                    if (fit.safe.width <= 0 || fit.safe.height <= 0)
+                    {
+                        if (restored.width != 0 || restored.height != 0)
+                            return 327;
+                        continue;
+                    }
+                    if (!DAW::mobile::floatingMixerFits(fit, restored))
+                        return 328;
+                    const int safeTop = DAW::mobile::clampInt(top, 0, viewportH);
+                    const int safeBottom = DAW::mobile::clampInt(
+                        bottom, 0, viewportH - safeTop);
+                    if (restored.y < safeTop
+                        || static_cast<long long>(restored.y) + restored.height
+                            > viewportH - safeBottom)
+                        return 329;
+                }
 }
