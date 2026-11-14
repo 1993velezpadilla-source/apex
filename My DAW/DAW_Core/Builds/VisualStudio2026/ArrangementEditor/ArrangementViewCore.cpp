@@ -1123,6 +1123,10 @@ namespace ArrangementEditor
 
         if (touchCount >= 2)
         {
+            if (m_rubberBand.isVisible())
+                m_rubberBand.endDrag();
+            m_marqueePending = false;
+
             // A second finger changes the gesture owner from region editing
             // to navigation. Discard the uncommitted move rather than
             // allowing viewport pinch + clip drag in the same transaction.
@@ -1147,6 +1151,7 @@ namespace ArrangementEditor
             if (! m_twoFingerGestureActive)
             {
                 ++m_touchGestureEpoch; // cancel any pending selected-clip tap menu
+                m_pinchAxis = TouchNavigationMath::PinchAxis::undecided;
                 m_twoFingerGestureActive = true;
                 m_lastPinchCentre = centreInView;
                 m_lastPinchSepX = sepX;
@@ -1364,8 +1369,6 @@ namespace ArrangementEditor
             return true;
         }
 
-        m_gestureIsPinch = false;
-
         // Exponential decay per frame. 0.967 per 16 ms frame is the iOS
         // UIScrollView "normal" deceleration (0.998 per ms) — the natural,
         // long glide. 0.93 was stopping noticeably short.
@@ -1388,6 +1391,14 @@ namespace ArrangementEditor
         if (actual.x == before.x) m_touchPanVelocityX = 0.0;
         if (actual.y == before.y) m_touchPanVelocityY = 0.0;
         return true;
+    }
+
+    void ArrangementViewCore::beginTouchNavigation()
+    {
+        if (!m_inertiaTimer)
+            m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+        if (!m_inertiaTimer->isTimerRunning())
+            m_inertiaTimer->startTimerHz(60);
     }
 
     void ArrangementViewCore::stopTouchMomentumOnClipPress() noexcept
@@ -2304,8 +2315,15 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setTempoBpm(double bpm)
     {
-        m_tempoBpm = juce::jmax(1.0, bpm);
-        m_ruler.setTempo(m_tempoBpm);
+        if (!std::isfinite(bpm))
+            return;
+        const double tempo = juce::jmax(1.0, bpm);
+        if (m_tempoBpm == tempo)
+            return;
+        m_tempoBpm = tempo;
+        m_ruler.setTempo(tempo);
+        updateAutomationLayout();
+        repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::rebuildClipRenderers()
@@ -3200,6 +3218,9 @@ namespace ArrangementEditor
             return;
         }
 
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            beginTouchNavigation();
+
         // Free View Mode: view only — no selection, no drags, no marquee.
         if (m_viewOnlyMode)
             return;
@@ -3274,18 +3295,6 @@ namespace ArrangementEditor
             }
         }
 
-        // Start the gesture clock on touch DOWN, not the first drag event.
-        // Stationary long-presses on empty space otherwise never fire.
-        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
-            && m_toolState.getActiveTool() == EditorTool::Select
-            && !m_viewOnlyMode && findClipAt(e.getPosition()) == nullptr)
-        {
-            if (! m_inertiaTimer)
-                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (!m_inertiaTimer->isTimerRunning())
-                m_inertiaTimer->startTimerHz(60);
-        }
-
         grabKeyboardFocus();
 
         if (m_toolState.getActiveTool() != EditorTool::Split
@@ -3353,20 +3362,14 @@ namespace ArrangementEditor
                 if (activeFingers > 1)
                 {
                     cancelClipDragForTouchNavigation();
-                    if (!m_inertiaTimer)
-                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-                    if (!m_inertiaTimer->isTimerRunning())
-                        m_inertiaTimer->startTimerHz(60);
+                    beginTouchNavigation();
                     return;
                 }
 
                 updateClipDrag(e.getPosition());
                 return;
             }
-            if (!m_inertiaTimer)
-                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (!m_inertiaTimer->isTimerRunning())
-                m_inertiaTimer->startTimerHz(60);
+            beginTouchNavigation();
             return;
         }
 
@@ -3836,10 +3839,7 @@ namespace ArrangementEditor
                 if (arrangementFingers > 1)
                 {
                     cancelClipDragForTouchNavigation();
-                    if (!m_inertiaTimer)
-                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-                    if (!m_inertiaTimer->isTimerRunning())
-                        m_inertiaTimer->startTimerHz(60);
+                    beginTouchNavigation();
                     return;
                 }
             }
@@ -8372,11 +8372,6 @@ int ArrangementViewCore::getLaneTopForIndex(int laneIndex) const noexcept
     return DAW::TrackPlaylistInlineLayoutCore::topOfLane(
         laneIndex, juce::jmax(1, (int)m_zoom.getTrackHeightPx()),
         getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels);
-}
-
-int ArrangementViewCore::getLaneContentHeight() const noexcept
-{
-    return getLaneTopForIndex(juce::jmax(1, getArrangementTrackCount()));
 }
 
 int ArrangementViewCore::getLaneIndexForY(int y) const noexcept

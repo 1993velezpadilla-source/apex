@@ -256,7 +256,6 @@ namespace ArrangementEditor
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
         int getInlinePlaylistExtraForLane(int laneIndex) const noexcept;
-        int getLaneContentHeight() const noexcept;
         int getLaneTopForIndex(int laneIndex) const noexcept;
         int getLaneIndexForY(int y) const noexcept;
         EditorToolState& getToolState() { return m_toolState; }
@@ -273,6 +272,7 @@ namespace ArrangementEditor
         // scrolling immediately on DOWN, before selection listeners rebuild
         // renderers; a stationary selection must never fling the timeline.
         void stopTouchMomentumOnClipPress() noexcept;
+        void beginTouchNavigation();
         void finishUnselectedClipTouchPan() noexcept;
         ArrangementToolbarCore& getToolbar() { return m_toolbar; }
 
@@ -497,12 +497,7 @@ namespace ArrangementEditor
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
         std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
-        double m_lastPinchDistance = 0.0; // legacy pinch scratch state
-        juce::Point<float> m_lastPinchCentre { -1.0f, -1.0f }; // Viewport-local centroid
-        // Gesture classification: decided once per gesture (pan by default,
-        // promoted to pinch on a clear separation change) so the two never
-        // flip-flop mid-gesture.
-        bool m_gestureIsPinch = false;
+        juce::Point<float> m_lastPinchCentre; // Viewport-local centroid
         double m_lastPinchSepX = 0.0;   // last horizontal finger separation
         double m_lastPinchSepY = 0.0;   // last vertical finger separation
         TouchNavigationMath::PinchAxis m_pinchAxis = TouchNavigationMath::PinchAxis::undecided;
