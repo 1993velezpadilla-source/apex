@@ -2991,4 +2991,32 @@ int main()
                 return 373;
         }
 
+    // Phone Track List regression: growing the requested width cannot
+    // shrink the list, and growing the viewport cannot shrink it either.
+    // This catches jitter when rotating or restoring an old project width.
+    for (int workspace : { 2, 44, 108, 320, 393, 852, 2048 })
+    {
+        int previous = 0;
+        for (int requested = 0; requested <= 2048; ++requested)
+        {
+            const int actual = DAW::mobile::phoneTrackListWidth(
+                requested, workspace);
+            if (actual < previous)
+                return 374;
+            previous = actual;
+        }
+    }
+    for (int requested : { 1, 44, 108, 320, 9999 })
+    {
+        int previous = 0;
+        for (int workspace = 0; workspace <= 2048; ++workspace)
+        {
+            const int actual = DAW::mobile::phoneTrackListWidth(
+                requested, workspace);
+            if (actual < previous)
+                return 375;
+            previous = actual;
+        }
+    }
+
 }
