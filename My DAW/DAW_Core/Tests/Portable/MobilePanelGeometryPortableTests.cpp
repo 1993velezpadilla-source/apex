@@ -2717,4 +2717,27 @@ int main()
                 return 341;
         }
 
+    // Transport launcher must not fire on a release over a different
+    // launcher, a foreign touch source, or a drag across the panel row.
+    // All four phone launchers share this gesture policy.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        const int other = launcher == 4 ? 1 : launcher + 1;
+        DAW::mobile::PhoneTransportTapState taps;
+        taps.begin(launcher, 7);
+        if (taps.release(7, other, 0, 0))
+            return 342;
+        taps.begin(launcher, 7);
+        if (taps.release(8, launcher, 0, 0)
+            || taps.release(7, launcher, 0, 0))
+            return 343;
+        taps.begin(launcher, 7);
+        taps.move(7, 1000, 1000);
+        if (taps.release(7, launcher, 1000, 1000))
+            return 344;
+        taps.begin(launcher, 7);
+        if (!taps.release(7, launcher, 0, 0))
+            return 345;
+    }
+
 }
