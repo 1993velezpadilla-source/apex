@@ -2645,4 +2645,30 @@ int main()
                 return 332;
         }
 
+
+    // Clip FX host: immersive inset changes must keep the opening window
+    // inside the usable phone region, even on near-zero split-screen sizes.
+    for (int viewportW : { 1, 44, 180, 393, 852 })
+        for (int viewportH : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+                {
+                    const auto fit = DAW::mobile::fitPhoneClipProperties(
+                        viewportW, viewportH, top, bottom);
+                    if (fit.safe.width <= 0 || fit.safe.height <= 0)
+                    {
+                        if (fit.window.width != 0 || fit.window.height != 0)
+                            return 333;
+                        continue;
+                    }
+                    if (!DAW::mobile::phoneClipPropertiesFits(fit, fit.window))
+                        return 334;
+                    const int safeTop = DAW::mobile::clampInt(top, 0, viewportH);
+                    const int safeBottom = DAW::mobile::clampInt(
+                        bottom, 0, viewportH - safeTop);
+                    if (fit.window.y < safeTop
+                        || static_cast<long long>(fit.window.y) + fit.window.height
+                            > viewportH - safeBottom)
+                        return 335;
+                }
 }
