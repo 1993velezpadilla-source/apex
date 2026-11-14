@@ -292,6 +292,61 @@ public:
             expect(peaksAfter.maxPeaks == peaksBefore.maxPeaks, "max peaks byte-identical");
         }
 
+        beginTest("Waveform gain and both fades update after geometry-only zoom");
+        {
+            WaveformRenderFixture f;
+            const juce::Colour waveformColour(0xFF00D5FF);
+            f.setTrackColour(waveformColour);
+            f.renderer->setSize(190, 42);
+            expect(f.primeWaveform());
+
+            auto& cache = f.renderer->getWaveformCache();
+            juce::CriticalSection::ScopedLockType lock(cache.getPeaksLock());
+            const auto peaksBefore = cache.getPeaks();
+
+            for (const int width : { 190, 320 })
+            {
+                f.zoom.setPixelsPerSecond(static_cast<double>(width));
+                f.renderer->setSize(width, 120);
+                auto waveformAt = [&](int x, const juce::Image& image)
+                {
+                    int pixels = 0;
+                    for (int y = 27; y < 112; ++y)
+                    {
+                        float hue = 0.f, saturation = 0.f, brightness = 0.f;
+                        image.getPixelAt(x, y).getHSB(hue, saturation, brightness);
+                        if (std::abs(hue - waveformColour.getHue()) < 0.05f
+                            && saturation > 0.5f && brightness > 0.5f)
+                            ++pixels;
+                    }
+                    return pixels;
+                };
+                f.model.gain = 2.0f;
+                f.model.fadeInLength = f.model.fadeOutLength = 0.0;
+                f.renderer->updateClipData(f.model);
+                const auto loud = f.render();
+
+                f.model.gain = 0.5f;
+                f.renderer->updateClipData(f.model);
+                const auto quiet = f.render();
+
+                expect(waveformAt(width / 2, loud) > waveformAt(width / 2, quiet));
+                f.model.gain = 2.0f;
+                const int fadeInX = width / 8;
+                const int fadeOutX = width * 7 / 8;
+                f.model.fadeInLength = 0.45;
+                f.model.fadeOutLength = 0.45;
+                f.renderer->updateClipData(f.model);
+                const auto faded = f.render();
+
+                expect(waveformAt(fadeInX, loud) > waveformAt(fadeInX, faded));
+                expect(waveformAt(fadeOutX, loud) > waveformAt(fadeOutX, faded));
+                expectEquals(waveformAt(width / 2, loud), waveformAt(width / 2, faded));
+            }
+            expect(cache.getPeaks().minPeaks == peaksBefore.minPeaks);
+            expect(cache.getPeaks().maxPeaks == peaksBefore.maxPeaks);
+        }
+
         beginTest("ImportedClipUsesDestinationTrackColor");
         {
             WaveformRenderFixture f;
