@@ -2615,4 +2615,34 @@ int main()
                             > viewportH - safeBottom)
                         return 329;
                 }
+    // Phone Quick Send must never restore the desktop 260-high Mixer minimum:
+    // that recovery would overlap the persistent Transport in landscape.
+    // Conversely, desktop/iPad retain the historical recovery behavior.
+    for (int currentHeight : { -1, 0, 1, 64, 179, 180, 259, 260, 261, 852 })
+        for (int desktopMinimum : { 0, 1, 180, 260, 1000 })
+        {
+            if (DAW::mobile::quickSendNeedsDesktopMixerMinimum(
+                    true, currentHeight, desktopMinimum))
+                return 330;
+            if (DAW::mobile::quickSendNeedsDesktopMixerMinimum(
+                    false, currentHeight, desktopMinimum)
+                != (currentHeight < desktopMinimum))
+                return 331;
+        }
+
+    // A phone landscape viewport shorter than desktop's 260 minimum must
+    // still constrain Quick Send's floating Mixer above its Transport.
+    for (int width : { 320, 393, 852, 1280 })
+        for (int height : { 96, 180, 220, 259 })
+        {
+            const auto fit = DAW::mobile::fitFloatingMixer(
+                width, height, 44, 64);
+            const auto window = DAW::mobile::constrainFloatingMixerPlacement(
+                fit, { 0, 0, 800, 260 });
+            if (fit.safe.width > 0 && fit.safe.height > 0
+                && (!DAW::mobile::floatingMixerFits(fit, window)
+                    || window.height > fit.safe.height))
+                return 332;
+        }
+
 }
