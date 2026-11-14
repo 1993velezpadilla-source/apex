@@ -2969,4 +2969,26 @@ int main()
                     }
                 }
 
+    // Phone Track List: after orientation or split-view changes, never
+    // consume the entire Arrangement width or create a negative pane.
+    for (int workspace : { -1, 0, 1, 2, 44, 108, 320, 393, 852,
+                           std::numeric_limits<int>::max() })
+        for (int requested : { std::numeric_limits<int>::min(), -1, 0, 1,
+                               107, 108, 320, 9999,
+                               std::numeric_limits<int>::max() })
+        {
+            const int actual = DAW::mobile::phoneTrackListWidth(
+                requested, workspace);
+            if (actual < 0 || actual > (requested > 0 ? requested : 0))
+                return 371;
+            if (workspace <= 1 || requested <= 0)
+            {
+                if (actual != 0)
+                    return 372;
+            }
+            else if (actual >= workspace || actual > (workspace / 4 > 108
+                                                   ? workspace / 4 : 108))
+                return 373;
+        }
+
 }
