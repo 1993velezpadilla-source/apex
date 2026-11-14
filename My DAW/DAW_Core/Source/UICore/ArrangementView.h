@@ -104,6 +104,7 @@ public:
         : trackManager_(trackManager), clipManager_(clipManager), state_(state),
           markers_(markers), transport_(transport), audioFiles_(audioFiles), automation_(automation)
     {
+        setOpaque(true);
         core_ = std::make_unique<ArrangementEditor::ArrangementViewCore>();
         core_->setAudioEngineBridge(&clipManager_, audioFiles_, &trackManager_, 44100.0,
                                     clipRegionPlugins, pluginFormatManager);

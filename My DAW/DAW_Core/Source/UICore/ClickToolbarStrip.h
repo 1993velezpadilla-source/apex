@@ -5,13 +5,13 @@
 
 namespace DAW {
 
-class ClickToolbarStrip : public juce::Component
+class ClickToolbarStrip : public juce::Component, private juce::Timer
 {
 public:
     explicit ClickToolbarStrip(ClickStateModel& state)
         : state_(state)
     {
-        startTimerHz(60);
+        startTimerHz(30);
     }
 
     void paint(juce::Graphics& g) override
@@ -97,13 +97,27 @@ public:
     }
 
 private:
-    class Timer final : public juce::Timer {};
-    void startTimerHz(int hz) { timer_.owner = this; timer_.startTimerHz(hz); }
-    struct RepaintTimer final : public juce::Timer
+    void timerCallback() override
     {
-        ClickToolbarStrip* owner = nullptr;
-        void timerCallback() override { if (owner) owner->repaint(); }
-    } timer_;
+        const auto mode = state_.getActiveMode();
+        const auto bars = state_.getCountInBars();
+        const auto volume = state_.volumeLinear.load(std::memory_order_relaxed);
+        const bool muted = state_.muted.load(std::memory_order_relaxed);
+        if (mode == lastMode_ && bars == lastCountInBars_
+            && volume == lastVolume_ && muted == lastMuted_)
+            return;
+
+        lastMode_ = mode;
+        lastCountInBars_ = bars;
+        lastVolume_ = volume;
+        lastMuted_ = muted;
+        repaint();
+    }
+
+    ClickActiveMode lastMode_ = ClickActiveMode::Off;
+    ClickCountInBars lastCountInBars_ = ClickCountInBars::None;
+    float lastVolume_ = 0.0f;
+    bool lastMuted_ = false;
 
     ClickStateModel& state_;
     juce::Rectangle<int> clickBounds_;
