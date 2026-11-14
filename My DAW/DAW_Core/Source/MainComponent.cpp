@@ -9662,7 +9662,7 @@ void MainComponent::prepareAndroidUiBenchmark(bool withClip)
     repaint();
 }
 
-juce::var MainComponent::androidUiBenchmarkState()
+juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
 {
     auto* state = new juce::DynamicObject();
     state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
@@ -9675,6 +9675,28 @@ juce::var MainComponent::androidUiBenchmarkState()
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
     state->setProperty("windowWidth", getWidth());
     state->setProperty("windowHeight", getHeight());
+    const auto addTiming = [&](const juce::Identifier& name, SampleRing& ring)
+    {
+        if (finishPhase)
+        {
+            const auto stats = ring.computePercentiles();
+            auto* timing = new juce::DynamicObject();
+            timing->setProperty("count", static_cast<int>(ring.size()));
+            timing->setProperty("p50", stats.p50_ns / 1.0e6);
+            timing->setProperty("p95", stats.p95_ns / 1.0e6);
+            timing->setProperty("worst", static_cast<double>(stats.worst_ns) / 1.0e6);
+            state->setProperty(name, juce::var(timing));
+        }
+        else
+        {
+            ring.reset();
+        }
+    };
+    addTiming("zoomMs", TimelinePaintMetrics::viewportZoomDurationNs);
+    addTiming("presentationMs", TimelinePaintMetrics::viewportPresentationDurationNs);
+    addTiming("arrangerPaintMs", TimelinePaintMetrics::paintDurationNs);
+    addTiming("arrangerOverlayMs", TimelinePaintMetrics::paintChildrenDurationNs);
+    addTiming("waveformMs", TimelinePaintMetrics::waveformDurationNs);
     return juce::var(state);
 }
 

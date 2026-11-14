@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real APEX APK on an emulator; never clear a physical device.
 
-UI Choreographer intervals are input/UI-thread cadence, NOT presented FPS.
-The same APK supports both backends through explicit launch extras.
+Record input, native arranger and Android Window timings separately.
 """
 from __future__ import annotations
 import argparse
@@ -33,6 +32,8 @@ def validate_result(result: dict, scene: str) -> None:
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
+        if phase["phase"] != "idle" and phase["inputWallMs"]["count"] < 2:
+            raise ValueError("No measured gesture dispatches")
         for state in (phase["before"], phase["after"]):
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
@@ -42,6 +43,8 @@ def validate_result(result: dict, scene: str) -> None:
         raise ValueError("Pan did not move the production Viewport")
     if phases[1]["before"]["pps"] == phases[1]["after"]["pps"]:
         raise ValueError("Pinch did not change production zoom")
+    if phases[1]["after"]["zoomMs"]["count"] == 0:
+        raise ValueError("Pinch did not time the native zoom transaction")
     if phases[3]["before"]["scrollX"] == phases[3]["after"]["scrollX"]:
         raise ValueError("Reverse pan did not move the production Viewport")
     for phase in phases:
@@ -88,8 +91,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
         "--es", "apex_renderer", renderer, "--es", "apex_scene", scene)
     deadline = time.monotonic() + 100
     ready = None
-    before = middle = False
+    before = False
     result = None
+    phases = {}
     while time.monotonic() < deadline:
         log = adb("logcat", "-d", "-v", "raw", "APEX_UI_BENCH:I", "*:S")
         if "READY " in log and ready is None:
@@ -98,11 +102,11 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
             screenshot(output / f"{name}-before.png")
             record_focus(output / f"{name}-before-window.txt")
             before = True
-        if ready is not None and time.monotonic() - ready > 5.5 and not middle:
-            screenshot(output / f"{name}-pinch.png")
-            middle = True
         for line in log.splitlines():
-            if line.startswith("RESULT "):
+            if line.startswith("PHASE "):
+                phase = json.loads(line[len("PHASE "):])
+                phases[phase["phase"]] = phase
+            elif line.startswith("RESULT "):
                 result = json.loads(line[len("RESULT "):])
         if result is not None:
             break
@@ -110,6 +114,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     (output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
+    result["phases"] = [phases[key] for key in ("pan", "pinch", "idle", "reverse") if key in phases]
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
@@ -168,7 +173,9 @@ def main() -> int:
         for phase in result["phases"][:2]:
             print(f"{result['scene']} pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
-                  f"worst={phase['ui_interval_worst_ms']:.1f} ms")
+                  f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
+                  f"input CPU p95={phase['inputCpuMs']['p95']:.2f} ms, "
+                  f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms")
     if failures:
         raise RuntimeError(f"{len(failures)} runtime cases failed; review retained evidence")
     return 0

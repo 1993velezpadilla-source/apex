@@ -114,7 +114,7 @@ class MainComponent : public juce::Component,
 public:
    #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     void prepareAndroidUiBenchmark(bool withClip);
-    juce::var androidUiBenchmarkState();
+    juce::var androidUiBenchmarkState(bool finishPhase);
     juce::Rectangle<int> androidUiBenchmarkBounds() const;
    #endif
     MainComponent();

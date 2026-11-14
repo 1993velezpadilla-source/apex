@@ -82,7 +82,7 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
 
 BENCHMARK_ACTIVITY = """
     private ApexUiBenchmark uiBenchmark;
-    public native String nativeNavigationState();
+    public native String nativeNavigationState(boolean finishPhase);
 
     public void startApexUiBenchmark(int x, int y, int width, int height) {
         if (uiBenchmark != null) uiBenchmark.stop();

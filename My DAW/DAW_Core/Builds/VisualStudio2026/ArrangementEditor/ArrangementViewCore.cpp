@@ -175,6 +175,8 @@ namespace ArrangementEditor
         , m_pianoRollBtn(PianoRollButtonCore::Style::ToolbarButton)
         , m_ghostOverlay(*this)
     {
+        setOpaque(true);
+
         // Initialize timers for deferred operations
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
@@ -2027,6 +2029,9 @@ namespace ArrangementEditor
         if (m_drag.active || m_drag.pending || m_rubberBand.isVisible())
             return;
 
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        TimelinePaintMetrics::ScopedTimer zoomTimer(TimelinePaintMetrics::viewportZoomDurationNs);
+       #endif
         const auto anchor = capturedAnchor != nullptr ? *capturedAnchor
                                                        : captureViewportZoomAnchor(focusBefore);
         const auto origin = getPreciseViewportOrigin();
@@ -2156,6 +2161,9 @@ namespace ArrangementEditor
         if (!zoomChanged && !scrollChanged && size == m_viewportSize)
             return;
 
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        TimelinePaintMetrics::ScopedTimer presentationTimer(TimelinePaintMetrics::viewportPresentationDurationNs);
+       #endif
         if (m_viewportScrollX != scrollX) m_viewportRemainder.x = 0.0;
         if (m_viewportScrollY != scrollY) m_viewportRemainder.y = 0.0;
         m_viewportSize = size;

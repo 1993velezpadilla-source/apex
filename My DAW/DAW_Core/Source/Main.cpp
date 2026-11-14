@@ -35,7 +35,7 @@ namespace DAW
     }
 
     // Used only by explicit adb benchmark launches, never by normal user flows.
-    inline std::function<juce::String()> androidUiBenchmarkSnapshot;
+    inline std::function<juce::String(bool)> androidUiBenchmarkSnapshot;
 
 }
 #endif
@@ -1940,12 +1940,12 @@ public:
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);
-                DAW::androidUiBenchmarkSnapshot = [safe]() -> juce::String
+                DAW::androidUiBenchmarkSnapshot = [safe](bool finishPhase) -> juce::String
                 {
                     if (safe == nullptr || safe->getMainComponent() == nullptr)
                         return "{}";
                     return juce::JSON::toString(
-                        safe->getMainComponent()->androidUiBenchmarkState(), true);
+                        safe->getMainComponent()->androidUiBenchmarkState(finishPhase), true);
                 };
                 juce::Timer::callAfterDelay(3000, [safe]
                 {
@@ -2377,9 +2377,9 @@ START_JUCE_APPLICATION (DAW_CoreApplication)
 
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_xziel_apex_mobileportrait_ApexImmersiveActivity_nativeNavigationState(JNIEnv* env, jobject)
+Java_com_xziel_apex_mobileportrait_ApexImmersiveActivity_nativeNavigationState(JNIEnv* env, jobject, jboolean finishPhase)
 {
-    const auto state = DAW::androidUiBenchmarkSnapshot ? DAW::androidUiBenchmarkSnapshot() : "{}";
+    const auto state = DAW::androidUiBenchmarkSnapshot ? DAW::androidUiBenchmarkSnapshot(finishPhase == JNI_TRUE) : "{}";
     return env->NewStringUTF(state.toRawUTF8());
 }
 #endif

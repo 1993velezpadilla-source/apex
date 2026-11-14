@@ -9,6 +9,7 @@ on:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - "Android/scripts/pin_full_exporter_ndk.py"
+      - "Android/scripts/run_ui_runtime_benchmark.py"
       - "Android/scripts/tests/test_pin_full_exporter_ndk.py"
       - ".github/workflows/apex-android-ui-runtime.yml"
       - "Android/Source/ApexUiBenchmark.java"

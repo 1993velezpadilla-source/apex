@@ -218,6 +218,10 @@ struct TimelinePaintMetrics
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    static inline SampleRing viewportZoomDurationNs;
+    static inline SampleRing viewportPresentationDurationNs;
+#endif
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
     static inline SampleRing requestedDirtyAreaPixelsRing;  // Per-repaint-request area (from source call sites)
     static inline SampleRing actualPaintClipAreaPixels;     // Per-paint g.getClipBounds() area
