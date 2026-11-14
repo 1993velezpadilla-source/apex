@@ -3019,4 +3019,31 @@ int main()
         }
     }
 
+
+    // Arrangement/Transport: playhead runway must be monotonic across
+    // transport ticks and never shrink a restored clip/loop extent.
+    // Sweep the 2-second boundary and the 24-hour safety limit.
+    for (double extent : { 0.0, 1.0, 30.0, 300.0, 86400.0 })
+    {
+        double previous = -1.0;
+        for (int tick = 0; tick <= 86400; tick += 3)
+        {
+            const double actual = DAW::mobile::timelinePhonePlaybackExtentSeconds(
+                extent, static_cast<double>(tick));
+            if (!(actual >= extent))
+                return 376;
+            if (actual < previous)
+                return 377;
+            previous = actual;
+        }
+    }
+    // Corrupt transport state after project restore must not extend the
+    // Arrangement or introduce NaN into viewport geometry.
+    for (double invalid : { -1.0, 86401.0,
+                            std::numeric_limits<double>::infinity(),
+                            -std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN() })
+        if (DAW::mobile::timelinePhonePlaybackExtentSeconds(120.0, invalid)
+            != 120.0)
+            return 378;
 }
