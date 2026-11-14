@@ -127,6 +127,26 @@ namespace ArrangementEditor
             return !isFingerInput && !isRightButton;
         }
 
+        enum class PinchAxis { undecided, horizontal, vertical, both };
+
+        static PinchAxis pinchAxis(double initialX, double initialY,
+                                   double currentX, double currentY) noexcept
+        {
+            // Ignore tiny orthogonal separation: a nearly horizontal pinch
+            // must not resize tracks when the fingers wobble vertically.
+            const double dx = std::max(initialX, currentX) >= 16.0
+                ? std::abs(currentX - initialX) : 0.0;
+            const double dy = std::max(initialY, currentY) >= 16.0
+                ? std::abs(currentY - initialY) : 0.0;
+            if (std::max(dx, dy) < 3.0)
+                return PinchAxis::undecided;
+            if (dx >= 1.5 * dy)
+                return PinchAxis::horizontal;
+            if (dy >= 1.5 * dx)
+                return PinchAxis::vertical;
+            return PinchAxis::both;
+        }
+
         // Ignore collapsed/crossed finger-axis separations (<=1 px) so a
         // transient zero at an axis crossing cannot trigger a phantom zoom.
         // Compare to the LAST APPLIED pinch distance, not the last sampled

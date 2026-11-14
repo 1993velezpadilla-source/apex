@@ -147,6 +147,7 @@ public:
     // the playhead moves past the current content end (scrubbing/looping).
     void transportStateChanged() override;
     void positionChanged(DAW::SamplePosition newPosition) override;
+    void loopRangeChanged(DAW::SamplePosition, DAW::SamplePosition) override;
 
     /** Wire a scan-active callback into the plugin scanner.
      *  Called from Main.cpp after both MainComponent and the suppressor exist.
@@ -480,6 +481,7 @@ private:
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
     void syncPlaylistTimeline();
+    void syncTimelineViewportPosition();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();
      *  used to gate playhead-driven extent growth so the viewport bounds are

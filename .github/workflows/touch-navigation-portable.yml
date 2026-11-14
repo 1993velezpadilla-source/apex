@@ -32,6 +32,11 @@ on:
       - 'Android/scripts/tests/test_enable_immersive_fullscreen.py'
       - 'My DAW/DAW_Core/Source/Main.cpp'
       - '.github/workflows/touch-navigation-portable.yml'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementRulerCore.cpp'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/WaveformPeakRangeIndexCore.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipWaveformCacheCore.cpp'
+      - 'My DAW/DAW_Core/Source/UICore/TrackPlaylistInlineLayoutCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/WaveformPeakRangePortableTests.cpp'
   workflow_dispatch:
 
 permissions:
@@ -63,6 +68,8 @@ jobs:
           /tmp/apex_mobile_transport_portrait_tests
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_ubsan
           /tmp/apex_mobile_transport_portrait_ubsan
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/WaveformPeakRangePortableTests.cpp -o /tmp/apex_waveform_peak_range_tests
+          /tmp/apex_waveform_peak_range_tests
       - name: Validate generated Android orientation and immersive activity
         shell: bash
         run: python3 -m unittest discover -s Android/scripts/tests -p 'test_enable_immersive_fullscreen.py' -v

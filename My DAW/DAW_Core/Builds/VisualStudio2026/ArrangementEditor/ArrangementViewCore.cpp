@@ -2,9 +2,7 @@
 // ArrangementViewCore.cpp
 // ===========================================================================
 #include "ArrangementViewCore.h"
-#include "TouchNavigationMath.h"
 #include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
-#include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroMappingCore.h"
 #include "../../../Source/AutomationCore/AutomationMacroVst3TargetCore.h"
@@ -177,6 +175,8 @@ namespace ArrangementEditor
         , m_pianoRollBtn(PianoRollButtonCore::Style::ToolbarButton)
         , m_ghostOverlay(*this)
     {
+        setOpaque(true);
+
         // Initialize timers for deferred operations
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
@@ -184,7 +184,7 @@ namespace ArrangementEditor
         addAndMakeVisible(m_headerClipGuard);
         addAndMakeVisible(m_toolbar);
         addAndMakeVisible(m_ruler);
-        addAndMakeVisible(m_rubberBand);
+        addChildComponent(m_rubberBand);
         addAndMakeVisible(m_splitIndicator);
         // Keep the existing Piano Roll component, but do not display or
         // activate it during APEX's audio-first release.
@@ -343,12 +343,6 @@ namespace ArrangementEditor
             repaint();
         };
 
-        // Wire zoom callbacks
-        m_zoom.onZoomChanged = [this]() {
-            rebuildClipRenderers();
-            repaint();
-        };
-
         // Wire rubber band
         m_rubberBand.onSelectionChanged = [this](juce::Rectangle<int> bounds)
         {
@@ -385,7 +379,6 @@ namespace ArrangementEditor
         m_clipState.onClipRemoved = nullptr;
         m_clipState.onClipChanged = nullptr;
         m_clipState.onStateChanged = nullptr;
-        m_zoom.onZoomChanged = nullptr;
         m_toolState.removeListener(this);
         DAW::CommandManager::getInstance().removeListener(this);
     }
@@ -765,17 +758,6 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::paint(juce::Graphics& g)
     {
-        // Keep the ruler in sync with the real viewport position. The scroll
-        // callback path is not wired, so the ruler's scroll offset went stale
-        // and its bar numbers drifted away from the clip positions while
-        // scrolling.
-        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-        {
-            const int viewX = viewport->getViewPositionX();
-            const int viewY = viewport->getViewPositionY();
-            if (viewX != m_viewportScrollX || viewY != m_viewportScrollY)
-                setViewportScrollOffset(viewX, viewY);
-        }
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
 
         if (metricsActive)
@@ -804,16 +786,19 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
         const int trackCount = getArrangementTrackCount();
         const int contentTop = arrangementContentTop();
-        const auto visibleBounds = getViewportVisibleBounds();
+        const auto visibleBounds = getViewportVisibleBounds().getIntersection(g.getClipBounds());
+        if (visibleBounds.isEmpty())
+            return;
+
         // The unfolded take bands consume real vertical content height. Do
         // not cull the physical tracks below using uniform-height division.
-        const int firstVisibleTrack = juce::jlimit(0, trackCount,
-            juce::jmax(0, getLaneIndexForY(visibleBounds.getY()) < 0
-                ? (getInlineExpandedLaneIndex() >= 0
-                    ? getInlineExpandedLaneIndex() : 0)
-                : getLaneIndexForY(visibleBounds.getY())));
-        const int lastVisibleTrack = juce::jlimit(firstVisibleTrack, trackCount,
-            juce::jmax(firstVisibleTrack + 1, getLaneIndexForY(visibleBounds.getBottom() - 1) + 2));
+        const auto laneHeight = static_cast<int>(m_zoom.getTrackHeightPx());
+        const auto firstBand = DAW::TrackPlaylistInlineLayoutCore::anchorAtY(
+            visibleBounds.getY(), laneHeight, getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels);
+        const auto lastBand = DAW::TrackPlaylistInlineLayoutCore::anchorAtY(
+            visibleBounds.getBottom() - 1, laneHeight, getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels);
+        const int firstVisibleTrack = juce::jlimit(0, trackCount, firstBand.lane);
+        const int lastVisibleTrack = juce::jlimit(firstVisibleTrack, trackCount, lastBand.lane + 1);
         const int visibleTrackCount = juce::jmax(0, lastVisibleTrack - firstVisibleTrack);
 
         // These counters are only incremented when metrics are active,
@@ -850,28 +835,21 @@ namespace ArrangementEditor
             // scrolled content, so it must NOT subtract the scroll offset.
             // Subtracting it shifted every bar line away from the clips and
             // the ruler as soon as the view scrolled.
-            auto timeToLaneX = [this](double t) { return (int) m_zoom.timeToX(t); };
-            const double viewStart = m_zoom.xToTime((double) m_viewportScrollX);
-            const double viewEnd   = m_zoom.xToTime((double) (m_viewportScrollX + getWidth()));
-            const int    gridVisibleX0 = (int) visibleBounds.getX();
-            const int    gridVisibleX1 = (int) visibleBounds.getRight();
-
+            const int gridVisibleX0 = visibleBounds.getX();
+            const int gridVisibleX1 = visibleBounds.getRight();
             const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
-            const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-            const int    barStart  = (int) (viewStart / barDuration);
-            const int    barEnd    = (int) (viewEnd   / barDuration) + 1;
-            const int    barStep   = GridLodPolicy::barStep(pxPerBar);
-            const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
+            const double pxPerBar = barDuration * m_zoom.getPixelsPerSecond();
+            const int barStep = GridLodPolicy::barStep(pxPerBar);
+            const bool noBeats = GridLodPolicy::suppressBeats(pxPerBeat);
+            const int step = noBeats ? barStep : 1;
+            const auto bars = GridLodPolicy::visibleBars(
+                gridVisibleX0, gridVisibleX1, pxPerBar, step);
 
-            for (int bar = barStart; bar <= barEnd; ++bar)
+            for (auto bar = bars.first; gridBottom > gridTop && bar <= bars.last; bar += step)
             {
-                // Skip bars at extreme zoom-out to reduce GPU draw calls
-                if (barStep > 1 && (bar % barStep) != 0)
-                    continue;
-
                 const double barTime = bar * barDuration;
-                const int x = timeToLaneX(barTime);
-                if (x >= gridVisibleX0 && x <= gridVisibleX1)
+                const int x = timeToScreenX(barTime);
+                if (bar % barStep == 0 && x >= gridVisibleX0 && x < gridVisibleX1)
                 {
                     g.setColour(fromU32(Col::gridBar).withAlpha(0.55f));
                     g.drawVerticalLine(x, gridTop, gridBottom);
@@ -886,8 +864,8 @@ namespace ArrangementEditor
                 g.setColour(fromU32(Col::gridBeat).withAlpha(0.22f));
                 for (int beat = 1; beat < 4; ++beat)
                 {
-                    const int beatX = timeToLaneX(barTime + beat * beatDuration);
-                    if (beatX >= gridVisibleX0 && beatX <= gridVisibleX1)
+                    const int beatX = timeToScreenX(barTime + beat * beatDuration);
+                    if (beatX >= gridVisibleX0 && beatX < gridVisibleX1)
                     {
                         g.drawVerticalLine(beatX, gridTop, gridBottom);
                         if (metricsActive)
@@ -1056,7 +1034,7 @@ namespace ArrangementEditor
         m_marqueeHitGeometry.reserve(m_clipRenderers.size());
         for (const auto& renderer : m_clipRenderers)
             if (renderer != nullptr)
-                m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getBounds());
+                m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getDisplayedOrTimelineBounds());
 
         m_rubberBand.startDrag(m_gestureDownPos);
         if (onEngineClipSelectionCleared)
@@ -1147,6 +1125,10 @@ namespace ArrangementEditor
 
         if (touchCount >= 2)
         {
+            if (m_rubberBand.isVisible())
+                m_rubberBand.endDrag();
+            m_marqueePending = false;
+
             // A second finger changes the gesture owner from region editing
             // to navigation. Discard the uncommitted move rather than
             // allowing viewport pinch + clip drag in the same transaction.
@@ -1163,93 +1145,51 @@ namespace ArrangementEditor
 
             // SCREEN coordinates are stable across Viewport scrolling. Using
             // content-local deltas fed scrolling back into itself (jitter).
-            const auto centreScreen = (firstTouch + secondTouch) * 0.5f;
-            const double sepX = std::abs((double) firstTouch.x - (double) secondTouch.x);
-            const double sepY = std::abs((double) firstTouch.y - (double) secondTouch.y);
+            const auto firstInView = viewport->getLocalPoint(nullptr, firstTouch);
+            const auto secondInView = viewport->getLocalPoint(nullptr, secondTouch);
+            const auto centreInView = (firstInView + secondInView) * 0.5f;
+            const double sepX = std::abs(static_cast<double>(firstInView.x) - secondInView.x);
+            const double sepY = std::abs(static_cast<double>(firstInView.y) - secondInView.y);
             if (! m_twoFingerGestureActive)
             {
                 ++m_touchGestureEpoch; // cancel any pending selected-clip tap menu
+                m_pinchAxis = TouchNavigationMath::PinchAxis::undecided;
                 m_twoFingerGestureActive = true;
-                m_lastTwoFingerPos = centreScreen;
+                m_lastPinchCentre = centreInView;
                 m_lastPinchSepX = sepX;
                 m_lastPinchSepY = sepY;
                 return true;
             }
 
-            const auto delta = centreScreen - m_lastTwoFingerPos;
-            const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
-            const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
-            const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-            const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-            const int beforeX = viewport->getViewPositionX();
-            const int beforeY = viewport->getViewPositionY();
-            const int nextX = TouchNavigationMath::panPosition(beforeX, delta.x, maxX);
-            const int nextY = TouchNavigationMath::panPosition(beforeY, delta.y, maxY);
-            // At an edge, a saturated pinch may change finger separation but
-            // neither viewport position nor zoom. Avoid redundant viewport
-            // layout and low-detail waveform paint in that case.
-            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
-            {
-                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                viewport->setViewPosition(nextX, nextY);
-            }
+            using Axis = TouchNavigationMath::PinchAxis;
+            if (m_pinchAxis == Axis::undecided)
+                m_pinchAxis = TouchNavigationMath::pinchAxis(
+                    m_lastPinchSepX, m_lastPinchSepY, sepX, sepY);
 
-            // Horizontal spread = time zoom. Keep the musical time under the
-            // two-finger midpoint fixed rather than zooming toward song start.
-            // Compare to LAST APPLIED separation to catch slow pinches.
-            if (zoomingX)
+            double pps = m_zoom.getPixelsPerSecond();
+            double height = m_zoom.getTrackHeightPx();
+            if ((m_pinchAxis == Axis::horizontal || m_pinchAxis == Axis::both)
+                && TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX))
             {
-                const double oldPps = m_zoom.getPixelsPerSecond();
-                const double newPps = TouchNavigationMath::pinchZoomTarget(
-                    oldPps, TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX),
-                    2.0, 4000.0);
-                if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
-                {
-                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                    const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
-                    const double focusViewportX = focusX - viewport->getViewPositionX();
-                    m_zoom.setPixelsPerSecond(newPps);
-                    viewport->setViewPosition(
-                        TouchNavigationMath::zoomPosition(focusX, focusViewportX,
-                            newPps / juce::jmax(1.0, oldPps),
-                            juce::jmax(0, getWidth() - viewport->getViewWidth()),
-                            viewport->getViewPositionX()),
-                        viewport->getViewPositionY());
-                    repaint();
-                }
+                pps *= TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX);
                 m_lastPinchSepX = sepX;
             }
-
-            // Vertical spread = lane zoom; preserve the lane beneath fingers.
-            if (zoomingY)
+            if ((m_pinchAxis == Axis::vertical || m_pinchAxis == Axis::both)
+                && TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY))
             {
-                const double oldH = m_zoom.getTrackHeightPx();
-                const double newH = TouchNavigationMath::pinchZoomTarget(
-                    oldH, TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY),
-                    24.0, 180.0);
-                if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
-                {
-                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                    const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
-                    const double focusViewportY = focusY - viewport->getViewPositionY();
-                    const double contentTop = (double) arrangementContentTop();
-                    m_zoom.setTrackHeightPx(newH);
-                    const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
-                    viewport->setViewPosition(viewport->getViewPositionX(),
-                        juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
-                            juce::roundToInt(newFocusY - focusViewportY)));
-                    repaint();
-                }
+                height *= TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY);
                 m_lastPinchSepY = sepY;
             }
+            zoomViewport(pps, height, m_lastPinchCentre.toDouble(), centreInView.toDouble());
 
-            m_lastTwoFingerPos = centreScreen;
+            m_lastPinchCentre = centreInView;
             return true;
         }
 
         // On 2 -> 1 fingers, acquire a new one-finger screen anchor rather
         // than jumping to the obsolete single-finger pan origin.
         m_twoFingerGestureActive = false;
+        m_pinchAxis = TouchNavigationMath::PinchAxis::undecided;
         m_lastPinchSepX = 0.0;
         m_lastPinchSepY = 0.0;
 
@@ -1306,7 +1246,6 @@ namespace ArrangementEditor
                 m_touchScrollActive = false;
                 m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
                 m_smoothedTouchValid = false;
-                ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
                 return false;
             }
             // One finger pans the timeline — anchored, with a 6 px slop so a
@@ -1398,7 +1337,7 @@ namespace ArrangementEditor
                 m_marqueeHitGeometry.reserve(m_clipRenderers.size());
                 for (const auto& renderer : m_clipRenderers)
                     if (renderer != nullptr)
-                        m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getBounds());
+                        m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getDisplayedOrTimelineBounds());
                 m_rubberBand.startDrag(m_holdLocalPos.toInt());
                 if (onEngineClipSelectionCleared)
                     onEngineClipSelectionCleared();
@@ -1411,22 +1350,13 @@ namespace ArrangementEditor
                 return true;
             }
 
-            // A one-finger drag pinned at an edge (or moving < 1 pixel)
-            // must not trigger low-detail waveform painting or redundant
-            // Viewport notifications. A free axis still scrolls normally.
-            const int beforeX = viewport->getViewPositionX();
-            const int beforeY = viewport->getViewPositionY();
-            const int nextX = TouchNavigationMath::panPosition(m_gestureStartViewX,
-                pos.x - m_touchPanDownScreenPos.x,
-                juce::jmax(0, getWidth() - viewport->getViewWidth()));
-            const int nextY = TouchNavigationMath::panPosition(m_gestureStartViewY,
-                pos.y - m_touchPanDownScreenPos.y,
-                juce::jmax(0, getHeight() - viewport->getViewHeight()));
-            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
-            {
-                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-                viewport->setViewPosition(nextX, nextY);
-            }
+            viewport->setViewPosition(
+                TouchNavigationMath::panPosition(m_gestureStartViewX,
+                    pos.x - m_touchPanDownScreenPos.x,
+                    juce::jmax(0, getWidth() - viewport->getViewWidth())),
+                TouchNavigationMath::panPosition(m_gestureStartViewY,
+                    pos.y - m_touchPanDownScreenPos.y,
+                    juce::jmax(0, getHeight() - viewport->getViewHeight())));
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
@@ -1441,8 +1371,6 @@ namespace ArrangementEditor
             return true;
         }
 
-        m_gestureIsPinch = false;
-
         // Exponential decay per frame. 0.967 per 16 ms frame is the iOS
         // UIScrollView "normal" deceleration (0.998 per ms) — the natural,
         // long glide. 0.93 was stopping noticeably short.
@@ -1450,37 +1378,29 @@ namespace ArrangementEditor
         m_touchPanVelocityY *= 0.967;
 
         if (std::abs(m_touchPanVelocityX) < 0.35 && std::abs(m_touchPanVelocityY) < 0.35)
-        {
-            // End of touch momentum: the zoom callback has already rebuilt
-            // clip geometry, and viewport scrolling updates renderer visibility.
-            // Rebuilding every clip here adds a full-project hitch to a pure
-            // pan. Keep the automation layout refresh for pinch/track zoom.
-            const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
-                false, std::memory_order_relaxed);
-            if (wasLightweight)
-            {
-                updateAutomationLayout();
-                repaint(getViewportVisibleBounds());
-            }
             return false;
-        }
 
-        const int maxX = juce::jmax(0, getWidth()  - viewport->getViewWidth());
-        const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-        const int beforeX = viewport->getViewPositionX();
-        const int beforeY = viewport->getViewPositionY();
-        const int nextX = TouchNavigationMath::panPosition(beforeX, m_touchPanVelocityX, maxX);
-        const int nextY = TouchNavigationMath::panPosition(beforeY, m_touchPanVelocityY, maxY);
-        viewport->setViewPosition(nextX, nextY);
+        const auto before = viewport->getViewPosition();
+        const auto next = juce::Point<int>(
+            TouchNavigationMath::panPosition(before.x, m_touchPanVelocityX,
+                juce::jmax(0, getWidth() - viewport->getViewWidth())),
+            TouchNavigationMath::panPosition(before.y, m_touchPanVelocityY,
+                juce::jmax(0, getHeight() - viewport->getViewHeight())));
+        if (next != before)
+            viewport->setViewPosition(next);
 
-        // An axis pinned at the start/end (or too slow to move one pixel)
-        // must not keep a 60 Hz inertia timer alive for hundreds of frames.
-        // Stop only the blocked axis so diagonal flings still glide freely.
-        m_touchPanVelocityX = TouchNavigationMath::inertiaVelocityAfterMove(
-            m_touchPanVelocityX, beforeX, viewport->getViewPositionX());
-        m_touchPanVelocityY = TouchNavigationMath::inertiaVelocityAfterMove(
-            m_touchPanVelocityY, beforeY, viewport->getViewPositionY());
+        const auto actual = viewport->getViewPosition();
+        if (actual.x == before.x) m_touchPanVelocityX = 0.0;
+        if (actual.y == before.y) m_touchPanVelocityY = 0.0;
         return true;
+    }
+
+    void ArrangementViewCore::beginTouchNavigation()
+    {
+        if (!m_inertiaTimer)
+            m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
+        if (!m_inertiaTimer->isTimerRunning())
+            m_inertiaTimer->startTimerHz(60);
     }
 
     void ArrangementViewCore::stopTouchMomentumOnClipPress() noexcept
@@ -1498,12 +1418,6 @@ namespace ArrangementEditor
         m_skipSlop = false;
         m_touchPanVelocityX = 0.0;
         m_touchPanVelocityY = 0.0;
-        const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
-            false, std::memory_order_relaxed);
-        // A new clip press interrupts inertia. Restore detailed waveforms in
-        // the visible viewport without rebuilding every clip in the project.
-        if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
-            repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
@@ -1547,13 +1461,6 @@ namespace ArrangementEditor
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
-            const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
-                false, std::memory_order_relaxed);
-            // No fling follows this release. Restore waveform detail now;
-            // otherwise the last low-detail frame can remain on screen until
-            // an unrelated redraw. Pure pan does not require a clip rebuild.
-            if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
-                repaint(getViewportVisibleBounds());
         }
     }
 
@@ -1995,7 +1902,7 @@ namespace ArrangementEditor
                 auto* renderer = findClipRendererFor(id);
                 if (clip == nullptr || renderer == nullptr)
                     continue;
-                const auto bounds = renderer->getBounds();
+                const auto bounds = renderer->getDisplayedOrTimelineBounds();
                 const int top = juce::jmax(bounds.getY() + 17, protectedTop);
                 if (top >= bounds.getBottom())
                     continue;
@@ -2081,10 +1988,102 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::resized()
     {
-        updatePinnedViewportControls();
+        if (m_applyingViewportZoom)
+            return;
 
-        rebuildClipRenderers();
+        updatePinnedViewportControls();
+        updateClipRendererVisibility();
         updateAutomationLayout();
+    }
+
+    juce::Point<double> ArrangementViewCore::getPreciseViewportOrigin() const
+    {
+        if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        {
+            const auto actual = viewport->getViewPosition();
+            return { actual.x + (actual.x == m_viewportScrollX ? m_viewportRemainder.x : 0.0),
+                     actual.y + (actual.y == m_viewportScrollY ? m_viewportRemainder.y : 0.0) };
+        }
+        return {};
+    }
+
+    ArrangementViewCore::ViewportZoomAnchor ArrangementViewCore::captureViewportZoomAnchor(
+        juce::Point<double> focus) const
+    {
+        const auto content = getPreciseViewportOrigin() + focus;
+        return { m_zoom.xToTime(content.x),
+                 DAW::TrackPlaylistInlineLayoutCore::anchorAtY(
+                    content.y, static_cast<int>(m_zoom.getTrackHeightPx()),
+                    getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels) };
+    }
+
+    void ArrangementViewCore::zoomViewport(double pixelsPerSecond, double trackHeight,
+                                           juce::Point<double> focusBefore, juce::Point<double> focusAfter,
+                                           const ViewportZoomAnchor* capturedAnchor)
+    {
+        if (m_applyingViewportZoom)
+            return;
+
+        // Keep existing edit captures in their original coordinate system.
+        // The touch path cancels a pending clip move before entering here.
+        if (m_drag.active || m_drag.pending || m_rubberBand.isVisible())
+            return;
+
+        const auto anchor = capturedAnchor != nullptr ? *capturedAnchor
+                                                       : captureViewportZoomAnchor(focusBefore);
+        const auto origin = getPreciseViewportOrigin();
+        const bool horizontalZoom = m_zoom.setPixelsPerSecond(pixelsPerSecond);
+        const bool verticalZoom = m_zoom.setTrackHeightPx(trackHeight);
+        const bool zoomChanged = horizontalZoom || verticalZoom;
+        if (!zoomChanged && focusBefore == focusAfter)
+            return;
+        if (zoomChanged)
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementZoomUpdates);
+
+        auto* viewport = findParentComponentOfClass<juce::Viewport>();
+        auto positionedOrigin = origin;
+        if (viewport != nullptr)
+        {
+            {
+                const juce::ScopedValueSetter<bool> transaction(m_applyingViewportZoom, zoomChanged);
+                if (zoomChanged && onViewportZoomLayout)
+                    onViewportZoomLayout(verticalZoom);
+
+                const auto viewOrigin = viewport->getViewPosition();
+                if (horizontalZoom || focusBefore.x != focusAfter.x)
+                    positionedOrigin.x = ArrangementZoomCore::scrollOrigin(
+                        m_zoom.timeToX(anchor.seconds), focusAfter.x, getWidth(), viewport->getViewWidth());
+                if (verticalZoom || focusBefore.y != focusAfter.y)
+                    positionedOrigin.y = ArrangementZoomCore::scrollOrigin(
+                        DAW::TrackPlaylistInlineLayoutCore::yForAnchor(
+                            anchor.lane, static_cast<int>(m_zoom.getTrackHeightPx()),
+                            getInlineExpandedLaneIndex(), m_inlinePlaylistExtraPixels),
+                        focusAfter.y, getHeight(), viewport->getViewHeight());
+
+                const auto next = positionedOrigin.roundToInt();
+                if (next != viewOrigin)
+                    viewport->setViewPosition(next);
+            }
+
+            const auto actual = viewport->getViewPosition();
+            if (zoomChanged)
+                refreshViewportPresentation(actual.x, actual.y, true);
+            else
+                setViewportScrollOffset(actual.x, actual.y);
+            const auto rounded = positionedOrigin.roundToInt();
+            m_viewportRemainder = { actual.x == rounded.x ? positionedOrigin.x - actual.x : 0.0,
+                                    actual.y == rounded.y ? positionedOrigin.y - actual.y : 0.0 };
+        }
+        else if (zoomChanged)
+        {
+            const juce::ScopedValueSetter<bool> transaction(m_applyingViewportZoom, true);
+            if (onViewportZoomLayout)
+                onViewportZoomLayout(verticalZoom);
+            refreshViewportPresentation(0, 0, true);
+        }
+
+        if (zoomChanged && onViewportZoomCommitted)
+            onViewportZoomCommitted();
     }
 
     void ArrangementViewCore::updatePinnedViewportControls()
@@ -2125,8 +2124,7 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2148,25 +2146,35 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setViewportScrollOffset(int scrollX, int scrollY)
     {
-        scrollX = juce::jmax(0, scrollX);
-        scrollY = juce::jmax(0, scrollY);
+        if (!m_applyingViewportZoom)
+            refreshViewportPresentation(juce::jmax(0, scrollX), juce::jmax(0, scrollY), false);
+    }
 
-        if (m_viewportScrollX == scrollX && m_viewportScrollY == scrollY)
+    void ArrangementViewCore::refreshViewportPresentation(int scrollX, int scrollY, bool zoomChanged)
+    {
+        const auto visible = getViewportVisibleBounds();
+        const juce::Point<int> size(visible.getWidth(), visible.getHeight());
+        const bool scrollChanged = m_viewportScrollX != scrollX || m_viewportScrollY != scrollY;
+        if (!zoomChanged && !scrollChanged && size == m_viewportSize)
             return;
 
+        if (m_viewportScrollX != scrollX) m_viewportRemainder.x = 0.0;
+        if (m_viewportScrollY != scrollY) m_viewportRemainder.y = 0.0;
+        m_viewportSize = size;
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
         m_ruler.setScrollOffsetX(scrollX);
 
-        TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
-        const juce::ScopedValueSetter<bool> scrollGuard(m_inViewportScroll, true);
+        if (scrollChanged && !zoomChanged)
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
+        const juce::ScopedValueSetter<bool> scrollGuard(m_inViewportScroll, scrollChanged && !zoomChanged);
 
-        // Scrolling changes only the viewport-relative controls and which
-        // existing clip components are eligible to paint.  It is not a
-        // structural resize: clip models, bounds, automation layout, and
-        // renderer ownership remain unchanged.
         updatePinnedViewportControls();
-        updateClipRendererVisibility();
+        if (zoomChanged)
+            m_ruler.repaint();
+        updateClipRendererVisibility(zoomChanged);
+        if (zoomChanged)
+            updateAutomationLayout();
 
         // Repaint only the viewport-visible content region.  JUCE coalesces
         // this with the Viewport's exposed-area invalidation, while keeping
@@ -2175,8 +2183,9 @@ namespace ArrangementEditor
         const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());
         if (!visibleRepaint.isEmpty())
         {
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
-            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+            if (m_inViewportScroll)
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollPartialRepaints);
+            if (m_inViewportScroll && TimelinePaintMetrics::active.load(std::memory_order_relaxed))
             {
                 const auto area = static_cast<int64_t>(
                     static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getWidth()))
@@ -2190,7 +2199,8 @@ namespace ArrangementEditor
             // Defensive fallback for an invalid/un-sized viewport.  Normal
             // production scrolls have a non-empty intersection and therefore
             // never take this broad invalidation path.
-            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
+            if (m_inViewportScroll)
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollFullRepaints);
             repaint();
         }
     }
@@ -2307,13 +2317,20 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::setTempoBpm(double bpm)
     {
-        m_tempoBpm = juce::jmax(1.0, bpm);
-        m_ruler.setTempo(m_tempoBpm);
+        if (!std::isfinite(bpm))
+            return;
+        const double tempo = juce::jmax(1.0, bpm);
+        if (m_tempoBpm == tempo)
+            return;
+        m_tempoBpm = tempo;
+        m_ruler.setTempo(tempo);
+        updateAutomationLayout();
+        repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::rebuildClipRenderers()
     {
-        // Guard against recursive rebuild calls (e.g., from zoom callbacks)
+        // Guard against recursive rebuild calls from model notifications.
         if (m_rebuildInProgress)
         {
             m_deferredRebuildRequested = true;
@@ -2333,6 +2350,7 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::rebuildClipRenderersInternal()
     {
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementRendererRebuilds);
         std::set<juce::Uuid> liveClipIds;
         for (const auto& clip : m_clipState.allClips())
             liveClipIds.insert(clip.id);
@@ -2390,36 +2408,36 @@ namespace ArrangementEditor
             m_waveformLoadTimer->startTimer(16);  // ~60 FPS
     }
 
+    juce::Rectangle<int> ArrangementViewCore::getClipLayoutBounds(
+        const ArrangementClipModel& clip, int expandedLane, bool hiddenByFolder) const
+    {
+        const int trackHeight = static_cast<int>(m_zoom.getTrackHeightPx());
+        const double width = clip.visualLength() * m_zoom.getPixelsPerSecond();
+        const int x = timeToScreenX(clip.startTime);
+        const int w = static_cast<int>(std::clamp(std::isfinite(width) ? width : 4.0, 4.0,
+            static_cast<double>(ArrangementZoomCore::maxContentWidth)));
+        if (hiddenByFolder)
+            return { x, -100000, w, 1 };
+
+        const int y = DAW::TrackPlaylistInlineLayoutCore::topOfLane(
+            clip.trackIndex, trackHeight, expandedLane, m_inlinePlaylistExtraPixels);
+        return { x, y, w, trackHeight - 2 };
+    }
+
+    bool ArrangementViewCore::isClipLaneHiddenByFolder(int lane) const
+    {
+        if (m_engineTrackManager == nullptr || m_collapsedFolderIds.empty())
+            return false;
+        const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
+        return lane >= masterOffset && isTrackHiddenByCollapsedFolder(
+            m_engineTrackManager->getTrack(lane - masterOffset));
+    }
+
     void ArrangementViewCore::upsertClipRenderer(const juce::Uuid& clipId)
     {
         auto* clip = m_clipState.findClip(clipId);
         if (clip == nullptr)
             return;
-
-        int toolbarH = 48;
-        int rulerH = 32;
-        int trackH = (int)m_zoom.getTrackHeightPx();
-
-        int x = timeToScreenX(clip->startTime);
-        int w = (int)(clip->visualLength() * m_zoom.getPixelsPerSecond());
-        w = juce::jmax(4, w);
-        int y = getLaneTopForIndex(clip->trackIndex);
-        int h = trackH - 2;
-
-        // Collapsed folder: keep the renderer alive but park it offscreen so
-        // expanding the folder restores every clip instantly. laneIndex 0 is
-        // the MASTER lane; regular tracks sit at laneIndex = index + offset.
-        if (m_engineTrackManager != nullptr)
-        {
-            const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
-            if (clip->trackIndex >= masterOffset)
-                if (auto* track = m_engineTrackManager->getTrack(clip->trackIndex - masterOffset))
-                    if (isTrackHiddenByCollapsedFolder(track))
-                    {
-                        y = -100000;
-                        h = 1;
-                    }
-        }
 
         DAW::AudioFileManager::CachedAudioHandle cachedAudio;
         bool hasEngineAudioOwner = false;
@@ -2433,12 +2451,14 @@ namespace ArrangementEditor
             }
         }
 
-        const juce::Rectangle<int> targetBounds(x, y, w, h);
+        const auto targetBounds = getClipLayoutBounds(
+            *clip, getInlineExpandedLaneIndex(), isClipLaneHiddenByFolder(clip->trackIndex));
 
         if (auto* renderer = findClipRendererFor(clipId))
         {
             renderer->updateClipData(*clip);
             renderer->setCachedAudioHandle(cachedAudio, !hasEngineAudioOwner);
+            renderer->setTimelineBounds(targetBounds);
             if (renderer->getBounds() != targetBounds)
                 renderer->setBounds(targetBounds);
             renderer->setSelected(m_selection.isSelected(clip->id));
@@ -2458,6 +2478,7 @@ namespace ArrangementEditor
             const_cast<ArrangementClipModel&>(*clip), m_zoom,
             std::move(cachedAudio), !hasEngineAudioOwner);
         renderer->setEngineSampleRate (m_engineSampleRate);
+        renderer->setTimelineBounds(targetBounds);
         renderer->setBounds(targetBounds);
         renderer->setSelected(m_selection.isSelected(clip->id));
 
@@ -3199,6 +3220,9 @@ namespace ArrangementEditor
             return;
         }
 
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            beginTouchNavigation();
+
         // Free View Mode: view only — no selection, no drags, no marquee.
         if (m_viewOnlyMode)
             return;
@@ -3273,18 +3297,6 @@ namespace ArrangementEditor
             }
         }
 
-        // Start the gesture clock on touch DOWN, not the first drag event.
-        // Stationary long-presses on empty space otherwise never fire.
-        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch
-            && m_toolState.getActiveTool() == EditorTool::Select
-            && !m_viewOnlyMode && findClipAt(e.getPosition()) == nullptr)
-        {
-            if (! m_inertiaTimer)
-                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (!m_inertiaTimer->isTimerRunning())
-                m_inertiaTimer->startTimerHz(60);
-        }
-
         grabKeyboardFocus();
 
         if (m_toolState.getActiveTool() != EditorTool::Split
@@ -3352,20 +3364,14 @@ namespace ArrangementEditor
                 if (activeFingers > 1)
                 {
                     cancelClipDragForTouchNavigation();
-                    if (!m_inertiaTimer)
-                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-                    if (!m_inertiaTimer->isTimerRunning())
-                        m_inertiaTimer->startTimerHz(60);
+                    beginTouchNavigation();
                     return;
                 }
 
                 updateClipDrag(e.getPosition());
                 return;
             }
-            if (!m_inertiaTimer)
-                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            if (!m_inertiaTimer->isTimerRunning())
-                m_inertiaTimer->startTimerHz(60);
+            beginTouchNavigation();
             return;
         }
 
@@ -3456,7 +3462,6 @@ namespace ArrangementEditor
             m_holdActive = false;
             m_holdDragging = false;
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
             showEmptyTrackContextMenu(e.getScreenPosition(), e.getPosition());
@@ -3663,61 +3668,34 @@ namespace ArrangementEditor
     {
         if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
         {
-            if (e.mods.isCtrlDown())
+            const auto focus = viewport->getLocalPoint(this, e.position).toDouble();
+            const double pps = m_zoom.getPixelsPerSecond();
+            const double height = m_zoom.getTrackHeightPx();
+            const double factor = std::pow(1.2, static_cast<double>(wheel.deltaY) * 2.0);
+            if (e.mods.isCtrlDown() || e.mods.isCommandDown())
+                zoomViewport(pps * factor, height, focus, focus);
+            else if (e.mods.isAltDown())
+                zoomViewport(pps, height * factor, focus, focus);
+            else
             {
-                // Ctrl+scroll = horizontal zoom, anchored to mouse position
-                const double oldPps = m_zoom.getPixelsPerSecond();
-                const double anchorTime = m_zoom.xToTime((double)e.x);
-                const int mouseXInViewport = e.x - viewport->getViewPositionX();
-                const double newPps = TouchNavigationMath::wheelZoomTarget(
-                    oldPps, (double)wheel.deltaY, 10.0, 4000.0);
-                // At the zoom limit (or with malformed input), do not shift
-                // the anchor or schedule viewport work for an unchanged zoom.
-                if (newPps == oldPps)
-                    return;
-
-                m_zoom.setPixelsPerSecond(newPps);
-
-                const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-                const int anchoredViewX = TouchNavigationMath::zoomPosition(
-                    (double)e.x, (double)mouseXInViewport, newPps / oldPps,
-                    maxX, viewport->getViewPositionX());
-                viewport->setViewPosition(anchoredViewX, viewport->getViewPositionY());
-                return;
+                const bool shift = e.mods.isShiftDown();
+                const double dx = shift && wheel.deltaX == 0.0f ? wheel.deltaY : wheel.deltaX;
+                const double dy = shift ? 0.0 : wheel.deltaY;
+                if (std::isfinite(dx) && std::isfinite(dy))
+                    zoomViewport(pps, height, {}, { dx * 120.0, dy * 120.0 });
             }
+        }
+    }
 
-            if (e.mods.isAltDown())
-            {
-                // Alt+scroll = vertical zoom (track/lane height), anchored to mouse Y
-                const double oldH = (double)m_zoom.getTrackHeightPx();
-                const double anchorTrackY = (double)(e.y);  // content-local Y
-                const int mouseYInViewport = e.y - viewport->getViewPositionY();
-                const double newH = TouchNavigationMath::wheelZoomTarget(
-                    oldH, (double)wheel.deltaY, 24.0, 180.0);
-                // A saturated wheel gesture must not move the viewport anchor
-                // or rebuild the renderers when the effective height is fixed.
-                if (newH == oldH)
-                    return;
-
-                m_zoom.setTrackHeightPx(newH);
-
-                // Keep the track under the cursor visually stable
-                const double scale = newH / juce::jmax(1.0, oldH);
-                const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-                const int anchoredViewY = TouchNavigationMath::zoomPosition(
-                    anchorTrackY, (double)mouseYInViewport, scale,
-                    maxY, viewport->getViewPositionY());
-                viewport->setViewPosition(viewport->getViewPositionX(), anchoredViewY);
+    void ArrangementViewCore::mouseMagnify(const juce::MouseEvent& e, float magnifyAmount)
+    {
+        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        {
+            if (!(magnifyAmount > 0.0f) || !std::isfinite(magnifyAmount))
                 return;
-            }
-
-            // Plain scroll
-            const int dx = juce::roundToInt((wheel.deltaX != 0.0f ? -wheel.deltaX : 0.0f) * 120.0f);
-            const int dy = juce::roundToInt((wheel.deltaY != 0.0f ? -wheel.deltaY : 0.0f) * 120.0f);
-            const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-            const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-            viewport->setViewPosition(juce::jlimit(0, maxX, viewport->getViewPositionX() + dx),
-                                      juce::jlimit(0, maxY, viewport->getViewPositionY() + dy));
+            const auto focus = viewport->getLocalPoint(this, e.position).toDouble();
+            zoomViewport(m_zoom.getPixelsPerSecond() * magnifyAmount,
+                         m_zoom.getTrackHeightPx(), focus, focus);
         }
     }
 
@@ -3863,10 +3841,7 @@ namespace ArrangementEditor
                 if (arrangementFingers > 1)
                 {
                     cancelClipDragForTouchNavigation();
-                    if (!m_inertiaTimer)
-                        m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-                    if (!m_inertiaTimer->isTimerRunning())
-                        m_inertiaTimer->startTimerHz(60);
+                    beginTouchNavigation();
                     return;
                 }
             }
@@ -3945,7 +3920,7 @@ namespace ArrangementEditor
                 m_marqueeHitGeometry.reserve(m_clipRenderers.size());
                 for (const auto& renderer : m_clipRenderers)
                     if (renderer != nullptr)
-                        m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getBounds());
+                        m_marqueeHitGeometry.emplace_back(renderer->getClipId(), renderer->getDisplayedOrTimelineBounds());
 
                 m_rubberBand.startDrag(e.getPosition());
                 if (onEngineClipSelectionCleared)
@@ -4532,18 +4507,31 @@ namespace ArrangementEditor
         const int overscanY = juce::jmax(ArrangementClipLodPolicy::kViewportOverscanPx, trackH);
         const auto renderRegion = getViewportVisibleBounds().expanded(
             ArrangementClipLodPolicy::kViewportOverscanPx, overscanY);
-        return renderRegion.intersects(renderer.getBounds());
+        return renderRegion.intersects(renderer.getTimelineBounds());
     }
 
-    void ArrangementViewCore::updateClipRendererVisibility()
+    void ArrangementViewCore::updateClipRendererVisibility(bool updateBounds)
     {
+        const int overscan = ArrangementClipLodPolicy::kViewportOverscanPx;
+        const auto renderRegion = getViewportVisibleBounds().expanded(
+            overscan, juce::jmax(overscan, static_cast<int>(m_zoom.getTrackHeightPx())));
+        const int expandedLane = updateBounds ? getInlineExpandedLaneIndex() : -1;
         for (auto& renderer : m_clipRenderers)
         {
-            if (renderer == nullptr)
-                continue;
+            if (updateBounds)
+            {
+                const auto* clip = renderer->getClip();
+                const bool hiddenByFolder = renderer->getTimelineBounds().getY() < 0;
+                renderer->setTimelineBounds(getClipLayoutBounds(*clip, expandedLane, hiddenByFolder));
+            }
 
             const bool wasVisible = renderer->isVisible();
-            const bool shouldBeVisible = shouldShowClipRenderer(*renderer);
+            const auto bounds = renderer->getTimelineBounds();
+            const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
+                || renderRegion.intersects(bounds);
+            if (shouldBeVisible && (updateBounds || (!wasVisible && !m_drag.active))
+                && bounds != renderer->getBounds())
+                renderer->setBounds(bounds);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
@@ -4585,7 +4573,7 @@ namespace ArrangementEditor
         else
         {
             for (const auto& renderer : m_clipRenderers)
-                if (renderer != nullptr && bounds.intersects(renderer->getBounds()))
+                if (renderer != nullptr && bounds.intersects(renderer->getDisplayedOrTimelineBounds()))
                     selectedIds.insert(renderer->getClipId());
         }
 
@@ -4599,7 +4587,7 @@ namespace ArrangementEditor
     {
         for (auto& renderer : m_clipRenderers)
         {
-            if (renderer->getBounds().contains(pos))
+            if (renderer->getDisplayedOrTimelineBounds().contains(pos))
                 return renderer.get();
         }
         return nullptr;
@@ -4763,12 +4751,16 @@ namespace ArrangementEditor
 
     int ArrangementViewCore::timeToScreenX(double time) const
     {
-        return (int)m_zoom.timeToX(time);
+        if (!std::isfinite(time))
+            return 0;
+        return static_cast<int>(std::clamp(m_zoom.timeToX(time),
+            -static_cast<double>(ArrangementZoomCore::maxContentWidth),
+            static_cast<double>(ArrangementZoomCore::maxContentWidth)));
     }
 
     int ArrangementViewCore::arrangementContentTop() const
     {
-        return 48 + 32;
+        return DAW::TrackPlaylistInlineLayoutCore::contentTop;
     }
 
     int ArrangementViewCore::computeClampedDragAnchorX() const
@@ -6798,7 +6790,7 @@ namespace ArrangementEditor
             juce::Rectangle<int> bounds;
             if (selectedRenderer != nullptr)
             {
-                bounds = selectedRenderer->getBounds();
+                bounds = selectedRenderer->getDisplayedOrTimelineBounds();
             }
             else
             {
@@ -6865,7 +6857,6 @@ namespace ArrangementEditor
         m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
         if (m_inertiaTimer)
             m_inertiaTimer->stopTimer();
-        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
 
         appendDebugLog("[startClipDrag end] selectionCount=" + juce::String(m_selection.getSelectionCount())
             + " dragItemCount=" + juce::String((int)m_drag.items.size()));
@@ -7545,6 +7536,7 @@ DAW::AutomationLaneContainerComponent* ArrangementViewCore::getOrCreateAutomatio
     addAndMakeVisible(container.get());
     container->setEnabled(true);
     m_automationContainers[trackId] = std::move(container);
+    ensureToolbarZOrder();
 
     resized();
     return ptr;
@@ -8310,10 +8302,6 @@ void ArrangementViewCore::clearAutomationLanes(const DAW::TrackID& trackId)
 
 void ArrangementViewCore::updateAutomationLayout()
 {
-    // Send all clip renderers to the back first
-    for (auto& r : m_clipRenderers)
-        r->toBack();
-
     for (auto& [trackId, container] : m_automationContainers)
     {
         if (container == nullptr)
@@ -8344,20 +8332,12 @@ void ArrangementViewCore::updateAutomationLayout()
 
         container->setVisible(true);
         container->setBounds(laneBounds.getX(), y, laneBounds.getWidth(), height);
-        container->toFront(false);
         container->setSamplesPerPixel(juce::jmax(1.0, m_engineSampleRate / juce::jmax(1.0, m_zoom.getPixelsPerSecond())));
         container->setZoomLevel(m_zoom.getPixelsPerSecond());
         container->setSampleRate(m_engineSampleRate);
         container->setTempoBpm(m_tempoBpm);
         container->repaint();
-
-        DBG("[TIMELINE-RECOVERY] automation lane bounds track=" << trackId
-            << " y=" << y << " h=" << height);
     }
-
-    // Re-front the pinned toolbar/ruler AFTER every container toFront so the
-    // Quick New Track button always wins hit-testing in the pinned strip.
-    ensureToolbarZOrder();
 }
 
 void ArrangementViewCore::changeListenerCallback(juce::ChangeBroadcaster* source)
@@ -8411,11 +8391,12 @@ void ArrangementViewCore::setInlinePlaylistExpansion(
         return;
     m_inlinePlaylistTrackId = trackId;
     m_inlinePlaylistExtraPixels = clamped;
-    // Structural UI layout only; clips are never recreated and audio stays on
-    // the existing track. This updates renderer Y and automation containers.
-    rebuildClipRenderers();
-    updateAutomationLayout();
-    repaint();
+    if (!m_applyingViewportZoom)
+    {
+        updateClipRendererVisibility(true);
+        updateAutomationLayout();
+        repaint(getViewportVisibleBounds());
+    }
 }
 
 int ArrangementViewCore::getYForTrackId(const DAW::TrackID& trackId) const
@@ -8469,7 +8450,7 @@ juce::Rectangle<int> ArrangementViewCore::getTrackLaneBounds(const DAW::TrackID&
 juce::Rectangle<int> ArrangementViewCore::getClipBounds(const juce::Uuid& clipId) const
 {
     if (auto* renderer = findClipRendererFor(clipId))
-        return renderer->getBounds();
+        return renderer->getDisplayedOrTimelineBounds();
     return {};
 }
 
@@ -8627,7 +8608,7 @@ ArrangementViewCore::getVisibleWaveformReadinessForDiagnostics() const
         }
 
         // Skip renderers outside the visible viewport
-        if (!visibleRect.intersects(renderer->getBounds()))
+        if (!visibleRect.intersects(renderer->getDisplayedOrTimelineBounds()))
             continue;
 
         // Count all renderers intersecting viewport (audio, MIDI, pattern)
