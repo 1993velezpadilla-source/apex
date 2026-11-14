@@ -417,12 +417,15 @@ namespace ArrangementEditor
         if (s_viewOnlyMode.load(std::memory_order_relaxed))
             return;
 
-        // Touching a region claims the prior fling even on a stationary tap.
-        // A clip owns this pointer, so parent mouseDown is not guaranteed to
-        // see it; stop the old inertia before selection callbacks run.
+        // Start the sampler when a clip handle captures touch so a second
+        // finger can claim navigation even if neither reaches the canvas.
         if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
             if (auto* view = findParentComponentOfClass<ArrangementViewCore>())
+            {
                 view->stopTouchMomentumOnClipPress();
+                view->beginTouchNavigation();
+                m_touchMenuGestureEpoch = view->getTouchGestureEpoch();
+            }
 
         // Right-click must reach the parent context menu without selecting,
         // trimming, muting or disturbing an existing multi-selection.
@@ -574,6 +577,11 @@ namespace ArrangementEditor
                 parent->mouseDrag(e.getEventRelativeTo(parent));
             return;
         }
+
+        if (e.source.getType() == juce::MouseInputSource::InputSourceType::touch)
+            if (const auto* view = findParentComponentOfClass<ArrangementViewCore>())
+                if (view->getTouchGestureEpoch() != m_touchMenuGestureEpoch)
+                    return;
 
         const double pps     = juce::jmax(1.0, m_zoom.getPixelsPerSecond());
         // Use SCREEN x for the drag delta. Left-edge trim calls setBounds() on

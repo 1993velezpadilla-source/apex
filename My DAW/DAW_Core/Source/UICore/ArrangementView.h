@@ -397,7 +397,10 @@ trackManager_.addListener(this);
         return trackManager_.getNumTracks() + (trackManager_.hasMasterTrack() ? 1 : 0);
     }
 
-    int getLaneContentHeight() const noexcept { return core_->getLaneContentHeight(); }
+    int getLaneContentHeight() const noexcept
+    {
+        return core_->getLaneTopForIndex(juce::jmax(1, getNumLanes()));
+    }
 
     int getPhysicalTrackHeight() const noexcept
     {
@@ -1258,12 +1261,14 @@ private:
 
     void clipRemoved(const ClipID& clipID) override
     {
+        const auto previousEnd = getLastClipEnd();
         const auto end = clipEnds_.find(clipID);
         if (end != clipEnds_.end())
         {
             removeClipEndCount(end->second);
             clipEnds_.erase(end);
-            clipExtentChanged();
+            if (getLastClipEnd() != previousEnd)
+                clipExtentChanged();
         }
 
         if (onClipDeleted)
