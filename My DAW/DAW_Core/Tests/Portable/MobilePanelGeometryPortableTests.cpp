@@ -2912,4 +2912,32 @@ int main()
                         return 365;
                 }
 
+
+    // Floating (non-maximized) phone FX Browser: a restored desktop
+    // position must clamp to the current safe workspace after rotation.
+    // Reapplying the same layout must not cause position drift.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+                {
+                    const auto fitted = DAW::mobile::fitPhonePluginBrowser(
+                        width, height, top, bottom);
+                    const auto restored = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom,
+                        { std::numeric_limits<int>::max(),
+                          std::numeric_limits<int>::min(), 340, 560 });
+                    if (!inside(restored, width, height))
+                        return 366;
+                    if (restored.width != fitted.width
+                        || restored.height != fitted.height)
+                        return 367;
+                    const auto again = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom, restored);
+                    if (again.x != restored.x || again.y != restored.y
+                        || again.width != restored.width
+                        || again.height != restored.height)
+                        return 368;
+                }
+
 }
