@@ -3046,4 +3046,24 @@ int main()
         if (DAW::mobile::timelinePhonePlaybackExtentSeconds(120.0, invalid)
             != 120.0)
             return 378;
+
+    // Transport: a 49th simultaneous contact exceeds both tracked arrays.
+    // No release may open a panel until an explicit gesture reset after
+    // the untracked overflow, including when all known fingers lift.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        for (int source = 0; source < 49; ++source)
+            taps.begin(launcher, source);
+        for (int source = 48; source >= 0; --source)
+            if (taps.release(source, launcher, 0, 0))
+                return 379;
+        taps.begin(launcher, 99);
+        if (taps.release(99, launcher, 0, 0))
+            return 380;
+        taps.invalidate(); // orientation/recreation resets overflow latch
+        taps.begin(launcher, 99);
+        if (!taps.release(99, launcher, 0, 0))
+            return 381;
+    }
 }
