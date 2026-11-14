@@ -3083,6 +3083,29 @@ int main()
                         }
             }
 
+
+    // Transport: a cancelled two-finger gesture must never resurrect the
+    // original launcher's tap after the second finger leaves. The next
+    // independent one-finger tap should work without recreating the view.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        taps.begin(launcher, 7);
+        taps.begin(launcher, 8);
+        if (taps.release(8, launcher, 0, 0)
+            || taps.release(7, launcher, 0, 0))
+            return 385;
+        taps.begin(launcher, 7);
+        if (!taps.release(7, launcher, 0, 0))
+            return 386;
+
+        // A duplicate down for the same source is not a fresh tap.
+        taps.begin(launcher, 7);
+        taps.begin(launcher, 7);
+        if (taps.release(7, launcher, 0, 0))
+            return 387;
+    }
+
     // Transport: a 49th simultaneous contact exceeds both tracked arrays.
     // No release may open a panel until an explicit gesture reset after
     // the untracked overflow, including when all known fingers lift.
