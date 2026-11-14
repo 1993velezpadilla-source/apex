@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "../ThemeCore/Theme.h"
+#include "../UICore/MobilePanelGeometry.h"
 
 namespace DAW {
 
@@ -46,6 +47,18 @@ public:
     const juce::String& getTitle() const noexcept { return title_; }
 
     juce::Component* getContent() const noexcept { return content_; }
+
+    /** Phone FX Browser uses 44-unit hit targets; all other chrome stays desktop. */
+    void setPhonePresentation(bool phone)
+    {
+        if (phonePresentation_ == phone)
+            return;
+        phonePresentation_ = phone;
+        pendingPhoneButton_.invalidate();
+        isDragging_ = false;
+        resized();
+        repaint();
+    }
 
     /** Store the bounds to restore to after maximize. */
     void setPreMaxBounds(juce::Rectangle<int> b) { preMaxBounds_ = b; }
@@ -137,7 +150,7 @@ public:
         g.drawRoundedRectangle(bounds, corner, 1.f);
 
         // Title bar
-        auto titleBar = bounds.removeFromTop((float)kChromeH);
+        auto titleBar = bounds.removeFromTop((float)chromeHeight());
         juce::ColourGradient tGrad(t.colors.surface.brighter(0.06f), 0, titleBar.getY(),
                                    t.colors.surface.darker(0.04f), 0, titleBar.getBottom(), false);
         g.setGradientFill(tGrad);
@@ -157,7 +170,8 @@ public:
 
         // Title text
         auto textArea = titleBar.reduced(10.f, 0.f);
-        textArea.removeFromRight((float)(kBtnW * 3 + kBtnGap * 2 + kBtnPadR + 4));
+        textArea.removeFromRight(phonePresentation_ ? 136.f
+                                                  : (float)(kBtnW * 3 + kBtnGap * 2 + kBtnPadR + 4));
         g.setFont(juce::Font(11.f, juce::Font::bold));
         g.setColour(juce::Colours::black.withAlpha(0.5f));
         g.drawText(title_, textArea.translated(0, 1), juce::Justification::centredLeft, true);
@@ -170,8 +184,14 @@ public:
 
     void resized() override
     {
+        // Rotation/parent resize invalidates an in-flight phone title gesture.
+        if (phonePresentation_)
+        {
+            pendingPhoneButton_.invalidate();
+            isDragging_ = false;
+        }
         if (content_)
-            content_->setBounds(getLocalBounds().withTrimmedTop(kChromeH));
+            content_->setBounds(getLocalBounds().withTrimmedTop(chromeHeight()));
     }
 
     void mouseDown(const juce::MouseEvent& e) override
@@ -179,8 +199,16 @@ public:
         toFront(true);
 
         // Hit-test window buttons
-        auto titleBar = getLocalBounds().removeFromTop(kChromeH).toFloat();
+        auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
         auto hit = hitTestButtons(e.position, titleBar);
+        // On phones, defer window actions until a stationary release over
+        // the same button. A swipe must not accidentally close an FX window.
+        pendingPhoneButton_.invalidate();
+        if (phonePresentation_ && hit != BtnHit::None)
+        {
+            pendingPhoneButton_.begin(static_cast<int>(hit));
+            return;
+        }
         if (hit == BtnHit::Close)    { closePanel(); return; }
         if (hit == BtnHit::Minimize) { minimizePanel(); return; }
         if (hit == BtnHit::Maximize)
@@ -191,7 +219,7 @@ public:
         }
 
         // Title bar drag
-        if (e.y <= kChromeH && state_ != PanelState::Maximized)
+        if (e.y <= chromeHeight() && state_ != PanelState::Maximized)
         {
             isDragging_ = true;
             dragger_.startDraggingComponent(this, e);
@@ -200,12 +228,35 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        // A swipe that returns to its starting button is still a swipe.
+        // Cancel the pending phone action permanently once the touch travels
+        // beyond the tap slop, even if mouseUp lands on the same button.
+        if (phonePresentation_)
+            pendingPhoneButton_.move(e.getDistanceFromDragStartX(),
+                                     e.getDistanceFromDragStartY());
         if (!isDragging_) return;
         dragger_.dragComponent(this, e, &constrainer_);
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
+        if (phonePresentation_ && pendingPhoneButton_.pressed != 0)
+        {
+            const auto pressed = static_cast<BtnHit>(pendingPhoneButton_.pressed);
+            const auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
+            const auto released = hitTestButtons(e.position, titleBar);
+            if (pendingPhoneButton_.release(
+                    static_cast<int>(released),
+                    e.getDistanceFromDragStartX(), e.getDistanceFromDragStartY()))
+            {
+                if (pressed == BtnHit::Close) closePanel();
+                else if (pressed == BtnHit::Minimize) minimizePanel();
+                else if (pressed == BtnHit::Maximize)
+                    if (auto* parent = getParentComponent())
+                        maximizePanel(parent->getLocalBounds());
+            }
+            return;
+        }
         if (isDragging_)
         {
             isDragging_ = false;
@@ -219,15 +270,19 @@ public:
     void mouseMove(const juce::MouseEvent&) override
     {
         // Repaint to show button hover states
-        repaint(getLocalBounds().removeFromTop(kChromeH));
+        repaint(getLocalBounds().removeFromTop(chromeHeight()));
     }
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
     {
-        if (e.y <= kChromeH)
+        if (e.y <= chromeHeight())
         {
-            auto titleBar = getLocalBounds().removeFromTop(kChromeH).toFloat();
-            if (hitTestButtons(e.position, titleBar) == BtnHit::None)
+            auto titleBar = getLocalBounds().removeFromTop(chromeHeight()).toFloat();
+            // A phone has an explicit large maximize target. Ignore title
+            // double-taps so the second touch cannot unexpectedly maximize
+            // a floating browser or corrupt its drag/restore bounds.
+            if (mobile::chromeTitleDoubleClickMaximizes(
+                    phonePresentation_, hitTestButtons(e.position, titleBar) != BtnHit::None))
             {
                 if (auto* parent = getParentComponent())
                     maximizePanel(parent->getLocalBounds());
@@ -242,10 +297,13 @@ private:
     juce::Rectangle<int> preMaxBounds_;
     juce::Rectangle<int> floatingBounds_;
     bool isDragging_ = false;
+    bool phonePresentation_ = false;
+    int chromeHeight() const noexcept { return mobile::pluginBrowserChromeHeight(phonePresentation_); }
     juce::ComponentDragger dragger_;
     juce::ComponentBoundsConstrainer constrainer_;
 
     enum class BtnHit { None, Close, Minimize, Maximize };
+    mobile::PhoneChromeTapState pendingPhoneButton_;
 
     struct BtnRects
     {
@@ -255,6 +313,18 @@ private:
     BtnRects getButtonRects(juce::Rectangle<float> titleBar) const
     {
         BtnRects r;
+        if (phonePresentation_)
+        {
+            const float side = juce::jmin(
+                (float)mobile::phoneChromeControlSize(juce::roundToInt(titleBar.getWidth())),
+                titleBar.getHeight());
+            const float y = titleBar.getY() + (titleBar.getHeight() - side) * 0.5f;
+            const float x = titleBar.getRight() - side;
+            r.close = { x, y, side, side };
+            r.maximize = { x - side, y, side, side };
+            r.minimize = { x - 2.f * side, y, side, side };
+            return r;
+        }
         float x = titleBar.getRight() - kBtnPadR - kBtnW;
         float y = (titleBar.getHeight() - 16.f) * 0.5f + titleBar.getY();
 
@@ -285,7 +355,13 @@ private:
         {
             bool hovered = r.contains(mouse);
             g.setColour(hovered ? hoverCol : normalCol);
-            g.fillRoundedRectangle(r, 3.f);
+            // Retain APEX's 24x16 painted buttons; only the invisible touch
+            // hit zones expand to 44x44 on phone presentation.
+            const auto painted = phonePresentation_
+                ? r.withSizeKeepingCentre(juce::jmin(24.f, r.getWidth()),
+                                          juce::jmin(16.f, r.getHeight()))
+                : r;
+            g.fillRoundedRectangle(painted, 3.f);
             return hovered;
         };
 

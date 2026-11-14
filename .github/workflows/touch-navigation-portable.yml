@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/TouchNavigationMath.h'
+      - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementZoomCore.h'
+      - 'My DAW/DAW_Core/Tests/Portable/ArrangementZoomPortableTests.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.cpp'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ArrangementViewCore.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipRenderCore.cpp'
@@ -11,11 +13,24 @@ on:
       - 'My DAW/DAW_Core/Tests/Portable/TouchNavigationMathPortableTests.cpp'
       - 'My DAW/DAW_Core/Tests/Portable/ApexRadialGeometryPortableTests.cpp'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialGeometry.h'
+      - 'My DAW/DAW_Core/Source/UICore/MobilePanelGeometry.h'
+      - 'My DAW/DAW_Core/Source/FloatingWindowCore/FloatingPanelChrome.h'
+      - 'My DAW/DAW_Core/Source/PluginHostCore/PluginBrowserPanel.h'
+      - 'My DAW/DAW_Core/Source/MainComponent.cpp'
+      - 'My DAW/DAW_Core/Source/UICore/MobileTransportPortrait.h'
+      - 'My DAW/DAW_Core/Source/UICore/TransportBar.h'
+      - 'My DAW/DAW_Core/Source/UICore/MixerWindow.h'
+      - 'My DAW/DAW_Core/Tests/Portable/MobileTransportPortraitPortableTests.cpp'
+      - 'My DAW/DAW_Core/Tests/Portable/MobilePanelGeometryPortableTests.cpp'
+      - 'My DAW/DAW_Core/Source/UICore/BubblegumV2PanelUI.h'
       - 'My DAW/DAW_Core/Source/UICore/ApexRadialContextMenu.h'
       - 'My DAW/DAW_Core/Source/UICore/ApexContextMenuStyle.h'
       - 'My DAW/DAW_Core/Source/UICore/SettingsPanel.h'
       - 'My DAW/DAW_Core/Source/UICore/TrackList.h'
       - 'My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/ClipContextMenuCore.h'
+      - 'Android/scripts/enable_immersive_fullscreen.py'
+      - 'Android/scripts/tests/test_enable_immersive_fullscreen.py'
+      - 'My DAW/DAW_Core/Source/Main.cpp'
       - '.github/workflows/touch-navigation-portable.yml'
   workflow_dispatch:
 
@@ -34,5 +49,20 @@ jobs:
           cd "My DAW/DAW_Core"
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/TouchNavigationMathPortableTests.cpp -o /tmp/apex_touch_navigation_tests
           /tmp/apex_touch_navigation_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_tests
+          /tmp/apex_arrangement_zoom_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/ArrangementZoomPortableTests.cpp -o /tmp/apex_arrangement_zoom_ubsan
+          /tmp/apex_arrangement_zoom_ubsan
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ApexRadialGeometryPortableTests.cpp -o /tmp/apex_radial_geometry_tests
           /tmp/apex_radial_geometry_tests
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
+          /tmp/apex_mobile_panel_geometry_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_ubsan
+          /tmp/apex_mobile_panel_geometry_ubsan
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_tests
+          /tmp/apex_mobile_transport_portrait_tests
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_ubsan
+          /tmp/apex_mobile_transport_portrait_ubsan
+      - name: Validate generated Android orientation and immersive activity
+        shell: bash
+        run: python3 -m unittest discover -s Android/scripts/tests -p 'test_enable_immersive_fullscreen.py' -v
