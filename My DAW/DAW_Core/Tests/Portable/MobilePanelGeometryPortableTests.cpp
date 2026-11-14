@@ -2803,4 +2803,31 @@ int main()
         if (taps.release(11, launcher, 0, 0))
             return 354;
     }
+
+    // Phone launcher hit-slop boundary: movement at exactly eight logical
+    // units is a tap; diagonal movement beyond radius eight is a drag.
+    // Every launcher uses the same circular threshold, regardless of
+    // orientation or the selected floating panel.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        for (int source : { 0, 7, 15 })
+        {
+            DAW::mobile::PhoneTransportTapState taps;
+            taps.begin(launcher, source);
+            taps.move(source, 8, 0);
+            if (!taps.release(source, launcher, 8, 0))
+                return 355;
+
+            taps.begin(launcher, source);
+            taps.move(source, 6, 5);
+            if (taps.release(source, launcher, 0, 0))
+                return 356;
+
+            // A cancelled diagonal drag must not poison a fresh tap.
+            taps.begin(launcher, source);
+            taps.move(source, 0, -8);
+            if (!taps.release(source, launcher, 0, -8))
+                return 357;
+        }
+    }
 }
