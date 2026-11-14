@@ -193,6 +193,10 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> arrangementScrollPartialRepaints{0};
     static inline std::atomic<int64_t>  arrangementScrollDirtyAreaPixels{0};
 
+    static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
+    static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
+    static inline std::atomic<uint64_t> waveformRefreshes{0};
+
     // ── Counter group: waveform ─────────────────────────────────────────
     static inline std::atomic<uint64_t> waveformDrawCalls{0};
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
@@ -330,6 +334,9 @@ struct TimelinePaintMetrics
         arrangementScrollFullRepaints = 0;
         arrangementScrollPartialRepaints = 0;
         arrangementScrollDirtyAreaPixels = 0;
+        arrangementZoomUpdates = 0;
+        arrangementRendererRebuilds = 0;
+        waveformRefreshes = 0;
         waveformDrawCalls     = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
