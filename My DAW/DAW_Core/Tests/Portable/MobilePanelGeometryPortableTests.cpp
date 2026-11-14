@@ -2883,4 +2883,33 @@ int main()
                         return 362;
                 }
 
+
+    // Maximized phone FX Browser must ignore stale floating coordinates
+    // after orientation or immersive-inset changes. Re-layout must remain
+    // stable and never restore a desktop-sized window over the Transport.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+                {
+                    const auto expected = DAW::mobile::fitPhonePluginBrowser(
+                        width, height, top, bottom, true);
+                    const auto restored = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom,
+                        { std::numeric_limits<int>::min(),
+                          std::numeric_limits<int>::max(), 340, 560 }, true);
+                    if (restored.x != expected.x || restored.y != expected.y
+                        || restored.width != expected.width
+                        || restored.height != expected.height)
+                        return 363;
+                    if (!inside(restored, width, height))
+                        return 364;
+                    const auto again = DAW::mobile::fitPhonePluginBrowserPlacement(
+                        width, height, top, bottom, restored, true);
+                    if (again.x != restored.x || again.y != restored.y
+                        || again.width != restored.width
+                        || again.height != restored.height)
+                        return 365;
+                }
+
 }
