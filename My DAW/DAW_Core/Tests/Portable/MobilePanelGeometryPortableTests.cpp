@@ -2940,4 +2940,33 @@ int main()
                         return 368;
                 }
 
+    // The floating FX Browser must remain below the phone header and
+    // above the persistent Transport, not merely inside the viewport.
+    // Negative/oversized insets are normalized independently per axis.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 120, 480, 852 })
+            for (int top : { -1, 0, 44, 1000 })
+                for (int bottom : { -1, 0, 64, 1000 })
+                {
+                    const int safeTop = top < 0 ? 0 : top > height ? height : top;
+                    const int remaining = height - safeTop;
+                    const int safeBottom = bottom < 0 ? 0
+                        : bottom > remaining ? remaining : bottom;
+                    for (bool maximized : { false, true })
+                    {
+                        const auto bounds = DAW::mobile::fitPhonePluginBrowserPlacement(
+                            width, height, top, bottom,
+                            { 999999, -999999, 340, 560 }, maximized);
+                        if (bounds.width <= 0 || bounds.height <= 0)
+                            continue;
+                        if (bounds.y < safeTop
+                            || static_cast<long long>(bounds.y) + bounds.height
+                                > static_cast<long long>(height) - safeBottom)
+                            return 369;
+                        if (bounds.x < 0
+                            || static_cast<long long>(bounds.x) + bounds.width > width)
+                            return 370;
+                    }
+                }
+
 }
