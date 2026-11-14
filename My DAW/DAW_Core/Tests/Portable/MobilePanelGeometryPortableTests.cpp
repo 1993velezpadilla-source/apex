@@ -2544,4 +2544,43 @@ int main()
         }
     }
 
+
+    // Phone floating Mixer: restored sizes and coordinates can be corrupt
+    // after rotation/process recreation. Reject invalid sizes, preserve
+    // manually sized valid windows, and stabilize after one layout pass.
+    for (int viewportW : { 1, 44, 320, 393, 852 })
+        for (int viewportH : { 1, 96, 300, 852 })
+            for (int restoredSize : { std::numeric_limits<int>::min(),
+                                      -1, 0, 1, 200, 500,
+                                      std::numeric_limits<int>::max() })
+            {
+                const auto fit = DAW::mobile::fitFloatingMixer(
+                    viewportW, viewportH, 44, 64);
+                const DAW::mobile::PanelBounds stale{
+                    std::numeric_limits<int>::max(),
+                    std::numeric_limits<int>::min(),
+                    restoredSize, restoredSize };
+                const auto once = DAW::mobile::constrainFloatingMixerPlacement(
+                    fit, stale);
+                if (fit.safe.width <= 0 || fit.safe.height <= 0)
+                {
+                    if (once.width != 0 || once.height != 0)
+                        return 323;
+                    continue;
+                }
+                if (!DAW::mobile::floatingMixerFits(fit, once))
+                    return 324;
+                const bool validSize = restoredSize >= fit.minimumWidth
+                    && restoredSize >= fit.minimumHeight
+                    && restoredSize <= fit.safe.width
+                    && restoredSize <= fit.safe.height;
+                if (validSize && (once.width != restoredSize
+                    || once.height != restoredSize))
+                    return 325;
+                const auto twice = DAW::mobile::constrainFloatingMixerPlacement(
+                    fit, once);
+                if (twice.x != once.x || twice.y != once.y
+                    || twice.width != once.width || twice.height != once.height)
+                    return 326;
+            }
 }
