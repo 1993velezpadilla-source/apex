@@ -2759,4 +2759,26 @@ int main()
             return 348;
     }
 
+
+    // Repeated mouseDown from the same JUCE touch source is not a second
+    // valid tap; an interrupted gesture cannot reopen Sends or Mixer.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        taps.begin(launcher, 7);
+        taps.begin(launcher, 7);
+        if (taps.release(7, launcher, 0, 0))
+            return 349;
+        taps.begin(launcher, 7);
+        if (!taps.release(7, launcher, 0, 0))
+            return 350;
+
+        // Once drag exceeds the tap slop, returning to origin must not
+        // resurrect the original press after a layout/rotation gesture.
+        taps.begin(launcher, 7);
+        taps.move(7, 1000, 1000);
+        taps.move(7, 0, 0);
+        if (taps.release(7, launcher, 0, 0))
+            return 351;
+    }
 }
