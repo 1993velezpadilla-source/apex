@@ -2781,4 +2781,26 @@ int main()
         if (taps.release(7, launcher, 0, 0))
             return 351;
     }
+
+    // A foreign touch move during a pending phone launcher tap must cancel
+    // the gesture, not let a later release open Mixer/Sends/FX/Browser.
+    // A fresh contact must still work after all pending fingers are gone.
+    for (int launcher : { 1, 2, 3, 4 })
+    {
+        DAW::mobile::PhoneTransportTapState taps;
+        taps.begin(launcher, 11);
+        taps.move(12, 0, 0);
+        if (taps.release(11, launcher, 0, 0))
+            return 352;
+        taps.begin(launcher, 12);
+        if (!taps.release(12, launcher, 0, 0))
+            return 353;
+
+        // Reusing a touch ID on another launcher before mouseUp must not
+        // change the active target or re-arm a cancelled gesture.
+        taps.begin(launcher, 11);
+        taps.begin(launcher == 4 ? 1 : launcher + 1, 11);
+        if (taps.release(11, launcher, 0, 0))
+            return 354;
+    }
 }
