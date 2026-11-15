@@ -3125,6 +3125,44 @@ int main()
         if (!taps.release(99, launcher, 0, 0))
             return 381;
     }
+
+    // Floating Mixer toolbar: narrow phone widths must replace hidden
+    // actions with Overflow, never create undersized or overlapping hits.
+    // Sweep the exact 46/94/142-unit transitions and rotation-sized zones.
+    for (int w = 0; w <= 200; ++w)
+        for (int h : { 0, 31, 32, 33, 48, 64 })
+        {
+            const auto layout = DAW::mobile::phoneMixerToolbarLayout(w, h);
+            const int expected = h < 32 || w < 46 ? 0
+                               : w < 94 ? 1 : w < 142 ? 2 : 3;
+            if (layout.count != expected)
+                return 388;
+            for (int i = 0; i < layout.count; ++i)
+            {
+                const auto hit = layout.buttons[i].bounds;
+                if (hit.width != 44 || hit.height != 32
+                    || hit.x < 0 || hit.y < 0
+                    || hit.x + hit.width > w || hit.y + hit.height > h)
+                    return 389;
+                for (int j = 0; j < i; ++j)
+                {
+                    const auto other = layout.buttons[j].bounds;
+                    if (hit.x < other.x + other.width
+                        && other.x < hit.x + hit.width
+                        && hit.y < other.y + other.height
+                        && other.y < hit.y + hit.height)
+                        return 390;
+                }
+            }
+            if (layout.count > 0)
+            {
+                const auto last = layout.buttons[layout.count - 1].action;
+                if (last != (w < 142 ? DAW::mobile::phoneMixerOverflow
+                                      : DAW::mobile::phoneMixerReset))
+                    return 391;
+            }
+        }
+
 }
 
 // Cross-device presentation contract: phone-only chrome must never leak into
