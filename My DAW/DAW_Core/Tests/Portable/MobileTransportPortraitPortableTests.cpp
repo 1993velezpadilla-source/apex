@@ -1062,3 +1062,37 @@ constexpr bool portraitReadoutHeightFloorAtThreshold()
     return true;
 }
 static_assert(portraitReadoutHeightFloorAtThreshold());
+
+
+// Regression: at the smallest supported portrait deck, top readout hit areas
+// must not intercept the six transport actions or phone-only shortcuts.
+// The readout and transport layouts are consumed by different UI components;
+// testing them together catches cross-component overlap after resize.
+constexpr bool portraitCrossRowHitIsolation(int w, int h)
+{
+    const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+    const auto deck = portraitTransportLayout(w, h);
+    const PortraitTransportBounds readouts[] = {
+        top.key, top.tempo, top.clock, top.automation
+    };
+    const PortraitTransportBounds actions[] = {
+        deck.transport[0], deck.transport[1], deck.transport[2],
+        deck.transport[3], deck.transport[4], deck.transport[5],
+        deck.click, deck.fx, deck.browser, deck.mixer, deck.sends
+    };
+    for (const auto readout : readouts)
+    {
+        if (!inside(readout, w, h)) return false;
+        if (readout.width == 0 || readout.height == 0) continue;
+        if (readout.width < 44 || readout.height < 44) return false;
+        for (const auto action : actions)
+            if (action.width > 0 && action.height > 0
+                && !separated(readout, action)) return false;
+    }
+    return true;
+}
+static_assert(portraitCrossRowHitIsolation(320, 144));
+static_assert(portraitCrossRowHitIsolation(360, 144));
+static_assert(portraitCrossRowHitIsolation(393, 144));
+static_assert(portraitCrossRowHitIsolation(430, 156));
+static_assert(portraitCrossRowHitIsolation(852, 180));
