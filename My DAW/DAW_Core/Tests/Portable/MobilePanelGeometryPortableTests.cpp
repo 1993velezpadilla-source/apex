@@ -3200,3 +3200,15 @@ static_assert(!DAW::mobile::timelineWheelDelegatesToViewport(true));
 static_assert(DAW::mobile::timelineWheelDelegatesToViewport(false));
 static_assert(!DAW::mobile::desktopRestoreBubbleVisible(true));
 static_assert(DAW::mobile::desktopRestoreBubbleVisible(false));
+
+// Portrait Arrangement must remain scrollable even when phone scrollbar
+// chrome is hidden. Desktop/iPad must keep the native scrollbar policy.
+// Guard all five flags, not only the corner zoom button.
+static_assert(!DAW::mobile::timelineViewportChrome(true).showVerticalBar);
+static_assert(!DAW::mobile::timelineViewportChrome(true).showHorizontalBar);
+static_assert(DAW::mobile::timelineViewportChrome(true).allowVerticalScrollWithoutBar);
+static_assert(DAW::mobile::timelineViewportChrome(true).allowHorizontalScrollWithoutBar);
+static_assert(DAW::mobile::timelineViewportChrome(false).showVerticalBar);
+static_assert(DAW::mobile::timelineViewportChrome(false).showHorizontalBar);
+static_assert(!DAW::mobile::timelineViewportChrome(false).allowVerticalScrollWithoutBar);
+static_assert(!DAW::mobile::timelineViewportChrome(false).allowHorizontalScrollWithoutBar);
