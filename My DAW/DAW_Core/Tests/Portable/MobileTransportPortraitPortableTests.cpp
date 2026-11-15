@@ -1041,3 +1041,24 @@ constexpr bool phonePortraitPrimaryTapMinimums()
     return true;
 }
 static_assert(phonePortraitPrimaryTapMinimums());
+
+// At the minimum portrait deck height the readout row used to be 40 high,
+// exposing undersized Key/Tempo/Clock taps while transport actions were 44.
+// Test the entire transition through the natural 44-unit row height.
+constexpr bool portraitReadoutHeightFloorAtThreshold()
+{
+    for (int h = 144; h <= 156; ++h)
+    {
+        const auto readouts = DAW::mobile::portraitReadoutLayout(393, h);
+        const auto actions = DAW::mobile::portraitTransportLayout(393, h);
+        for (const auto readout : {readouts.key, readouts.tempo, readouts.clock})
+        {
+            if (readout.width <= 0) continue;
+            if (readout.height < 44 || !inside(readout, 393, h)) return false;
+            for (const auto action : actions.transport)
+                if (!separated(readout, action)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutHeightFloorAtThreshold());
