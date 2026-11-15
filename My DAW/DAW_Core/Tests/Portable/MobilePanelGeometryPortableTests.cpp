@@ -3164,6 +3164,28 @@ int main()
         }
 
 
+    // FX Browser after portrait/landscape rotation or search filtering:
+    // scrollbar reservation is determined by CURRENT row count, not the
+    // previous frame. Exact-fit rows must not steal touch width.
+    for (int width : { 0, 1, 8, 44, 180, 393, 852 })
+        for (int height : { 0, 1, 44, 88, 352 })
+            for (int rowHeight : { 0, 1, 44, 48 })
+                for (int rows : { 0, 1, 2, 8, 100 })
+                    for (int scrollbar : { 0, 1, 12, 9999 })
+                    {
+                        const int actual = DAW::mobile::pluginBrowserListWidth(
+                            width, height, rows, rowHeight, scrollbar);
+                        const bool overflow = width > 0 && height > 0
+                            && rows > 0 && rowHeight > 0
+                            && rows > height / rowHeight;
+                        const int reserved = overflow
+                            ? (scrollbar < width ? scrollbar : width) : 0;
+                        const int expected = width <= 0 || height <= 0
+                            ? 0 : width - reserved;
+                        if (actual != expected || actual < 0 || actual > width)
+                            return 394;
+                    }
+
     // Floating Mixer toolbar must be deterministic after repeated resize
     // notifications. Height changes must preserve action order and horizontal
     // placement while vertically re-centring targets in the taller title bar.
