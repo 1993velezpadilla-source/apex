@@ -677,6 +677,33 @@ static_assert(compactTouchThresholdRoundTrip());
 
 int main()
 {
+    // Runtime adversarial sweep across the entire portrait resize band.
+    // Cross-component hit isolation matters: readouts and action buttons are
+    // positioned by separate helpers, so independent bounds tests can pass
+    // even if one intercepts a tap intended for the other.
+    for (int w = 56; w <= 600; ++w)
+        for (int h = 144; h <= 180; ++h)
+        {
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto deck = portraitTransportLayout(w, h);
+            const PortraitTransportBounds readouts[] = {
+                top.key, top.tempo, top.clock, top.automation
+            };
+            const PortraitTransportBounds shortcuts[] = {
+                deck.click, deck.fx, deck.browser, deck.mixer, deck.sends
+            };
+            assert(portraitReadoutsSafe(w, h));
+            assert(valid(w, h));
+            for (const auto readout : readouts)
+            {
+                if (readout.width == 0 || readout.height == 0) continue;
+                assert(readout.width >= 44 && readout.height >= 44);
+                for (const auto action : deck.transport)
+                    assert(separated(readout, action));
+                for (const auto shortcut : shortcuts)
+                    assert(separated(readout, shortcut));
+            }
+        }
     // Portrait readout height transition under keyboard/inset resize: the
     // clock must never leave a ghost hit target at 143, and must recover at
     // 144 without colliding with optional key/tempo/automation readouts.
