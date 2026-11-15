@@ -3126,3 +3126,13 @@ int main()
             return 381;
     }
 }
+
+// Cross-device presentation contract: phone-only chrome must never leak into
+// the desktop/iPad presentation after an orientation or window-mode change.
+// These are compile-time gates so Release builds cannot skip the assertions.
+static_assert(!DAW::mobile::timelineViewportChrome(true).showCornerZoom);
+static_assert(DAW::mobile::timelineViewportChrome(false).showCornerZoom);
+static_assert(!DAW::mobile::timelineWheelDelegatesToViewport(true));
+static_assert(DAW::mobile::timelineWheelDelegatesToViewport(false));
+static_assert(!DAW::mobile::desktopRestoreBubbleVisible(true));
+static_assert(DAW::mobile::desktopRestoreBubbleVisible(false));
