@@ -1022,3 +1022,22 @@ static_assert(automationAtHeight.automation.width >= 44
 static_assert(inside(automationAtHeight.automation, 852, 168));
 static_assert(portraitReadoutsSafe(852, 167)
               && portraitReadoutsSafe(852, 168));
+
+// Phone portrait regression: the six primary transport actions and the
+// floating Mixer/Bubblegum Sends shortcuts must remain finger-sized at
+// common narrow phone widths, including the 320-unit split-screen case.
+constexpr bool phonePortraitPrimaryTapMinimums()
+{
+    for (int w : {320, 360, 375, 390, 393, 430})
+    {
+        const auto r = DAW::mobile::portraitTransportLayout(w, 144);
+        for (const auto button : r.transport)
+            if (button.width < 44 || button.height < 44 || !inside(button, w, 144))
+                return false;
+        for (const auto shortcut : {r.fx, r.browser, r.mixer, r.sends})
+            if (shortcut.width < 44 || shortcut.height < 44 || !inside(shortcut, w, 144))
+                return false;
+    }
+    return true;
+}
+static_assert(phonePortraitPrimaryTapMinimums());
