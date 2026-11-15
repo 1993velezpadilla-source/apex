@@ -3283,3 +3283,14 @@ static_assert(DAW::mobile::timelineViewportChrome(false).showVerticalBar);
 static_assert(DAW::mobile::timelineViewportChrome(false).showHorizontalBar);
 static_assert(!DAW::mobile::timelineViewportChrome(false).allowVerticalScrollWithoutBar);
 static_assert(!DAW::mobile::timelineViewportChrome(false).allowHorizontalScrollWithoutBar);
+
+// FX Browser rotation contract: a swipe must never instantiate a plugin,
+// even when it ends inside the original row. Desktop clicks remain intact.
+static_assert(DAW::mobile::pluginBrowserRowTapActivates(false, 100, 100, false));
+static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, 0, 0, true));
+static_assert(DAW::mobile::pluginBrowserRowTapActivates(true, 8, 0, true));
+static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 8, 1, true));
+static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 0, 0, false));
+static_assert(!DAW::mobile::phoneTapGestureRemainsEligible(false, 0, 0));
+static_assert(!DAW::mobile::phoneTapGestureRemainsEligible(true, 9, 0));
+static_assert(DAW::mobile::phoneTapGestureRemainsEligible(true, 0, 0));
