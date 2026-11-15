@@ -813,6 +813,21 @@ int main()
                         assert(separated(readout, shortcut));
             }
         }
+    // Inset/rotation height sweep: visible portrait readouts must retain
+    // 44-unit touch height, not merely fit within the viewport. This catches
+    // regressions at every intermediate height between 144 and 180.
+    for (int h = 144; h <= 180; ++h)
+        for (int w = 56; w <= 600; ++w)
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto target : {r.key, r.tempo, r.clock, r.automation})
+            {
+                assert(inside(target, w, h));
+                if (target.width == 0 || target.height == 0) continue;
+                assert(target.width >= 44 && target.height >= 44);
+            }
+            assert(exclusivePortraitReadoutEdges(w, h));
+        }
     // Portrait deck: exercise every width across the minimum-size guard and
     // phone split-screen range. Compact geometry has a separate exhaustive
     // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
