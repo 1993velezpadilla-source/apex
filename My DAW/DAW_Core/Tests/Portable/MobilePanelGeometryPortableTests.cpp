@@ -3294,3 +3294,23 @@ static_assert(!DAW::mobile::pluginBrowserRowTapActivates(true, 0, 0, false));
 static_assert(!DAW::mobile::phoneTapGestureRemainsEligible(false, 0, 0));
 static_assert(!DAW::mobile::phoneTapGestureRemainsEligible(true, 9, 0));
 static_assert(DAW::mobile::phoneTapGestureRemainsEligible(true, 0, 0));
+
+// Narrow portrait Arrangement: Track List must never consume the final
+// timeline unit, even when a restored width is larger than the viewport.
+// A hidden/zero-width list must not reappear after orientation changes.
+static_assert(DAW::mobile::phoneTrackListWidth(500, 1) == 0);
+static_assert(DAW::mobile::phoneTrackListWidth(500, 2) == 1);
+static_assert(DAW::mobile::phoneTrackListWidth(500, 44) == 43);
+static_assert(DAW::mobile::phoneTrackListWidth(500, 393) == 108);
+static_assert(DAW::mobile::phoneTrackListWidth(500, 852) == 213);
+static_assert(DAW::mobile::phoneTrackListWidth(0, 393) == 0);
+static_assert(DAW::mobile::phoneTrackListWidth(-1, 393) == 0);
+
+// Tiny floating panel title bars: close/drag chrome must not demand
+// three full 44-unit targets when split-screen width cannot supply them.
+static_assert(DAW::mobile::phoneChromeControlSize(0) == 0);
+static_assert(DAW::mobile::phoneChromeControlSize(2) == 0);
+static_assert(DAW::mobile::phoneChromeControlSize(3) == 1);
+static_assert(DAW::mobile::phoneChromeControlSize(131) == 43);
+static_assert(DAW::mobile::phoneChromeControlSize(132) == 44);
+static_assert(DAW::mobile::phoneChromeControlSize(393) == 44);
