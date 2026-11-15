@@ -36,6 +36,30 @@ int main()
                > viewport.height - bottom)
             return 901;
     }
+    // Adversarial orientation/split-screen sweep: the floating Mixer must
+    // respect changing header and Transport insets, not only fixed presets.
+    for (int width : { 120, 180, 240, 320, 390, 568, 844 })
+        for (int height : { 180, 240, 320, 390, 568, 844 })
+            for (int top : { 0, 32, 56 })
+                for (int bottom : { 0, 48, 80 })
+                {
+                    if (top + bottom >= height)
+                        continue;
+                    const auto fit = DAW::mobile::fitFloatingMixer(
+                        width, height, top, bottom);
+                    if (!inside(fit.safe, width, height)
+                        || !inside(fit.window, width, height)
+                        || fit.window.x < fit.safe.x
+                        || fit.window.y < fit.safe.y
+                        || static_cast<long long>(fit.window.x) + fit.window.width
+                           > static_cast<long long>(fit.safe.x) + fit.safe.width
+                        || static_cast<long long>(fit.window.y) + fit.window.height
+                           > static_cast<long long>(fit.safe.y) + fit.safe.height
+                        || fit.window.y < top
+                        || static_cast<long long>(fit.window.y) + fit.window.height
+                           > height - bottom)
+                        return 902;
+                }
     // Phone Mixer chrome: reject malformed touch coordinates and preserve
     // exclusive boundaries after rotation. No ghost minimize/maximize hit.
     for (int titleHeight : { 1, 31, 32, 44, 96 })
