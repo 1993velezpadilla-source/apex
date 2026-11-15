@@ -11,6 +11,37 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Sends placement: adversarial anchor/inset sweep across portrait,
+    // landscape and collapsed split-screen. A nonempty panel must remain
+    // entirely between the APEX header and persistent phone Transport.
+    for (int width : { 0, 1, 44, 180, 393, 852 })
+        for (int height : { 0, 1, 44, 180, 393, 852 })
+            for (int top : { -1, 0, 64, 1000 })
+                for (int bottom : { -1, 0, 88, 1000 })
+                for (int anchor : { -1000000, 0, 1000000 })
+                {
+                    const auto phone = fitBubblegumSends(
+                        width, height, anchor, anchor, true, top, bottom);
+                    if (!inside(phone, width, height))
+                        return 902;
+                    const int safeTop = top < 0 ? 0 : top > height ? height : top;
+                    const int remaining = height - safeTop;
+                    const int safeBottom = bottom < 0 ? 0
+                        : bottom > remaining ? remaining : bottom;
+                    if (phone.height > 0
+                        && (phone.y < safeTop
+                            || static_cast<long long>(phone.y) + phone.height
+                               > static_cast<long long>(height) - safeBottom))
+                        return 903;
+                    const auto desktop = fitBubblegumSends(
+                        width, height, anchor, anchor, false, top, bottom);
+                    const auto baseline = fitBubblegumSends(
+                        width, height, anchor, anchor, false);
+                    if (desktop.x != baseline.x || desktop.y != baseline.y
+                        || desktop.width != baseline.width
+                        || desktop.height != baseline.height)
+                        return 904;
+                }
     // Phone rotation and split-screen: floating Mixer must stay within the
     // header/Transport-safe region, including compact portrait dimensions.
     for (const auto viewport : { DAW::mobile::PanelBounds{ 0, 0, 390, 844 },
