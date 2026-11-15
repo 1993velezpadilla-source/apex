@@ -1096,3 +1096,34 @@ static_assert(portraitCrossRowHitIsolation(360, 144));
 static_assert(portraitCrossRowHitIsolation(393, 144));
 static_assert(portraitCrossRowHitIsolation(430, 156));
 static_assert(portraitCrossRowHitIsolation(852, 180));
+
+
+// The clock is the only mandatory top readout during narrow multi-window
+// resize. Optional Key/Tempo must never consume its minimum 44-unit target.
+// Verify the readout and the independently laid-out transport deck together
+// across the optional-readout width thresholds and keyboard-inset heights.
+constexpr bool portraitClockResizePriorityContract()
+{
+    for (int w : {56, 57, 64, 95, 100, 101, 112, 143, 188,
+                  189, 200, 240, 280, 320, 393, 430, 852})
+        for (int h : {144, 155, 156, 167, 168, 180})
+        {
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto deck = DAW::mobile::portraitTransportLayout(w, h);
+            if (top.clock.width < 44 || top.clock.height < 44
+                || !inside(top.clock, w, h))
+                return false;
+            for (const auto optional : {top.key, top.tempo, top.automation})
+                if (!separated(top.clock, optional))
+                    return false;
+            for (const auto action : deck.transport)
+                if (!separated(top.clock, action))
+                    return false;
+            for (const auto shortcut : {deck.click, deck.fx, deck.browser,
+                                        deck.mixer, deck.sends})
+                if (!separated(top.clock, shortcut))
+                    return false;
+        }
+    return true;
+}
+static_assert(portraitClockResizePriorityContract());
