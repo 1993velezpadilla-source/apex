@@ -3163,6 +3163,31 @@ int main()
             }
         }
 
+
+    // Floating Mixer toolbar must be deterministic after repeated resize
+    // notifications. Height changes beyond the minimum cannot reorder or
+    // move actions; widths on both sides of each breakpoint are covered.
+    for (int width : { 0, 45, 46, 47, 93, 94, 95, 141, 142, 143, 320, 852 })
+    {
+        const auto baseline = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        for (int height : { 33, 44, 64, 180 })
+        {
+            const auto resized = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (resized.count != baseline.count)
+                return 392;
+            for (int i = 0; i < baseline.count; ++i)
+            {
+                const auto a = baseline.buttons[i];
+                const auto b = resized.buttons[i];
+                if (a.action != b.action || a.bounds.x != b.bounds.x
+                    || a.bounds.y != b.bounds.y
+                    || a.bounds.width != b.bounds.width
+                    || a.bounds.height != b.bounds.height)
+                    return 393;
+            }
+        }
+    }
+
 }
 
 // Cross-device presentation contract: phone-only chrome must never leak into
