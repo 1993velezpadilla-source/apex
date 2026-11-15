@@ -3314,3 +3314,23 @@ static_assert(DAW::mobile::phoneChromeControlSize(3) == 1);
 static_assert(DAW::mobile::phoneChromeControlSize(131) == 43);
 static_assert(DAW::mobile::phoneChromeControlSize(132) == 44);
 static_assert(DAW::mobile::phoneChromeControlSize(393) == 44);
+
+
+// Sends panel orientation contract: reserved phone header/Transport space
+// must constrain the panel, while desktop/iPad ignore phone-only insets.
+constexpr auto sendsPhonePortrait = DAW::mobile::fitBubblegumSends(
+    393, 852, 390, 850, true, 64, 88);
+constexpr auto sendsPhoneLandscape = DAW::mobile::fitBubblegumSends(
+    852, 393, 850, 390, true, 64, 88);
+constexpr auto sendsDesktopBaseline = DAW::mobile::fitBubblegumSends(
+    852, 393, 850, 390, false);
+constexpr auto sendsDesktopWithPhoneInsets = DAW::mobile::fitBubblegumSends(
+    852, 393, 850, 390, false, 64, 88);
+static_assert(sendsPhonePortrait.y >= 64
+              && sendsPhonePortrait.y + sendsPhonePortrait.height <= 852 - 88);
+static_assert(sendsPhoneLandscape.y >= 64
+              && sendsPhoneLandscape.y + sendsPhoneLandscape.height <= 393 - 88);
+static_assert(sendsDesktopBaseline.x == sendsDesktopWithPhoneInsets.x
+              && sendsDesktopBaseline.y == sendsDesktopWithPhoneInsets.y
+              && sendsDesktopBaseline.width == sendsDesktopWithPhoneInsets.width
+              && sendsDesktopBaseline.height == sendsDesktopWithPhoneInsets.height);
