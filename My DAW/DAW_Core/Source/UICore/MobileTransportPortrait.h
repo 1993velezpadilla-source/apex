@@ -20,7 +20,7 @@ constexpr PortraitTransportLayout portraitReadoutLayout(int w, int h) noexcept
     PortraitTransportLayout out{};
     if (w <= 12 || h < 144) return out;
     constexpr int margin = 6, gap = 3;
-    const int rowH = (h - 4 * margin) / 3;
+    // At 144..155 units, the action row is already 44+ high; keep the\n    // interactive top readouts equally finger-sized without crossing rows.\n    const int rowH = (h - 4 * margin) / 3 < 44 ? 44 : (h - 4 * margin) / 3;
     int cursor = margin;
     int remaining = w - 2 * margin;
     const auto take = [&](int wanted, int minimum) -> PortraitTransportBounds
