@@ -3165,8 +3165,9 @@ int main()
 
 
     // Floating Mixer toolbar must be deterministic after repeated resize
-    // notifications. Height changes beyond the minimum cannot reorder or
-    // move actions; widths on both sides of each breakpoint are covered.
+    // notifications. Height changes must preserve action order and horizontal
+    // placement while vertically re-centring targets in the taller title bar.
+    // Widths on both sides of each breakpoint are covered.
     for (int width : { 0, 45, 46, 47, 93, 94, 95, 141, 142, 143, 320, 852 })
     {
         const auto baseline = DAW::mobile::phoneMixerToolbarLayout(width, 32);
@@ -3180,7 +3181,7 @@ int main()
                 const auto a = baseline.buttons[i];
                 const auto b = resized.buttons[i];
                 if (a.action != b.action || a.bounds.x != b.bounds.x
-                    || a.bounds.y != b.bounds.y
+                    || b.bounds.y != (height - 32) / 2
                     || a.bounds.width != b.bounds.width
                     || a.bounds.height != b.bounds.height)
                     return 393;
