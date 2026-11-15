@@ -55,10 +55,18 @@ jobs:
           /tmp/apex_arrangement_zoom_ubsan
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/ApexRadialGeometryPortableTests.cpp -o /tmp/apex_radial_geometry_tests
           /tmp/apex_radial_geometry_tests
-          clang++ -std=c++17 -O0 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
-          /tmp/apex_mobile_panel_geometry_tests
-          clang++ -std=c++17 -O0 -g0 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_ubsan
-          /tmp/apex_mobile_panel_geometry_ubsan
+          echo "::group::MobilePanelGeometry normal compile"
+          /usr/bin/time -v clang++ -std=c++17 -O0 -Wall -Wextra -Werror Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_tests
+          echo "::endgroup::"
+          echo "::group::MobilePanelGeometry normal runtime"
+          /usr/bin/time -v /tmp/apex_mobile_panel_geometry_tests
+          echo "::endgroup::"
+          echo "::group::MobilePanelGeometry UBSan compile"
+          /usr/bin/time -v clang++ -std=c++17 -O0 -g0 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobilePanelGeometryPortableTests.cpp -o /tmp/apex_mobile_panel_geometry_ubsan
+          echo "::endgroup::"
+          echo "::group::MobilePanelGeometry UBSan runtime"
+          /usr/bin/time -v /tmp/apex_mobile_panel_geometry_ubsan
+          echo "::endgroup::"
           g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_tests
           /tmp/apex_mobile_transport_portrait_tests
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all Tests/Portable/MobileTransportPortraitPortableTests.cpp -o /tmp/apex_mobile_transport_portrait_ubsan
