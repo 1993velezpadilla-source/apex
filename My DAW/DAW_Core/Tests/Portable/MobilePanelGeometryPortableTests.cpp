@@ -11,6 +11,31 @@ constexpr bool inside(DAW::mobile::PanelBounds p, int w, int h)
 }
 int main()
 {
+    // Phone rotation and split-screen: floating Mixer must stay within the
+    // header/Transport-safe region, including compact portrait dimensions.
+    for (const auto viewport : { DAW::mobile::PanelBounds{ 0, 0, 390, 844 },
+                                 { 0, 0, 844, 390 },
+                                 { 0, 0, 320, 568 },
+                                 { 0, 0, 240, 320 },
+                                 { 0, 0, 120, 180 } })
+    {
+        constexpr int top = 56, bottom = 80;
+        const auto fit = DAW::mobile::fitFloatingMixer(
+            viewport.width, viewport.height, top, bottom);
+        if (!inside(fit.safe, viewport.width, viewport.height)
+            || !inside(fit.window, viewport.width, viewport.height)
+            || fit.window.width < fit.minimumWidth
+            || fit.window.height < fit.minimumHeight
+            || fit.window.x < fit.safe.x || fit.window.y < fit.safe.y
+            || static_cast<long long>(fit.window.x) + fit.window.width
+               > static_cast<long long>(fit.safe.x) + fit.safe.width
+            || static_cast<long long>(fit.window.y) + fit.window.height
+               > static_cast<long long>(fit.safe.y) + fit.safe.height
+            || fit.window.y < top
+            || static_cast<long long>(fit.window.y) + fit.window.height
+               > viewport.height - bottom)
+            return 901;
+    }
     // Phone Mixer chrome: reject malformed touch coordinates and preserve
     // exclusive boundaries after rotation. No ghost minimize/maximize hit.
     for (int titleHeight : { 1, 31, 32, 44, 96 })
