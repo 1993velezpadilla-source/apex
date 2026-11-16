@@ -42,6 +42,22 @@ int main()
                         || desktop.height != baseline.height)
                         return 904;
                 }
+    // Clip FX Properties: rotation and extreme reserved chrome must never
+    // leave a positive-sized panel outside its computed safe rectangle.
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 180, 393, 852 })
+            for (int top : { -10, 0, 64, 1000 })
+                for (int bottom : { -10, 0, 88, 1000 })
+                {
+                    const auto fit = DAW::mobile::fitPhoneClipProperties(
+                        width, height, top, bottom);
+                    if (!inside(fit.safe, width, height)
+                        || !inside(fit.window, width, height))
+                        return 905;
+                    if (fit.window.width > 0 && fit.window.height > 0
+                        && !DAW::mobile::phoneClipPropertiesFits(fit, fit.window))
+                        return 906;
+                }
     // Phone rotation and split-screen: floating Mixer must stay within the
     // header/Transport-safe region, including compact portrait dimensions.
     for (const auto viewport : { DAW::mobile::PanelBounds{ 0, 0, 390, 844 },
