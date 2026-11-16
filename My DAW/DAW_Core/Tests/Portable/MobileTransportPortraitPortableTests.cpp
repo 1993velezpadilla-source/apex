@@ -1375,7 +1375,10 @@ constexpr bool phoneDeckModeSwitchIsolation()
             || !inside(compact.sends, w, 143)) return false;
         for (const auto panel : {portrait.mixer, portrait.sends})
         {
-            if (panel.width < 44 || panel.height < 44) return false;
+            if (!inside(panel, w, 144)) return false;
+            // At narrow split-screen widths the five bottom controls cannot
+            // all retain 44-unit targets; require that only at phone widths.
+            if (w >= 320 && (panel.width < 44 || panel.height < 44)) return false;
             for (const auto readout : {readouts.key, readouts.tempo,
                                        readouts.clock, readouts.automation})
                 if (readout.width > 0 && readout.height > 0
