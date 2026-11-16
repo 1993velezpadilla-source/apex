@@ -1226,3 +1226,30 @@ constexpr bool compactShortcutThresholdRoundTrip()
     return true;
 }
 static_assert(compactShortcutThresholdRoundTrip());
+
+
+// Boundary regression: at the minimum 94-unit compact deck height, the
+// phone-only Mixer/Sends targets must remain 44 high as the width crosses
+// the 188/189-unit shortcut threshold. No shortcut may steal a transport tap.
+constexpr bool compactShortcutMinimumHeightBoundary()
+{
+    for (int w : {188, 189, 190, 320, 393, 852})
+    {
+        for (int h : {93, 94, 95})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto shortcut : {r.mixer, r.sends})
+            {
+                if (!inside(shortcut, w, h)) return false;
+                if (w >= 189 && h >= 94
+                    && (shortcut.width < 44 || shortcut.height < 44))
+                    return false;
+                if (w == 188 && shortcut.width >= 44) return false;
+                for (const auto action : r.transport)
+                    if (!separated(shortcut, action)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(compactShortcutMinimumHeightBoundary());
