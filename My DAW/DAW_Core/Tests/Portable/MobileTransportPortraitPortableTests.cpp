@@ -1357,3 +1357,34 @@ constexpr bool compactTinyViewportBounds()
     return true;
 }
 static_assert(compactTinyViewportBounds());
+
+
+// Regression: switching between compact and portrait decks at the 143/144
+// height boundary must not leave a tappable compact Mixer/Sends rectangle
+// over the portrait transport or its readouts after an OS inset change.
+// Exercise both independent layout functions, not only one mode in isolation.
+constexpr bool phoneDeckModeSwitchIsolation()
+{
+    for (int w : {189, 190, 245, 320, 360, 393, 852})
+    {
+        const auto compact = DAW::mobile::compactPhoneTransportLayout(w, 143);
+        const auto portrait = DAW::mobile::portraitTransportLayout(w, 144);
+        const auto readouts = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (!validCompact(w, 143) || !valid(w, 144)) return false;
+        if (!inside(compact.mixer, w, 143)
+            || !inside(compact.sends, w, 143)) return false;
+        for (const auto panel : {portrait.mixer, portrait.sends})
+        {
+            if (panel.width < 44 || panel.height < 44) return false;
+            for (const auto readout : {readouts.key, readouts.tempo,
+                                       readouts.clock, readouts.automation})
+                if (readout.width > 0 && readout.height > 0
+                    && !separated(panel, readout)) return false;
+        }
+        const auto again = DAW::mobile::compactPhoneTransportLayout(w, 143);
+        if (!sameBounds(compact.mixer, again.mixer)
+            || !sameBounds(compact.sends, again.sends)) return false;
+    }
+    return true;
+}
+static_assert(phoneDeckModeSwitchIsolation());
