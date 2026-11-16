@@ -675,6 +675,31 @@ constexpr bool compactTouchThresholdRoundTrip()
 }
 static_assert(compactTouchThresholdRoundTrip());
 
+// Exercise rapid orientation/inset transitions with distinct dimensions, not
+// only repeat calculations at one viewport. A stale shortcut rectangle after
+// rotation would be outside bounds or overlap another touch target.
+constexpr bool rotatingPhoneShortcutIsolation()
+{
+    constexpr int widths[] = {360, 852, 189, 320, 393, 188, 360};
+    constexpr int heights[] = {96, 180, 94, 112, 144, 93, 96};
+    const auto baseline = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    for (int i = 0; i < 7; ++i)
+    {
+        const auto layout = DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i]);
+        if (!validCompact(widths[i], heights[i])
+            || !exclusiveCompactAllTargets(widths[i], heights[i])
+            || !uniqueHitCentres(layout)
+            || !inside(layout.mixer, widths[i], heights[i])
+            || !inside(layout.sends, widths[i], heights[i])) return false;
+        if (widths[i] >= 189
+            && (layout.mixer.width < 44 || layout.sends.width < 44)) return false;
+        if (heights[i] >= 94
+            && (layout.mixer.height < 44 || layout.sends.height < 44)) return false;
+    }
+    return sameLayout(baseline, DAW::mobile::compactPhoneTransportLayout(360, 96));
+}
+static_assert(rotatingPhoneShortcutIsolation());
+
 int main()
 {
     // Runtime pixel-by-pixel inset sweep: include the 188/189 shortcut
