@@ -1333,3 +1333,27 @@ constexpr bool compactPanelShortcutOrderAcrossRotation()
     return true;
 }
 static_assert(compactPanelShortcutOrderAcrossRotation());
+
+
+// Adversarial split-screen widths: compact transport and panel shortcuts
+// must never escape the viewport or acquire negative dimensions, even when
+// the host temporarily provides less than a finger-sized deck.
+constexpr bool compactTinyViewportBounds()
+{
+    for (int w : {20, 21, 24, 32, 44, 64, 96, 128, 160, 187, 188})
+    {
+        for (int h : {8, 9, 12, 24, 48, 64, 93})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto target : {r.fx, r.browser, r.mixer, r.sends,
+                                      r.clock, r.tempo, r.key, r.automation,
+                                      r.click})
+                if (!inside(target, w, h)) return false;
+            for (const auto target : r.transport)
+                if (!inside(target, w, h)) return false;
+            if (!separated(r.mixer, r.sends)) return false;
+        }
+    }
+    return true;
+}
+static_assert(compactTinyViewportBounds());
