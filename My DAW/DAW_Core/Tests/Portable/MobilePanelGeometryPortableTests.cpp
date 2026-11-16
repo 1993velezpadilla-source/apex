@@ -3462,3 +3462,26 @@ constexpr bool sendsExtremeInsetsStaySafe = []() constexpr {
     return true;
 }();
 static_assert(sendsExtremeInsetsStaySafe);
+
+
+// Phone floating-panel close orb: preserve a reachable touch rectangle
+// after portrait/landscape resize, including near-zero split-screen sizes.
+// This only tests the existing portable hit geometry; no DSP/JUCE changes.
+constexpr bool phoneCloseTargetsStayInside = []() constexpr {
+    for (int width : { 0, 1, 2, 24, 43, 44, 45, 180, 393, 852 })
+        for (int height : { 0, 1, 2, 24, 43, 44, 45, 180, 393, 852 })
+        {
+            const auto hit = DAW::mobile::phoneCloseTouchBounds(width, height);
+            if (!inside(hit, width, height))
+                return false;
+            const int expectedWidth = width < 44 ? width : 44;
+            const int expectedHeight = height < 44 ? height : 44;
+            if (hit.width != expectedWidth || hit.height != expectedHeight)
+                return false;
+            if (width >= 44 && height >= 44
+                && (hit.width < 44 || hit.height < 44))
+                return false;
+        }
+    return true;
+}();
+static_assert(phoneCloseTargetsStayInside);
