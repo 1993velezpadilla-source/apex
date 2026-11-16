@@ -3516,3 +3516,24 @@ constexpr bool closeOrbCentreRemainsTouchable = []() constexpr {
 }();
 static_assert(closeOrbCentreRemainsTouchable);
 
+
+// Restored floating panels may carry near-INT_MAX dimensions after a
+// display-mode change. The phone close target must not overflow or escape.
+constexpr bool closeOrbExtremeDimensionsStayBounded = []() constexpr {
+    constexpr int huge = std::numeric_limits<int>::max();
+    for (int width : { 1, 25, 44, 393, huge - 1, huge })
+        for (int height : { 1, 25, 44, 852, huge - 1, huge })
+        {
+            const auto hit = phoneCloseTouchBounds(width, height);
+            if (!inside(hit, width, height))
+                return false;
+            if (hit.width != (width < 44 ? width : 44)
+                || hit.height != (height < 44 ? height : 44))
+                return false;
+            if (width >= 44 && height >= 44
+                && (hit.width != 44 || hit.height != 44))
+                return false;
+        }
+    return true;
+}();
+static_assert(closeOrbExtremeDimensionsStayBounded);
