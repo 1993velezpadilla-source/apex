@@ -1197,3 +1197,32 @@ constexpr bool phoneShortcutInsetRoundTrip()
     return true;
 }
 static_assert(phoneShortcutInsetRoundTrip());
+
+// Compact phone deck: the 188/189-unit threshold is where Mixer and
+// Bubblegum Sends shortcuts become 44-unit targets. Repeated keyboard/inset
+// resizing must not create overlap or retain stale coordinates.
+constexpr bool compactShortcutThresholdRoundTrip()
+{
+    for (int w : {188, 189, 190, 320, 393})
+    {
+        const auto first = DAW::mobile::compactPhoneTransportLayout(w, 144);
+        for (int h : {96, 112, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!inside(r.mixer, w, h) || !inside(r.sends, w, h)
+                || !separated(r.mixer, r.sends))
+                return false;
+            if (w >= 189 && (r.mixer.width < 44 || r.sends.width < 44
+                             || r.mixer.height < 44 || r.sends.height < 44))
+                return false;
+            if (w == 188 && (r.mixer.width >= 44 || r.sends.width >= 44))
+                return false;
+        }
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 144);
+        if (!sameBounds(first.mixer, restored.mixer)
+            || !sameBounds(first.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(compactShortcutThresholdRoundTrip());
