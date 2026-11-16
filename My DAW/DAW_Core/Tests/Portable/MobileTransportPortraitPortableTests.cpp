@@ -1502,3 +1502,31 @@ constexpr bool portraitReadoutActionRowIsolation()
     return true;
 }
 static_assert(portraitReadoutActionRowIsolation());
+
+
+// Phone split-screen regression: the clock is the essential portrait readout.
+// Optional Key/Tempo/Automation must never consume its minimum touch width.
+// Exercise the exact 56-unit threshold and recovery after landscape sizing.
+constexpr bool portraitClockPriorityAcrossInsets()
+{
+    for (int w : {13, 20, 44, 55, 56, 57, 64, 96, 128, 160,
+                  188, 189, 245, 320, 393, 430, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
+        const auto landscape = DAW::mobile::portraitReadoutLayout(852, 180);
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (!inside(before.clock, w, 144)
+            || !sameBounds(before.clock, restored.clock)
+            || !inside(landscape.clock, 852, 180))
+            return false;
+        if (w >= 56 && (before.clock.width < 44 || before.clock.height < 44))
+            return false;
+        for (const auto optional : {before.key, before.tempo, before.automation})
+        {
+            if (!inside(optional, w, 144)) return false;
+            if (!separated(optional, before.clock)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitClockPriorityAcrossInsets());
