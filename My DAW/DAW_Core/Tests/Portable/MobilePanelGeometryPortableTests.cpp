@@ -3366,21 +3366,25 @@ static_assert(DAW::mobile::phoneChromeControlSize(393) == 44);
 // Phone Sends must collapse cleanly when rotation/split-screen leaves no
 // vertical space between the APEX header and persistent Transport. A stale
 // anchor (including extreme restored coordinates) cannot resurrect a panel.
-for (int width : { 1, 44, 180, 393, 852 })
-    for (int height : { 1, 44, 180, 393, 852 })
-        for (int anchor : { std::numeric_limits<int>::min(),
-                            std::numeric_limits<int>::max() })
-        {
-            const auto noRoom = DAW::mobile::fitBubblegumSends(
-                width, height, anchor, anchor, true, height, height);
-            if (noRoom.width != 0 || noRoom.height != 0
-                || !inside(noRoom, width, height))
-                return 907;
-            const auto oneUnit = DAW::mobile::fitBubblegumSends(
-                width, height, anchor, anchor, true, height - 1, 0);
-            if (!inside(oneUnit, width, height))
-                return 908;
-        }
+constexpr bool collapsedSendsRemainBounded = []() constexpr {
+    for (int width : { 1, 44, 180, 393, 852 })
+        for (int height : { 1, 44, 180, 393, 852 })
+            for (int anchor : { std::numeric_limits<int>::min(),
+                                std::numeric_limits<int>::max() })
+            {
+                const auto noRoom = DAW::mobile::fitBubblegumSends(
+                    width, height, anchor, anchor, true, height, height);
+                if (noRoom.width != 0 || noRoom.height != 0
+                    || !inside(noRoom, width, height))
+                    return false;
+                const auto oneUnit = DAW::mobile::fitBubblegumSends(
+                    width, height, anchor, anchor, true, height - 1, 0);
+                if (!inside(oneUnit, width, height))
+                    return false;
+            }
+    return true;
+}();
+static_assert(collapsedSendsRemainBounded);
 
 // Sends panel orientation contract: reserved phone header/Transport space
 // must constrain the panel, while desktop/iPad ignore phone-only insets.
