@@ -3404,3 +3404,42 @@ static_assert(sendsDesktopBaseline.x == sendsDesktopWithPhoneInsets.x
               && sendsDesktopBaseline.y == sendsDesktopWithPhoneInsets.y
               && sendsDesktopBaseline.width == sendsDesktopWithPhoneInsets.width
               && sendsDesktopBaseline.height == sendsDesktopWithPhoneInsets.height);
+
+
+// Rotation with corrupt/stale saved insets: clamp both reservations before
+// placing Bubblegum Sends, and never let phone-only insets affect desktop/iPad.
+// Exercise INT_MIN/MAX as well as exact-fit and collapsed viewport sizes.
+constexpr bool sendsExtremeInsetsStaySafe = []() constexpr {
+    for (int width : { 1, 2, 44, 393, 852 })
+        for (int height : { 1, 2, 44, 393, 852 })
+            for (int top : { std::numeric_limits<int>::min(), 0, 64,
+                             std::numeric_limits<int>::max() })
+                for (int bottom : { std::numeric_limits<int>::min(), 0, 88,
+                                    std::numeric_limits<int>::max() })
+                {
+                    const auto phone = fitBubblegumSends(
+                        width, height, std::numeric_limits<int>::max(),
+                        std::numeric_limits<int>::min(), true, top, bottom);
+                    if (!inside(phone, width, height))
+                        return false;
+                    const int safeTop = top < 0 ? 0 : top > height ? height : top;
+                    const int room = height - safeTop;
+                    const int safeBottom = bottom < 0 ? 0
+                        : bottom > room ? room : bottom;
+                    if (phone.height > 0
+                        && (phone.y < safeTop
+                            || static_cast<long long>(phone.y) + phone.height
+                               > height - safeBottom))
+                        return false;
+                    const auto desktop = fitBubblegumSends(
+                        width, height, 0, 0, false, top, bottom);
+                    const auto baseline = fitBubblegumSends(
+                        width, height, 0, 0, false);
+                    if (desktop.x != baseline.x || desktop.y != baseline.y
+                        || desktop.width != baseline.width
+                        || desktop.height != baseline.height)
+                        return false;
+                }
+    return true;
+}();
+static_assert(sendsExtremeInsetsStaySafe);
