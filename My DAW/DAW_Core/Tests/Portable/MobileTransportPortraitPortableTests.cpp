@@ -1290,3 +1290,46 @@ constexpr bool portraitReadoutVisibilityRoundTrip()
     return true;
 }
 static_assert(portraitReadoutVisibilityRoundTrip());
+
+
+// Adversarial rotation/keyboard boundary: the compact shortcut row must keep
+// the intended FX -> Browser -> floating Mixer -> Bubblegum Sends order.
+// This catches accidental swapping of the two phone-only panel entry points
+// when the deck crosses the 188/189-unit minimum-touch-width threshold.
+constexpr bool compactPanelShortcutOrderAcrossRotation()
+{
+    for (int w : {188, 189, 190, 320, 393, 600, 852})
+    {
+        for (int h : {93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!inside(panels[i], w, h)) return false;
+                if (i > 0 && panels[i - 1].x + panels[i - 1].width > panels[i].x)
+                    return false;
+                if (i > 0 && !separated(panels[i - 1], panels[i]))
+                    return false;
+                if (w >= 189 && h >= 94
+                    && (panels[i].width < 44 || panels[i].height < 44))
+                    return false;
+                for (const auto action : r.transport)
+                    if (!separated(panels[i], action)) return false;
+            }
+        }
+        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        const auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (!inside(rotated.mixer, 852, 180) || !inside(rotated.sends, 852, 180)
+            || !sameBounds(before.fx, restored.fx)
+            || !sameBounds(before.browser, restored.browser)
+            || !sameBounds(before.mixer, restored.mixer)
+            || !sameBounds(before.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(compactPanelShortcutOrderAcrossRotation());
