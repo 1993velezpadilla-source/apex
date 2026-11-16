@@ -3488,3 +3488,31 @@ constexpr bool phoneCloseTargetsStayInside = []() constexpr {
     return true;
 }();
 static_assert(phoneCloseTargetsStayInside);
+
+// Close orb after phone rotation: the touch target must include the painted
+// close centre (25 units from the top/right), even on tiny split-screen panels.
+// Negative dimensions must collapse instead of creating an offscreen hit area.
+constexpr bool closeOrbCentreRemainsTouchable = []() constexpr {
+    for (int width : { -100, -1, 0, 1, 24, 25, 26, 43, 44, 45, 180, 393, 852 })
+        for (int height : { -100, -1, 0, 1, 24, 25, 26, 43, 44, 45, 180, 393, 852 })
+        {
+            const auto hit = phoneCloseTouchBounds(width, height);
+            if (width <= 0 || height <= 0)
+            {
+                if (hit.x != 0 || hit.y != 0 || hit.width != 0 || hit.height != 0)
+                    return false;
+                continue;
+            }
+            if (!inside(hit, width, height))
+                return false;
+            const int centreX = width < 25 ? 0 : width - 25;
+            const int centreY = height < 25 ? height : 25;
+            // Treat the right/bottom border as part of the hit area.
+            if (centreX < hit.x || centreX > hit.x + hit.width
+                || centreY < hit.y || centreY > hit.y + hit.height)
+                return false;
+        }
+    return true;
+}();
+static_assert(closeOrbCentreRemainsTouchable);
+
