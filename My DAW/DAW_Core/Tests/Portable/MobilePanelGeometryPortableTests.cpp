@@ -3474,8 +3474,11 @@ constexpr bool phoneCloseTargetsStayInside = []() constexpr {
             const auto hit = DAW::mobile::phoneCloseTouchBounds(width, height);
             if (!inside(hit, width, height))
                 return false;
-            const int expectedWidth = width < 44 ? width : 44;
-            const int expectedHeight = height < 44 ? height : 44;
+            // A zero-sized axis collapses the whole hit rectangle.
+            const int expectedWidth = width == 0 || height == 0
+                ? 0 : (width < 44 ? width : 44);
+            const int expectedHeight = width == 0 || height == 0
+                ? 0 : (height < 44 ? height : 44);
             if (hit.width != expectedWidth || hit.height != expectedHeight)
                 return false;
             if (width >= 44 && height >= 44
