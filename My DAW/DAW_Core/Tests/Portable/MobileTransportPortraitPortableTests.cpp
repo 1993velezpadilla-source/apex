@@ -1435,3 +1435,41 @@ constexpr bool phoneDeckModeSwitchIsolation()
     return true;
 }
 static_assert(phoneDeckModeSwitchIsolation());
+
+
+// Rotation/inset regression: preserve every phone-deck hit rectangle, not
+// just Mixer/Sends, after switching between narrow portrait and wide landscape.
+// Pure geometry cannot validate Android rotation events or actual touch dispatch.
+constexpr bool fullPhoneDeckRotationRoundTrip()
+{
+    for (int w : {189, 245, 320, 360, 393, 430})
+    {
+        for (int h : {94, 96, 112, 143})
+        {
+            const auto before = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const auto landscape = DAW::mobile::compactPhoneTransportLayout(852, 180);
+            const auto after = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !validCompact(852, 180))
+                return false;
+            for (int i = 0; i < 6; ++i)
+                if (!sameBounds(before.transport[i], after.transport[i]))
+                    return false;
+            const PortraitTransportBounds first[] = {
+                before.clock, before.tempo, before.key, before.automation,
+                before.click, before.fx, before.browser, before.mixer, before.sends
+            };
+            const PortraitTransportBounds last[] = {
+                after.clock, after.tempo, after.key, after.automation,
+                after.click, after.fx, after.browser, after.mixer, after.sends
+            };
+            for (int i = 0; i < 9; ++i)
+                if (!sameBounds(first[i], last[i]))
+                    return false;
+            if (!inside(landscape.mixer, 852, 180)
+                || !inside(landscape.sends, 852, 180))
+                return false;
+        }
+    }
+    return true;
+}
+static_assert(fullPhoneDeckRotationRoundTrip());
