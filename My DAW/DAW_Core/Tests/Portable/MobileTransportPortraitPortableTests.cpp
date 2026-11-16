@@ -677,6 +677,25 @@ static_assert(compactTouchThresholdRoundTrip());
 
 int main()
 {
+    // Runtime pixel-by-pixel inset sweep: include the 188/189 shortcut
+    // breakpoint and 93/94 touch-height boundary, rather than only samples.
+    // Keep this at runtime to avoid an excessive constexpr compiler budget.
+    for (int w = 180; w <= 330; ++w)
+        for (int h = 88; h <= 100; ++h)
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(uniqueHitCentres(deck));
+            assert(inside(deck.mixer, w, h) && inside(deck.sends, w, h));
+            if (w >= 189)
+                assert(deck.mixer.width >= 44 && deck.sends.width >= 44);
+            if (h >= 94)
+                assert(deck.mixer.height >= 44 && deck.sends.height >= 44);
+            const auto restored = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(sameBounds(deck.mixer, restored.mixer));
+            assert(sameBounds(deck.sends, restored.sends));
+        }
     // Runtime adversarial sweep across the entire portrait resize band.
     // Cross-component hit isolation matters: readouts and action buttons are
     // positioned by separate helpers, so independent bounds tests can pass
