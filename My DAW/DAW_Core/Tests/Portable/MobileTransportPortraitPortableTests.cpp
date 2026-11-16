@@ -1169,3 +1169,31 @@ constexpr bool portraitClockResizePriorityContract()
     return true;
 }
 static_assert(portraitClockResizePriorityContract());
+
+
+// Regression: repeated OS inset changes must not change the ownership of
+// Mixer/Sends shortcuts or leave stale hit bounds after returning to portrait.
+// Both layouts are pure; check complete rectangles and cross-target isolation.
+constexpr bool phoneShortcutInsetRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto first = DAW::mobile::portraitTransportLayout(w, 144);
+        for (int h : {96, 112, 144, 168, 180})
+        {
+            const auto intermediate = DAW::mobile::portraitTransportLayout(w, h);
+            if (!inside(intermediate.mixer, w, h)
+                || !inside(intermediate.sends, w, h)
+                || !separated(intermediate.mixer, intermediate.sends))
+                return false;
+            if (!exclusiveHitEdges(intermediate))
+                return false;
+        }
+        const auto restored = DAW::mobile::portraitTransportLayout(w, 144);
+        if (!sameBounds(first.mixer, restored.mixer)
+            || !sameBounds(first.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(phoneShortcutInsetRoundTrip());
