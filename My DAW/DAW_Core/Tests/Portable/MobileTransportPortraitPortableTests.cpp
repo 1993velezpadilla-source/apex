@@ -1473,3 +1473,32 @@ constexpr bool fullPhoneDeckRotationRoundTrip()
     return true;
 }
 static_assert(fullPhoneDeckRotationRoundTrip());
+
+
+// Adversarial fullscreen/inset boundary: portrait top readouts must not
+// intercept transport actions or the floating Mixer / Bubblegum Sends.
+// At the 144-unit threshold both rows can touch edges but never overlap.
+// This is geometry-only; native safe-area and touch dispatch remain unverified.
+constexpr bool portraitReadoutActionRowIsolation()
+{
+    for (int w : {189, 245, 320, 360, 393, 430, 600, 852})
+    {
+        for (int h : {144, 145, 146, 147, 180, 240, 320})
+        {
+            const auto deck = DAW::mobile::portraitTransportLayout(w, h);
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto readout : {top.key, top.tempo, top.clock, top.automation})
+            {
+                if (!inside(readout, w, h)) return false;
+                if (readout.width == 0 || readout.height == 0) continue;
+                for (const auto action : deck.transport)
+                    if (!separated(readout, action)) return false;
+                for (const auto shortcut : {deck.fx, deck.browser, deck.mixer,
+                                            deck.sends, deck.click})
+                    if (!separated(readout, shortcut)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutActionRowIsolation());
