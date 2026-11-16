@@ -42,6 +42,25 @@ int main()
                         || desktop.height != baseline.height)
                         return 904;
                 }
+    // Repeated portrait-landscape-portrait transitions must be idempotent:
+    // stale popup anchors cannot make Sends drift after a second rotation.
+    // This guards against stateful placement assumptions in the geometry API.
+    for (int anchorX : { -1000000, 0, 196, 850, 1000000 })
+        for (int anchorY : { -1000000, 0, 390, 850, 1000000 })
+        {
+            const auto portraitBefore = fitBubblegumSends(
+                393, 852, anchorX, anchorY, true, 64, 88);
+            const auto landscape = fitBubblegumSends(
+                852, 393, anchorX, anchorY, true, 64, 88);
+            const auto portraitAfter = fitBubblegumSends(
+                393, 852, anchorX, anchorY, true, 64, 88);
+            if (!inside(landscape, 852, 393)
+                || portraitBefore.x != portraitAfter.x
+                || portraitBefore.y != portraitAfter.y
+                || portraitBefore.width != portraitAfter.width
+                || portraitBefore.height != portraitAfter.height)
+                return 907;
+        }
     // Clip FX Properties: rotation and extreme reserved chrome must never
     // leave a positive-sized panel outside its computed safe rectangle.
     for (int width : { 1, 44, 180, 393, 852 })
