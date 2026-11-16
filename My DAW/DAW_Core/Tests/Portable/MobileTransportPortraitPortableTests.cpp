@@ -1253,3 +1253,40 @@ constexpr bool compactShortcutMinimumHeightBoundary()
     return true;
 }
 static_assert(compactShortcutMinimumHeightBoundary());
+
+
+// Portrait readout visibility boundary: when a keyboard/inset resize reduces
+// the deck below 144 units, every top hit target must disappear. Returning
+// to 144 must restore the exact rectangles, without stale invisible taps.
+constexpr bool portraitReadoutVisibilityRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
+        for (int h : {0, 24, 93, 112, 143})
+        {
+            const auto hidden = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto target : {hidden.key, hidden.tempo,
+                                      hidden.clock, hidden.automation})
+                if (target.width != 0 || target.height != 0)
+                    return false;
+        }
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 144);
+        for (int i = 0; i < 4; ++i)
+        {
+            const PortraitTransportBounds first[] = {
+                before.key, before.tempo, before.clock, before.automation
+            };
+            const PortraitTransportBounds last[] = {
+                restored.key, restored.tempo, restored.clock, restored.automation
+            };
+            if (!sameBounds(first[i], last[i]))
+                return false;
+        }
+        if (before.clock.width < 44 || before.clock.height < 44
+            || !inside(before.clock, w, 144))
+            return false;
+    }
+    return true;
+}
+static_assert(portraitReadoutVisibilityRoundTrip());
