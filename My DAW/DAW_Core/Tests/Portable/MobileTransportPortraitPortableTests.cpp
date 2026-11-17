@@ -774,8 +774,12 @@ int main()
             assert(inside(deck.mixer, w, h) && inside(deck.sends, w, h));
             if (w >= 189)
                 assert(deck.mixer.width >= 44 && deck.sends.width >= 44);
-            if (h >= 94)
+            // Both dimensions must fit the shortcut row. At w < 189,
+            // the panel shortcuts are deliberately hidden even when tall.
+            if (w >= 189 && h >= 94)
                 assert(deck.mixer.height >= 44 && deck.sends.height >= 44);
+            else
+                assert(deck.mixer.width == 0 && deck.sends.width == 0);
             const auto restored = DAW::mobile::compactPhoneTransportLayout(w, h);
             assert(sameBounds(deck.mixer, restored.mixer));
             assert(sameBounds(deck.sends, restored.sends));
