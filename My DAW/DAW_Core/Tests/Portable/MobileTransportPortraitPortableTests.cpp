@@ -1755,3 +1755,38 @@ constexpr bool compactTransportHeightEdgeSweep()
     return true;
 }
 static_assert(compactTransportHeightEdgeSweep());
+
+
+// Rotation round-trip: recomputing phone portrait geometry after a landscape
+// viewport must restore every hit target, not retain stale panel coordinates.
+// Pure layout regression; native orientation events still need device testing.
+constexpr bool portraitRotationRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const int h = 180;
+        const auto before = DAW::mobile::portraitTransportLayout(w, h);
+        const auto landscape = DAW::mobile::portraitTransportLayout(h, w);
+        const auto restored = DAW::mobile::portraitTransportLayout(w, h);
+        const PortraitTransportBounds first[] = {
+            before.transport[0], before.transport[1], before.transport[2],
+            before.transport[3], before.transport[4], before.transport[5],
+            before.click, before.fx, before.browser, before.mixer, before.sends
+        };
+        const PortraitTransportBounds last[] = {
+            restored.transport[0], restored.transport[1], restored.transport[2],
+            restored.transport[3], restored.transport[4], restored.transport[5],
+            restored.click, restored.fx, restored.browser, restored.mixer, restored.sends
+        };
+        for (int i = 0; i < 11; ++i)
+            if (!sameBounds(first[i], last[i])
+                || !inside(last[i], w, h)) return false;
+        for (const auto b : landscape.transport)
+            if (!inside(b, h, w)) return false;
+        for (const auto b : {landscape.click, landscape.fx,
+                             landscape.browser, landscape.mixer, landscape.sends})
+            if (!inside(b, h, w)) return false;
+    }
+    return true;
+}
+static_assert(portraitRotationRoundTrip());
