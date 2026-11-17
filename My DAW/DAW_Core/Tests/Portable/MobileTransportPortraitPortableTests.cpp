@@ -1611,3 +1611,32 @@ constexpr bool portraitAutomationMinimumHeightTransition()
     return true;
 }
 static_assert(portraitAutomationMinimumHeightTransition());
+
+
+// Adversarial inset sweep: Automation must be either fully hidden or have
+// a finger-sized hit rectangle, even when the available width changes by
+// one logical unit. Also guard Clock priority and readout separation.
+// Pure geometry only; does not prove native touch dispatch.
+constexpr bool portraitReadoutInsetSweep()
+{
+    for (int w = 13; w <= 900; ++w)
+    {
+        for (int h : {144, 155, 167, 168, 169, 240})
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto b : {r.key, r.tempo, r.clock, r.automation})
+                if (!inside(b, w, h)) return false;
+            if (w >= 56 && (r.clock.width < 44 || r.clock.height < 44))
+                return false;
+            if ((r.automation.width == 0) != (r.automation.height == 0))
+                return false;
+            if (r.automation.width > 0
+                && (r.automation.width < 44 || r.automation.height < 44))
+                return false;
+            for (const auto b : {r.key, r.tempo, r.clock})
+                if (!separated(b, r.automation)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutInsetSweep());
