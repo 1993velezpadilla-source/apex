@@ -90,7 +90,11 @@ constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int vie
     const int mixerW = minActionW + mixerExtra;
 
     int x = margin;
-    out.click = { x, bottomY, clickW, rowH };
+    // Narrow split-screen decks can leave less than a finger-sized Click
+    // target. Hide it instead of exposing an accidental 1..43-unit tap.
+    // Preserve the reserved slot so FX/Browser/Mixer/Sends do not jump.
+    if (clickW >= 44 && rowH >= 44)
+        out.click = { x, bottomY, clickW, rowH };
     x += clickW + bottomGap;
     out.fx = { x, bottomY, minActionW, rowH };
     x += minActionW + bottomGap;
