@@ -1893,3 +1893,33 @@ constexpr bool portraitNarrowClickTouchGate()
     return true;
 }
 static_assert(portraitNarrowClickTouchGate());
+
+
+// Narrow compact deck regression: between the 189-unit shortcut activation
+// threshold and the 246-unit clock threshold, the four panel entry points
+// must retain 44-unit hit widths while the optional clock stays hidden.
+// This tests geometry, not OS touch dispatch.
+constexpr bool compactPanelClockThresholdSweep()
+{
+    for (int w = 189; w < 246; ++w)
+        for (int h : {94, 95, 112, 143, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (r.clock.width != 0 || r.clock.height != 0) return false;
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!inside(panels[i], w, h)
+                    || panels[i].width < 44 || panels[i].height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(panels[i], panels[j])) return false;
+                for (const auto action : r.transport)
+                    if (!separated(panels[i], action)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactPanelClockThresholdSweep());
