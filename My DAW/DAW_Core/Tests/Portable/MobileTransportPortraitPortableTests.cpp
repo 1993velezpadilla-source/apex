@@ -1576,7 +1576,9 @@ constexpr bool compactReadoutPanelIsolation()
                 for (const auto action : r.transport)
                     if (!separated(readouts[i], action)) return false;
             }
-            if (w >= 245 && (r.clock.width < 54 || r.clock.height < 44))
+            // Four 44-unit shortcuts leave only 53 units at w=245;
+            // the clock first fits its 54-unit minimum at w=246.
+            if (w >= 246 && (r.clock.width < 54 || r.clock.height < 44))
                 return false;
         }
     }
