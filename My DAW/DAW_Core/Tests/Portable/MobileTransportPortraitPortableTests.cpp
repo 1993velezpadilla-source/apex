@@ -1530,3 +1530,39 @@ constexpr bool portraitClockPriorityAcrossInsets()
     return true;
 }
 static_assert(portraitClockPriorityAcrossInsets());
+
+
+// Compact landscape/keyboard deck: optional readouts must not steal taps
+// from the four panel shortcuts or the six transport buttons. This covers
+// the readout reappearance threshold as the usable width grows.
+constexpr bool compactReadoutPanelIsolation()
+{
+    for (int w : {189, 190, 243, 244, 245, 320, 393, 430, 600, 852})
+    {
+        for (int h : {94, 95, 112, 143, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds readouts[] = {
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!inside(readouts[i], w, h)) return false;
+                if (readouts[i].width == 0 || readouts[i].height == 0) continue;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(readouts[i], readouts[j])) return false;
+                for (const auto panel : panels)
+                    if (!separated(readouts[i], panel)) return false;
+                for (const auto action : r.transport)
+                    if (!separated(readouts[i], action)) return false;
+            }
+            if (w >= 245 && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+        }
+    }
+    return true;
+}
+static_assert(compactReadoutPanelIsolation());
