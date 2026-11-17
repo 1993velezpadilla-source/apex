@@ -518,10 +518,17 @@ static_assert(readoutActivationBoundaries());
 constexpr bool compactHeightActivation(int w)
 {
     const auto hidden = DAW::mobile::compactPhoneTransportLayout(w, 7);
-    const auto shown = DAW::mobile::compactPhoneTransportLayout(w, 8);
+    const auto shortRow = DAW::mobile::compactPhoneTransportLayout(w, 93);
+    const auto shown = DAW::mobile::compactPhoneTransportLayout(w, 94);
+    // h=8 restores the deck, but its row is only 1 unit high. The
+    // four 44-unit shortcuts must wait until rowH reaches 44 at h=94.
     return emptyLayout(hidden) && validCompact(w, 8)
         && exclusiveCompactAllTargets(w, 8)
-        && shown.mixer.width > 0 && shown.sends.width > 0;
+        && validCompact(w, 93) && validCompact(w, 94)
+        && shortRow.fx.width == 0 && shortRow.browser.width == 0
+        && shortRow.mixer.width == 0 && shortRow.sends.width == 0
+        && shown.fx.width >= 44 && shown.browser.width >= 44
+        && shown.mixer.width >= 44 && shown.sends.width >= 44;
 }
 static_assert(compactHeightActivation(189));
 static_assert(compactHeightActivation(320));
