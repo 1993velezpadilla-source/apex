@@ -1820,3 +1820,40 @@ constexpr bool portraitRotationRoundTrip()
     return true;
 }
 static_assert(portraitRotationRoundTrip());
+
+
+// Compact phone rotation regression: every optional readout must recover
+// exactly after portrait -> landscape -> portrait. This tests pure geometry,
+// not native orientation callbacks or device fullscreen behavior.
+constexpr bool compactRotationReadoutRoundTrip()
+{
+    for (int w : {240, 245, 246, 320, 360, 393, 430, 600})
+        for (int h : {94, 112, 143, 168})
+        {
+            const auto before = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const auto landscape = DAW::mobile::compactPhoneTransportLayout(h, w);
+            const auto after = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds first[] = {
+                before.clock, before.tempo, before.key, before.automation,
+                before.click, before.fx, before.browser, before.mixer,
+                before.sends
+            };
+            const PortraitTransportBounds last[] = {
+                after.clock, after.tempo, after.key, after.automation,
+                after.click, after.fx, after.browser, after.mixer,
+                after.sends
+            };
+            for (int i = 0; i < 9; ++i)
+                if (!sameBounds(first[i], last[i])
+                    || !inside(last[i], w, h)) return false;
+            for (const auto action : after.transport)
+                if (!inside(action, w, h)) return false;
+            for (const auto action : landscape.transport)
+                if (!inside(action, h, w)) return false;
+            for (const auto panel : {landscape.fx, landscape.browser,
+                                     landscape.mixer, landscape.sends})
+                if (!inside(panel, h, w)) return false;
+        }
+    return true;
+}
+static_assert(compactRotationReadoutRoundTrip());
