@@ -702,6 +702,23 @@ static_assert(rotatingPhoneShortcutIsolation());
 
 int main()
 {
+    // Adversarial rotation-height band beyond the 93/94 threshold: the
+    // compact deck can grow while Android changes its usable window height.
+    // Verify semantic shortcut order and exclusive hit ownership at every
+    // width/height, not just the short 88..100 band tested below.
+    for (int w = 189; w <= 320; ++w)
+        for (int h = 101; h <= 180; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(r.fx.x < r.browser.x && r.browser.x < r.mixer.x
+                   && r.mixer.x < r.sends.x);
+            assert(r.fx.width >= 44 && r.browser.width >= 44
+                   && r.mixer.width >= 44 && r.sends.width >= 44);
+            assert(r.mixer.height >= 44 && r.sends.height >= 44);
+            assert(sameLayout(r, DAW::mobile::compactPhoneTransportLayout(w, h)));
+        }
     // Runtime pixel-by-pixel inset sweep: include the 188/189 shortcut
     // breakpoint and 93/94 touch-height boundary, rather than only samples.
     // Keep this at runtime to avoid an excessive constexpr compiler budget.
