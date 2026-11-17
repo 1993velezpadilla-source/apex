@@ -700,6 +700,36 @@ constexpr bool rotatingPhoneShortcutIsolation()
 }
 static_assert(rotatingPhoneShortcutIsolation());
 
+
+// Height/inset adversarial sweep for the optional Automation readout.
+// Its visible rectangle is inset by two logical units vertically: it must
+// not become an undersized active target at the 167/168 transition.
+constexpr bool automationTouchActivationSweep()
+{
+    for (int w = 56; w <= 600; ++w)
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 168);
+        if (!portraitReadoutsSafe(w, 167) || !portraitReadoutsSafe(w, 168))
+            return false;
+        if (before.automation.width != 0 || before.automation.height != 0)
+            return false;
+        if (after.automation.width > 0)
+        {
+            if (after.automation.width < 44 || after.automation.height < 44
+                || !inside(after.automation, w, 168)
+                || !separated(after.automation, after.clock)
+                || !separated(after.automation, after.tempo)
+                || !separated(after.automation, after.key))
+                return false;
+        }
+        if (!sameBounds(before.clock, DAW::mobile::portraitReadoutLayout(w, 167).clock))
+            return false;
+    }
+    return true;
+}
+static_assert(automationTouchActivationSweep());
+
 int main()
 {
     // Adversarial rotation-height band beyond the 93/94 threshold: the
