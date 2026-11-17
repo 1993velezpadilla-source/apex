@@ -1671,3 +1671,32 @@ constexpr bool portraitPanelRowInsetIsolation()
     return true;
 }
 static_assert(portraitPanelRowInsetIsolation());
+
+
+// Portrait action-row sweep: a six-button transport must retain finger-sized
+// targets across common phone widths, stay within the visible deck and never
+// intercept floating Mixer or Bubblegum Sends after safe-area resizing.
+// This tests geometry only, not OS touch dispatch or actual device insets.
+constexpr bool portraitTransportActionInsetSweep()
+{
+    for (int w = 320; w <= 900; ++w)
+    {
+        for (int h : {144, 145, 167, 168, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto action = r.transport[i];
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(action, r.transport[j])) return false;
+                for (const auto panel : {r.mixer, r.sends, r.fx, r.browser, r.click})
+                    if (!separated(action, panel)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitTransportActionInsetSweep());
