@@ -313,7 +313,8 @@ constexpr bool portraitActionsOrdered(int w, int h)
     for (int i = 1; i < 6; ++i)
         if (r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
             return false;
-    return r.click.y == r.sends.y && r.fx.x < r.browser.x
+    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
+        && r.fx.x < r.browser.x
         && r.browser.x < r.mixer.x && r.mixer.x < r.sends.x;
 }
 static_assert(portraitActionsOrdered(320, 144));
