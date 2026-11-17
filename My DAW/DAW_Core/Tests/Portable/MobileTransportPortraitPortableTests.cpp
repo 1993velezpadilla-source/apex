@@ -1585,3 +1585,29 @@ constexpr bool compactReadoutPanelIsolation()
     return true;
 }
 static_assert(compactReadoutPanelIsolation());
+
+
+// Regression: the portrait Automation readout is hidden until its inset
+// rectangle can retain 44 logical units of height. Keyboard/safe-area
+// resizing across 167/168 must not leave a 43-unit tappable sliver.
+constexpr bool portraitAutomationMinimumHeightTransition()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 168);
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 167);
+        if (before.automation.width != 0 || before.automation.height != 0)
+            return false;
+        if (!sameBounds(before.automation, restored.automation))
+            return false;
+        if (!inside(after.automation, w, 168)
+            || after.automation.width < 44 || after.automation.height < 44)
+            return false;
+        for (const auto readout : {after.key, after.tempo, after.clock})
+            if (!separated(after.automation, readout))
+                return false;
+    }
+    return true;
+}
+static_assert(portraitAutomationMinimumHeightTransition());
