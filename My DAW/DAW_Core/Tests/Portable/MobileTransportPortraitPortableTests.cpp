@@ -1857,3 +1857,34 @@ constexpr bool compactRotationReadoutRoundTrip()
     return true;
 }
 static_assert(compactRotationReadoutRoundTrip());
+
+
+// Split-screen width regression: a reserved Click slot must never become
+// a sub-44-unit active touch target. Other bottom-row buttons retain their
+// positions even when Click is hidden. Pure geometry, not device dispatch.
+constexpr bool portraitNarrowClickTouchGate()
+{
+    for (int w = 189; w <= 320; ++w)
+        for (int h : {144, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            const int usable = w - 12;
+            const int bottomGap = usable / 5 < 3 ? usable / 5 : 3;
+            const int controlsW = usable - 4 * bottomGap;
+            const int minActionW = controlsW / 4 < 44 ? controlsW / 4 : 44;
+            const int extra = controlsW - 4 * minActionW;
+            const int reservedClickW = extra < 132 ? extra : 132;
+            const bool visible = reservedClickW >= 44;
+            if (visible != (r.click.width > 0)) return false;
+            if (visible && (r.click.width < 44 || r.click.height < 44))
+                return false;
+            if (!visible && (r.click.width != 0 || r.click.height != 0))
+                return false;
+            if (r.fx.x != 6 + reservedClickW + bottomGap)
+                return false;
+            for (const auto b : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(b, w, h)) return false;
+        }
+    return true;
+}
+static_assert(portraitNarrowClickTouchGate());
