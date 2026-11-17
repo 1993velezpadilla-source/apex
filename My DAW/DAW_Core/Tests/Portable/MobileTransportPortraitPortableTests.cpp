@@ -1923,3 +1923,27 @@ constexpr bool compactPanelClockThresholdSweep()
     return true;
 }
 static_assert(compactPanelClockThresholdSweep());
+
+
+// Extremely narrow compact decks cannot fit four 44-unit shortcuts.
+// No partially tappable FX/Browser/Mixer/Sends rectangles may survive
+// across the 188 -> 189 logical-unit boundary or short deck heights.
+constexpr bool compactPanelMinimumTouchGate()
+{
+    for (int w = 20; w <= 200; ++w)
+        for (int h : {8, 80, 93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const bool visible = w >= 189 && h >= 94;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+            {
+                if (!inside(panel, w, h)) return false;
+                if (visible && (panel.width < 44 || panel.height < 44))
+                    return false;
+                if (!visible && (panel.width != 0 || panel.height != 0))
+                    return false;
+            }
+        }
+    return true;
+}
+static_assert(compactPanelMinimumTouchGate());
