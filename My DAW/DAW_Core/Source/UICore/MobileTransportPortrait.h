@@ -125,14 +125,19 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
         out.transport[i] = { margin + i * (actionW + gap) + inset,
                              actionY, actionW - 2 * inset, rowH };
     }
-    // 44-unit shortcuts at widths >=189; below that degrade without overflow.
-    const int slot = usable >= 185 ? 44 : (usable - 3 * gap) / 4;
+    // A four-shortcut row needs 189 logical units including margins/gaps.
+    // Below that width, hide the shortcuts rather than exposing sub-44 taps.
+    // Keep the readout allocation anchored to the right edge.
+    const int slot = usable >= 185 ? 44 : 0;
     const int controlsW = 4 * slot + 3 * gap;
     const int controlsX = margin + usable - controlsW;
-    out.fx = { controlsX, margin, slot, rowH };
-    out.browser = { controlsX + slot + gap, margin, slot, rowH };
-    out.mixer = { controlsX + 2 * (slot + gap), margin, slot, rowH };
-    out.sends = { controlsX + 3 * (slot + gap), margin, slot, rowH };
+    if (slot >= 44 && rowH >= 44)
+    {
+        out.fx = { controlsX, margin, slot, rowH };
+        out.browser = { controlsX + slot + gap, margin, slot, rowH };
+        out.mixer = { controlsX + 2 * (slot + gap), margin, slot, rowH };
+        out.sends = { controlsX + 3 * (slot + gap), margin, slot, rowH };
+    }
 
     const int readoutRight = controlsX - gap;
     int cursor = margin;
