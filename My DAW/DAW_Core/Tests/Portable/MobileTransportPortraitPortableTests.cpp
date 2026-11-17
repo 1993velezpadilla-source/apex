@@ -846,7 +846,10 @@ int main()
             assert(inside(r.mixer, w, h));
             assert(inside(r.sends, w, h));
             assert(r.clock.width == 0 || r.clock.width >= 54);
-            assert(r.mixer.width > 0 && r.sends.width > 0);
+            if (w >= 189 && h >= 94)
+                assert(r.mixer.width >= 44 && r.sends.width >= 44);
+            else
+                assert(r.mixer.width == 0 && r.sends.width == 0);
         }
     // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
     // transition rather than checking only the 143/144 boundary. A hidden
