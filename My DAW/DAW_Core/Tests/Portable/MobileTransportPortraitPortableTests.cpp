@@ -1729,3 +1729,29 @@ constexpr bool compactClockThresholdEdgeSweep()
     return true;
 }
 static_assert(compactClockThresholdEdgeSweep());
+
+
+// Compact phone action-row regression: a keyboard/inset height change must
+// not produce sub-44-unit transport targets once the two-row deck has room.
+// This is portable geometry only, not a device touch-dispatch assertion.
+constexpr bool compactTransportHeightEdgeSweep()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto action = r.transport[i];
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(action, r.transport[j])) return false;
+                for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                    if (!separated(action, panel)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactTransportHeightEdgeSweep());
