@@ -1640,3 +1640,34 @@ constexpr bool portraitReadoutInsetSweep()
     return true;
 }
 static_assert(portraitReadoutInsetSweep());
+
+
+// Phone portrait bottom-row regression: every floating panel shortcut must
+// remain disjoint from its neighbours and from the transport action row
+// when keyboard/safe-area insets change the available deck height.
+// Geometry-only: does not validate native touch delivery.
+constexpr bool portraitPanelRowInsetIsolation()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        for (int h : {144, 145, 167, 168, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            const PortraitTransportBounds bottom[] = {
+                r.click, r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!inside(bottom[i], w, h)) return false;
+                if (bottom[i].width < 44 || bottom[i].height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(bottom[i], bottom[j])) return false;
+                for (const auto action : r.transport)
+                    if (!separated(bottom[i], action)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitPanelRowInsetIsolation());
