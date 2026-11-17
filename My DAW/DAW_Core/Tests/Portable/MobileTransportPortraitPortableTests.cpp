@@ -772,7 +772,7 @@ int main()
             assert(exclusiveCompactAllTargets(w, h));
             assert(uniqueHitCentres(deck));
             assert(inside(deck.mixer, w, h) && inside(deck.sends, w, h));
-            if (w >= 189)
+            if (w >= 189 && h >= 94)
                 assert(deck.mixer.width >= 44 && deck.sends.width >= 44);
             // Both dimensions must fit the shortcut row. At w < 189,
             // the panel shortcuts are deliberately hidden even when tall.
