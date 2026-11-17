@@ -1700,3 +1700,32 @@ constexpr bool portraitTransportActionInsetSweep()
     return true;
 }
 static_assert(portraitTransportActionInsetSweep());
+
+
+// Width-edge regression: the compact clock must become tappable exactly
+// when the four phone panel shortcuts leave 54 units for it (w=246).
+// No readout may steal Mixer/Sends or transport taps on inset changes.
+constexpr bool compactClockThresholdEdgeSweep()
+{
+    for (int w = 240; w <= 252; ++w)
+        for (int h : {94, 95, 112, 143, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!inside(r.clock, w, h)) return false;
+            if (w < 246 && r.clock.width != 0) return false;
+            if (w >= 246 && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+            {
+                if (!inside(panel, w, h) || panel.width < 44
+                    || panel.height < 44 || !separated(panel, r.clock))
+                    return false;
+                for (const auto action : r.transport)
+                    if (!separated(panel, action)) return false;
+            }
+            for (const auto action : r.transport)
+                if (!separated(r.clock, action)) return false;
+        }
+    return true;
+}
+static_assert(compactClockThresholdEdgeSweep());
