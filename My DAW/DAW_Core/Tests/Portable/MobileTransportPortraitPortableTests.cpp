@@ -1961,3 +1961,28 @@ constexpr bool compactPanelMinimumTouchGate()
     return true;
 }
 static_assert(compactPanelMinimumTouchGate());
+
+
+// Six compact transport actions must retain 44-unit hit widths once the
+// viewport can actually fit six actions with the existing 1-unit insets.
+// This is a pure geometry boundary test, not a native touch-dispatch test.
+constexpr bool compactSixActionTouchBoundary()
+{
+    for (int w = 295; w <= 340; ++w)
+        for (int h : {94, 112, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto b = r.transport[i];
+                if (!inside(b, w, h) || b.width < 44 || b.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(b, r.transport[j])) return false;
+                for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                    if (!separated(b, panel)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactSixActionTouchBoundary());
