@@ -1963,6 +1963,34 @@ constexpr bool compactPanelMinimumTouchGate()
 static_assert(compactPanelMinimumTouchGate());
 
 
+// A collapsing keyboard/safe-area inset must not leave a tiny but clickable
+// Clock/Tempo/Key/Automation/Click. At h=94 the top row is 44 units again.
+// This intentionally does not claim to solve undersized transport at h<94.
+constexpr bool compactReadoutHeightTouchGate()
+{
+    for (const int w : {20, 188, 189, 245, 246, 320, 360, 852})
+        for (int h = 8; h <= 100; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h)) return false;
+            for (const auto readout : {r.clock, r.tempo, r.key,
+                                       r.automation, r.click})
+            {
+                if (!inside(readout, w, h)) return false;
+                if (h < 94 && (readout.width != 0 || readout.height != 0))
+                    return false;
+                if (readout.width > 0
+                    && (readout.width < 44 || readout.height < 44))
+                    return false;
+            }
+            if (h >= 94 && w >= 246
+                && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+        }
+    return true;
+}
+static_assert(compactReadoutHeightTouchGate());
+
 // Six compact transport actions must retain 44-unit hit widths once the
 // viewport can actually fit six actions with the existing 1-unit insets.
 // This is a pure geometry boundary test, not a native touch-dispatch test.
