@@ -743,6 +743,8 @@ static_assert(automationTouchActivationSweep());
 
 int main()
 {
+    assert(compactRecoveredWidthHeightGrid());
+
     // Adversarial rotation-height band beyond the 93/94 threshold: the
     // compact deck can grow while Android changes its usable window height.
     // Verify semantic shortcut order and exclusive hit ownership at every
@@ -2061,4 +2063,4 @@ constexpr bool compactRecoveredWidthHeightGrid()
         }
     return true;
 }
-static_assert(compactRecoveredWidthHeightGrid());
+// Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
