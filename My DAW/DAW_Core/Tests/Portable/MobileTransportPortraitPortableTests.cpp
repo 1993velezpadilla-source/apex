@@ -616,21 +616,20 @@ constexpr bool compactHeightTouchThreshold()
 }
 static_assert(compactHeightTouchThreshold());
 
-// Six compact transport actions need 44-unit widths after the 1-unit
-// horizontal inset on each side. At w=294 the computed action width is
-// 43; at w=295 it becomes 44. This is distinct from the 189-unit
-// shortcut breakpoint and must survive keyboard/split-screen resizing.
+// Compact transport recovers six 44-unit targets at width 268 by
+// reducing decorative spacing. Below 268, six targets cannot fit.
+// At 295 the regular inset-and-gap layout resumes.
 constexpr bool compactActionWidthBoundary()
 {
     for (const int h : {94, 96, 112, 180})
     {
-        const auto below = DAW::mobile::compactPhoneTransportLayout(294, h);
-        const auto at = DAW::mobile::compactPhoneTransportLayout(295, h);
-        if (!validCompact(294, h) || !validCompact(295, h)) return false;
-        if (!exclusiveCompactAllTargets(294, h)
-            || !exclusiveCompactAllTargets(295, h)) return false;
+        const auto below = DAW::mobile::compactPhoneTransportLayout(267, h);
+        const auto at = DAW::mobile::compactPhoneTransportLayout(268, h);
+        if (!validCompact(267, h) || !validCompact(268, h)) return false;
+        if (!exclusiveCompactAllTargets(267, h)
+            || !exclusiveCompactAllTargets(268, h)) return false;
         for (int i = 0; i < 6; ++i)
-            if (below.transport[i].width != 43
+            if (below.transport[i].width >= 44
                 || at.transport[i].width != 44
                 || at.transport[i].height < 44) return false;
         if (at.mixer.width < 44 || at.sends.width < 44) return false;
@@ -640,7 +639,7 @@ constexpr bool compactActionWidthBoundary()
 static_assert(compactActionWidthBoundary());
 
 // The two independent compact touch thresholds must hold together during
-// keyboard/inset resizing: 295 units wide and 94 units tall. A bounds-only
+// keyboard/inset resizing: 268 units wide and 94 units tall. A bounds-only
 // pass would miss a control that becomes a tiny but still clickable sliver.
 constexpr bool compactCombinedTouchBoundary()
 {
@@ -650,7 +649,7 @@ constexpr bool compactCombinedTouchBoundary()
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
             if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
                 return false;
-            const bool expectedActionsTouchable = w >= 295 && h >= 94;
+            const bool expectedActionsTouchable = w >= 268 && h >= 94;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
                     != expectedActionsTouchable) return false;
@@ -678,7 +677,7 @@ constexpr bool compactTouchThresholdRoundTrip()
                 return false;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
-                    != (w >= 295 && h >= 94)) return false;
+                    != (w >= 268 && h >= 94)) return false;
             if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
                 || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
                 return false;
@@ -1998,11 +1997,11 @@ constexpr bool compactReadoutHeightTouchGate()
 static_assert(compactReadoutHeightTouchGate());
 
 // Six compact transport actions must retain 44-unit hit widths once the
-// viewport can actually fit six actions with the existing 1-unit insets.
+// viewport can fit six actions, including reduced gaps at narrow widths.
 // This is a pure geometry boundary test, not a native touch-dispatch test.
 constexpr bool compactSixActionTouchBoundary()
 {
-    for (int w = 295; w <= 340; ++w)
+    for (int w = 268; w <= 340; ++w)
         for (int h : {94, 112, 144, 180})
         {
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
@@ -2020,3 +2019,21 @@ constexpr bool compactSixActionTouchBoundary()
     return true;
 }
 static_assert(compactSixActionTouchBoundary());
+
+// Narrow-deck regression: preserve six separated 44-unit actions across
+// every intermediate width where removing decorative gaps makes them fit.
+constexpr bool compactRecoveredActionWidths()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h : {94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto b : r.transport)
+                if (!inside(b, w, h) || b.width < 44 || b.height < 44)
+                    return false;
+        }
+    return true;
+}
+static_assert(compactRecoveredActionWidths());
