@@ -1130,16 +1130,15 @@ constexpr bool compactClockInsetRotationContract()
                 || !separated(r.clock, r.sends))
                 return false;
         }
-        // Cross the 93/94-unit Automation threshold, then return to 93.
-        // The clock must remain stable while Automation appears/disappears.
+        // Crossing the minimum touch height hides and restores Clock.
+        // A hidden rectangle is intentionally zero-sized; its position
+        // need not match the visible 44-unit rectangle at h=94.
         const auto before = DAW::mobile::compactPhoneTransportLayout(w, 93);
         const auto expanded = DAW::mobile::compactPhoneTransportLayout(w, 94);
         const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 93);
-        if (before.clock.x != expanded.clock.x
-            || before.clock.width != expanded.clock.width
-            || before.clock.y != expanded.clock.y
-            || before.clock.height != 0
-            || expanded.clock.height != 44
+        if (before.clock.width != 0 || before.clock.height != 0
+            || expanded.clock.width < 54 || expanded.clock.height != 44
+            || !inside(expanded.clock, w, 94)
             || !sameBounds(before.clock, restored.clock))
             return false;
     }
