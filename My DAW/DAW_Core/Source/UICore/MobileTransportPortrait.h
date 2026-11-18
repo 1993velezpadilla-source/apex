@@ -139,6 +139,11 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
         out.sends = { controlsX + 3 * (slot + gap), margin, slot, rowH };
     }
 
+    // Keyboard/safe-area collapse: never leave 1..43-unit-high interactive
+    // readouts (Clock/Tempo/Key/Automation/Click) on the compact top row.
+    // The six transport actions remain unchanged pending narrow-deck navigation.
+    if (rowH < 44) return out;
+
     const int readoutRight = controlsX - gap;
     int cursor = margin;
     auto take = [&](int wanted, int minimum) -> PortraitTransportBounds
