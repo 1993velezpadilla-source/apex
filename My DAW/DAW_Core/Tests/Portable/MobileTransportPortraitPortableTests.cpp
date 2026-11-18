@@ -1118,7 +1118,13 @@ constexpr bool compactClockInsetRotationContract()
         for (int h : {93, 94, 96, 112, 180})
         {
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
-            if (r.clock.width < 54 || r.clock.height <= 0)
+            // Below 94 units the production layout deliberately hides
+            // compact readouts instead of exposing a sub-44-unit target.
+            if (h < 94)
+            {
+                if (r.clock.width != 0 || r.clock.height != 0) return false;
+            }
+            else if (r.clock.width < 54 || r.clock.height < 44)
                 return false;
             if (!inside(r.clock, w, h) || !separated(r.clock, r.mixer)
                 || !separated(r.clock, r.sends))
@@ -1132,7 +1138,8 @@ constexpr bool compactClockInsetRotationContract()
         if (before.clock.x != expanded.clock.x
             || before.clock.width != expanded.clock.width
             || before.clock.y != expanded.clock.y
-            || expanded.clock.height != before.clock.height + 1
+            || before.clock.height != 0
+            || expanded.clock.height != 44
             || !sameBounds(before.clock, restored.clock))
             return false;
     }
