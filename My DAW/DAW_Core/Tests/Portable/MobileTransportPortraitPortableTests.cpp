@@ -741,6 +741,30 @@ constexpr bool automationTouchActivationSweep()
 }
 static_assert(automationTouchActivationSweep());
 
+// Adversarial inset sweep through every recovered-width / usable-height pair.
+// The earlier regression sampled only three heights, missing intermediate
+// keyboard and fullscreen inset sizes. This remains geometry-only coverage.
+constexpr bool compactRecoveredWidthHeightGrid()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(panel, w, h)
+                    || panel.width < 44 || panel.height < 44)
+                    return false;
+        }
+    return true;
+}
+// Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
+
 int main()
 {
     assert(compactRecoveredWidthHeightGrid());
@@ -2041,26 +2065,4 @@ constexpr bool compactRecoveredActionWidths()
 static_assert(compactRecoveredActionWidths());
 
 
-// Adversarial inset sweep through every recovered-width / usable-height pair.
-// The earlier regression sampled only three heights, missing intermediate
-// keyboard and fullscreen inset sizes. This remains geometry-only coverage.
-constexpr bool compactRecoveredWidthHeightGrid()
-{
-    for (int w = 268; w < 295; ++w)
-        for (int h = 94; h <= 143; ++h)
-        {
-            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
-            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
-                return false;
-            for (const auto action : r.transport)
-                if (!inside(action, w, h)
-                    || action.width < 44 || action.height < 44)
-                    return false;
-            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
-                if (!inside(panel, w, h)
-                    || panel.width < 44 || panel.height < 44)
-                    return false;
-        }
-    return true;
-}
-// Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
+
