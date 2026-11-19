@@ -21,7 +21,8 @@ def configure(juce_root: Path) -> None:
     bitmap_source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidBitmapPeer.h"
     bitmap_text = bitmap_source.read_text(encoding="utf-8")
     if "apexAndroidPeer::WindowBitmap apexWindowBitmap;" in original:
-        if '#include "native/ApexAndroidBitmapPeer.h"' not in module_text:
+        if ('#include "native/ApexAndroidBitmapPeer.h"' not in module_text
+                or "apexWindowBitmap.pendingRepaint" not in original):
             raise ValueError("The generated JUCE renderer patch is incomplete")
         header.write_text(bitmap_text, encoding="utf-8")
         return
@@ -36,19 +37,19 @@ def configure(juce_root: Path) -> None:
     paint = peer_text[paint_start:paint_end]
     paint = replace(paint, "        auto sizeNeeded = clip.getWidth() * clip.getHeight();", """
        #if APEX_ANDROID_UI_BENCHMARK
-        apexAndroidPeer::FrameProbe probe (clip);
+        apexAndroidPeer::FrameProbe probe;
        #endif
-        const auto raster = [&] (const Image& image)
+        const auto scale = static_cast<float> (Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale
+                                                / Desktop::getInstance().getGlobalScaleFactor());
+        const auto raster = [&] (const Image& image, Rectangle<int> area)
         {
            #if APEX_ANDROID_UI_BENCHMARK
-            probe.startRaster();
+            probe.startRaster (area);
            #endif
             {
                 LowLevelGraphicsSoftwareRenderer g (image);
-                g.setOrigin (-clip.getPosition());
-                const auto scale = Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale
-                                 / Desktop::getInstance().getGlobalScaleFactor();
-                g.addTransform (AffineTransform::scale ((float) scale));
+                g.setOrigin (-area.getPosition());
+                g.addTransform (AffineTransform::scale (scale));
                 t.handlePaint (g);
             }
            #if APEX_ANDROID_UI_BENCHMARK
@@ -57,7 +58,8 @@ def configure(juce_root: Path) -> None:
         };
 
         if (apexAndroidPeer::useBitmap
-            && t.apexWindowBitmap.paint (env, canvas, clip, t.component.isOpaque(), raster))
+            && t.apexWindowBitmap.paint (env, canvas, clip, scale, t.component.isOpaque(),
+                                         apexAndroidPeer::useRepaintRegion, raster))
         {
            #if APEX_ANDROID_UI_BENCHMARK
             probe.usedBitmap();
@@ -67,6 +69,7 @@ def configure(juce_root: Path) -> None:
             return;
         }
 
+        t.apexWindowBitmap.invalidateCache();
         auto sizeNeeded = clip.getWidth() * clip.getHeight();""".lstrip("\n"))
     paint = replace(paint, """
                 {
@@ -76,9 +79,20 @@ def configure(juce_root: Path) -> None:
                                      / Desktop::getInstance().getGlobalScaleFactor();
                     g.addTransform (AffineTransform::scale ((float) scale));
                     t.handlePaint (g);
-                }""".lstrip("\n"), "                raster (temp);")
+                }""".lstrip("\n"), "                raster (temp, clip);")
 
-    peer.write_text(peer_text[:paint_start] + paint + peer_text[paint_end:], encoding="utf-8")
+    peer_text = peer_text[:paint_start] + paint + peer_text[paint_end:]
+    peer_text = replace(peer_text, """        callOnMessageThread ([area, localView]
+        {
+            localView.callVoidMethod (AndroidView.invalidate,""",
+        """        auto pending = apexWindowBitmap.pendingRepaint;
+        callOnMessageThread ([area, localView, pending = std::move (pending)]
+        {
+            if (apexAndroidPeer::useRepaintRegion)
+                *pending = pending->getUnion (area.expanded (1));
+            localView.callVoidMethod (AndroidView.invalidate,""")
+
+    peer.write_text(peer_text, encoding="utf-8")
     header.write_text(bitmap_text, encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 

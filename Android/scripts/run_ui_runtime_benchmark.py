@@ -29,8 +29,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         raise ValueError("Missing real gesture phases")
     if result.get("events", 0) < 20:
         raise ValueError("Insufficient delivered touch events")
-    if result.get("hardware_canvas") != (renderer != "bitmap-software"):
-        raise ValueError("Activity did not use the requested Android Canvas")
+    if not result.get("hardware_canvas"):
+        raise ValueError("Activity did not use the production accelerated Android Canvas")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -93,8 +93,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
     adb("shell", "pm", "grant", PACKAGE, "android.permission.RECORD_AUDIO")
     adb("logcat", "-c")
-    activity = ".ApexSoftwareCanvasActivity" if renderer == "bitmap-software" else ".ApexImmersiveActivity"
-    adb("shell", "am", "start", "-W", "-n", PACKAGE + "/" + activity,
+    adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.ApexImmersiveActivity",
         "--es", "apex_renderer", renderer, "--es", "apex_scene", scene)
     deadline = time.monotonic() + 100
     ready = None
@@ -156,7 +155,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("int-array", "bitmap", "bitmap-software")
+        renderers = ("int-array", "bitmap", "bitmap-damage")
         for scene in ("empty", "clip"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:
