@@ -21,7 +21,8 @@ import org.json.JSONObject;
  * No input simulation, file writes or polling occur in normal app launches. */
 public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private static final String TAG = "APEX_UI_BENCH";
-    private static final String[] PHASES = {"pan", "pinch", "unpinch", "idle", "reverse"};
+    private static final String[] PHASES = {"pan", "pinch", "unpinch", "idle", "reverse",
+        "vertical-pan", "vertical-pinch", "vertical-unpinch"};
     private static final long PHASE_NS = 2500000000L;
     private final ApexImmersiveActivity activity;
     private final View decor;
@@ -114,15 +115,22 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         ++eventCount;
     }
 
-    private boolean isPinch() { return phase == 1 || phase == 2; }
+    private boolean isPinch() { return phase == 1 || phase == 2 || phase == 6 || phase == 7; }
 
     private void position(double progress) {
-        if (isPinch()) {
+        if (phase == 6 || phase == 7) {
+            final double spread = 0.13 + (phase == 6 ? progress : 1.0 - progress) * 0.20;
+            coordinates[0].x = coordinates[1].x = (float)(left + width * 0.55);
+            coordinates[0].y = (float)(top + height * (0.5 - spread));
+            coordinates[1].y = (float)(top + height * (0.5 + spread));
+        } else if (phase == 5) {
+            coordinates[0].x = (float)(left + width * 0.82);
+            coordinates[0].y = (float)(top + height * (0.82 - progress * 0.55));
+        } else if (isPinch()) {
             final double spread = 0.13 + (phase == 1 ? progress : 1.0 - progress) * 0.20;
             coordinates[0].x = (float)(left + width * (0.5 - spread));
             coordinates[1].x = (float)(left + width * (0.5 + spread));
-            coordinates[0].y = (float)(top + height * (0.5 - spread * 0.3));
-            coordinates[1].y = (float)(top + height * (0.5 + spread * 0.3));
+            coordinates[0].y = coordinates[1].y = (float)(top + height * 0.5);
         } else {
             coordinates[0].x = (float)(left + width *
                 (phase == 4 ? 0.22 + progress * 0.55 : 0.82 - progress * 0.55));
@@ -159,7 +167,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 intervals[samples++] = frameTimeNanos - lastFrame;
             }
             lastFrame = frameTimeNanos;
-            final double progress = Math.min(1.0, (frameTimeNanos - phaseStart) / (double)PHASE_NS);
+            final double duration = phase >= 5 ? 1_500_000_000L : PHASE_NS;
+            final double progress = Math.min(1.0, (frameTimeNanos - phaseStart) / duration);
             if (phase != 3) {
                 position(progress);
                 send(MotionEvent.ACTION_MOVE, isPinch() ? 2 : 1);

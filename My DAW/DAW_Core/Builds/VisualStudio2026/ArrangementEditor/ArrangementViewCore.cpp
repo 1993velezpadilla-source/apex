@@ -26,6 +26,7 @@
 #include "../Source/TrackCore/Track.h"
 #include "../Source/UICore/CursorThemeCore.h"
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <limits>
 
@@ -175,6 +176,257 @@ namespace ArrangementEditor
         }
     }
 
+   #if JUCE_ANDROID
+    class ArrangementViewCore::HorizontalViewportImage final : public juce::CachedComponentImage,
+                                                               private juce::Timer
+    {
+    public:
+        explicit HorizontalViewportImage(ArrangementViewCore& component) : owner(component) {}
+
+        bool beginMovement(bool horizontal)
+        {
+            if (!enabled || !horizontal)
+            {
+                releaseResources();
+                return false;
+            }
+
+            lastMovement = juce::Time::getMillisecondCounter();
+            if (!isTimerRunning())
+                startTimer(40);
+            return true;
+        }
+
+        bool invalidateAll() override
+        {
+            if (!movingCamera)
+                needsPaint = true;
+            return true;
+        }
+
+        bool invalidate(const juce::Rectangle<int>& area) override
+        {
+            if (!movingCamera && (area.intersects(current.bounds) || area.intersects(bodyBounds())))
+                needsPaint = true;
+            return true;
+        }
+
+        void releaseResources() override
+        {
+            stopTimer();
+            current = {};
+            reference = {};
+            needsPaint = true;
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            const auto bounds = bodyBounds();
+            if (!isTimerRunning() || !g.getClipBounds().intersects(bounds))
+            {
+                owner.paintEntireComponent(g, false);
+                return;
+            }
+
+            const float density = g.getInternalContext().getPhysicalPixelScaleFactor();
+            const int width = (int)std::ceil(bounds.getWidth() * density);
+            const int height = (int)std::ceil(bounds.getHeight() * density);
+            if (width <= 0 || height <= 0 || (juce::int64)width * height > 4'000'000)
+            {
+                releaseResources();
+                owner.paintEntireComponent(g, false);
+                return;
+            }
+
+            const auto pps = owner.m_zoom.getPixelsPerSecond();
+            const auto next = Frame{ {}, bounds, density, pps };
+            if (needsPaint || !current.compatibleWith(next))
+                paintExact(next, width, height);
+            else if (bounds != current.bounds || pps != current.pps)
+            {
+                const bool reused = reference.image.isNull() && pps == current.pps
+                    ? translate(next, width, height)
+                    : reproject(next, width, height);
+                if (reused)
+                    ++reusedFrames;
+                else
+                    paintExact(next, width, height);
+            }
+
+            {
+                juce::Graphics::ScopedSaveState restore(g);
+                g.excludeClipRegion(bounds);
+                if (!g.isClipEmpty())
+                    owner.paintEntireComponent(g, false);
+            }
+            juce::Graphics::ScopedSaveState restore(g);
+            if (g.reduceClipRegion(bounds))
+            {
+                g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+                g.drawImageTransformed(current.image, juce::AffineTransform::scale(1.0f / density)
+                    .translated((float)bounds.getX(), (float)bounds.getY()));
+            }
+        }
+
+        bool enabled = true, movingCamera = false;
+        juce::int64 reusedFrames = 0;
+
+    private:
+        struct Frame
+        {
+            juce::Image image;
+            juce::Rectangle<int> bounds;
+            float density = 0;
+            double pps = 0;
+
+            bool compatibleWith(const Frame& other) const
+            {
+                return image.isValid() && density == other.density
+                    && bounds.getY() == other.bounds.getY()
+                    && bounds.getWidth() == other.bounds.getWidth()
+                    && bounds.getHeight() == other.bounds.getHeight();
+            }
+        };
+
+        juce::Rectangle<int> bodyBounds() const
+        {
+            const auto viewport = owner.getViewportVisibleBounds().getIntersection(owner.getLocalBounds());
+            return viewport.withTrimmedTop(juce::jlimit(0, viewport.getHeight(),
+                owner.m_ruler.getBottom() - viewport.getY()));
+        }
+
+        void timerCallback() override
+        {
+            if (juce::Time::getMillisecondCounter() - lastMovement < 150)
+                return;
+
+            releaseResources();
+            owner.repaint(bodyBounds());
+        }
+
+        void updateFrame(const Frame& next, int width, int height)
+        {
+            if (current.image.getWidth() != width || current.image.getHeight() != height)
+                current.image = juce::Image(juce::Image::ARGB, width, height, false, juce::SoftwareImageType{});
+
+            current.bounds = next.bounds;
+            current.density = next.density;
+            current.pps = next.pps;
+        }
+
+        void paintBody(juce::Rectangle<int> pixels)
+        {
+            if (pixels.isEmpty())
+                return;
+
+            juce::Graphics raster(current.image);
+            raster.reduceClipRegion(pixels);
+            raster.addTransform(juce::AffineTransform::scale(current.density)
+                .translated(-current.bounds.getX() * current.density, -current.bounds.getY() * current.density));
+            owner.paintEntireComponent(raster, true);
+        }
+
+        void paintExact(const Frame& next, int width, int height)
+        {
+            reference = {};
+            updateFrame(next, width, height);
+            paintBody({ 0, 0, width, height });
+            needsPaint = false;
+        }
+
+        bool translate(const Frame& next, int width, int height)
+        {
+            const auto physicalX = [density = next.density](int x) { return std::llround(x * (double)density); };
+            const auto shift = physicalX(next.bounds.getX()) - physicalX(current.bounds.getX());
+            if (std::abs(shift) >= width / 2)
+                return false;
+
+            const int delta = (int)shift;
+            const int sourceX = juce::jmax(0, delta), destinationX = juce::jmax(0, -delta);
+            if (delta != 0)
+            {
+                const juce::Image::BitmapData pixels(current.image, juce::Image::BitmapData::readWrite);
+                for (int y = 0; y < height; ++y)
+                    std::memmove(pixels.getPixelPointer(destinationX, y), pixels.getPixelPointer(sourceX, y),
+                                 (size_t)(width - std::abs(delta)) * sizeof(juce::PixelARGB));
+            }
+            updateFrame(next, width, height);
+            if (delta != 0)
+                paintBody({ delta > 0 ? width - delta : 0, 0, std::abs(delta), height });
+            return true;
+        }
+
+        bool reproject(const Frame& next, int width, int height)
+        {
+            if (reference.image.isNull())
+            {
+                reference = std::move(current);
+                current = {};
+            }
+            const double ratio = reference.pps / next.pps;
+            // Refresh exact labels and clip controls periodically while zooming.
+            if (ratio < 0.82 || ratio > 1.22)
+                return false;
+
+            const double offset = next.density * (next.bounds.getX() * ratio - reference.bounds.getX());
+            const auto sourceX = [&](int x) { return std::floor(offset + (x + 0.5) * ratio); };
+            int start = 0, end = width;
+            while (start < end && sourceX(start) < 0.0)
+                ++start;
+            while (end > start && sourceX(end - 1) >= width)
+                --end;
+            if (end - start < width * 3 / 5)
+                return false;
+
+            sourceColumns.resize((size_t)(end - start));
+            for (int i = start; i < end; ++i)
+                sourceColumns[(size_t)(i - start)] = (int)sourceX(i);
+
+            updateFrame(next, width, height);
+            {
+                const juce::Image::BitmapData source(reference.image, juce::Image::BitmapData::readOnly);
+                const juce::Image::BitmapData destination(current.image, juce::Image::BitmapData::readWrite);
+                for (int y = 0; y < height; ++y)
+                {
+                    const auto* src = reinterpret_cast<const juce::PixelARGB*>(source.getLinePointer(y));
+                    auto* dst = reinterpret_cast<juce::PixelARGB*>(destination.getPixelPointer(start, y));
+                    for (int column : sourceColumns)
+                        *dst++ = src[column];
+                }
+            }
+            paintBody({ 0, 0, start, height });
+            paintBody({ end, 0, width - end, height });
+            return true;
+        }
+
+        ArrangementViewCore& owner;
+        Frame current, reference;
+        std::vector<int> sourceColumns;
+        juce::uint32 lastMovement = 0;
+        bool needsPaint = true;
+    };
+
+    void ArrangementViewCore::moveTouchViewport(juce::Viewport& viewport, juce::Point<int> next)
+    {
+        const bool horizontal = next.x != viewport.getViewPositionX() && next.y == viewport.getViewPositionY();
+        auto& cache = *m_horizontalViewportImage;
+        const juce::ScopedValueSetter<bool> movement(cache.movingCamera, cache.beginMovement(horizontal));
+        viewport.setViewPosition(next);
+    }
+
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void ArrangementViewCore::setHorizontalCacheForBenchmark(bool enabled)
+    {
+        m_horizontalViewportImage->enabled = enabled;
+    }
+
+    juce::int64 ArrangementViewCore::horizontalCacheFramesForBenchmark() const
+    {
+        return m_horizontalViewportImage->reusedFrames;
+    }
+   #endif
+   #endif
+
     ArrangementViewCore::ArrangementViewCore()
         : m_toolbar(m_toolState)
         , m_ruler(m_zoom)
@@ -182,6 +434,10 @@ namespace ArrangementEditor
         , m_ghostOverlay(*this)
     {
         setOpaque(true); // paint() fills the entire surface
+       #if JUCE_ANDROID
+        m_horizontalViewportImage = new HorizontalViewportImage(*this);
+        setCachedComponentImage(m_horizontalViewportImage);
+       #endif
         // Initialize timers for deferred clip work.
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
@@ -1352,8 +1608,11 @@ namespace ArrangementEditor
                 juce::jmax(0, getHeight() - viewport->getViewHeight()));
             if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
             {
-
+               #if JUCE_ANDROID
+                moveTouchViewport(*viewport, { nextX, nextY });
+               #else
                 viewport->setViewPosition(nextX, nextY);
+               #endif
             }
 
             const auto delta = pos - m_lastTouchPanPos;
@@ -1383,7 +1642,13 @@ namespace ArrangementEditor
 
         const juce::Point<int> requested{ juce::roundToInt(exact.x), juce::roundToInt(exact.y) };
         if (requested != before)
+        {
+           #if JUCE_ANDROID
+            moveTouchViewport(*viewport, requested);
+           #else
             viewport->setViewPosition(requested);
+           #endif
+        }
         const auto actual = viewport->getViewPosition();
         m_zoom.remember(exact, { (double)requested.x, (double)requested.y },
                        { (double)actual.x, (double)actual.y });
@@ -2083,6 +2348,14 @@ namespace ArrangementEditor
         if (!scaleChanged && !request.projectX && !request.projectY)
             return;
 
+       #if JUCE_ANDROID
+        auto& cache = *m_horizontalViewportImage;
+        const bool horizontalTouch = m_touchNavigationArmed && !heightChanged
+            && (scaleChanged || (request.projectX && !request.projectY));
+        const juce::ScopedValueSetter<bool> movement(cache.movingCamera,
+                                                     cache.beginMovement(horizontalTouch));
+       #endif
+
         auto exact = exactStart;
         auto projected = start;
         {
@@ -2101,6 +2374,10 @@ namespace ArrangementEditor
         }
 
         const auto actual = viewport ? viewport->getViewPosition() : juce::Point<int>();
+       #if JUCE_ANDROID
+        if (actual.y != start.y)
+            cache.releaseResources();
+       #endif
         m_zoom.remember(exact, { (double)projected.x, (double)projected.y },
                        { (double)actual.x, (double)actual.y });
         if (scaleChanged)

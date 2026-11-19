@@ -14,6 +14,8 @@ import subprocess
 import time
 
 PACKAGE = "com.xziel.apex.mobileportrait"
+PHASES = ("pan", "pinch", "unpinch", "idle", "reverse",
+          "vertical-pan", "vertical-pinch", "vertical-unpinch")
 
 
 def adb(*args: str, binary: bool = False):
@@ -25,7 +27,7 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
-    if [p.get("phase") for p in phases] != ["pan", "pinch", "unpinch", "idle", "reverse"]:
+    if tuple(p.get("phase") for p in phases) != PHASES:
         raise ValueError("Missing real gesture phases")
     if result.get("events", 0) < 20:
         raise ValueError("Insufficient delivered touch events")
@@ -39,15 +41,16 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         peer_count = phase["peerWallMs"]["count"]
         if phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
-        if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
+        if phase["peerTiledFrames"] != peer_count:
             raise ValueError("The requested native presentation path was not used")
-        reduced = phase["peerReducedTimelineFrames"]
-        if renderer == "tiles" and phase["phase"] != "idle" and reduced == 0:
-            raise ValueError(f"{phase['phase']} did not rasterize the moving viewport at reduced density")
-        if renderer == "tiles" and phase["phase"] == "idle" and reduced == peer_count:
-            raise ValueError("The viewport did not return to native density after motion")
-        if renderer != "tiles" and reduced != 0:
-            raise ValueError("Unexpected reduced-density frames in the native-density reference")
+        if phase["peerReducedTimelineFrames"] != 0:
+            raise ValueError("The comparison requires native physical density")
+        before, after = phase["before"], phase["after"]
+        reused = after["horizontalCacheFrames"] - before["horizontalCacheFrames"]
+        if renderer == "horizontal-cache" and phase["phase"] in PHASES[:3] and reused <= 0:
+            raise ValueError(f"{phase['phase']} never reused the viewport image")
+        if renderer == "native-tiles" and reused != 0:
+            raise ValueError("The reference unexpectedly reused the viewport image")
         for state in (phase["before"], phase["after"]):
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
@@ -62,6 +65,14 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             raise ValueError(f"{phase['phase']} did not time the native zoom transaction")
     if phases[4]["before"]["scrollX"] == phases[4]["after"]["scrollX"]:
         raise ValueError("Reverse pan did not move the production Viewport")
+    if phases[5]["after"]["scrollY"] <= phases[5]["before"]["scrollY"]:
+        raise ValueError("Vertical pan did not scroll tracks")
+    for phase, direction in zip(phases[6:], (1, -1)):
+        if (phase["after"]["laneHeight"] - phase["before"]["laneHeight"]) * direction <= 0:
+            raise ValueError(f"{phase['phase']} did not change lane height")
+    for phase in phases[5:]:
+        if phase["before"]["pps"] != phase["after"]["pps"]:
+            raise ValueError(f"{phase['phase']} unexpectedly changed horizontal zoom")
     for phase in phases:
         for key in ("rebuilds", "waveformRefreshes"):
             if phase["before"][key] != phase["after"][key]:
@@ -128,7 +139,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     (output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
-    result["phases"] = [phases[key] for key in ("pan", "pinch", "unpinch", "idle", "reverse") if key in phases]
+    result["phases"] = [phases[key] for key in PHASES if key in phases]
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
@@ -163,7 +174,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("native-tiles", "tiles")
+        renderers = ("native-tiles", "horizontal-cache")
         for scene in ("empty", "clip"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:
@@ -185,7 +196,7 @@ def main() -> int:
             "failures": failures,
         }, indent=2))
     for result in results:
-        for phase in result["phases"][:3]:
+        for phase in result["phases"]:
             print(f"{result['scene']} {result['renderer_requested']} "
                   f"pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
