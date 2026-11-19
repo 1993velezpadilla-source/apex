@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pin_full_exporter_ndk import pin_ndk_version, NDK_VERSION
+from pin_full_exporter_ndk import pin_ndk_version, set_zoom_preview_install_id, NDK_VERSION
 
 
 class PinNdkTests(unittest.TestCase):
@@ -47,6 +47,16 @@ class PinNdkTests(unittest.TestCase):
         self.assertNotIn('rootProject.ext.ndkVersion', pinned)
         self.assertEqual(pinned.count(f'ndkVersion "{NDK_VERSION}"'), 2)
         self.assertEqual(pinned, pin_ndk_version(pinned))
+
+    def test_zoom_preview_can_install_alongside_previous_preview(self):
+        original = ('    namespace "com.xziel.apex.zoomrewrite"\n'
+                    '        applicationId "com.xziel.apex.zoomrewrite"\n')
+        generated = set_zoom_preview_install_id(original)
+        self.assertIn('namespace "com.xziel.apex.zoomrewrite"', generated)
+        self.assertIn('applicationId "com.xziel.apex.zoomrewrite.r2"', generated)
+        self.assertEqual(generated, set_zoom_preview_install_id(generated))
+        other_app = original.replace("zoomrewrite", "mobileportrait")
+        self.assertEqual(other_app, set_zoom_preview_install_id(other_app))
 
 
 if __name__ == "__main__":

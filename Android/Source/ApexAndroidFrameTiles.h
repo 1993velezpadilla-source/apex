@@ -17,8 +17,18 @@ DECLARE_JNI_CLASS (TileBitmap, "android/graphics/Bitmap")
 #undef JNI_CLASS_MEMBERS
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
-    METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V")
+    METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V") \
+    METHOD (save, "save", "()I") \
+    METHOD (restoreToCount, "restoreToCount", "(I)V") \
+    METHOD (clipRect, "clipRect", "(FFFF)Z") \
+    METHOD (translate, "translate", "(FF)V") \
+    METHOD (scale, "scale", "(FF)V")
 DECLARE_JNI_CLASS (TileCanvas, "android/graphics/Canvas")
+#undef JNI_CLASS_MEMBERS
+
+#define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
+    METHOD (construct, "<init>", "(I)V")
+DECLARE_JNI_CLASS (TilePaint, "android/graphics/Paint")
 #undef JNI_CLASS_MEMBERS
 
 // Android's bitmap storage and JUCE's Android SoftwareImageType use the
@@ -40,50 +50,74 @@ struct Damage
     RectangleList<int> pending;
 };
 
-class FrameTiles
+class BitmapTiles
 {
 public:
-    // The queued UI-thread invalidation may outlive the component peer.
-    const std::shared_ptr<Damage> damage = std::make_shared<Damage>();
+    explicit BitmapTiles(int divisor) : pixelDivisor(divisor) {}
 
-    void invalidate() noexcept
+    void invalidate() noexcept { frameBounds = {}; }
+
+    bool needsReset(Rectangle<int> clip, float scale, bool opaque) const noexcept
     {
-        frameBounds = {};
+        return frameBounds != clip || frameScale != scale || frameOpaque != opaque;
     }
 
     template <typename Raster>
-    bool paint(JNIEnv* env, jobject canvas, Rectangle<int> clip, float scale,
-               bool opaque, Raster&& raster)
+    bool update(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque,
+                RectangleList<int> redraw, Raster&& raster)
     {
-        auto redraw = std::exchange(damage->pending, {});
-        const bool reset = frameBounds != clip || frameScale != scale || frameOpaque != opaque;
-        if (reset && !resetFrame(env, clip, scale, opaque))
+        if (needsReset(clip, scale, opaque) && !resetFrame(env, clip, scale, opaque))
             return false;
 
-        if (reset)
-            redraw.add(clip);
         redraw.clipTo(clip);
         redraw.offsetAll(-clip.getPosition());
+        if (pixelDivisor != 1)
+        {
+            RectangleList<int> reduced;
+            for (const auto& area : redraw)
+                reduced.add(Rectangle<int>::leftTopRightBottom(
+                    area.getX() / pixelDivisor, area.getY() / pixelDivisor,
+                    smallerDimension(area.getRight()), smallerDimension(area.getBottom())));
+            redraw = std::move(reduced);
+        }
 
         if (!redraw.isEmpty())
         {
             if (!opaque)
                 for (const auto& area : redraw)
                     backing.clear(area);
-            raster(backing, redraw, clip.getPosition());
+            raster(backing, redraw, clip.getPosition(), pixelDivisor);
             const Image::BitmapData source(backing, Image::BitmapData::readOnly);
             for (auto& tile : tiles)
                 if (redraw.intersectsRectangle(tile.bounds) && !upload(env, tile, source, redraw))
                     return false;
         }
 
+        return true;
+    }
+
+    void draw(JNIEnv* env, jobject canvas) const
+    {
+        jint saveCount = 0;
+        if (pixelDivisor != 1)
+        {
+            const auto area = frameBounds.toFloat();
+            saveCount = env->CallIntMethod(canvas, TileCanvas.save);
+            env->CallBooleanMethod(canvas, TileCanvas.clipRect, area.getX(), area.getY(),
+                                   area.getRight(), area.getBottom());
+            env->CallVoidMethod(canvas, TileCanvas.translate, area.getX(), area.getY());
+            env->CallVoidMethod(canvas, TileCanvas.scale, (jfloat)pixelDivisor, (jfloat)pixelDivisor);
+        }
+
+        const auto origin = pixelDivisor == 1 ? frameBounds.getPosition() : Point<int>{};
         for (const auto& tile : tiles)
         {
-            const auto position = clip.getPosition() + tile.bounds.getPosition();
+            const auto position = origin + tile.bounds.getPosition();
             env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
-                                (jfloat)position.x, (jfloat)position.y, static_cast<jobject>(nullptr));
+                                (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
         }
-        return true;
+        if (pixelDivisor != 1)
+            env->CallVoidMethod(canvas, TileCanvas.restoreToCount, saveCount);
     }
 
 private:
@@ -94,11 +128,13 @@ private:
         std::size_t stride;
     };
 
+    int smallerDimension(int size) const noexcept { return (size + pixelDivisor - 1) / pixelDivisor; }
+
     bool resetFrame(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque)
     {
-        constexpr int tileSize = 384; // physical pixels
-        const int width = clip.getWidth();
-        const int height = clip.getHeight();
+        constexpr int tileSize = 384;
+        const int width = smallerDimension(clip.getWidth());
+        const int height = smallerDimension(clip.getHeight());
         if ((int64)width * height > 16'000'000)
             return false; // use the platform peer's fallback for unusually large surfaces
 
@@ -106,6 +142,17 @@ private:
             AndroidBitmapConfig, AndroidBitmapConfig.valueOf, javaString("ARGB_8888").get()));
         if (config == nullptr)
             return clearFailure(env);
+
+        if (pixelDivisor != 1 && filteredPaint.get() == nullptr)
+        {
+            constexpr jint filterBitmapFlag = 2;
+            auto paint = LocalRef<jobject>(env->NewObject(TilePaint, TilePaint.construct, filterBitmapFlag));
+            if (paint == nullptr)
+                return clearFailure(env);
+            filteredPaint = GlobalRef(paint, env);
+            if (filteredPaint.get() == nullptr)
+                return clearFailure(env);
+        }
 
         std::vector<Tile> next;
         next.reserve((std::size_t)((width + tileSize - 1) / tileSize) * ((height + tileSize - 1) / tileSize));
@@ -171,11 +218,93 @@ private:
         return false;
     }
 
+    const int pixelDivisor;
+    GlobalRef filteredPaint;
     Image backing;
     std::vector<Tile> tiles;
     Rectangle<int> frameBounds;
     float frameScale = 0.0f;
     bool frameOpaque = false;
+};
+
+class FrameTiles final : private Timer
+{
+public:
+    // The queued UI-thread invalidation may outlive the component peer.
+    const std::shared_ptr<Damage> damage = std::make_shared<Damage>();
+
+    void noteTimelineMotion(Component& viewport)
+    {
+        motionViewport = &viewport;
+        lastMotionMs = Time::getMillisecondCounter();
+        if (!isTimerRunning())
+            startTimer(50);
+    }
+
+    void invalidate() noexcept
+    {
+        nativeTiles.invalidate();
+        motionTiles.invalidate();
+        drawnMotionArea = {};
+    }
+
+    template <typename Raster>
+    bool paint(JNIEnv* env, jobject canvas, Rectangle<int> clip, float scale,
+               Component& root, Raster&& raster)
+    {
+        const bool opaque = root.isOpaque();
+        const auto* viewport = motionViewport.getComponent();
+        Rectangle<int> motionArea;
+        if (opaque && scale >= 2.0f && viewport != nullptr && viewport->isShowing()
+            && root.isParentOf(viewport))
+            motionArea = (root.getLocalArea(viewport, viewport->getLocalBounds()).toFloat() * scale)
+                .getSmallestIntegerContainer().getIntersection(clip);
+
+        auto redraw = std::exchange(damage->pending, {});
+        if (nativeTiles.needsReset(clip, scale, opaque))
+            redraw.add(clip);
+        if (motionArea != drawnMotionArea)
+        {
+            redraw.add(drawnMotionArea);
+            redraw.add(motionArea);
+        }
+        if (!motionArea.isEmpty())
+        {
+            if (motionTiles.needsReset(motionArea, scale, true))
+                redraw.add(motionArea);
+            if (!motionTiles.update(env, motionArea, scale, true, redraw, raster))
+                return false;
+            redraw.subtract(motionArea);
+        }
+        if (!nativeTiles.update(env, clip, scale, opaque, std::move(redraw), raster))
+            return false;
+
+        nativeTiles.draw(env, canvas);
+        if (!motionArea.isEmpty())
+            motionTiles.draw(env, canvas);
+        drawnMotionArea = motionArea;
+        return true;
+    }
+
+    bool drawsMotionLayer() const noexcept { return !drawnMotionArea.isEmpty(); }
+
+private:
+    void timerCallback() override
+    {
+        if (Time::getMillisecondCounter() - lastMotionMs < 150)
+            return;
+
+        stopTimer();
+        auto viewport = motionViewport;
+        motionViewport = nullptr;
+        if (viewport != nullptr)
+            viewport->repaint();
+    }
+
+    BitmapTiles nativeTiles { 1 }, motionTiles { 2 };
+    Component::SafePointer<Component> motionViewport;
+    uint32 lastMotionMs = 0;
+    Rectangle<int> drawnMotionArea;
 };
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
@@ -219,8 +348,8 @@ public:
             beginRaster = Clock::now();
         }
     }
-    void endRaster() { if (record) sample.rasterNs = ns(Clock::now() - beginRaster); }
-    void presentedTiles() { if (record) sample.usedTiles = 1; }
+    void endRaster() { if (record) sample.rasterNs += ns(Clock::now() - beginRaster); }
+    void presentedTiles(bool motion) { if (record) sample.usedTiles = motion ? 2 : 1; }
 
 private:
     using Clock = std::chrono::steady_clock;

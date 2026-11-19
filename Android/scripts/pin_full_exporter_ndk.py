@@ -37,11 +37,18 @@ def pin_ndk_version(content: str, version: str = NDK_VERSION) -> str:
     return content[:match.end()] + insertion + content[match.end():]
 
 
+def set_zoom_preview_install_id(content: str) -> str:
+    # The earlier preview used a disposable signer. Give this candidate its
+    # own install identity while retaining the generated Java namespace.
+    return re.sub(r'(?m)^([ \t]*applicationId[ \t]+")com\.xziel\.apex\.zoomrewrite(")',
+                  r'\g<1>com.xziel.apex.zoomrewrite.r2\2', content)
+
+
 def main() -> int:
     if not APP_GRADLE.is_file():
         raise SystemExit(f"Missing generated app Gradle file: {APP_GRADLE}")
     before = APP_GRADLE.read_text(encoding="utf-8")
-    after = pin_ndk_version(before)
+    after = set_zoom_preview_install_id(pin_ndk_version(before))
     APP_GRADLE.write_text(after, encoding="utf-8")
     assert pin_ndk_version(after) == after, "NDK pin must be idempotent"
     print(f"[APEX-ANDROID] Pinned generated app NDK to {NDK_VERSION}")

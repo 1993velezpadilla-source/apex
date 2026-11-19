@@ -10,6 +10,41 @@ def replace(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
+def add_timeline_motion(peer: str) -> str:
+    peer = replace(peer,
+        "const auto raster = [&] (const Image& frame, const RectangleList<int>& regions, Point<int> origin)",
+        "const auto raster = [&] (const Image& frame, const RectangleList<int>& regions,\n"
+        "                                 Point<int> origin, int pixelDivisor)")
+    peer = replace(peer, """\
+                g.setOrigin (-origin);
+                g.addTransform (AffineTransform::scale (scale));""", """\
+                const auto factor = 1.0f / (float) pixelDivisor;
+                g.addTransform (AffineTransform::scale (scale * factor)
+                    .translated ((float) -origin.x * factor, (float) -origin.y * factor));""")
+    peer = replace(peer, "t.apexFrameTiles.paint (env, canvas, clip, scale, t.component.isOpaque(), raster)",
+                         "t.apexFrameTiles.paint (env, canvas, clip, scale, t.component, raster)")
+    peer = replace(peer, "probe.presentedTiles();",
+                         "probe.presentedTiles (t.apexFrameTiles.drawsMotionLayer());")
+    peer = replace(peer, "raster (temp, RectangleList<int> (clip.withZeroOrigin()), clip.getPosition());",
+                         "raster (temp, RectangleList<int> (clip.withZeroOrigin()), clip.getPosition(), 1);")
+    peer = replace(peer, "    void repaint (const Rectangle<int>& userArea) override", """\
+    void noteApexTimelineMotion (Component& viewport)
+    {
+        if (apexAndroidFrame::useTiles && component.isOpaque())
+            apexFrameTiles.noteTimelineMotion (viewport);
+    }
+
+    void repaint (const Rectangle<int>& userArea) override""")
+    return replace(peer, "ComponentPeer* Component::createNewPeer", """\
+void noteApexTimelineMotion (Component& viewport)
+{
+    if (auto* peer = dynamic_cast<AndroidComponentPeer*> (viewport.getPeer()))
+        peer->noteApexTimelineMotion (viewport);
+}
+
+ComponentPeer* Component::createNewPeer""")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     module = gui / "juce_gui_basics.cpp"
@@ -22,6 +57,8 @@ def configure(root: Path) -> None:
     if "apexAndroidFrame::FrameTiles apexFrameTiles;" in peer_text:
         if include not in module_text:
             raise ValueError("Incomplete APEX Android renderer")
+        if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
+            peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -89,7 +126,7 @@ def configure(root: Path) -> None:
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
-    peer.write_text(peer_text, encoding="utf-8")
+    peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

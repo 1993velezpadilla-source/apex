@@ -29,6 +29,10 @@
 #include <functional>
 #include <limits>
 
+#if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+namespace juce { void noteApexTimelineMotion(Component& viewport); }
+#endif
+
 namespace ArrangementEditor
 {
     namespace Col
@@ -2110,6 +2114,10 @@ namespace ArrangementEditor
             projectClips();
             updateClipRendererVisibility();
             updateAutomationLayout();
+           #if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+            if (viewport != nullptr && m_touchNavigationArmed)
+                juce::noteApexTimelineMotion(*viewport);
+           #endif
             repaint(getViewportVisibleBounds());
         }
         else
@@ -2192,6 +2200,12 @@ namespace ArrangementEditor
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
         m_ruler.setScrollOffsetX(scrollX);
+
+       #if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+        if (m_touchNavigationArmed)
+            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+                juce::noteApexTimelineMotion(*viewport);
+       #endif
 
         TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
         const juce::ScopedValueSetter<bool> scrollGuard(m_inViewportScroll, true);

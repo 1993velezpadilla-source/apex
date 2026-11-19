@@ -235,6 +235,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         final long[] raster = new long[count];
         final long[] transfer = new long[count];
         int tiledFrames = 0;
+        int reducedTimelineFrames = 0;
         long paintedPixels = 0;
         for (int i = 0; i < count; ++i) {
             final int start = i * 5;
@@ -244,12 +245,14 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             transfer[i] = Math.max(0, wall[i] - raster[i]);
             paintedPixels += samples[start + 3];
             if (samples[start + 4] != 0) ++tiledFrames;
+            if (samples[start + 4] == 2) ++reducedTimelineFrames;
         }
         entry.put("peerWallMs", summarize(wall, count));
         entry.put("peerCpuMs", summarize(cpu, count));
         entry.put("peerRasterMs", summarize(raster, count));
         entry.put("peerTransferMs", summarize(transfer, count));
         entry.put("peerTiledFrames", tiledFrames);
+        entry.put("peerReducedTimelineFrames", reducedTimelineFrames);
         if (count != 0) entry.put("peerMeanPixels", paintedPixels / count);
     }
 

@@ -41,6 +41,13 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             raise ValueError("No measured Android native window paints")
         if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
+        reduced = phase["peerReducedTimelineFrames"]
+        if renderer == "tiles" and phase["phase"] != "idle" and reduced == 0:
+            raise ValueError(f"{phase['phase']} did not rasterize the moving viewport at reduced density")
+        if renderer == "tiles" and phase["phase"] == "idle" and reduced == peer_count:
+            raise ValueError("The viewport did not return to native density after motion")
+        if renderer == "int-array" and reduced != 0:
+            raise ValueError("Unexpected reduced-density frames in the integer-array reference")
         for state in (phase["before"], phase["after"]):
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")

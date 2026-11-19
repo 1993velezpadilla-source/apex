@@ -260,8 +260,6 @@ namespace ArrangementEditor
 
         // DEBUG: Paint counter to verify paint() is actually being called
         mutable int m_paintDebugCounter = 0;
-        int m_lastWaveformRequestWidth = -1;
-        bool m_lastWaveformRenderable = false;
 
         // NAME_H: height reserved at top for clip name label
         // Waveform starts below this so name never overlaps waveform.

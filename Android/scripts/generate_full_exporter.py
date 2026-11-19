@@ -38,7 +38,7 @@ def main() -> int:
     zoom_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-zoom-rewrite"
                     and not args.benchmark_x86)
     if zoom_preview:
-        name, app_id = "APEX Zoom Rewrite", "com.xziel.apex.zoomrewrite"
+        name, app_id = "APEX Zoom Rewrite 2", "com.xziel.apex.zoomrewrite"
     elif portrait_preview or args.benchmark_x86:
         name, app_id = "APEXMobilePortrait", "com.xziel.apex.mobileportrait"
     else:
@@ -57,6 +57,7 @@ def main() -> int:
         "JUCE_ASIO=0",
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
+        "APEX_ANDROID_FRAME_TILES=1",
         f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
     ])
     root.set("defines", " ".join(defines))

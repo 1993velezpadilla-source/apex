@@ -239,11 +239,6 @@ namespace ArrangementEditor
 
     void ClipRenderCore::resized()
     {
-        const int oldWidth = m_lastWaveformRequestWidth;
-        const bool oldWaveformLod = m_lastWaveformRenderable;
-        m_lastWaveformRequestWidth = getWidth();
-        m_lastWaveformRenderable = shouldRenderWaveform();
-
         // Position Piano Roll button in top-right corner only when the clip is
         // wide enough to keep header controls usable and avoid overlapping the
         // lock icon (drawn at x=4, width=16).
@@ -259,15 +254,8 @@ namespace ArrangementEditor
                 : juce::Rectangle<int>());
         }
 
-        // setBounds() is also used for every scroll reposition.  Refreshing
-        // the waveform from resized() made a horizontal scroll walk every
-        // cache even though the clip width did not change.  Only refresh when
-        // width or waveform LOD changes, and only for a renderer currently
-        // shown in the viewport.
-        const bool waveformGeometryChanged = oldWidth != m_lastWaveformRequestWidth
-            || oldWaveformLod != m_lastWaveformRenderable;
-        if (waveformGeometryChanged && isShowing() && shouldRenderWaveform())
-            refresh();
+        // Zoom changes the projection of the source peaks. The arrangement's
+        // visibility update requests peaks for newly drawable, dirty clips.
     }
 
     // -----------------------------------------------------------------------
@@ -913,10 +901,6 @@ namespace ArrangementEditor
         if (!shouldRenderWaveform())
             return;
 
-        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
-        if (metricsActive)
-            TimelinePaintMetrics::waveformDrawCalls.fetch_add(1);
-
         if (!m_waveformCache->isReady())
             return;
 
@@ -1084,6 +1068,10 @@ namespace ArrangementEditor
                                        dirty.getX() - full.getX());
         const int endPx = juce::jlimit(startPx, (int)clipW,
                                      dirty.getRight() - full.getX());
+        if (startPx == endPx || dirty.getY() >= areaBot || dirty.getBottom() <= areaTop)
+            return;
+
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformDrawCalls);
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
 
