@@ -516,25 +516,20 @@ namespace ArrangementEditor
         void onEmptySpaceHold();
 
         // ── Touch pan inertia (iOS-style momentum) ──
-        class TouchPanInertiaTimer : public juce::Timer
+        bool m_touchNavigationActive = false;
+        double m_touchNavigationLastFrameSec = 0.0;
+        juce::VBlankAttachment m_touchNavigationClock { this, [this](double frameTime)
         {
-        public:
-            explicit TouchPanInertiaTimer(ArrangementViewCore& owner) : m_owner(owner) {}
-            void timerCallback() override
-            {
-                if (! m_owner.applyTouchPanInertia())
-                    stopTimer();
-            }
-        private:
-            ArrangementViewCore& m_owner;
-        };
-        std::unique_ptr<TouchPanInertiaTimer> m_inertiaTimer;
-        juce::Point<int> m_touchPanDownScreenPos; // screen-space origin avoids scroll feedback
-        juce::Point<int> m_lastTouchPanPos; // screen-space for stable velocity
-        double m_lastTouchPanTimeMs = 0.0;
-        double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
+            if (m_touchNavigationActive)
+                updateTouchNavigationOnDisplayFrame(frameTime);
+        } };
+        juce::Point<int> m_touchPanDownScreenPos;
+        juce::Point<int> m_lastTouchPanPos;
+        double m_touchPanVelocityX = 0.0; // pixels per nominal 60 Hz frame
         double m_touchPanVelocityY = 0.0;
-        bool applyTouchPanInertia();
+        void updateTouchNavigationOnDisplayFrame(double frameTime);
+        void stopTouchNavigation() noexcept;
+        bool applyTouchPanInertia(double frames);
         void endTouchPanGesture();
 
         std::unique_ptr<ClipPropertiesWindowCore> m_propertiesWindow;
