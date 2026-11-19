@@ -155,7 +155,10 @@ jobs:
           for attempt in 1 2 3; do
             echo "[APEX-ANDROID] Gradle build attempt $attempt/3" |
               tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
-            if ./gradlew --no-daemon --max-workers=2 assembleRelease \
+            # The release-preview workflow checks lint on the supported ARM64 build.
+            # Benchmark the actual optimized x86_64 APK even if the unrelated
+            # release lint resolver hits Maven Central's request limit.
+            if ./gradlew --no-daemon --max-workers=2 :app:packageRelease_Release \
                 2>&1 | tee -a "$RUNNER_TEMP/apex-android-full-compile.log"; then
               exit 0
             fi
