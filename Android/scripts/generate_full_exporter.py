@@ -33,14 +33,14 @@ def main() -> int:
     # preview can be installed alongside an existing full-shell APK, without
     # deleting or overwriting the user's saved Android test projects.
     branch = os.environ.get("GITHUB_REF_NAME", "")
-    fold_qa = branch == "feature/mobile-portrait-zoom-pixel-fold-qa"
+    fold_qa = branch == "feature/mobile-portrait-zoom-android-bitmap-qa"
     portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
                         or branch.startswith("feature/mobile-portrait-"))
     name = "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid"
     package = "com.xziel.apex.mobileportrait" if portrait_preview else "com.xziel.apex.fulltest"
     if fold_qa:
-        name = "APEX Zoom Test"
-        package = "com.xziel.apex.zoomqa"
+        name = "APEX Zoom Preview"
+        package = "com.xziel.apex.zoomrender"
     root.set("name", name)
     root.set("bundleIdentifier", package)
     root.set("version", "0.1.0")
@@ -72,6 +72,7 @@ def main() -> int:
             "androidMinimumSDK": "26",
             "microphonePermissionNeeded": "1",
             "androidEnableContentSharing": "1",
+            "externalLibraries": "jnigraphics",
         },
     )
     # Projucer's Android exporter emits headerPath relative to the generated

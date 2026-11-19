@@ -9,6 +9,8 @@ on:
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
+      - "Android/scripts/configure_android_bitmap_peer.py"
+      - "Android/Source/ApexAndroidBitmapPeer.h"
       - ".github/workflows/apex-android-full-shell-release.yml"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
@@ -112,14 +114,15 @@ jobs:
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
+          python3 Android/scripts/configure_android_bitmap_peer.py
           python3 Android/scripts/enable_immersive_fullscreen.py
           MANIFEST="My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-zoom-pixel-fold-qa ]]; then
-            grep -q "com.xziel.apex.zoomqa.ApexImmersiveActivity" "$MANIFEST"
-            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/zoomqa/ApexImmersiveActivity.java"
+          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-zoom-android-bitmap-qa ]]; then
+            grep -q "com.xziel.apex.zoomrender.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/zoomrender/ApexImmersiveActivity.java"
           elif [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then
             grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"

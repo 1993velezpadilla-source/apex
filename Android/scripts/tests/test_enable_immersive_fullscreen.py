@@ -117,7 +117,7 @@ class ImmersiveManifestTests(unittest.TestCase):
             return run
 
     def test_juce8_manifest_without_package_uses_generated_project(self):
-        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait", "com.xziel.apex.zoomqa"):
+        for bundle in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait", "com.xziel.apex.zoomrender"):
             with self.subTest(bundle=bundle):
                 self.assertEqual(self.run_patch(bundle).returncode, 0)
 
