@@ -29,7 +29,7 @@
 #include <functional>
 #include <limits>
 
-#if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 namespace juce { void noteApexTimelineMotion(Component& viewport); }
 #endif
 
@@ -2114,7 +2114,7 @@ namespace ArrangementEditor
             projectClips();
             updateClipRendererVisibility();
             updateAutomationLayout();
-           #if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+           #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             if (viewport != nullptr && m_touchNavigationArmed)
                 juce::noteApexTimelineMotion(*viewport);
            #endif
@@ -2201,7 +2201,7 @@ namespace ArrangementEditor
         m_viewportScrollY = scrollY;
         m_ruler.setScrollOffsetX(scrollX);
 
-       #if JUCE_ANDROID && defined(APEX_ANDROID_FRAME_TILES)
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         if (m_touchNavigationArmed)
             if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
                 juce::noteApexTimelineMotion(*viewport);

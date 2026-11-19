@@ -40,7 +40,8 @@ static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 static bool reduceTimelineMotion = false;
 #else
-static constexpr bool reduceTimelineMotion = true;
+// The matched emulator replay showed longer frame delays with this layer.
+static constexpr bool reduceTimelineMotion = false;
 #endif
 
 struct Damage

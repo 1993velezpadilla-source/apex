@@ -57,7 +57,6 @@ def main() -> int:
         "JUCE_ASIO=0",
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
-        "APEX_ANDROID_FRAME_TILES=1",
         f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
     ])
     root.set("defines", " ".join(defines))
