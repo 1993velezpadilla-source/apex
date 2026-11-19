@@ -25,6 +25,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private static final long PHASE_NS = 2500000000L;
     private final ApexImmersiveActivity activity;
     private final View decor;
+    private final String renderer;
     private final int left, top, width, height;
     private final MotionEvent.PointerProperties[] properties = new MotionEvent.PointerProperties[2];
     private final MotionEvent.PointerCoords[] coordinates = new MotionEvent.PointerCoords[2];
@@ -41,9 +42,13 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private long phaseStart = 0, lastFrame = 0, downTime = 0;
     private boolean stopped = false, touching = false, collectingMetrics = false;
 
+    private static native void nativeUseWindowBitmap(boolean enabled);
+    private static native long[] nativeWindowDrawSamples(boolean finish);
+
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
         activity = owner;
         decor = owner.getWindow().getDecorView();
+        renderer = owner.getIntent().getStringExtra("apex_renderer");
         left = x; top = y; width = w; height = h;
         for (int i = 0; i < 2; ++i) {
             properties[i] = new MotionEvent.PointerProperties();
@@ -60,10 +65,13 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             fail(new IllegalStateException("No real visible timeline body"));
             return;
         }
-        metricsThread.start();
-        activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
-            new Handler(metricsThread.getLooper()));
-        collectingMetrics = true;
+        nativeUseWindowBitmap(!"int-array".equals(renderer));
+        if (decor.isHardwareAccelerated()) {
+            metricsThread.start();
+            activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
+                new Handler(metricsThread.getLooper()));
+            collectingMetrics = true;
+        }
         // Let the host capture a baseline frame and let initial peak jobs settle.
         decor.postDelayed(() -> Choreographer.getInstance().postFrameCallback(this), 1500);
     }
@@ -137,6 +145,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 JSONObject entry = new JSONObject();
                 entry.put("phase", PHASES[phase]);
                 entry.put("before", state(false));
+                nativeWindowDrawSamples(false);
                 phases.put(entry);
                 if (phase != 2) {
                     send(MotionEvent.ACTION_DOWN, 1);
@@ -164,6 +173,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 Arrays.sort(sorted);
                 JSONObject entry = phases.getJSONObject(phase);
                 entry.put("after", state(true));
+                addPeerTimings(entry, nativeWindowDrawSamples(true));
                 entry.put("ui_callback_samples", samples);
                 entry.put("ui_interval_p50_ms", percentile(sorted, 0.50));
                 entry.put("ui_interval_p95_ms", percentile(sorted, 0.95));
@@ -206,13 +216,39 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 }
             }
             JSONObject result = new JSONObject();
-            result.put("renderer_requested", activity.getIntent().getStringExtra("apex_renderer"));
+            result.put("renderer_requested", renderer);
+            result.put("hardware_canvas", decor.isHardwareAccelerated());
             result.put("scene", activity.getIntent().getStringExtra("apex_scene"));
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);
             Log.i(TAG, "RESULT " + result);
         } catch (Exception error) { fail(error); }
+    }
+
+    private void addPeerTimings(JSONObject entry, long[] samples) throws Exception {
+        final int count = samples.length / 5;
+        final long[] wall = new long[count];
+        final long[] cpu = new long[count];
+        final long[] raster = new long[count];
+        final long[] transfer = new long[count];
+        int bitmapFrames = 0;
+        long paintedPixels = 0;
+        for (int i = 0; i < count; ++i) {
+            final int start = i * 5;
+            wall[i] = samples[start];
+            cpu[i] = samples[start + 1];
+            raster[i] = samples[start + 2];
+            transfer[i] = Math.max(0, wall[i] - raster[i]);
+            paintedPixels += samples[start + 3];
+            if (samples[start + 4] != 0) ++bitmapFrames;
+        }
+        entry.put("peerWallMs", summarize(wall, count));
+        entry.put("peerCpuMs", summarize(cpu, count));
+        entry.put("peerRasterMs", summarize(raster, count));
+        entry.put("peerTransferMs", summarize(transfer, count));
+        entry.put("peerBitmapFrames", bitmapFrames);
+        if (count != 0) entry.put("peerMeanPixels", paintedPixels / count);
     }
 
     private JSONObject summarize(long[] values, int count) throws Exception {

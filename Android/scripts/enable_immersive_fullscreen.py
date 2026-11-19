@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+from copy import deepcopy
 import xml.etree.ElementTree as ET
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 # The actual activity name is derived from the generated Projucer manifest.
 # Portrait previews have a separate package from the existing landscape build.
 ACTIVITY_SIMPLE_NAME = "ApexImmersiveActivity"
+SOFTWARE_ACTIVITY = "ApexSoftwareCanvasActivity"
 JAVA_SOURCE = r"""package __APEX_PACKAGE__;
 
 import android.os.Build;
@@ -158,8 +160,6 @@ def main() -> int:
     # Android 12+ requires an explicit exported launcher. An existing false
     # value also makes the home-screen entry unable to start this Activity.
     activity.set(f"{{{ANDROID_NS}}}exported", "true")
-    tree.write(manifest, encoding="utf-8", xml_declaration=True)
-
     java = (generated / "app/src/main/java" / package.replace(".", "/")
             / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
@@ -167,12 +167,29 @@ def main() -> int:
     if args.benchmark:
         if package != "com.xziel.apex.mobileportrait":
             raise RuntimeError("The runtime benchmark requires the portrait preview")
+        source = source.replace("public final class", "public class", 1)
         benchmark = Path(__file__).resolve().parents[1] / "Source/ApexUiBenchmark.java"
         (java.parent / "ApexUiBenchmark.java").write_text(
             benchmark.read_text(encoding="utf-8").replace("__APEX_PACKAGE__", package),
             encoding="utf-8")
         marker = "    @Override\n    protected void onCreate"
         source = source.replace(marker, BENCHMARK_ACTIVITY + marker, 1)
+        app = root.find("application")
+        assert app is not None
+        software_name = package + "." + SOFTWARE_ACTIVITY
+        if not any(a.get(f"{{{ANDROID_NS}}}name") == software_name for a in candidates):
+            software_activity = deepcopy(activity)
+            for filt in software_activity.findall("intent-filter"):
+                software_activity.remove(filt)
+            software_activity.set(f"{{{ANDROID_NS}}}name", software_name)
+            software_activity.set(f"{{{ANDROID_NS}}}hardwareAccelerated", "false")
+            app.append(software_activity)
+        activity.set(f"{{{ANDROID_NS}}}hardwareAccelerated", "true")
+        (java.parent / (SOFTWARE_ACTIVITY + ".java")).write_text(
+            f"package {package};\n\n"
+            f"public final class {SOFTWARE_ACTIVITY} extends {ACTIVITY_SIMPLE_NAME} {{}}\n",
+            encoding="utf-8")
+    tree.write(manifest, encoding="utf-8", xml_declaration=True)
     java.write_text(source, encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.

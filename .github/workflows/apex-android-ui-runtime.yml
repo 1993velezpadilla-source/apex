@@ -4,15 +4,17 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "integrate/mobile-ui-shared-zoom-runtime"
+      - "integrate/android-presentation-ab"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
+      - "Android/scripts/configure_android_bitmap_peer.py"
       - "Android/scripts/pin_full_exporter_ndk.py"
       - "Android/scripts/run_ui_runtime_benchmark.py"
       - "Android/scripts/tests/test_pin_full_exporter_ndk.py"
       - ".github/workflows/apex-android-ui-runtime.yml"
       - "Android/Source/ApexUiBenchmark.java"
+      - "Android/Source/ApexAndroidBitmapPeer.h"
       - "My DAW/DAW_Core/Source/**"
       - "My DAW/DAW_Core/Builds/VisualStudio2026/ArrangementEditor/**"
       - "My DAW/DAW_Core/DAW_Core.jucer"
@@ -116,6 +118,7 @@ jobs:
           python3 -m unittest discover -s Android/scripts/tests -p 'test_pin_full_exporter_ndk.py' -v
           python3 Android/scripts/pin_full_exporter_ndk.py
           grep -q 'ndkVersion "26.3.11579264"' "My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle"
+          python3 Android/scripts/configure_android_bitmap_peer.py
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.

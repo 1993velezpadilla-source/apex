@@ -21,7 +21,7 @@ def adb(*args: str, binary: bool = False):
     return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
 
 
-def validate_result(result: dict, scene: str) -> None:
+def validate_result(result: dict, scene: str, renderer: str) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
@@ -29,11 +29,18 @@ def validate_result(result: dict, scene: str) -> None:
         raise ValueError("Missing real gesture phases")
     if result.get("events", 0) < 20:
         raise ValueError("Insufficient delivered touch events")
+    if result.get("hardware_canvas") != (renderer != "bitmap-software"):
+        raise ValueError("Activity did not use the requested Android Canvas")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
         if phase["phase"] != "idle" and phase["inputWallMs"]["count"] < 2:
             raise ValueError("No measured gesture dispatches")
+        peer_count = phase["peerWallMs"]["count"]
+        if phase["phase"] != "idle" and peer_count < 2:
+            raise ValueError("No measured Android native window paints")
+        if phase["peerBitmapFrames"] != (0 if renderer == "int-array" else peer_count):
+            raise ValueError("The requested bitmap presentation path was not used")
         for state in (phase["before"], phase["after"]):
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
@@ -52,10 +59,9 @@ def validate_result(result: dict, scene: str) -> None:
             if phase["before"][key] != phase["after"][key]:
                 raise ValueError(f"{phase['phase']} unexpectedly changed {key}")
     if scene == "clip":
-        if not any(phase["after"].get("waveformPaints", 0) >
-                   phase["before"].get("waveformPaints", 0)
-                   for phase in phases[:2]):
-            raise ValueError("No production waveform draw observed during navigation")
+        for phase in phases[:2]:
+            if phase["after"].get("waveformPaints", 0) <= phase["before"].get("waveformPaints", 0):
+                raise ValueError(f"No production waveform draw observed during {phase['phase']}")
 
 
 def validate_focus(window_dump: str) -> None:
@@ -87,7 +93,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
     adb("shell", "pm", "grant", PACKAGE, "android.permission.RECORD_AUDIO")
     adb("logcat", "-c")
-    adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.ApexImmersiveActivity",
+    activity = ".ApexSoftwareCanvasActivity" if renderer == "bitmap-software" else ".ApexImmersiveActivity"
+    adb("shell", "am", "start", "-W", "-n", PACKAGE + "/" + activity,
         "--es", "apex_renderer", renderer, "--es", "apex_scene", scene)
     deadline = time.monotonic() + 100
     ready = None
@@ -118,7 +125,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
-    validate_result(result, scene)
+    validate_result(result, scene, renderer)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
@@ -149,19 +156,20 @@ def main() -> int:
     results = []
     failures = []
     try:
+        renderers = ("int-array", "bitmap", "bitmap-software")
         for scene in ("empty", "clip"):
-            for repeat in (1, 2):
-                renderer = "software"
-                name = f"{scene}-{renderer}-{repeat}"
-                try:
-                    result = run_case(args.output, renderer, scene, repeat)
-                    results.append(result)
-                    print(f"Runtime gesture/surface checks passed: {scene}, pass {repeat}", flush=True)
-                except Exception as error:
-                    failures.append({"case": name, "error": str(error)})
-                    (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
-                    screenshot(args.output / f"{name}-failure.png")
-                    print(f"Runtime check FAILED: {name}: {error}", flush=True)
+            for repeat, order in enumerate((renderers, renderers[::-1]), 1):
+                for renderer in order:
+                    name = f"{scene}-{renderer}-{repeat}"
+                    try:
+                        result = run_case(args.output, renderer, scene, repeat)
+                        results.append(result)
+                        print(f"Runtime gesture/surface checks passed: {name}", flush=True)
+                    except Exception as error:
+                        failures.append({"case": name, "error": str(error)})
+                        (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
+                        screenshot(args.output / f"{name}-failure.png")
+                        print(f"Runtime check FAILED: {name}: {error}", flush=True)
     finally:
         (args.output / "runtime-results.json").write_text(json.dumps({
             "hardware": "CI x86_64 Android emulator; not Pixel Fold",
@@ -171,10 +179,12 @@ def main() -> int:
         }, indent=2))
     for result in results:
         for phase in result["phases"][:2]:
-            print(f"{result['scene']} pass {result['repeat']} {phase['phase']} "
+            print(f"{result['scene']} {result['renderer_requested']} "
+                  f"pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
                   f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
-                  f"input CPU p95={phase['inputCpuMs']['p95']:.2f} ms, "
+                  f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
+                  f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
                   f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms")
     if failures:
         raise RuntimeError(f"{len(failures)} runtime cases failed; review retained evidence")
