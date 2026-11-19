@@ -197,7 +197,9 @@ public:
 
         beginTest("clip LOD: threshold transitions are stable at exact boundaries");
         {
-            expect(!ArrangementClipLodPolicy::drawWaveform(7, 28));
+            expect(!ArrangementClipLodPolicy::drawWaveform(3, 21));
+            expect(!ArrangementClipLodPolicy::drawWaveform(4, 20));
+            expect(ArrangementClipLodPolicy::drawWaveform(4, 21));
             expect(ArrangementClipLodPolicy::drawWaveform(8, 28));
             expect(!ArrangementClipLodPolicy::drawClipName(24, 17));
             expect(ArrangementClipLodPolicy::drawClipName(24, 18));
