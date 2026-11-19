@@ -28,6 +28,27 @@ namespace ArrangementEditor
                 0, std::max(0, maxViewPx));
         }
 
+        // Motion constants use the original 60 Hz time unit. Derive that unit
+        // from the display clock and cap catch-up after a suspended frame.
+        static double frameUnits(double previousSeconds, double nowSeconds) noexcept
+        {
+            if (!std::isfinite(previousSeconds) || !std::isfinite(nowSeconds)
+                || previousSeconds <= 0.0 || nowSeconds <= previousSeconds)
+                return 1.0;
+            return std::clamp((nowSeconds - previousSeconds) * 60.0, 0.06, 3.0);
+        }
+
+        static double advanceInertia(double& velocity, double frames) noexcept
+        {
+            constexpr double decay = 0.967;
+            const double retention = std::pow(decay, frames);
+            // Integrate the geometric series from the original single-step
+            // glide. Two half-frames travel the same distance as one frame.
+            const double distance = velocity * decay * (1.0 - retention) / (1.0 - decay);
+            velocity *= retention;
+            return distance;
+        }
+
         // Distinguish a region tap from a drag using Euclidean SCREEN
         // displacement. A tap opens the contextual menu only when the region
         // was already selected at pointer-down; higher-level code enforces

@@ -1041,7 +1041,21 @@ namespace ArrangementEditor
             onEngineClipSelectionCleared();
     }
 
-    bool ArrangementViewCore::applyTouchPanInertia()
+    void ArrangementViewCore::updateTouchNavigationOnDisplayFrame(double frameTime)
+    {
+        const double frames = TouchNavigationMath::frameUnits(m_touchNavigationLastFrameSec, frameTime);
+        m_touchNavigationLastFrameSec = frameTime;
+        if (!applyTouchPanInertia(frames))
+            stopTouchNavigation();
+    }
+
+    void ArrangementViewCore::stopTouchNavigation() noexcept
+    {
+        m_touchNavigationActive = false;
+        m_touchNavigationLastFrameSec = 0.0;
+    }
+
+    bool ArrangementViewCore::applyTouchPanInertia(double frames)
     {
         auto* viewport = findParentComponentOfClass<juce::Viewport>();
         if (viewport == nullptr)
@@ -1053,10 +1067,8 @@ namespace ArrangementEditor
         // A stationary tap/hold now keeps full-detail paint and requires no
         // unnecessary end-of-gesture renderer rebuild.
 
-        // ── Live two-finger gesture, sampled at 60 Hz ──
-        // Driving the pan/pinch from this timer instead of the irregular mouse
-        // event stream is what makes it feel like an Apple device: every frame
-        // advances by the same amount, no bursts, no stalls.
+        // Sample both contact positions together on the display frame.
+        // Android emits a separate JUCE update for each contact in a move.
         int touchCount = 0;
         int gestureAreaFingerCount = 0;
         juce::Point<float> firstTouch, secondTouch;
@@ -1206,7 +1218,7 @@ namespace ArrangementEditor
             m_smoothedTouchValid = false;
 
             // A clip renderer owns clip-long-press dispatch on its OWN
-            // mouseUp. Do not open a second wheel from this polling timer,
+            // mouseUp. Do not open a second wheel from this frame callback,
             // which sometimes ran before mouseUp and swallowed the menu.
             const auto endedHoldPos = m_holdLocalPos.toInt();
             const bool hadHoldGlow = m_holdActive;
@@ -1216,7 +1228,7 @@ namespace ArrangementEditor
                 repaint(endedHoldPos.x - 48, endedHoldPos.y - 48, 96, 96);
 
             // A stationary tap or a tiny digitizer jitter must NEVER enter
-            // inertial motion, even though this 60 Hz timer is already active.
+            // inertial motion, even though the frame callback is already active.
             const double swipeX = m_lastTouchPanPos.x - m_touchPanDownScreenPos.x;
             const double swipeY = m_lastTouchPanPos.y - m_touchPanDownScreenPos.y;
             if (swipeX * swipeX + swipeY * swipeY <= 24.0 * 24.0)
@@ -1262,7 +1274,8 @@ namespace ArrangementEditor
             }
             else
             {
-                m_smoothedTouchPos = m_smoothedTouchPos * 0.6f + localRaw * 0.4f;
+                const float retention = static_cast<float>(std::pow(0.6, frames));
+                m_smoothedTouchPos = m_smoothedTouchPos * retention + localRaw * (1.0f - retention);
             }
             const auto posScreen = m_smoothedTouchPos.toInt();
             const auto local = getLocalPoint(nullptr, posScreen).toFloat();
@@ -1291,7 +1304,6 @@ namespace ArrangementEditor
                 m_gestureStartViewX = viewport->getViewPositionX();
                 m_gestureStartViewY = viewport->getViewPositionY();
                 m_lastTouchPanPos    = posScreen;
-                m_lastTouchPanTimeMs = juce::Time::getMillisecondCounterHiRes();
                 m_touchPanVelocityX  = 0.0;
                 m_touchPanVelocityY  = 0.0;
 
@@ -1299,7 +1311,7 @@ namespace ArrangementEditor
 
                 // Long-press detection starts now.
                 m_holdLocalPos = local;
-                m_holdStartMs  = m_lastTouchPanTimeMs;
+                m_holdStartMs  = juce::Time::getMillisecondCounterHiRes();
                 m_holdActive   = false;
                 m_holdDragging = false;
                 return true;
@@ -1358,49 +1370,45 @@ namespace ArrangementEditor
                     pos.y - m_touchPanDownScreenPos.y,
                     juce::jmax(0, getHeight() - viewport->getViewHeight())));
 
-            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
-            const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
-            if (dtMs > 0.0 && dtMs < 120.0)
-            {
-                const auto delta = pos - m_lastTouchPanPos;
-                m_touchPanVelocityX = 0.7 * m_touchPanVelocityX + 0.3 * (double) delta.x;
-                m_touchPanVelocityY = 0.7 * m_touchPanVelocityY + 0.3 * (double) delta.y;
-            }
-            m_lastTouchPanPos    = pos;
-            m_lastTouchPanTimeMs = nowMs;
+            const auto delta = pos - m_lastTouchPanPos;
+            const double retention = std::pow(0.7, frames);
+            const double velocityWeight = (1.0 - retention) / frames;
+            m_touchPanVelocityX = retention * m_touchPanVelocityX + velocityWeight * delta.x;
+            m_touchPanVelocityY = retention * m_touchPanVelocityY + velocityWeight * delta.y;
+            m_lastTouchPanPos = pos;
             return true;
         }
 
-        // Exponential decay per frame. 0.967 per 16 ms frame is the iOS
-        // UIScrollView "normal" deceleration (0.998 per ms) — the natural,
-        // long glide. 0.93 was stopping noticeably short.
-        m_touchPanVelocityX *= 0.967;
-        m_touchPanVelocityY *= 0.967;
-
+        const juce::Point<double> movement(
+            TouchNavigationMath::advanceInertia(m_touchPanVelocityX, frames),
+            TouchNavigationMath::advanceInertia(m_touchPanVelocityY, frames));
         if (std::abs(m_touchPanVelocityX) < 0.35 && std::abs(m_touchPanVelocityY) < 0.35)
             return false;
 
+        const auto origin = getPreciseViewportOrigin();
         const auto before = viewport->getViewPosition();
-        const auto next = juce::Point<int>(
-            TouchNavigationMath::panPosition(before.x, m_touchPanVelocityX,
-                juce::jmax(0, getWidth() - viewport->getViewWidth())),
-            TouchNavigationMath::panPosition(before.y, m_touchPanVelocityY,
-                juce::jmax(0, getHeight() - viewport->getViewHeight())));
+        const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
+        const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
+        const juce::Point<double> target(
+            juce::jlimit(0.0, static_cast<double>(maxX), origin.x - movement.x),
+            juce::jlimit(0.0, static_cast<double>(maxY), origin.y - movement.y));
+        const auto next = target.roundToInt();
         if (next != before)
             viewport->setViewPosition(next);
 
         const auto actual = viewport->getViewPosition();
-        if (actual.x == before.x) m_touchPanVelocityX = 0.0;
-        if (actual.y == before.y) m_touchPanVelocityY = 0.0;
+        // Retain fractional motion so a 120 Hz frame can move less than one
+        // logical pixel without cancelling momentum. Stop at a clamped edge.
+        m_viewportRemainder = { actual.x == next.x ? target.x - actual.x : 0.0,
+                                actual.y == next.y ? target.y - actual.y : 0.0 };
+        if (target.x <= 0.0 || target.x >= maxX) m_touchPanVelocityX = 0.0;
+        if (target.y <= 0.0 || target.y >= maxY) m_touchPanVelocityY = 0.0;
         return true;
     }
 
     void ArrangementViewCore::beginTouchNavigation()
     {
-        if (!m_inertiaTimer)
-            m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-        if (!m_inertiaTimer->isTimerRunning())
-            m_inertiaTimer->startTimerHz(60);
+        m_touchNavigationActive = true;
     }
 
     void ArrangementViewCore::stopTouchMomentumOnClipPress() noexcept
@@ -1409,8 +1417,7 @@ namespace ArrangementEditor
         // Simply selecting a clip must not reuse a stale viewport anchor or
         // keep moving after finger-up (the reported timeline-flying bug).
         ++m_touchGestureEpoch;
-        if (m_inertiaTimer)
-            m_inertiaTimer->stopTimer();
+        stopTouchNavigation();
         m_touchScrollActive = false;
         m_smoothedTouchValid = false;
         m_holdActive = false;
@@ -1431,8 +1438,7 @@ namespace ArrangementEditor
         {
             m_touchPanVelocityX = 0.0;
             m_touchPanVelocityY = 0.0;
-            if (m_inertiaTimer)
-                m_inertiaTimer->stopTimer();
+            stopTouchNavigation();
         }
     }
 
@@ -1449,18 +1455,15 @@ namespace ArrangementEditor
         if (realSwipe
             && (std::abs(m_touchPanVelocityX) > 1.0 || std::abs(m_touchPanVelocityY) > 1.0))
         {
-            if (! m_inertiaTimer)
-                m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-            m_inertiaTimer->startTimerHz(60);
+            beginTouchNavigation();
         }
         else
         {
-            // The timer may have started on initial touch drag, *before*
+            // The display callback may have been enabled on touch-down, before
             // mouseUp. Ending with a non-fling must cancel that existing
-            // timer and its velocity, not merely decline to start a new one.
+            // callback and its velocity.
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
-            if (m_inertiaTimer)
-                m_inertiaTimer->stopTimer();
+            stopTouchNavigation();
         }
     }
 
@@ -3355,7 +3358,7 @@ namespace ArrangementEditor
                 && (m_drag.pending || m_drag.active))
             {
                 // A simultaneous second finger cancels this pending edit;
-                // the two-finger timer becomes the sole gesture owner.
+                // display-paced navigation takes ownership.
                 int activeFingers = 0;
                 for (const auto& input : juce::Desktop::getInstance().getMouseSources())
                     if (input.getType() == juce::MouseInputSource::InputSourceType::touch
@@ -3413,24 +3416,6 @@ namespace ArrangementEditor
                 return;
             }
 
-            // Input-source split (industry standard): a TOUCH drag scrolls the
-            // timeline with the finger; a MOUSE drag runs the marquee below.
-            const bool touchDrag =
-                e.source.getType() == juce::MouseInputSource::InputSourceType::touch;
-
-            if (touchDrag)
-            {
-                // ALL touch navigation is sampled by the 60 Hz gesture timer
-                // (see applyTouchPanInertia): one finger pans the timeline,
-                // two fingers pinch each axis. The raw event stream is too
-                // irregular to drive a smooth gesture.
-                if (! m_inertiaTimer)
-                    m_inertiaTimer = std::make_unique<TouchPanInertiaTimer>(*this);
-                if (! m_inertiaTimer->isTimerRunning())
-                    m_inertiaTimer->startTimerHz(60);
-                return;
-            }
-
             // Rubber band select.  Keep updating while the pointer crosses
             // clips; ClipRenderCore forwards body drags here and the old
             // findClipAt() gate froze the marquee over any clip.
@@ -3462,8 +3447,7 @@ namespace ArrangementEditor
             m_holdActive = false;
             m_holdDragging = false;
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
-            if (m_inertiaTimer)
-                m_inertiaTimer->stopTimer();
+            stopTouchNavigation();
             showEmptyTrackContextMenu(e.getScreenPosition(), e.getPosition());
             repaint(juce::Rectangle<int>(e.x - 48, e.y - 48, 96, 96));
             return;
@@ -6855,8 +6839,7 @@ namespace ArrangementEditor
         m_touchScrollActive = false;
         m_smoothedTouchValid = false;
         m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
-        if (m_inertiaTimer)
-            m_inertiaTimer->stopTimer();
+        stopTouchNavigation();
 
         appendDebugLog("[startClipDrag end] selectionCount=" + juce::String(m_selection.getSelectionCount())
             + " dragItemCount=" + juce::String((int)m_drag.items.size()));
