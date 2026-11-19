@@ -217,6 +217,22 @@ static_assert(compactAtThreshold.fx.width == 44
               && compactAtThreshold.sends.width == 44);
 static_assert(compactBelowThreshold.fx.width < 44
               && compactBelowThreshold.sends.width < 44);
+// Hidden phone shortcuts must be truly non-interactive on both axes.
+// Width-only assertions would miss a zero-width JUCE target retaining
+// stale height after split-screen resize or keyboard inset changes.
+constexpr bool compactShortcutsDisappearBelowThreshold()
+{
+    for (const int w : {20, 188})
+        for (const int h : {93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            for (const auto item : shortcuts)
+                if (item.width != 0 || item.height != 0) return false;
+        }
+    return true;
+}
+static_assert(compactShortcutsDisappearBelowThreshold());
 static_assert(compactAtThreshold.transport[0].height >= 44
               && compactBelowThreshold.transport[0].height >= 44);
 // Landscape rotation must preserve the six transport hit targets and
