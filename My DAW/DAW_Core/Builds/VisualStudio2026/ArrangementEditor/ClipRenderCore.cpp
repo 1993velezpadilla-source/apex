@@ -993,8 +993,8 @@ namespace ArrangementEditor
             }
         }
 
-        if (metricsActive)
-            TimelinePaintMetrics::waveformPeaksWalked.fetch_add(static_cast<uint64_t>(visiblePeakCount));
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformPeaksWalked,
+                                  static_cast<uint64_t>(visiblePeakCount));
 
         // â”€â”€ Visual gain/fade multipliers (REALTIME, NO CACHE REGEN) â”€â”€â”€â”€â”€â”€
         // This is the KEY FIX:
