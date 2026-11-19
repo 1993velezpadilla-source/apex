@@ -103,7 +103,7 @@ class WindowBitmap
 {
 public:
     template <typename Raster>
-    bool paint (JNIEnv* env, jobject canvas, jobject paint, Rectangle<int> clip, bool opaque, Raster&& raster)
+    bool paint (JNIEnv* env, jobject canvas, Rectangle<int> clip, bool opaque, Raster&& raster)
     {
         if (! prepare (env, clip.getWidth(), clip.getHeight()))
             return false;
@@ -123,10 +123,11 @@ public:
             }
         }
 
-        // The Canvas is already clipped to the requested rectangle, including
-        // when the reusable bitmap has extra columns or rows.
+        // Canvas already clips any excess rows/columns. The JUCE Java peer's
+        // Paint swaps red and blue for the int[] path. This bitmap is RGBA.
         env->CallVoidMethod (canvas, BitmapCanvas.drawBitmap, bitmap.get(),
-                             static_cast<jfloat> (clip.getX()), static_cast<jfloat> (clip.getY()), paint);
+                             static_cast<jfloat> (clip.getX()), static_cast<jfloat> (clip.getY()),
+                             static_cast<jobject> (nullptr));
         return true;
     }
 

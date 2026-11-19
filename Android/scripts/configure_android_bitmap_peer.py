@@ -57,7 +57,7 @@ def configure(juce_root: Path) -> None:
         };
 
         if (apexAndroidPeer::useBitmap
-            && t.apexWindowBitmap.paint (env, canvas, paint, clip, t.component.isOpaque(), raster))
+            && t.apexWindowBitmap.paint (env, canvas, clip, t.component.isOpaque(), raster))
         {
            #if APEX_ANDROID_UI_BENCHMARK
             probe.usedBitmap();
