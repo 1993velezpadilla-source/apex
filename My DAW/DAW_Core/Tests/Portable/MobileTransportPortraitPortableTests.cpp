@@ -767,7 +767,8 @@ constexpr bool compactRecoveredWidthHeightGrid()
 
 int main()
 {
-    assert(compactRecoveredWidthHeightGrid());
+    // Keep the full geometry sweep active even when NDEBUG removes assert().
+    if (!compactRecoveredWidthHeightGrid()) return 1;
 
     // Adversarial rotation-height band beyond the 93/94 threshold: the
     // compact deck can grow while Android changes its usable window height.
