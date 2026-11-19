@@ -763,12 +763,37 @@ constexpr bool compactRecoveredWidthHeightGrid()
         }
     return true;
 }
+// Full-size compact phone decks also cross width transitions after the
+// recovered 268..294 band. Check every intermediate width and inset height
+// in Release too, not only selected compile-time sample widths.
+// Geometry only: no claim about OS touch delivery or device fullscreen.
+bool compactStandardWidthHeightGrid()
+{
+    for (int w = 295; w <= 430; ++w)
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(panel, w, h)
+                    || panel.width < 44 || panel.height < 44)
+                    return false;
+        }
+    return true;
+}
+
 // Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
 
 int main()
 {
     // Keep the full geometry sweep active even when NDEBUG removes assert().
     if (!compactRecoveredWidthHeightGrid()) return 1;
+    if (!compactStandardWidthHeightGrid()) return 2;
 
     // Adversarial rotation-height band beyond the 93/94 threshold: the
     // compact deck can grow while Android changes its usable window height.
