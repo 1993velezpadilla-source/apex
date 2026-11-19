@@ -177,7 +177,8 @@ namespace ArrangementEditor
         , m_pianoRollBtn(PianoRollButtonCore::Style::ToolbarButton)
         , m_ghostOverlay(*this)
     {
-        // Initialize timers for deferred operations
+        setOpaque(true); // paint() fills the entire surface
+        // Initialize timers for deferred clip work.
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);
 
@@ -787,7 +788,10 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
         const int trackCount = getArrangementTrackCount();
         const int contentTop = arrangementContentTop();
-        const auto visibleBounds = getViewportVisibleBounds();
+        const auto visibleBounds = getViewportVisibleBounds().getIntersection(g.getClipBounds());
+        if (visibleBounds.isEmpty())
+            return;
+
         // The unfolded take bands consume real vertical content height. Do
         // not cull the physical tracks below using uniform-height division.
         const int firstVisibleTrack = juce::jlimit(0, trackCount,
@@ -823,6 +827,7 @@ namespace ArrangementEditor
         // Restrained cool tones: bars read above beats, grid never competes
         // with clips. LOD policy shared with ArrangementRulerCore via
         // GridLodPolicy.
+        if (std::isfinite(m_tempoBpm))
         {
             const double beatDuration = 60.0 / juce::jmax(1.0, m_tempoBpm);
             const double barDuration  = beatDuration * 4.0;
@@ -834,24 +839,18 @@ namespace ArrangementEditor
             // Subtracting it shifted every bar line away from the clips and
             // the ruler as soon as the view scrolled.
             auto timeToLaneX = [this](double t) { return (int) m_zoom.timeToX(t); };
-            const double viewStart = m_zoom.xToTime((double) m_viewportScrollX);
-            const double viewEnd   = m_zoom.xToTime((double) (m_viewportScrollX + getWidth()));
-            const int    gridVisibleX0 = (int) visibleBounds.getX();
-            const int    gridVisibleX1 = (int) visibleBounds.getRight();
-
+            const int gridVisibleX0 = visibleBounds.getX();
+            const int gridVisibleX1 = visibleBounds.getRight();
             const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
-            const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-            const int    barStart  = (int) (viewStart / barDuration);
-            const int    barEnd    = (int) (viewEnd   / barDuration) + 1;
-            const int    barStep   = GridLodPolicy::barStep(pxPerBar);
-            const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
-
-            for (int bar = barStart; bar <= barEnd; ++bar)
+            const double pxPerBar = barDuration * m_zoom.getPixelsPerSecond();
+            const int barStep = GridLodPolicy::barStep(pxPerBar);
+            const bool noBeats = GridLodPolicy::suppressBeats(pxPerBeat);
+            // A long project only visits bars intersecting this paint. The
+            // aligned preceding bar can still supply visible beat subdivisions.
+            const auto first = static_cast<int64_t>(gridVisibleX0 / pxPerBar);
+            const auto last = static_cast<int64_t>(gridVisibleX1 / pxPerBar);
+            for (auto bar = first - first % barStep; bar <= last; bar += barStep)
             {
-                // Skip bars at extreme zoom-out to reduce GPU draw calls
-                if (barStep > 1 && (bar % barStep) != 0)
-                    continue;
-
                 const double barTime = bar * barDuration;
                 const int x = timeToLaneX(barTime);
                 if (x >= gridVisibleX0 && x <= gridVisibleX1)
@@ -2057,7 +2056,7 @@ namespace ArrangementEditor
         if (!m_pendingZoom || m_applyingZoom)
             return;
 
-       #if APEX_ANDROID_UI_BENCHMARK
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         TimelinePaintMetrics::ScopedTimer zoomTimer(TimelinePaintMetrics::viewportZoomDurationNs);
        #endif
         auto request = *m_pendingZoom;
@@ -2455,8 +2454,7 @@ namespace ArrangementEditor
     void ArrangementViewCore::projectClips()
     {
         const auto viewport = getViewportVisibleBounds();
-        const auto overscan = viewport.expanded(ArrangementClipLodPolicy::kViewportOverscanPx,
-                                                 m_zoom.getTrackHeightPx());
+        const int trackHeight = m_zoom.getTrackHeightPx();
         for (auto& renderer : m_clipRenderers)
         {
             const auto* clip = renderer->getClip();
@@ -2464,7 +2462,8 @@ namespace ArrangementEditor
                 continue;
             const auto bounds = projectClipBounds(*clip);
             // Move hidden renderers without invalidating their previous or new area.
-            if (!overscan.intersects(bounds) && !renderer->isEditGestureActive())
+            if (!ArrangementClipLodPolicy::intersectsViewport(bounds, viewport, trackHeight)
+                && !renderer->isEditGestureActive())
                 renderer->setVisible(false);
             if (renderer->getBounds() != bounds)
                 renderer->setBounds(bounds);
