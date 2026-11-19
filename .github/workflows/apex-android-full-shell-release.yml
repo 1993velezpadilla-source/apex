@@ -8,6 +8,8 @@ on:
       - "feature/mobile-portrait-*"
     paths:
       - "Android/scripts/generate_full_exporter.py"
+      - "Android/scripts/configure_android_bitmap_peer.py"
+      - "Android/Source/ApexAndroidBitmapPeer.h"
       - "Android/scripts/enable_immersive_fullscreen.py"
       - ".github/workflows/apex-android-full-shell-release.yml"
       - "My DAW/DAW_Core/Source/**"
@@ -112,6 +114,7 @@ jobs:
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
           # bars and re-applies after focus changes from plugin dialogs.
+          python3 Android/scripts/configure_android_bitmap_peer.py
           python3 Android/scripts/enable_immersive_fullscreen.py
           MANIFEST="My DAW/DAW_Core/Builds/AndroidFull/app/src/main/AndroidManifest.xml"
           # Allow portrait + landscape under Android auto-rotate preferences;
