@@ -96,13 +96,16 @@ constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int vie
     if (clickW >= 44 && rowH >= 44)
         out.click = { x, bottomY, clickW, rowH };
     x += clickW + bottomGap;
-    out.fx = { x, bottomY, minActionW, rowH };
+    // During split-screen or keyboard-inset collapse, never expose tiny
+    // shortcut hit targets. Preserve the slot positions for resize recovery.
+    const bool shortcutsTouchable = minActionW >= 44 && rowH >= 44;
+    if (shortcutsTouchable) out.fx = { x, bottomY, minActionW, rowH };
     x += minActionW + bottomGap;
-    out.browser = { x, bottomY, minActionW, rowH };
+    if (shortcutsTouchable) out.browser = { x, bottomY, minActionW, rowH };
     x += minActionW + bottomGap;
-    out.mixer = { x, bottomY, mixerW, rowH };
+    if (shortcutsTouchable) out.mixer = { x, bottomY, mixerW, rowH };
     x += mixerW + bottomGap;
-    out.sends = { x, bottomY, mixerW, rowH };
+    if (shortcutsTouchable) out.sends = { x, bottomY, mixerW, rowH };
     return out;
 }
 
