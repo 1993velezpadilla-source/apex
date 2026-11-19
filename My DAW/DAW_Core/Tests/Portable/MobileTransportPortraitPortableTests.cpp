@@ -222,13 +222,20 @@ static_assert(compactBelowThreshold.fx.width < 44
 // stale height after split-screen resize or keyboard inset changes.
 constexpr bool compactShortcutsDisappearBelowThreshold()
 {
-    for (const int w : {20, 188})
+    // Check both independent failure axes: width below 189 and deck height
+    // below 94. A wide landscape deck with a keyboard inset must also hide
+    // all four shortcuts, while the exact 189x94 boundary restores them.
+    for (const int w : {20, 188, 189, 320, 852})
         for (const int h : {93, 94, 112, 180})
         {
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
             const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            const bool shouldBeVisible = w >= 189 && h >= 94;
             for (const auto item : shortcuts)
-                if (item.width != 0 || item.height != 0) return false;
+                if (shouldBeVisible
+                    ? (item.width < 44 || item.height < 44)
+                    : (item.width != 0 || item.height != 0))
+                    return false;
         }
     return true;
 }
