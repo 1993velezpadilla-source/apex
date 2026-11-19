@@ -106,6 +106,24 @@ static_assert(valid(360, 112));
 static_assert(valid(360, 144));
 static_assert(valid(393, 144));
 static_assert(valid(245, 144));
+// Portrait split-screen/keyboard collapse must not leave tiny tappable
+// FX, Browser, floating Mixer or Bubblegum Sends targets behind.
+constexpr bool portraitShortcutsRespectTouchMinimum()
+{
+    for (const int w : {13, 100, 188, 189, 245, 320, 360})
+        for (const int h : {25, 112, 143, 144, 180})
+        {
+            const auto r = portraitTransportLayout(w, h);
+            const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            for (const auto item : shortcuts)
+                if ((item.width == 0 && item.height == 0)
+                    || (item.width >= 44 && item.height >= 44))
+                    continue;
+                else return false;
+        }
+    return true;
+}
+static_assert(portraitShortcutsRespectTouchMinimum());
 static_assert(valid(852, 300));
 static_assert(valid(13, 25));
 static_assert(valid(1, 1));
