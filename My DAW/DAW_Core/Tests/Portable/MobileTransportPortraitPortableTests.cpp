@@ -2092,3 +2092,41 @@ static_assert(compactRecoveredActionWidths());
 
 
 
+
+
+// Adversarial center-point hit test: a tap at the center of any visible
+// compact phone target must not also land inside another visible target.
+// Geometry-only: native JUCE event routing still requires device testing.
+constexpr bool compactCenterHitExclusivity()
+{
+    for (int w : {189, 245, 246, 267, 268, 294, 295, 320, 393, 430, 852})
+        for (int h : {94, 95, 112, 143, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.transport[0], r.transport[1], r.transport[2],
+                r.transport[3], r.transport[4], r.transport[5],
+                r.fx, r.browser, r.mixer, r.sends,
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            for (int i = 0; i < 15; ++i)
+            {
+                const auto a = targets[i];
+                if (a.width <= 0 || a.height <= 0) continue;
+                const int cx = a.x + a.width / 2;
+                const int cy = a.y + a.height / 2;
+                if (cx < 0 || cy < 0 || cx >= w || cy >= h) return false;
+                for (int j = 0; j < 15; ++j)
+                {
+                    if (j == i) continue;
+                    const auto b = targets[j];
+                    if (b.width > 0 && b.height > 0
+                        && cx >= b.x && cx < b.x + b.width
+                        && cy >= b.y && cy < b.y + b.height)
+                        return false;
+                }
+            }
+        }
+    return true;
+}
+static_assert(compactCenterHitExclusivity());
