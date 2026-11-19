@@ -33,7 +33,10 @@ def main() -> int:
     # preview can be installed alongside an existing full-shell APK, without
     # deleting or overwriting the user's saved Android test projects.
     branch = os.environ.get("GITHUB_REF_NAME", "")
-    fold_qa = branch == "feature/mobile-portrait-zoom-android-bitmap-qa"
+    fold_qa = branch in (
+        "feature/mobile-portrait-zoom-android-bitmap-qa",
+        "feature/mobile-portrait-zoom-android-damage-qa",
+    )
     portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
                         or branch.startswith("feature/mobile-portrait-"))
     name = "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid"

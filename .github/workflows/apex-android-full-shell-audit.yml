@@ -121,7 +121,7 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-zoom-android-bitmap-qa ]]; then
+          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-zoom-android-*-qa ]]; then
             grep -q "com.xziel.apex.zoomrender.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/zoomrender/ApexImmersiveActivity.java"
           elif [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then

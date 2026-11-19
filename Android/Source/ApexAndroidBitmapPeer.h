@@ -55,7 +55,8 @@ public:
         data.lineStride = lineStride;
         data.pixelStride = sizeof (PixelARGB);
         data.pixelFormat = Image::ARGB;
-        data.size = static_cast<size_t> (height) * lineStride - offset;
+        data.size = static_cast<size_t> (height - y - 1) * lineStride
+                  + static_cast<size_t> (width - x) * sizeof (PixelARGB);
     }
 
     Ptr clone() override
@@ -102,18 +103,35 @@ private:
 class WindowBitmap
 {
 public:
+    // Repaint callbacks queued by the peer can outlive it. This small piece of
+    // state belongs to the callback as well and is updated on the UI thread.
+    const std::shared_ptr<Rectangle<int>> pendingRepaint = std::make_shared<Rectangle<int>>();
+
+    void invalidateCache() { lastClip = {}; }
+
     template <typename Raster>
-    bool paint (JNIEnv* env, jobject canvas, Rectangle<int> clip, bool opaque, Raster&& raster)
+    bool paint (JNIEnv* env, jobject canvas, Rectangle<int> clip, float scale,
+                bool opaque, bool useRepaintRegion, Raster&& raster)
     {
+        const auto invalidated = std::exchange (*pendingRepaint, {});
+        const auto toPaint = useRepaintRegion && ! invalidated.isEmpty() && clip == lastClip
+                             && scale == lastScale && opaque == lastOpaque
+                           ? clip.getIntersection (invalidated)
+                           : clip;
+
         if (! prepare (env, clip.getWidth(), clip.getHeight()))
             return false;
 
+        if (! toPaint.isEmpty())
         {
             LockedBitmap lock (env, bitmap.get());
             if (auto* pixels = lock.pixels())
             {
-                Image image (new BitmapPixels (clip.getWidth(), clip.getHeight(), stride, pixels, ! opaque));
-                raster (image);
+                const auto offset = toPaint.getPosition() - clip.getPosition();
+                auto* origin = pixels + static_cast<size_t> (offset.y) * stride
+                                      + static_cast<size_t> (offset.x) * sizeof (PixelARGB);
+                Image image (new BitmapPixels (toPaint.getWidth(), toPaint.getHeight(), stride, origin, ! opaque));
+                raster (image, toPaint);
             }
             else
             {
@@ -122,6 +140,10 @@ public:
                 return false;
             }
         }
+
+        lastClip = clip;
+        lastScale = scale;
+        lastOpaque = opaque;
 
         // Canvas already clips any excess rows/columns. The JUCE Java peer's
         // Paint swaps red and blue for the int[] path. This bitmap is RGBA.
@@ -189,6 +211,9 @@ private:
     GlobalRef bitmap, argb8888;
     Point<int> allocatedSize;
     int stride = 0;
+    Rectangle<int> lastClip;
+    float lastScale = 0.0f;
+    bool lastOpaque = false;
 };
 
 #if APEX_ANDROID_UI_BENCHMARK
@@ -206,16 +231,16 @@ static std::array<FrameSample, 2048> frameSamples {};
 static size_t sampleCount = 0;
 static bool measureFrames = false;
 static bool useBitmap = false;
+static bool useRepaintRegion = false;
 
 class FrameProbe
 {
 public:
-    FrameProbe (Rectangle<int> clip)
+    FrameProbe()
         : record (measureFrames && sampleCount < frameSamples.size())
     {
         if (record)
         {
-            sample.pixels = static_cast<jlong> (clip.getWidth()) * clip.getHeight();
             started = Clock::now();
             cpuStarted = threadCpuNs();
         }
@@ -231,7 +256,14 @@ public:
         }
     }
 
-    void startRaster() { if (record) rasterStarted = Clock::now(); }
+    void startRaster (Rectangle<int> clip)
+    {
+        if (record)
+        {
+            sample.pixels = static_cast<jlong> (clip.getWidth()) * clip.getHeight();
+            rasterStarted = Clock::now();
+        }
+    }
     void endRaster() { if (record) sample.rasterNs = elapsed (rasterStarted); }
     void usedBitmap() { if (record) sample.usedBitmap = 1; }
 
@@ -257,14 +289,17 @@ private:
 };
 #else
 static constexpr bool useBitmap = true;
+static constexpr bool useRepaintRegion = true;
 #endif
 }
 
 #if APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT void JNICALL
-Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseWindowBitmap (JNIEnv*, jclass, jboolean enabled)
+Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseWindowBitmap (JNIEnv*, jclass,
+                                                                        jboolean enabled, jboolean repaintRegion)
 {
     juce::apexAndroidPeer::useBitmap = enabled == JNI_TRUE;
+    juce::apexAndroidPeer::useRepaintRegion = repaintRegion == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
