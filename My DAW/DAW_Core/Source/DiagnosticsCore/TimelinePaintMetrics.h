@@ -199,9 +199,8 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
     static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
 
-   #if APEX_ANDROID_UI_BENCHMARK
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     static inline SampleRing viewportZoomDurationNs;
-    static inline SampleRing viewportPresentationDurationNs;
    #endif
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
