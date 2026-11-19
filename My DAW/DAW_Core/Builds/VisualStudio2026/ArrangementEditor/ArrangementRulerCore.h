@@ -14,7 +14,7 @@ namespace ArrangementEditor
     class ArrangementRulerCore : public juce::Component
     {
     public:
-        ArrangementRulerCore(ArrangementZoomCore& zoom);
+        ArrangementRulerCore(const TimelineZoomController& zoom);
 
         void setTempo(double bpm);
         void setPlayheadPosition(double timeSeconds);
@@ -32,7 +32,7 @@ namespace ArrangementEditor
         std::function<void(double, double)> onLoopRegionChanged;
 
     private:
-        ArrangementZoomCore& m_zoom;
+        const TimelineZoomController& m_zoom;
 
         double m_bpm = 120.0;
         double m_playheadTime = 0.0;

@@ -31,7 +31,7 @@ namespace ArrangementEditor
     }
 
     ClipRenderCore::ClipRenderCore(ArrangementClipModel& model,
-                                   ArrangementZoomCore& zoom,
+                                   const TimelineZoomController& zoom,
                                    DAW::AudioFileManager::CachedAudioHandle cachedAudio,
                                    bool allowFileFallback)
         : m_clipData(model), m_clipId(model.id), m_zoom(zoom),
@@ -75,6 +75,7 @@ namespace ArrangementEditor
 
     void ClipRenderCore::refresh()
     {
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformRefreshes);
         std::lock_guard<std::recursive_mutex> lock(m_dataMutex);
         if (m_model)
         {

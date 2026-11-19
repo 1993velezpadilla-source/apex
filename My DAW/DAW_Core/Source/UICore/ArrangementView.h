@@ -171,22 +171,23 @@ public:
                 onOpenSelectedMidiClip();
         };
 
-        // Wire zoom changes → header sync so TrackList row heights stay
-        // in sync with ArrangementViewCore track height at all times.
-        core_->getZoom().onZoomChanged = [this]()
+        core_->onZoomLayout = [this](bool vertical)
         {
-            defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
-            if (core_ != nullptr)
-                core_->resized();
-            // Dynamic take rows must be re-laid out on vertical zoom too.
-            if (inlinePlaylistPanel_ != nullptr)
-                refreshInlinePlaylistLayout();
-            else
+            if (vertical)
             {
-                updateInlinePlaylistBounds();
-                if (onLaneLayoutChanged) onLaneLayoutChanged();
+                defaultLaneHeight_ = core_->getZoom().getTrackHeightPx();
+                if (inlinePlaylistPanel_ != nullptr)
+                    refreshInlinePlaylistLayout();
+                else if (onLaneLayoutChanged)
+                    onLaneLayoutChanged();
             }
-            repaint();
+            if (onZoomLayout)
+                onZoomLayout();
+        };
+        core_->onZoomPresented = [this]
+        {
+            if (onZoomPresented)
+                onZoomPresented();
         };
 
         addAndMakeVisible(*core_);
@@ -414,13 +415,28 @@ trackManager_.addListener(this);
         return core_ != nullptr ? core_->getZoom().getPixelsPerSecond() : 100.0;
     }
 
-    void setPixelsPerSecond(double pixelsPerSecond)
+    void zoomStep(bool vertical, bool in)
     {
-        if (core_ != nullptr)
-            core_->getZoom().setPixelsPerSecond(pixelsPerSecond);
-        resized();
-        repaint();
+        if (core_)
+            core_->zoomStep(vertical, in);
     }
+
+    bool zoomWheel(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+    {
+        return core_ && core_->zoomWheel(event, wheel);
+    }
+
+    void zoomScrollbar(bool vertical, bool startEdge, double ratio,
+                       ArrangementEditor::TimelineZoomController::Scale reference,
+                       ArrangementEditor::TimelineZoomController::Point origin)
+    {
+        if (core_)
+            core_->zoomScrollbar(vertical, startEdge, ratio, reference, origin);
+    }
+
+    bool isApplyingZoom() const noexcept { return core_ != nullptr && core_->isApplyingZoom(); }
+    std::function<void()> onZoomLayout;
+    std::function<void()> onZoomPresented;
 
     void setViewportScrollOffsets(int scrollX, int scrollY)
     {
@@ -544,13 +560,12 @@ trackManager_.addListener(this);
 
     void setLaneHeight(int /*index*/, int newHeight)
     {
-        newHeight = juce::jlimit(24, 180, newHeight);
-        defaultLaneHeight_ = newHeight;
-        if (core_ != nullptr)
-            core_->getZoom().setTrackHeightPx((double)newHeight);
-        // onLaneLayoutChanged fired by zoom callback wired in constructor
-        resized();
-        repaint();
+        defaultLaneHeight_ = juce::jlimit(24, 180, newHeight);
+        if (!core_)
+            return;
+        auto scale = core_->getZoom().scale();
+        scale.laneHeight = defaultLaneHeight_;
+        core_->zoomTo(scale, {});
     }
 
     void setMultiSelectedClips(const std::vector<juce::String>& ids)
