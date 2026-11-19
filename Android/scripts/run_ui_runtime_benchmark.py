@@ -46,8 +46,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             raise ValueError(f"{phase['phase']} did not rasterize the moving viewport at reduced density")
         if renderer == "tiles" and phase["phase"] == "idle" and reduced == peer_count:
             raise ValueError("The viewport did not return to native density after motion")
-        if renderer == "int-array" and reduced != 0:
-            raise ValueError("Unexpected reduced-density frames in the integer-array reference")
+        if renderer != "tiles" and reduced != 0:
+            raise ValueError("Unexpected reduced-density frames in the native-density reference")
         for state in (phase["before"], phase["after"]):
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
@@ -163,7 +163,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("int-array", "tiles")
+        renderers = ("native-tiles", "tiles")
         for scene in ("empty", "clip"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:

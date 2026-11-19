@@ -37,6 +37,12 @@ DECLARE_JNI_CLASS (TilePaint, "android/graphics/Paint")
 static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
                && PixelARGB::indexB == 2 && PixelARGB::indexA == 3);
 
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+static bool reduceTimelineMotion = false;
+#else
+static constexpr bool reduceTimelineMotion = true;
+#endif
+
 struct Damage
 {
     void add(Rectangle<int> area)
@@ -96,7 +102,7 @@ public:
         return true;
     }
 
-    void draw(JNIEnv* env, jobject canvas) const
+    void draw(JNIEnv* env, jobject canvas, Rectangle<int> covered = {}) const
     {
         jint saveCount = 0;
         if (pixelDivisor != 1)
@@ -112,6 +118,9 @@ public:
         const auto origin = pixelDivisor == 1 ? frameBounds.getPosition() : Point<int>{};
         for (const auto& tile : tiles)
         {
+            if (covered.contains(tile.bounds + origin))
+                continue;
+
             const auto position = origin + tile.bounds.getPosition();
             env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
                                 (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
@@ -235,6 +244,9 @@ public:
 
     void noteTimelineMotion(Component& viewport)
     {
+        if (!reduceTimelineMotion)
+            return;
+
         motionViewport = &viewport;
         lastMotionMs = Time::getMillisecondCounter();
         if (!isTimerRunning())
@@ -279,7 +291,7 @@ public:
         if (!nativeTiles.update(env, clip, scale, opaque, std::move(redraw), raster))
             return false;
 
-        nativeTiles.draw(env, canvas);
+        nativeTiles.draw(env, canvas, motionArea);
         if (!motionArea.isEmpty())
             motionTiles.draw(env, canvas);
         drawnMotionArea = motionArea;
@@ -376,9 +388,11 @@ static constexpr bool useTiles = true;
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT void JNICALL
-Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(JNIEnv*, jclass, jboolean enabled)
+Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
+    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
+    juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

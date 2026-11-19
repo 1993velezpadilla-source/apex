@@ -42,7 +42,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private long phaseStart = 0, lastFrame = 0, downTime = 0;
     private boolean stopped = false, touching = false, collectingMetrics = false;
 
-    private static native void nativeUseFrameTiles(boolean enabled);
+    private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -65,7 +65,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             fail(new IllegalStateException("No real visible timeline body"));
             return;
         }
-        nativeUseFrameTiles("tiles".equals(renderer));
+        nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
