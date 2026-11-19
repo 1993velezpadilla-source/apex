@@ -57,6 +57,27 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // Motion constants use the original 60 Hz time unit. Derive that unit
+        // from the display clock and cap catch-up after a suspended frame.
+        static double frameUnits(double previousSeconds, double nowSeconds) noexcept
+        {
+            if (!std::isfinite(previousSeconds) || !std::isfinite(nowSeconds)
+                || previousSeconds <= 0.0 || nowSeconds <= previousSeconds)
+                return 1.0;
+            return std::clamp((nowSeconds - previousSeconds) * 60.0, 0.06, 3.0);
+        }
+
+        static double advanceInertia(double& velocity, double frames) noexcept
+        {
+            constexpr double decay = 0.967;
+            const double retention = std::pow(decay, frames);
+            // Integrate the geometric series from the original single-step
+            // glide. Two half-frames travel the same distance as one frame.
+            const double distance = velocity * decay * (1.0 - retention) / (1.0 - decay);
+            velocity *= retention;
+            return distance;
+        }
+
         // A touch sample at a viewport edge (or subpixel jitter) must not
         // schedule an unchanged Viewport position or enter low-detail paint.
         // This applies to two-finger translation independently of zoom.
