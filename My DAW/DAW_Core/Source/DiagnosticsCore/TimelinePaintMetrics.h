@@ -195,6 +195,13 @@ struct TimelinePaintMetrics
 
     // ── Counter group: waveform ─────────────────────────────────────────
     static inline std::atomic<uint64_t> waveformDrawCalls{0};
+    static inline std::atomic<uint64_t> waveformRefreshes{0};
+    static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
+    static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
+
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    static inline SampleRing viewportZoomDurationNs;
+   #endif
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
 
@@ -331,6 +338,9 @@ struct TimelinePaintMetrics
         arrangementScrollPartialRepaints = 0;
         arrangementScrollDirtyAreaPixels = 0;
         waveformDrawCalls     = 0;
+        waveformRefreshes     = 0;
+        arrangementRendererRebuilds = 0;
+        arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
         automationTimerTicks  = 0;

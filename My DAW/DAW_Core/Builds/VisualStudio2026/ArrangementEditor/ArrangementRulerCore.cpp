@@ -19,7 +19,7 @@ namespace ArrangementEditor
         constexpr uint32_t loopRegion = 0x33813CFF;  // violet wash
     }
 
-    ArrangementRulerCore::ArrangementRulerCore(ArrangementZoomCore& zoom)
+    ArrangementRulerCore::ArrangementRulerCore(const TimelineZoomController& zoom)
         : m_zoom(zoom)
     {
         setSize(800, 32);

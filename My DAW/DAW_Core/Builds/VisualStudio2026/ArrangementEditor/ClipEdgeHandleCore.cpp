@@ -13,7 +13,7 @@ namespace ArrangementEditor
     }
 
     ClipEdgeHandleCore::ClipEdgeHandleCore(ArrangementClipModel& model,
-                                            ArrangementZoomCore& zoom,
+                                            const TimelineZoomController& zoom,
                                             EdgeHandleType type)
         : m_model(model), m_zoom(zoom), m_type(type)
     {
