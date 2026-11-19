@@ -17,7 +17,7 @@ namespace ArrangementEditor
     {
     public:
         ClipFadeHandleCore(ArrangementClipModel& model,
-                           ArrangementZoomCore& zoom,
+                           const TimelineZoomController& zoom,
                            FadeHandleType type);
 
         void paint(juce::Graphics& g) override;
@@ -31,7 +31,7 @@ namespace ArrangementEditor
 
     private:
         ArrangementClipModel& m_model;
-        ArrangementZoomCore&  m_zoom;
+        const TimelineZoomController&  m_zoom;
         FadeHandleType        m_type;
 
         float m_dragStartX = 0.f;

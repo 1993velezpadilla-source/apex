@@ -29,68 +29,70 @@ namespace juce
 
 int main()
 {
-    ArrangementEditor::ArrangementZoomCore zoom;
-    int rebuildCallbacks = 0;
-    zoom.onZoomChanged = [&] { ++rebuildCallbacks; };
+    using Zoom = ArrangementEditor::TimelineZoomController;
+    Zoom camera;
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    const auto inf = std::numeric_limits<double>::infinity();
+    camera.apply({ 1e300, 1000.0 });
+    assert(camera.getPixelsPerSecond() == 4000.0);
+    assert(camera.getTrackHeightPx() == 180);
+    camera.apply({ nan, -inf });
+    assert(camera.getPixelsPerSecond() == 4000.0);
+    assert(camera.getTrackHeightPx() == 180);
+    camera.apply({ -1e300, -1e300 });
+    assert(camera.getPixelsPerSecond() == 2.0);
+    assert(camera.getTrackHeightPx() == 24);
+    assert(Zoom::wheelFactor(nan) == 1.0);
+    assert(Zoom::contentWidth(0.0, 100.0, 360) == 361);
+    assert(Zoom::contentWidth(1e300, 4000.0, 360) == std::numeric_limits<int>::max() / 2);
 
-    // A saturated pinch/wheel must not rebuild all clip renderers on each
-    // repeated callback; actual changes still update the lane height.
-    assert(zoom.getTrackHeightPx() == 80.0);
-    zoom.setTrackHeightPx(80.0);
-    assert(rebuildCallbacks == 0);
-    zoom.setTrackHeightPx(1000.0);
-    assert(zoom.getTrackHeightPx() == 180.0);
-    assert(rebuildCallbacks == 1);
-    for (int i = 0; i < 1000; ++i)
-        zoom.setTrackHeightPx(1000.0);
-    assert(rebuildCallbacks == 1);
+    // Preserve the exact time and track under the focus over repeated
+    // in/out cycles with integer scrollbar positions.
+    camera.apply({ 100.0, 80.0 });
+    Zoom::Point actual{ 372003.0, 147.0 };
+    const Zoom::Point focus{ 120.5, 235.0 };
+    const Zoom::Point limit{ 1e8, 10000.0 };
+    Zoom::Lanes lanes{ 80, 80, 1, 132 };
+    const auto anchor = Zoom::capture(camera.scale(), actual, focus, lanes);
+    for (int i = 0; i < 10000; ++i)
+    {
+        const bool enlarged = i % 2 == 0;
+        Zoom::Request request{ { enlarged ? 173.5 : 100.0, enlarged ? 126.0 : 80.0 },
+                              Zoom::capture(camera.scale(), camera.origin(actual), focus, lanes), focus, true, true };
+        lanes = enlarged ? Zoom::Lanes{ 80, 126, 1, 208 } : Zoom::Lanes{ 80, 80, 1, 132 };
+        const auto next = Zoom::projectOrigin(request, lanes, camera.origin(actual), limit);
+        const Zoom::Point rounded{ std::round(next.x), std::round(next.y) };
+        camera.apply(request.scale);
+        camera.remember(next, rounded, rounded);
+        actual = rounded;
+        assert(std::abs(camera.xToTime(next.x + focus.x) - anchor.seconds) < 1e-8);
+        assert(std::abs(Zoom::projectY(anchor, lanes) - (next.y + focus.y)) < 1e-8);
+    }
+    assert(actual.x == 372003.0 && actual.y == 147.0);
+    const auto take = Zoom::capture(camera.scale(), {}, { 0.0, 290.0 }, { 80, 80, 1, 132 });
+    assert(take.band == Zoom::Anchor::Band::takes);
+    assert(std::abs(Zoom::projectY(take, { 80, 126, 1, 208 }) - (332.0 + 50.0 * 208.0 / 132.0)) < 1e-10);
+    const auto outside = Zoom::projectOrigin({ { 4000.0, 80.0 }, { 1000.0, 0.0 }, {}, true, false },
+                                               lanes, { 0.0, 400.0 }, { 440.0, 110.0 });
+    assert(outside.x == 440.0 && outside.y == 110.0);
 
-    // Malformed coordinates/gesture math must never poison the zoom state
-    // or request renderer reconstruction.
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    const double inf = std::numeric_limits<double>::infinity();
-    zoom.setTrackHeightPx(nan);
-    zoom.setTrackHeightPx(inf);
-    zoom.setTrackHeightPx(-inf);
-    assert(zoom.getTrackHeightPx() == 180.0);
-    assert(rebuildCallbacks == 1);
-
-    zoom.setTrackHeightPx(-1e300);
-    assert(zoom.getTrackHeightPx() == 24.0);
-    assert(rebuildCallbacks == 2);
-    zoom.setTrackHeightPx(-1e300);
-    assert(rebuildCallbacks == 2);
-    zoom.setTrackHeightPx(80.0);
-    assert(zoom.getTrackHeightPx() == 80.0);
-    assert(rebuildCallbacks == 3);
-
-    // Mouse-wheel zoom must anchor to the SAME clamped height that the setter
-    // applies (old wheel path used 240 while the setter capped at 180).
-    const double wheelHeight = ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(240.0, 80.0);
-    assert(wheelHeight == 180.0);
-    zoom.setTrackHeightPx(wheelHeight);
-    assert(zoom.getTrackHeightPx() == wheelHeight);
-    assert(rebuildCallbacks == 4);
-    for (int i = 0; i < 1000; ++i)
-        zoom.setTrackHeightPx(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(240.0, zoom.getTrackHeightPx()));
-    assert(rebuildCallbacks == 4);
-    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(nan, 180.0) == 180.0);
-    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(inf, 180.0) == 180.0);
-    assert(ArrangementEditor::ArrangementZoomCore::clampTrackHeightPx(-999.0, 180.0) == 24.0);
-
-    // Horizontal zoom has no callback, but must remain finite after invalid
-    // input and respect both bounds when the requested value is finite.
-    assert(zoom.getPixelsPerSecond() == 100.0);
-    zoom.setPixelsPerSecond(nan);
-    zoom.setPixelsPerSecond(inf);
-    zoom.setPixelsPerSecond(-inf);
-    assert(zoom.getPixelsPerSecond() == 100.0);
-    zoom.setPixelsPerSecond(1e300);
-    assert(zoom.getPixelsPerSecond() == 4000.0);
-    zoom.setPixelsPerSecond(-1e300);
-    assert(zoom.getPixelsPerSecond() == 2.0);
-    zoom.setPixelsPerSecond(100.0);
-    assert(zoom.getPixelsPerSecond() == 100.0);
+    // Large missed-frame movement must keep the full pinch ratio. The first
+    // sample after reaching a zoom limit must reverse immediately.
+    Zoom::Pinch pinch;
+    camera.apply({ 3500.0, 80.0 });
+    pinch.begin({ 200.0, 120.0 }, { 50.0, 12.0 });
+    auto request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 100.0, 12.0 }, camera.scale());
+    assert(request.scale.pixelsPerSecond == 4000.0);
+    camera.apply(request.scale);
+    request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 99.0, 12.0 }, camera.scale());
+    assert(request.scale.pixelsPerSecond == 3960.0);
+    request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { -99.0, 12.0 }, camera.scale());
+    assert(request.scale.pixelsPerSecond == 4000.0);
+    pinch.begin({ 200.0, 120.0 }, { 50.0, 50.0 });
+    camera.apply({ 100.0, 80.0 });
+    request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 125.0, 125.0 }, camera.scale());
+    assert(request.scale.pixelsPerSecond == 250.0);
+    assert(request.scale.laneHeight == 180.0);
 
     // Grid density is used on every Arrangement paint. A very small
     // px-per-bar used to overflow the ceil(24 / density) -> int conversion.
@@ -129,5 +131,5 @@ int main()
         assert(GridLodPolicy::barStep(density) == expected);
     }
 
-    std::cout << "ArrangementZoomCore: saturated/invalid UI zoom regression passed\n";
+    std::cout << "TimelineZoomController: anchor, limit, pinch and grid regressions passed\n";
 }

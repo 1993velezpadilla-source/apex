@@ -112,6 +112,11 @@ class MainComponent : public juce::Component,
                       private DAW::TransportController::Listener
 {
 public:
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void prepareAndroidUiBenchmark(bool withClip);
+    juce::var androidUiBenchmarkState(bool finishPhase);
+    juce::Rectangle<int> androidUiBenchmarkBounds() const;
+   #endif
     MainComponent();
     ~MainComponent() override;
 
@@ -479,6 +484,8 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
+    void sizeTimelineContent();
+    void syncTimelineViewportPosition();
     void syncPlaylistTimeline();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();

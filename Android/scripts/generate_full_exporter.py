@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--benchmark-x86", action="store_true")
     args = parser.parse_args()
     repo = args.repo_root.resolve()
     original = repo / "My DAW" / "DAW_Core" / "DAW_Core.jucer"
@@ -34,9 +35,16 @@ def main() -> int:
     # deleting or overwriting the user's saved Android test projects.
     portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
                         or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
-    root.set("name", "APEXMobilePortrait" if portrait_preview else "APEXFullAndroid")
-    root.set("bundleIdentifier", "com.xziel.apex.mobileportrait" if portrait_preview
-             else "com.xziel.apex.fulltest")
+    zoom_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-zoom-rewrite"
+                    and not args.benchmark_x86)
+    if zoom_preview:
+        name, app_id = "APEX Zoom Rewrite", "com.xziel.apex.zoomrewrite"
+    elif portrait_preview or args.benchmark_x86:
+        name, app_id = "APEXMobilePortrait", "com.xziel.apex.mobileportrait"
+    else:
+        name, app_id = "APEXFullAndroid", "com.xziel.apex.fulltest"
+    root.set("name", name)
+    root.set("bundleIdentifier", app_id)
     root.set("version", "0.1.0")
     # Do not let this experimental build generate VST3/ASIO host code on Android.
     defines = [
@@ -49,6 +57,7 @@ def main() -> int:
         "JUCE_ASIO=0",
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
+        f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
     ])
     root.set("defines", " ".join(defines))
 
@@ -66,6 +75,7 @@ def main() -> int:
             "androidMinimumSDK": "26",
             "microphonePermissionNeeded": "1",
             "androidEnableContentSharing": "1",
+            "externalLibraries": "jnigraphics",
         },
     )
     # Projucer's Android exporter emits headerPath relative to the generated
@@ -79,13 +89,14 @@ def main() -> int:
         "../../Source/ThirdParty/signalsmith-linear",
     ))
     configs = ET.SubElement(android, "CONFIGURATIONS")
+    architecture = "x86_64" if args.benchmark_x86 else "arm64-v8a"
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Debug", "isDebug": "1", "androidArchitectures": "arm64-v8a",
+        "name": "Debug", "isDebug": "1", "androidArchitectures": architecture,
         "optimisation": "1", "linkTimeOptimisation": "0",
         "headerPath": shared_headers,
     })
     ET.SubElement(configs, "CONFIGURATION", {
-        "name": "Release", "isDebug": "0", "androidArchitectures": "arm64-v8a", "optimisation": "3",
+        "name": "Release", "isDebug": "0", "androidArchitectures": architecture, "optimisation": "3",
         "headerPath": shared_headers,
     })
     paths = ET.SubElement(android, "MODULEPATHS")

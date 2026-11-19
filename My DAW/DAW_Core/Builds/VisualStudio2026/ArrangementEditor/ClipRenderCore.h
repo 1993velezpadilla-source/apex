@@ -22,7 +22,7 @@ namespace ArrangementEditor
     {
     public:
         ClipRenderCore(ArrangementClipModel& model,
-                       ArrangementZoomCore& zoom,
+                       const TimelineZoomController& zoom,
                        DAW::AudioFileManager::CachedAudioHandle cachedAudio = {},
                        bool allowFileFallback = true);
         ~ClipRenderCore() override;
@@ -124,7 +124,6 @@ namespace ArrangementEditor
     // Scroll/gesture LOD: while a pan or pinch is running every renderer stops
     // after its background + header, so each frame stays cheap and the gesture
     // is smooth. Full detail (waveform, badges, fades) returns on release.
-    static inline std::atomic<bool> s_lightweightPaint { false };
 
         // Interactive handle callbacks — wired by ArrangementViewCore
         // onEditBegin: called when user starts dragging a fade/resize handle.
@@ -186,7 +185,7 @@ namespace ArrangementEditor
         ArrangementClipModel* m_model = &m_clipData;   // always points to m_clipData
         juce::Uuid             m_clipId;                // stable copy of clip ID
         double                 engineSampleRate_ = 44100.0;
-        ArrangementZoomCore&  m_zoom;
+        const TimelineZoomController&  m_zoom;
         DAW::AudioFileManager::CachedAudioHandle m_cachedAudio;
         bool m_allowFileFallback = true;
 
