@@ -127,13 +127,8 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* || "$GITHUB_REF_NAME" == integrate/mobile-ui-* ]]; then
-            grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
-            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
-          else
-            grep -q "com.xziel.apex.fulltest.ApexImmersiveActivity" "$MANIFEST"
-            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/fulltest/ApexImmersiveActivity.java"
-          fi
+          grep -q "com.xziel.apex.mobileportrait.ApexImmersiveActivity" "$MANIFEST"
+          test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/mobileportrait/ApexImmersiveActivity.java"
 
       - name: Create disposable Android Debug signing key
         shell: bash
