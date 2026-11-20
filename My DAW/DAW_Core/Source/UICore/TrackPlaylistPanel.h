@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "ApexRadialContextMenu.h"
+#include "TrackPlaylistInlineLayoutCore.h"
 #include <map>
 #include <cmath>
 #include "../TrackCore/TrackPlaylistCompCore.h"
@@ -51,7 +52,8 @@ public:
 
     void setInlineTakeHeight(int pixels)
     {
-        const int height = juce::jlimit(40, 180, pixels);
+        const int height = juce::jlimit(TrackPlaylistInlineLayoutCore::minTakeHeight,
+                                       TrackPlaylistInlineLayoutCore::maxTakeHeight, pixels);
         if (inlineTakeHeight_ == height) return;
         inlineTakeHeight_ = height;
         repaint();

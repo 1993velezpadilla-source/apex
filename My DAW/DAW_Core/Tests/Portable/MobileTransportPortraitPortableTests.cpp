@@ -836,12 +836,19 @@ bool compactStandardWidthHeightGrid()
 }
 
 // Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
+// Forward declaration: the wide inset sweep is defined after main and must
+// remain exhaustive without exhausting the CI compiler's constexpr budget.
+constexpr bool compactWideInsetRecoverySweep();
 
 int main()
 {
     // Keep the full geometry sweep active even when NDEBUG removes assert().
     if (!compactRecoveredWidthHeightGrid()) return 1;
     if (!compactStandardWidthHeightGrid()) return 2;
+    if (!compactWideInsetRecoverySweep()) {
+        std::fprintf(stderr, "MobileTransportPortrait: wide inset recovery sweep failed\n");
+        return 3;
+    }
 
     // Adversarial rotation-height band beyond the 93/94 threshold: the
     // compact deck can grow while Android changes its usable window height.
@@ -2291,4 +2298,7 @@ constexpr bool compactWideInsetRecoverySweep()
         }
     return true;
 }
-static_assert(compactWideInsetRecoverySweep());
+// The full 46 x 23 width/height grid runs in main() rather than as one
+// static_assert: GCC can exhaust its constexpr operation budget for this
+// expensive nested overlap check. Earlier focused static_asserts remain.
+

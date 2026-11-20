@@ -12,7 +12,7 @@ namespace ArrangementEditor
     }
 
     ClipFadeHandleCore::ClipFadeHandleCore(ArrangementClipModel& model,
-                                            ArrangementZoomCore& zoom,
+                                            const TimelineZoomController& zoom,
                                             FadeHandleType type)
         : m_model(model), m_zoom(zoom), m_type(type)
     {

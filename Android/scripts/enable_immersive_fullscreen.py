@@ -80,10 +80,28 @@ public final class ApexImmersiveActivity extends com.rmsl.juce.JuceActivity {
 """
 
 
+BENCHMARK_ACTIVITY = """
+    private ApexUiBenchmark uiBenchmark;
+    public native String nativeNavigationState(boolean finishPhase);
+
+    public void startApexUiBenchmark(int x, int y, int width, int height) {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        uiBenchmark = new ApexUiBenchmark(this, x, y, width, height);
+        uiBenchmark.start();
+    }
+
+    @Override protected void onDestroy() {
+        if (uiBenchmark != null) uiBenchmark.stop();
+        super.onDestroy();
+    }
+"""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", type=Path,
         default=Path("My DAW/DAW_Core/Builds/AndroidFull"))
+    parser.add_argument("--benchmark", action="store_true")
     args = parser.parse_args()
     generated = args.project.resolve()
     manifest = generated / "app/src/main/AndroidManifest.xml"
@@ -122,7 +140,8 @@ def main() -> int:
         raise RuntimeError("Android manifest/.jucer package mismatch: "
                            + manifest_package + " != " + project_package)
     package = manifest_package or project_package
-    if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait"):
+    if package not in ("com.xziel.apex.fulltest", "com.xziel.apex.mobileportrait",
+                       "com.xziel.apex.zoomrewrite"):
         raise RuntimeError("Unexpected APEX Android package: " + package)
     android_activity = package + "." + ACTIVITY_SIMPLE_NAME
     old = activity.get(f"{{{ANDROID_NS}}}name", "")
@@ -140,12 +159,23 @@ def main() -> int:
     # Android 12+ requires an explicit exported launcher. An existing false
     # value also makes the home-screen entry unable to start this Activity.
     activity.set(f"{{{ANDROID_NS}}}exported", "true")
-    tree.write(manifest, encoding="utf-8", xml_declaration=True)
-
     java = (generated / "app/src/main/java" / package.replace(".", "/")
             / (ACTIVITY_SIMPLE_NAME + ".java"))
     java.parent.mkdir(parents=True, exist_ok=True)
-    java.write_text(JAVA_SOURCE.replace("__APEX_PACKAGE__", package), encoding="utf-8")
+    source = JAVA_SOURCE.replace("__APEX_PACKAGE__", package)
+    if args.benchmark:
+        if package != "com.xziel.apex.mobileportrait":
+            raise RuntimeError("The runtime benchmark requires the portrait preview")
+        benchmark = Path(__file__).resolve().parents[1] / "Source/ApexUiBenchmark.java"
+        (java.parent / "ApexUiBenchmark.java").write_text(
+            benchmark.read_text(encoding="utf-8").replace("__APEX_PACKAGE__", package),
+            encoding="utf-8")
+        marker = "    @Override\n    protected void onCreate"
+        source = source.replace(marker, BENCHMARK_ACTIVITY + marker, 1)
+    if args.benchmark or package == "com.xziel.apex.zoomrewrite":
+        activity.set(f"{{{ANDROID_NS}}}hardwareAccelerated", "true")
+    tree.write(manifest, encoding="utf-8", xml_declaration=True)
+    java.write_text(source, encoding="utf-8")
 
     # Audit checks: both manifest and full generated class MUST agree.
     again = ET.parse(manifest)

@@ -235,7 +235,16 @@ namespace ArrangementEditor
         // Access to subsystems
         ArrangementClipStateCore& getClipState() { return m_clipState; }
         ArrangementSelectionCore& getSelection() { return m_selection; }
-        ArrangementZoomCore& getZoom() { return m_zoom; }
+        const TimelineZoomController& getZoom() const noexcept { return m_zoom; }
+        bool isApplyingZoom() const noexcept { return m_applyingZoom; }
+        void zoomTo(TimelineZoomController::Scale scale, TimelineZoomController::Point focus,
+                    bool nextFrame = false);
+        void zoomStep(bool vertical, bool in);
+        void zoomScrollbar(bool vertical, bool startEdge, double ratio,
+                           TimelineZoomController::Scale reference, TimelineZoomController::Point origin);
+        bool zoomWheel(const juce::MouseEvent&, const juce::MouseWheelDetails&);
+        std::function<void(bool)> onZoomLayout;
+        std::function<void()> onZoomPresented;
         // One native expanded playlist owner, with virtual take bands that
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
@@ -400,6 +409,7 @@ namespace ArrangementEditor
         void mouseDoubleClick(const juce::MouseEvent& e) override;
         void mouseWheelMove(const juce::MouseEvent& e,
                             const juce::MouseWheelDetails& wheel) override;
+        void mouseMagnify(const juce::MouseEvent&, float scaleFactor) override;
 
         bool keyPressed(const juce::KeyPress& key) override;
 
@@ -436,7 +446,18 @@ namespace ArrangementEditor
         // Plain click on an already-selected member of a group collapses it
         // only on mouse release. A real drag must preserve the whole group.
         std::optional<juce::Uuid> m_pendingExclusiveOnRelease;
-        ArrangementZoomCore      m_zoom;
+        TimelineZoomController m_zoom;
+        TimelineZoomController::Pinch m_zoomPinch;
+        std::optional<TimelineZoomController::Request> m_pendingZoom;
+        bool m_applyingZoom = false;
+        juce::VBlankAttachment m_zoomClock { this, [this](double seconds) { timelineDisplayFrame(seconds); } };
+        void timelineDisplayFrame(double seconds);
+        TimelineZoomController::Lanes zoomLanes() const noexcept;
+        TimelineZoomController::Scale requestedZoom() const noexcept;
+        TimelineZoomController::Point zoomFocus(const juce::MouseEvent&) const;
+        void queueZoom(TimelineZoomController::Request, bool nextFrame);
+        void presentPendingZoom();
+        juce::Rectangle<int> projectClipBounds(const ArrangementClipModel&) const;
         ArrangementUndoCore      m_undo;
         EditorToolState          m_toolState;
 
@@ -479,14 +500,6 @@ namespace ArrangementEditor
         bool m_touchScrollActive = false; // a touch pan gesture is in progress
         bool m_twoFingerGestureActive = false; // separately anchored multi-touch phase
         std::uint64_t m_touchGestureEpoch = 0; // invalidates tap/context on any pinch
-        double m_lastPinchDistance = 0.0; // legacy pinch scratch state
-        juce::Point<float> m_lastTwoFingerPos { -1.0f, -1.0f }; // SCREEN-space centroid
-        // Gesture classification: decided once per gesture (pan by default,
-        // promoted to pinch on a clear separation change) so the two never
-        // flip-flop mid-gesture.
-        bool m_gestureIsPinch = false;
-        double m_lastPinchSepX = 0.0;   // last horizontal finger separation
-        double m_lastPinchSepY = 0.0;   // last vertical finger separation
         // Low-pass filtered touch position: touch digitizers jitter ±1 px even
         // on a nearly still finger, which made slow pans shake.
         juce::Point<float> m_smoothedTouchPos;
@@ -502,25 +515,14 @@ namespace ArrangementEditor
         void onEmptySpaceHold();
 
         // ── Touch pan inertia (iOS-style momentum) ──
-        class TouchPanInertiaTimer : public juce::Timer
-        {
-        public:
-            explicit TouchPanInertiaTimer(ArrangementViewCore& owner) : m_owner(owner) {}
-            void timerCallback() override
-            {
-                if (! m_owner.applyTouchPanInertia())
-                    stopTimer();
-            }
-        private:
-            ArrangementViewCore& m_owner;
-        };
-        std::unique_ptr<TouchPanInertiaTimer> m_inertiaTimer;
-        juce::Point<int> m_touchPanDownScreenPos; // screen-space origin avoids scroll feedback
-        juce::Point<int> m_lastTouchPanPos; // screen-space for stable velocity
-        double m_lastTouchPanTimeMs = 0.0;
-        double m_touchPanVelocityX = 0.0;   // pixels per 16 ms frame
+        bool m_touchNavigationArmed = false;
+        double m_previousTouchFrame = 0.0;
+        juce::Point<int> m_touchPanDownScreenPos;
+        juce::Point<int> m_lastTouchPanPos;
+        double m_touchPanVelocityX = 0.0; // pixels per nominal 60 Hz frame
         double m_touchPanVelocityY = 0.0;
-        bool applyTouchPanInertia();
+        bool applyTouchPanInertia(double frames);
+        void stopTouchNavigation() noexcept;
         void endTouchPanGesture();
 
         std::unique_ptr<ClipPropertiesWindowCore> m_propertiesWindow;
@@ -615,7 +617,7 @@ namespace ArrangementEditor
         void updatePinnedViewportControls();
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
-        void updateClipRendererVisibility();
+        void updateClipRendererVisibility(bool projectBounds = false);
         ClipRenderCore* findClipRendererAt(juce::Point<int> pos);
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);
@@ -684,7 +686,7 @@ namespace ArrangementEditor
         // GUI-thread observation only: audio-track output meters >0 dBFS
         // while its single active clip is playing. Never prelabel cached
         // source waveform peaks as audible output clipping.
-        std::map<juce::String, std::set<int64_t>> m_playbackClippedClipBins;
+        std::map<juce::Uuid, std::set<int64_t>> m_playbackClippedClipBins;
         bool m_masterPreviewWasPlaying = false;
         void drawReadOnlyMasterPreview(juce::Graphics& g);
 
@@ -793,6 +795,7 @@ namespace ArrangementEditor
         int m_viewportScrollX = 0;
         int m_viewportScrollY = 0;
         bool m_inViewportScroll = false;
+        juce::Rectangle<int> m_clipVisibilityGuard;
         bool m_middleMousePanActive = false;
         juce::Point<int> m_middleMousePanScreenPos;
 

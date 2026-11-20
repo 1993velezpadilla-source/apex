@@ -24,11 +24,6 @@ constexpr TimelineViewportChrome timelineViewportChrome(bool phone) noexcept
 // TimelineViewport applies its own clamped wheel displacement. Letting JUCE's
 // Viewport process that same wheel again can scroll twice on a phone. Keep the
 // existing desktop/iPad wheel delegation unchanged.
-constexpr bool timelineWheelDelegatesToViewport(bool phone) noexcept
-{
-    return !phone;
-}
-
 // Trackpads and horizontal wheel gestures report deltaX without Shift.
 // Phones must select the dominant gesture axis; Shift+vertical wheel is a
 // horizontal navigation fallback for external keyboards. Desktop stays on
@@ -115,12 +110,12 @@ struct TimelinePhoneWheelPixelMotion
     int pixels;
     double remainder;
 };
-constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
-    int viewSpan, float delta, double remainder) noexcept
+constexpr TimelinePhoneWheelPixelMotion timelineWheelPixelMotion(
+    double pixelsPerWheelUnit, float delta, double remainder) noexcept
 {
-    if (viewSpan <= 0)
+    if (!(pixelsPerWheelUnit > 0.0 && pixelsPerWheelUnit <= std::numeric_limits<int>::max() - 1.0))
         return { 0, 0.0 };
-    const double requested = -0.65 * static_cast<double>(viewSpan)
+    const double requested = -pixelsPerWheelUnit
         * static_cast<double>(timelinePhoneBoundWheelDelta(delta));
     // Carry is always a fractional pixel. A malformed/restored NaN, infinity
     // or out-of-range carry must never reach the double-to-int conversion.
@@ -134,6 +129,12 @@ constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
     const double movement = requested + (reversed ? 0.0 : safeRemainder);
     const int wholePixels = static_cast<int>(movement); // truncate only after accumulation
     return { wholePixels, movement - static_cast<double>(wholePixels) };
+}
+
+constexpr TimelinePhoneWheelPixelMotion timelinePhoneWheelPixelMotion(
+    int viewSpan, float delta, double remainder) noexcept
+{
+    return timelineWheelPixelMotion(0.65 * static_cast<double>(viewSpan), delta, remainder);
 }
 
 // Subpixel ticks at the start/end of a song must not accumulate a stale

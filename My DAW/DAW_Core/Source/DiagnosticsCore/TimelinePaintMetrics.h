@@ -195,6 +195,13 @@ struct TimelinePaintMetrics
 
     // ── Counter group: waveform ─────────────────────────────────────────
     static inline std::atomic<uint64_t> waveformDrawCalls{0};
+    static inline std::atomic<uint64_t> waveformRefreshes{0};
+    static inline std::atomic<uint64_t> liveRecordingWaveformPaints{0};
+    static inline std::atomic<uint64_t> masterPreviewDirtyPixels{0};
+    static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
+    static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
+
+    static inline SampleRing viewportZoomDurationNs;
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
 
@@ -214,6 +221,7 @@ struct TimelinePaintMetrics
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
+    static inline SampleRing clipNameDurationNs;
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
     static inline SampleRing requestedDirtyAreaPixelsRing;  // Per-repaint-request area (from source call sites)
     static inline SampleRing actualPaintClipAreaPixels;     // Per-paint g.getClipBounds() area
@@ -331,6 +339,11 @@ struct TimelinePaintMetrics
         arrangementScrollPartialRepaints = 0;
         arrangementScrollDirtyAreaPixels = 0;
         waveformDrawCalls     = 0;
+        waveformRefreshes     = 0;
+        liveRecordingWaveformPaints = 0;
+        masterPreviewDirtyPixels = 0;
+        arrangementRendererRebuilds = 0;
+        arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
         automationTimerTicks  = 0;
@@ -345,6 +358,8 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
+        viewportZoomDurationNs.reset();
+        clipNameDurationNs.reset();
         frameIntervalNs.reset();
         requestedDirtyAreaPixelsRing.reset();
         actualPaintClipAreaPixels.reset();

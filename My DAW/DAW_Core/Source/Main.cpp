@@ -8,6 +8,37 @@
 
 #include <JuceHeader.h>
 #include "MainComponent.h"
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+#include <jni.h>
+#include <juce_core/native/juce_JNIHelpers_android.h>
+namespace DAW
+{
+    inline juce::String androidLaunchExtra(const char* key)
+    {
+        auto* env = juce::getEnv();
+        const auto activity = juce::getMainActivity();
+        if (activity == nullptr)
+            return {};
+        const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));
+        const auto getIntent = env->GetMethodID(cls.get(), "getIntent", "()Landroid/content/Intent;");
+        const juce::LocalRef<jobject> intent(env->CallObjectMethod(activity.get(), getIntent));
+        if (intent == nullptr)
+            return {};
+        const juce::LocalRef<jclass> intentClass(env->GetObjectClass(intent.get()));
+        const auto getString = env->GetMethodID(intentClass.get(), "getStringExtra",
+                                               "(Ljava/lang/String;)Ljava/lang/String;");
+        const juce::LocalRef<jstring> name(env->NewStringUTF(key));
+        const juce::LocalRef<jstring> value(static_cast<jstring>(
+            env->CallObjectMethod(intent.get(), getString, name.get())));
+        return value == nullptr ? juce::String() : juce::juceString(env, value.get());
+    }
+
+    // Used only by explicit adb benchmark launches, never by normal user flows.
+    inline std::function<juce::String(bool)> androidUiBenchmarkSnapshot;
+
+}
+#endif
 #include "SplashScreen.h"
 #include "UICore/ApexPresentationClock.h"
 #include "PluginScanCore/PluginScanWorkerProcessCore.h"
@@ -1114,6 +1145,32 @@ public:
         }
        #endif
 
+       #if JUCE_WINDOWS
+        if (processArguments.contains("--apex-ci-timeline-navigation"))
+        {
+            const auto report = juce::SystemStats::getEnvironmentVariable("APEX_TIMELINE_NAV_REPORT", {});
+            const bool reference = processArguments.contains("--timeline-reference");
+            const bool deep = processArguments.contains("--timeline-deep");
+            const bool playing = processArguments.contains("--timeline-playing");
+            juce::Timer::callAfterDelay(3000, [this, report, reference, deep, playing]
+            {
+                auto* component = mainWindow ? mainWindow->getMainComponent() : nullptr;
+                if (report.isEmpty() || component == nullptr || mainWindow->getPeer() == nullptr)
+                {
+                    setApplicationReturnValue(1);
+                    quit();
+                    return;
+                }
+                timelineNavigationReplay_ = std::make_unique<TimelineNavigationReplay>(*component,
+                    juce::File(report), reference, deep, playing, [this](bool success)
+                    {
+                        setApplicationReturnValue(success ? 0 : 1);
+                        quit();
+                    });
+            });
+        }
+       #endif
+
         // ── Production GUI launch smoke for Windows CI ────────────────────
         // Unlike the unit-test executable, this launches the actual DAW with
         // the real MainComponent, plugin host, audio-device initialization,
@@ -1717,6 +1774,9 @@ public:
         // serves as a safety net if this path is somehow missed.
         DAW::ApexPresentationClock::instance().setMainWindow (nullptr);
 
+       #if JUCE_WINDOWS
+        timelineNavigationReplay_.reset();
+       #endif
         mainWindow = nullptr; // (deletes our window)
 
         // Detach the logger LAST so all teardown diagnostics are captured.
@@ -1901,6 +1961,48 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            const auto scene = DAW::androidLaunchExtra("apex_scene");
+            using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
+            const auto mode = scene == "recording" ? BenchmarkTransport::Recording
+                : scene == "playback" ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
+            const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
+                                    || mode != BenchmarkTransport::Stopped)
+                && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
+                    DAW::androidLaunchExtra("apex_renderer") == "reference", mode);
+            if (benchmark)
+            {
+                juce::Component::SafePointer<MainWindow> safe(this);
+                DAW::androidUiBenchmarkSnapshot = [safe](bool finishPhase) -> juce::String
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return "{}";
+                    return juce::JSON::toString(
+                        safe->getMainComponent()->timelineNavigationBenchmarkState(finishPhase), true);
+                };
+                juce::Timer::callAfterDelay(3000, [safe, mode]
+                {
+                    if (safe == nullptr || safe->getMainComponent() == nullptr)
+                        return;
+                    // Android opens the input and prepares its writer after
+                    // mounting the MainComponent.
+                    auto* component = safe->getMainComponent();
+                    if (!component->startTimelineNavigationBenchmarkTransport(mode))
+                    {
+                        __android_log_print(ANDROID_LOG_ERROR, "APEX_UI_BENCH",
+                            "RESULT {\"error\":\"The recording engine did not start a take\"}");
+                        return;
+                    }
+                    const auto bounds = component->androidUiBenchmarkBounds();
+                    auto* env = juce::getEnv();
+                    const auto activity = juce::getMainActivity();
+                    const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));
+                    const auto method = env->GetMethodID(cls.get(), "startApexUiBenchmark", "(IIII)V");
+                    env->CallVoidMethod(activity.get(), method, bounds.getX(), bounds.getY(),
+                                        bounds.getWidth(), bounds.getHeight());
+                });
+            }
+           #endif
             // ResizableWindow::resized() is JUCE's authoritative owner of
             // content bounds. Do not override it with a desktop-sized guess:
             // Android can rotate while MainComponent is being constructed.
@@ -2270,6 +2372,9 @@ private:
 
     // ── Timeline benchmark controller (--timeline-benchmark flag) ──────
     std::unique_ptr<TimelineBenchmarkController> benchmarkController_;
+   #if JUCE_WINDOWS
+    std::unique_ptr<TimelineNavigationReplay> timelineNavigationReplay_;
+   #endif
 
     // ── Command-line argument helpers for subprocess scanner mode ─────
     static juce::String extractQuotedArg(const juce::String& cmdLine, const juce::String& flag)
@@ -2314,3 +2419,12 @@ private:
 //==============================================================================
 // This macro generates the main() routine that launches the app.
 START_JUCE_APPLICATION (DAW_CoreApplication)
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xziel_apex_mobileportrait_ApexImmersiveActivity_nativeNavigationState(JNIEnv* env, jobject, jboolean finishPhase)
+{
+    const auto state = DAW::androidUiBenchmarkSnapshot ? DAW::androidUiBenchmarkSnapshot(finishPhase == JNI_TRUE) : "{}";
+    return env->NewStringUTF(state.toRawUTF8());
+}
+#endif

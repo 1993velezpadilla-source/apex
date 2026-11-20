@@ -88,6 +88,54 @@ jobs:
           name: Apex-EvoEye-Frames-${{ matrix.configuration }}-${{ github.sha }}
           path: My DAW/DAW_Core/evidence/boot/*.png
           if-no-files-found: error
+      - name: Exercise arranger scrolling and both zoom axes in the Windows EXE
+        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path '.\Builds\VisualStudio2026\x64\Release\App\DAW_Core.exe').Path
+          $out = (New-Item -ItemType Directory -Force -Path 'evidence\timeline-navigation').FullName
+          foreach ($scene in @('clip', 'deep', 'playback')) {
+            $modes = if ($scene -eq 'playback') { @('optimized') } else { @('reference', 'optimized') }
+            foreach ($mode in $modes) {
+              $env:APEX_TIMELINE_NAV_REPORT = Join-Path $out "$scene-$mode.json"
+              Remove-Item -LiteralPath $env:APEX_TIMELINE_NAV_REPORT -ErrorAction SilentlyContinue
+              $arguments = @('--apex-ci-timeline-navigation')
+              if ($scene -eq 'deep') { $arguments += '--timeline-deep' }
+              if ($scene -eq 'playback') { $arguments += '--timeline-playing' }
+              if ($mode -eq 'reference') { $arguments += '--timeline-reference' }
+              $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+              try {
+                if (-not $process.WaitForExit(45000)) { throw "Arranger replay timed out: $scene $mode" }
+                if (-not (Test-Path -LiteralPath $env:APEX_TIMELINE_NAV_REPORT)) {
+                  throw "Missing real Windows arranger measurements: $scene $mode"
+                }
+                $result = Get-Content -Raw -LiteralPath $env:APEX_TIMELINE_NAV_REPORT | ConvertFrom-Json
+                if ($process.ExitCode -ne 0 -or $result.error -or $result.phases.Count -ne 8) {
+                  throw "Windows arranger replay failed: $scene $mode $($result.error)"
+                }
+                Write-Host "Real Windows arranger passed all navigation phases: $scene $mode"
+              }
+              finally {
+                if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+                $process.Dispose()
+              }
+            }
+          }
+      - name: Upload Windows arranger runtime measurements
+        if: always() && (github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite')
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Windows-Arranger-Navigation-${{ github.sha }}
+          path: My DAW/DAW_Core/evidence/timeline-navigation/*.json
+          if-no-files-found: warn
+      - name: Upload Windows arranger preview executable
+        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite'
+        uses: actions/upload-artifact@v4
+        with:
+          name: APEX-Zoom-Rewrite-Windows-x64-${{ github.sha }}
+          path: My DAW/DAW_Core/Builds/VisualStudio2026/x64/Release/App/DAW_Core.exe
+          if-no-files-found: error
+          retention-days: 14
       - name: Run complete test suite
         run: .\Scripts\run_apex_tests.ps1 -Configuration ${{ matrix.configuration }} -Seed 0xA9E12026
       - name: Smoke real APEX GUI and project automation persistence

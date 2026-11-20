@@ -112,6 +112,21 @@ class MainComponent : public juce::Component,
                       private DAW::TransportController::Listener
 {
 public:
+   #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
+    enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
+    bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
+                                            TimelineBenchmarkTransport mode);
+    bool startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode);
+    juce::var timelineNavigationBenchmarkState(bool finishPhase);
+   #endif
+   #if JUCE_WINDOWS
+    static constexpr int timelineBenchmarkSampleRate = 48000;
+    static constexpr int timelineBenchmarkBlockSize = 480;
+    void replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers);
+   #endif
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    juce::Rectangle<int> androidUiBenchmarkBounds() const;
+   #endif
     MainComponent();
     ~MainComponent() override;
 
@@ -479,6 +494,8 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
+    void sizeTimelineContent();
+    void syncTimelineViewportPosition();
     void syncPlaylistTimeline();
 
     /** Last content-extent computed by updateTimelineViewportContentBounds();

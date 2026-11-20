@@ -210,8 +210,6 @@ int main()
                   && !desktopChrome.allowVerticalScrollWithoutBar
                   && !desktopChrome.allowHorizontalScrollWithoutBar
                   && desktopChrome.showCornerZoom);
-    static_assert(!DAW::mobile::timelineWheelDelegatesToViewport(true));
-    static_assert(DAW::mobile::timelineWheelDelegatesToViewport(false));
     static_assert(!DAW::mobile::desktopRestoreBubbleVisible(true));
     static_assert(DAW::mobile::desktopRestoreBubbleVisible(false));
 
@@ -520,7 +518,6 @@ int main()
 
     // Phone Arrangement must consume each wheel gesture once, even with
     // hidden scrollbars; desktop/iPad keep their original JUCE wheel path.
-    using DAW::mobile::timelineWheelDelegatesToViewport;
     using DAW::mobile::timelineWheelClampedPosition;
     using DAW::mobile::timelinePhoneWheelIntent;
     // Horizontal trackpad gestures must not be lost without Shift; a
@@ -610,6 +607,12 @@ int main()
 
     // A stream of high-resolution wheel ticks must move eventually instead
     // of each fractional pixel being rounded to zero and discarded.
+    constexpr auto smallDesktopWheel = DAW::mobile::timelineWheelPixelMotion(120.0, -0.005f, 0.0);
+    static_assert(smallDesktopWheel.pixels == 0);
+    static_assert(DAW::mobile::timelineWheelPixelMotion(
+        120.0, -0.005f, smallDesktopWheel.remainder).pixels == 1);
+    static_assert(DAW::mobile::timelineWheelPixelMotion(120.0, -0.5f, 0.0).pixels == 60);
+
     constexpr auto fine1 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, 0.0);
     constexpr auto fine2 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, fine1.remainder);
     constexpr auto fine3 = DAW::mobile::timelinePhoneWheelPixelMotion(400, 0.001f, fine2.remainder);
@@ -728,8 +731,6 @@ int main()
     static_assert(!timelinePhoneWheelBlockedAtEdge(0, 2000, 400,
         std::numeric_limits<float>::quiet_NaN()));
 
-    static_assert(!timelineWheelDelegatesToViewport(true));
-    static_assert(timelineWheelDelegatesToViewport(false));
     static_assert(timelineWheelClampedPosition(200, 2000, 400, 120) == 320);
     static_assert(timelineWheelClampedPosition(200, 2000, 400, -300) == 0);
     static_assert(timelineWheelClampedPosition(1500, 2000, 400, 300) == 1600);
@@ -3333,8 +3334,6 @@ int main()
 // These are compile-time gates so Release builds cannot skip the assertions.
 static_assert(!DAW::mobile::timelineViewportChrome(true).showCornerZoom);
 static_assert(DAW::mobile::timelineViewportChrome(false).showCornerZoom);
-static_assert(!DAW::mobile::timelineWheelDelegatesToViewport(true));
-static_assert(DAW::mobile::timelineWheelDelegatesToViewport(false));
 static_assert(!DAW::mobile::desktopRestoreBubbleVisible(true));
 static_assert(DAW::mobile::desktopRestoreBubbleVisible(false));
 

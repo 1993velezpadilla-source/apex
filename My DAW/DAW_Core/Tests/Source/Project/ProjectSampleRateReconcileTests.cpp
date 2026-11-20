@@ -595,7 +595,8 @@ public:
             expectEquals(Layout::takeHeightForTrackHeight(80), 66);
             expect(Layout::takeHeightForTrackHeight(50) < 66);
             expect(Layout::takeHeightForTrackHeight(140) > 66);
-            for (const int trackH : { 50, 80, 140 })
+            expectEquals(Layout::takeHeightForTrackHeight(360), 297);
+            for (const int trackH : { 50, 80, 140, 360 })
             {
                 const int h = Layout::takeHeightForTrackHeight(trackH);
                 const int extra = 3 * h;

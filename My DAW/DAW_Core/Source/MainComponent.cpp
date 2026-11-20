@@ -474,6 +474,8 @@ public:
 
     /** (isVertical, zoomIn) — fired by the corner zoom buttons. */
     std::function<void(bool, bool)> onZoomButton;
+    std::function<void()> onVisibleAreaChanged;
+    std::function<bool(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onZoomWheel;
 
     void setPhonePresentation(bool phone)
     {
@@ -498,95 +500,61 @@ public:
 
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
-        // Vertical wheel scrolls lanes; Shift+wheel scrolls horizontally.
-        if (auto* c = getViewedComponent())
+        if (onZoomWheel && onZoomWheel(e, wheel))
+            return;
+        const auto* content = getViewedComponent();
+        if (content == nullptr)
+            return;
+
+        const int contentW = content->getWidth();
+        const int contentH = content->getHeight();
+        wheelCarry_.observeContentSize(contentW, contentH);
+        wheelCarry_.observeContentScale(getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
+                                        getLaneHeight ? getLaneHeight() : 0.0);
+
+        auto scrollAxis = [&](int position, int extent, int view, float delta, double& carry)
         {
-            const int contentW = juce::jmax(1, c->getWidth());
-            const int contentH = juce::jmax(1, c->getHeight());
-
-            if (phonePresentation_)
+            if (DAW::mobile::timelinePhoneWheelBlockedAtEdge(position, extent, view, delta))
             {
-                wheelCarry_.observeContentSize(contentW, contentH);
-                wheelCarry_.observeContentScale(
-                    getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
-                    getLaneHeight ? getLaneHeight() : 0.0);
+                carry = 0.0;
+                return position;
             }
+            const auto movement = phonePresentation_
+                ? DAW::mobile::timelinePhoneWheelPixelMotion(view, delta, carry)
+                : DAW::mobile::timelineWheelPixelMotion(120.0, delta, carry);
+            const int next = DAW::mobile::timelineWheelClampedPosition(position, extent, view, movement.pixels);
+            carry = DAW::mobile::timelinePhoneWheelBlockedAtEdge(next, extent, view, delta)
+                ? 0.0 : movement.remainder;
+            return next;
+        };
 
-            const int viewW = juce::jmax(1, getViewWidth());
-            const int viewH = juce::jmax(1, getViewHeight());
-
-            auto pos = getViewPosition();
-
-            const float dx = wheel.deltaX;
-            const float dy = wheel.deltaY;
-
-            const bool shift = e.mods.isShiftDown();
-            const auto phoneIntent = DAW::mobile::timelinePhoneWheelIntent(shift, dx, dy);
-            const bool horizontal = phonePresentation_ ? phoneIntent.horizontal : shift;
-            const float primary = phonePresentation_ ? phoneIntent.delta : (shift ? dx : dy);
-
-            // Preserve fractional high-resolution wheel motion on phones.
-            // Desktop/iPad keep their original per-event rounding.
-            int step = 0;
-            if (phonePresentation_)
-            {
-                auto& carry = horizontal ? wheelCarry_.x : wheelCarry_.y;
-                const int axisPosition = horizontal ? pos.x : pos.y;
-                const int contentSpan = horizontal ? contentW : contentH;
-                const int viewSpan = horizontal ? viewW : viewH;
-                if (DAW::mobile::timelinePhoneWheelBlockedAtEdge(
-                        axisPosition, contentSpan, viewSpan, primary))
-                    carry = 0.0;
-                else
-                {
-                    const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
-                        viewSpan, primary, carry);
-                    carry = motion.remainder;
-                    step = motion.pixels;
-                }
-            }
+        const auto start = getViewPosition();
+        auto next = start;
+        const bool shift = e.mods.isShiftDown();
+        if (phonePresentation_ || shift)
+        {
+            const auto intent = DAW::mobile::timelinePhoneWheelIntent(shift, wheel.deltaX, wheel.deltaY);
+            if (intent.horizontal)
+                next.x = scrollAxis(start.x, contentW, getViewWidth(), intent.delta, wheelCarry_.x);
             else
-                step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);
-
-            if (step != 0)
-            {
-                const auto originalPos = pos;
-                if (phonePresentation_)
-                {
-                    // Hidden scrollbars do not imply a second wheel pass.
-                    // Keep wheel navigation bounded after zoom/rotation.
-                    if (horizontal)
-                        pos.x = DAW::mobile::timelineWheelClampedPosition(
-                            pos.x, contentW, viewW, step);
-                    else
-                        pos.y = DAW::mobile::timelineWheelClampedPosition(
-                            pos.y, contentH, viewH, step);
-                    // At the end of a song/lane range, discard unconsumed
-                    // fractional motion rather than bouncing on reversal.
-                    const int next = horizontal ? pos.x : pos.y;
-                    const int maxAxis = juce::jmax(0,
-                        (horizontal ? contentW - viewW : contentH - viewH));
-                    if (next == (horizontal ? originalPos.x : originalPos.y)
-                        || next == 0 || next == maxAxis)
-                        (horizontal ? wheelCarry_.x : wheelCarry_.y) = 0.0;
-                }
-                else if (shift)
-                    pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
-                else
-                    pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
-
-                if (!phonePresentation_ || pos != originalPos)
-                    setViewPosition(pos);
-            }
+                next.y = scrollAxis(start.y, contentH, getViewHeight(), intent.delta, wheelCarry_.y);
         }
-
-        // JUCE's default Viewport wheel handler scrolls again. Preserve the
-        // desktop/iPad path, but consume the phone wheel exactly once.
-        if (DAW::mobile::timelineWheelDelegatesToViewport(phonePresentation_))
-            juce::Viewport::mouseWheelMove(e, wheel);
+        else
+        {
+            next.x = scrollAxis(start.x, contentW, getViewWidth(), wheel.deltaX, wheelCarry_.x);
+            next.y = scrollAxis(start.y, contentH, getViewHeight(), wheel.deltaY, wheelCarry_.y);
+        }
+        if (next != start)
+            setViewPosition(next);
     }
 
 protected:
+    void visibleAreaChanged(const juce::Rectangle<int>&) override
+    {
+        if (onVisibleAreaChanged)
+            onVisibleAreaChanged();
+    }
+
     juce::ScrollBar* createScrollBarComponent(bool isVertical) override
     {
         auto* bar = new TimelineZoomScrollBar(isVertical);
@@ -2419,7 +2387,12 @@ MainComponent::MainComponent()
         if (!arrangement_ || !trackList_)
             return;
 
-        updateTimelineViewportContentBounds();
+        // The zoom transaction sizes the viewport from its cached song
+        // extent after the lane heights have been updated.
+        if (arrangement_->isApplyingZoom())
+            trackList_->beginTimelineHeightZoom();
+        else
+            updateTimelineViewportContentBounds();
 
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
 
@@ -2979,72 +2952,26 @@ MainComponent::MainComponent()
         const double newThumbSize = juce::jmax(minSz, newEnd - newStart);
         const double zoomRatio    = (double)info.initialThumbSizePixels / newThumbSize;
 
-        if (!info.isVertical)
-        {
-            const double refPps   = juce::jmax(1.0, info.referencePixelsPerSecond);
-            const double newPps   = juce::jlimit(10.0, 4000.0, refPps * zoomRatio);
-            const double vpWidth  = (double)timelineViewport_->getViewWidth();
-
-            // Anchor: the edge that does NOT move stays at the same time position.
-            // Start edge drag ? right side of viewport is anchor.
-            // End edge drag   ? left  side of viewport is anchor.
-            double anchorTime;
-            if (info.isStartEdge)
-                anchorTime = ((double)info.referenceViewX + vpWidth) / refPps;
-            else
-                anchorTime = (double)info.referenceViewX / refPps;
-
-            arrangement_->setPixelsPerSecond(newPps);
-            updateTimelineViewportContentBounds();
-
-            int newViewX;
-            if (info.isStartEdge)
-                newViewX = juce::roundToInt(anchorTime * newPps - vpWidth);
-            else
-                newViewX = juce::roundToInt(anchorTime * newPps);
-
-            const auto va = timelineViewport_->getViewArea();
-            const int maxX = juce::jmax(0, arrangement_->getWidth() - va.getWidth());
-            timelineViewport_->setViewPosition(juce::jlimit(0, maxX, newViewX), va.getY());
-        }
-        else
-        {
-            const double refLaneH  = juce::jmax(1.0, info.referenceLaneHeight);
-            const double newLaneH  = juce::jlimit(24.0, 240.0, refLaneH * zoomRatio);
-            const double vpHeight  = (double)timelineViewport_->getViewHeight();
-
-            double anchorContentY;
-            if (info.isStartEdge)
-                anchorContentY = ((double)info.referenceViewY + vpHeight) / juce::jmax(1.0, refLaneH);
-            else
-                anchorContentY = (double)info.referenceViewY / juce::jmax(1.0, refLaneH);
-
-            arrangement_->setLaneHeight(0, juce::roundToInt(newLaneH));
-            updateTimelineViewportContentBounds();
-
-            int newViewY;
-            if (info.isStartEdge)
-                newViewY = juce::roundToInt(anchorContentY * newLaneH - vpHeight);
-            else
-                newViewY = juce::roundToInt(anchorContentY * newLaneH);
-
-            const auto va = timelineViewport_->getViewArea();
-            const int maxY = juce::jmax(0, arrangement_->getHeight() - va.getHeight());
-            timelineViewport_->setViewPosition(va.getX(), juce::jlimit(0, maxY, newViewY));
-
-            if (trackList_)
-                trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        }
-
-        // Force scrollbar repaint so thumb redraws at the new size immediately
-        timelineViewport_->getHorizontalScrollBar().repaint();
-        timelineViewport_->getVerticalScrollBar().repaint();
+        arrangement_->zoomScrollbar(info.isVertical, info.isStartEdge, zoomRatio,
+            { info.referencePixelsPerSecond, info.referenceLaneHeight },
+            { (double)info.referenceViewX, (double)info.referenceViewY });
     };
     // Corner zoom buttons and Ctrl+arrow keyboard zoom share one operation.
     // Zoom keeps the viewport centre anchored — pro-DAW behaviour.
     timelineViewport->onZoomButton = [this](bool isVertical, bool zoomIn)
     {
         applyTimelineZoom(isVertical, zoomIn);
+    };
+    timelineViewport->onVisibleAreaChanged = [this] { syncTimelineViewportPosition(); };
+    timelineViewport->onZoomWheel = [this](const auto& event, const auto& wheel)
+    {
+        return arrangement_ && arrangement_->zoomWheel(event, wheel);
+    };
+    arrangement_->onZoomLayout = [this] { sizeTimelineContent(); };
+    arrangement_->onZoomPresented = [this]
+    {
+        syncTimelineViewportPosition();
+        syncPlaylistTimeline();
     };
     timelineViewport_ = std::move(timelineViewport);
     timelineViewport_->getVerticalScrollBar().addListener(this);
@@ -7322,14 +7249,7 @@ void MainComponent::scrollBarMoved(juce::ScrollBar* scrollBar, double /*newRange
     if (timelineViewport_ != nullptr
         && (scrollBar == &timelineViewport_->getHorizontalScrollBar()
             || scrollBar == &timelineViewport_->getVerticalScrollBar()))
-    {
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-        syncPlaylistTimeline();
         return;
-    }
 
     resized();
 }
@@ -8166,7 +8086,10 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     {
         if (auto* self = safeThis.getComponent())
             if (self->arrangement_)
+            {
                 self->arrangement_->setEngineSampleRate(sampleRate);
+                self->updateTimelineViewportContentBounds();
+            }
     });
 }
 
@@ -9421,26 +9344,40 @@ void MainComponent::syncPlaylistTimeline()
     playlistPanel_->followArrangementTimeline(0.0, pps);
 }
 
+void MainComponent::syncTimelineViewportPosition()
+{
+    if (!timelineViewport_ || !arrangement_ || arrangement_->isApplyingZoom())
+        return;
+    const auto origin = timelineViewport_->getViewPosition();
+    arrangement_->setViewportScrollOffsets(origin.x, origin.y);
+    if (trackList_)
+        trackList_->setScrollOffset(origin.y);
+}
+
+void MainComponent::sizeTimelineContent()
+{
+    if (!arrangement_ || !timelineViewport_)
+        return;
+    const int viewW = juce::jmax(1, timelineViewport_->getWidth());
+    const int viewH = juce::jmax(1, timelineViewport_->getHeight());
+    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
+    int contentH = 80;
+    for (int i = 0; i < trackCount; ++i)
+        contentH += arrangement_->getLaneHeight(i);
+    const auto pps = arrangement_->getPixelsPerSecond();
+    arrangement_->setSize(ArrangementEditor::TimelineZoomController::contentWidth(
+                              juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, viewW),
+                          juce::jmax(viewH + 1, contentH));
+}
+
 void MainComponent::updateTimelineViewportContentBounds()
 {
     if (!arrangement_)
         return;
 
-    const auto viewportBounds = timelineWindow_ != nullptr && timelineWindow_->isVisible()
-        ? timelineWindow_->getContentArea()
-        : (timelineViewport_ != nullptr && timelineViewport_->getParentComponent() != nullptr ? timelineViewport_->getBounds() : juce::Rectangle<int>());
-
-    const int viewportW = juce::jmax(1, viewportBounds.getWidth());
-    const int viewportH = juce::jmax(1, viewportBounds.getHeight());
-
-    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
-    int contentH = 80;
-    for (int i = 0; i < trackCount; ++i)
-        contentH += arrangement_->getLaneHeight(i);
-
-    const auto zoomPxPerSecond = arrangement_->getPixelsPerSecond();
     double projectLengthSeconds = 30.0;
-    const auto sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    // Use the same timebase as the clips, including before audio starts.
+    const auto sampleRate = arrangement_->getEngineSampleRate();
     for (auto* clip : appCore_.getClipManager().getAllClips())
     {
         if (clip == nullptr)
@@ -9467,34 +9404,8 @@ void MainComponent::updateTimelineViewportContentBounds()
         projectLengthSeconds = juce::jmax(projectLengthSeconds, playheadSeconds + 2.0);
     lastTimelineContentLengthSeconds_ = projectLengthSeconds;
 
-    // Content width = zoom * project length, but never below viewportW + 1.
-    // At extreme zoom-out the raw length would shrink under the viewport and
-    // collapse into an empty void with the horizontal scrollbar hidden — the
-    // same way the vertical clamp to viewportH + 1 keeps the vertical bar
-    // alive. Keeping one extra pixel of scroll range means the timeline
-    // always fills the view and the scrollbar never disappears.
-    const int contentW = juce::jmax(viewportW + 1,
-        juce::jmax(4, (int)std::ceil(zoomPxPerSecond * projectLengthSeconds)));
-
-    arrangement_->setSize(contentW, juce::jmax(viewportH + 1, contentH));
-
-    // Force the viewport to re-sync its scrollbar ranges and repaint the thumbs.
-    // JUCE only does this when the view position is set, not on content resize alone.
-    if (timelineViewport_ != nullptr)
-    {
-        const auto cur = timelineViewport_->getViewPosition();
-        const int maxX = juce::jmax(0, contentW    - timelineViewport_->getViewWidth());
-        const int maxY = juce::jmax(0, contentH    - timelineViewport_->getViewHeight());
-        timelineViewport_->setViewPosition(juce::jlimit(0, maxX, cur.x),
-                                           juce::jlimit(0, maxY, cur.y));
-        if (arrangement_)
-            arrangement_->setViewportScrollOffsets(timelineViewport_->getViewPositionX(), timelineViewport_->getViewPositionY());
-        timelineViewport_->getHorizontalScrollBar().repaint();
-        timelineViewport_->getVerticalScrollBar().repaint();
-    }
-
-    if (trackList_)
-        trackList_->setScrollOffset(timelineViewport_ != nullptr ? timelineViewport_->getViewPosition().y : 0);
+    sizeTimelineContent();
+    syncTimelineViewportPosition();
     syncPlaylistTimeline();
 }
 
@@ -9504,7 +9415,9 @@ void MainComponent::positionChanged(DAW::SamplePosition newPosition)
     // the current content end (ruler scrubbing, transport commands, looping).
     // Guarded by the cached length so the viewport bounds are not rebuilt on
     // every transport tick during playback.
-    const double sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    if (!arrangement_)
+        return;
+    const double sampleRate = arrangement_->getEngineSampleRate();
     const double playheadSeconds = (double) newPosition / sampleRate;
     if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
         updateTimelineViewportContentBounds();
@@ -9678,61 +9591,8 @@ bool MainComponent::hasMixerKeyboardFocus() const
 
 void MainComponent::applyTimelineZoom(bool isVertical, bool zoomIn)
 {
-    if (!arrangement_ || !timelineViewport_)
-        return;
-
-    if (!isVertical)
-    {
-        const double oldPps = juce::jmax(1.0, arrangement_->getPixelsPerSecond());
-        const double newPps = juce::jlimit(5.0, 4000.0,
-                                           zoomIn ? oldPps * 1.25 : oldPps / 1.25);
-        if (juce::approximatelyEqual(oldPps, newPps))
-            return;
-
-        const double vpW       = (double) timelineViewport_->getViewWidth();
-        const double centreSec = ((double) timelineViewport_->getViewPositionX()
-                                  + vpW * 0.5) / oldPps;
-
-        arrangement_->setPixelsPerSecond(newPps);
-        updateTimelineViewportContentBounds();
-
-        const int maxX = juce::jmax(0, arrangement_->getWidth()
-                                       - timelineViewport_->getViewWidth());
-        const int newX = juce::jlimit(0, maxX,
-                                      juce::roundToInt(centreSec * newPps - vpW * 0.5));
-        timelineViewport_->setViewPosition(newX, timelineViewport_->getViewPositionY());
-    }
-    else
-    {
-        // The first arranger lane can itself be expanded if there is no
-        // Master track. Zoom the PHYSICAL strip, never strip+all take rows.
-        const double oldLaneH = juce::jmax(1.0,
-                                           (double) arrangement_->getPhysicalTrackHeight());
-        const double newLaneH = juce::jlimit(24.0, 240.0,
-                                             zoomIn ? oldLaneH * 1.15
-                                                    : oldLaneH / 1.15);
-        if (juce::approximatelyEqual(oldLaneH, newLaneH))
-            return;
-
-        const double vpH        = (double) timelineViewport_->getViewHeight();
-        const double centreLane = ((double) timelineViewport_->getViewPositionY()
-                                   + vpH * 0.5) / oldLaneH;
-
-        arrangement_->setLaneHeight(0, juce::roundToInt(newLaneH));
-        updateTimelineViewportContentBounds();
-
-        const int maxY = juce::jmax(0, arrangement_->getHeight()
-                                       - timelineViewport_->getViewHeight());
-        const int newY = juce::jlimit(0, maxY,
-                                      juce::roundToInt(centreLane * newLaneH - vpH * 0.5));
-        timelineViewport_->setViewPosition(timelineViewport_->getViewPositionX(), newY);
-
-        if (trackList_)
-            trackList_->setScrollOffset(timelineViewport_->getViewPositionY());
-    }
-
-    timelineViewport_->getHorizontalScrollBar().repaint();
-    timelineViewport_->getVerticalScrollBar().repaint();
+    if (arrangement_ && timelineViewport_)
+        arrangement_->zoomStep(isVertical, zoomIn);
 }
 
 void MainComponent::parentHierarchyChanged()
@@ -9841,6 +9701,213 @@ void MainComponent::startPluginScanIfNeeded()
         appendMainStartupTrace("startPluginScanIfNeeded.after-startScan");
     });
 }
+
+#if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
+bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
+                                                       TimelineBenchmarkTransport mode)
+{
+    // Benchmark mode only populates a disposable, empty session.
+    if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
+        return false;
+    if (!appCore_.getProjectManager().getProjectFile().getFullPathName().isEmpty()
+        || !appCore_.getClipManager().getAllClips().isEmpty())
+        return false;
+    startupPanelMayBeShown_ = false;
+    if (startupPanel_)
+        startupPanel_->dismiss();
+    if (mixerWindow_)
+        mixerWindow_->setVisible(false);
+    timelineWindow_->setVisible(true);
+   #if JUCE_WINDOWS
+    timelineWindow_->setBufferedToImage(reference);
+    trackListWindow_->setBufferedToImage(reference);
+   #endif
+    trackList_->setDirectHeightZoomPaintForBenchmark(!reference);
+
+   #if JUCE_WINDOWS
+    if (mode == TimelineBenchmarkTransport::Playing)
+    {
+        // Feed the shared engine from the replay's buffer clock. Windows CI
+        // can have no output endpoint. Remove hardware callbacks first.
+        inputWatchdog_.stopTimer();
+        shutdownAudio();
+        cachedEnabledAudioInputChannels_.store(0, std::memory_order_release);
+        prepareToPlay(timelineBenchmarkBlockSize, timelineBenchmarkSampleRate);
+        arrangement_->setEngineSampleRate(timelineBenchmarkSampleRate);
+    }
+   #endif
+
+    auto& tracks = appCore_.getTrackManager();
+    while (tracks.getNumTracks() < 12)
+        if (tracks.createTrack("UI benchmark lane") == nullptr)
+            break;
+
+    if (withClip)
+    {
+        const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("apex-ui-benchmark", ".wav");
+        auto output = file.createOutputStream();
+        juce::WavAudioFormat format;
+        const double sr = arrangement_ ? arrangement_->getEngineSampleRate() : 44100.0;
+        std::unique_ptr<juce::AudioFormatWriter> writer(output == nullptr ? nullptr
+            : format.createWriterFor(output.release(), sr, 1, 16, {}, 0));
+        if (writer != nullptr)
+        {
+            juce::AudioBuffer<float> block(1, 4096);
+            const int length = (int)(sr * 24.0);
+            bool written = true;
+            for (int start = 0; start < length && written; start += block.getNumSamples())
+            {
+                const int count = juce::jmin(block.getNumSamples(), length - start);
+                for (int i = 0; i < count; ++i)
+                {
+                    const double t = (start + i) / sr;
+                    block.setSample(0, i, (float)(0.7 * std::sin(t * 1382.30076758)
+                        * (0.2 + 0.8 * std::abs(std::sin(t * 2.3)))));
+                }
+                written = writer->writeFromAudioSampleBuffer(block, 0, count);
+            }
+            writer.reset();
+            if (written)
+            {
+                juce::Array<juce::File> files;
+                files.add(file);
+                auto* track = tracks.getNumTracks() > 0 ? tracks.getTrack(0)
+                                                       : tracks.createTrack("UI benchmark");
+                if (track != nullptr)
+                    DAW::CommandManager::getInstance().execute(
+                        std::make_unique<DAW::ImportAudioFilesCommand>(tracks,
+                            appCore_.getClipManager(), appCore_.getAudioFileManager(),
+                            std::move(files), track->getID(), 0, sr));
+            }
+        }
+    }
+    resized();
+    updateTimelineViewportContentBounds();
+    if (deepZoom && arrangement_)
+        arrangement_->getCore()->zoomTo({ 9'000.0, 240.0 }, {});
+    TimelinePaintMetrics::reset();
+    TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
+    if (mode == TimelineBenchmarkTransport::Recording)
+    {
+        const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("apex-ui-recording", {});
+        auto* track = tracks.getTrack(0);
+        if (track == nullptr || !dir.createDirectory().wasOk())
+            return false;
+        appCore_.getRecordingEngine().setProjectDirectory(dir);
+        track->setInputSource(0, true);
+        track->setArmed(true);
+    }
+    repaint();
+    return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
+}
+
+bool MainComponent::startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode)
+{
+    auto& transport = appCore_.getTransport();
+    if (mode == TimelineBenchmarkTransport::Recording)
+    {
+        transport.record();
+        return appCore_.getRecordingEngine().isActivelyRecording();
+    }
+    if (mode == TimelineBenchmarkTransport::Playing)
+        transport.play();
+    return true;
+}
+
+juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
+{
+    auto* state = new juce::DynamicObject();
+    state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
+    state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
+    state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
+    state->setProperty("tracksWindowBuffered",
+        trackListWindow_ && trackListWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("timelineWindowBuffered",
+        timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("directRowPaint", trackList_ && trackList_->isDirectHeightZoomPaintForBenchmark());
+    if (const auto* firstRow = trackList_ ? trackList_->getRow(0) : nullptr)
+        state->setProperty("trackHeaderHeight", firstRow->getHeight());
+    state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
+   #if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+        state->setProperty("backend", peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]);
+   #else
+    state->setProperty("backend", "software");
+   #endif
+    state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
+    state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
+    state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
+    state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
+    state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
+    state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
+    auto& transport = appCore_.getTransport();
+    state->setProperty("playing", transport.isPlaying());
+    state->setProperty("recording", transport.isRecording());
+    state->setProperty("playheadFrames", static_cast<juce::int64>(transport.getPosition()));
+    if (auto* track = appCore_.getTrackManager().getTrack(0))
+    {
+        auto& waveform = track->getLiveRecordWaveform();
+        state->setProperty("recordedFrames", static_cast<juce::int64>(waveform.getRecordedSpan().length));
+        state->setProperty("recordingInputAvailable", waveform.isInputAvailable());
+    }
+    state->setProperty("windowWidth", getWidth());
+    state->setProperty("windowHeight", getHeight());
+    state->setProperty("timelineWidth", arrangement_ ? arrangement_->getWidth() : 0);
+    const auto addTiming = [&](const juce::Identifier& name, SampleRing& ring)
+    {
+        if (finishPhase)
+        {
+            const auto stats = ring.computePercentiles();
+            auto* timing = new juce::DynamicObject();
+            timing->setProperty("count", static_cast<int>(ring.size()));
+            timing->setProperty("p50", stats.p50_ns / 1.0e6);
+            timing->setProperty("p95", stats.p95_ns / 1.0e6);
+            timing->setProperty("worst", static_cast<double>(stats.worst_ns) / 1.0e6);
+            state->setProperty(name, juce::var(timing));
+        }
+        else
+        {
+            ring.reset();
+        }
+    };
+    addTiming("zoomMs", TimelinePaintMetrics::viewportZoomDurationNs);
+    addTiming("arrangerPaintMs", TimelinePaintMetrics::paintDurationNs);
+    addTiming("arrangerOverlayMs", TimelinePaintMetrics::paintChildrenDurationNs);
+    addTiming("waveformMs", TimelinePaintMetrics::waveformDurationNs);
+    addTiming("clipNameMs", TimelinePaintMetrics::clipNameDurationNs);
+    return juce::var(state);
+}
+#endif
+
+#if JUCE_WINDOWS
+void MainComponent::replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers)
+{
+    auto* core = arrangement_->getCore();
+    const auto focusInView = timelineViewport_->getLocalBounds().getCentre();
+    const auto focus = core->getLocalPoint(timelineViewport_.get(), focusInView).toFloat();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::MouseEvent event(juce::Desktop::getInstance().getMainMouseSource(), focus,
+        modifiers, 0.f, 0.f, 0.f, 0.f, 0.f, core, core, now, focus, now, 0, false);
+    juce::MouseWheelDetails wheel {};
+    wheel.deltaX = horizontal;
+    wheel.deltaY = vertical;
+    wheel.isSmooth = true;
+    core->mouseWheelMove(event, wheel);
+}
+#endif
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+juce::Rectangle<int> MainComponent::androidUiBenchmarkBounds() const
+{
+    if (timelineViewport_ == nullptr)
+        return {};
+    const auto logical = timelineViewport_->getScreenBounds().withTrimmedTop(90).toFloat();
+    return juce::Desktop::getInstance().getDisplays().logicalToPhysical(logical).toNearestInt();
+}
+#endif
 
 void MainComponent::openPianoRollForClip(DAW::MidiClip& clip)
 {
