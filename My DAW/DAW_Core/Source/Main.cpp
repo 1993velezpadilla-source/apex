@@ -1969,13 +1969,14 @@ public:
            #endif
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
+            const auto renderer = DAW::androidLaunchExtra("apex_renderer");
             using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
             const auto mode = scene == "recording" ? BenchmarkTransport::Recording
                 : scene == "playback" ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
             const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
                                     || mode != BenchmarkTransport::Stopped)
                 && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
-                    DAW::androidLaunchExtra("apex_renderer") == "reference", mode);
+                    renderer == "reference", mode, renderer == "retained");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

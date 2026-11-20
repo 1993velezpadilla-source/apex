@@ -9731,7 +9731,7 @@ void MainComponent::startPluginScanIfNeeded()
 
 #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
 bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
-                                                       TimelineBenchmarkTransport mode)
+                                                       TimelineBenchmarkTransport mode, bool retainedViewport)
 {
     // Benchmark mode only populates a disposable, empty session.
     if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
@@ -9748,6 +9748,9 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
    #if JUCE_WINDOWS
     timelineWindow_->setBufferedToImage(reference);
     trackListWindow_->setBufferedToImage(reference);
+    juce::ignoreUnused(retainedViewport);
+   #elif JUCE_ANDROID
+    arrangement_->getCore()->setViewportPaintCacheEnabled(retainedViewport);
    #endif
     trackList_->setDirectHeightZoomPaintForBenchmark(!reference);
 
@@ -9874,6 +9877,8 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
     state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
     state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
+    state->setProperty("arrangerReusePixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerReusePixels.load()));
+    state->setProperty("arrangerRasterPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerRasterPixels.load()));
     auto& transport = appCore_.getTransport();
     state->setProperty("playing", transport.isPlaying());
     state->setProperty("recording", transport.isRecording());

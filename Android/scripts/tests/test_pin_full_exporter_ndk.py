@@ -58,7 +58,7 @@ class PinNdkTests(unittest.TestCase):
         frame_cache = original.replace("zoomrewrite", "framecache")
         frame_cache_install = set_zoom_preview_install_id(frame_cache)
         self.assertIn('namespace "com.xziel.apex.framecache"', frame_cache_install)
-        self.assertIn('applicationId "com.xziel.apex.framecache.r91"', frame_cache_install)
+        self.assertIn('applicationId "com.xziel.apex.framecache.r92"', frame_cache_install)
         self.assertEqual(set_zoom_preview_install_id(frame_cache_install), frame_cache_install)
         other_app = original.replace("zoomrewrite", "mobileportrait")
         self.assertEqual(other_app, set_zoom_preview_install_id(other_app))

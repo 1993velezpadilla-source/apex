@@ -372,6 +372,9 @@ namespace ArrangementEditor
         void recordMasterOutputPreview(double seconds, float leftPeak,
                                        float rightPeak, bool playing);
         void setViewportScrollOffset(int scrollX, int scrollY);
+       #if JUCE_ANDROID
+        void setViewportPaintCacheEnabled(bool enabled);
+       #endif
         void setSnapMode(SnapMode mode);
         SnapMode getSnapMode() const noexcept { return m_snapMode; }
         int getSnapModeIndex() const noexcept;
@@ -616,6 +619,9 @@ namespace ArrangementEditor
         void updateClipAutomationDim();
         void updatePinnedViewportControls(bool restack = true);
         juce::Rectangle<int> getViewportVisibleBounds() const;
+       #if JUCE_ANDROID
+        class ViewportPaintCache;
+       #endif
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
         enum class ClipBoundsUpdate { none, time, all };
         void updateClipRendererVisibility(ClipBoundsUpdate update = ClipBoundsUpdate::none);

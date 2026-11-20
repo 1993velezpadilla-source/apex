@@ -175,6 +175,170 @@ namespace ArrangementEditor
         }
     }
 
+   #if JUCE_ANDROID
+    class ArrangementViewCore::ViewportPaintCache final : public juce::CachedComponentImage
+    {
+    public:
+        explicit ViewportPaintCache(ArrangementViewCore& owner)
+            : view(owner), pixelsPerSecond(owner.m_zoom.getPixelsPerSecond()),
+              laneHeight(owner.m_zoom.getTrackHeightPx()) {}
+
+        void paint(juce::Graphics& graphics) override
+        {
+            const auto scale = graphics.getInternalContext().getPhysicalPixelScaleFactor();
+            const auto visible = view.getViewportVisibleBounds().getIntersection(view.getLocalBounds());
+            const auto zoom = view.m_zoom.getPixelsPerSecond();
+            const auto height = view.m_zoom.getTrackHeightPx();
+            const bool zoomChanged = pixelsPerSecond != zoom || laneHeight != height;
+            pixelsPerSecond = zoom;
+            laneHeight = height;
+
+            // JUCE's software raster uses single-precision coordinates. Keep
+            // the existing direct path at deep offsets, while zooming, and
+            // when an offscreen paint doesn't have a real viewport.
+            constexpr double maxRasterCoordinate = 1 << 21;
+            constexpr int64_t maxImagePixels = 4'000'000;
+            if (zoomChanged || visible.isEmpty() || !std::isfinite(scale) || scale <= 0.0f
+                || visible.getRight() * static_cast<double>(scale) >= maxRasterCoordinate
+                || visible.getBottom() * static_cast<double>(scale) >= maxRasterCoordinate
+                || view.findParentComponentOfClass<juce::Viewport>() == nullptr)
+            {
+                invalidateAll();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            const auto deviceView = toPixels(visible, scale);
+            const auto frameOrigin = deviceView.getPosition() - juce::Point<int>(2, 2);
+            // A fixed size survives different fractional origins at 2.625x etc.
+            const auto size = toPixels(visible.withZeroOrigin(), scale).getBottomRight()
+                + juce::Point<int>(5, 5);
+            if (static_cast<int64_t>(size.x) * size.y > maxImagePixels)
+            {
+                releaseResources();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
+            const juce::Rectangle<int> nextFrame(frameOrigin.x, frameOrigin.y, size.x, size.y);
+            if (!image.isValid() || image.getBounds().getBottomRight() != size || scale != pixelScale)
+            {
+                image = juce::Image(juce::Image::ARGB, size.x, size.y, false, juce::SoftwareImageType());
+                valid.clear();
+                pixelScale = scale;
+            }
+            else if (nextFrame != frame)
+            {
+                // The toolbar/ruler are pinned in view space. Discard their
+                // old and new positions before preserving world-space pixels.
+                const int header = view.arrangementContentTop();
+                valid.subtract(toPixels(previousView.withHeight(header), scale).expanded(2));
+                valid.subtract(toPixels(visible.withHeight(header), scale).expanded(2));
+                // Pixels immediately outside the old view may have been clipped
+                // by the arranger's own culling. Paint them as they enter.
+                valid.clipTo(toPixels(previousView, scale).reduced(2));
+                valid.clipTo(nextFrame);
+                const auto overlap = valid.getBounds();
+                if (!overlap.isEmpty())
+                {
+                    const auto source = overlap.getPosition() - frame.getPosition();
+                    const auto destination = overlap.getPosition() - nextFrame.getPosition();
+                    image.moveImageSection(destination.x, destination.y, source.x, source.y,
+                                           overlap.getWidth(), overlap.getHeight());
+                }
+            }
+            frame = nextFrame;
+            previousView = visible;
+
+            const auto dirty = graphics.getClipBounds().getIntersection(visible);
+            if (dirty.isEmpty())
+                return;
+            const auto pixels = toPixels(dirty, scale).expanded(1).getIntersection(frame);
+            juce::RectangleList<int> missing(pixels);
+            missing.subtract(valid);
+            if (missing.getNumRectangles() > 32)
+                missing = juce::RectangleList<int>(pixels);
+
+            if (!missing.isEmpty())
+            {
+                auto local = missing;
+                local.offsetAll(-frame.getPosition());
+                juce::Graphics raster(image);
+                raster.reduceClipRegion(local);
+                raster.addTransform(juce::AffineTransform::scale(scale)
+                    .translated(static_cast<float>(-frame.getX()), static_cast<float>(-frame.getY())));
+                view.paintEntireComponent(raster, true);
+                valid.add(missing);
+                valid.consolidate();
+            }
+
+            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+            {
+                uint64_t drawn = 0;
+                for (const auto& area : missing)
+                    drawn += static_cast<uint64_t>(area.getWidth()) * area.getHeight();
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerRasterPixels, drawn);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerReusePixels,
+                    static_cast<uint64_t>(pixels.getWidth()) * pixels.getHeight() - drawn);
+            }
+
+            juce::Graphics::ScopedSaveState restore(graphics);
+            // The image already has native-density pixels. Use the renderer's
+            // blit path, snapping its translation to the nearest device pixel.
+            graphics.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+            graphics.setOpacity(view.getAlpha());
+            graphics.drawImageTransformed(image, juce::AffineTransform::scale(1.0f / scale)
+                .translated(frame.getX() / scale, frame.getY() / scale));
+        }
+
+        bool invalidateAll() override
+        {
+            valid.clear();
+            return true;
+        }
+
+        bool invalidate(const juce::Rectangle<int>& area) override
+        {
+            if (image.isValid())
+            {
+                const auto dirty = area.getIntersection(previousView.expanded(2));
+                if (!dirty.isEmpty())
+                    valid.subtract(toPixels(dirty, pixelScale).expanded(2));
+                if (valid.getNumRectangles() > 64)
+                    valid.clear();
+            }
+            return true;
+        }
+
+        void releaseResources() override
+        {
+            image = {};
+            invalidateAll();
+        }
+
+    private:
+        static juce::Rectangle<int> toPixels(juce::Rectangle<int> bounds, float scale)
+        {
+            return (bounds.toDouble() * static_cast<double>(scale)).getSmallestIntegerContainer();
+        }
+
+        ArrangementViewCore& view;
+        double pixelsPerSecond;
+        int laneHeight;
+        float pixelScale = 0.0f;
+        juce::Image image;
+        juce::Rectangle<int> frame;
+        juce::Rectangle<int> previousView;
+        juce::RectangleList<int> valid;
+    };
+
+    void ArrangementViewCore::setViewportPaintCacheEnabled(bool enabled)
+    {
+        if (enabled != (getCachedComponentImage() != nullptr))
+            setCachedComponentImage(enabled ? new ViewportPaintCache(*this) : nullptr);
+    }
+   #endif
+
     ArrangementViewCore::ArrangementViewCore()
         : m_toolbar(m_toolState)
         , m_ruler(m_zoom)
@@ -182,6 +346,9 @@ namespace ArrangementEditor
         , m_ghostOverlay(*this)
     {
         setOpaque(true); // paint() fills the entire surface
+       #if JUCE_ANDROID
+        setViewportPaintCacheEnabled(true);
+       #endif
         // Initialize timers for deferred clip work.
         m_rebuildDeferTimer = std::make_unique<RebuildDeferTimer>(*this);
         m_waveformLoadTimer = std::make_unique<WaveformLoadTimer>(*this);

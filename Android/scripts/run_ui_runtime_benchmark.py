@@ -76,6 +76,13 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         raise ValueError("Reverse pan did not move the production Viewport")
     if phases[5]["after"]["scrollY"] <= phases[5]["before"]["scrollY"]:
         raise ValueError("Vertical pan did not scroll tracks")
+    if renderer == "retained":
+        for phase in (phases[0], phases[4], phases[5]):
+            before, after = phase["before"], phase["after"]
+            if after["arrangerReusePixels"] <= before["arrangerReusePixels"]:
+                raise ValueError(f"{phase['phase']} reused no rasterized arranger pixels")
+            if after["arrangerRasterPixels"] <= before["arrangerRasterPixels"]:
+                raise ValueError(f"{phase['phase']} drew no newly exposed arranger pixels")
     for phase, direction in zip(phases[6:], (1, -1)):
         if (phase["after"]["laneHeight"] - phase["before"]["laneHeight"]) * direction <= 0:
             raise ValueError(f"{phase['phase']} did not change lane height")
@@ -202,10 +209,7 @@ def main() -> int:
     failures = []
     try:
         for scene in ("playback", "recording", "empty", "clip", "deep"):
-            if scene in ("playback", "recording"):
-                orders = (("optimized", "gpu"), ("gpu", "optimized"))
-            else:
-                orders = (("reference", "optimized", "gpu"), ("optimized", "reference"))
+            orders = (("optimized", "retained"), ("retained", "optimized"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):
@@ -229,13 +233,17 @@ def main() -> int:
         }, indent=2))
     for result in results:
         for phase in result["phases"]:
+            before, after = phase["before"], phase["after"]
+            reused = after["arrangerReusePixels"] - before["arrangerReusePixels"]
+            redrawn = after["arrangerRasterPixels"] - before["arrangerRasterPixels"]
             print(f"{result['scene']} {result['renderer_requested']} "
                   f"pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
                   f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
                   f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
-                  f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms")
+                  f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms, "
+                  f"arranger pixels reused={reused:,}/redrawn={redrawn:,}")
     if failures:
         raise RuntimeError(f"{len(failures)} runtime cases failed; review retained evidence")
     return 0
