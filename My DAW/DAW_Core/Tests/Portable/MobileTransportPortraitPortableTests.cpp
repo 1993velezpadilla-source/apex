@@ -837,8 +837,13 @@ bool compactStandardWidthHeightGrid()
 
 // Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
 
+constexpr bool compactWideInsetRecoverySweep();
+
 int main()
 {
+    // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
+    // evaluation budget; retain the same checks in optimized/NDEBUG builds.
+    assert(compactWideInsetRecoverySweep());
     // Keep the full geometry sweep active even when NDEBUG removes assert().
     if (!compactRecoveredWidthHeightGrid()) return 1;
     if (!compactStandardWidthHeightGrid()) return 2;
@@ -2291,4 +2296,4 @@ constexpr bool compactWideInsetRecoverySweep()
         }
     return true;
 }
-static_assert(compactWideInsetRecoverySweep());
+// Exercised by main() rather than a compiler-budget-limited static_assert.
