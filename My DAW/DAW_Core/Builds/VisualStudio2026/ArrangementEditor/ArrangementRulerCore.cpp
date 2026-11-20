@@ -141,6 +141,7 @@ namespace ArrangementEditor
             return;
 
         const int barStep = GridLodPolicy::barStep(pxPerBar);
+        const int labelStep = GridLodPolicy::barLabelStep(pxPerBar);
         const bool drawBeats = !GridLodPolicy::suppressBeats(pxPerBeat);
         const bool drawSeconds = pxPerBar >= 60.0;
         constexpr int labelReach = 46;
@@ -151,36 +152,38 @@ namespace ArrangementEditor
         static const juce::Font secondsFont("Segoe UI", 8.f, juce::Font::plain);
         const float bottom = static_cast<float>(getHeight());
 
-        for (int bar = firstBar; bar <= lastBar; ++bar)
+        for (int bar = firstBar - firstBar % barStep; bar <= lastBar; bar += barStep)
         {
             const double barTime = bar * barDuration;
             const int x = timeToX(barTime);
-            if (x < 0 || x >= dirty.getRight())
-                continue;
+            if (x >= dirty.getRight())
+                break;
 
-            const bool major = bar % barStep == 0;
-            if (major && dirty.intersects(juce::Rectangle<int>{ x, 20, 1, getHeight() - 20 }))
+            if (dirty.intersects(juce::Rectangle<int>{ x, 20, 1, getHeight() - 20 }))
             {
                 g.setColour(fromU32(Col::gridLineMajor));
                 g.drawVerticalLine(x, 20.f, bottom);
             }
 
-            const juce::Rectangle<int> barLabel(x + 2, 4, 40, 14);
-            if (dirty.intersects(barLabel))
+            if (bar % labelStep == 0)
             {
-                g.setColour(fromU32(Col::text));
-                g.setFont(barFont);
-                g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
-            }
-            const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
-            if (drawSeconds && dirty.intersects(secondsLabel))
-            {
-                g.setColour(fromU32(Col::textDim));
-                g.setFont(secondsFont);
-                g.drawText(formatTimeSeconds(barTime), secondsLabel, juce::Justification::centredLeft);
+                const juce::Rectangle<int> barLabel(x + 2, 4, 40, 14);
+                if (dirty.intersects(barLabel))
+                {
+                    g.setColour(fromU32(Col::text));
+                    g.setFont(barFont);
+                    g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
+                }
+                const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
+                if (drawSeconds && dirty.intersects(secondsLabel))
+                {
+                    g.setColour(fromU32(Col::textDim));
+                    g.setFont(secondsFont);
+                    g.drawText(formatTimeSeconds(barTime), secondsLabel, juce::Justification::centredLeft);
+                }
             }
 
-            if (!major || !drawBeats || dirty.getBottom() <= 24)
+            if (!drawBeats || dirty.getBottom() <= 24)
                 continue;
 
             g.setColour(fromU32(Col::gridLine).withAlpha(0.3f));

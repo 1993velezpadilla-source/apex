@@ -2452,7 +2452,10 @@ namespace ArrangementEditor
             renderer->updateClipData(*clip);
             renderer->setCachedAudioHandle(cachedAudio, !hasEngineAudioOwner);
             if (renderer->getBounds() != targetBounds)
+            {
+                m_clipVisibilityGuard = {};
                 renderer->setBounds(targetBounds);
+            }
             renderer->setSelected(m_selection.isSelected(clip->id));
             renderer->setSoloActive(!m_clipAuditionSoloId.isNull()
                 && clip->id == m_clipAuditionSoloId);
@@ -2962,6 +2965,7 @@ namespace ArrangementEditor
         };
 
         auto* addedRenderer = renderer.get();
+        m_clipVisibilityGuard = {};
         addAndMakeVisible(*addedRenderer);
         addedRenderer->setVisible(shouldShowClipRenderer(*addedRenderer));
         if (addedRenderer->isVisible() && addedRenderer->shouldRenderWaveform()
@@ -4477,9 +4481,9 @@ namespace ArrangementEditor
             return true;
 
         const auto bounds = renderer.getBounds();
-        // A clip inserted or moved while scrolling also has to be ready
-        // anywhere the viewport may travel before the next culling pass.
-        return m_clipVisibilityGuard.intersects(bounds)
+        // A model-only edit must not hide a previously prepared clip inside
+        // the guard. Inserts and bounds changes invalidate the guard first.
+        return (renderer.isVisible() && m_clipVisibilityGuard.intersects(bounds))
             || ArrangementClipLodPolicy::intersectsViewport(bounds,
                 getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
     }
@@ -4493,8 +4497,7 @@ namespace ArrangementEditor
 
         const int trackHeight = m_zoom.getTrackHeightPx();
         const auto region = ArrangementClipLodPolicy::renderRegion(viewport, trackHeight);
-        constexpr int travel = ArrangementClipLodPolicy::kViewportOverscanPx / 2;
-        m_clipVisibilityGuard = viewport.expanded(travel, juce::jmax(travel, trackHeight / 2));
+        auto guard = ArrangementClipLodPolicy::visibilityGuard(viewport, getWidth(), trackHeight);
         for (auto& renderer : m_clipRenderers)
         {
             if (renderer == nullptr)
@@ -4514,6 +4517,8 @@ namespace ArrangementEditor
             const bool wasVisible = renderer->isVisible();
             const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
                                           || region.intersects(nextBounds);
+            if (!shouldBeVisible)
+                ArrangementClipLodPolicy::excludeHiddenClip(guard, viewport, nextBounds);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
@@ -4546,6 +4551,9 @@ namespace ArrangementEditor
                 renderer->refresh();
             }
         }
+        // An active drag can force offscreen clips visible. Re-evaluate
+        // once after the drag so that temporary visibility is retired.
+        m_clipVisibilityGuard = m_drag.active ? juce::Rectangle<int>() : guard;
     }
 
     void ArrangementViewCore::updateRubberBandSelection(const juce::Rectangle<int>& bounds)

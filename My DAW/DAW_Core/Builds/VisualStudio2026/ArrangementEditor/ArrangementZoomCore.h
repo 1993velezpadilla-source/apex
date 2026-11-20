@@ -45,6 +45,12 @@ namespace ArrangementEditor
             if (pixelsPerBar >= kMinMajorSpacing / 16.0) return 16;
             return 32;
         }
+
+        static int barLabelStep(double pixelsPerBar) noexcept
+        {
+            constexpr double labelWidth = 40.0;
+            return barStep(pixelsPerBar * (kMinMajorSpacing / labelWidth));
+        }
     };
 
     // ── Clip rendering LOD policy ────────────────────────────────────────
@@ -97,7 +103,33 @@ namespace ArrangementEditor
         static juce::Rectangle<int> renderRegion(const juce::Rectangle<int>& viewport,
                                                   int trackHeightPx) noexcept
         {
-            return viewport.expanded(kViewportOverscanPx, juce::jmax(kViewportOverscanPx, trackHeightPx));
+            // Prepare clips ahead of a pan in either direction. A viewport
+            // can travel much farther than 32 px between touch frames.
+            return viewport.expanded(juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2),
+                                     juce::jmax(kViewportOverscanPx, trackHeightPx));
+        }
+
+        static juce::Rectangle<int> visibilityGuard(const juce::Rectangle<int>& viewport,
+                                                     int contentWidth, int trackHeightPx) noexcept
+        {
+            const int verticalTravel = juce::jmax(kViewportOverscanPx / 2, trackHeightPx / 2);
+            return viewport.expanded(0, verticalTravel)
+                .withX(0).withWidth(juce::jmax(contentWidth, viewport.getRight()));
+        }
+
+        // The viewport can travel between the closest hidden clips without
+        // rescanning the clip list. Use the entire vertical guard so a small
+        // diagonal pan cannot expose a clip in a neighbouring lane.
+        static void excludeHiddenClip(juce::Rectangle<int>& guard,
+                                      const juce::Rectangle<int>& viewport,
+                                      const juce::Rectangle<int>& clip) noexcept
+        {
+            if (!guard.intersects(clip))
+                return;
+            if (clip.getRight() <= viewport.getX())
+                guard = guard.withLeft(clip.getRight());
+            else if (clip.getX() >= viewport.getRight())
+                guard = guard.withRight(clip.getX());
         }
 
         static bool intersectsViewport(const juce::Rectangle<int>& clipBounds,

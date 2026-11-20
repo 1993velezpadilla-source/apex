@@ -933,7 +933,9 @@ namespace ArrangementEditor
         // Read the peaks and their readiness under a single lock.
         juce::CriticalSection::ScopedLockType lock(m_waveformCache->getPeaksLock());
         const auto& peaks = m_waveformCache->getPeaks();
-        if (!peaks.valid || peaks.minPeaks.empty() || peaks.maxPeaks.empty())
+        const auto& minimums = peaks.minimums();
+        const auto& maximums = peaks.maximums();
+        if (!peaks.valid || minimums.empty() || maximums.empty())
             return;
 
         // Waveform area starts BELOW the name bar so they never overlap.
@@ -983,7 +985,7 @@ namespace ArrangementEditor
             readRatio = (tp.stretchRatio > 0.001) ? 1.0 / tp.stretchRatio : 1.0;
         }
 
-        const int totalPeaks = (int)peaks.minPeaks.size();
+        const int totalPeaks = (int)minimums.size();
         if (totalPeaks <= 0)
             return;
 
@@ -1114,12 +1116,12 @@ namespace ArrangementEditor
                 i0 = juce::jlimit(visibleStartPeak, lastPeak, i0);
                 i1 = juce::jlimit(i0, lastPeak, i1);
 
-                rawMin = peaks.minPeaks[(size_t)i0];
-                rawMax = peaks.maxPeaks[(size_t)i0];
+                rawMin = minimums[(size_t)i0];
+                rawMax = maximums[(size_t)i0];
                 for (int i = i0 + 1; i <= i1; ++i)
                 {
-                    rawMin = juce::jmin(rawMin, peaks.minPeaks[(size_t)i]);
-                    rawMax = juce::jmax(rawMax, peaks.maxPeaks[(size_t)i]);
+                    rawMin = juce::jmin(rawMin, minimums[(size_t)i]);
+                    rawMax = juce::jmax(rawMax, maximums[(size_t)i]);
                 }
             }
             else
@@ -1133,10 +1135,10 @@ namespace ArrangementEditor
                                             visibleStartPeak + (int)fl);
                 const int ib = juce::jlimit(visibleStartPeak, lastPeak, ia + 1);
 
-                rawMin = peaks.minPeaks[(size_t)ia]
-                       + (peaks.minPeaks[(size_t)ib] - peaks.minPeaks[(size_t)ia]) * t;
-                rawMax = peaks.maxPeaks[(size_t)ia]
-                       + (peaks.maxPeaks[(size_t)ib] - peaks.maxPeaks[(size_t)ia]) * t;
+                rawMin = minimums[(size_t)ia]
+                       + (minimums[(size_t)ib] - minimums[(size_t)ia]) * t;
+                rawMax = maximums[(size_t)ia]
+                       + (maximums[(size_t)ib] - maximums[(size_t)ia]) * t;
             }
 
             // â”€â”€ APPLY VISUAL TRANSFORMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -20,8 +20,33 @@ namespace juce
 
     template <typename T> struct Rectangle
     {
-        Rectangle expanded(int, int) const { return *this; }
-        bool intersects(const Rectangle&) const { return false; }
+        T x {}, y {}, w {}, h {};
+        T getX() const { return x; }
+        T getWidth() const { return w; }
+        T getRight() const { return x + w; }
+
+        Rectangle expanded(int dx, int dy) const
+        {
+            return { x - dx, y - dy, w + 2 * dx, h + 2 * dy };
+        }
+
+        Rectangle withX(T newX) const { return { newX, y, w, h }; }
+        Rectangle withWidth(T width) const { return { x, y, width, h }; }
+        Rectangle withLeft(T left) const { return { left, y, getRight() - left, h }; }
+        Rectangle withRight(T right) const { return { x, y, right - x, h }; }
+
+        bool intersects(const Rectangle& other) const
+        {
+            return w > 0 && h > 0 && other.w > 0 && other.h > 0
+                && x < other.getRight() && other.x < getRight()
+                && y < other.y + other.h && other.y < y + h;
+        }
+
+        bool contains(const Rectangle& other) const
+        {
+            return x <= other.x && getRight() >= other.getRight()
+                && y <= other.y && y + h >= other.y + other.h;
+        }
     };
 }
 
@@ -139,5 +164,34 @@ int main()
         assert(GridLodPolicy::barStep(density) == expected);
     }
 
-    std::cout << "TimelineZoomController: anchor, limit, pinch and grid regressions passed\n";
+    assert(GridLodPolicy::barLabelStep(4.0) == 16);
+    assert(GridLodPolicy::barLabelStep(20.0) == 2);
+    assert(GridLodPolicy::barLabelStep(40.0) == 1);
+    for (int quarter = 1; quarter <= 400; ++quarter)
+    {
+        const double density = quarter * 0.25;
+        assert(GridLodPolicy::barLabelStep(density) % GridLodPolicy::barStep(density) == 0);
+    }
+
+    // Horizontal scroll must leave the prepared window only when a hidden
+    // clip could enter, including one reached by a small diagonal pan.
+    using LOD = ArrangementEditor::ArrangementClipLodPolicy;
+    const juce::Rectangle<int> viewport { 1200, 200, 400, 600 };
+    const auto region = LOD::renderRegion(viewport, 80);
+    assert(region.intersects({ 1750, 240, 50, 80 }));
+    assert(!region.intersects({ 1950, 240, 50, 80 }));
+    auto guard = LOD::visibilityGuard(viewport, 20000, 80);
+    assert(guard.contains(viewport.withX(17000)));
+    assert(guard.contains(viewport.withX(0)));
+    LOD::excludeHiddenClip(guard, viewport, { 2500, 235, 70, 80 });
+    LOD::excludeHiddenClip(guard, viewport, { 1950, 810, 70, 80 });
+    LOD::excludeHiddenClip(guard, viewport, { 1850, 900, 70, 80 });
+    LOD::excludeHiddenClip(guard, viewport, { 675, 250, 200, 80 });
+    assert(guard.contains(viewport.withX(875)));
+    assert(!guard.contains(viewport.withX(874)));
+    assert(guard.contains(viewport.withX(1550)));
+    assert(!guard.contains(viewport.withX(1551)));
+    assert(!guard.contains({ 1200, 241, 400, 600 }));
+
+    std::cout << "TimelineZoomController: anchor, limit, pinch, grid and clip guard regressions passed\n";
 }
