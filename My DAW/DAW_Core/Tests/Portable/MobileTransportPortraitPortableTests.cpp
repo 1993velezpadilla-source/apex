@@ -844,6 +844,23 @@ int main()
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
     // evaluation budget; retain the same checks in optimized/NDEBUG builds.
     assert(compactWideInsetRecoverySweep());
+    // Deep keyboard-inset recovery: when only one 44-unit row fits,
+    // Transport must stay tappable and all optional top-row targets hidden.
+    // Runtime sweep avoids GCC constexpr evaluation-budget regressions.
+    for (int w = 268; w <= 430; ++w)
+        for (int h = 44; h <= 87; ++h)
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            for (const auto action : deck.transport)
+                assert(inside(action, w, h) && action.width >= 44
+                       && action.height >= 44);
+            for (const auto optional : {deck.fx, deck.browser, deck.mixer,
+                                        deck.sends, deck.clock, deck.tempo,
+                                        deck.key, deck.automation, deck.click})
+                assert(optional.width == 0 && optional.height == 0);
+        }
     // Keep the full geometry sweep active even when NDEBUG removes assert().
     if (!compactRecoveredWidthHeightGrid()) return 1;
     if (!compactStandardWidthHeightGrid()) return 2;
