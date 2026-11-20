@@ -1826,3 +1826,106 @@ public:
 };
 
 static LavaCacheGenerationTest lavaCacheGenerationTest;
+
+class ArrangerZoomInvariantsTest final : public juce::UnitTest
+{
+public:
+    ArrangerZoomInvariantsTest()
+        : juce::UnitTest("apex.ui.arranger_zoom_invariants.v1",
+                         "apex.ui.arranger_zoom_invariants.v1") {}
+
+    void runTest() override
+    {
+        using Metrics = TimelinePaintMetrics;
+        using Zoom = ArrangementEditor::ArrangementZoomCore;
+
+        for (const int count : { 0, 1, 8, 32, 100 })
+        {
+            beginTest("Production viewport zoom with " + juce::String(count) + " clips");
+            DAW::AudioFileManager audioFiles;
+            DAW::TrackManager tracks;
+            DAW::ClipManager clips;
+            ArrangementEditor::ArrangementViewCore arrangement;
+            juce::Viewport viewport;
+            viewport.setScrollBarsShown(false, false, true, true);
+            viewport.setSize(480, 420);
+            viewport.setViewedComponent(&arrangement, false);
+            arrangement.onViewportZoomLayout = [&](bool)
+            {
+                arrangement.setSize(Zoom::contentWidth(
+                    arrangement.getZoom().getPixelsPerSecond(), 180.0, viewport.getWidth()), 1200);
+            };
+
+            auto* track = tracks.createTrack("Zoom");
+            expect(track != nullptr);
+            if (track == nullptr)
+                continue;
+            arrangement.setAudioEngineBridge(&clips, &audioFiles, &tracks, 48000.0);
+
+            const auto media = std::make_shared<DAW::AudioFileManager::CachedAudio>();
+            media->sampleRate = 48000.0;
+            media->buffer.setSize(1, 512);
+            media->buffer.clear();
+            media->rawMin.assign(64, -0.25f);
+            media->rawMax.assign(64, 0.5f);
+            std::vector<juce::Uuid> ids;
+
+            arrangement.beginEngineClipBatch(false);
+            for (int i = 0; i < count; ++i)
+            {
+                auto* audio = clips.createAudioClip("Zoom", juce::File());
+                audio->setTrackID(track->getID());
+                audioFiles.shareSnapshotForClip(media, audio->getID());
+                auto clip = ArrangementEditor::ArrangementClipModel::createNew(
+                    0, i == 0 ? 4.0 : 30.0 + i, 4.0);
+                clip.clipName = "Zoom clip";
+                clip.sourcePath = "zoom-test.wav";
+                clip.sourceEndSample = 512;
+                ids.push_back(clip.id);
+                arrangement.addOrUpdateEngineClipModel(clip, audio->getID());
+            }
+            arrangement.endEngineClipBatch();
+            arrangement.onViewportZoomLayout(false);
+            viewport.setViewPosition(360, 20);
+            arrangement.setViewportScrollOffset(360, 20);
+
+            const juce::Point<double> centre(200.0, 100.0);
+            const double anchorSeconds = (360.0 + centre.x) / 100.0;
+            if (count > 0)
+                expect(arrangement.getVisibleWaveformReadinessForDiagnostics().allReady());
+
+            Metrics::reset();
+            Metrics::active.store(true, std::memory_order_relaxed);
+            for (int i = 0; i < 240; ++i)
+            {
+                const bool zoomed = i % 2 == 0;
+                const double pps = zoomed ? 155.0 : 100.0;
+                arrangement.zoomViewport(pps, zoomed ? 116.0 : 80.0, centre, centre);
+                expect(std::abs(viewport.getViewPositionX() + centre.x - anchorSeconds * pps) <= 0.51);
+                expectEquals(viewport.getViewPositionY(), zoomed ? 38 : 20);
+                if (count == 0)
+                    continue;
+                const auto bounds = arrangement.getClipBounds(ids.front());
+                expectEquals(bounds.getX(), static_cast<int>(4.0 * pps));
+                expectEquals(bounds.getWidth(), static_cast<int>(4.0 * pps));
+                expect(arrangement.getVisibleWaveformReadinessForDiagnostics().allReady());
+                const auto offscreen = arrangement.getClipBounds(ids.back());
+                expectEquals(offscreen.getWidth(), static_cast<int>(4.0 * pps));
+            }
+            Metrics::active.store(false, std::memory_order_relaxed);
+            expectEquals(static_cast<int>(Metrics::arrangementZoomUpdates.load()), 240);
+            expectEquals(static_cast<int>(Metrics::arrangementRendererRebuilds.load()), 0);
+            expectEquals(static_cast<int>(Metrics::waveformRefreshes.load()), 0);
+            if (count > 1)
+            {
+                const auto expected = arrangement.getClipBounds(ids.back());
+                viewport.setViewPosition(expected.getX() - 24, 0);
+                arrangement.setViewportScrollOffset(viewport.getViewPositionX(), 0);
+                expect(arrangement.getVisibleWaveformReadinessForDiagnostics().allReady());
+            }
+            Metrics::reset();
+        }
+    }
+};
+
+static ArrangerZoomInvariantsTest arrangerZoomInvariantsTest;

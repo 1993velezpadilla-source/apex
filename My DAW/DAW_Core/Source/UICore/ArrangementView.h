@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <functional>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -103,6 +104,7 @@ public:
         : trackManager_(trackManager), clipManager_(clipManager), state_(state),
           markers_(markers), transport_(transport), audioFiles_(audioFiles), automation_(automation)
     {
+        setOpaque(true);
         core_ = std::make_unique<ArrangementEditor::ArrangementViewCore>();
         core_->setAudioEngineBridge(&clipManager_, audioFiles_, &trackManager_, 44100.0,
                                     clipRegionPlugins, pluginFormatManager);
@@ -171,22 +173,23 @@ public:
                 onOpenSelectedMidiClip();
         };
 
-        // Wire zoom changes → header sync so TrackList row heights stay
-        // in sync with ArrangementViewCore track height at all times.
-        core_->getZoom().onZoomChanged = [this]()
+        core_->onViewportZoomLayout = [this](bool vertical)
         {
-            defaultLaneHeight_ = (int)core_->getZoom().getTrackHeightPx();
-            if (core_ != nullptr)
-                core_->resized();
-            // Dynamic take rows must be re-laid out on vertical zoom too.
-            if (inlinePlaylistPanel_ != nullptr)
-                refreshInlinePlaylistLayout();
-            else
+            if (vertical)
             {
-                updateInlinePlaylistBounds();
-                if (onLaneLayoutChanged) onLaneLayoutChanged();
+                defaultLaneHeight_ = getPhysicalTrackHeight();
+                if (inlinePlaylistPanel_ != nullptr)
+                    refreshInlinePlaylistLayout();
             }
-            repaint();
+            if (onViewportZoomLayout)
+                onViewportZoomLayout(vertical);
+            if (vertical)
+                updateInlinePlaylistBounds();
+        };
+        core_->onViewportZoomCommitted = [this]()
+        {
+            if (onViewportZoomCommitted)
+                onViewportZoomCommitted();
         };
 
         addAndMakeVisible(*core_);
@@ -373,8 +376,11 @@ trackManager_.addListener(this);
             (int)track->getPlaylists().size() - 1)) * takeHeight;
         inlinePlaylistPanel_->setInlineTakeHeight(takeHeight);
         core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
-        updateInlinePlaylistBounds();
-        if (onLaneLayoutChanged) onLaneLayoutChanged();
+        if (!core_->isApplyingViewportZoom())
+        {
+            updateInlinePlaylistBounds();
+            if (onLaneLayoutChanged) onLaneLayoutChanged();
+        }
     }
 
     bool isInlinePlaylistPanelActive() const noexcept
@@ -390,6 +396,11 @@ trackManager_.addListener(this);
     int getNumLanes() const noexcept
     {
         return trackManager_.getNumTracks() + (trackManager_.hasMasterTrack() ? 1 : 0);
+    }
+
+    int getLaneContentHeight() const noexcept
+    {
+        return core_->getLaneTopForIndex(juce::jmax(1, getNumLanes()));
     }
 
     int getPhysicalTrackHeight() const noexcept
@@ -414,21 +425,36 @@ trackManager_.addListener(this);
         return core_ != nullptr ? core_->getZoom().getPixelsPerSecond() : 100.0;
     }
 
-    void setPixelsPerSecond(double pixelsPerSecond)
+    using ViewportZoomAnchor = ArrangementEditor::ArrangementViewCore::ViewportZoomAnchor;
+
+    ViewportZoomAnchor captureViewportZoomAnchor(juce::Point<double> focus) const
     {
-        if (core_ != nullptr)
-            core_->getZoom().setPixelsPerSecond(pixelsPerSecond);
-        resized();
-        repaint();
+        return core_->captureViewportZoomAnchor(focus);
+    }
+
+    void zoomViewport(double pixelsPerSecond, double trackHeight,
+                      juce::Point<double> focus, const ViewportZoomAnchor* anchor = nullptr)
+    {
+        core_->zoomViewport(pixelsPerSecond, trackHeight, focus, focus, anchor);
+    }
+
+    double getTrackZoomHeight() const noexcept { return core_->getZoom().getTrackHeightPx(); }
+    bool isApplyingViewportZoom() const noexcept { return core_->isApplyingViewportZoom(); }
+
+    SamplePosition getLastClipEnd() const noexcept
+    {
+        return clipEndCounts_.empty() ? 0 : clipEndCounts_.rbegin()->first;
     }
 
     void setViewportScrollOffsets(int scrollX, int scrollY)
     {
+        const bool changed = horizontalScrollOffset_ != scrollX || verticalScrollOffset_ != scrollY;
         horizontalScrollOffset_ = juce::jmax(0, scrollX);
         verticalScrollOffset_ = juce::jmax(0, scrollY);
         if (core_ != nullptr)
             core_->setViewportScrollOffset(scrollX, scrollY);
-        updateImportOverlayBounds();
+        if (changed)
+            updateImportOverlayBounds();
     }
 
     bool isInterestedInFileDrag(const juce::StringArray& files) override
@@ -544,13 +570,7 @@ trackManager_.addListener(this);
 
     void setLaneHeight(int /*index*/, int newHeight)
     {
-        newHeight = juce::jlimit(24, 180, newHeight);
-        defaultLaneHeight_ = newHeight;
-        if (core_ != nullptr)
-            core_->getZoom().setTrackHeightPx((double)newHeight);
-        // onLaneLayoutChanged fired by zoom callback wired in constructor
-        resized();
-        repaint();
+        zoomViewport(getPixelsPerSecond(), newHeight, {});
     }
 
     void setMultiSelectedClips(const std::vector<juce::String>& ids)
@@ -829,9 +849,10 @@ trackManager_.addListener(this);
         updateImportOverlayBounds();
     }
 
-    std::function<void(int,int)> onLaneHeightChanged;
-    std::function<void(int)> onVerticalScrollChanged;
     std::function<void()> onLaneLayoutChanged;
+    std::function<void()> onClipExtentChanged;
+    std::function<void(bool)> onViewportZoomLayout;
+    std::function<void()> onViewportZoomCommitted;
     std::function<void()> onSendToBubble;
     std::function<void(MidiClip&)> onOpenMidiClip;
     std::function<void(const std::vector<juce::String>&, bool)> onBoxSelectionCommitted;
@@ -1227,7 +1248,10 @@ private:
     void clipAdded(Clip* clip) override
     {
         if (clip != nullptr)
+        {
             clip->addListener(this);
+            updateClipEnd(*clip);
+        }
 
         if (core_ != nullptr && core_->isSyncingArrangementToEngine())
             return;
@@ -1238,6 +1262,16 @@ private:
 
     void clipRemoved(const ClipID& clipID) override
     {
+        const auto previousEnd = getLastClipEnd();
+        const auto end = clipEnds_.find(clipID);
+        if (end != clipEnds_.end())
+        {
+            removeClipEndCount(end->second);
+            clipEnds_.erase(end);
+            if (getLastClipEnd() != previousEnd)
+                clipExtentChanged();
+        }
+
         if (onClipDeleted)
             onClipDeleted(clipID);
 
@@ -1277,15 +1311,20 @@ private:
             return;
 
         engineClipIdsToArrangementIds_.clear();
+        clipEnds_.clear();
+        clipEndCounts_.clear();
         core_->beginEngineClipBatch(true);
         attachClipListeners();
         mirrorAllEngineClipsIntoArrangement();
         core_->endEngineClipBatch();
+        clipExtentChanged();
         repaint();
     }
 
     void clipPropertyChanged(Clip* clip) override
     {
+        if (clip != nullptr)
+            updateClipEnd(*clip);
         if (isMirroringToArrangement_)
             return;
         if (core_ != nullptr && core_->isSyncingArrangementToEngine())
@@ -1677,12 +1716,54 @@ void trackPropertyChanged(Track* track) override
                 track->removeListener(this);
     }
 
+    void removeClipEndCount(SamplePosition end)
+    {
+        const auto count = clipEndCounts_.find(end);
+        if (--count->second == 0)
+            clipEndCounts_.erase(count);
+    }
+
+    void clipExtentChanged()
+    {
+        if (clipExtentUpdatePending_ || !onClipExtentChanged)
+            return;
+        clipExtentUpdatePending_ = true;
+        juce::MessageManager::callAsync([safe = juce::Component::SafePointer<ArrangementView>(this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->clipExtentUpdatePending_ = false;
+            if (safe->onClipExtentChanged)
+                safe->onClipExtentChanged();
+        });
+    }
+
+    void updateClipEnd(const Clip& clip)
+    {
+        const auto previousEnd = getLastClipEnd();
+        const auto next = clip.getEndPosition();
+        const auto [it, inserted] = clipEnds_.try_emplace(clip.getID(), next);
+        if (!inserted)
+        {
+            if (it->second == next)
+                return;
+            removeClipEndCount(it->second);
+            it->second = next;
+        }
+        ++clipEndCounts_[next];
+        if (getLastClipEnd() != previousEnd)
+            clipExtentChanged();
+    }
+
     void attachClipListeners()
     {
         juce::ScopedLock sl(clipManager_.getLock());
         for (auto* clip : clipManager_.getAllClips())
             if (clip != nullptr)
+            {
                 clip->addListener(this);
+                updateClipEnd(*clip);
+            }
     }
 
     void detachClipListeners()
@@ -1705,6 +1786,9 @@ void trackPropertyChanged(Track* track) override
     TrackPlaylistPanel* inlinePlaylistPanel_ = nullptr; // owned by MainComponent
     TrackID inlinePlaylistTrackId_;
     bool inlineRefreshScheduled_ = false;
+    bool clipExtentUpdatePending_ = false;
+    std::unordered_map<ClipID, SamplePosition> clipEnds_;
+    std::map<SamplePosition, int> clipEndCounts_;
     ImportOverlayComponent importOverlay_;
     std::function<PluginChainCore*(const TrackID&)> pluginChainProvider_;
     std::function<RoutingGraph*()> routingGraphProvider_;

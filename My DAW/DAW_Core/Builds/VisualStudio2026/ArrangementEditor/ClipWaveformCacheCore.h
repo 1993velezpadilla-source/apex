@@ -10,6 +10,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include "WaveformPeakRangeIndexCore.h"
 #include "../../../Source/AudioEngineCore/AudioFileManager.h"
 
 namespace ArrangementEditor
@@ -18,6 +19,7 @@ namespace ArrangementEditor
     {
         std::vector<float> minPeaks;
         std::vector<float> maxPeaks;
+        WaveformPeakRangeIndexCore rangeIndex;
         /** Peak-bucket indices whose source samples reached 0 dBFS
             (|sample| >= 1). Sorted ascending; used to draw the clipped-
             position markers on the clip. */
