@@ -120,7 +120,10 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
     constexpr int margin = 2, gap = 3;
     const int usable = w - 2 * margin;
     const int rowH = (h - 3 * margin) / 2;
-    const int actionY = 2 * margin + rowH;
+    // On 88..93-unit inset decks, preserve a 44-unit transport row while
+    // optional top-row controls remain hidden. Do not change taller layouts.
+    const int actionH = h >= 88 && rowH < 44 ? 44 : rowH;
+    const int actionY = actionH > rowH ? h - actionH : 2 * margin + rowH;
     // Recover finger-sized actions in 268..294-unit split-screen decks by
     // spending decorative gaps/insets before shrinking the six hit targets.
     // Below 268 units, six 44-unit actions physically cannot fit in one row.
@@ -132,7 +135,7 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
     {
         const int inset = w >= 295 && actionW > 2 ? 1 : 0;
         out.transport[i] = { margin + i * (actionW + actionGap) + inset,
-                             actionY, actionW - 2 * inset, rowH };
+                             actionY, actionW - 2 * inset, actionH };
     }
     // A four-shortcut row needs 189 logical units including margins/gaps.
     // Below that width, hide the shortcuts rather than exposing sub-44 taps.
