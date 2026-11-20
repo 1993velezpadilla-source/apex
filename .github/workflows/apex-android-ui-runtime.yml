@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "feature/mobile-portrait-zoom-rewrite"
+      - "qa/arranger-zoom-6-android"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"
@@ -36,10 +36,17 @@ jobs:
           submodules: recursive
 
       - name: Install Projucer and Android build dependencies
+        timeout-minutes: 6
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=25 -o Acquire::https::Timeout=25)
+          # Only the Ubuntu archives are needed to build the emulator APK.
+          # An unrelated image mirror should not hold up device validation.
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            apt_options+=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=-)
+          fi
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             git ninja-build cmake pkg-config xvfb \
             libasound2-dev libjack-jackd2-dev \
             libfreetype-dev libfontconfig1-dev \
