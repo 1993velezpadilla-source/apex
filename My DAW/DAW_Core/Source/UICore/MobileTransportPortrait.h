@@ -120,9 +120,10 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
     constexpr int margin = 2, gap = 3;
     const int usable = w - 2 * margin;
     const int rowH = (h - 3 * margin) / 2;
-    // On 88..93-unit inset decks, preserve a 44-unit transport row while
-    // optional top-row controls remain hidden. Do not change taller layouts.
-    const int actionH = h >= 88 && rowH < 44 ? 44 : rowH;
+    // Under deep keyboard/safe-area insets, use the available single row
+    // for a 44-unit Transport target once the viewport can fit it.
+    // Optional top-row controls stay hidden until their row fits 44.
+    const int actionH = h >= 44 && rowH < 44 ? 44 : rowH;
     const int actionY = actionH > rowH ? h - actionH : 2 * margin + rowH;
     // Recover finger-sized actions in 268..294-unit split-screen decks by
     // spending decorative gaps/insets before shrinking the six hit targets.
