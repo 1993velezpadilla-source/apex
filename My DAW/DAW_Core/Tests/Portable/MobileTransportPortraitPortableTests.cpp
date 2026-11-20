@@ -640,9 +640,9 @@ constexpr bool compactClockResizeRecovery()
 }
 static_assert(compactClockResizeRecovery());
 
-// A two-row compact deck needs at least 94 logical units for 44-unit
-// touch height: (94 - 6) / 2 == 44. Bounds-only tests at h=8 must not
-// accidentally be interpreted as proof of usable finger targets.
+// The compact transport preserves a 44-unit action row at heights 88..93,
+// while optional shortcuts remain hidden until the two-row 94-unit threshold.
+// Bounds-only tests at h=8 do not prove finger-sized targets.
 constexpr bool compactHeightTouchThreshold()
 {
     for (const int w : {320, 360, 393, 852})
@@ -650,7 +650,7 @@ constexpr bool compactHeightTouchThreshold()
         const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
         const auto usableDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
         if (!validCompact(w, 93) || !validCompact(w, 94)) return false;
-        if (shortDeck.transport[0].height >= 44
+        if (shortDeck.transport[0].height != 44
             || shortDeck.mixer.height >= 44
             || shortDeck.sends.height >= 44) return false;
         for (const auto action : usableDeck.transport)
@@ -686,8 +686,8 @@ constexpr bool compactActionWidthBoundary()
 }
 static_assert(compactActionWidthBoundary());
 
-// The two independent compact touch thresholds must hold together during
-// keyboard/inset resizing: 268 units wide and 94 units tall. A bounds-only
+// Compact actions require 268 units wide and 88 units tall; shortcuts
+// separately require 94 units tall during keyboard/inset resizing. A bounds-only
 // pass would miss a control that becomes a tiny but still clickable sliver.
 constexpr bool compactCombinedTouchBoundary()
 {
@@ -697,7 +697,7 @@ constexpr bool compactCombinedTouchBoundary()
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
             if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
                 return false;
-            const bool expectedActionsTouchable = w >= 268 && h >= 94;
+            const bool expectedActionsTouchable = w >= 268 && h >= 88;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
                     != expectedActionsTouchable) return false;
@@ -711,7 +711,7 @@ constexpr bool compactCombinedTouchBoundary()
 }
 static_assert(compactCombinedTouchBoundary());
 
-// Adversarial keyboard-inset oscillation around both 44-unit touch thresholds.
+// Adversarial keyboard-inset oscillation around the action/shortcut thresholds.
 // Test every intermediate size, not only the endpoints, and verify that
 // returning to a usable deck recreates the exact original hit rectangles.
 constexpr bool compactTouchThresholdRoundTrip()
@@ -725,7 +725,7 @@ constexpr bool compactTouchThresholdRoundTrip()
                 return false;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
-                    != (w >= 268 && h >= 94)) return false;
+                    != (w >= 268 && h >= 88)) return false;
             if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
                 || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
                 return false;
