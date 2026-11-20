@@ -175,7 +175,7 @@ namespace ArrangementEditor
         }
     }
 
-   #if JUCE_ANDROID
+   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
     class ArrangementViewCore::ViewportPaintCache final : public juce::CachedComponentImage
     {
     public:
@@ -185,6 +185,8 @@ namespace ArrangementEditor
 
         void paint(juce::Graphics& graphics) override
         {
+            auto* software = dynamic_cast<juce::LowLevelGraphicsSoftwareRenderer*>(
+                &graphics.getInternalContext());
             const auto scale = graphics.getInternalContext().getPhysicalPixelScaleFactor();
             const auto visible = view.getViewportVisibleBounds().getIntersection(view.getLocalBounds());
             const auto zoom = view.m_zoom.getPixelsPerSecond();
@@ -198,7 +200,8 @@ namespace ArrangementEditor
             // when an offscreen paint doesn't have a real viewport.
             constexpr double maxRasterCoordinate = 1 << 21;
             constexpr int64_t maxImagePixels = 4'000'000;
-            if (zoomChanged || visible.isEmpty() || !std::isfinite(scale) || scale <= 0.0f
+            if (software == nullptr || !view.isOpaque() || view.getAlpha() != 1.0f
+                || zoomChanged || visible.isEmpty() || !std::isfinite(scale) || scale <= 0.0f
                 || visible.getRight() * static_cast<double>(scale) >= maxRasterCoordinate
                 || visible.getBottom() * static_cast<double>(scale) >= maxRasterCoordinate
                 || view.findParentComponentOfClass<juce::Viewport>() == nullptr)
@@ -272,6 +275,15 @@ namespace ArrangementEditor
                 valid.consolidate();
             }
 
+            const auto toUser = juce::AffineTransform::scale(1.0f / scale)
+                .translated(frame.getX() / scale, frame.getY() / scale);
+            if (!software->blitOpaqueImage(image, toUser))
+            {
+                invalidateAll();
+                view.paintEntireComponent(graphics, false);
+                return;
+            }
+
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
             {
                 uint64_t drawn = 0;
@@ -281,14 +293,6 @@ namespace ArrangementEditor
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerReusePixels,
                     static_cast<uint64_t>(pixels.getWidth()) * pixels.getHeight() - drawn);
             }
-
-            juce::Graphics::ScopedSaveState restore(graphics);
-            // The image already has native-density pixels. Use the renderer's
-            // blit path, snapping its translation to the nearest device pixel.
-            graphics.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-            graphics.setOpacity(view.getAlpha());
-            graphics.drawImageTransformed(image, juce::AffineTransform::scale(1.0f / scale)
-                .translated(frame.getX() / scale, frame.getY() / scale));
         }
 
         bool invalidateAll() override
@@ -331,11 +335,17 @@ namespace ArrangementEditor
         juce::Rectangle<int> previousView;
         juce::RectangleList<int> valid;
     };
+   #endif
 
+   #if JUCE_ANDROID
     void ArrangementViewCore::setViewportPaintCacheEnabled(bool enabled)
     {
+       #if defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
         if (enabled != (getCachedComponentImage() != nullptr))
             setCachedComponentImage(enabled ? new ViewportPaintCache(*this) : nullptr);
+       #else
+        juce::ignoreUnused(enabled);
+       #endif
     }
    #endif
 
