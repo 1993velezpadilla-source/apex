@@ -2209,3 +2209,23 @@ constexpr bool compactTransportWidthBoundary()
     return narrow.transport[0].width < 44;
 }
 static_assert(compactTransportWidthBoundary());
+
+constexpr bool compactInsetTransportTouchBoundary()
+{
+    for (int h = 88; h <= 94; ++h)
+        for (int w = 268; w <= 294; ++w)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto& action : r.transport)
+                if (action.width < 44 || action.height < 44
+                    || action.x < 0 || action.y < 0
+                    || action.x + action.width > w
+                    || action.y + action.height > h)
+                    return false;
+            if (h < 94 && (r.fx.width != 0 || r.browser.width != 0
+                            || r.mixer.width != 0 || r.sends.width != 0))
+                return false;
+        }
+    return true;
+}
+static_assert(compactInsetTransportTouchBoundary());
