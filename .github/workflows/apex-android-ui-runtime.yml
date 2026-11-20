@@ -112,6 +112,14 @@ jobs:
           path: /tmp/apex-juce-host
           key: apex-juce-8.0.12-projucer-ubuntu-24-04-v1
 
+      - name: Cache Gradle dependency downloads for repeatable emulator builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: apex-android-ui-gradle-agp-8.10.0-${{ runner.os }}-v1
+
       - name: Generate Android exporter from ORIGINAL APEX .jucer
         shell: bash
         run: |
@@ -159,23 +167,38 @@ jobs:
           # Gradle dependency servers intermittently failed to resolve the
           # Android Gradle Plugin transitive dependencies on run 41152629694.
           # Retry NETWORK resolution only; never ignore real C++ errors.
-          for attempt in 1 2 3; do
-            echo "[APEX-ANDROID] Gradle build attempt $attempt/3" |
+          # Central can rate-limit shared GitHub runner IPs (HTTP 429). The
+          # earlier 10/20 s retries all failed before the emulator could boot.
+          # Retry ONLY known transient network failures with bounded backoff.
+          # Keep each attempt's log separate so old 429s cannot mask a new
+          # deterministic C++ or Gradle error.
+          for attempt in 1 2 3 4 5; do
+            echo "[APEX-ANDROID] Gradle build attempt $attempt/5" |
               tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
-            # The release-preview workflow checks lint on the supported ARM64 build.
-            # Benchmark the actual optimized x86_64 APK even if the unrelated
-            # release lint resolver hits Maven Central's request limit.
-            if ./gradlew --no-daemon --max-workers=2 :app:packageRelease_Release \
-                2>&1 | tee -a "$RUNNER_TEMP/apex-android-full-compile.log"; then
+            attempt_log="$(mktemp)"
+            # Only one Gradle worker during dependency warmup to avoid a
+            # simultaneous burst of Maven requests from this CI job.
+            if ./gradlew --no-daemon --max-workers=1 :app:packageRelease_Release \
+                2>&1 | tee "$attempt_log" | tee -a "$RUNNER_TEMP/apex-android-full-compile.log"; then
+              rm -f "$attempt_log"
               exit 0
             fi
-            if ! tail -n 300 "$RUNNER_TEMP/apex-android-full-compile.log" |
-                grep -Eq 'Could not resolve|Could not find com\\.|Could not GET|Read timed out|Connection timed out|repo.maven.apache.org|dl.google.com'; then
-              echo "[APEX-ANDROID] Real build error; will not hide it with retries."
+            if ! grep -Eq 'Received status code (429|50[0-9]|52[0-9])|Read timed out|Connection timed out|Connection reset|Temporary failure in name resolution|HTTP 429|Too Many Requests' "$attempt_log"; then
+              echo "[APEX-ANDROID] Non-transient build error; not retrying."
+              rm -f "$attempt_log"
               exit 1
             fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep $((attempt * 10))
+            rm -f "$attempt_log"
+            if [ "$attempt" -eq 5 ]; then exit 1; fi
+            case "$attempt" in
+              1) delay=30 ;;
+              2) delay=60 ;;
+              3) delay=120 ;;
+              4) delay=180 ;;
+            esac
+            echo "[APEX-ANDROID] Transient repository/network failure; backoff ${delay}s" |
+              tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
+            sleep "$delay"
           done
 
       - name: Sign and verify RELEASE-optimized X86_64 preview APK
