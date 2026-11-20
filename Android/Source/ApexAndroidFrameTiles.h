@@ -373,6 +373,38 @@ public:
 
     static void reset() { components.clear(); }
 
+    static void logTimelineChild(const Component& parent, const Component& child,
+                                 Graphics& graphics, Rectangle<int> parentClip)
+    {
+        if (!measuring || frameCount >= 2)
+            return;
+
+        const auto* parentType = typeid(parent).name();
+        const auto* childType = typeid(child).name();
+        if (std::strstr(parentType, "TimelineViewport") == nullptr
+            && std::strstr(childType, "TimelineViewport") == nullptr
+            && std::strstr(childType, "ArrangementView") == nullptr)
+            return;
+
+        const auto bounds = child.getBounds();
+        Graphics::ScopedSaveState state(graphics);
+        if (child.isTransformed())
+            graphics.addTransform(child.getTransform());
+        const auto intersects = parentClip.intersects(bounds);
+        const auto clipped = graphics.reduceClipRegion(bounds);
+        const auto reduced = graphics.getClipBounds();
+        __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                            "TIMELINE_CLIP %s/%s visible=%d transformed=%d cached=%d "
+                            "bounds=[%d,%d,%d,%d] clip=[%d,%d,%d,%d] "
+                            "intersects=%d clipped=%d remaining=[%d,%d,%d,%d]",
+                            parentType, childType, child.isVisible(), child.isTransformed(),
+                            child.getCachedComponentImage() != nullptr,
+                            bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight(),
+                            parentClip.getX(), parentClip.getY(), parentClip.getWidth(), parentClip.getHeight(),
+                            intersects, clipped, reduced.getX(), reduced.getY(),
+                            reduced.getWidth(), reduced.getHeight());
+    }
+
     static void logTop(std::size_t frames)
     {
         using Entry = std::pair<const std::type_info*, Sample>;

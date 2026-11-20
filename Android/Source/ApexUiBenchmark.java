@@ -34,6 +34,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private final long[] inputWall = new long[2048];
     private final long[] inputCpu = new long[2048];
     private final long[] phaseStarts = new long[PHASES.length];
+    private final long[] phaseEnds = new long[PHASES.length];
     private final ArrayList<long[]> windowFrames = new ArrayList<>();
     private final HandlerThread metricsThread = new HandlerThread("APEX UI benchmark metrics");
     private final Window.OnFrameMetricsAvailableListener frameListener = this::recordWindowFrame;
@@ -192,11 +193,16 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 entry.put("ui_interval_worst_ms", percentile(sorted, 1.0));
                 entry.put("inputWallMs", summarize(inputWall, moves));
                 entry.put("inputCpuMs", summarize(inputCpu, moves));
+                phaseEnds[phase] = frameTimeNanos;
                 ++phase;
                 phaseStart = lastFrame = 0;
                 if (phase == PHASES.length) {
-                    final long end = frameTimeNanos;
-                    decor.postDelayed(() -> finish(end), 500);
+                    decor.postDelayed(this::finish, 500);
+                    return;
+                }
+                if (phase == 2 && "deep".equals(activity.getIntent().getStringExtra("apex_scene"))) {
+                    Log.i(TAG, "PEAK horizontal");
+                    decor.postDelayed(() -> Choreographer.getInstance().postFrameCallback(this), 1800);
                     return;
                 }
             }
@@ -204,7 +210,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         } catch (Exception error) { fail(error); }
     }
 
-    private void finish(long end) {
+    private void finish() {
         if (stopped) return;
         stop();
         try {
@@ -213,9 +219,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 final long[] total = new long[windowFrames.size()];
                 for (int i = 0; i < phaseStarts.length; ++i) {
                     int count = 0;
-                    long limit = i + 1 < phaseStarts.length ? phaseStarts[i + 1] : end + 1;
                     for (long[] frame : windowFrames) {
-                        if (frame[0] < phaseStarts[i] || frame[0] >= limit) continue;
+                        if (frame[0] < phaseStarts[i] || frame[0] > phaseEnds[i]) continue;
                         draw[count] = frame[1];
                         total[count++] = frame[2];
                     }

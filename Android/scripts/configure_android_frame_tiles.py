@@ -59,6 +59,18 @@ def configure_component_paint_probe(gui: Path) -> None:
     apexAndroidFrame::ComponentPaintProbe apexPaintProbe ({component});
    #endif"""), encoding="utf-8")
 
+    path = gui / "components/juce_Component.cpp"
+    contents = path.read_text(encoding="utf-8")
+    if "ComponentPaintProbe::logTimelineChild" not in contents:
+        child = "        auto& child = *childComponentList.getUnchecked (i);\n\n        if (child.isVisible())"
+        path.write_text(replace(contents, child, """\
+        auto& child = *childComponentList.getUnchecked (i);
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        apexAndroidFrame::ComponentPaintProbe::logTimelineChild (*this, child, g, clipBounds);
+       #endif
+
+        if (child.isVisible())"""), encoding="utf-8")
+
 
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"

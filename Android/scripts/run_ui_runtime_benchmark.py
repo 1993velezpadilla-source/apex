@@ -41,7 +41,7 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         peer_count = phase["peerWallMs"]["count"]
         if phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
-        if phase["peerTiledFrames"] != peer_count:
+        if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
@@ -121,6 +121,7 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     deadline = time.monotonic() + 100
     ready = None
     before = False
+    peak = False
     result = None
     phases = {}
     while time.monotonic() < deadline:
@@ -131,6 +132,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
             screenshot(output / f"{name}-before.png")
             record_focus(output / f"{name}-before-window.txt")
             before = True
+        if not peak and "PEAK horizontal" in log:
+            screenshot(output / f"{name}-peak.png")
+            peak = True
         for line in log.splitlines():
             if line.startswith("PHASE "):
                 phase = json.loads(line[len("PHASE "):])
@@ -180,7 +184,10 @@ def main() -> int:
     try:
         renderers = ("buffered-tracks", "direct-timeline")
         for scene in ("empty", "clip", "deep"):
-            for repeat, order in enumerate((renderers, renderers[::-1]), 1):
+            orders = (renderers, renderers[::-1])
+            if scene == "deep":
+                orders += (("int-array",),)
+            for repeat, order in enumerate(orders, 1):
                 for renderer in order:
                     name = f"{scene}-{renderer}-{repeat}"
                     try:
