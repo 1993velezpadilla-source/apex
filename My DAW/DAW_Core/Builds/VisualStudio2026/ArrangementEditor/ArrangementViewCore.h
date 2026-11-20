@@ -686,7 +686,7 @@ namespace ArrangementEditor
         // GUI-thread observation only: audio-track output meters >0 dBFS
         // while its single active clip is playing. Never prelabel cached
         // source waveform peaks as audible output clipping.
-        std::map<juce::String, std::set<int64_t>> m_playbackClippedClipBins;
+        std::map<juce::Uuid, std::set<int64_t>> m_playbackClippedClipBins;
         bool m_masterPreviewWasPlaying = false;
         void drawReadOnlyMasterPreview(juce::Graphics& g);
 
@@ -795,6 +795,7 @@ namespace ArrangementEditor
         int m_viewportScrollX = 0;
         int m_viewportScrollY = 0;
         bool m_inViewportScroll = false;
+        juce::Rectangle<int> m_clipVisibilityGuard;
         bool m_middleMousePanActive = false;
         juce::Point<int> m_middleMousePanScreenPos;
 

@@ -9703,7 +9703,8 @@ void MainComponent::startPluginScanIfNeeded()
 }
 
 #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
-bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference)
+bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
+                                                       TimelineBenchmarkTransport mode)
 {
     // Benchmark mode only populates a disposable, empty session.
     if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
@@ -9774,6 +9775,23 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         arrangement_->getCore()->zoomTo({ 9'000.0, 240.0 }, {});
     TimelinePaintMetrics::reset();
     TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
+    auto& transport = appCore_.getTransport();
+    if (mode == TimelineBenchmarkTransport::Recording)
+    {
+        const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("apex-ui-recording", {});
+        auto* track = tracks.getTrack(0);
+        if (track == nullptr || !dir.createDirectory().wasOk())
+            return false;
+        appCore_.getRecordingEngine().setProjectDirectory(dir);
+        track->setInputSource(0, true);
+        track->setArmed(true);
+        transport.record();
+    }
+    else if (mode == TimelineBenchmarkTransport::Playing)
+    {
+        transport.play();
+    }
     repaint();
     return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
 }
@@ -9802,6 +9820,19 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
     state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
+    state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
+    state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
+    state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
+    auto& transport = appCore_.getTransport();
+    state->setProperty("playing", transport.isPlaying());
+    state->setProperty("recording", transport.isRecording());
+    state->setProperty("playheadFrames", static_cast<juce::int64>(transport.getPosition()));
+    if (auto* track = appCore_.getTrackManager().getTrack(0))
+    {
+        auto& waveform = track->getLiveRecordWaveform();
+        state->setProperty("recordedFrames", static_cast<juce::int64>(waveform.getRecordedSpan().length));
+        state->setProperty("recordingInputAvailable", waveform.isInputAvailable());
+    }
     state->setProperty("windowWidth", getWidth());
     state->setProperty("windowHeight", getHeight());
     state->setProperty("timelineWidth", arrangement_ ? arrangement_->getWidth() : 0);

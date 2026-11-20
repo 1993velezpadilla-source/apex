@@ -1295,12 +1295,16 @@ class TimelineNavigationReplay final : private juce::Timer
 {
 public:
     TimelineNavigationReplay(MainComponent& component, juce::File output, bool reference,
-                             bool deep, std::function<void(bool)> finished)
-        : component_(&component), output_(std::move(output)), finished_(std::move(finished)), deep_(deep)
+                             bool deep, bool playing, std::function<void(bool)> finished)
+        : component_(&component), output_(std::move(output)), finished_(std::move(finished)),
+          deep_(deep), playing_(playing)
     {
         report_->setProperty("reference", reference);
         report_->setProperty("deep", deep);
-        if (!component.prepareTimelineNavigationBenchmark(true, deep, reference))
+        report_->setProperty("playing", playing);
+        using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
+        if (!component.prepareTimelineNavigationBenchmark(true, deep, reference,
+                playing ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped))
         {
             finish("Could not prepare the empty benchmark session");
             return;
@@ -1370,11 +1374,15 @@ private:
         const bool wave = phaseIndex_ >= 3 || double(after["waveformPaints"]) > double(before_["waveformPaints"]);
         const bool maximum = !deep_ || ((phaseIndex_ != 1 || double(after["pps"]) == 16'000.0)
                                     && (phaseIndex_ != 5 || int(after["laneHeight"]) == 360));
-        if (shift * phase.direction <= 0 || !painted || !wave || !maximum
+        const bool playbackAdvanced = !playing_ || (static_cast<bool>(after["playing"])
+            && static_cast<juce::int64>(after["playheadFrames"])
+                > static_cast<juce::int64>(before_["playheadFrames"]));
+        if (shift * phase.direction <= 0 || !painted || !wave || !maximum || !playbackAdvanced
             || after["trackHeaderHeight"] != after["laneHeight"]
             || after["rebuilds"] != before_["rebuilds"])
         {
-            finish(juce::String("Windows navigation, waveform or layout check failed in ") + phase.name);
+            finish(juce::String(playbackAdvanced ? "Navigation, waveform or layout check failed in "
+                                                 : "Playback did not advance during ") + phase.name);
             return;
         }
 
@@ -1404,6 +1412,7 @@ private:
     std::size_t phaseIndex_ = 0;
     int ticks_ = 0;
     bool deep_;
+    bool playing_;
 };
 #endif
 

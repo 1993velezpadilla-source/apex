@@ -64,6 +64,59 @@ public:
             }
         }
 
+        beginTest ("live waveform follows accepted frame counts inside the dirty paint area");
+        {
+            DAW::LiveRecordWaveformCore waveform;
+            waveform.reset (512, 2000);
+            waveform.setInputAvailable (true);
+            waveform.setTakeActive (true);
+            waveform.pushPeak (-0.9f, -0.5f, 64);
+            waveform.pushPeak (0.55f, 0.9f, 192);
+
+            const auto span = waveform.getRecordedSpan();
+            expect (waveform.isTakeActive());
+            expectEquals ((juce::int64) span.timelineStart, (juce::int64) 2000);
+            expectEquals ((juce::int64) span.length, (juce::int64) 256);
+
+            juce::Image image (juce::Image::ARGB, 72, 40, true);
+            {
+                juce::Graphics graphics (image);
+                graphics.reduceClipRegion (10, 0, 25, 40);
+                expect (waveform.draw (graphics, image.getBounds().toFloat(),
+                                       juce::Colours::white, 0.25, (double) span.length));
+            }
+            expect (image.getPixelAt (12, 32).getAlpha() > 0);
+            expect (image.getPixelAt (25, 8).getAlpha() > 0);
+            expectEquals ((int) image.getPixelAt (25, 32).getAlpha(), 0);
+            expectEquals ((int) image.getPixelAt (9, 32).getAlpha(), 0);
+            expectEquals ((int) image.getPixelAt (35, 8).getAlpha(), 0);
+        }
+
+        beginTest ("the current loop take paints from its own audio");
+        {
+            DAW::LiveRecordWaveformCore waveform;
+            waveform.reset (512, 1300, 1000, 1500);
+            waveform.setInputAvailable (true);
+            waveform.pushPeak (-0.9f, -0.5f, 200);
+            expectEquals ((juce::int64) waveform.getRecordedSpan().timelineStart, (juce::int64) 1300);
+            waveform.pushPeak (0.55f, 0.9f, 150);
+
+            const auto span = waveform.getRecordedSpan();
+            expectEquals ((juce::int64) span.timelineStart, (juce::int64) 1000);
+            expectEquals ((juce::int64) span.sourceOffset, (juce::int64) 200);
+            expectEquals ((juce::int64) span.length, (juce::int64) 150);
+            juce::Image image (juce::Image::ARGB, 60, 40, true);
+            {
+                juce::Graphics graphics (image);
+                expect (waveform.draw (graphics, image.getBounds().toFloat(),
+                                       juce::Colours::white, 0.25, (double) span.length,
+                                       span.sourceOffset));
+            }
+            expect (image.getPixelAt (10, 8).getAlpha() > 0);
+            expectEquals ((int) image.getPixelAt (10, 32).getAlpha(), 0);
+            expectEquals ((int) image.getPixelAt (40, 8).getAlpha(), 0);
+        }
+
         beginTest ("invalid pixel scales do not paint");
 
         struct InvalidScale

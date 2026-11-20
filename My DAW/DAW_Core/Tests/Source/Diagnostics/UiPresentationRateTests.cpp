@@ -432,6 +432,10 @@ public:
                        juce::String(phase) + ": scroll must not recreate or remove renderers");
                 observedVisibilityChanges += countVisibilityTransitions(beforeVisibility,
                                                                           afterVisibility);
+                const auto visible = fixture.arrangement.getViewportVisibleBounds();
+                for (const auto* renderer : initialRenderers)
+                    if (renderer->getBounds().intersects(visible))
+                        expect(renderer->isVisible(), "A clip entering the viewport must be ready to paint");
             }
 
             const auto snapshot = Metrics::snapshot();
@@ -439,10 +443,10 @@ public:
             expectEquals((juce::int64) snapshot.arrangementScrollEvents,
                          (juce::int64) ArrangerScrollWorkMeasurementTest::Fixture::kScrollSteps,
                          phaseLabel + ": every changed viewport offset must be recorded");
-            expectEquals((juce::int64) snapshot.arrangementScrollClipIterations,
-                         (juce::int64) (initialRenderers.size()
-                             * (size_t) ArrangerScrollWorkMeasurementTest::Fixture::kScrollSteps),
-                         phaseLabel + ": culling must inspect each existing renderer per event");
+            expect(snapshot.arrangementScrollClipIterations > 0
+                && snapshot.arrangementScrollClipIterations
+                    < initialRenderers.size() * ArrangerScrollWorkMeasurementTest::Fixture::kScrollSteps / 2,
+                phaseLabel + ": small scroll steps reuse the prepared clip region");
             expectEquals((juce::int64) snapshot.arrangementScrollVisibilityChanges,
                          (juce::int64) observedVisibilityChanges,
                          phaseLabel + ": visibility counter must equal actual state transitions");

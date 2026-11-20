@@ -1151,7 +1151,8 @@ public:
             const auto report = juce::SystemStats::getEnvironmentVariable("APEX_TIMELINE_NAV_REPORT", {});
             const bool reference = processArguments.contains("--timeline-reference");
             const bool deep = processArguments.contains("--timeline-deep");
-            juce::Timer::callAfterDelay(3000, [this, report, reference, deep]
+            const bool playing = processArguments.contains("--timeline-playing");
+            juce::Timer::callAfterDelay(3000, [this, report, reference, deep, playing]
             {
                 auto* component = mainWindow ? mainWindow->getMainComponent() : nullptr;
                 if (report.isEmpty() || component == nullptr || mainWindow->getPeer() == nullptr)
@@ -1161,7 +1162,7 @@ public:
                     return;
                 }
                 timelineNavigationReplay_ = std::make_unique<TimelineNavigationReplay>(*component,
-                    juce::File(report), reference, deep, [this](bool success)
+                    juce::File(report), reference, deep, playing, [this](bool success)
                     {
                         setApplicationReturnValue(success ? 0 : 1);
                         quit();
@@ -1959,9 +1960,13 @@ public:
             resized(); // JUCE derives owned content bounds from the actual peer
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
-            const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep")
+            using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
+            const auto mode = scene == "recording" ? BenchmarkTransport::Recording
+                : scene == "playback" ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
+            const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
+                                    || mode != BenchmarkTransport::Stopped)
                 && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
-                    DAW::androidLaunchExtra("apex_renderer") == "reference");
+                    DAW::androidLaunchExtra("apex_renderer") == "reference", mode);
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

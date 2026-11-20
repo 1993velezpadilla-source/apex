@@ -94,12 +94,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path '.\Builds\VisualStudio2026\x64\Release\App\DAW_Core.exe').Path
           $out = (New-Item -ItemType Directory -Force -Path 'evidence\timeline-navigation').FullName
-          foreach ($scene in @('clip', 'deep')) {
-            foreach ($mode in @('reference', 'optimized')) {
+          foreach ($scene in @('clip', 'deep', 'playback')) {
+            $modes = if ($scene -eq 'playback') { @('optimized') } else { @('reference', 'optimized') }
+            foreach ($mode in $modes) {
               $env:APEX_TIMELINE_NAV_REPORT = Join-Path $out "$scene-$mode.json"
               Remove-Item -LiteralPath $env:APEX_TIMELINE_NAV_REPORT -ErrorAction SilentlyContinue
               $arguments = @('--apex-ci-timeline-navigation')
               if ($scene -eq 'deep') { $arguments += '--timeline-deep' }
+              if ($scene -eq 'playback') { $arguments += '--timeline-playing' }
               if ($mode -eq 'reference') { $arguments += '--timeline-reference' }
               $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
               try {

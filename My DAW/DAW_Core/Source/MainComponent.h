@@ -113,7 +113,9 @@ class MainComponent : public juce::Component,
 {
 public:
    #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
-    bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference);
+    enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
+    bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
+                                            TimelineBenchmarkTransport mode);
     juce::var timelineNavigationBenchmarkState(bool finishPhase);
    #endif
    #if JUCE_WINDOWS

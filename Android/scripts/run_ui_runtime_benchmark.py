@@ -46,6 +46,9 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
+        if scene in ("playback", "recording"):
+            if not after.get("playing") or after["playheadFrames"] <= before["playheadFrames"]:
+                raise ValueError(f"Playback did not advance during {phase['phase']}")
         for state in (before, after):
             if state.get("tracksWindowBuffered") or state.get("timelineWindowBuffered"):
                 raise ValueError("The Android navigation comparison requires direct window painting")
@@ -78,6 +81,13 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         for key in ("rebuilds", "waveformRefreshes"):
             if phase["before"][key] != phase["after"][key]:
                 raise ValueError(f"{phase['phase']} unexpectedly changed {key}")
+    if scene == "recording":
+        before, after = phases[0]["before"], phases[0]["after"]
+        if (not before.get("recording") or not after.get("recording")
+                or not after.get("recordingInputAvailable")
+                or after["recordedFrames"] <= before["recordedFrames"]
+                or after["liveWaveformPaints"] <= before["liveWaveformPaints"]):
+            raise ValueError("The live take did not draw new waveform columns before stopping")
     if scene == "deep":
         if phases[1]["after"]["pps"] != 16_000 or phases[6]["after"]["laneHeight"] != 360:
             raise ValueError("Pinches did not reach both new zoom limits")
@@ -185,8 +195,8 @@ def main() -> int:
     failures = []
     try:
         renderers = ("reference", "optimized")
-        for scene in ("empty", "clip", "deep"):
-            orders = (renderers, renderers[::-1])
+        for scene in ("playback", "recording", "empty", "clip", "deep"):
+            orders = (("optimized",),) if scene in ("playback", "recording") else (renderers, renderers[::-1])
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):

@@ -27,6 +27,8 @@ namespace ArrangementEditor
 
     void ArrangementRulerCore::setTempo(double bpm)
     {
+        if (m_bpm == bpm)
+            return;
         m_bpm = bpm;
         repaint();
     }
@@ -63,38 +65,23 @@ namespace ArrangementEditor
         m_playheadTime = timeSeconds;
         const int newX = timeToX(timeSeconds);
 
-        const int rulerW = getWidth();
-        const int rulerH = getHeight();
+        if (oldX == newX)
+            return;
 
-        if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+        const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+        for (const int x : { oldX, newX })
         {
-            auto recordOne = [&](int x) {
-                auto r = rulerPlayheadDirtyRect(x, rulerW, rulerH);
-                if (r.isEmpty()) return;
+            const auto dirty = rulerPlayheadDirtyRect(x, getWidth(), getHeight());
+            if (dirty.isEmpty())
+                continue;
+            repaint(dirty);
+            if (metricsActive)
+            {
+                const auto area = static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight();
                 TimelinePaintMetrics::requestedPartialRepaints.fetch_add(1);
-                auto area = static_cast<uint64_t>(r.getWidth())
-                          * static_cast<uint64_t>(r.getHeight());
-                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(
-                    static_cast<int64_t>(area));
+                TimelinePaintMetrics::requestedDirtyAreaPixels.fetch_add(static_cast<int64_t>(area));
                 TimelinePaintMetrics::requestedDirtyAreaPixelsRing.push(area);
-            };
-            if (oldX == newX) {
-                recordOne(newX);
-            } else {
-                recordOne(oldX);
-                recordOne(newX);
             }
-        }
-
-        // Issue partial repaints for old and new playhead positions
-        if (oldX == newX) {
-            auto r = rulerPlayheadDirtyRect(newX, rulerW, rulerH);
-            if (!r.isEmpty()) repaint(r);
-        } else {
-            auto oldR = rulerPlayheadDirtyRect(oldX, rulerW, rulerH);
-            if (!oldR.isEmpty()) repaint(oldR);
-            auto newR = rulerPlayheadDirtyRect(newX, rulerW, rulerH);
-            if (!newR.isEmpty()) repaint(newR);
         }
     }
 
