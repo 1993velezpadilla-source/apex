@@ -1936,8 +1936,11 @@ public:
             const auto scene = DAW::androidLaunchExtra("apex_scene");
             const bool benchmark = scene == "empty" || scene == "clip";
             if (benchmark)
-                daw->prepareAndroidUiBenchmark(scene == "clip",
-                    DAW::androidLaunchExtra("apex_renderer") == "native-tiles");
+            {
+                const auto renderer = DAW::androidLaunchExtra("apex_renderer");
+                daw->prepareAndroidUiBenchmark(scene == "clip", renderer == "native-tiles",
+                                               renderer != "direct-timeline");
+            }
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

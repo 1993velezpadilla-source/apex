@@ -41,7 +41,7 @@ def set_zoom_preview_install_id(content: str) -> str:
     # The earlier preview used a disposable signer. Give this candidate its
     # own install identity while retaining the generated Java namespace.
     return re.sub(r'(?m)^([ \t]*applicationId[ \t]+")com\.xziel\.apex\.zoomrewrite(")',
-                  r'\g<1>com.xziel.apex.zoomrewrite.r3\2', content)
+                  r'\g<1>com.xziel.apex.zoomrewrite.r4\2', content)
 
 
 def main() -> int:

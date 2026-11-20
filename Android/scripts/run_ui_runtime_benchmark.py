@@ -49,6 +49,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         for state in (before, after):
             if state.get("timelineWindowBuffered") != (renderer == "native-tiles"):
                 raise ValueError("The timeline window did not use the requested buffer mode")
+            if state.get("legacyClipName") != (renderer != "direct-timeline"):
+                raise ValueError("The clip name did not use the requested layout")
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != "software":
@@ -171,7 +173,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("native-tiles", "direct-timeline")
+        renderers = ("native-tiles", "direct-legacy-name", "direct-timeline")
         for scene in ("empty", "clip"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:

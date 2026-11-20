@@ -52,6 +52,10 @@ namespace ArrangementEditor
         void setSelected(bool selected);
         void setSoloActive(bool active) { if (m_soloActive != active) { m_soloActive = active; repaint(); } }
         bool isSelected() const { return m_selected; }
+
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        static inline bool useLegacyNameLayoutForBenchmark = false;
+       #endif
         void setAutomationActive(bool active) { if (m_automationActive != active) { m_automationActive = active; repaint(); } }
 
         ArrangementClipModel* getClip() { return &m_clipData; }
@@ -264,6 +268,11 @@ namespace ArrangementEditor
         // NAME_H: height reserved at top for clip name label
         // Waveform starts below this so name never overlaps waveform.
         static constexpr int kNameH = 16;
+
+       #if JUCE_ANDROID
+        juce::String measuredClipName;
+        int measuredClipNameWidth = 0;
+       #endif
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);

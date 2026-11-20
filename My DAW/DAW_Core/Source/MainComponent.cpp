@@ -9734,13 +9734,14 @@ void MainComponent::startPluginScanIfNeeded()
 }
 
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline)
+void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline, bool legacyClipName)
 {
     // Called only by an explicit adb benchmark launch in a clean CI install.
     // Never clear or load a user's project to manufacture a benchmark result.
     if (!appCore_.getProjectManager().getProjectFile().getFullPathName().isEmpty()
         || !appCore_.getClipManager().getAllClips().isEmpty())
         return;
+    ArrangementEditor::ClipRenderCore::useLegacyNameLayoutForBenchmark = legacyClipName;
     startupPanelMayBeShown_ = false;
     if (startupPanel_)
         startupPanel_->dismiss();
@@ -9813,6 +9814,7 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
     state->setProperty("timelineWindowBuffered",
         timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("legacyClipName", ArrangementEditor::ClipRenderCore::useLegacyNameLayoutForBenchmark);
     state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
     state->setProperty("backend", "software");
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
@@ -9841,6 +9843,7 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     addTiming("arrangerPaintMs", TimelinePaintMetrics::paintDurationNs);
     addTiming("arrangerOverlayMs", TimelinePaintMetrics::paintChildrenDurationNs);
     addTiming("waveformMs", TimelinePaintMetrics::waveformDurationNs);
+    addTiming("clipNameMs", TimelinePaintMetrics::clipNameDurationNs);
     return juce::var(state);
 }
 
