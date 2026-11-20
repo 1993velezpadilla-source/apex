@@ -106,6 +106,24 @@ static_assert(valid(360, 112));
 static_assert(valid(360, 144));
 static_assert(valid(393, 144));
 static_assert(valid(245, 144));
+// Portrait split-screen/keyboard collapse must not leave tiny tappable
+// FX, Browser, floating Mixer or Bubblegum Sends targets behind.
+constexpr bool portraitShortcutsRespectTouchMinimum()
+{
+    for (const int w : {13, 100, 188, 189, 245, 320, 360})
+        for (const int h : {25, 112, 143, 144, 180})
+        {
+            const auto r = portraitTransportLayout(w, h);
+            const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            for (const auto item : shortcuts)
+                if ((item.width == 0 && item.height == 0)
+                    || (item.width >= 44 && item.height >= 44))
+                    continue;
+                else return false;
+        }
+    return true;
+}
+static_assert(portraitShortcutsRespectTouchMinimum());
 static_assert(valid(852, 300));
 static_assert(valid(13, 25));
 static_assert(valid(1, 1));
@@ -336,9 +354,16 @@ constexpr bool portraitActionsOrdered(int w, int h)
     for (int i = 1; i < 6; ++i)
         if (r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
             return false;
-    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
-        && r.fx.x < r.browser.x
+    // Collapsed shortcuts have zero bounds; compare ordering only while
+    // all four shortcuts are visible. Never require x-order for hidden taps.
+    const bool shortcutsVisible = r.fx.width > 0 && r.browser.width > 0
+        && r.mixer.width > 0 && r.sends.width > 0;
+    const bool shortcutsHidden = r.fx.width == 0 && r.browser.width == 0
+        && r.mixer.width == 0 && r.sends.width == 0;
+    const bool ordered = r.fx.x < r.browser.x
         && r.browser.x < r.mixer.x && r.mixer.x < r.sends.x;
+    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
+        && ((shortcutsVisible && ordered) || shortcutsHidden);
 }
 static_assert(portraitActionsOrdered(320, 144));
 static_assert(portraitActionsOrdered(393, 144));
@@ -615,9 +640,9 @@ constexpr bool compactClockResizeRecovery()
 }
 static_assert(compactClockResizeRecovery());
 
-// A two-row compact deck needs at least 94 logical units for 44-unit
-// touch height: (94 - 6) / 2 == 44. Bounds-only tests at h=8 must not
-// accidentally be interpreted as proof of usable finger targets.
+// The compact transport preserves a 44-unit action row at heights 88..93,
+// while optional shortcuts remain hidden until the two-row 94-unit threshold.
+// Bounds-only tests at h=8 do not prove finger-sized targets.
 constexpr bool compactHeightTouchThreshold()
 {
     for (const int w : {320, 360, 393, 852})
@@ -625,7 +650,7 @@ constexpr bool compactHeightTouchThreshold()
         const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
         const auto usableDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
         if (!validCompact(w, 93) || !validCompact(w, 94)) return false;
-        if (shortDeck.transport[0].height >= 44
+        if (shortDeck.transport[0].height != 44
             || shortDeck.mixer.height >= 44
             || shortDeck.sends.height >= 44) return false;
         for (const auto action : usableDeck.transport)
@@ -661,8 +686,8 @@ constexpr bool compactActionWidthBoundary()
 }
 static_assert(compactActionWidthBoundary());
 
-// The two independent compact touch thresholds must hold together during
-// keyboard/inset resizing: 268 units wide and 94 units tall. A bounds-only
+// Compact actions require 268 units wide and 88 units tall; shortcuts
+// separately require 94 units tall during keyboard/inset resizing. A bounds-only
 // pass would miss a control that becomes a tiny but still clickable sliver.
 constexpr bool compactCombinedTouchBoundary()
 {
@@ -672,7 +697,7 @@ constexpr bool compactCombinedTouchBoundary()
             const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
             if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
                 return false;
-            const bool expectedActionsTouchable = w >= 268 && h >= 94;
+            const bool expectedActionsTouchable = w >= 268 && h >= 88;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
                     != expectedActionsTouchable) return false;
@@ -686,7 +711,7 @@ constexpr bool compactCombinedTouchBoundary()
 }
 static_assert(compactCombinedTouchBoundary());
 
-// Adversarial keyboard-inset oscillation around both 44-unit touch thresholds.
+// Adversarial keyboard-inset oscillation around the action/shortcut thresholds.
 // Test every intermediate size, not only the endpoints, and verify that
 // returning to a usable deck recreates the exact original hit rectangles.
 constexpr bool compactTouchThresholdRoundTrip()
@@ -700,7 +725,7 @@ constexpr bool compactTouchThresholdRoundTrip()
                 return false;
             for (const auto action : r.transport)
                 if ((action.width >= 44 && action.height >= 44)
-                    != (w >= 268 && h >= 94)) return false;
+                    != (w >= 268 && h >= 88)) return false;
             if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
                 || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
                 return false;
@@ -811,12 +836,19 @@ bool compactStandardWidthHeightGrid()
 }
 
 // Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
+// Forward declaration: the wide inset sweep is defined after main and must
+// remain exhaustive without exhausting the CI compiler's constexpr budget.
+constexpr bool compactWideInsetRecoverySweep();
 
 int main()
 {
     // Keep the full geometry sweep active even when NDEBUG removes assert().
     if (!compactRecoveredWidthHeightGrid()) return 1;
     if (!compactStandardWidthHeightGrid()) return 2;
+    if (!compactWideInsetRecoverySweep()) {
+        std::fprintf(stderr, "MobileTransportPortrait: wide inset recovery sweep failed\n");
+        return 3;
+    }
 
     // Adversarial rotation-height band beyond the 93/94 threshold: the
     // compact deck can grow while Android changes its usable window height.
@@ -1979,7 +2011,14 @@ constexpr bool portraitNarrowClickTouchGate()
                 return false;
             if (!visible && (r.click.width != 0 || r.click.height != 0))
                 return false;
-            if (r.fx.x != 6 + reservedClickW + bottomGap)
+            // Hidden shortcuts deliberately have zero geometry; their reserved
+            // slots are not exposed as hit targets until both axes fit 44.
+            if (r.fx.width > 0)
+            {
+                if (r.fx.x != 6 + reservedClickW + bottomGap)
+                    return false;
+            }
+            else if (r.fx.x != 0 || r.fx.y != 0 || r.fx.height != 0)
                 return false;
             for (const auto b : {r.fx, r.browser, r.mixer, r.sends})
                 if (!inside(b, w, h)) return false;
@@ -2153,3 +2192,113 @@ constexpr bool compactCenterHitExclusivity()
     return true;
 }
 static_assert(compactCenterHitExclusivity());
+
+
+// Regression for the six-action compact Transport boundary after split-screen
+// resize. 268 is the first width that can fit six 44-unit targets; at 267
+// a single-row layout cannot satisfy that requirement without navigation.
+constexpr bool compactTransportWidthBoundary()
+{
+    for (int w = 268; w <= 294; ++w)
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        for (int i = 0; i < 6; ++i)
+        {
+            if (r.transport[i].width < 44 || r.transport[i].height < 44)
+                return false;
+            if (!inside(r.transport[i], w, 94))
+                return false;
+            if (i && !separated(r.transport[i - 1], r.transport[i]))
+                return false;
+        }
+    }
+    const auto narrow = DAW::mobile::compactPhoneTransportLayout(267, 94);
+    return narrow.transport[0].width < 44;
+}
+static_assert(compactTransportWidthBoundary());
+
+constexpr bool compactInsetTransportTouchBoundary()
+{
+    for (int h = 88; h <= 94; ++h)
+        for (int w = 268; w <= 294; ++w)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto& action : r.transport)
+                if (action.width < 44 || action.height < 44
+                    || action.x < 0 || action.y < 0
+                    || action.x + action.width > w
+                    || action.y + action.height > h)
+                    return false;
+            if (h < 94 && (r.fx.width != 0 || r.browser.width != 0
+                            || r.mixer.width != 0 || r.sends.width != 0))
+                return false;
+        }
+    return true;
+}
+static_assert(compactInsetTransportTouchBoundary());
+
+// Rotation and keyboard-inset regression above the 295-unit gap/inset
+// transition. Keep all six actions tappable at 88..93 units high without
+// accidentally resurrecting hidden top-row controls; at 94 recover panels.
+constexpr bool compactWideInsetRotationRecovery()
+{
+    for (const int w : {295, 296, 320, 393, 430, 852})
+        for (int h = 88; h <= 94; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h) || action.width < 44
+                    || action.height < 44) return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (h < 94 ? (panel.width != 0 || panel.height != 0)
+                           : (panel.width < 44 || panel.height < 44))
+                    return false;
+        }
+    return true;
+}
+static_assert(compactWideInsetRotationRecovery());
+
+// Combined narrow-width and reduced-height rotation/inset boundary.  The
+// previous checks verified target sizes but did not test cross-row overlap
+// throughout this 27 x 7 transition.  Native touch routing is still untested.
+constexpr bool compactInsetAllTargetsExclusive()
+{
+    for (int w = 268; w <= 294; ++w)
+        for (int h = 88; h <= 94; ++h)
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+    return true;
+}
+static_assert(compactInsetAllTargetsExclusive());
+
+
+// Exhaustive post-inset recovery: the 295-unit decorative-inset transition
+// must not introduce overlapping targets or shrink any visible action below
+// 44 logical units while the top row reappears after keyboard dismissal.
+// Geometry only; does not claim native touch or orientation validation.
+constexpr bool compactWideInsetRecoverySweep()
+{
+    for (int w = 295; w <= 340; ++w)
+        for (int h = 88; h <= 110; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h) || action.width < 44
+                    || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (h < 94 ? (panel.width != 0 || panel.height != 0)
+                           : (!inside(panel, w, h) || panel.width < 44
+                              || panel.height < 44))
+                    return false;
+        }
+    return true;
+}
+// The full 46 x 23 width/height grid runs in main() rather than as one
+// static_assert: GCC can exhaust its constexpr operation budget for this
+// expensive nested overlap check. Earlier focused static_asserts remain.
+
