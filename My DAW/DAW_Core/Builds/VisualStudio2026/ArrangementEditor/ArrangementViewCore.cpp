@@ -192,6 +192,12 @@ namespace ArrangementEditor
             const auto zoom = view.m_zoom.getPixelsPerSecond();
             const auto height = view.m_zoom.getTrackHeightPx();
             const bool zoomChanged = pixelsPerSecond != zoom || laneHeight != height;
+            const bool separateForeground = juce::isApexAndroidFramePacingEnabled();
+            if (separateForeground != paintsForegroundSeparately)
+            {
+                invalidateAll();
+                paintsForegroundSeparately = separateForeground;
+            }
             pixelsPerSecond = zoom;
             laneHeight = height;
 
@@ -270,7 +276,11 @@ namespace ArrangementEditor
                 raster.reduceClipRegion(local);
                 raster.addTransform(juce::AffineTransform::scale(scale)
                     .translated(static_cast<float>(-frame.getX()), static_cast<float>(-frame.getY())));
-                view.paintEntireComponent(raster, true);
+                {
+                    const juce::ScopedValueSetter<bool> backgroundOnly(view.m_paintingViewportBackground,
+                                                                      separateForeground);
+                    view.paintEntireComponent(raster, true);
+                }
                 valid.add(missing);
                 valid.consolidate();
             }
@@ -283,6 +293,9 @@ namespace ArrangementEditor
                 view.paintEntireComponent(graphics, false);
                 return;
             }
+
+            if (separateForeground)
+                view.paintTimelineForeground(graphics);
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
             {
@@ -329,6 +342,7 @@ namespace ArrangementEditor
         ArrangementViewCore& view;
         double pixelsPerSecond;
         int laneHeight;
+        bool paintsForegroundSeparately = false;
         float pixelScale = 0.0f;
         juce::Image image;
         juce::Rectangle<int> frame;
@@ -773,13 +787,23 @@ namespace ArrangementEditor
         const auto body = getViewportVisibleBounds().getIntersection(
             getLocalBounds().withTop(m_ruler.getBottom()));
         const bool metricsActive = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        auto* overlayParent = getCachedComponentImage() != nullptr
+                           && juce::isApexAndroidFramePacingEnabled() ? getParentComponent() : nullptr;
+       #endif
         for (const int x : { oldX, newX })
         {
             // The 5 px glow needs one extra pixel of antialiasing margin.
             const auto dirty = body.getIntersection({ x - 3, body.getY(), 7, body.getHeight() });
             if (dirty.isEmpty())
                 continue;
-            repaint(dirty);
+           #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+            // Redraw the old and new line from cached clip/background pixels.
+            if (overlayParent != nullptr)
+                overlayParent->repaint(overlayParent->getLocalArea(this, dirty));
+            else
+           #endif
+                repaint(dirty);
             if (metricsActive)
             {
                 const auto area = static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight();
@@ -1161,6 +1185,10 @@ namespace ArrangementEditor
                 stopTouchNavigation();
         }
         presentPendingZoom();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (onDisplayFrame && juce::isApexAndroidFramePacingEnabled())
+            onDisplayFrame();
+       #endif
     }
 
     void ArrangementViewCore::stopTouchNavigation() noexcept
@@ -2042,6 +2070,15 @@ namespace ArrangementEditor
         if (m_drag.active)
             drawGhost(g);
 
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (m_paintingViewportBackground)
+            return;
+       #endif
+        paintTimelineForeground(g);
+    }
+
+    void ArrangementViewCore::paintTimelineForeground(juce::Graphics& g)
+    {
         const int x = timeToScreenX(m_playheadTimeSeconds);
         if (x >= 0 && x <= getWidth())
         {

@@ -54,7 +54,11 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         if scene in ("playback", "recording"):
             if not after.get("playing") or after["playheadFrames"] <= before["playheadFrames"]:
                 raise ValueError(f"Playback did not advance during {phase['phase']}")
+            if after["audioCallbacks"] <= before["audioCallbacks"]:
+                raise ValueError(f"Audio device callbacks did not advance during {phase['phase']}")
         for state in (before, after):
+            if state.get("framePacing") != (renderer == "frame-paced"):
+                raise ValueError("The requested frame pacing policy did not become active")
             if state.get("tracksWindowBuffered") or state.get("timelineWindowBuffered"):
                 raise ValueError("The Android navigation comparison requires direct window painting")
             if renderer == "reference" and state.get("directRowPaint"):
@@ -76,7 +80,7 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         raise ValueError("Reverse pan did not move the production Viewport")
     if phases[5]["after"]["scrollY"] <= phases[5]["before"]["scrollY"]:
         raise ValueError("Vertical pan did not scroll tracks")
-    if renderer == "retained":
+    if renderer in ("retained", "frame-paced"):
         for phase in (phases[0], phases[4], phases[5]):
             before, after = phase["before"], phase["after"]
             if after["arrangerReusePixels"] <= before["arrangerReusePixels"]:
@@ -209,7 +213,8 @@ def main() -> int:
     failures = []
     try:
         for scene in ("playback", "recording", "empty", "clip", "deep"):
-            orders = (("optimized", "retained"), ("retained", "optimized"))
+            # Both paths retain the viewport cache. "retained" is the 9.3 path.
+            orders = (("retained", "frame-paced"), ("frame-paced", "retained"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):

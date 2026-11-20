@@ -63,6 +63,10 @@ namespace DAW
     class ClipRegionPluginCore;
 }
 
+#if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+namespace juce { bool isApexAndroidFramePacingEnabled() noexcept; }
+#endif
+
 namespace ArrangementEditor
 {
     class ArrangementViewCore : public juce::Component,
@@ -245,6 +249,9 @@ namespace ArrangementEditor
         bool zoomWheel(const juce::MouseEvent&, const juce::MouseWheelDetails&);
         std::function<void(bool)> onZoomLayout;
         std::function<void()> onZoomPresented;
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        std::function<void()> onDisplayFrame;
+       #endif
         // One native expanded playlist owner, with virtual take bands that
         // do not become transport tracks. Called only on the UI thread.
         void setInlinePlaylistExpansion(const DAW::TrackID& trackId, int extraPixels);
@@ -485,6 +492,7 @@ namespace ArrangementEditor
         // Drawn from paintOverChildren() so the opaque HeaderClipGuard child
         // cannot hide it.
         void drawLockButton(juce::Graphics& g);
+        void paintTimelineForeground(juce::Graphics& g);
 
         // ── Free View Mode button (view-only: scroll/zoom, no editing) ──
         juce::Rectangle<int> m_viewOnlyBtnBounds;
@@ -621,6 +629,7 @@ namespace ArrangementEditor
         juce::Rectangle<int> getViewportVisibleBounds() const;
        #if JUCE_ANDROID
         class ViewportPaintCache;
+        bool m_paintingViewportBackground = false;
        #endif
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
         enum class ClipBoundsUpdate { none, time, all };

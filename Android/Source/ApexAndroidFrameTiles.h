@@ -26,6 +26,7 @@ DECLARE_JNI_CLASS (TileBitmap, "android/graphics/Bitmap")
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V") \
     METHOD (getWidth, "getWidth", "()I") \
     METHOD (getHeight, "getHeight", "()I") \
+    METHOD (isHardwareAccelerated, "isHardwareAccelerated", "()Z") \
     METHOD (save, "save", "()I") \
     METHOD (restoreToCount, "restoreToCount", "(I)V") \
     METHOD (clipRect, "clipRect", "(FFFF)Z") \
@@ -47,7 +48,9 @@ static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 static bool reduceTimelineMotion = false;
+static bool framePacingEnabled = true;
 #else
+static constexpr bool framePacingEnabled = true;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
 #endif
@@ -63,6 +66,8 @@ struct Damage
     }
 
     RectangleList<int> pending;
+    bool hardwareCanvas = false;
+    bool viewInvalidated = false;
 };
 
 class BitmapTiles
@@ -265,6 +270,7 @@ public:
 
     void invalidate() noexcept
     {
+        damage->hardwareCanvas = false;
         nativeTiles.invalidate();
         motionTiles.invalidate();
         drawnMotionArea = {};
@@ -327,6 +333,8 @@ public:
         if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster))
             return false;
 
+        damage->hardwareCanvas = framePacingEnabled
+            && env->CallBooleanMethod(canvas, TileCanvas.isHardwareAccelerated) == JNI_TRUE;
         nativeTiles.draw(env, canvas, clip, motionArea);
         if (!motionArea.isEmpty())
             motionTiles.draw(env, canvas, clip);
@@ -523,10 +531,11 @@ static constexpr bool useTiles = true;
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
-    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion)
+    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
+    juce::apexAndroidFrame::framePacingEnabled = framePaced == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

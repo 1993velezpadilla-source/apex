@@ -45,6 +45,46 @@ void noteApexTimelineMotion (Component& viewport)
 ComponentPeer* Component::createNewPeer""")
 
 
+def add_frame_pacing(peer: str) -> str:
+    if "bool isApexAndroidFramePacingEnabled() noexcept" in peer:
+        return peer
+
+    peer = replace(peer, "        t.callVBlankListeners (timestampSec);", """\
+        t.apexFrameTiles.damage->viewInvalidated = false;
+        t.callVBlankListeners (timestampSec);""")
+    peer = replace(peer, "        LocalRef<jobject> rect { env->CallObjectMethod (canvas, AndroidCanvas.getClipBounds) };",
+                         "        t.apexFrameTiles.damage->viewInvalidated = false;\n"
+                         "        LocalRef<jobject> rect { env->CallObjectMethod (canvas, AndroidCanvas.getClipBounds) };")
+    peer = replace(peer, """\
+            if (apexAndroidFrame::useTiles)
+                damage->add (area);
+            localView.callVoidMethod (AndroidView.invalidate,""", """\
+            if (apexAndroidFrame::useTiles)
+            {
+                damage->add (area);
+                if (apexAndroidFrame::framePacingEnabled && damage->hardwareCanvas)
+                {
+                    // Hardware View invalidation schedules a draw. The precise
+                    // dirty regions remain in the native backing store.
+                    if (! std::exchange (damage->viewInvalidated, true))
+                        localView.callVoidMethod (ComponentPeerView.invalidateAll);
+                    return;
+                }
+            }
+            localView.callVoidMethod (AndroidView.invalidate,""")
+    peer = replace(peer, '    METHOD   (clear,                            "clear",                         "()V") \\\n',
+                         '    METHOD   (clear,                            "clear",                         "()V") \\\n'
+                         '    METHOD   (invalidateAll,                    "invalidate",                    "()V") \\\n')
+    return replace(peer, "void noteApexTimelineMotion (Component& viewport)\n{", """\
+bool isApexAndroidFramePacingEnabled() noexcept
+{
+    return apexAndroidFrame::framePacingEnabled;
+}
+
+void noteApexTimelineMotion (Component& viewport)
+{""")
+
+
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -162,7 +202,8 @@ def configure(root: Path) -> None:
         if include not in module_text:
             raise ValueError("Incomplete APEX Android renderer")
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
-            peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
+            peer_text = add_timeline_motion(peer_text)
+        peer.write_text(add_frame_pacing(peer_text), encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -230,7 +271,7 @@ def configure(root: Path) -> None:
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
-    peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
+    peer.write_text(add_frame_pacing(add_timeline_motion(peer_text)), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

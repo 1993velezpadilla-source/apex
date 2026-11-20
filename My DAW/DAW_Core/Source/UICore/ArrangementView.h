@@ -209,8 +209,13 @@ trackManager_.addListener(this);
         transport_.addListener(this);
         mirrorAllEngineClipsIntoArrangement();
         syncAutomationLanesFromTracks();
-        // Timer is for playhead repaint only — clip mirroring is event-driven
-        // via clipAdded/clipRemoved to avoid the repaint storm.
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        core_->onDisplayFrame = [this]
+        {
+            if (isShowing())
+                updateTimelinePresentation();
+        };
+       #endif
         startTimerHz(60);
     }
 
@@ -281,6 +286,9 @@ trackManager_.addListener(this);
             core_->onEngineClipIsVocalTuneBypassed = nullptr;
             core_->onEngineMidiClipDoubleClicked = nullptr;
             core_->onPlayheadMoved = nullptr;
+           #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+            core_->onDisplayFrame = nullptr;
+           #endif
         }
     }
 
@@ -1341,12 +1349,24 @@ void trackPropertyChanged(Track* track) override
             }
         }
 
-        updateLiveRecordingOverlays();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        // An offscreen arranger still needs to retire a finished live take.
+        if (!juce::isApexAndroidFramePacingEnabled() || !isShowing())
+       #endif
+            updateTimelinePresentation();
 
-        // Record message-thread frame interval for benchmark metrics.
-        // This is the arrangement's 60 Hz timer callback — the closest
-        // message-thread presentation signal. Label: message-thread tick
-        // interval, NOT OS-presented FPS or VSync timing.
+        if (automationSyncDirty_)
+        {
+            syncAutomationLanesFromTracks();
+            automationSyncDirty_ = false;
+        }
+    }
+
+    void updateTimelinePresentation()
+    {
+        updateLiveRecordingOverlays();
+        // These are message-thread ticks. Android's peer benchmark separately
+        // measures native draw time and the display callback interval.
         TimelinePaintMetrics::frameSampler.tick();
 
         if (core_ != nullptr)
@@ -1356,23 +1376,13 @@ void trackPropertyChanged(Track* track) override
             const double playheadSeconds = (double)transport_.getPosition() / sr;
             core_->setPlayheadPosition(playheadSeconds);
             // Stereo peaks are published atomically by the real master audio
-            // thread. Sample on the UI timer only: never allocate/lock or
+            // thread. Sample on the UI thread only: never allocate/lock or
             // render waveform objects inside the audio callback.
             if (auto* master = trackManager_.getMasterTrack())
                 core_->recordMasterOutputPreview(playheadSeconds,
                     master->getPeakLevelLeft(), master->getPeakLevelRight(),
                     transport_.isPlaying());
         }
-
-        if (automationSyncDirty_)
-        {
-            syncAutomationLanesFromTracks();
-            automationSyncDirty_ = false;
-        }
-
-        // NOTE: playhead repaint is handled inside
-        // ArrangementViewCore::setPlayheadPosition() using bounded dirty
-        // rectangles (F1). No duplicate full repaint needed here.
     }
 
     struct LiveRecordingVisual
@@ -1380,7 +1390,13 @@ void trackPropertyChanged(Track* track) override
         LiveRecordWaveformCore::RecordedSpan span {};
         juce::Rectangle<int> bounds;
         bool inputAvailable = false;
+        double pixelsPerSample = 0.0;
     };
+
+    static int liveRecordingHeaderHeight(int laneHeight) noexcept
+    {
+        return juce::jlimit(0, 18, laneHeight - 8);
+    }
 
     juce::Rectangle<int> visibleRecordingBody() const
     {
@@ -1400,7 +1416,8 @@ void trackPropertyChanged(Track* track) override
         const auto begin = core_->timeToScreenX(static_cast<double>(span.timelineStart) / rate);
         const auto end = core_->timeToScreenX((static_cast<double>(span.timelineStart) + span.length) / rate);
         return { span, { begin, band.getY(), juce::jmax(6, end - begin),
-                         juce::jmax(0, getPhysicalTrackHeight() - 2) }, waveform.isInputAvailable() };
+                         juce::jmax(0, getPhysicalTrackHeight() - 2) }, waveform.isInputAvailable(),
+                 core_->getZoom().getPixelsPerSecond() / rate };
     }
 
     void updateLiveRecordingOverlays()
@@ -1408,6 +1425,11 @@ void trackPropertyChanged(Track* track) override
         if (!core_ || (!transport_.isRecording() && liveRecordingVisuals_.empty()))
             return;
 
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        const bool framePaced = juce::isApexAndroidFramePacingEnabled();
+       #else
+        constexpr bool framePaced = false;
+       #endif
         const bool hadTakes = !liveRecordingVisuals_.empty();
         const auto visible = visibleRecordingBody();
         const auto invalidate = [this, visible](juce::Rectangle<int> bounds)
@@ -1441,14 +1463,21 @@ void trackPropertyChanged(Track* track) override
             if (samePass && previous.bounds == next.bounds && previous.span.length == next.span.length)
                 continue;
 
-            // Only the growing edge and the moving record dot need painting
-            // once the label fits. A seek, loop wrap or zoom can change both ends.
-            if (samePass && previous.bounds.getWidth() >= 200
+            const bool growing = samePass && !previous.bounds.isEmpty()
                 && previous.bounds.getPosition() == next.bounds.getPosition()
                 && previous.bounds.getHeight() == next.bounds.getHeight()
-                && previous.bounds.getRight() <= next.bounds.getRight())
+                && previous.bounds.getRight() <= next.bounds.getRight();
+            const bool labelFits = previous.bounds.getWidth() >= 200;
+            const bool sameProjection = previous.pixelsPerSample == next.pixelsPerSample
+                && previous.span.length <= next.span.length;
+            if (growing && (framePaced ? sameProjection : labelFits))
             {
-                invalidate(next.bounds.withLeft(previous.bounds.getRight() - 20));
+                // The samples in old columns are unchanged. Repaint the new
+                // columns, the old rounded edge and the moving record dot.
+                const int edge = juce::jmax(next.bounds.getX(), previous.bounds.getRight() - 20);
+                invalidate(next.bounds.withLeft(edge));
+                if (!labelFits)
+                    invalidate(next.bounds.withHeight(liveRecordingHeaderHeight(next.bounds.getHeight())));
             }
             else
             {
@@ -1484,7 +1513,7 @@ void trackPropertyChanged(Track* track) override
                 continue;
             const auto bounds = visual.bounds.toFloat();
             // Reserve waveform space even at the minimum 24 px lane height.
-            const auto headerHeight = juce::jmin(18.0f, bounds.getHeight() - 8.0f);
+            const auto headerHeight = static_cast<float>(liveRecordingHeaderHeight(visual.bounds.getHeight()));
             const auto header = bounds.withHeight(headerHeight);
             g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
             g.fillRoundedRectangle(bounds, 4.0f);

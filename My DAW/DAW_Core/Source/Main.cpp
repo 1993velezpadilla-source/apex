@@ -1976,7 +1976,7 @@ public:
             const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
                                     || mode != BenchmarkTransport::Stopped)
                 && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
-                    renderer == "reference", mode, renderer == "retained");
+                    renderer == "reference", mode, renderer == "retained" || renderer == "frame-paced");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

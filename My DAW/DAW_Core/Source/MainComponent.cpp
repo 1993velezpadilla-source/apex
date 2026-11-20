@@ -9883,6 +9883,11 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("playing", transport.isPlaying());
     state->setProperty("recording", transport.isRecording());
     state->setProperty("playheadFrames", static_cast<juce::int64>(transport.getPosition()));
+   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+    state->setProperty("framePacing", juce::isApexAndroidFramePacingEnabled());
+    state->setProperty("audioCallbacks", static_cast<juce::int64>(audioCallbackTickCounter_.load(std::memory_order_relaxed)));
+    state->setProperty("audioXRuns", getOwnedDeviceManager().getXRunCount());
+   #endif
     if (auto* track = appCore_.getTrackManager().getTrack(0))
     {
         auto& waveform = track->getLiveRecordWaveform();
