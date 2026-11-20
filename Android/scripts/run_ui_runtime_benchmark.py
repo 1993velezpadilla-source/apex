@@ -46,12 +46,9 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
-        reused = after["horizontalCacheFrames"] - before["horizontalCacheFrames"]
-        if renderer == "horizontal-cache" and phase["phase"] in PHASES[:3] and reused <= 0:
-            raise ValueError(f"{phase['phase']} never reused the viewport image")
-        if renderer == "native-tiles" and reused != 0:
-            raise ValueError("The reference unexpectedly reused the viewport image")
-        for state in (phase["before"], phase["after"]):
+        for state in (before, after):
+            if state.get("timelineWindowBuffered") != (renderer == "native-tiles"):
+                raise ValueError("The timeline window did not use the requested buffer mode")
             if (state.get("clips", 0) > 0) != (scene == "clip"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != "software":
@@ -174,7 +171,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("native-tiles", "horizontal-cache")
+        renderers = ("native-tiles", "direct-timeline")
         for scene in ("empty", "clip"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:

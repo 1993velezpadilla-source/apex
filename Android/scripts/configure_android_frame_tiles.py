@@ -45,55 +45,6 @@ void noteApexTimelineMotion (Component& viewport)
 ComponentPeer* Component::createNewPeer""")
 
 
-def configure_opaque_viewport_blit(root: Path) -> None:
-    """Copy fully opaque arranger snapshots through JUCE's integer image path."""
-    path = root / "modules/juce_graphics/native/juce_RenderingHelpers.h"
-    original = path.read_text(encoding="utf-8")
-    if 'opaqueViewport ("apexOpaqueHorizontalViewport")' in original:
-        return
-    text = replace(original, """\
-    private:
-        const Image::BitmapData& destData;
-        const Image::BitmapData& srcData;
-        const int extraAlpha, xOffset, yOffset;""", """\
-        bool opaqueSource = false;
-
-    private:
-        const Image::BitmapData& destData;
-        const Image::BitmapData& srcData;
-        const int extraAlpha, xOffset, yOffset;""")
-    text = replace(text, """\
-            if (destStride == srcStride
-                 && srcData.pixelFormat  == Image::RGB
-                 && destData.pixelFormat == Image::RGB)""", """\
-            if (destStride == srcStride
-                 && ((srcData.pixelFormat == Image::RGB && destData.pixelFormat == Image::RGB)
-                     || (opaqueSource && srcData.pixelFormat == Image::ARGB && destData.pixelFormat == Image::ARGB)))""")
-    text = replace(text, """\
-const Image::BitmapData& srcData, int alpha, int x, int y, bool tiledFill)
-    {
-        switch (destData.pixelFormat)""", """\
-const Image::BitmapData& srcData, int alpha, int x, int y, bool tiledFill, bool opaqueSource)
-    {
-        if (opaqueSource)
-        {
-            ImageFill<PixelARGB, PixelARGB, false> renderer (destData, srcData, alpha, x, y);
-            renderer.opaqueSource = true;
-            iter.iterate (renderer);
-            return;
-        }
-        switch (destData.pixelFormat)""")
-    text = replace(text,
-        "        EdgeTableFillers::renderImageUntransformed (iter, destData, srcData, alpha, x, y, tiledFill);", """\
-        static const Identifier opaqueViewport ("apexOpaqueHorizontalViewport");
-        const auto* properties = src.getProperties();
-        const bool copyOpaqueViewport = !tiledFill && alpha == 255 && src != image
-            && srcData.pixelFormat == Image::ARGB && destData.pixelFormat == Image::ARGB
-            && properties != nullptr && (bool) properties->getWithDefault (opaqueViewport, false);
-        EdgeTableFillers::renderImageUntransformed (iter, destData, srcData, alpha, x, y, tiledFill, copyOpaqueViewport);""")
-    path.write_text(text, encoding="utf-8")
-
-
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -110,7 +61,6 @@ def configure_component_paint_probe(gui: Path) -> None:
 
 
 def configure(root: Path) -> None:
-    configure_opaque_viewport_blit(root)
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
     module = gui / "juce_gui_basics.cpp"

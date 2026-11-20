@@ -450,15 +450,6 @@ namespace ArrangementEditor
         TimelineZoomController::Pinch m_zoomPinch;
         std::optional<TimelineZoomController::Request> m_pendingZoom;
         bool m_applyingZoom = false;
-       #if JUCE_ANDROID
-        class HorizontalViewportImage;
-        HorizontalViewportImage* m_horizontalViewportImage = nullptr; // owned by Component
-        void moveTouchViewport(juce::Viewport&, juce::Point<int>);
-       #endif
-       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        void setHorizontalCacheForBenchmark(bool);
-        juce::int64 horizontalCacheFramesForBenchmark() const;
-       #endif
         juce::VBlankAttachment m_zoomClock { this, [this](double seconds) { timelineDisplayFrame(seconds); } };
         void timelineDisplayFrame(double seconds);
         TimelineZoomController::Lanes zoomLanes() const noexcept;

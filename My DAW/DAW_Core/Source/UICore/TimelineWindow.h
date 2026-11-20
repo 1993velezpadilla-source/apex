@@ -15,7 +15,15 @@ namespace DAW {
 class TimelineWindow : public FloatingWindowBase
 {
 public:
-    TimelineWindow() : FloatingWindowBase("TIMELINE") { setSize(900, 500); }
+    TimelineWindow() : FloatingWindowBase("TIMELINE")
+    {
+       #if JUCE_ANDROID
+        // The Android peer already keeps a native-density frame. An embedded
+        // timeline with JUCE's parent buffer composites the viewport twice.
+        setBufferedToImage(false);
+       #endif
+        setSize(900, 500);
+    }
 
     std::function<void()> onDockRequested;
 

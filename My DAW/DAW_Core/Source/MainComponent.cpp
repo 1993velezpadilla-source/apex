@@ -9734,7 +9734,7 @@ void MainComponent::startPluginScanIfNeeded()
 }
 
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool horizontalCache)
+void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline)
 {
     // Called only by an explicit adb benchmark launch in a clean CI install.
     // Never clear or load a user's project to manufacture a benchmark result.
@@ -9747,15 +9747,15 @@ void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool horizontalCach
     if (mixerWindow_)
         mixerWindow_->setVisible(false);
     if (timelineWindow_)
+    {
+        timelineWindow_->setBufferedToImage(bufferTimeline);
         timelineWindow_->setVisible(true);
+    }
 
     auto& tracks = appCore_.getTrackManager();
     while (tracks.getNumTracks() < 12)
         if (tracks.createTrack("UI benchmark lane") == nullptr)
             break;
-
-    if (arrangement_)
-        arrangement_->getCore()->setHorizontalCacheForBenchmark(horizontalCache);
 
     if (withClip)
     {
@@ -9811,8 +9811,8 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
     state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
-    state->setProperty("horizontalCacheFrames",
-        arrangement_ ? arrangement_->getCore()->horizontalCacheFramesForBenchmark() : 0);
+    state->setProperty("timelineWindowBuffered",
+        timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
     state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
     state->setProperty("backend", "software");
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));

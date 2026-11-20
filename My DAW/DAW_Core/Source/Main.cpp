@@ -1937,7 +1937,7 @@ public:
             const bool benchmark = scene == "empty" || scene == "clip";
             if (benchmark)
                 daw->prepareAndroidUiBenchmark(scene == "clip",
-                    DAW::androidLaunchExtra("apex_renderer") == "horizontal-cache");
+                    DAW::androidLaunchExtra("apex_renderer") == "native-tiles");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);
