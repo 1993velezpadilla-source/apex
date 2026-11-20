@@ -1997,7 +1997,14 @@ constexpr bool portraitNarrowClickTouchGate()
                 return false;
             if (!visible && (r.click.width != 0 || r.click.height != 0))
                 return false;
-            if (r.fx.x != 6 + reservedClickW + bottomGap)
+            // Hidden shortcuts deliberately have zero geometry; their reserved
+            // slots are not exposed as hit targets until both axes fit 44.
+            if (r.fx.width > 0)
+            {
+                if (r.fx.x != 6 + reservedClickW + bottomGap)
+                    return false;
+            }
+            else if (r.fx.x != 0 || r.fx.y != 0 || r.fx.height != 0)
                 return false;
             for (const auto b : {r.fx, r.browser, r.mixer, r.sends})
                 if (!inside(b, w, h)) return false;
