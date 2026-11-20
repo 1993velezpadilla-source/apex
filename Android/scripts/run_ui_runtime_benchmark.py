@@ -81,8 +81,10 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         for key in ("rebuilds", "waveformRefreshes"):
             if phase["before"][key] != phase["after"][key]:
                 raise ValueError(f"{phase['phase']} unexpectedly changed {key}")
+    before, after = phases[0]["before"], phases[0]["after"]
+    if scene in ("playback", "recording") and after["masterPreviewDirtyPixels"] <= before["masterPreviewDirtyPixels"]:
+        raise ValueError("No visible master preview changes during active horizontal scroll")
     if scene == "recording":
-        before, after = phases[0]["before"], phases[0]["after"]
         if (not before.get("recording") or not after.get("recording")
                 or not after.get("recordingInputAvailable")
                 or after["recordedFrames"] <= before["recordedFrames"]

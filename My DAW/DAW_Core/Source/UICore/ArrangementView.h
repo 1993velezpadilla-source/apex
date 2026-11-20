@@ -1483,11 +1483,13 @@ void trackPropertyChanged(Track* track) override
             if (!dirty.intersects(visual.bounds))
                 continue;
             const auto bounds = visual.bounds.toFloat();
-            const auto header = bounds.withHeight(18.0f);
+            // Reserve waveform space even at the minimum 24 px lane height.
+            const auto headerHeight = juce::jmin(18.0f, bounds.getHeight() - 8.0f);
+            const auto header = bounds.withHeight(headerHeight);
             g.setColour(track->getColor().darker(0.45f).withAlpha(0.92f));
             g.fillRoundedRectangle(bounds, 4.0f);
             if (visual.inputAvailable && track->getLiveRecordWaveform().draw(g,
-                    bounds.withTrimmedTop(18.0f).reduced(2.0f), juce::Colours::white.withAlpha(0.72f),
+                    bounds.withTrimmedTop(headerHeight).reduced(2.0f), juce::Colours::white.withAlpha(0.72f),
                     pixelsPerSample, static_cast<double>(visual.span.length), visual.span.sourceOffset))
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::liveRecordingWaveformPaints);
 
@@ -1496,13 +1498,16 @@ void trackPropertyChanged(Track* track) override
                 g.setColour(track->getColor());
                 g.fillRoundedRectangle(header, 4.0f);
                 g.fillRect(header.withTrimmedTop(4.0f));
-                static const juce::Font font(11.0f, juce::Font::bold);
-                g.setFont(font);
-                g.setColour(juce::Colours::white.withAlpha(0.85f));
-                g.drawText(visual.inputAvailable ? "Recording..." : "No input - recording silence",
-                           header.reduced(6.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
-                g.setColour(juce::Colour(0xFFFF4D4D).withAlpha(0.95f));
-                g.fillEllipse(header.getRight() - 14.0f, header.getCentreY() - 4.0f, 8.0f, 8.0f);
+                if (header.getWidth() >= 16.0f)
+                {
+                    static const juce::Font font(11.0f, juce::Font::bold);
+                    g.setFont(font);
+                    g.setColour(juce::Colours::white.withAlpha(0.85f));
+                    g.drawText(visual.inputAvailable ? "Recording..." : "No input - recording silence",
+                               header.reduced(6.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, true);
+                    g.setColour(juce::Colour(0xFFFF4D4D).withAlpha(0.95f));
+                    g.fillEllipse(header.getRight() - 14.0f, header.getCentreY() - 4.0f, 8.0f, 8.0f);
+                }
             }
             g.setColour(juce::Colour(0xFF111111));
             g.drawRoundedRectangle(bounds.reduced(0.5f), 4.0f, 1.0f);

@@ -1303,17 +1303,50 @@ public:
         report_->setProperty("deep", deep);
         report_->setProperty("playing", playing);
         using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
-        if (!component.prepareTimelineNavigationBenchmark(true, deep, reference,
-                playing ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped))
+        const auto mode = playing ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
+        if (!component.prepareTimelineNavigationBenchmark(true, deep, reference, mode)
+            || !component.startTimelineNavigationBenchmarkTransport(mode))
         {
             finish("Could not prepare the empty benchmark session");
             return;
+        }
+        if (playing)
+        {
+            report_->setProperty("audioOutput", "engine buffer");
+            playback_ = std::make_unique<PlaybackPump>(component);
         }
         intervals_.reserve(ticksPerPhase);
         startTimer(1600);
     }
 
 private:
+    class PlaybackPump final : private juce::HighResolutionTimer
+    {
+    public:
+        explicit PlaybackPump(MainComponent& component) : component_(component)
+        {
+            constexpr int periodMs = MainComponent::timelineBenchmarkBlockSize * 1000
+                / MainComponent::timelineBenchmarkSampleRate;
+            startTimer(periodMs);
+        }
+
+        ~PlaybackPump() override { stopTimer(); }
+
+        int audibleBlocks() const noexcept { return audibleBlocks_.load(std::memory_order_relaxed); }
+
+    private:
+        void hiResTimerCallback() override
+        {
+            component_.getNextAudioBlock({ &output_, 0, output_.getNumSamples() });
+            if (output_.getMagnitude(0, output_.getNumSamples()) > 0.0001f)
+                audibleBlocks_.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        MainComponent& component_;
+        juce::AudioBuffer<float> output_ { 2, MainComponent::timelineBenchmarkBlockSize };
+        std::atomic<int> audibleBlocks_ { 0 };
+    };
+
     struct Phase
     {
         const char* name;
@@ -1365,6 +1398,8 @@ private:
         entry->setProperty("phase", phase.name);
         entry->setProperty("before", before_);
         entry->setProperty("after", after);
+        const int audibleBlocks = playback_ ? playback_->audibleBlocks() : 0;
+        entry->setProperty("audibleBlocks", audibleBlocks);
         std::sort(intervals_.begin(), intervals_.end());
         entry->setProperty("replayIntervalP95Ms", intervals_[intervals_.size() * 95 / 100]);
         results_.add(juce::var(entry));
@@ -1377,6 +1412,11 @@ private:
         const bool playbackAdvanced = !playing_ || (static_cast<bool>(after["playing"])
             && static_cast<juce::int64>(after["playheadFrames"])
                 > static_cast<juce::int64>(before_["playheadFrames"]));
+        if (playing_ && audibleBlocks == 0)
+        {
+            finish("The Windows playback engine did not render the benchmark clip");
+            return;
+        }
         if (shift * phase.direction <= 0 || !painted || !wave || !maximum || !playbackAdvanced
             || after["trackHeaderHeight"] != after["laneHeight"]
             || after["rebuilds"] != before_["rebuilds"])
@@ -1394,6 +1434,7 @@ private:
     void finish(const juce::String& error)
     {
         stopTimer();
+        playback_.reset();
         TimelinePaintMetrics::active.store(false, std::memory_order_relaxed);
         report_->setProperty("error", error);
         report_->setProperty("phases", results_);
@@ -1413,6 +1454,7 @@ private:
     int ticks_ = 0;
     bool deep_;
     bool playing_;
+    std::unique_ptr<PlaybackPump> playback_;
 };
 #endif
 

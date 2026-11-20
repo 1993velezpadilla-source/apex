@@ -90,6 +90,9 @@ public:
             expectEquals ((int) image.getPixelAt (25, 32).getAlpha(), 0);
             expectEquals ((int) image.getPixelAt (9, 32).getAlpha(), 0);
             expectEquals ((int) image.getPixelAt (35, 8).getAlpha(), 0);
+
+            waveform.pushPeak (std::numeric_limits<float>::quiet_NaN(), 0.1f, 32);
+            expectEquals ((juce::int64) waveform.getRecordedSpan().length, (juce::int64) 288);
         }
 
         beginTest ("the current loop take paints from its own audio");

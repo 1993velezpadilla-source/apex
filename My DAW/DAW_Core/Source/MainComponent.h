@@ -116,9 +116,12 @@ public:
     enum class TimelineBenchmarkTransport { Stopped, Playing, Recording };
     bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
                                             TimelineBenchmarkTransport mode);
+    bool startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode);
     juce::var timelineNavigationBenchmarkState(bool finishPhase);
    #endif
    #if JUCE_WINDOWS
+    static constexpr int timelineBenchmarkSampleRate = 48000;
+    static constexpr int timelineBenchmarkBlockSize = 480;
     void replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers);
    #endif
    #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK

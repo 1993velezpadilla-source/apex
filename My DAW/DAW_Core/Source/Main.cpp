@@ -1774,6 +1774,9 @@ public:
         // serves as a safety net if this path is somehow missed.
         DAW::ApexPresentationClock::instance().setMainWindow (nullptr);
 
+       #if JUCE_WINDOWS
+        timelineNavigationReplay_.reset();
+       #endif
         mainWindow = nullptr; // (deletes our window)
 
         // Detach the logger LAST so all teardown diagnostics are captured.
@@ -1977,11 +1980,20 @@ public:
                     return juce::JSON::toString(
                         safe->getMainComponent()->timelineNavigationBenchmarkState(finishPhase), true);
                 };
-                juce::Timer::callAfterDelay(3000, [safe]
+                juce::Timer::callAfterDelay(3000, [safe, mode]
                 {
                     if (safe == nullptr || safe->getMainComponent() == nullptr)
                         return;
-                    const auto bounds = safe->getMainComponent()->androidUiBenchmarkBounds();
+                    // Android opens the input and prepares its writer after
+                    // mounting the MainComponent.
+                    auto* component = safe->getMainComponent();
+                    if (!component->startTimelineNavigationBenchmarkTransport(mode))
+                    {
+                        __android_log_print(ANDROID_LOG_ERROR, "APEX_UI_BENCH",
+                            "RESULT {\"error\":\"The recording engine did not start a take\"}");
+                        return;
+                    }
+                    const auto bounds = component->androidUiBenchmarkBounds();
                     auto* env = juce::getEnv();
                     const auto activity = juce::getMainActivity();
                     const juce::LocalRef<jclass> cls(env->GetObjectClass(activity.get()));

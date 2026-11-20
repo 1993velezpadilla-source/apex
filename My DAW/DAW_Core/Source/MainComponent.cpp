@@ -9724,6 +9724,19 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
    #endif
     trackList_->setDirectHeightZoomPaintForBenchmark(!reference);
 
+   #if JUCE_WINDOWS
+    if (mode == TimelineBenchmarkTransport::Playing)
+    {
+        // Feed the shared engine from the replay's buffer clock. Windows CI
+        // can have no output endpoint. Remove hardware callbacks first.
+        inputWatchdog_.stopTimer();
+        shutdownAudio();
+        cachedEnabledAudioInputChannels_.store(0, std::memory_order_release);
+        prepareToPlay(timelineBenchmarkBlockSize, timelineBenchmarkSampleRate);
+        arrangement_->setEngineSampleRate(timelineBenchmarkSampleRate);
+    }
+   #endif
+
     auto& tracks = appCore_.getTrackManager();
     while (tracks.getNumTracks() < 12)
         if (tracks.createTrack("UI benchmark lane") == nullptr)
@@ -9775,7 +9788,6 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         arrangement_->getCore()->zoomTo({ 9'000.0, 240.0 }, {});
     TimelinePaintMetrics::reset();
     TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
-    auto& transport = appCore_.getTransport();
     if (mode == TimelineBenchmarkTransport::Recording)
     {
         const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
@@ -9786,14 +9798,22 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         appCore_.getRecordingEngine().setProjectDirectory(dir);
         track->setInputSource(0, true);
         track->setArmed(true);
-        transport.record();
-    }
-    else if (mode == TimelineBenchmarkTransport::Playing)
-    {
-        transport.play();
     }
     repaint();
     return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
+}
+
+bool MainComponent::startTimelineNavigationBenchmarkTransport(TimelineBenchmarkTransport mode)
+{
+    auto& transport = appCore_.getTransport();
+    if (mode == TimelineBenchmarkTransport::Recording)
+    {
+        transport.record();
+        return appCore_.getRecordingEngine().isActivelyRecording();
+    }
+    if (mode == TimelineBenchmarkTransport::Playing)
+        transport.play();
+    return true;
 }
 
 juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)

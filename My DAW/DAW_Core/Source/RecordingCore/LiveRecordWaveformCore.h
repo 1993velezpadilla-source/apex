@@ -76,8 +76,8 @@ public:
     /** Push one block's worth of peaks from the audio thread. */
     void pushPeak(float minVal, float maxVal, int samples = 0) noexcept
     {
-        if (! std::isfinite(minVal) || ! std::isfinite(maxVal))
-            return;
+        if (!std::isfinite(minVal) || !std::isfinite(maxVal))
+            minVal = maxVal = 0.0f; // A non-finite peak still represents accepted audio frames.
 
         minVal = juce::jlimit(-1.0f, 1.0f, minVal);
         maxVal = juce::jlimit(-1.0f, 1.0f, maxVal);
