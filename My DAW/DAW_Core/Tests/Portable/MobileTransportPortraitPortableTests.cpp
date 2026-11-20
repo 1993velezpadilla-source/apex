@@ -2252,3 +2252,16 @@ constexpr bool compactWideInsetRotationRecovery()
     return true;
 }
 static_assert(compactWideInsetRotationRecovery());
+
+// Combined narrow-width and reduced-height rotation/inset boundary.  The
+// previous checks verified target sizes but did not test cross-row overlap
+// throughout this 27 x 7 transition.  Native touch routing is still untested.
+constexpr bool compactInsetAllTargetsExclusive()
+{
+    for (int w = 268; w <= 294; ++w)
+        for (int h = 88; h <= 94; ++h)
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+    return true;
+}
+static_assert(compactInsetAllTargetsExclusive());
