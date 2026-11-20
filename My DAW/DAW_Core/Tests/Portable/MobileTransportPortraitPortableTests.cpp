@@ -2229,3 +2229,26 @@ constexpr bool compactInsetTransportTouchBoundary()
     return true;
 }
 static_assert(compactInsetTransportTouchBoundary());
+
+// Rotation and keyboard-inset regression above the 295-unit gap/inset
+// transition. Keep all six actions tappable at 88..93 units high without
+// accidentally resurrecting hidden top-row controls; at 94 recover panels.
+constexpr bool compactWideInsetRotationRecovery()
+{
+    for (const int w : {295, 296, 320, 393, 430, 852})
+        for (int h = 88; h <= 94; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h) || action.width < 44
+                    || action.height < 44) return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (h < 94 ? (panel.width != 0 || panel.height != 0)
+                           : (panel.width < 44 || panel.height < 44))
+                    return false;
+        }
+    return true;
+}
+static_assert(compactWideInsetRotationRecovery());
