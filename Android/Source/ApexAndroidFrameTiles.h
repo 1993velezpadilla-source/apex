@@ -24,6 +24,8 @@ DECLARE_JNI_CLASS (TileBitmap, "android/graphics/Bitmap")
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V") \
+    METHOD (getWidth, "getWidth", "()I") \
+    METHOD (getHeight, "getHeight", "()I") \
     METHOD (save, "save", "()I") \
     METHOD (restoreToCount, "restoreToCount", "(I)V") \
     METHOD (clipRect, "clipRect", "(FFFF)Z") \
@@ -272,6 +274,32 @@ public:
                Component& root, Raster&& raster)
     {
         const bool opaque = root.isOpaque();
+
+        // The Android Canvas clip is a DIRTY RECT, not a stable frame size.
+        // Binding tile allocations to that changing rect recycled every tile
+        // when the playhead or touch gesture invalidated a different region.
+        // Anchor our backing image to the actual Canvas surface dimensions.
+        const auto surfaceWidth = env->CallIntMethod(canvas, TileCanvas.getWidth);
+        const auto surfaceHeight = env->CallIntMethod(canvas, TileCanvas.getHeight);
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return false;
+        }
+        if (surfaceWidth <= 0 || surfaceHeight <= 0)
+            return false;
+        const Rectangle<int> surface(0, 0, surfaceWidth, surfaceHeight);
+        if (!surface.intersects(clip))
+            return false;
+        const bool initialOrResized = nativeTiles.needsReset(surface, scale, opaque);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (initialOrResized)
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "FRAME_CACHE_RESET surface=%dx%d dirty=%d,%d,%d,%d",
+                surfaceWidth, surfaceHeight, clip.getX(), clip.getY(),
+                clip.getWidth(), clip.getHeight());
+       #endif
+
         const auto* viewport = motionViewport.getComponent();
         Rectangle<int> motionArea;
         if (opaque && scale >= 2.0f && viewport != nullptr && viewport->isShowing()
@@ -280,8 +308,8 @@ public:
                 .getSmallestIntegerContainer().getIntersection(clip);
 
         auto redraw = std::exchange(damage->pending, {});
-        if (nativeTiles.needsReset(clip, scale, opaque))
-            redraw.add(clip);
+        if (initialOrResized)
+            redraw.add(surface);
         if (motionArea != drawnMotionArea)
         {
             redraw.add(drawnMotionArea);
@@ -295,7 +323,7 @@ public:
                 return false;
             redraw.subtract(motionArea);
         }
-        if (!nativeTiles.update(env, clip, scale, opaque, std::move(redraw), raster))
+        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster))
             return false;
 
         nativeTiles.draw(env, canvas, motionArea);

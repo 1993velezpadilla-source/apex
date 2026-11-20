@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "feature/mobile-portrait-zoom-rewrite"
+      - "feature/mobile-portrait-frame-cache"
     paths:
       - "Android/scripts/generate_full_exporter.py"
       - "Android/scripts/enable_immersive_fullscreen.py"

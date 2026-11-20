@@ -37,7 +37,11 @@ def main() -> int:
                         or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
     zoom_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-zoom-rewrite"
                     and not args.benchmark_x86)
-    if zoom_preview:
+    frame_cache_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-frame-cache"
+                           and not args.benchmark_x86)
+    if frame_cache_preview:
+        name, app_id = "APEX Frame Cache Preview", "com.xziel.apex.framecache"
+    elif zoom_preview:
         name, app_id = "APEX Zoom Rewrite 7.1", "com.xziel.apex.zoomrewrite"
     elif portrait_preview or args.benchmark_x86:
         name, app_id = "APEXMobilePortrait", "com.xziel.apex.mobileportrait"
