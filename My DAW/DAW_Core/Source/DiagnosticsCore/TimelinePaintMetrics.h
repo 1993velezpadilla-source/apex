@@ -199,9 +199,7 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
     static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
 
-   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     static inline SampleRing viewportZoomDurationNs;
-   #endif
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
 
@@ -221,9 +219,7 @@ struct TimelinePaintMetrics
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
-   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
     static inline SampleRing clipNameDurationNs;
-   #endif
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
     static inline SampleRing requestedDirtyAreaPixelsRing;  // Per-repaint-request area (from source call sites)
     static inline SampleRing actualPaintClipAreaPixels;     // Per-paint g.getClipBounds() area
@@ -358,9 +354,8 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
-       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        viewportZoomDurationNs.reset();
         clipNameDurationNs.reset();
-       #endif
         frameIntervalNs.reset();
         requestedDirtyAreaPixelsRing.reset();
         actualPaintClipAreaPixels.reset();
