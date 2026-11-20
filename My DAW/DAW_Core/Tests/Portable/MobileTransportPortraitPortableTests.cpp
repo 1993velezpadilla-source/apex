@@ -278,8 +278,10 @@ constexpr bool compactShortcutsDisappearBelowThreshold()
     return true;
 }
 static_assert(compactShortcutsDisappearBelowThreshold());
-static_assert(compactAtThreshold.transport[0].height >= 44
-              && compactBelowThreshold.transport[0].height >= 44);
+// Below 268 units the six-action row is intentionally hidden; only the
+// 268+ boundary may expose 44-unit transport targets.
+static_assert(compactAtThreshold.transport[0].height == 0
+              && compactBelowThreshold.transport[0].height == 0);
 // Landscape rotation must preserve the six transport hit targets and
 // phone-only floating Mixer / Sends shortcuts at accessible dimensions.
 constexpr auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
@@ -858,6 +860,7 @@ bool compactStandardWidthHeightGrid()
 // Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
 
 constexpr bool compactWideInsetRecoverySweep();
+constexpr bool compactNarrowTransportIsNonInteractive();
 
 int main()
 {
