@@ -1145,6 +1145,31 @@ public:
         }
        #endif
 
+       #if JUCE_WINDOWS
+        if (processArguments.contains("--apex-ci-timeline-navigation"))
+        {
+            const auto report = juce::SystemStats::getEnvironmentVariable("APEX_TIMELINE_NAV_REPORT", {});
+            const bool reference = processArguments.contains("--timeline-reference");
+            const bool deep = processArguments.contains("--timeline-deep");
+            juce::Timer::callAfterDelay(3000, [this, report, reference, deep]
+            {
+                auto* component = mainWindow ? mainWindow->getMainComponent() : nullptr;
+                if (report.isEmpty() || component == nullptr || mainWindow->getPeer() == nullptr)
+                {
+                    setApplicationReturnValue(1);
+                    quit();
+                    return;
+                }
+                timelineNavigationReplay_ = std::make_unique<TimelineNavigationReplay>(*component,
+                    juce::File(report), reference, deep, [this](bool success)
+                    {
+                        setApplicationReturnValue(success ? 0 : 1);
+                        quit();
+                    });
+            });
+        }
+       #endif
+
         // ── Production GUI launch smoke for Windows CI ────────────────────
         // Unlike the unit-test executable, this launches the actual DAW with
         // the real MainComponent, plugin host, audio-device initialization,
@@ -1934,10 +1959,9 @@ public:
             resized(); // JUCE derives owned content bounds from the actual peer
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
-            const bool benchmark = scene == "empty" || scene == "clip" || scene == "deep";
-            if (benchmark)
-                daw->prepareAndroidUiBenchmark(scene != "empty", scene == "deep",
-                    DAW::androidLaunchExtra("apex_renderer") == "buffered-tracks");
+            const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep")
+                && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
+                    DAW::androidLaunchExtra("apex_renderer") == "reference");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);
@@ -1946,7 +1970,7 @@ public:
                     if (safe == nullptr || safe->getMainComponent() == nullptr)
                         return "{}";
                     return juce::JSON::toString(
-                        safe->getMainComponent()->androidUiBenchmarkState(finishPhase), true);
+                        safe->getMainComponent()->timelineNavigationBenchmarkState(finishPhase), true);
                 };
                 juce::Timer::callAfterDelay(3000, [safe]
                 {
@@ -2331,6 +2355,9 @@ private:
 
     // ── Timeline benchmark controller (--timeline-benchmark flag) ──────
     std::unique_ptr<TimelineBenchmarkController> benchmarkController_;
+   #if JUCE_WINDOWS
+    std::unique_ptr<TimelineNavigationReplay> timelineNavigationReplay_;
+   #endif
 
     // ── Command-line argument helpers for subprocess scanner mode ─────
     static juce::String extractQuotedArg(const juce::String& cmdLine, const juce::String& flag)

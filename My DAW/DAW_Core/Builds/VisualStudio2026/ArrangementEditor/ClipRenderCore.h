@@ -265,10 +265,8 @@ namespace ArrangementEditor
         // Waveform starts below this so name never overlaps waveform.
         static constexpr int kNameH = 16;
 
-       #if JUCE_ANDROID
         juce::String measuredClipName;
         int measuredClipNameWidth = 0;
-       #endif
 
         void drawBackground(juce::Graphics& g);
         void drawWaveform(juce::Graphics& g);

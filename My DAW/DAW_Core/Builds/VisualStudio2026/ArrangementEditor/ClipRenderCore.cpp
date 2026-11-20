@@ -878,18 +878,30 @@ namespace ArrangementEditor
         const juce::Colour bodyCol   = ClipBodyColourCore::resolveClipBodyColour(
             m_model->trackColour, m_selected, m_model->muted, m_hovered, overrideColour);
 
-        // Body
+        const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
+        const bool insideStraightEdges = dirty.getX() >= 5 && dirty.getRight() <= getWidth() - 5;
+
+        // Large zoomed clips usually cross the whole viewport. Inside the
+        // straight edges, the body and header occupy ordinary rectangles.
         g.setColour(bodyCol);
-        g.fillRoundedRectangle(b, 4.f);
+        if (insideStraightEdges)
+            g.fillRect(dirty);
+        else
+            g.fillRoundedRectangle(b, 4.f);
 
         // Header strip (solid colour, same as clip colour)
         juce::Rectangle<float> header(b.getX(), b.getY(), b.getWidth(), (float)kNameH);
-        g.setColour(headerCol);
-        g.fillRect(header);
-        // Round top corners only
-        g.fillRoundedRectangle(header, 4.f);
-        // Square bottom of header
-        g.fillRect(header.withTrimmedTop(4.f));
+        if (dirty.getY() < kNameH)
+        {
+            const auto visibleHeader = header.getIntersection(dirty.toFloat());
+            g.setColour(headerCol);
+            g.fillRect(visibleHeader);
+            if (insideStraightEdges)
+                g.fillRect(visibleHeader);
+            else
+                g.fillRoundedRectangle(header, 4.f);
+            g.fillRect(visibleHeader.withTop(juce::jmax(4.f, visibleHeader.getY())));
+        }
 
         // Border
         g.setColour(fromU32(Col::border));
@@ -899,6 +911,11 @@ namespace ArrangementEditor
     void ClipRenderCore::drawWaveform(juce::Graphics& g)
     {
         if (!shouldRenderWaveform())
+            return;
+
+        const auto full = getLocalBounds();
+        const auto dirty = g.getClipBounds().getIntersection(full.withTrimmedTop(kNameH));
+        if (dirty.isEmpty())
             return;
 
         if (!m_waveformCache->isReady())
@@ -912,7 +929,6 @@ namespace ArrangementEditor
             return;
 
         // Waveform area starts BELOW the name bar so they never overlap.
-        const auto  full      = getLocalBounds();
         const float areaTop   = (float)(full.getY() + kNameH);
         const float areaBot   = (float)full.getBottom();
         const float areaH     = areaBot - areaTop;
@@ -1063,13 +1079,8 @@ namespace ArrangementEditor
         // The Graphics clip region already excludes the offscreen part of
         // the component. Avoid walking cached peaks for pixels that cannot
         // possibly be drawn. This matters for wide, zoomed arrangements.
-        const auto dirty = g.getClipBounds();
-        const int startPx = juce::jlimit(0, (int)clipW,
-                                       dirty.getX() - full.getX());
-        const int endPx = juce::jlimit(startPx, (int)clipW,
-                                     dirty.getRight() - full.getX());
-        if (startPx == endPx || dirty.getY() >= areaBot || dirty.getBottom() <= areaTop)
-            return;
+        const int startPx = dirty.getX() - full.getX();
+        const int endPx = dirty.getRight() - full.getX();
 
         TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformDrawCalls);
         float prevTop = 0.f, prevBot = 0.f;
@@ -1078,7 +1089,7 @@ namespace ArrangementEditor
         for (int px = startPx; px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
-            const int visualPx = m_model->reversed ? ((int)clipW - 1 - px) : px;
+            const int visualPx = m_model->reversed ? (full.getWidth() - 1 - px) : px;
             const double fStart = (double)visualPx * peaksPerPixel;
 
             float rawMin, rawMax;
@@ -1231,17 +1242,17 @@ namespace ArrangementEditor
 
         // Header is already drawn in drawBackground() with the clip colour.
         // Just draw the name text on top of the header.
-       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         TimelinePaintMetrics::ScopedTimer nameTimer(TimelinePaintMetrics::clipNameDurationNs);
-       #endif
         const juce::String name(m_model->clipName.empty() ? "(unnamed)" : m_model->clipName);
-        g.setColour(juce::Colours::white.withAlpha(0.92f));
         int labelWidth = textW;
        #if JUCE_ANDROID
-        // Keep JUCE's cached glyph layout keyed to the name's width
-        // whenever the entire name fits.
         static const juce::Font font(juce::FontOptions(juce::Font::getDefaultSansSerifFontName(),
             9.5f, juce::Font::bold).withMetricsKind(juce::TypefaceMetricsKind::legacy));
+       #else
+        static const juce::Font font("Segoe UI", 9.5f, juce::Font::bold);
+       #endif
+        // Keep JUCE's cached glyph layout keyed to the name's width
+        // whenever the entire name fits at the current zoom.
         if (measuredClipName != name)
         {
             measuredClipName = name;
@@ -1249,10 +1260,10 @@ namespace ArrangementEditor
         }
         if (measuredClipNameWidth > 0)
             labelWidth = juce::jmin(textW, measuredClipNameWidth + 4);
+        if (!g.clipRegionIntersects({ textX, 1, labelWidth, kNameH - 2 }))
+            return;
+        g.setColour(juce::Colours::white.withAlpha(0.92f));
         g.setFont(font);
-       #else
-        g.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::bold));
-       #endif
         g.drawText(name, textX, 1, labelWidth, kNameH - 2,
                    juce::Justification::centredLeft, true);
     }

@@ -17,9 +17,9 @@ class TimelineWindow : public FloatingWindowBase
 public:
     TimelineWindow() : FloatingWindowBase("TIMELINE")
     {
-       #if JUCE_ANDROID
-        // The Android peer already keeps a native-density frame. An embedded
-        // timeline with JUCE's parent buffer composites the viewport twice.
+       #if JUCE_ANDROID || JUCE_WINDOWS
+        // The native peer already composites the frame. Avoid a second
+        // full window-sized image between the viewport and the peer.
         setBufferedToImage(false);
        #endif
         setSize(900, 500);

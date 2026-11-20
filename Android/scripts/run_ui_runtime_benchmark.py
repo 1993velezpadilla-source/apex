@@ -47,8 +47,10 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
         for state in (before, after):
-            if state.get("tracksWindowBuffered") != (renderer == "buffered-tracks"):
-                raise ValueError("Track headers did not use the requested buffer mode")
+            if state.get("tracksWindowBuffered") or state.get("timelineWindowBuffered"):
+                raise ValueError("The Android navigation comparison requires direct window painting")
+            if renderer == "reference" and state.get("directRowPaint"):
+                raise ValueError("Reference case unexpectedly disabled row caching")
             if state.get("trackHeaderHeight") != state["laneHeight"]:
                 raise ValueError("Track headers and arranger lanes are different heights")
             if (state.get("clips", 0) > 0) != (scene != "empty"):
@@ -182,7 +184,7 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("buffered-tracks", "direct-timeline")
+        renderers = ("reference", "optimized")
         for scene in ("empty", "clip", "deep"):
             orders = (renderers, renderers[::-1])
             if scene == "deep":

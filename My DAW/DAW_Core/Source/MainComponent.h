@@ -112,9 +112,14 @@ class MainComponent : public juce::Component,
                       private DAW::TransportController::Listener
 {
 public:
+   #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
+    bool prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference);
+    juce::var timelineNavigationBenchmarkState(bool finishPhase);
+   #endif
+   #if JUCE_WINDOWS
+    void replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers);
+   #endif
    #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-    void prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool bufferTracks);
-    juce::var androidUiBenchmarkState(bool finishPhase);
     juce::Rectangle<int> androidUiBenchmarkBounds() const;
    #endif
     MainComponent();

@@ -2063,9 +2063,7 @@ namespace ArrangementEditor
         if (!m_pendingZoom || m_applyingZoom)
             return;
 
-       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         TimelinePaintMetrics::ScopedTimer zoomTimer(TimelinePaintMetrics::viewportZoomDurationNs);
-       #endif
         auto request = *m_pendingZoom;
         m_pendingZoom.reset();
         if (m_drag.active || m_drag.pending || m_rubberBand.isVisible())
@@ -3697,14 +3695,7 @@ namespace ArrangementEditor
         if (zoomWheel(event, wheel))
             return;
         if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-        {
-            const auto origin = viewport->getViewPosition();
-            const int dx = juce::roundToInt(-wheel.deltaX * 120.0f);
-            const int dy = juce::roundToInt(-wheel.deltaY * 120.0f);
-            viewport->setViewPosition(
-                juce::jlimit(0, juce::jmax(0, getWidth() - viewport->getViewWidth()), origin.x + dx),
-                juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()), origin.y + dy));
-        }
+            viewport->mouseWheelMove(event.getEventRelativeTo(viewport), wheel);
     }
 
     void ArrangementViewCore::mouseMagnify(const juce::MouseEvent& event, float scaleFactor)

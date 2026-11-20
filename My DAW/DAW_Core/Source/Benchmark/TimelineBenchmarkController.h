@@ -26,6 +26,7 @@
 #include <iomanip>
 #include <sstream>
 #include <fstream>
+#include <array>
 #include "../DiagnosticsCore/TimelinePaintMetrics.h"
 #include "../MainComponent.h"
 #include "../ClipCore/Clip.h"
@@ -1286,6 +1287,125 @@ private:
     //   ""                     — not yet set (external_or_unknown)
     juce::String startTrigger_;
 };
+
+#if JUCE_WINDOWS
+// Opt-in desktop replay. The actual arranger receives the same wheel events
+// and uses the same message-loop paints as an interactive Windows launch.
+class TimelineNavigationReplay final : private juce::Timer
+{
+public:
+    TimelineNavigationReplay(MainComponent& component, juce::File output, bool reference,
+                             bool deep, std::function<void(bool)> finished)
+        : component_(&component), output_(std::move(output)), finished_(std::move(finished)), deep_(deep)
+    {
+        report_->setProperty("reference", reference);
+        report_->setProperty("deep", deep);
+        if (!component.prepareTimelineNavigationBenchmark(true, deep, reference))
+        {
+            finish("Could not prepare the empty benchmark session");
+            return;
+        }
+        intervals_.reserve(ticksPerPhase);
+        startTimer(1600);
+    }
+
+private:
+    struct Phase
+    {
+        const char* name;
+        float dx, dy;
+        int modifiers;
+        const char* axis;
+        int direction;
+    };
+
+    static constexpr int ticksPerPhase = 48;
+    static constexpr Phase phases[] {
+        { "right",        -0.060f,  0.000f, 0,                            "scrollX",     1 },
+        { "horizontal-in", 0.000f,  0.065f, juce::ModifierKeys::ctrlModifier, "pps",     1 },
+        { "horizontal-out",0.000f, -0.040f, juce::ModifierKeys::ctrlModifier, "pps",    -1 },
+        { "left",          0.060f,  0.000f, 0,                            "scrollX",    -1 },
+        { "down",          0.000f, -0.054f, 0,                            "scrollY",     1 },
+        { "vertical-in",   0.000f,  0.035f, juce::ModifierKeys::altModifier, "laneHeight", 1 },
+        { "vertical-out",  0.000f, -0.030f, juce::ModifierKeys::altModifier, "laneHeight",-1 },
+        { "up",            0.000f,  0.054f, 0,                            "scrollY",    -1 }
+    };
+
+    void timerCallback() override
+    {
+        if (!component_)
+        {
+            finish("Windows arranger window closed during navigation");
+            return;
+        }
+        const auto& phase = phases[phaseIndex_];
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (ticks_ == 0)
+        {
+            startTimer(16);
+            before_ = component_->timelineNavigationBenchmarkState(false);
+            intervals_.clear();
+        }
+        else
+            intervals_.push_back(now - lastTick_);
+        lastTick_ = now;
+
+        if (ticks_++ < ticksPerPhase)
+        {
+            component_->replayTimelineWheel(phase.dx, phase.dy, juce::ModifierKeys(phase.modifiers));
+            return;
+        }
+
+        const auto after = component_->timelineNavigationBenchmarkState(true);
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty("phase", phase.name);
+        entry->setProperty("before", before_);
+        entry->setProperty("after", after);
+        std::sort(intervals_.begin(), intervals_.end());
+        entry->setProperty("replayIntervalP95Ms", intervals_[intervals_.size() * 95 / 100]);
+        results_.add(juce::var(entry));
+
+        const auto shift = double(after[phase.axis]) - double(before_[phase.axis]);
+        const bool painted = int(after["arrangerPaintMs"]["count"]) > 0;
+        const bool wave = phaseIndex_ >= 3 || double(after["waveformPaints"]) > double(before_["waveformPaints"]);
+        const bool maximum = !deep_ || ((phaseIndex_ != 1 || double(after["pps"]) == 16'000.0)
+                                    && (phaseIndex_ != 5 || int(after["laneHeight"]) == 360));
+        if (shift * phase.direction <= 0 || !painted || !wave || !maximum
+            || after["trackHeaderHeight"] != after["laneHeight"]
+            || after["rebuilds"] != before_["rebuilds"])
+        {
+            finish(juce::String("Windows navigation, waveform or layout check failed in ") + phase.name);
+            return;
+        }
+
+        ticks_ = 0;
+        if (++phaseIndex_ == std::size(phases))
+            finish({});
+    }
+
+    void finish(const juce::String& error)
+    {
+        stopTimer();
+        TimelinePaintMetrics::active.store(false, std::memory_order_relaxed);
+        report_->setProperty("error", error);
+        report_->setProperty("phases", results_);
+        const bool written = output_.replaceWithText(juce::JSON::toString(juce::var(report_.get())));
+        finished_(written && error.isEmpty());
+    }
+
+    juce::Component::SafePointer<MainComponent> component_;
+    juce::File output_;
+    std::function<void(bool)> finished_;
+    juce::DynamicObject::Ptr report_ = new juce::DynamicObject();
+    juce::Array<juce::var> results_;
+    std::vector<double> intervals_;
+    juce::var before_;
+    double lastTick_ = 0.0;
+    std::size_t phaseIndex_ = 0;
+    int ticks_ = 0;
+    bool deep_;
+};
+#endif
 
 //==============================================================================
 // Inline helper to extract benchmark-label and benchmark-project arguments.

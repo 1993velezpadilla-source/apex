@@ -502,92 +502,50 @@ public:
     {
         if (onZoomWheel && onZoomWheel(e, wheel))
             return;
-        // Vertical wheel scrolls lanes; Shift+wheel scrolls horizontally.
-        if (auto* c = getViewedComponent())
+        const auto* content = getViewedComponent();
+        if (content == nullptr)
+            return;
+
+        const int contentW = content->getWidth();
+        const int contentH = content->getHeight();
+        wheelCarry_.observeContentSize(contentW, contentH);
+        wheelCarry_.observeContentScale(getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
+                                        getLaneHeight ? getLaneHeight() : 0.0);
+
+        auto scrollAxis = [&](int position, int extent, int view, float delta, double& carry)
         {
-            const int contentW = juce::jmax(1, c->getWidth());
-            const int contentH = juce::jmax(1, c->getHeight());
-
-            if (phonePresentation_)
+            if (DAW::mobile::timelinePhoneWheelBlockedAtEdge(position, extent, view, delta))
             {
-                wheelCarry_.observeContentSize(contentW, contentH);
-                wheelCarry_.observeContentScale(
-                    getPixelsPerSecond ? getPixelsPerSecond() : 0.0,
-                    getLaneHeight ? getLaneHeight() : 0.0);
+                carry = 0.0;
+                return position;
             }
+            const auto movement = phonePresentation_
+                ? DAW::mobile::timelinePhoneWheelPixelMotion(view, delta, carry)
+                : DAW::mobile::timelineWheelPixelMotion(120.0, delta, carry);
+            const int next = DAW::mobile::timelineWheelClampedPosition(position, extent, view, movement.pixels);
+            carry = DAW::mobile::timelinePhoneWheelBlockedAtEdge(next, extent, view, delta)
+                ? 0.0 : movement.remainder;
+            return next;
+        };
 
-            const int viewW = juce::jmax(1, getViewWidth());
-            const int viewH = juce::jmax(1, getViewHeight());
-
-            auto pos = getViewPosition();
-
-            const float dx = wheel.deltaX;
-            const float dy = wheel.deltaY;
-
-            const bool shift = e.mods.isShiftDown();
-            const auto phoneIntent = DAW::mobile::timelinePhoneWheelIntent(shift, dx, dy);
-            const bool horizontal = phonePresentation_ ? phoneIntent.horizontal : shift;
-            const float primary = phonePresentation_ ? phoneIntent.delta : (shift ? dx : dy);
-
-            // Preserve fractional high-resolution wheel motion on phones.
-            // Desktop/iPad keep their original per-event rounding.
-            int step = 0;
-            if (phonePresentation_)
-            {
-                auto& carry = horizontal ? wheelCarry_.x : wheelCarry_.y;
-                const int axisPosition = horizontal ? pos.x : pos.y;
-                const int contentSpan = horizontal ? contentW : contentH;
-                const int viewSpan = horizontal ? viewW : viewH;
-                if (DAW::mobile::timelinePhoneWheelBlockedAtEdge(
-                        axisPosition, contentSpan, viewSpan, primary))
-                    carry = 0.0;
-                else
-                {
-                    const auto motion = DAW::mobile::timelinePhoneWheelPixelMotion(
-                        viewSpan, primary, carry);
-                    carry = motion.remainder;
-                    step = motion.pixels;
-                }
-            }
+        const auto start = getViewPosition();
+        auto next = start;
+        const bool shift = e.mods.isShiftDown();
+        if (phonePresentation_ || shift)
+        {
+            const auto intent = DAW::mobile::timelinePhoneWheelIntent(shift, wheel.deltaX, wheel.deltaY);
+            if (intent.horizontal)
+                next.x = scrollAxis(start.x, contentW, getViewWidth(), intent.delta, wheelCarry_.x);
             else
-                step = (int)std::lround((float)(horizontal ? viewW : viewH) * primary * -0.65f);
-
-            if (step != 0)
-            {
-                const auto originalPos = pos;
-                if (phonePresentation_)
-                {
-                    // Hidden scrollbars do not imply a second wheel pass.
-                    // Keep wheel navigation bounded after zoom/rotation.
-                    if (horizontal)
-                        pos.x = DAW::mobile::timelineWheelClampedPosition(
-                            pos.x, contentW, viewW, step);
-                    else
-                        pos.y = DAW::mobile::timelineWheelClampedPosition(
-                            pos.y, contentH, viewH, step);
-                    // At the end of a song/lane range, discard unconsumed
-                    // fractional motion rather than bouncing on reversal.
-                    const int next = horizontal ? pos.x : pos.y;
-                    const int maxAxis = juce::jmax(0,
-                        (horizontal ? contentW - viewW : contentH - viewH));
-                    if (next == (horizontal ? originalPos.x : originalPos.y)
-                        || next == 0 || next == maxAxis)
-                        (horizontal ? wheelCarry_.x : wheelCarry_.y) = 0.0;
-                }
-                else if (shift)
-                    pos.x = juce::jlimit(0, juce::jmax(0, contentW - viewW), pos.x + step);
-                else
-                    pos.y = juce::jlimit(0, juce::jmax(0, contentH - viewH), pos.y + step);
-
-                if (!phonePresentation_ || pos != originalPos)
-                    setViewPosition(pos);
-            }
+                next.y = scrollAxis(start.y, contentH, getViewHeight(), intent.delta, wheelCarry_.y);
         }
-
-        // JUCE's default Viewport wheel handler scrolls again. Preserve the
-        // desktop/iPad path, but consume the phone wheel exactly once.
-        if (DAW::mobile::timelineWheelDelegatesToViewport(phonePresentation_))
-            juce::Viewport::mouseWheelMove(e, wheel);
+        else
+        {
+            next.x = scrollAxis(start.x, contentW, getViewWidth(), wheel.deltaX, wheelCarry_.x);
+            next.y = scrollAxis(start.y, contentH, getViewHeight(), wheel.deltaY, wheelCarry_.y);
+        }
+        if (next != start)
+            setViewPosition(next);
     }
 
 protected:
@@ -2431,7 +2389,9 @@ MainComponent::MainComponent()
 
         // The zoom transaction sizes the viewport from its cached song
         // extent after the lane heights have been updated.
-        if (!arrangement_->isApplyingZoom())
+        if (arrangement_->isApplyingZoom())
+            trackList_->beginTimelineHeightZoom();
+        else
             updateTimelineViewportContentBounds();
 
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
@@ -9742,23 +9702,26 @@ void MainComponent::startPluginScanIfNeeded()
     });
 }
 
-#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool bufferTracks)
+#if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
+bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference)
 {
-    // Called only by an explicit adb benchmark launch in a clean CI install.
-    // Never clear or load a user's project to manufacture a benchmark result.
+    // Benchmark mode only populates a disposable, empty session.
+    if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
+        return false;
     if (!appCore_.getProjectManager().getProjectFile().getFullPathName().isEmpty()
         || !appCore_.getClipManager().getAllClips().isEmpty())
-        return;
+        return false;
     startupPanelMayBeShown_ = false;
     if (startupPanel_)
         startupPanel_->dismiss();
     if (mixerWindow_)
         mixerWindow_->setVisible(false);
-    if (timelineWindow_)
-        timelineWindow_->setVisible(true);
-    if (trackListWindow_)
-        trackListWindow_->setBufferedToImage(bufferTracks);
+    timelineWindow_->setVisible(true);
+   #if JUCE_WINDOWS
+    timelineWindow_->setBufferedToImage(reference);
+    trackListWindow_->setBufferedToImage(reference);
+   #endif
+    trackList_->setDirectHeightZoomPaintForBenchmark(!reference);
 
     auto& tracks = appCore_.getTrackManager();
     while (tracks.getNumTracks() < 12)
@@ -9812,9 +9775,10 @@ void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool
     TimelinePaintMetrics::reset();
     TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
     repaint();
+    return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
 }
 
-juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
+juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
 {
     auto* state = new juce::DynamicObject();
     state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
@@ -9823,10 +9787,18 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
     state->setProperty("tracksWindowBuffered",
         trackListWindow_ && trackListWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("timelineWindowBuffered",
+        timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
+    state->setProperty("directRowPaint", trackList_ && trackList_->isDirectHeightZoomPaintForBenchmark());
     if (const auto* firstRow = trackList_ ? trackList_->getRow(0) : nullptr)
         state->setProperty("trackHeaderHeight", firstRow->getHeight());
     state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
+   #if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+        state->setProperty("backend", peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]);
+   #else
     state->setProperty("backend", "software");
+   #endif
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
     state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
@@ -9857,7 +9829,26 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     addTiming("clipNameMs", TimelinePaintMetrics::clipNameDurationNs);
     return juce::var(state);
 }
+#endif
 
+#if JUCE_WINDOWS
+void MainComponent::replayTimelineWheel(float horizontal, float vertical, juce::ModifierKeys modifiers)
+{
+    auto* core = arrangement_->getCore();
+    const auto focusInView = timelineViewport_->getLocalBounds().getCentre();
+    const auto focus = core->getLocalPoint(timelineViewport_.get(), focusInView).toFloat();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::MouseEvent event(juce::Desktop::getInstance().getMainMouseSource(), focus,
+        modifiers, 0.f, 0.f, 0.f, 0.f, 0.f, core, core, now, focus, now, 0, false);
+    juce::MouseWheelDetails wheel {};
+    wheel.deltaX = horizontal;
+    wheel.deltaY = vertical;
+    wheel.isSmooth = true;
+    core->mouseWheelMove(event, wheel);
+}
+#endif
+
+#if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 juce::Rectangle<int> MainComponent::androidUiBenchmarkBounds() const
 {
     if (timelineViewport_ == nullptr)

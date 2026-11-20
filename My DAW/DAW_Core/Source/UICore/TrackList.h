@@ -2554,6 +2554,24 @@ public:
         positionRowsForScroll();
         repaint(0, 80, getWidth(), juce::jmax(0, getHeight() - 80));
     }
+
+    void beginTimelineHeightZoom()
+    {
+       #if JUCE_ANDROID || JUCE_WINDOWS
+        if (directHeightZoomPaint_)
+            heightZoomPaint_.deferBuffering();
+       #endif
+    }
+
+    void setDirectHeightZoomPaintForBenchmark(bool enabled) noexcept
+    {
+        directHeightZoomPaint_ = enabled;
+    }
+
+    bool isDirectHeightZoomPaintForBenchmark() const noexcept
+    {
+        return !heightZoomPaint_.isBuffering();
+    }
     void setMasterRowHeight(int h)
     {
         if (trackManager_.hasMasterTrack() && trackRows_.size() > 0)
@@ -3128,8 +3146,40 @@ public:
     }
 
 private:
+    class HeightZoomPaint final : private juce::Timer
+    {
+    public:
+        explicit HeightZoomPaint(TrackList& owner) : owner_(owner) {}
+
+        bool isBuffering() const noexcept { return !isTimerRunning(); }
+
+        void deferBuffering()
+        {
+            if (isBuffering())
+                setBuffering(false);
+            startTimer(120);
+        }
+
+    private:
+        void timerCallback() override
+        {
+            stopTimer();
+            setBuffering(true);
+        }
+
+        void setBuffering(bool enabled)
+        {
+            for (auto* row : owner_.trackRows_)
+                row->setBufferedToImage(enabled);
+        }
+
+        TrackList& owner_;
+    };
+
     TrackManager& trackManager_;
     juce::OwnedArray<TrackRow> trackRows_;
+    HeightZoomPaint heightZoomPaint_ { *this };
+    bool directHeightZoomPaint_ = true;
     TrackListHeaderBar headerBar_;   // pinned overlay with the real TRACKS "+"
     int  dragStartX_ = -1;
     bool dragHover_  = false;
@@ -3751,6 +3801,7 @@ private:
     // Re-apply Quick Send mode state after the rebuild.
     for (auto* row : trackRows_)
     {
+        row->setBufferedToImage(heightZoomPaint_.isBuffering());
         row->setQuickSendSource(quickSendModeActive_ && row->getTrackID() == quickSendSourceId_);
         row->setQuickSendModeActive(quickSendModeActive_);
     }
