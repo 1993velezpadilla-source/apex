@@ -224,6 +224,11 @@ class ImmersiveManifestTests(unittest.TestCase):
             with self.subTest(bundle=bundle):
                 self.assertEqual(self.run_patch(bundle, rerun=True).returncode, 0)
 
+    def test_isolated_opengl_prototype_package_is_allowed(self):
+        bundle = "com.xziel.apex.gpuprototype"
+        self.assertEqual(self.run_patch(bundle).returncode, 0)
+        self.assertEqual(self.run_patch(bundle, rerun=True).returncode, 0)
+
     def test_manifest_package_matching_project_is_allowed(self):
         bundle = "com.xziel.apex.mobileportrait"
         self.assertEqual(self.run_patch(bundle, bundle).returncode, 0)

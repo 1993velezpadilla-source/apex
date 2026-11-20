@@ -122,7 +122,10 @@ jobs:
           # Allow portrait + landscape under Android auto-rotate preferences;
           # packaging is NOT a device rotation test.
           grep -q 'android:screenOrientation="user"' "$MANIFEST"
-          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-opengl-prototype" ]]; then
+            grep -q "com.xziel.apex.gpuprototype.ApexImmersiveActivity" "$MANIFEST"
+            test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/gpuprototype/ApexImmersiveActivity.java"
+          elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
             grep -q "com.xziel.apex.zoomrewrite.ApexImmersiveActivity" "$MANIFEST"
             test -s "My DAW/DAW_Core/Builds/AndroidFull/app/src/main/java/com/xziel/apex/zoomrewrite/ApexImmersiveActivity.java"
           elif [[ "$GITHUB_REF_NAME" == feature/mobile-portrait-* ]]; then
@@ -187,7 +190,9 @@ jobs:
             unsigned="android-release-real-apk/apex-release-unsigned-tmp-${found}.apk"
             aligned="android-release-real-apk/apex-release-aligned-tmp-${found}.apk"
             output="android-release-real-apk/APEX-Android-Original-Release-Optimized-ARM64-Preview-${found}.apk"
-            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
+            if [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-opengl-prototype" ]]; then
+              output="android-release-real-apk/APEX-OpenGL-Prototype-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
+            elif [[ "$GITHUB_REF_NAME" == "feature/mobile-portrait-zoom-rewrite" ]]; then
               output="android-release-real-apk/APEX-Zoom-Rewrite-${GITHUB_SHA:0:8}-ARM64-${found}.apk"
             fi
             cp "$apk" "$unsigned"
@@ -217,7 +222,7 @@ jobs:
       - name: Upload release-optimized ORIGINAL APEX ARM64 preview APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW' }}
+          name: ${{ github.ref_name == 'feature/mobile-portrait-opengl-prototype' && 'APEX-OpenGL-Prototype-ARM64' || (github.ref_name == 'feature/mobile-portrait-zoom-rewrite' && 'APEX-Zoom-Rewrite-ARM64' || 'APEX-Android-Original-Release-Optimized-ARM64-PREVIEW') }}
           path: android-release-real-apk/*.apk
           if-no-files-found: error
           retention-days: 14
