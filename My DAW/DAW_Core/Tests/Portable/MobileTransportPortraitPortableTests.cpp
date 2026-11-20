@@ -2185,3 +2185,27 @@ constexpr bool compactCenterHitExclusivity()
     return true;
 }
 static_assert(compactCenterHitExclusivity());
+
+
+// Regression for the six-action compact Transport boundary after split-screen
+// resize. 268 is the first width that can fit six 44-unit targets; at 267
+// a single-row layout cannot satisfy that requirement without navigation.
+constexpr bool compactTransportWidthBoundary()
+{
+    for (int w = 268; w <= 294; ++w)
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        for (int i = 0; i < 6; ++i)
+        {
+            if (r.transport[i].width < 44 || r.transport[i].height < 44)
+                return false;
+            if (!inside(r.transport[i], w, 94))
+                return false;
+            if (i && !separated(r.transport[i - 1], r.transport[i]))
+                return false;
+        }
+    }
+    const auto narrow = DAW::mobile::compactPhoneTransportLayout(267, 94);
+    return narrow.transport[0].width < 44;
+}
+static_assert(compactTransportWidthBoundary());
