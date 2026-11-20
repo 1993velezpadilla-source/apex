@@ -7980,8 +7980,32 @@ void MainComponent::refreshPinnedValueHint()
                                       : (showPlugin ? lastPluginValueHint_ : juce::String()));
 }
 
+#if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+void MainComponent::enableAndroidGpuPresentation()
+{
+    androidGpuContext_.setRenderer(&androidGpuFrames_);
+    androidGpuContext_.setComponentPaintingEnabled(true);
+    androidGpuContext_.setContinuousRepainting(false);
+    androidGpuContext_.attachTo(*this);
+
+    // Keep the software peer available on devices that cannot start EGL.
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(4000, [safe]
+    {
+        if (safe != nullptr && safe->androidGpuFrames_.rendered.load(std::memory_order_relaxed) == 0)
+        {
+            safe->androidGpuContext_.detach();
+            safe->repaint();
+        }
+    });
+}
+#endif
+
 MainComponent::~MainComponent()
 {
+   #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    androidGpuContext_.detach();
+   #endif
     pinnedValueTimer_.stopTimer();
     // 1. Detach listeners first - prevents callbacks into dying objects
     removeKeyListener(this);
@@ -9837,6 +9861,10 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
    #if JUCE_WINDOWS
     if (auto* peer = getPeer())
         state->setProperty("backend", peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]);
+   #elif JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    const auto gpuFrames = androidGpuFrames_.rendered.load(std::memory_order_relaxed);
+    state->setProperty("backend", androidGpuContext_.isAttached() && gpuFrames > 0 ? "OpenGL" : "software");
+    state->setProperty("gpuFrames", gpuFrames);
    #else
     state->setProperty("backend", "software");
    #endif

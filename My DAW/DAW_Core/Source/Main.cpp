@@ -1961,6 +1961,12 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
+           #if defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+               #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                if (DAW::androidLaunchExtra("apex_renderer") == "gpu")
+               #endif
+                    daw->enableAndroidGpuPresentation();
+           #endif
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
             using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;

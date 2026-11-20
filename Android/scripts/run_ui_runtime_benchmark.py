@@ -33,6 +33,7 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         raise ValueError("Insufficient delivered touch events")
     if not result.get("hardware_canvas"):
         raise ValueError("Activity did not use the production accelerated Android Canvas")
+    gpu = renderer == "gpu"
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -41,13 +42,15 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         peer_count = phase["peerWallMs"]["count"]
         if (phase["peerRasterCpuMs"]["count"] != peer_count or phase["peerRasterWaitMs"]["count"] != peer_count):
             raise ValueError("Missing raster CPU versus wall-time profiling samples")
-        if phase["phase"] != "idle" and peer_count < 2:
+        if not gpu and phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
         if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
             raise ValueError("The requested native presentation path was not used")
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
+        if gpu and phase["phase"] != "idle" and after.get("gpuFrames", 0) <= before.get("gpuFrames", 0):
+            raise ValueError(f"OpenGL renderer did not advance during {phase['phase']}")
         if scene in ("playback", "recording"):
             if not after.get("playing") or after["playheadFrames"] <= before["playheadFrames"]:
                 raise ValueError(f"Playback did not advance during {phase['phase']}")
@@ -60,8 +63,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
                 raise ValueError("Track headers and arranger lanes are different heights")
             if (state.get("clips", 0) > 0) != (scene != "empty"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
-            if state.get("backend") != "software":
-                raise ValueError("Unexpected renderer in the software benchmark")
+            if state.get("backend") != ("OpenGL" if gpu else "software"):
+                raise ValueError("The requested arranger backend did not become active")
     if phases[0]["before"]["scrollX"] == phases[0]["after"]["scrollX"]:
         raise ValueError("Pan did not move the production Viewport")
     for phase, direction in zip(phases[1:3], (1, -1)):
@@ -198,9 +201,11 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("reference", "optimized")
         for scene in ("playback", "recording", "empty", "clip", "deep"):
-            orders = (("optimized",),) if scene in ("playback", "recording") else (renderers, renderers[::-1])
+            if scene in ("playback", "recording"):
+                orders = (("optimized", "gpu"), ("gpu", "optimized"))
+            else:
+                orders = (("reference", "optimized", "gpu"), ("optimized", "reference"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):
