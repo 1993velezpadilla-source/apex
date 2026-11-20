@@ -221,8 +221,14 @@ namespace ArrangementEditor
 
         void paint(juce::Graphics& g) override
         {
+            if (!isTimerRunning())
+            {
+                owner.paintEntireComponent(g, false);
+                return;
+            }
+
             const auto bounds = bodyBounds();
-            if (!isTimerRunning() || !g.getClipBounds().intersects(bounds))
+            if (!g.getClipBounds().intersects(bounds))
             {
                 owner.paintEntireComponent(g, false);
                 return;
@@ -307,7 +313,10 @@ namespace ArrangementEditor
         void updateFrame(const Frame& next, int width, int height)
         {
             if (current.image.getWidth() != width || current.image.getHeight() != height)
+            {
                 current.image = juce::Image(juce::Image::ARGB, width, height, false, juce::SoftwareImageType{});
+                current.image.getProperties()->set("apexOpaqueHorizontalViewport", true);
+            }
 
             current.bounds = next.bounds;
             current.density = next.density;
@@ -321,6 +330,7 @@ namespace ArrangementEditor
 
             juce::Graphics raster(current.image);
             raster.reduceClipRegion(pixels);
+            raster.fillAll(fromU32(Col::bg));
             raster.addTransform(juce::AffineTransform::scale(current.density)
                 .translated(-current.bounds.getX() * current.density, -current.bounds.getY() * current.density));
             owner.paintEntireComponent(raster, true);
