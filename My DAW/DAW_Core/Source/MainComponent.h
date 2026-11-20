@@ -592,6 +592,12 @@ private:
     juce::Time   lastAutosaveFailToastTime_;
     static constexpr int kAutosaveFailToastIntervalSec = 30;
 
+   #if JUCE_ANDROID && defined(APEX_ANDROID_OPENGL_PROTOTYPE) && APEX_ANDROID_OPENGL_PROTOTYPE
+    // Prototype only: render the existing JUCE component tree with GPU-backed
+    // OpenGLGraphicsContext. Never enable this in the shipping mobile branch.
+    juce::OpenGLContext androidOpenGLContext_;
+   #endif
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
 

@@ -5341,6 +5341,15 @@ MainComponent::MainComponent()
         }
     });
 
+   #if JUCE_ANDROID && defined(APEX_ANDROID_OPENGL_PROTOTYPE) && APEX_ANDROID_OPENGL_PROTOTYPE
+    // Isolated experiment: avoid the software-raster/canvas upload path.
+    // Retain every waveform and native JUCE touch control at full resolution.
+    // The OpenGLContext is attached only after the full component tree exists.
+    androidOpenGLContext_.setComponentPaintingEnabled(true);
+    androidOpenGLContext_.setContinuousRepainting(false);
+    androidOpenGLContext_.attachTo(*this);
+    juce::Logger::writeToLog("[APEX-GPU-PROTOTYPE] OpenGL component painting attached");
+   #endif
     appendMainStartupTrace("ctor.complete");
     DAW::StartupProgressCore::reach(82);
 }
@@ -7982,6 +7991,10 @@ void MainComponent::refreshPinnedValueHint()
 
 MainComponent::~MainComponent()
 {
+   #if JUCE_ANDROID && defined(APEX_ANDROID_OPENGL_PROTOTYPE) && APEX_ANDROID_OPENGL_PROTOTYPE
+    // Stop the GPU render callback before dismantling the component tree.
+    androidOpenGLContext_.detach();
+   #endif
     pinnedValueTimer_.stopTimer();
     // 1. Detach listeners first - prevents callbacks into dying objects
     removeKeyListener(this);

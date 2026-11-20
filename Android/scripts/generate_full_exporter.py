@@ -35,9 +35,13 @@ def main() -> int:
     # deleting or overwriting the user's saved Android test projects.
     portrait_preview = (os.environ.get("APEX_ANDROID_PORTRAIT_PREVIEW") == "1"
                         or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
+    gpu_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-opengl-prototype"
+                   and not args.benchmark_x86)
     zoom_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-zoom-rewrite"
                     and not args.benchmark_x86)
-    if zoom_preview:
+    if gpu_preview:
+        name, app_id = "APEX GPU Prototype", "com.xziel.apex.gpuprototype"
+    elif zoom_preview:
         name, app_id = "APEX Zoom Rewrite 7.1", "com.xziel.apex.zoomrewrite"
     elif portrait_preview or args.benchmark_x86:
         name, app_id = "APEXMobilePortrait", "com.xziel.apex.mobileportrait"
@@ -58,6 +62,7 @@ def main() -> int:
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
         f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
+        f"APEX_ANDROID_OPENGL_PROTOTYPE={int(gpu_preview)}",
     ])
     root.set("defines", " ".join(defines))
 
@@ -65,6 +70,14 @@ def main() -> int:
     exports = root.find("EXPORTFORMATS")
     if modules is None or exports is None:
         raise ValueError("Canonical .jucer missing MODULES/EXPORTFORMATS")
+
+    # Only the isolated Android GPU prototype adds juce_opengl.
+    # The canonical Windows project and stable Android rewrite are untouched.
+    if gpu_preview and not any(m.get("id") == "juce_opengl" for m in modules.findall("MODULE")):
+        ET.SubElement(modules, "MODULE", {
+            "id": "juce_opengl", "showAllCode": "1",
+            "useLocalCopy": "0", "useGlobalPath": "0",
+        })
 
     for exporter in list(exports):
         exports.remove(exporter)
@@ -158,6 +171,7 @@ def main() -> int:
     tree.write(output, encoding="utf-8", xml_declaration=True)
     print(f"Android Full exporter: {output}")
     print(f"Portrait-first separate-install preview: {portrait_preview}; package={root.get('bundleIdentifier')}")
+    print(f"Isolated Android OpenGL preview: {gpu_preview}")
     print(f"Desktop files retained: {len(listed)}; translation units: {compiled}")
     print(f"Windows-only translation units excluded from Android: {len(android_excluded)}")
     for path in android_excluded:
