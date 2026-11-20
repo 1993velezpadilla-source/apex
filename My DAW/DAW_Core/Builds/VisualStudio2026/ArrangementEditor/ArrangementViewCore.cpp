@@ -2116,7 +2116,7 @@ namespace ArrangementEditor
             if (viewport != nullptr && m_touchNavigationArmed)
                 juce::noteApexTimelineMotion(*viewport);
            #endif
-            repaintViewport(getViewportVisibleBounds());
+            repaint(getViewportVisibleBounds());
         }
         else
             setViewportScrollOffset(actual.x, actual.y);
@@ -2184,21 +2184,6 @@ namespace ArrangementEditor
             m_arrangementDebugPanel->setBounds(juce::Rectangle<int>(juce::jmax(20, w - 460), toolbarH + rulerH + 8, 440, juce::jmax(220, getHeight() - (toolbarH + rulerH + 16))));
     }
 
-    void ArrangementViewCore::repaintViewport(juce::Rectangle<int> visibleBounds)
-    {
-       #if JUCE_ANDROID
-        // The native bitmap tiles are sized to the window. Invalidate the
-        // visible viewport itself so wide, scrolled children do not define
-        // Android's damage region while their bounds are being projected.
-        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-        {
-            viewport->repaint();
-            return;
-        }
-       #endif
-        repaint(visibleBounds);
-    }
-
     void ArrangementViewCore::setViewportScrollOffset(int scrollX, int scrollY)
     {
         if (m_applyingZoom)
@@ -2245,7 +2230,7 @@ namespace ArrangementEditor
                     * static_cast<uint64_t>(juce::jmax(0, visibleRepaint.getHeight())));
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollDirtyAreaPixels, area);
             }
-            repaintViewport(visibleRepaint);
+            repaint(visibleRepaint);
         }
         else
         {

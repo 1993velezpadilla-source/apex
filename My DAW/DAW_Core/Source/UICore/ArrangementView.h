@@ -302,13 +302,16 @@ trackManager_.addListener(this);
 
     void setEngineSampleRate(double sampleRate)
     {
-        sampleRate = juce::jmax(1.0, sampleRate);
+        if (!std::isfinite(sampleRate) || sampleRate < 1.0)
+            return;
         currentEngineSampleRate_ = sampleRate;
 
         if (core_ != nullptr)
             core_->setEngineSampleRate(sampleRate);
         mirrorAllEngineClipsIntoArrangement();
     }
+
+    double getEngineSampleRate() const noexcept { return currentEngineSampleRate_; }
 
     // Transport controller listener - update UI tempo when transport tempo changes
     void tempoChanged(double newTempo) override

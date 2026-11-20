@@ -8126,7 +8126,10 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     {
         if (auto* self = safeThis.getComponent())
             if (self->arrangement_)
+            {
                 self->arrangement_->setEngineSampleRate(sampleRate);
+                self->updateTimelineViewportContentBounds();
+            }
     });
 }
 
@@ -9413,7 +9416,8 @@ void MainComponent::updateTimelineViewportContentBounds()
         return;
 
     double projectLengthSeconds = 30.0;
-    const auto sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    // Use the same timebase as the clips, including before audio starts.
+    const auto sampleRate = arrangement_->getEngineSampleRate();
     for (auto* clip : appCore_.getClipManager().getAllClips())
     {
         if (clip == nullptr)
@@ -9451,7 +9455,9 @@ void MainComponent::positionChanged(DAW::SamplePosition newPosition)
     // the current content end (ruler scrubbing, transport commands, looping).
     // Guarded by the cached length so the viewport bounds are not rebuilt on
     // every transport tick during playback.
-    const double sampleRate = juce::jmax(1.0, appCore_.getCurrentSampleRate());
+    if (!arrangement_)
+        return;
+    const double sampleRate = arrangement_->getEngineSampleRate();
     const double playheadSeconds = (double) newPosition / sampleRate;
     if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
         updateTimelineViewportContentBounds();
@@ -9765,7 +9771,7 @@ void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool
             .getNonexistentChildFile("apex-ui-benchmark", ".wav");
         auto output = file.createOutputStream();
         juce::WavAudioFormat format;
-        const double sr = juce::jmax(44100.0, appCore_.getCurrentSampleRate());
+        const double sr = arrangement_ ? arrangement_->getEngineSampleRate() : 44100.0;
         std::unique_ptr<juce::AudioFormatWriter> writer(output == nullptr ? nullptr
             : format.createWriterFor(output.release(), sr, 1, 16, {}, 0));
         if (writer != nullptr)
@@ -9826,6 +9832,7 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
     state->setProperty("windowWidth", getWidth());
     state->setProperty("windowHeight", getHeight());
+    state->setProperty("timelineWidth", arrangement_ ? arrangement_->getWidth() : 0);
     const auto addTiming = [&](const juce::Identifier& name, SampleRing& ring)
     {
         if (finishPhase)

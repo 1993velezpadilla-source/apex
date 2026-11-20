@@ -72,9 +72,33 @@ def configure_component_paint_probe(gui: Path) -> None:
         if (child.isVisible())"""), encoding="utf-8")
 
 
+def bound_wide_software_clips(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "maxExactFloatSpan" in contents:
+        return
+
+    path.write_text(replace(contents,
+        "                clip = clip->clipToRectangle (transform.transformed (r));", """\
+                // At high display density a long timeline can have a device
+                // width exceeding INT_MAX. Intersect it with the raster's
+                // clip in double precision before forming an integer width.
+                constexpr int maxExactFloatSpan = 1 << std::numeric_limits<float>::digits;
+                if (r.getWidth() > maxExactFloatSpan || r.getHeight() > maxExactFloatSpan)
+                {
+                    const auto bounded = r.toDouble().transformedBy (transform.complexTransform)
+                        .getIntersection (clip->getClipBounds().toDouble());
+                    clip = clip->clipToRectangle (bounded.getSmallestIntegerContainer());
+                }
+                else
+                {
+                    clip = clip->clipToRectangle (transform.transformed (r));
+                }"""), encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
+    bound_wide_software_clips(root / "modules/juce_graphics/native/juce_RenderingHelpers.h")
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"

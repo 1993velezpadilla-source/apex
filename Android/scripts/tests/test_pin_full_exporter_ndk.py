@@ -53,7 +53,7 @@ class PinNdkTests(unittest.TestCase):
                     '        applicationId "com.xziel.apex.zoomrewrite"\n')
         generated = set_zoom_preview_install_id(original)
         self.assertIn('namespace "com.xziel.apex.zoomrewrite"', generated)
-        self.assertIn('applicationId "com.xziel.apex.zoomrewrite.r5"', generated)
+        self.assertIn('applicationId "com.xziel.apex.zoomrewrite.r5p1"', generated)
         self.assertEqual(generated, set_zoom_preview_install_id(generated))
         other_app = original.replace("zoomrewrite", "mobileportrait")
         self.assertEqual(other_app, set_zoom_preview_install_id(other_app))
