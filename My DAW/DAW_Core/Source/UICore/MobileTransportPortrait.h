@@ -134,7 +134,10 @@ constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noex
         ? ((usable - 264) / 5 < gap ? (usable - 264) / 5 : gap)
         : gap;
     const int actionW = (usable - 5 * actionGap) / 6;
-    for (int i = 0; i < 6; ++i)
+    // Six 44-unit actions cannot fit below 268 units. Until a paged
+    // navigation design exists, do not expose six undersized tap targets.
+    // Optional top-row shortcuts remain independently gated below.
+    for (int i = 0; i < 6 && w >= 268; ++i)
     {
         const int inset = w >= 295 && actionW > 2 ? 1 : 0;
         out.transport[i] = { margin + i * (actionW + actionGap) + inset,
