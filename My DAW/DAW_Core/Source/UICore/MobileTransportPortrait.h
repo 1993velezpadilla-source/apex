@@ -116,7 +116,9 @@ constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int vie
 constexpr PortraitTransportLayout compactPhoneTransportLayout(int w, int h) noexcept
 {
     PortraitTransportLayout out{};
-    if (w < 20 || h < 8) return out;
+    // No safe 44-unit touch row fits below this height. Hide all controls
+    // rather than exposing undersized Transport targets during inset collapse.
+    if (w < 20 || h < 44) return out;
     constexpr int margin = 2, gap = 3;
     const int usable = w - 2 * margin;
     const int rowH = (h - 3 * margin) / 2;
