@@ -354,9 +354,16 @@ constexpr bool portraitActionsOrdered(int w, int h)
     for (int i = 1; i < 6; ++i)
         if (r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
             return false;
-    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
-        && r.fx.x < r.browser.x
+    // Collapsed shortcuts have zero bounds; compare ordering only while
+    // all four shortcuts are visible. Never require x-order for hidden taps.
+    const bool shortcutsVisible = r.fx.width > 0 && r.browser.width > 0
+        && r.mixer.width > 0 && r.sends.width > 0;
+    const bool shortcutsHidden = r.fx.width == 0 && r.browser.width == 0
+        && r.mixer.width == 0 && r.sends.width == 0;
+    const bool ordered = r.fx.x < r.browser.x
         && r.browser.x < r.mixer.x && r.mixer.x < r.sends.x;
+    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
+        && ((shortcutsVisible && ordered) || shortcutsHidden);
 }
 static_assert(portraitActionsOrdered(320, 144));
 static_assert(portraitActionsOrdered(393, 144));
