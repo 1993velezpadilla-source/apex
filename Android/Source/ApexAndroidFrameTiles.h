@@ -330,6 +330,7 @@ private:
 struct FrameSample
 {
     jlong wallNs = 0, cpuNs = 0, rasterNs = 0, pixels = 0, usedTiles = 0;
+    jlong rasterCpuNs = 0;
 };
 static std::array<FrameSample, 2048> recordedFrames {};
 static std::size_t frameCount = 0;
@@ -461,9 +462,17 @@ public:
             for (const auto& area : region)
                 sample.pixels += (jlong)area.getWidth() * area.getHeight();
             beginRaster = Clock::now();
+            beginRasterCpu = threadCpuNs();
         }
     }
-    void endRaster() { if (record) sample.rasterNs += ns(Clock::now() - beginRaster); }
+    void endRaster()
+    {
+        if (record)
+        {
+            sample.rasterNs += ns(Clock::now() - beginRaster);
+            sample.rasterCpuNs += threadCpuNs() - beginRasterCpu;
+        }
+    }
     void presentedTiles(bool motion) { if (record) sample.usedTiles = motion ? 2 : 1; }
 
 private:
@@ -475,7 +484,7 @@ private:
     const bool record;
     FrameSample sample;
     Clock::time_point begin, beginRaster;
-    jlong beginCpu = 0;
+    jlong beginCpu = 0, beginRasterCpu = 0;
 };
 #else
 static constexpr bool useTiles = true;
@@ -504,11 +513,12 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     }
     ComponentPaintProbe::logTop(frameCount);
     std::vector<jlong> values;
-    values.reserve(frameCount * 5);
+    values.reserve(frameCount * 6);
     for (std::size_t i = 0; i < frameCount; ++i)
     {
         const auto& f = recordedFrames[i];
-        values.insert(values.end(), { f.wallNs, f.cpuNs, f.rasterNs, f.pixels, f.usedTiles });
+        values.insert(values.end(), { f.wallNs, f.cpuNs, f.rasterNs, f.pixels,
+                                      f.usedTiles, f.rasterCpuNs });
     }
     const auto count = (jsize)values.size();
     auto result = env->NewLongArray(count);

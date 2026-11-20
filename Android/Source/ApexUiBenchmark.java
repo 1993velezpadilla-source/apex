@@ -243,19 +243,24 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     }
 
     private void addPeerTimings(JSONObject entry, long[] samples) throws Exception {
-        final int count = samples.length / 5;
+        if (samples.length % 6 != 0) throw new IllegalArgumentException("Invalid APEX peer sample stride");
+        final int count = samples.length / 6;
         final long[] wall = new long[count];
         final long[] cpu = new long[count];
         final long[] raster = new long[count];
+        final long[] rasterCpu = new long[count];
+        final long[] rasterWait = new long[count];
         final long[] transfer = new long[count];
         int tiledFrames = 0;
         int reducedTimelineFrames = 0;
         long paintedPixels = 0;
         for (int i = 0; i < count; ++i) {
-            final int start = i * 5;
+            final int start = i * 6;
             wall[i] = samples[start];
             cpu[i] = samples[start + 1];
             raster[i] = samples[start + 2];
+            rasterCpu[i] = samples[start + 5];
+            rasterWait[i] = Math.max(0, raster[i] - rasterCpu[i]);
             transfer[i] = Math.max(0, wall[i] - raster[i]);
             paintedPixels += samples[start + 3];
             if (samples[start + 4] != 0) ++tiledFrames;
@@ -264,6 +269,9 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         entry.put("peerWallMs", summarize(wall, count));
         entry.put("peerCpuMs", summarize(cpu, count));
         entry.put("peerRasterMs", summarize(raster, count));
+        entry.put("peerRasterCpuMs", summarize(rasterCpu, count));
+        // Wall minus thread CPU is scheduling/blocking time, not drawing instructions.
+        entry.put("peerRasterWaitMs", summarize(rasterWait, count));
         entry.put("peerTransferMs", summarize(transfer, count));
         entry.put("peerTiledFrames", tiledFrames);
         entry.put("peerReducedTimelineFrames", reducedTimelineFrames);

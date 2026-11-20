@@ -39,6 +39,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         if phase["phase"] != "idle" and phase["inputWallMs"]["count"] < 2:
             raise ValueError("No measured gesture dispatches")
         peer_count = phase["peerWallMs"]["count"]
+        if (phase["peerRasterCpuMs"]["count"] != peer_count or phase["peerRasterWaitMs"]["count"] != peer_count):
+            raise ValueError("Missing raster CPU versus wall-time profiling samples")
         if phase["phase"] != "idle" and peer_count < 2:
             raise ValueError("No measured Android native window paints")
         if phase["peerTiledFrames"] != (0 if renderer == "int-array" else peer_count):
