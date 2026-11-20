@@ -615,6 +615,7 @@ namespace ArrangementEditor
         bool isAutomationInteractionBlockingClipAt(juce::Point<int> pos) const;
         void updateClipAutomationDim();
         void updatePinnedViewportControls();
+        void repaintViewport(juce::Rectangle<int> visibleBounds);
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
         void updateClipRendererVisibility(bool projectBounds = false);
