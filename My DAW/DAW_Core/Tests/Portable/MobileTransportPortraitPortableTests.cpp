@@ -198,6 +198,26 @@ static_assert(validCompact(320, 112));
 static_assert(validCompact(480, 96));
 static_assert(validCompact(245, 96));
 static_assert(validCompact(20, 8));
+// Extreme keyboard/IME inset: no 44-unit row can fit at 0..43.
+// All hit targets must disappear, then recover at exactly 44 units.
+constexpr bool compactSubTouchHeightIsNonInteractive()
+{
+    for (const int w : {20, 189, 268, 320, 852})
+        for (int h = 0; h < 44; ++h)
+            if (!emptyLayout(DAW::mobile::compactPhoneTransportLayout(w, h)))
+                return false;
+    for (const int w : {268, 320, 852})
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(w, 44);
+        if (!validCompact(w, 44)) return false;
+        for (const auto action : r.transport)
+            if (action.width < 44 || action.height < 44
+                || !inside(action, w, 44)) return false;
+    }
+    return true;
+}
+static_assert(compactSubTouchHeightIsNonInteractive());
+
 static_assert(validCompact(0, 0));
 static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(-1, 96)));
 static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, -1)));
