@@ -738,10 +738,15 @@ namespace ArrangementEditor
         for (int i = firstVisibleTrack; i < lastVisibleTrack; ++i)
         {
             const int y = getLaneTopForIndex(i);
-            g.setColour(fromU32(i % 2 == 0 ? Col::trackBg : Col::bg));
-            g.fillRect(0, y, getWidth(), trackH);
+            if (i % 2 == 0)
+            {
+                g.setColour(fromU32(Col::trackBg));
+                g.fillRect(visibleBounds.getIntersection(
+                    { visibleBounds.getX(), y, visibleBounds.getWidth(), trackH }));
+            }
             g.setColour(fromU32(Col::trackLine));
-            g.drawHorizontalLine(y + trackH - 1, 0.f, (float)getWidth());
+            g.drawHorizontalLine(y + trackH - 1, static_cast<float>(visibleBounds.getX()),
+                                 static_cast<float>(visibleBounds.getRight()));
         }
 
         // ── Beat/bar grid across lanes ──────────────────────────────────────
@@ -801,9 +806,11 @@ namespace ArrangementEditor
         }
 
         // ── Folder Track hierarchy — branch/continuity guides ───────────────
-        // Visual only: subtle grouping band + inherited parent accent on the
-        // lane's left edge. FolderBusCore/routing semantics are untouched.
-        if (m_engineTrackManager != nullptr)
+        // All folder guides lie along the start of the canvas.
+        constexpr int maxDepth = 16;
+        constexpr int indent = 6;
+        constexpr int guideRight = 2 + (maxDepth - 1) * indent + 1;
+        if (visibleBounds.getX() < guideRight && m_engineTrackManager != nullptr)
         {
             // Lane 0 is the MASTER lane when a master track exists; engine
             // tracks sit at lane = engineIndex + masterOffset (mirrors the
@@ -838,7 +845,7 @@ namespace ArrangementEditor
                 {
                     DAW::Track* cursor = track;
                     juce::String parentId = cursor->getParentTrackID();
-                    while (parentId.isNotEmpty() && depth < 16)
+                    while (parentId.isNotEmpty() && depth < maxDepth)
                     {
                         auto* parent = m_engineTrackManager->getTrack(parentId);
                         if (parent == nullptr) break;
@@ -864,14 +871,14 @@ namespace ArrangementEditor
                 {
                     // Child lane: darker grouping band + branch guide in the
                     // parent's accent, stepping right with nesting depth.
-                    const int bandW = juce::jmin(4 + (depth - 1) * 6, 22);
+                    const int bandW = juce::jmin(4 + (depth - 1) * indent, 22);
                     g.setColour(fromU32(Col::folderBand).withAlpha(0.60f));
                     g.fillRect(0, laneY, bandW, trackH);
 
                     for (int d = 0; d < depth; ++d)
                     {
                         g.setColour(parentAccent.withAlpha(d == depth - 1 ? 0.50f : 0.28f));
-                        g.fillRect(2 + d * 6, laneY, 1, trackH);
+                        g.fillRect(2 + d * indent, laneY, 1, trackH);
                     }
                 }
             }
@@ -1158,9 +1165,8 @@ namespace ArrangementEditor
             // One finger pans the timeline — anchored, with a 6 px slop so a
             // small nudge does not register, and the release velocity tracked
             // for the iOS momentum.
-            // Low-pass the touch position before using it: digitizers report
-            // ±1 px of noise on a nearly still finger, which is what made slow
-            // pans shake. The filter trades ~1 frame of lag for stability.
+            // Preserve the vertical filter and let deliberate horizontal
+            // movement track the finger as soon as a display frame arrives.
             const auto localRaw = firstTouch; // screen-space; never shifts as the viewport pans
             if (! m_smoothedTouchValid)
             {
@@ -1170,7 +1176,9 @@ namespace ArrangementEditor
             else
             {
                 const float retained = (float)std::pow(0.6, frames);
-                m_smoothedTouchPos = m_smoothedTouchPos * retained + localRaw * (1.0f - retained);
+                m_smoothedTouchPos.x = TouchNavigationMath::followHorizontalPan(
+                    m_smoothedTouchPos.x, localRaw.x, retained);
+                m_smoothedTouchPos.y = m_smoothedTouchPos.y * retained + localRaw.y * (1.0f - retained);
             }
             const auto posScreen = m_smoothedTouchPos.toInt();
             const auto local = getLocalPoint(nullptr, posScreen).toFloat();
@@ -2057,10 +2065,10 @@ namespace ArrangementEditor
             TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementZoomUpdates);
             m_viewportScrollX = actual.x;
             m_viewportScrollY = actual.y;
-            updatePinnedViewportControls();
+            updatePinnedViewportControls(heightChanged || actual.y != start.y);
             m_ruler.setScrollOffsetX(actual.x);
-            updateClipRendererVisibility(true);
-            updateAutomationLayout();
+            updateClipRendererVisibility(heightChanged ? ClipBoundsUpdate::all : ClipBoundsUpdate::time);
+            updateAutomationLayout(heightChanged);
            #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             if (viewport != nullptr && m_touchNavigationArmed)
                 juce::noteApexTimelineMotion(*viewport);
@@ -2074,7 +2082,7 @@ namespace ArrangementEditor
             onZoomPresented();
     }
 
-    void ArrangementViewCore::updatePinnedViewportControls()
+    void ArrangementViewCore::updatePinnedViewportControls(bool restack)
     {
         const auto viewportWidth = [this]() -> int
         {
@@ -2112,8 +2120,11 @@ namespace ArrangementEditor
         // and Lock), preserving the right-hand arranger interaction area.
         m_headerButtonShield->setBounds(m_viewportScrollX + viewportWidth - 152,
                                         m_viewportScrollY + 6, 80, 36);
-        m_headerButtonShield->toFront(false);
-        m_pianoRollBtn.toFront(false);
+        if (restack)
+        {
+            m_headerButtonShield->toFront(false);
+            m_pianoRollBtn.toFront(false);
+        }
 
         // Keep Piano Roll code intact but hide/disable its actual widget.
         if (DAW::BeatMakingFeaturePolicy::kPianoRollEnabled)
@@ -2144,6 +2155,7 @@ namespace ArrangementEditor
         if (m_viewportScrollX == scrollX && m_viewportScrollY == scrollY)
             return;
 
+        const bool verticalMoved = m_viewportScrollY != scrollY;
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
         m_ruler.setScrollOffsetX(scrollX);
@@ -2161,7 +2173,7 @@ namespace ArrangementEditor
         // existing clip components are eligible to paint.  It is not a
         // structural resize: clip models, bounds, automation layout, and
         // renderer ownership remain unchanged.
-        updatePinnedViewportControls();
+        updatePinnedViewportControls(verticalMoved);
         updateClipRendererVisibility();
 
         // Moving the viewed JUCE component already invalidates the viewport.
@@ -4472,10 +4484,11 @@ namespace ArrangementEditor
                 getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
     }
 
-    void ArrangementViewCore::updateClipRendererVisibility(bool projectBounds)
+    void ArrangementViewCore::updateClipRendererVisibility(ClipBoundsUpdate update)
     {
         const auto viewport = getViewportVisibleBounds();
-        if (m_inViewportScroll && !m_drag.active && m_clipVisibilityGuard.contains(viewport))
+        if (update == ClipBoundsUpdate::none && m_inViewportScroll
+            && !m_drag.active && m_clipVisibilityGuard.contains(viewport))
             return;
 
         const int trackHeight = m_zoom.getTrackHeightPx();
@@ -4489,7 +4502,15 @@ namespace ArrangementEditor
 
             const auto* clip = renderer->getClip();
             const auto oldBounds = renderer->getBounds();
-            const auto nextBounds = projectBounds && clip ? projectClipBounds(*clip) : oldBounds;
+            auto nextBounds = oldBounds;
+            if (clip != nullptr)
+            {
+                if (update == ClipBoundsUpdate::time)
+                    nextBounds = oldBounds.withX(timeToScreenX(clip->startTime))
+                        .withWidth(juce::jmax(4, timeToScreenX(clip->visualLength())));
+                else if (update == ClipBoundsUpdate::all)
+                    nextBounds = projectClipBounds(*clip);
+            }
             const bool wasVisible = renderer->isVisible();
             const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
                                           || region.intersects(nextBounds);
@@ -8261,11 +8282,12 @@ void ArrangementViewCore::clearAutomationLanes(const DAW::TrackID& trackId)
     }
 }
 
-void ArrangementViewCore::updateAutomationLayout()
+void ArrangementViewCore::updateAutomationLayout(bool restack)
 {
-    // Send all clip renderers to the back first
-    for (auto& r : m_clipRenderers)
-        r->toBack();
+    // Time zoom changes dimensions without changing any child ownership.
+    if (restack)
+        for (auto& renderer : m_clipRenderers)
+            renderer->toBack();
 
     for (auto& [trackId, container] : m_automationContainers)
     {
@@ -8297,7 +8319,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
         container->setVisible(true);
         container->setBounds(laneBounds.getX(), y, laneBounds.getWidth(), height);
-        container->toFront(false);
+        if (restack)
+            container->toFront(false);
         container->setSamplesPerPixel(juce::jmax(1.0, m_engineSampleRate / juce::jmax(1.0, m_zoom.getPixelsPerSecond())));
         container->setZoomLevel(m_zoom.getPixelsPerSecond());
         container->setSampleRate(m_engineSampleRate);
@@ -8310,7 +8333,8 @@ void ArrangementViewCore::updateAutomationLayout()
 
     // Re-front the pinned toolbar/ruler AFTER every container toFront so the
     // Quick New Track button always wins hit-testing in the pinned strip.
-    ensureToolbarZOrder();
+    if (restack)
+        ensureToolbarZOrder();
 }
 
 void ArrangementViewCore::changeListenerCallback(juce::ChangeBroadcaster* source)

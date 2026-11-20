@@ -2967,7 +2967,7 @@ MainComponent::MainComponent()
     {
         return arrangement_ && arrangement_->zoomWheel(event, wheel);
     };
-    arrangement_->onZoomLayout = [this] { sizeTimelineContent(); };
+    arrangement_->onZoomLayout = [this](bool heightChanged) { sizeTimelineContent(heightChanged); };
     arrangement_->onZoomPresented = [this]
     {
         syncTimelineViewportPosition();
@@ -9354,20 +9354,23 @@ void MainComponent::syncTimelineViewportPosition()
         trackList_->setScrollOffset(origin.y);
 }
 
-void MainComponent::sizeTimelineContent()
+void MainComponent::sizeTimelineContent(bool updateHeight)
 {
     if (!arrangement_ || !timelineViewport_)
         return;
-    const int viewW = juce::jmax(1, timelineViewport_->getWidth());
-    const int viewH = juce::jmax(1, timelineViewport_->getHeight());
-    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
-    int contentH = 80;
-    for (int i = 0; i < trackCount; ++i)
-        contentH += arrangement_->getLaneHeight(i);
     const auto pps = arrangement_->getPixelsPerSecond();
-    arrangement_->setSize(ArrangementEditor::TimelineZoomController::contentWidth(
-                              juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, viewW),
-                          juce::jmax(viewH + 1, contentH));
+    const int width = ArrangementEditor::TimelineZoomController::contentWidth(
+        juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, timelineViewport_->getWidth());
+    int height = arrangement_->getHeight();
+    if (updateHeight)
+    {
+        int contentHeight = 80;
+        const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
+        for (int i = 0; i < trackCount; ++i)
+            contentHeight += arrangement_->getLaneHeight(i);
+        height = juce::jmax(juce::jmax(1, timelineViewport_->getHeight()) + 1, contentHeight);
+    }
+    arrangement_->setSize(width, height);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()

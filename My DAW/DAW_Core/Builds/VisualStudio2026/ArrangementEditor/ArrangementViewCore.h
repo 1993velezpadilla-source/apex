@@ -327,7 +327,7 @@ namespace ArrangementEditor
         /**
          * Update layout of all automation containers.
          */
-        void updateAutomationLayout();
+        void updateAutomationLayout(bool restack = true);
 
         int getYForTrackId(const DAW::TrackID& trackId) const;
         int getYForTrack(const DAW::TrackID& trackId) const { return getYForTrackId(trackId); }
@@ -614,10 +614,11 @@ namespace ArrangementEditor
         bool isAutomationComponentAt(juce::Point<int> pos) const;
         bool isAutomationInteractionBlockingClipAt(juce::Point<int> pos) const;
         void updateClipAutomationDim();
-        void updatePinnedViewportControls();
+        void updatePinnedViewportControls(bool restack = true);
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
-        void updateClipRendererVisibility(bool projectBounds = false);
+        enum class ClipBoundsUpdate { none, time, all };
+        void updateClipRendererVisibility(ClipBoundsUpdate update = ClipBoundsUpdate::none);
         ClipRenderCore* findClipRendererAt(juce::Point<int> pos);
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);

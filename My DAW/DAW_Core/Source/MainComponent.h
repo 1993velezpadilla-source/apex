@@ -494,7 +494,7 @@ private:
     void setDefaultMixerWindowBounds();
     bool deleteTrackOrFolder(const DAW::TrackID& trackId);
     void updateTimelineViewportContentBounds();
-    void sizeTimelineContent();
+    void sizeTimelineContent(bool updateHeight = true);
     void syncTimelineViewportPosition();
     void syncPlaylistTimeline();
 

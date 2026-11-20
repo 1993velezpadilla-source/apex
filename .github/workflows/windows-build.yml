@@ -89,7 +89,7 @@ jobs:
           path: My DAW/DAW_Core/evidence/boot/*.png
           if-no-files-found: error
       - name: Exercise arranger scrolling and both zoom axes in the Windows EXE
-        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite'
+        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-frame-cache'
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path '.\Builds\VisualStudio2026\x64\Release\App\DAW_Core.exe').Path
@@ -122,14 +122,14 @@ jobs:
             }
           }
       - name: Upload Windows arranger runtime measurements
-        if: always() && (github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite')
+        if: always() && (github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-frame-cache')
         uses: actions/upload-artifact@v4
         with:
           name: APEX-Windows-Arranger-Navigation-${{ github.sha }}
           path: My DAW/DAW_Core/evidence/timeline-navigation/*.json
           if-no-files-found: warn
       - name: Upload Windows arranger preview executable
-        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite'
+        if: github.head_ref == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-zoom-rewrite' || github.ref_name == 'feature/mobile-portrait-frame-cache'
         uses: actions/upload-artifact@v4
         with:
           name: APEX-Zoom-Rewrite-Windows-x64-${{ github.sha }}

@@ -181,7 +181,7 @@ public:
                     onLaneLayoutChanged();
             }
             if (onZoomLayout)
-                onZoomLayout();
+                onZoomLayout(vertical);
         };
         core_->onZoomPresented = [this]
         {
@@ -437,7 +437,7 @@ trackManager_.addListener(this);
     }
 
     bool isApplyingZoom() const noexcept { return core_ != nullptr && core_->isApplyingZoom(); }
-    std::function<void()> onZoomLayout;
+    std::function<void(bool heightChanged)> onZoomLayout;
     std::function<void()> onZoomPresented;
 
     void setViewportScrollOffsets(int scrollX, int scrollY)

@@ -111,7 +111,7 @@ public:
         return true;
     }
 
-    void draw(JNIEnv* env, jobject canvas, Rectangle<int> covered = {}) const
+    void draw(JNIEnv* env, jobject canvas, Rectangle<int> clip, Rectangle<int> covered = {}) const
     {
         jint saveCount = 0;
         if (pixelDivisor != 1)
@@ -127,7 +127,8 @@ public:
         const auto origin = pixelDivisor == 1 ? frameBounds.getPosition() : Point<int>{};
         for (const auto& tile : tiles)
         {
-            if (covered.contains(tile.bounds + origin))
+            const auto surfaceTile = tile.bounds * pixelDivisor + frameBounds.getPosition();
+            if (!clip.intersects(surfaceTile) || covered.contains(surfaceTile))
                 continue;
 
             const auto position = origin + tile.bounds.getPosition();
@@ -326,9 +327,9 @@ public:
         if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster))
             return false;
 
-        nativeTiles.draw(env, canvas, motionArea);
+        nativeTiles.draw(env, canvas, clip, motionArea);
         if (!motionArea.isEmpty())
-            motionTiles.draw(env, canvas);
+            motionTiles.draw(env, canvas, clip);
         drawnMotionArea = motionArea;
         return true;
     }
