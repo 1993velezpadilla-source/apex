@@ -52,10 +52,6 @@ namespace ArrangementEditor
         void setSelected(bool selected);
         void setSoloActive(bool active) { if (m_soloActive != active) { m_soloActive = active; repaint(); } }
         bool isSelected() const { return m_selected; }
-
-       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        static inline bool useLegacyNameLayoutForBenchmark = false;
-       #endif
         void setAutomationActive(bool active) { if (m_automationActive != active) { m_automationActive = active; repaint(); } }
 
         ArrangementClipModel* getClip() { return &m_clipData; }

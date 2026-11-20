@@ -94,13 +94,17 @@ namespace ArrangementEditor
             return width >= kWaveformMinWidthPx && height >= kFadeMinHeightPx;
         }
 
+        static juce::Rectangle<int> renderRegion(const juce::Rectangle<int>& viewport,
+                                                  int trackHeightPx) noexcept
+        {
+            return viewport.expanded(kViewportOverscanPx, juce::jmax(kViewportOverscanPx, trackHeightPx));
+        }
+
         static bool intersectsViewport(const juce::Rectangle<int>& clipBounds,
                                        const juce::Rectangle<int>& viewport,
                                        int trackHeightPx) noexcept
         {
-            const int overscanY = juce::jmax(kViewportOverscanPx, trackHeightPx);
-            return viewport.expanded(kViewportOverscanPx, overscanY)
-                .intersects(clipBounds);
+            return renderRegion(viewport, trackHeightPx).intersects(clipBounds);
         }
 
     private:

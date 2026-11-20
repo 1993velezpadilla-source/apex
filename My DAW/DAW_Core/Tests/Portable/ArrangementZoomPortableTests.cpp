@@ -34,15 +34,19 @@ int main()
     const auto nan = std::numeric_limits<double>::quiet_NaN();
     const auto inf = std::numeric_limits<double>::infinity();
     camera.apply({ 1e300, 1000.0 });
-    assert(camera.getPixelsPerSecond() == 4000.0);
-    assert(camera.getTrackHeightPx() == 180);
+    assert(camera.getPixelsPerSecond() == 16'000.0);
+    assert(camera.getTrackHeightPx() == 360);
     camera.apply({ nan, -inf });
-    assert(camera.getPixelsPerSecond() == 4000.0);
-    assert(camera.getTrackHeightPx() == 180);
+    assert(camera.getPixelsPerSecond() == 16'000.0);
+    assert(camera.getTrackHeightPx() == 360);
     camera.apply({ -1e300, -1e300 });
     assert(camera.getPixelsPerSecond() == 2.0);
     assert(camera.getTrackHeightPx() == 24);
     assert(Zoom::wheelFactor(nan) == 1.0);
+    assert(camera.timeToPixel(nan) == 0);
+    assert(camera.timeToPixel(inf) == Zoom::maxContentWidth);
+    assert(camera.timeToPixel(-1e300) == -Zoom::maxContentWidth);
+    assert(camera.timeToPixel(0.75) == 1);
     assert(Zoom::contentWidth(0.0, 100.0, 360) == 361);
     assert(Zoom::contentWidth(1e300, 4000.0, 360) == std::numeric_limits<int>::max() / 2);
 
@@ -57,9 +61,9 @@ int main()
     for (int i = 0; i < 10000; ++i)
     {
         const bool enlarged = i % 2 == 0;
-        Zoom::Request request{ { enlarged ? 173.5 : 100.0, enlarged ? 126.0 : 80.0 },
+        Zoom::Request request{ { enlarged ? 16'000.0 : 100.0, enlarged ? 360.0 : 80.0 },
                               Zoom::capture(camera.scale(), camera.origin(actual), focus, lanes), focus, true, true };
-        lanes = enlarged ? Zoom::Lanes{ 80, 126, 1, 208 } : Zoom::Lanes{ 80, 80, 1, 132 };
+        lanes = enlarged ? Zoom::Lanes{ 80, 360, 1, 594 } : Zoom::Lanes{ 80, 80, 1, 132 };
         const auto next = Zoom::projectOrigin(request, lanes, camera.origin(actual), limit);
         const Zoom::Point rounded{ std::round(next.x), std::round(next.y) };
         camera.apply(request.scale);
@@ -79,20 +83,24 @@ int main()
     // Large missed-frame movement must keep the full pinch ratio. The first
     // sample after reaching a zoom limit must reverse immediately.
     Zoom::Pinch pinch;
-    camera.apply({ 3500.0, 80.0 });
+    camera.apply({ 15'500.0, 80.0 });
     pinch.begin({ 200.0, 120.0 }, { 50.0, 12.0 });
     auto request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 100.0, 12.0 }, camera.scale());
-    assert(request.scale.pixelsPerSecond == 4000.0);
+    assert(request.scale.pixelsPerSecond == 16'000.0);
     camera.apply(request.scale);
     request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 99.0, 12.0 }, camera.scale());
-    assert(request.scale.pixelsPerSecond == 3960.0);
+    assert(request.scale.pixelsPerSecond == 15'840.0);
     request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { -99.0, 12.0 }, camera.scale());
-    assert(request.scale.pixelsPerSecond == 4000.0);
+    assert(request.scale.pixelsPerSecond == 16'000.0);
     pinch.begin({ 200.0, 120.0 }, { 50.0, 50.0 });
-    camera.apply({ 100.0, 80.0 });
+    camera.apply({ 100.0, 150.0 });
     request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 125.0, 125.0 }, camera.scale());
     assert(request.scale.pixelsPerSecond == 250.0);
-    assert(request.scale.laneHeight == 180.0);
+    assert(request.scale.laneHeight == 360.0);
+    camera.apply(request.scale);
+    request = pinch.move(camera, {}, lanes, { 200.0, 120.0 }, { 125.0, 124.0 }, camera.scale());
+    assert(Zoom::displayHeight(request.scale.laneHeight) == 357);
+    assert(request.scale.pixelsPerSecond == 250.0);
 
     // Grid density is used on every Arrangement paint. A very small
     // px-per-bar used to overflow the ceil(24 / density) -> int conversion.

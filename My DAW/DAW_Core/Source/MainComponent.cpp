@@ -2429,7 +2429,10 @@ MainComponent::MainComponent()
         if (!arrangement_ || !trackList_)
             return;
 
-        updateTimelineViewportContentBounds();
+        // The zoom transaction sizes the viewport from its cached song
+        // extent after the lane heights have been updated.
+        if (!arrangement_->isApplyingZoom())
+            updateTimelineViewportContentBounds();
 
         trackList_->setScrollOffset(arrangement_->getVerticalScrollOffset());
 
@@ -9734,24 +9737,22 @@ void MainComponent::startPluginScanIfNeeded()
 }
 
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline, bool legacyClipName)
+void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool bufferTracks)
 {
     // Called only by an explicit adb benchmark launch in a clean CI install.
     // Never clear or load a user's project to manufacture a benchmark result.
     if (!appCore_.getProjectManager().getProjectFile().getFullPathName().isEmpty()
         || !appCore_.getClipManager().getAllClips().isEmpty())
         return;
-    ArrangementEditor::ClipRenderCore::useLegacyNameLayoutForBenchmark = legacyClipName;
     startupPanelMayBeShown_ = false;
     if (startupPanel_)
         startupPanel_->dismiss();
     if (mixerWindow_)
         mixerWindow_->setVisible(false);
     if (timelineWindow_)
-    {
-        timelineWindow_->setBufferedToImage(bufferTimeline);
         timelineWindow_->setVisible(true);
-    }
+    if (trackListWindow_)
+        trackListWindow_->setBufferedToImage(bufferTracks);
 
     auto& tracks = appCore_.getTrackManager();
     while (tracks.getNumTracks() < 12)
@@ -9800,6 +9801,8 @@ void MainComponent::prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline
     }
     resized();
     updateTimelineViewportContentBounds();
+    if (deepZoom && arrangement_)
+        arrangement_->getCore()->zoomTo({ 9'000.0, 240.0 }, {});
     TimelinePaintMetrics::reset();
     TimelinePaintMetrics::active.store(true, std::memory_order_relaxed);
     repaint();
@@ -9812,9 +9815,10 @@ juce::var MainComponent::androidUiBenchmarkState(bool finishPhase)
     state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
     state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
-    state->setProperty("timelineWindowBuffered",
-        timelineWindow_ && timelineWindow_->getCachedComponentImage() != nullptr);
-    state->setProperty("legacyClipName", ArrangementEditor::ClipRenderCore::useLegacyNameLayoutForBenchmark);
+    state->setProperty("tracksWindowBuffered",
+        trackListWindow_ && trackListWindow_->getCachedComponentImage() != nullptr);
+    if (const auto* firstRow = trackList_ ? trackList_->getRow(0) : nullptr)
+        state->setProperty("trackHeaderHeight", firstRow->getHeight());
     state->setProperty("clips", appCore_.getClipManager().getAllClips().size());
     state->setProperty("backend", "software");
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));

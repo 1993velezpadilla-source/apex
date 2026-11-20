@@ -458,7 +458,6 @@ namespace ArrangementEditor
         void queueZoom(TimelineZoomController::Request, bool nextFrame);
         void presentPendingZoom();
         juce::Rectangle<int> projectClipBounds(const ArrangementClipModel&) const;
-        void projectClips();
         ArrangementUndoCore      m_undo;
         EditorToolState          m_toolState;
 
@@ -618,7 +617,7 @@ namespace ArrangementEditor
         void updatePinnedViewportControls();
         juce::Rectangle<int> getViewportVisibleBounds() const;
         bool shouldShowClipRenderer(const ClipRenderCore& renderer) const;
-        void updateClipRendererVisibility();
+        void updateClipRendererVisibility(bool projectBounds = false);
         ClipRenderCore* findClipRendererAt(juce::Point<int> pos);
         ClipRenderCore* findClipRendererFor(const juce::Uuid& clipId) const;
         ArrangementClipModel* findClipAt(juce::Point<int> pos);

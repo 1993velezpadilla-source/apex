@@ -842,7 +842,7 @@ namespace ArrangementEditor
             // scrolled content, so it must NOT subtract the scroll offset.
             // Subtracting it shifted every bar line away from the clips and
             // the ruler as soon as the view scrolled.
-            auto timeToLaneX = [this](double t) { return (int) m_zoom.timeToX(t); };
+            auto timeToLaneX = [this](double t) { return timeToScreenX(t); };
             const int gridVisibleX0 = visibleBounds.getX();
             const int gridVisibleX1 = visibleBounds.getRight();
             const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
@@ -2110,9 +2110,7 @@ namespace ArrangementEditor
             m_viewportScrollY = actual.y;
             updatePinnedViewportControls();
             m_ruler.setScrollOffsetX(actual.x);
-            m_ruler.repaint();
-            projectClips();
-            updateClipRendererVisibility();
+            updateClipRendererVisibility(true);
             updateAutomationLayout();
            #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             if (viewport != nullptr && m_touchNavigationArmed)
@@ -2445,15 +2443,14 @@ namespace ArrangementEditor
         int trackH = (int)m_zoom.getTrackHeightPx();
 
         int x = timeToScreenX(clip.startTime);
-        int w = (int)(clip.visualLength() * m_zoom.getPixelsPerSecond());
-        w = juce::jmax(4, w);
+        const int w = juce::jmax(4, timeToScreenX(clip.visualLength()));
         int y = getLaneTopForIndex(clip.trackIndex);
         int h = trackH - 2;
 
         // Collapsed folder: keep the renderer alive but park it offscreen so
         // expanding the folder restores every clip instantly. laneIndex 0 is
         // the MASTER lane; regular tracks sit at laneIndex = index + offset.
-        if (m_engineTrackManager != nullptr)
+        if (m_engineTrackManager != nullptr && !m_collapsedFolderIds.empty())
         {
             const int masterOffset = m_engineTrackManager->hasMasterTrack() ? 1 : 0;
             if (clip.trackIndex >= masterOffset)
@@ -2466,25 +2463,6 @@ namespace ArrangementEditor
         }
 
         return { x, y, w, h };
-    }
-
-    void ArrangementViewCore::projectClips()
-    {
-        const auto viewport = getViewportVisibleBounds();
-        const int trackHeight = m_zoom.getTrackHeightPx();
-        for (auto& renderer : m_clipRenderers)
-        {
-            const auto* clip = renderer->getClip();
-            if (!clip)
-                continue;
-            const auto bounds = projectClipBounds(*clip);
-            // Move hidden renderers without invalidating their previous or new area.
-            if (!ArrangementClipLodPolicy::intersectsViewport(bounds, viewport, trackHeight)
-                && !renderer->isEditGestureActive())
-                renderer->setVisible(false);
-            if (renderer->getBounds() != bounds)
-                renderer->setBounds(bounds);
-        }
     }
 
     void ArrangementViewCore::upsertClipRenderer(const juce::Uuid& clipId)
@@ -4543,30 +4521,39 @@ namespace ArrangementEditor
         if (m_drag.active || renderer.isEditGestureActive())
             return true;
 
-        const int trackH = juce::jmax(1, (int)m_zoom.getTrackHeightPx());
-        const int overscanY = juce::jmax(ArrangementClipLodPolicy::kViewportOverscanPx, trackH);
-        const auto renderRegion = getViewportVisibleBounds().expanded(
-            ArrangementClipLodPolicy::kViewportOverscanPx, overscanY);
-        return renderRegion.intersects(renderer.getBounds());
+        return ArrangementClipLodPolicy::intersectsViewport(renderer.getBounds(),
+            getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
     }
 
-    void ArrangementViewCore::updateClipRendererVisibility()
+    void ArrangementViewCore::updateClipRendererVisibility(bool projectBounds)
     {
+        const auto region = ArrangementClipLodPolicy::renderRegion(
+            getViewportVisibleBounds(), m_zoom.getTrackHeightPx());
         for (auto& renderer : m_clipRenderers)
         {
             if (renderer == nullptr)
                 continue;
 
+            const auto* clip = renderer->getClip();
+            const auto oldBounds = renderer->getBounds();
+            const auto nextBounds = projectBounds && clip ? projectClipBounds(*clip) : oldBounds;
             const bool wasVisible = renderer->isVisible();
-            const bool shouldBeVisible = shouldShowClipRenderer(*renderer);
+            const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
+                                          || region.intersects(nextBounds);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
                 if (wasVisible != shouldBeVisible)
                     TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollVisibilityChanges);
             }
-            if (wasVisible != shouldBeVisible)
-                renderer->setVisible(shouldBeVisible);
+            // Project hidden clips before showing them so the old bounds
+            // never dirty another area during a zoom transaction.
+            if (wasVisible && !shouldBeVisible)
+                renderer->setVisible(false);
+            if (nextBounds != oldBounds)
+                renderer->setBounds(nextBounds);
+            if (!wasVisible && shouldBeVisible)
+                renderer->setVisible(true);
 
             if (TimelinePaintMetrics::active.load(std::memory_order_relaxed)
                 && !shouldBeVisible)
@@ -4577,8 +4564,7 @@ namespace ArrangementEditor
             // Tiny or non-audio clips therefore never start a cache worker just
             // because their renderer exists.
             if (shouldBeVisible && renderer->shouldRenderWaveform()
-                && renderer->getClip() != nullptr
-                && !renderer->getClip()->sourcePath.empty()
+                && clip != nullptr && !clip->sourcePath.empty()
                 && renderer->needsWaveformUpdate())
             {
                 if (m_inViewportScroll)
@@ -4778,7 +4764,7 @@ namespace ArrangementEditor
 
     int ArrangementViewCore::timeToScreenX(double time) const
     {
-        return (int)m_zoom.timeToX(time);
+        return m_zoom.timeToPixel(time);
     }
 
     int ArrangementViewCore::arrangementContentTop() const
@@ -6820,7 +6806,7 @@ namespace ArrangementEditor
                 const int trackH = (int)m_zoom.getTrackHeightPx();
                 const int x = timeToScreenX(sourceClip.startTime);
                 const int y = arrangementContentTop() + sourceClip.trackIndex * trackH;
-                const int w = juce::jmax(4, (int)(sourceClip.visualLength() * m_zoom.getPixelsPerSecond()));
+                const int w = juce::jmax(4, timeToScreenX(sourceClip.visualLength()));
                 bounds = { x, y, w, trackH - 2 };
             }
 
@@ -8420,7 +8406,8 @@ int ArrangementViewCore::getLaneIndexForY(int y) const noexcept
 void ArrangementViewCore::setInlinePlaylistExpansion(
     const DAW::TrackID& trackId, int extraPixels)
 {
-    const int clamped = juce::jlimit(0, 128 * 180, extraPixels);
+    const int clamped = juce::jlimit(0, DAW::TrackPlaylistInlineLayoutCore::maxTakeRows
+            * DAW::TrackPlaylistInlineLayoutCore::maxTakeHeight, extraPixels);
     if (m_inlinePlaylistTrackId == trackId && m_inlinePlaylistExtraPixels == clamped)
         return;
     m_inlinePlaylistTrackId = trackId;

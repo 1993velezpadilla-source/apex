@@ -1238,26 +1238,18 @@ namespace ArrangementEditor
         g.setColour(juce::Colours::white.withAlpha(0.92f));
         int labelWidth = textW;
        #if JUCE_ANDROID
-        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        if (useLegacyNameLayoutForBenchmark)
-            g.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::bold));
-        else
-        #endif
+        // Keep JUCE's cached glyph layout keyed to the name's width
+        // whenever the entire name fits.
+        static const juce::Font font(juce::FontOptions(juce::Font::getDefaultSansSerifFontName(),
+            9.5f, juce::Font::bold).withMetricsKind(juce::TypefaceMetricsKind::legacy));
+        if (measuredClipName != name)
         {
-            // Segoe UI is absent on Android. Avoid a system-font search on
-            // each new zoom width, and keep JUCE's cached glyph layout keyed
-            // to the name's width whenever the entire name fits.
-            static const juce::Font font(juce::FontOptions(juce::Font::getDefaultSansSerifFontName(),
-                9.5f, juce::Font::bold).withMetricsKind(juce::TypefaceMetricsKind::legacy));
-            if (measuredClipName != name)
-            {
-                measuredClipName = name;
-                measuredClipNameWidth = juce::GlyphArrangement::getStringWidthInt(font, name);
-            }
-            if (measuredClipNameWidth > 0)
-                labelWidth = juce::jmin(textW, measuredClipNameWidth + 4);
-            g.setFont(font);
+            measuredClipName = name;
+            measuredClipNameWidth = juce::GlyphArrangement::getStringWidthInt(font, name);
         }
+        if (measuredClipNameWidth > 0)
+            labelWidth = juce::jmin(textW, measuredClipNameWidth + 4);
+        g.setFont(font);
        #else
         g.setFont(juce::Font("Segoe UI", 9.5f, juce::Font::bold));
        #endif

@@ -9,11 +9,14 @@ namespace DAW
 // changes. Gap is inserted after the owning track's main band.
 struct TrackPlaylistInlineLayoutCore final
 {
+    static constexpr int maxTakeRows = 128;
+    static constexpr int minTakeHeight = 40;
+    static constexpr int maxTakeHeight = 300;
     // Keep each virtual take proportional to the parent's native vertical
     // zoom; 40px minimum preserves accessible buttons/selection gestures.
     static int takeHeightForTrackHeight(int trackHeight) noexcept
     {
-        return juce::jlimit(40, 180,
+        return juce::jlimit(minTakeHeight, maxTakeHeight,
             juce::roundToInt(66.0 * (double)juce::jmax(1, trackHeight) / 80.0));
     }
 

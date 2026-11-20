@@ -1934,13 +1934,10 @@ public:
             resized(); // JUCE derives owned content bounds from the actual peer
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
-            const bool benchmark = scene == "empty" || scene == "clip";
+            const bool benchmark = scene == "empty" || scene == "clip" || scene == "deep";
             if (benchmark)
-            {
-                const auto renderer = DAW::androidLaunchExtra("apex_renderer");
-                daw->prepareAndroidUiBenchmark(scene == "clip", renderer == "native-tiles",
-                                               renderer != "direct-timeline");
-            }
+                daw->prepareAndroidUiBenchmark(scene != "empty", scene == "deep",
+                    DAW::androidLaunchExtra("apex_renderer") == "buffered-tracks");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

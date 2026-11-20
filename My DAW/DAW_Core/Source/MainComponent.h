@@ -113,7 +113,7 @@ class MainComponent : public juce::Component,
 {
 public:
    #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-    void prepareAndroidUiBenchmark(bool withClip, bool bufferTimeline, bool legacyClipName);
+    void prepareAndroidUiBenchmark(bool withClip, bool deepZoom, bool bufferTracks);
     juce::var androidUiBenchmarkState(bool finishPhase);
     juce::Rectangle<int> androidUiBenchmarkBounds() const;
    #endif

@@ -38,15 +38,23 @@ public:
     };
 
     static constexpr double minPixelsPerSecond = 2.0;
-    static constexpr double maxPixelsPerSecond = 4000.0;
+    static constexpr double maxPixelsPerSecond = 16'000.0;
     static constexpr int minTrackHeight = 24;
-    static constexpr int maxTrackHeight = 180;
+    static constexpr int maxTrackHeight = 360;
+    static constexpr int maxContentWidth = std::numeric_limits<int>::max() / 2;
 
     Scale scale() const noexcept { return scale_; }
     double getPixelsPerSecond() const noexcept { return scale_.pixelsPerSecond; }
     int getTrackHeightPx() const noexcept { return displayHeight(scale_.laneHeight); }
     double timeToX(double seconds) const noexcept { return seconds * scale_.pixelsPerSecond; }
     double xToTime(double x) const noexcept { return x / scale_.pixelsPerSecond; }
+
+    int timeToPixel(double seconds) const noexcept
+    {
+        const auto x = timeToX(seconds);
+        return (int)std::clamp(std::isnan(x) ? 0.0 : x,
+                              -(double)maxContentWidth, (double)maxContentWidth);
+    }
 
     void apply(Scale next) noexcept { scale_ = clamp(next, scale_); }
 
@@ -142,10 +150,9 @@ public:
 
     static int contentWidth(double seconds, double pixelsPerSecond, int viewportWidth) noexcept
     {
-        constexpr int maxWidth = std::numeric_limits<int>::max() / 2;
-        const int minimum = std::clamp(viewportWidth, 0, maxWidth - 1) + 1;
+        const int minimum = std::clamp(viewportWidth, 0, maxContentWidth - 1) + 1;
         const double width = std::ceil(seconds * pixelsPerSecond);
-        return (int)std::clamp(std::isnan(width) ? 0.0 : width, (double)minimum, (double)maxWidth);
+        return (int)std::clamp(std::isnan(width) ? 0.0 : width, (double)minimum, (double)maxContentWidth);
     }
 
     class Pinch final

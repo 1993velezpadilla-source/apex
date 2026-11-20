@@ -47,11 +47,11 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
         for state in (before, after):
-            if state.get("timelineWindowBuffered") != (renderer == "native-tiles"):
-                raise ValueError("The timeline window did not use the requested buffer mode")
-            if state.get("legacyClipName") != (renderer != "direct-timeline"):
-                raise ValueError("The clip name did not use the requested layout")
-            if (state.get("clips", 0) > 0) != (scene == "clip"):
+            if state.get("tracksWindowBuffered") != (renderer == "buffered-tracks"):
+                raise ValueError("Track headers did not use the requested buffer mode")
+            if state.get("trackHeaderHeight") != state["laneHeight"]:
+                raise ValueError("Track headers and arranger lanes are different heights")
+            if (state.get("clips", 0) > 0) != (scene != "empty"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != "software":
                 raise ValueError("Unexpected renderer in the software benchmark")
@@ -76,7 +76,12 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         for key in ("rebuilds", "waveformRefreshes"):
             if phase["before"][key] != phase["after"][key]:
                 raise ValueError(f"{phase['phase']} unexpectedly changed {key}")
-    if scene == "clip":
+    if scene == "deep":
+        if phases[1]["after"]["pps"] != 16_000 or phases[6]["after"]["laneHeight"] != 360:
+            raise ValueError("Pinches did not reach both new zoom limits")
+        if phases[2]["after"]["pps"] <= 4_000:
+            raise ValueError("Pinch out did not remain in the expanded horizontal range")
+    if scene != "empty":
         for phase in phases[:3]:
             if phase["after"].get("waveformPaints", 0) <= phase["before"].get("waveformPaints", 0):
                 raise ValueError(f"No production waveform draw observed during {phase['phase']}")
@@ -173,8 +178,8 @@ def main() -> int:
     results = []
     failures = []
     try:
-        renderers = ("native-tiles", "direct-legacy-name", "direct-timeline")
-        for scene in ("empty", "clip"):
+        renderers = ("buffered-tracks", "direct-timeline")
+        for scene in ("empty", "clip", "deep"):
             for repeat, order in enumerate((renderers, renderers[::-1]), 1):
                 for renderer in order:
                     name = f"{scene}-{renderer}-{repeat}"

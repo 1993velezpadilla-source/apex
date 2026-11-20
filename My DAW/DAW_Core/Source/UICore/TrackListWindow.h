@@ -21,6 +21,11 @@ public:
     explicit TrackListWindow(TrackList& content)
         : FloatingWindowBase("Tracks"), content_(content)
     {
+       #if JUCE_ANDROID
+        // Compose the docked headers directly into the Android peer. Each
+        // TrackRow keeps its own image for reuse while scrolling.
+        setBufferedToImage(false);
+       #endif
         addAndMakeVisible(content_);
         setSize(240, 400);
     }

@@ -370,7 +370,7 @@ trackManager_.addListener(this);
         // One native main band + N alternate take bands in this SAME track.
         const int takeHeight = TrackPlaylistInlineLayoutCore::takeHeightForTrackHeight(
             (int)core_->getZoom().getTrackHeightPx());
-        const int extras = juce::jmin(128, juce::jmax(0,
+        const int extras = juce::jmin(TrackPlaylistInlineLayoutCore::maxTakeRows, juce::jmax(0,
             (int)track->getPlaylists().size() - 1)) * takeHeight;
         inlinePlaylistPanel_->setInlineTakeHeight(takeHeight);
         core_->setInlinePlaylistExpansion(inlinePlaylistTrackId_, extras);
@@ -560,7 +560,7 @@ trackManager_.addListener(this);
 
     void setLaneHeight(int /*index*/, int newHeight)
     {
-        defaultLaneHeight_ = juce::jlimit(24, 180, newHeight);
+        defaultLaneHeight_ = ArrangementEditor::TimelineZoomController::displayHeight(newHeight);
         if (!core_)
             return;
         auto scale = core_->getZoom().scale();
