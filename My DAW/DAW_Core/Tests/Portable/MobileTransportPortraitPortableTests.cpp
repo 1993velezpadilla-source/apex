@@ -861,6 +861,7 @@ constexpr bool compactWideInsetRecoverySweep();
 
 int main()
 {
+    assert(compactNarrowTransportIsNonInteractive());
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
     // evaluation budget; retain the same checks in optimized/NDEBUG builds.
     assert(compactWideInsetRecoverySweep());
@@ -2228,6 +2229,31 @@ constexpr bool compactCenterHitExclusivity()
 }
 static_assert(compactCenterHitExclusivity());
 
+
+// A six-button 44-unit row is impossible below 268 logical units.
+// Until paged navigation exists, no undersized Transport tap may survive.
+constexpr bool compactNarrowTransportIsNonInteractive()
+{
+    for (int w = 20; w < 268; ++w)
+        for (const int h : {44, 87, 88, 93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto action : r.transport)
+                if (action.x || action.y || action.width || action.height)
+                    return false;
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+        }
+    for (const int h : {44, 88, 94, 112})
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(268, h);
+        for (const auto action : r.transport)
+            if (!inside(action, 268, h) || action.width < 44 || action.height < 44)
+                return false;
+    }
+    return true;
+}
+// Runtime test avoids compiler constexpr evaluation limits.
 
 // Regression for the six-action compact Transport boundary after split-screen
 // resize. 268 is the first width that can fit six 44-unit targets; at 267
