@@ -94,9 +94,25 @@ const Image::BitmapData& srcData, int alpha, int x, int y, bool tiledFill, bool 
     path.write_text(text, encoding="utf-8")
 
 
+def configure_component_paint_probe(gui: Path) -> None:
+    for path, signature, component in (
+        (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
+        (gui / "windows/juce_ComponentPeer.cpp", "void ComponentPeer::handlePaint (LowLevelGraphicsContext& contextToPaintTo)", "component"),
+    ):
+        contents = path.read_text(encoding="utf-8")
+        if "apexAndroidFrame::ComponentPaintProbe" in contents:
+            continue
+        start = signature + "\n{"
+        path.write_text(replace(contents, start, start + f"""
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    apexAndroidFrame::ComponentPaintProbe apexPaintProbe ({component});
+   #endif"""), encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     configure_opaque_viewport_blit(root)
     gui = root / "modules/juce_gui_basics"
+    configure_component_paint_probe(gui)
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"

@@ -8,6 +8,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+#include <android/log.h>
+#include <map>
+#include <typeinfo>
+#endif
+
 // Compiled in the Android JUCE GUI module with its JNI bindings available.
 namespace juce::apexAndroidFrame
 {
@@ -330,6 +336,70 @@ static std::size_t frameCount = 0;
 static bool measuring = false;
 static bool useTiles = false;
 
+static jlong threadCpuNs()
+{
+    timespec now {};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+    return (jlong)now.tv_sec * 1'000'000'000 + now.tv_nsec;
+}
+
+// Measure the work between child paint calls on the real Android UI thread.
+// JUCE's top-level paint scope also includes clipping and window decoration.
+class ComponentPaintProbe
+{
+public:
+    explicit ComponentPaintProbe(const Component& component)
+        : type(measuring ? &typeid(component) : nullptr)
+    {
+        if (type == nullptr)
+            return;
+        parent = current;
+        current = this;
+        started = threadCpuNs();
+    }
+
+    ~ComponentPaintProbe()
+    {
+        if (type == nullptr)
+            return;
+        const auto duration = threadCpuNs() - started;
+        current = parent;
+        if (parent != nullptr)
+            parent->childTime += duration;
+        auto& sample = components[type];
+        sample.selfNs += duration - childTime;
+        ++sample.count;
+    }
+
+    static void reset() { components.clear(); }
+
+    static void logTop(std::size_t frames)
+    {
+        using Entry = std::pair<const std::type_info*, Sample>;
+        std::vector<Entry> sorted(components.begin(), components.end());
+        std::sort(sorted.begin(), sorted.end(), [](const Entry& left, const Entry& right)
+        {
+            return left.second.selfNs > right.second.selfNs;
+        });
+        __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PROFILE frames=%zu", frames);
+        for (std::size_t i = 0; i < jmin(sorted.size(), std::size_t{ 12 }); ++i)
+        {
+            const auto& [type, sample] = sorted[i];
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PAINT %s calls=%zu self_ms=%.3f",
+                                type->name(), sample.count, (double)sample.selfNs / 1'000'000.0);
+        }
+    }
+
+private:
+    struct Sample { jlong selfNs = 0; std::size_t count = 0; };
+    static inline thread_local ComponentPaintProbe* current = nullptr;
+    static inline std::map<const std::type_info*, Sample> components;
+
+    const std::type_info* type;
+    ComponentPaintProbe* parent = nullptr;
+    jlong started = 0, childTime = 0;
+};
+
 class FrameProbe
 {
 public:
@@ -370,13 +440,6 @@ private:
     {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
     }
-    static jlong threadCpuNs()
-    {
-        timespec now {};
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
-        return (jlong)now.tv_sec * 1'000'000'000 + now.tv_nsec;
-    }
-
     const bool record;
     FrameSample sample;
     Clock::time_point begin, beginRaster;
@@ -404,8 +467,10 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     if (measuring)
     {
         frameCount = 0;
+        ComponentPaintProbe::reset();
         return nullptr;
     }
+    ComponentPaintProbe::logTop(frameCount);
     std::vector<jlong> values;
     values.reserve(frameCount * 5);
     for (std::size_t i = 0; i < frameCount; ++i)
