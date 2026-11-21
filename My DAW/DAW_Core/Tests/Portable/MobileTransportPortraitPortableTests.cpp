@@ -912,8 +912,42 @@ bool compactRecoveredSingleRowGrid()
     return true;
 }
 
+// Exact 268-unit activation and 94-unit two-row recovery contract.
+// Sweep every intervening width so gap/inset rounding cannot silently
+// create undersized or overlapping Transport/Mixer/Sends targets.
+constexpr bool compactActivationSweep()
+{
+    for (int w = 264; w <= 300; ++w)
+        for (int h = 44; h <= 96; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+            {
+                if (w < 268)
+                {
+                    if (action.width != 0 || action.height != 0) return false;
+                }
+                else if (action.width < 44 || action.height < 44)
+                    return false;
+            }
+            const PortraitTransportBounds shortcuts[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (const auto shortcut : shortcuts)
+                if (h < 94
+                    ? (shortcut.width != 0 || shortcut.height != 0)
+                    : (shortcut.width < 44 || shortcut.height < 44))
+                    return false;
+        }
+    return true;
+}
+
+
 int main()
 {
+    assert(compactActivationSweep());
     assert(compactRecoveredSingleRowGrid());
     assert(compactNarrowTransportIsNonInteractive());
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
@@ -2416,35 +2450,3 @@ constexpr bool compactWideInsetRecoverySweep()
 // Exercised by main() rather than a compiler-budget-limited static_assert.
 
 
-// Exact 268-unit activation and 94-unit two-row recovery contract.
-// Sweep every intervening width so gap/inset rounding cannot silently
-// create undersized or overlapping Transport/Mixer/Sends targets.
-constexpr bool compactActivationSweep()
-{
-    for (int w = 264; w <= 300; ++w)
-        for (int h = 44; h <= 96; ++h)
-        {
-            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
-            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
-                return false;
-            for (const auto action : r.transport)
-            {
-                if (w < 268)
-                {
-                    if (action.width != 0 || action.height != 0) return false;
-                }
-                else if (action.width < 44 || action.height < 44)
-                    return false;
-            }
-            const PortraitTransportBounds shortcuts[] = {
-                r.fx, r.browser, r.mixer, r.sends
-            };
-            for (const auto shortcut : shortcuts)
-                if (h < 94
-                    ? (shortcut.width != 0 || shortcut.height != 0)
-                    : (shortcut.width < 44 || shortcut.height < 44))
-                    return false;
-        }
-    return true;
-}
-static_assert(compactActivationSweep());
