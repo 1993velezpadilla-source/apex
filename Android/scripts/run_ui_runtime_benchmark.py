@@ -150,6 +150,16 @@ def validate_result(result: dict, scene: str, renderer: str,
         for phase in phases[:3]:
             if phase["after"].get("waveformPaints", 0) <= phase["before"].get("waveformPaints", 0):
                 raise ValueError(f"No production waveform draw observed during {phase['phase']}")
+            if phase["after"].get("waveformPeaksWalked", 0) <= phase["before"].get("waveformPeaksWalked", 0):
+                raise ValueError(f"Waveform paint returned without usable cached audio peaks during {phase['phase']}")
+        if phases[0]["before"].get("visibleAudioWaveforms", 0) < 1:
+            raise ValueError("Benchmark began with no viewport-visible source audio clip")
+        if phases[0]["before"].get("readyAudioWaveforms", 0) < 1:
+            raise ValueError("Benchmark began before source waveform peaks were ready")
+        # The batching optimization must be exercised by at least one broad
+        # repaint (usually the horizontal pinch), not merely compiled in.
+        if phases[2]["after"].get("waveformBatchedPaints", 0) <= phases[0]["before"].get("waveformBatchedPaints", 0):
+            raise ValueError("Grouped waveform drawing was never exercised during horizontal navigation")
 
 
 def validate_focus(window_dump: str) -> None:
