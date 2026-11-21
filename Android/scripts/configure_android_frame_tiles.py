@@ -64,10 +64,19 @@ def add_frame_pacing(peer: str) -> str:
                 damage->add (area);
                 if (apexAndroidFrame::framePacingEnabled && damage->hardwareCanvas)
                 {
-                    // Hardware View invalidation schedules a draw. The precise
-                    // dirty regions remain in the native backing store.
-                    if (! std::exchange (damage->viewInvalidated, true))
-                        localView.callVoidMethod (ComponentPeerView.invalidateAll);
+                    // Match the normal (vertical) viewport damage path for
+                    // horizontal pans, too. Scheduling invalidate() with no
+                    // bounds promoted a small timeline strip to an entire
+                    // 1080x2400 hardware Canvas draw on EVERY touch frame.
+                    //
+                    // Do NOT coalesce to the first dirty rectangle: several
+                    // repaint requests may arrive before the draw callback,
+                    // and Android must union ALL their areas for the Canvas
+                    // clip to cover every freshly updated tile. Pending native
+                    // damage remains the source of truth for raster updates.
+                    localView.callVoidMethod (AndroidView.invalidate,
+                                              area.getX(), area.getY(),
+                                              area.getRight(), area.getBottom());
                     return;
                 }
             }
