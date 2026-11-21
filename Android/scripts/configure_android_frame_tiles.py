@@ -64,19 +64,23 @@ def add_frame_pacing(peer: str) -> str:
                 damage->add (area);
                 if (apexAndroidFrame::framePacingEnabled && damage->hardwareCanvas)
                 {
-                    // Match the normal (vertical) viewport damage path for
-                    // horizontal pans, too. Scheduling invalidate() with no
-                    // bounds promoted a small timeline strip to an entire
-                    // 1080x2400 hardware Canvas draw on EVERY touch frame.
-                    //
-                    // Do NOT coalesce to the first dirty rectangle: several
-                    // repaint requests may arrive before the draw callback,
-                    // and Android must union ALL their areas for the Canvas
-                    // clip to cover every freshly updated tile. Pending native
-                    // damage remains the source of truth for raster updates.
-                    localView.callVoidMethod (AndroidView.invalidate,
-                                              area.getX(), area.getY(),
-                                              area.getRight(), area.getBottom());
+                    // Hardware Canvas ignores invalidate(rect) bounds since
+                    // Android API 21. The internal RectangleList retains ALL
+                    // dirty regions, so request one frame while its draw is
+                    // pending rather than scheduling a new full Canvas pass
+                    // for each clip/ruler/viewport repaint.
+                    if (!damage->viewInvalidated)
+                    {
+                        damage->viewInvalidated = true;
+                       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                        ++damage->scheduledPresentations;
+                       #endif
+                        localView.callVoidMethod (AndroidView.invalidateAll);
+                    }
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    else
+                        ++damage->mergedPresentations;
+                   #endif
                     return;
                 }
             }

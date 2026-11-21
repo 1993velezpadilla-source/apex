@@ -105,10 +105,12 @@ struct Damage
             // before pan/REC. Log native requests DURING real gestures.
             if (measuredFramesLogged++ < 12)
                 __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
-                    "MEASURED_DAMAGE requests=%llu full90=%llu sumPixels=%lld "
+                    "MEASURED_DAMAGE requests=%llu full90=%llu scheduled=%llu merged=%llu sumPixels=%lld "
                     "unionPixels=%lld surfacePixels=%lld canvasDirty=%d,%d,%d,%d",
                     static_cast<unsigned long long>(requests),
                     static_cast<unsigned long long>(fullSurfaceRequests),
+                    static_cast<unsigned long long>(scheduledPresentations),
+                    static_cast<unsigned long long>(mergedPresentations),
                     static_cast<long long>(requestedPixels),
                     static_cast<long long>(unionPixels),
                     static_cast<long long>(lastSurfacePixels),
@@ -131,9 +133,11 @@ struct Damage
                 canvasDirty.getX(), canvasDirty.getY(),
                 canvasDirty.getWidth(), canvasDirty.getHeight());
         requests = fullSurfaceRequests = 0;
+        scheduledPresentations = mergedPresentations = 0;
         requestedPixels = largestRequestPixels = 0;
     }
     uint64_t requests = 0, fullSurfaceRequests = 0, damageFramesLogged = 0;
+    uint64_t scheduledPresentations = 0, mergedPresentations = 0;
     uint32_t lastMeasuredEpoch = 0;
     int measuredFramesLogged = 0;
     int64_t requestedPixels = 0, largestRequestPixels = 0, lastSurfacePixels = 0;
@@ -432,6 +436,7 @@ public:
     void invalidate() noexcept
     {
         damage->hardwareCanvas = false;
+        damage->viewInvalidated = false;
         nativeTiles.invalidate();
         motionTiles.invalidate();
         drawnMotionArea = {};
