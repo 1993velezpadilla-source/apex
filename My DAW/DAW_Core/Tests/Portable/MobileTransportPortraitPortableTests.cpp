@@ -106,6 +106,32 @@ static_assert(valid(360, 112));
 static_assert(valid(360, 144));
 static_assert(valid(393, 144));
 static_assert(valid(245, 144));
+// The legacy three-row portrait geometry can be selected during OS resize.
+// Its action row must not leave six 1..43-unit tappable targets behind when
+// the keyboard shrinks the deck or split-screen narrows the viewport.
+constexpr bool portraitCollapsedActionsAreNonInteractive()
+{
+    for (int w = 13; w <= 306; ++w)
+    {
+        const auto r = portraitTransportLayout(w, 144);
+        for (const auto action : r.transport)
+            if (action.width != 0 || action.height != 0) return false;
+    }
+    for (const int w : {307, 320, 360, 852})
+    {
+        const auto shortDeck = portraitTransportLayout(w, 143);
+        const auto usableDeck = portraitTransportLayout(w, 144);
+        for (int i = 0; i < 6; ++i)
+        {
+            if (shortDeck.transport[i].width != 0
+                || shortDeck.transport[i].height != 0) return false;
+            if (usableDeck.transport[i].width < 44
+                || usableDeck.transport[i].height < 44) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitCollapsedActionsAreNonInteractive());
 // Portrait split-screen/keyboard collapse must not leave tiny tappable
 // FX, Browser, floating Mixer or Bubblegum Sends targets behind.
 constexpr bool portraitShortcutsRespectTouchMinimum()
