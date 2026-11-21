@@ -127,89 +127,71 @@ namespace ArrangementEditor
         g.drawHorizontalLine((int)b.getBottom() - 1, b.getX(), b.getRight());
     }
 
-void ArrangementRulerCore::drawGrid(juce::Graphics& g)
+    void ArrangementRulerCore::drawGrid(juce::Graphics& g)
     {
-        double beatDuration = 60.0 / m_bpm;
-        double barDuration = beatDuration * 4.0;
+        const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
+        if (dirty.isEmpty())
+            return;
 
-        double viewStart = xToTime(0);
-        double viewEnd = xToTime(getWidth());
-
-        // Compute pixels-per-beat / pixels-per-bar from actual BPM + zoom
+        const double beatDuration = 60.0 / m_bpm;
+        const double barDuration = beatDuration * 4.0;
         const double pxPerBeat = beatDuration * m_zoom.getPixelsPerSecond();
-        const double pxPerBar  = barDuration  * m_zoom.getPixelsPerSecond();
-        const int    barStep   = GridLodPolicy::barStep(pxPerBar);
-        const bool   noBeats   = GridLodPolicy::suppressBeats(pxPerBeat);
+        const double pxPerBar = barDuration * m_zoom.getPixelsPerSecond();
+        if (!std::isfinite(pxPerBar) || pxPerBar <= 0.0)
+            return;
 
-        // Seconds labels (m:ss) only when bars are spaced wide enough that the
-        // ~44 px label cannot collide with its neighbours — bars-only beyond.
+        const int barStep = GridLodPolicy::barStep(pxPerBar);
+        const int labelStep = GridLodPolicy::barLabelStep(pxPerBar);
+        const bool drawBeats = !GridLodPolicy::suppressBeats(pxPerBeat);
         const bool drawSeconds = pxPerBar >= 60.0;
+        constexpr int labelReach = 46;
+        const int firstBar = static_cast<int>(
+            xToTime(juce::jmax(0, dirty.getX() - labelReach)) / barDuration);
+        const int lastBar = static_cast<int>(xToTime(dirty.getRight()) / barDuration) + 1;
+        static const juce::Font barFont("Segoe UI", 9.f, juce::Font::plain);
+        static const juce::Font secondsFont("Segoe UI", 8.f, juce::Font::plain);
+        const float bottom = static_cast<float>(getHeight());
 
-        int barStart = (int)(viewStart / barDuration);
-        int barEnd = (int)(viewEnd / barDuration) + 1;
-
-        for (int bar = barStart; bar <= barEnd; ++bar)
+        for (int bar = firstBar - firstBar % barStep; bar <= lastBar; bar += barStep)
         {
-            // Skip bars at extreme zoom-out to reduce GPU draw calls
-            if (barStep > 1 && (bar % barStep) != 0)
+            const double barTime = bar * barDuration;
+            const int x = timeToX(barTime);
+            if (x >= dirty.getRight())
+                break;
+
+            if (dirty.intersects(juce::Rectangle<int>{ x, 20, 1, getHeight() - 20 }))
             {
-                // Still draw bar numbers for skipped bars if they are
-                // far enough apart to be legible
-                double barTime = bar * barDuration;
-                int x = timeToX(barTime);
-                if (x >= 0 && x <= getWidth())
+                g.setColour(fromU32(Col::gridLineMajor));
+                g.drawVerticalLine(x, 20.f, bottom);
+            }
+
+            if (bar % labelStep == 0)
+            {
+                const juce::Rectangle<int> barLabel(x + 2, 4, 40, 14);
+                if (dirty.intersects(barLabel))
                 {
                     g.setColour(fromU32(Col::text));
-                    g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-                    g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                               juce::Justification::centredLeft);
-                    if (drawSeconds)
-                    {
-                        g.setColour(fromU32(Col::textDim));
-                        g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                        g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                                   juce::Justification::centredLeft);
-                    }
+                    g.setFont(barFont);
+                    g.drawText(juce::String(bar + 1), barLabel, juce::Justification::centredLeft);
                 }
-                continue;
+                const juce::Rectangle<int> secondsLabel(x + 2, 18, 44, 12);
+                if (drawSeconds && dirty.intersects(secondsLabel))
+                {
+                    g.setColour(fromU32(Col::textDim));
+                    g.setFont(secondsFont);
+                    g.drawText(formatTimeSeconds(barTime), secondsLabel, juce::Justification::centredLeft);
+                }
             }
 
-            double barTime = bar * barDuration;
-            int x = timeToX(barTime);
-
-            if (x < 0 || x > getWidth())
-                continue;
-
-            // Bar line — major divisions read above minor ones
-            g.setColour(fromU32(Col::gridLineMajor));
-            g.drawVerticalLine(x, 20.f, (float)getHeight());
-
-            // Bar number
-            g.setColour(fromU32(Col::text));
-            g.setFont(juce::Font("Segoe UI", 9.f, juce::Font::plain));
-            g.drawText(juce::String(bar + 1), x + 2, 4, 40, 14,
-                       juce::Justification::centredLeft);
-
-            // Song-time seconds label (m:ss) — the user's audible clock
-            if (drawSeconds)
-            {
-                g.setColour(fromU32(Col::textDim));
-                g.setFont(juce::Font("Segoe UI", 8.f, juce::Font::plain));
-                g.drawText(formatTimeSeconds(barTime), x + 2, 18, 44, 12,
-                           juce::Justification::centredLeft);
-            }
-
-            // Beat lines — suppressed when beats are too dense
-            if (noBeats)
+            if (!drawBeats || dirty.getBottom() <= 24)
                 continue;
 
             g.setColour(fromU32(Col::gridLine).withAlpha(0.3f));
             for (int beat = 1; beat < 4; ++beat)
             {
-                double beatTime = barTime + beat * beatDuration;
-                int beatX = timeToX(beatTime);
-                if (beatX >= 0 && beatX <= getWidth())
-                    g.drawVerticalLine(beatX, 24.f, (float)getHeight());
+                const int beatX = timeToX(barTime + beat * beatDuration);
+                if (beatX >= dirty.getX() && beatX < dirty.getRight())
+                    g.drawVerticalLine(beatX, 24.f, bottom);
             }
         }
     }

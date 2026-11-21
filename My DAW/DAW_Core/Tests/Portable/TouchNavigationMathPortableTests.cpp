@@ -20,6 +20,9 @@ int main()
     // A short phone pan and an interrupted fling must restore full-detail
     // waveform paint without a structural renderer rebuild. A stationary
     // tap or an ongoing fling must not schedule that extra repaint.
+    assert(TouchNavigationMath::followHorizontalPan(100.f, 164.f, 0.6f) == 164.f);
+    assert(TouchNavigationMath::followHorizontalPan(164.f, 90.f, 0.6f) == 90.f);
+    assert(std::abs(TouchNavigationMath::followHorizontalPan(100.f, 101.f, 0.6f) - 100.4f) < 0.001f);
     static_assert(TouchNavigationMath::touchPanNeedsDetailRepaint(true, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(false, false));
     static_assert(!TouchNavigationMath::touchPanNeedsDetailRepaint(true, true));

@@ -2967,12 +2967,21 @@ MainComponent::MainComponent()
     {
         return arrangement_ && arrangement_->zoomWheel(event, wheel);
     };
-    arrangement_->onZoomLayout = [this] { sizeTimelineContent(); };
+    arrangement_->onZoomLayout = [this](bool heightChanged) { sizeTimelineContent(heightChanged); };
     arrangement_->onZoomPresented = [this]
     {
         syncTimelineViewportPosition();
         syncPlaylistTimeline();
     };
+   #if JUCE_ANDROID
+    arrangement_->onTransportTick = [this]
+    {
+        // The RT transport does NOT fire positionChanged() as recording
+        // progresses. Keep scroll room ahead of the playhead from the
+        // existing message-thread UI timer, not the audio callback.
+        positionChanged(appCore_.getTransport().getPosition());
+    };
+   #endif
     timelineViewport_ = std::move(timelineViewport);
     timelineViewport_->getVerticalScrollBar().addListener(this);
     timelineViewport_->getHorizontalScrollBar().addListener(this);
@@ -7980,8 +7989,32 @@ void MainComponent::refreshPinnedValueHint()
                                       : (showPlugin ? lastPluginValueHint_ : juce::String()));
 }
 
+#if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+void MainComponent::enableAndroidGpuPresentation()
+{
+    androidGpuContext_.setRenderer(&androidGpuFrames_);
+    androidGpuContext_.setComponentPaintingEnabled(true);
+    androidGpuContext_.setContinuousRepainting(false);
+    androidGpuContext_.attachTo(*this);
+
+    // Keep the software peer available on devices that cannot start EGL.
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Timer::callAfterDelay(4000, [safe]
+    {
+        if (safe != nullptr && safe->androidGpuFrames_.rendered.load(std::memory_order_relaxed) == 0)
+        {
+            safe->androidGpuContext_.detach();
+            safe->repaint();
+        }
+    });
+}
+#endif
+
 MainComponent::~MainComponent()
 {
+   #if JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    androidGpuContext_.detach();
+   #endif
     pinnedValueTimer_.stopTimer();
     // 1. Detach listeners first - prevents callbacks into dying objects
     removeKeyListener(this);
@@ -9354,20 +9387,23 @@ void MainComponent::syncTimelineViewportPosition()
         trackList_->setScrollOffset(origin.y);
 }
 
-void MainComponent::sizeTimelineContent()
+void MainComponent::sizeTimelineContent(bool updateHeight)
 {
     if (!arrangement_ || !timelineViewport_)
         return;
-    const int viewW = juce::jmax(1, timelineViewport_->getWidth());
-    const int viewH = juce::jmax(1, timelineViewport_->getHeight());
-    const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
-    int contentH = 80;
-    for (int i = 0; i < trackCount; ++i)
-        contentH += arrangement_->getLaneHeight(i);
     const auto pps = arrangement_->getPixelsPerSecond();
-    arrangement_->setSize(ArrangementEditor::TimelineZoomController::contentWidth(
-                              juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, viewW),
-                          juce::jmax(viewH + 1, contentH));
+    const int width = ArrangementEditor::TimelineZoomController::contentWidth(
+        juce::jmax(30.0, lastTimelineContentLengthSeconds_), pps, timelineViewport_->getWidth());
+    int height = arrangement_->getHeight();
+    if (updateHeight)
+    {
+        int contentHeight = 80;
+        const int trackCount = juce::jmax(1, arrangement_->getNumLanes());
+        for (int i = 0; i < trackCount; ++i)
+            contentHeight += arrangement_->getLaneHeight(i);
+        height = juce::jmax(juce::jmax(1, timelineViewport_->getHeight()) + 1, contentHeight);
+    }
+    arrangement_->setSize(width, height);
 }
 
 void MainComponent::updateTimelineViewportContentBounds()
@@ -9411,15 +9447,21 @@ void MainComponent::updateTimelineViewportContentBounds()
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)
 {
-    // Grow the timeline scroll extent when the playhead approaches or passes
-    // the current content end (ruler scrubbing, transport commands, looping).
-    // Guarded by the cached length so the viewport bounds are not rebuilt on
-    // every transport tick during playback.
+    // The phone starts with a ten-minute virtual timeline instead of the
+    // old 30-second "page". Grow once with two minutes of warning so a long
+    // live recording never encounters the end of the scrollable Viewport.
+    // Do this on the message thread, not in the audio callback.
     if (!arrangement_)
         return;
     const double sampleRate = arrangement_->getEngineSampleRate();
     const double playheadSeconds = (double) newPosition / sampleRate;
-    if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
+    // Do not repeat an expensive viewport resize at 60 Hz if the transport
+    // reports an invalid/out-of-range position during route or project restore.
+    if (!std::isfinite(playheadSeconds) || playheadSeconds < 0.0 || playheadSeconds > 86400.0)
+        return;
+    const double warning = usesPhoneMixerPresentation()
+        ? DAW::mobile::kTimelinePhoneGrowthWarningSeconds : 2.0;
+    if (playheadSeconds + warning > lastTimelineContentLengthSeconds_)
         updateTimelineViewportContentBounds();
 }
 
@@ -9704,7 +9746,7 @@ void MainComponent::startPluginScanIfNeeded()
 
 #if JUCE_WINDOWS || (JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK)
 bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZoom, bool reference,
-                                                       TimelineBenchmarkTransport mode)
+                                                       TimelineBenchmarkTransport mode, bool retainedViewport)
 {
     // Benchmark mode only populates a disposable, empty session.
     if (!arrangement_ || !timelineViewport_ || !timelineWindow_ || !trackList_ || !trackListWindow_)
@@ -9721,6 +9763,9 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
    #if JUCE_WINDOWS
     timelineWindow_->setBufferedToImage(reference);
     trackListWindow_->setBufferedToImage(reference);
+    juce::ignoreUnused(retainedViewport);
+   #elif JUCE_ANDROID
+    arrangement_->getCore()->setViewportPaintCacheEnabled(retainedViewport);
    #endif
     trackList_->setDirectHeightZoomPaintForBenchmark(!reference);
 
@@ -9772,13 +9817,25 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
             {
                 juce::Array<juce::File> files;
                 files.add(file);
-                auto* track = tracks.getNumTracks() > 0 ? tracks.getTrack(0)
-                                                       : tracks.createTrack("UI benchmark");
+                // The REC navigation replay deliberately starts near 29s
+                // to cross the old bar-15/30s scroll limit. Keep a *regular*
+                // WAV clip visible in that region on a separate, unarmed
+                // track so the benchmark can independently assert that both
+                // imported waveforms and the LIVE recording waveform paint
+                // throughout the pan. Previously the reference WAV ended
+                // at 24s, so the generic waveform assertion failed despite
+                // successful live-take drawing.
+                auto* track = mode == TimelineBenchmarkTransport::Recording
+                    && tracks.getNumTracks() > 1 ? tracks.getTrack(1)
+                    : (tracks.getNumTracks() > 0 ? tracks.getTrack(0)
+                                                : tracks.createTrack("UI benchmark"));
+                const DAW::SamplePosition insertAt = mode == TimelineBenchmarkTransport::Recording
+                    ? static_cast<DAW::SamplePosition>(sr * 28.0) : 0;
                 if (track != nullptr)
                     DAW::CommandManager::getInstance().execute(
                         std::make_unique<DAW::ImportAudioFilesCommand>(tracks,
                             appCore_.getClipManager(), appCore_.getAudioFileManager(),
-                            std::move(files), track->getID(), 0, sr));
+                            std::move(files), track->getID(), insertAt, sr));
             }
         }
     }
@@ -9798,6 +9855,24 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         appCore_.getRecordingEngine().setProjectDirectory(dir);
         track->setInputSource(0, true);
         track->setArmed(true);
+
+        // Regression for a real user report: at 120 BPM the ruler reaches
+        // bar 15 (~28 seconds), then Android used to clamp horizontal pan
+        // during REC until Stop finalized the audio clip. Start the
+        // disposable emulator take at 29s and pan past the old 30s edge.
+        // Keep the *initial viewport* half a second behind the take start:
+        // at 29.0s the 1.5s warm-up can put all newly grown recording
+        // columns to the left of the viewport after a pan, making a visible-
+        // waveform assertion nondeterministic despite uninterrupted audio.
+        // Starting at 28.5s still crosses the old limit during the gesture
+        // while keeping newly recorded columns in the visible viewport.
+        // Do NOT seek or change any real user session outside benchmark mode.
+        const auto sr = juce::jmax(1.0, arrangement_->getEngineSampleRate());
+        appCore_.getTransport().setPosition(
+            static_cast<DAW::SamplePosition>(sr * 29.0));
+        timelineViewport_->setViewPosition(
+            juce::roundToInt(28.5 * arrangement_->getPixelsPerSecond()), 0);
+        syncTimelineViewportPosition();
     }
     repaint();
     return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
@@ -9821,6 +9896,8 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     auto* state = new juce::DynamicObject();
     state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
     state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("timelineContentSeconds", lastTimelineContentLengthSeconds_);
+    state->setProperty("timelineContentWidth", arrangement_ ? arrangement_->getWidth() : 0);
     state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
     state->setProperty("tracksWindowBuffered",
@@ -9834,6 +9911,10 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
    #if JUCE_WINDOWS
     if (auto* peer = getPeer())
         state->setProperty("backend", peer->getAvailableRenderingEngines()[peer->getCurrentRenderingEngine()]);
+   #elif JUCE_ANDROID && defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+    const auto gpuFrames = androidGpuFrames_.rendered.load(std::memory_order_relaxed);
+    state->setProperty("backend", androidGpuContext_.isAttached() && gpuFrames > 0 ? "OpenGL" : "software");
+    state->setProperty("gpuFrames", gpuFrames);
    #else
     state->setProperty("backend", "software");
    #endif
@@ -9843,10 +9924,20 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
     state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
     state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
+    state->setProperty("arrangerReusePixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerReusePixels.load()));
+    state->setProperty("arrangerRasterPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerRasterPixels.load()));
+    state->setProperty("arrangerCacheCopyPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerCacheCopyPixels.load()));
+    state->setProperty("arrangerCacheRebases", static_cast<juce::int64>(TimelinePaintMetrics::arrangerCacheRebases.load()));
+    state->setProperty("scrollEvents", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollEvents.load()));
     auto& transport = appCore_.getTransport();
     state->setProperty("playing", transport.isPlaying());
     state->setProperty("recording", transport.isRecording());
     state->setProperty("playheadFrames", static_cast<juce::int64>(transport.getPosition()));
+   #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+    state->setProperty("framePacing", juce::isApexAndroidFramePacingEnabled());
+    state->setProperty("audioCallbacks", static_cast<juce::int64>(audioCallbackTickCounter_.load(std::memory_order_relaxed)));
+    state->setProperty("audioXRuns", getOwnedDeviceManager().getXRunCount());
+   #endif
     if (auto* track = appCore_.getTrackManager().getTrack(0))
     {
         auto& waveform = track->getLiveRecordWaveform();

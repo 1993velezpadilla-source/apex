@@ -24,6 +24,9 @@ DECLARE_JNI_CLASS (TileBitmap, "android/graphics/Bitmap")
 
 #define JNI_CLASS_MEMBERS(METHOD, STATICMETHOD, FIELD, STATICFIELD, CALLBACK) \
     METHOD (drawBitmap, "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V") \
+    METHOD (getWidth, "getWidth", "()I") \
+    METHOD (getHeight, "getHeight", "()I") \
+    METHOD (isHardwareAccelerated, "isHardwareAccelerated", "()Z") \
     METHOD (save, "save", "()I") \
     METHOD (restoreToCount, "restoreToCount", "(I)V") \
     METHOD (clipRect, "clipRect", "(FFFF)Z") \
@@ -45,7 +48,9 @@ static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
 
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 static bool reduceTimelineMotion = false;
+static bool framePacingEnabled = true;
 #else
+static constexpr bool framePacingEnabled = true;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
 #endif
@@ -54,14 +59,63 @@ struct Damage
 {
     void add(Rectangle<int> area)
     {
-        if (!area.isEmpty())
-            pending.add(area.expanded(1));
+        if (area.isEmpty())
+            return;
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        ++requests;
+        const auto pixels = static_cast<int64_t>(area.getWidth()) * area.getHeight();
+        requestedPixels += pixels;
+        largestRequestPixels = jmax(largestRequestPixels, pixels);
+        if (lastSurfacePixels > 0 && pixels * 100 >= lastSurfacePixels * 90)
+            ++fullSurfaceRequests;
+       #endif
+        pending.add(area.expanded(1));
         if (pending.getNumRectangles() > 64)
             pending = RectangleList<int>(pending.getBounds());
     }
 
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void logAndReset(Rectangle<int> surface, Rectangle<int> canvasDirty,
+                     const RectangleList<int>& accumulated)
+    {
+        lastSurfacePixels = static_cast<int64_t>(surface.getWidth()) * surface.getHeight();
+        if (requests == 0)
+            return;
+        int64_t unionPixels = 0;
+        for (const auto& rect : accumulated)
+            unionPixels += static_cast<int64_t>(rect.getWidth()) * rect.getHeight();
+        // Only sample a bounded number of frames; log the ORIGINAL damage
+        // requests before the Android tile raster expands or merges them.
+        // This distinguishes full-window JUCE invalidation from tile rebase.
+        if (damageFramesLogged++ < 24)
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "DAMAGE_ORIGIN requests=%llu full90=%llu sumPixels=%lld "
+                "maxPixels=%lld unionPixels=%lld surfacePixels=%lld canvasDirty=%d,%d,%d,%d",
+                static_cast<unsigned long long>(requests),
+                static_cast<unsigned long long>(fullSurfaceRequests),
+                static_cast<long long>(requestedPixels),
+                static_cast<long long>(largestRequestPixels),
+                static_cast<long long>(unionPixels),
+                static_cast<long long>(lastSurfacePixels),
+                canvasDirty.getX(), canvasDirty.getY(),
+                canvasDirty.getWidth(), canvasDirty.getHeight());
+        requests = fullSurfaceRequests = 0;
+        requestedPixels = largestRequestPixels = 0;
+    }
+    uint64_t requests = 0, fullSurfaceRequests = 0, damageFramesLogged = 0;
+    int64_t requestedPixels = 0, largestRequestPixels = 0, lastSurfacePixels = 0;
+   #endif
+
     RectangleList<int> pending;
+    bool hardwareCanvas = false;
+    bool viewInvalidated = false;
 };
+
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+// Controlled by the existing native benchmark phase boundary below.
+static bool bitmapSubmitProfiling = false;
+static int bitmapSubmitSamples = 0;
+#endif
 
 class BitmapTiles
 {
@@ -109,7 +163,7 @@ public:
         return true;
     }
 
-    void draw(JNIEnv* env, jobject canvas, Rectangle<int> covered = {}) const
+    void draw(JNIEnv* env, jobject canvas, Rectangle<int> clip, Rectangle<int> covered = {}) const
     {
         jint saveCount = 0;
         if (pixelDivisor != 1)
@@ -123,17 +177,56 @@ public:
         }
 
         const auto origin = pixelDivisor == 1 ? frameBounds.getPosition() : Point<int>{};
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        // Native Canvas may supply a full-screen dirty rect despite small
+        // JUCE damage. Measure JNI bitmap submission independently of raster
+        // and component painting; production drawing is unchanged.
+        const bool sampleDraw = bitmapSubmitProfiling && bitmapSubmitSamples < 12;
+        const auto wallStart = sampleDraw ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
+        timespec cpuStart {};
+        if (sampleDraw) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
+        int submittedTiles = 0;
+        int64_t submittedPixels = 0;
+       #endif
         for (const auto& tile : tiles)
         {
-            if (covered.contains(tile.bounds + origin))
+            const auto surfaceTile = tile.bounds * pixelDivisor + frameBounds.getPosition();
+            if (!clip.intersects(surfaceTile) || covered.contains(surfaceTile))
                 continue;
 
             const auto position = origin + tile.bounds.getPosition();
             env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
                                 (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (sampleDraw)
+            {
+                ++submittedTiles;
+                submittedPixels += static_cast<int64_t>(tile.bounds.getWidth())
+                                   * tile.bounds.getHeight() * pixelDivisor * pixelDivisor;
+            }
+           #endif
         }
         if (pixelDivisor != 1)
             env->CallVoidMethod(canvas, TileCanvas.restoreToCount, saveCount);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (sampleDraw)
+        {
+            timespec cpuEnd {};
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuEnd);
+            const auto wallNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - wallStart).count();
+            const auto cpuNs = (static_cast<int64_t>(cpuEnd.tv_sec - cpuStart.tv_sec) * 1000000000LL)
+                               + cpuEnd.tv_nsec - cpuStart.tv_nsec;
+            ++bitmapSubmitSamples;
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "BITMAP_SUBMIT divisor=%d tiles=%d submittedPixels=%lld "
+                "dirty=%d,%d,%d,%d wall_ms=%.3f cpu_ms=%.3f wait_ms=%.3f",
+                pixelDivisor, submittedTiles, static_cast<long long>(submittedPixels),
+                clip.getX(), clip.getY(), clip.getWidth(), clip.getHeight(),
+                wallNs / 1.0e6, cpuNs / 1.0e6, (wallNs - cpuNs) / 1.0e6);
+        }
+       #endif
     }
 
 private:
@@ -262,6 +355,7 @@ public:
 
     void invalidate() noexcept
     {
+        damage->hardwareCanvas = false;
         nativeTiles.invalidate();
         motionTiles.invalidate();
         drawnMotionArea = {};
@@ -272,6 +366,32 @@ public:
                Component& root, Raster&& raster)
     {
         const bool opaque = root.isOpaque();
+
+        // The Android Canvas clip is a DIRTY RECT, not a stable frame size.
+        // Binding tile allocations to that changing rect recycled every tile
+        // when the playhead or touch gesture invalidated a different region.
+        // Anchor our backing image to the actual Canvas surface dimensions.
+        const auto surfaceWidth = env->CallIntMethod(canvas, TileCanvas.getWidth);
+        const auto surfaceHeight = env->CallIntMethod(canvas, TileCanvas.getHeight);
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return false;
+        }
+        if (surfaceWidth <= 0 || surfaceHeight <= 0)
+            return false;
+        const Rectangle<int> surface(0, 0, surfaceWidth, surfaceHeight);
+        if (!surface.intersects(clip))
+            return false;
+        const bool initialOrResized = nativeTiles.needsReset(surface, scale, opaque);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (initialOrResized)
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "FRAME_CACHE_RESET surface=%dx%d dirty=%d,%d,%d,%d",
+                surfaceWidth, surfaceHeight, clip.getX(), clip.getY(),
+                clip.getWidth(), clip.getHeight());
+       #endif
+
         const auto* viewport = motionViewport.getComponent();
         Rectangle<int> motionArea;
         if (opaque && scale >= 2.0f && viewport != nullptr && viewport->isShowing()
@@ -280,8 +400,11 @@ public:
                 .getSmallestIntegerContainer().getIntersection(clip);
 
         auto redraw = std::exchange(damage->pending, {});
-        if (nativeTiles.needsReset(clip, scale, opaque))
-            redraw.add(clip);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        damage->logAndReset(surface, clip, redraw);
+       #endif
+        if (initialOrResized)
+            redraw.add(surface);
         if (motionArea != drawnMotionArea)
         {
             redraw.add(drawnMotionArea);
@@ -295,12 +418,14 @@ public:
                 return false;
             redraw.subtract(motionArea);
         }
-        if (!nativeTiles.update(env, clip, scale, opaque, std::move(redraw), raster))
+        if (!nativeTiles.update(env, surface, scale, opaque, std::move(redraw), raster))
             return false;
 
-        nativeTiles.draw(env, canvas, motionArea);
+        damage->hardwareCanvas = framePacingEnabled
+            && env->CallBooleanMethod(canvas, TileCanvas.isHardwareAccelerated) == JNI_TRUE;
+        nativeTiles.draw(env, canvas, clip, motionArea);
         if (!motionArea.isEmpty())
-            motionTiles.draw(env, canvas);
+            motionTiles.draw(env, canvas, clip);
         drawnMotionArea = motionArea;
         return true;
     }
@@ -356,19 +481,26 @@ public:
             return;
         parent = current;
         current = this;
-        started = threadCpuNs();
+        startedCpu = threadCpuNs();
+        startedWall = std::chrono::steady_clock::now();
     }
 
     ~ComponentPaintProbe()
     {
         if (type == nullptr)
             return;
-        const auto duration = threadCpuNs() - started;
+        const auto durationWall = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - startedWall).count();
+        const auto durationCpu = threadCpuNs() - startedCpu;
         current = parent;
         if (parent != nullptr)
-            parent->childTime += duration;
+        {
+            parent->childWallTime += durationWall;
+            parent->childCpuTime += durationCpu;
+        }
         auto& sample = components[type];
-        sample.selfNs += duration - childTime;
+        sample.selfCpuNs += durationCpu - childCpuTime;
+        sample.selfWallNs += durationWall - childWallTime;
         ++sample.count;
     }
 
@@ -410,27 +542,37 @@ public:
     {
         using Entry = std::pair<const std::type_info*, Sample>;
         std::vector<Entry> sorted(components.begin(), components.end());
+        // Rank by WAIT (wall minus thread CPU), not CPU alone: the 9.5
+        // emulator profiler recorded ~8 ms CPU but ~38 ms off-CPU per
+        // horizontal frame. Pinpoint which JUCE Component or inherited
+        // painting phase blocks the Android message/render thread.
         std::sort(sorted.begin(), sorted.end(), [](const Entry& left, const Entry& right)
         {
-            return left.second.selfNs > right.second.selfNs;
+            const auto leftWait = left.second.selfWallNs - left.second.selfCpuNs;
+            const auto rightWait = right.second.selfWallNs - right.second.selfCpuNs;
+            return leftWait > rightWait;
         });
         __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PROFILE frames=%zu", frames);
         for (std::size_t i = 0; i < jmin(sorted.size(), std::size_t{ 12 }); ++i)
         {
             const auto& [type, sample] = sorted[i];
-            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PAINT %s calls=%zu self_ms=%.3f",
-                                type->name(), sample.count, (double)sample.selfNs / 1'000'000.0);
+            const auto cpuMs = (double)sample.selfCpuNs / 1'000'000.0;
+            const auto wallMs = (double)sample.selfWallNs / 1'000'000.0;
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                                "PEER_PAINT_WAIT %s calls=%zu cpu_ms=%.3f wall_ms=%.3f wait_ms=%.3f",
+                                type->name(), sample.count, cpuMs, wallMs, wallMs - cpuMs);
         }
     }
 
 private:
-    struct Sample { jlong selfNs = 0; std::size_t count = 0; };
+    struct Sample { jlong selfCpuNs = 0, selfWallNs = 0; std::size_t count = 0; };
     static inline thread_local ComponentPaintProbe* current = nullptr;
     static inline std::map<const std::type_info*, Sample> components;
 
     const std::type_info* type;
     ComponentPaintProbe* parent = nullptr;
-    jlong started = 0, childTime = 0;
+    std::chrono::steady_clock::time_point startedWall {};
+    jlong startedCpu = 0, childCpuTime = 0, childWallTime = 0;
 };
 
 class FrameProbe
@@ -494,10 +636,11 @@ static constexpr bool useTiles = true;
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
-    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion)
+    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
+    juce::apexAndroidFrame::framePacingEnabled = framePaced == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
@@ -505,8 +648,10 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
 {
     using namespace juce::apexAndroidFrame;
     measuring = finish != JNI_TRUE;
+    bitmapSubmitProfiling = measuring;
     if (measuring)
     {
+        bitmapSubmitSamples = 0;
         frameCount = 0;
         ComponentPaintProbe::reset();
         return nullptr;

@@ -32,6 +32,16 @@ namespace ArrangementEditor
             return static_cast<int>(std::lround(targetPx));
         }
 
+        // Filter small lateral digitizer jitter while following a deliberate
+        // horizontal movement in the same display frame.
+        static float followHorizontalPan(float previous, float observed, float retention) noexcept
+        {
+            if (!std::isfinite(observed))
+                return previous;
+            return std::abs(observed - previous) > 1.5f
+                ? observed : previous * retention + observed * (1.0f - retention);
+        }
+
         // Keep the timeline point under the gesture centroid fixed on screen.
         static int zoomPosition(double contentAnchorPx, double viewAnchorPx,
                                 double newToOldZoom, int maxViewPx,

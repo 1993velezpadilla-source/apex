@@ -45,6 +45,46 @@ void noteApexTimelineMotion (Component& viewport)
 ComponentPeer* Component::createNewPeer""")
 
 
+def add_frame_pacing(peer: str) -> str:
+    if "bool isApexAndroidFramePacingEnabled() noexcept" in peer:
+        return peer
+
+    peer = replace(peer, "        t.callVBlankListeners (timestampSec);", """\
+        t.apexFrameTiles.damage->viewInvalidated = false;
+        t.callVBlankListeners (timestampSec);""")
+    peer = replace(peer, "        LocalRef<jobject> rect { env->CallObjectMethod (canvas, AndroidCanvas.getClipBounds) };",
+                         "        t.apexFrameTiles.damage->viewInvalidated = false;\n"
+                         "        LocalRef<jobject> rect { env->CallObjectMethod (canvas, AndroidCanvas.getClipBounds) };")
+    peer = replace(peer, """\
+            if (apexAndroidFrame::useTiles)
+                damage->add (area);
+            localView.callVoidMethod (AndroidView.invalidate,""", """\
+            if (apexAndroidFrame::useTiles)
+            {
+                damage->add (area);
+                if (apexAndroidFrame::framePacingEnabled && damage->hardwareCanvas)
+                {
+                    // Hardware View invalidation schedules a draw. The precise
+                    // dirty regions remain in the native backing store.
+                    if (! std::exchange (damage->viewInvalidated, true))
+                        localView.callVoidMethod (ComponentPeerView.invalidateAll);
+                    return;
+                }
+            }
+            localView.callVoidMethod (AndroidView.invalidate,""")
+    peer = replace(peer, '    METHOD   (clear,                            "clear",                         "()V") \\\n',
+                         '    METHOD   (clear,                            "clear",                         "()V") \\\n'
+                         '    METHOD   (invalidateAll,                    "invalidate",                    "()V") \\\n')
+    return replace(peer, "void noteApexTimelineMotion (Component& viewport)\n{", """\
+bool isApexAndroidFramePacingEnabled() noexcept
+{
+    return apexAndroidFrame::framePacingEnabled;
+}
+
+void noteApexTimelineMotion (Component& viewport)
+{""")
+
+
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -95,10 +135,62 @@ def bound_wide_software_clips(path: Path) -> None:
                 }"""), encoding="utf-8")
 
 
+def add_opaque_image_blit(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "JUCE_APEX_OPAQUE_IMAGE_BLIT" in contents:
+        return
+    contents = replace(contents, "namespace juce\n{", """\
+#define JUCE_APEX_OPAQUE_IMAGE_BLIT 1
+
+namespace juce
+{""")
+    contents = replace(contents, "private:\n    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR", """\
+    // Copy a fully opaque memory-backed image under the current rectangular
+    // clip. The caller owns source opacity and uses the normal paint path
+    // if this target, clip, or transform cannot be copied directly.
+    bool blitOpaqueImage (const Image& source, const AffineTransform& sourceToUser)
+    {
+        using RectangleClip = RenderingHelpers::SoftwareRendererSavedState::RectangleListRegionType;
+        const auto* rectangularClip = dynamic_cast<const RectangleClip*> (stack->clip.get());
+        const auto transform = stack->transform.getTransformWith (sourceToUser);
+        if (rectangularClip == nullptr || source.getFormat() != Image::ARGB
+            || stack->image.getFormat() != Image::ARGB || source == stack->image
+            || ! RenderingHelpers::SoftwareRendererSavedState::isOnlyTranslationAllowingError (transform, 0.002f))
+            return false;
+
+        const auto snap = [] (float position) { return (int) std::floor (position + 0.5f); };
+        const Point<int> origin { snap (transform.getTranslationX()), snap (transform.getTranslationY()) };
+        const auto bounds = (source.getBounds() + origin).getIntersection (stack->image.getBounds());
+        const Image::BitmapData src (source, Image::BitmapData::readOnly);
+        const Image::BitmapData dst (stack->image, Image::BitmapData::readWrite);
+        constexpr auto bytesPerPixel = static_cast<int> (sizeof (PixelARGB));
+        if (src.pixelStride != bytesPerPixel || dst.pixelStride != bytesPerPixel)
+            return false;
+
+        for (const auto& rectangle : rectangularClip->clip)
+        {
+            const auto area = rectangle.getIntersection (bounds);
+            if (area.isEmpty())
+                continue;
+            const auto bytes = (size_t) area.getWidth() * sizeof (PixelARGB);
+            for (int y = area.getY(); y < area.getBottom(); ++y)
+                std::memcpy (dst.getPixelPointer (area.getX(), y),
+                             src.getPixelPointer (area.getX() - origin.x, y - origin.y), bytes);
+        }
+        return true;
+    }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR""")
+    path.write_text(contents, encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
-    bound_wide_software_clips(root / "modules/juce_graphics/native/juce_RenderingHelpers.h")
+    graphics = root / "modules/juce_graphics"
+    bound_wide_software_clips(graphics / "native/juce_RenderingHelpers.h")
+    add_opaque_image_blit(graphics / "contexts/juce_LowLevelGraphicsSoftwareRenderer.h")
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"
@@ -110,7 +202,8 @@ def configure(root: Path) -> None:
         if include not in module_text:
             raise ValueError("Incomplete APEX Android renderer")
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
-            peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
+            peer_text = add_timeline_motion(peer_text)
+        peer.write_text(add_frame_pacing(peer_text), encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -178,7 +271,7 @@ def configure(root: Path) -> None:
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
-    peer.write_text(add_timeline_motion(peer_text), encoding="utf-8")
+    peer.write_text(add_frame_pacing(add_timeline_motion(peer_text)), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

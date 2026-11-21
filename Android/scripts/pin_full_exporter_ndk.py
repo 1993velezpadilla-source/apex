@@ -40,8 +40,15 @@ def pin_ndk_version(content: str, version: str = NDK_VERSION) -> str:
 def set_zoom_preview_install_id(content: str) -> str:
     # The earlier preview used a disposable signer. Give this candidate its
     # own install identity while retaining the generated Java namespace.
-    return re.sub(r'(?m)^([ \t]*applicationId[ \t]+")com\.xziel\.apex\.zoomrewrite(")',
-                  r'\g<1>com.xziel.apex.zoomrewrite.r71\2', content)
+    install_ids = {
+        "zoomrewrite": "zoomrewrite.r71",
+        "framecache": "framecache.r95",
+    }
+    return re.sub(
+        r'(?m)^([ \t]*applicationId[ \t]+")com\.xziel\.apex\.(zoomrewrite|framecache)(")',
+        lambda match: f'{match[1]}com.xziel.apex.{install_ids[match[2]]}{match[3]}',
+        content,
+    )
 
 
 def main() -> int:

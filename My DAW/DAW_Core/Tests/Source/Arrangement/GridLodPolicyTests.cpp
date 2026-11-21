@@ -207,17 +207,27 @@ public:
             expect(ArrangementClipLodPolicy::drawFades(18, 24));
         }
 
-        beginTest("clip culling: horizontal and vertical viewport edges include overscan only");
+        beginTest("clip culling: preload half a viewport horizontally but only one lane vertically");
         {
             const juce::Rectangle<int> viewport(100, 200, 640, 480);
             const int trackHeight = 80;
 
             expect(ArrangementClipLodPolicy::intersectsViewport(
                 {120, 240, 20, 20}, viewport, trackHeight));
-            expect(!ArrangementClipLodPolicy::intersectsViewport(
+            // Ahead-of-finger preloading is intentional: the old 32px
+            // horizontal limit briefly hid clips during fast fling gestures.
+            expect(ArrangementClipLodPolicy::intersectsViewport(
                 {40, 240, 20, 20}, viewport, trackHeight));
             expect(ArrangementClipLodPolicy::intersectsViewport(
                 {68, 240, 1, 20}, viewport, trackHeight));
+            expect(ArrangementClipLodPolicy::intersectsViewport(
+                {-219, 240, 1, 20}, viewport, trackHeight));
+            expect(!ArrangementClipLodPolicy::intersectsViewport(
+                {-250, 240, 1, 20}, viewport, trackHeight));
+            expect(ArrangementClipLodPolicy::intersectsViewport(
+                {1059, 240, 1, 20}, viewport, trackHeight));
+            expect(!ArrangementClipLodPolicy::intersectsViewport(
+                {1060, 240, 1, 20}, viewport, trackHeight));
             expect(!ArrangementClipLodPolicy::intersectsViewport(
                 {120, 95, 20, 20}, viewport, trackHeight));
             expect(ArrangementClipLodPolicy::intersectsViewport(

@@ -186,6 +186,12 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> trackListScrollRowBoundsAssignments{0};
     static inline std::atomic<uint64_t> trackListScrollRowPositionUpdates{0};
     static inline std::atomic<uint64_t> arrangementScrollEvents{0};
+    static inline std::atomic<uint64_t> arrangerReusePixels{0};
+    static inline std::atomic<uint64_t> arrangerRasterPixels{0};
+    // Physical pixel copies when the Android native-density cache rebases.
+    // A smooth horizontal gesture should not shift a full bitmap every frame.
+    static inline std::atomic<uint64_t> arrangerCacheCopyPixels{0};
+    static inline std::atomic<uint64_t> arrangerCacheRebases{0};
     static inline std::atomic<uint64_t> arrangementScrollClipIterations{0};
     static inline std::atomic<uint64_t> arrangementScrollVisibilityChanges{0};
     static inline std::atomic<uint64_t> arrangementScrollWaveformRefreshes{0};
@@ -332,6 +338,10 @@ struct TimelinePaintMetrics
         trackListScrollRowBoundsAssignments = 0;
         trackListScrollRowPositionUpdates = 0;
         arrangementScrollEvents = 0;
+        arrangerReusePixels = 0;
+        arrangerRasterPixels = 0;
+        arrangerCacheCopyPixels = 0;
+        arrangerCacheRebases = 0;
         arrangementScrollClipIterations = 0;
         arrangementScrollVisibilityChanges = 0;
         arrangementScrollWaveformRefreshes = 0;

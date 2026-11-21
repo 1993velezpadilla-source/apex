@@ -1961,15 +1961,22 @@ public:
             auto* daw = new MainComponent();
             setContentOwned (daw, false);
             resized(); // JUCE derives owned content bounds from the actual peer
+           #if defined(APEX_ANDROID_GPU_ARRANGER) && APEX_ANDROID_GPU_ARRANGER
+               #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                if (DAW::androidLaunchExtra("apex_renderer") == "gpu")
+               #endif
+                    daw->enableAndroidGpuPresentation();
+           #endif
            #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
             const auto scene = DAW::androidLaunchExtra("apex_scene");
+            const auto renderer = DAW::androidLaunchExtra("apex_renderer");
             using BenchmarkTransport = MainComponent::TimelineBenchmarkTransport;
             const auto mode = scene == "recording" ? BenchmarkTransport::Recording
                 : scene == "playback" ? BenchmarkTransport::Playing : BenchmarkTransport::Stopped;
             const bool benchmark = (scene == "empty" || scene == "clip" || scene == "deep"
                                     || mode != BenchmarkTransport::Stopped)
                 && daw->prepareTimelineNavigationBenchmark(scene != "empty", scene == "deep",
-                    DAW::androidLaunchExtra("apex_renderer") == "reference", mode);
+                    renderer == "reference", mode, renderer == "retained" || renderer == "frame-paced");
             if (benchmark)
             {
                 juce::Component::SafePointer<MainWindow> safe(this);

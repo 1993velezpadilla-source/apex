@@ -757,49 +757,47 @@ int main()
                         return 61;
                 }
 
-    // Once playback approaches the end of the Arrangement, extending the
-    // phone scroll range by only 2s would rebuild clip bounds every tick.
-    // A 30s phone runway amortizes those costly GUI updates; long projects
-    // still retain their full clip/loop extent.
+    // Mobile scrolling must not stop around ruler bar 15 (~28 s at 120 BPM).
+    // A long recording has a ten-minute virtual timeline before it writes
+    // any file; moving past the original 30-second edge cannot clamp.
     using DAW::mobile::timelinePhonePlaybackExtentSeconds;
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.1) == 58.1);
-    // Invalid restored transport positions must not make the viewport
-    // infinite/NaN or grow the Arrangement on every transport tick.
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, -1.0) == 30.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 600.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.0) == 600.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 60.0) == 600.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 480.0) == 600.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 481.0) == 1081.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(2000.0, 20.0) == 2000.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(2000.0, 1880.0) == 2000.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(2000.0, 1881.0) == 2481.0);
+    static_assert(timelinePhonePlaybackExtentSeconds(30.0, -1.0) == 600.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0,
-        std::numeric_limits<double>::quiet_NaN()) == 30.0);
+        std::numeric_limits<double>::quiet_NaN()) == 600.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0,
-        std::numeric_limits<double>::infinity()) == 30.0);
+        std::numeric_limits<double>::infinity()) == 600.0);
     static_assert(timelinePhonePlaybackExtentSeconds(30.0,
-        std::numeric_limits<double>::max()) == 30.0);
+        std::numeric_limits<double>::max()) == 600.0);
 
-    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 28.1) == 200.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 0.0) == 30.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 1.0) == 30.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 27.9) == 30.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(30.0, 28.0) == 30.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 198.0) == 200.0);
-    static_assert(timelinePhonePlaybackExtentSeconds(200.0, 199.0) == 229.0);
-    // Repeated unrelated phone layout refreshes during the first 28s must
-    // not extend a 30s Arrangement or trigger a resize on each refresh.
-    for (int tick = 0; tick <= 560; ++tick) // 0..28s at 20 Hz
+    // Playback/REC can run for eight minutes without ANY structural
+    // resize at all. When near the preallocated end, reserve another ten
+    // minutes in one transaction, rather than the old 30s chunks.
+    for (int tick = 0; tick <= 9600; ++tick) // 0..480s at 20 Hz
         if (timelinePhonePlaybackExtentSeconds(30.0,
-                static_cast<double>(tick) / 20.0) != 30.0)
+                static_cast<double>(tick) / 20.0) != 600.0)
             return 88;
-    double phoneExtent = 30.0;
+    double phoneExtent = timelinePhonePlaybackExtentSeconds(30.0, 0.0);
     int refreshes = 0;
-    for (int tick = 0; tick < 1200; ++tick) // 60s at 20 transport ticks/s
+    for (int tick = 0; tick < 24000; ++tick) // 20 min at 20 transport ticks/s
     {
         const double playhead = static_cast<double>(tick) / 20.0;
-        if (playhead + 2.0 > phoneExtent)
+        if (playhead + DAW::mobile::kTimelinePhoneGrowthWarningSeconds > phoneExtent)
         {
             phoneExtent = timelinePhonePlaybackExtentSeconds(30.0, playhead);
             ++refreshes;
         }
     }
-    if (refreshes > 2) // Previously ~600 rebuilds after 28s.
+    if (refreshes > 2) // Old 30s chunks repeatedly resized the Viewport.
         return 89;
-    if (phoneExtent < 60.0)
+    if (phoneExtent < 1200.0)
         return 90;
 
     // Regression: closing Sends or the floating Mixer must not resurrect
@@ -3154,14 +3152,23 @@ int main()
         }
     }
     // Corrupt transport state after project restore must not extend the
-    // Arrangement or introduce NaN into viewport geometry.
+    // Arrangement or introduce NaN into viewport geometry. The virtual phone
+    // timeline now reserves a 600-second runway even for a short/empty
+    // project; the previous 120-second expectation was stale after fixing
+    // the 30-second recording-scroll clamp. Long clip/loop extents remain
+    // authoritative even if the playhead value was restored incorrectly.
     for (double invalid : { -1.0, 86401.0,
                             std::numeric_limits<double>::infinity(),
                             -std::numeric_limits<double>::infinity(),
                             std::numeric_limits<double>::quiet_NaN() })
+    {
         if (DAW::mobile::timelinePhonePlaybackExtentSeconds(120.0, invalid)
-            != 120.0)
+            != DAW::mobile::kTimelinePhoneRunwaySeconds)
             return 378;
+        if (DAW::mobile::timelinePhonePlaybackExtentSeconds(1200.0, invalid)
+            != 1200.0)
+            return 379;
+    }
 
 
     // Floating phone Mixer: after rotation or inset changes, clamp a

@@ -905,7 +905,19 @@ namespace ArrangementEditor
 
         // Border
         g.setColour(fromU32(Col::border));
-        g.drawRoundedRectangle(b.reduced(0.5f), 4.f, 1.f);
+        if (insideStraightEdges)
+        {
+            const auto left = static_cast<float>(dirty.getX());
+            const auto right = static_cast<float>(dirty.getRight());
+            if (dirty.getY() == 0)
+                g.drawHorizontalLine(0, left, right);
+            if (dirty.getBottom() == getHeight())
+                g.drawHorizontalLine(getHeight() - 1, left, right);
+        }
+        else
+        {
+            g.drawRoundedRectangle(b.reduced(0.5f), 4.f, 1.f);
+        }
     }
 
     void ClipRenderCore::drawWaveform(juce::Graphics& g)
@@ -918,14 +930,12 @@ namespace ArrangementEditor
         if (dirty.isEmpty())
             return;
 
-        if (!m_waveformCache->isReady())
-            return;
-
-        // Thread-safe peak access: lock to prevent race with background waveform generation
+        // Read the peaks and their readiness under a single lock.
         juce::CriticalSection::ScopedLockType lock(m_waveformCache->getPeaksLock());
-
-        auto& peaks = m_waveformCache->getPeaks();
-        if (peaks.minPeaks.empty() || peaks.maxPeaks.empty())
+        const auto& peaks = m_waveformCache->getPeaks();
+        const auto& minimums = peaks.minimums();
+        const auto& maximums = peaks.maximums();
+        if (!peaks.valid || minimums.empty() || maximums.empty())
             return;
 
         // Waveform area starts BELOW the name bar so they never overlap.
@@ -975,7 +985,7 @@ namespace ArrangementEditor
             readRatio = (tp.stretchRatio > 0.001) ? 1.0 / tp.stretchRatio : 1.0;
         }
 
-        const int totalPeaks = (int)peaks.minPeaks.size();
+        const int totalPeaks = (int)minimums.size();
         if (totalPeaks <= 0)
             return;
 
@@ -1029,6 +1039,8 @@ namespace ArrangementEditor
         const int64_t clipLengthSamples = (int64_t)std::llround(m_model->length * visualSampleRate);
         const int64_t fadeInSamp  = m_model->fadeInSamples(visualSampleRate);
         const int64_t fadeOutSamp = m_model->fadeOutSamples(visualSampleRate);
+        const bool hasFade = fadeInSamp > 0 || fadeOutSamp > 0;
+        const bool reversed = m_model->reversed;
 
         // Helper: compute fade gain for a given pixel position
         auto getFadeGainAtPixel = [&](int px) -> float
@@ -1086,10 +1098,12 @@ namespace ArrangementEditor
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
 
-        for (int px = startPx; px < endPx; ++px)
+        // Include the preceding column when drawing a partial stripe so
+        // the connected waveform has the same edge as a full paint.
+        for (int px = juce::jmax(0, startPx - 1); px < endPx; ++px)
         {
             // Map output pixel â†’ source peak range
-            const int visualPx = m_model->reversed ? (full.getWidth() - 1 - px) : px;
+            const int visualPx = reversed ? (full.getWidth() - 1 - px) : px;
             const double fStart = (double)visualPx * peaksPerPixel;
 
             float rawMin, rawMax;
@@ -1102,12 +1116,12 @@ namespace ArrangementEditor
                 i0 = juce::jlimit(visibleStartPeak, lastPeak, i0);
                 i1 = juce::jlimit(i0, lastPeak, i1);
 
-                rawMin = peaks.minPeaks[(size_t)i0];
-                rawMax = peaks.maxPeaks[(size_t)i0];
+                rawMin = minimums[(size_t)i0];
+                rawMax = maximums[(size_t)i0];
                 for (int i = i0 + 1; i <= i1; ++i)
                 {
-                    rawMin = juce::jmin(rawMin, peaks.minPeaks[(size_t)i]);
-                    rawMax = juce::jmax(rawMax, peaks.maxPeaks[(size_t)i]);
+                    rawMin = juce::jmin(rawMin, minimums[(size_t)i]);
+                    rawMax = juce::jmax(rawMax, maximums[(size_t)i]);
                 }
             }
             else
@@ -1121,14 +1135,14 @@ namespace ArrangementEditor
                                             visibleStartPeak + (int)fl);
                 const int ib = juce::jlimit(visibleStartPeak, lastPeak, ia + 1);
 
-                rawMin = peaks.minPeaks[(size_t)ia]
-                       + (peaks.minPeaks[(size_t)ib] - peaks.minPeaks[(size_t)ia]) * t;
-                rawMax = peaks.maxPeaks[(size_t)ia]
-                       + (peaks.maxPeaks[(size_t)ib] - peaks.maxPeaks[(size_t)ia]) * t;
+                rawMin = minimums[(size_t)ia]
+                       + (minimums[(size_t)ib] - minimums[(size_t)ia]) * t;
+                rawMax = maximums[(size_t)ia]
+                       + (maximums[(size_t)ib] - maximums[(size_t)ia]) * t;
             }
 
             // â”€â”€ APPLY VISUAL TRANSFORMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            const float fadeGain  = getFadeGainAtPixel(px);
+            const float fadeGain = hasFade ? getFadeGainAtPixel(px) : 1.0f;
             const float totalGain = clipGainLinear * fadeGain;
 
             const float displayMin = rawMin * totalGain;
@@ -1146,6 +1160,9 @@ namespace ArrangementEditor
             prevTop  = centreY - displayMax * halfHeight;
             prevBot  = centreY - displayMin * halfHeight;
             havePrev = true;
+
+            if (px < startPx)
+                continue;
 
             // Guarantee at least a hairline so silence still draws a centreline
             if (bot - top < 1.0f)

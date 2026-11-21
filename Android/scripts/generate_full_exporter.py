@@ -37,7 +37,13 @@ def main() -> int:
                         or os.environ.get("GITHUB_REF_NAME", "").startswith("feature/mobile-portrait-"))
     zoom_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-zoom-rewrite"
                     and not args.benchmark_x86)
-    if zoom_preview:
+    frame_cache_preview = (os.environ.get("GITHUB_REF_NAME") == "feature/mobile-portrait-frame-cache"
+                           and not args.benchmark_x86)
+    # Compare OpenGL in the emulator while the device preview uses the measured Canvas path.
+    gpu_arranger = args.benchmark_x86
+    if frame_cache_preview:
+        name, app_id = "APEX Horizontal Scroll 9.5", "com.xziel.apex.framecache"
+    elif zoom_preview:
         name, app_id = "APEX Zoom Rewrite 7.1", "com.xziel.apex.zoomrewrite"
     elif portrait_preview or args.benchmark_x86:
         name, app_id = "APEXMobilePortrait", "com.xziel.apex.mobileportrait"
@@ -58,6 +64,7 @@ def main() -> int:
         "JUCE_PLUGINHOST_VST3=0",
         "APEX_ENABLE_PLUGIN_SANDBOX=0",
         f"APEX_ANDROID_UI_BENCHMARK={int(args.benchmark_x86)}",
+        f"APEX_ANDROID_GPU_ARRANGER={int(gpu_arranger)}",
     ])
     root.set("defines", " ".join(defines))
 
@@ -65,6 +72,12 @@ def main() -> int:
     exports = root.find("EXPORTFORMATS")
     if modules is None or exports is None:
         raise ValueError("Canonical .jucer missing MODULES/EXPORTFORMATS")
+
+    if gpu_arranger and not any(m.get("id") == "juce_opengl" for m in modules.findall("MODULE")):
+        ET.SubElement(modules, "MODULE", {
+            "id": "juce_opengl", "showAllCode": "1",
+            "useLocalCopy": "0", "useGlobalPath": "0",
+        })
 
     for exporter in list(exports):
         exports.remove(exporter)
