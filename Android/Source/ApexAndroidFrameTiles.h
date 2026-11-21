@@ -55,8 +55,11 @@ static bool horizontalBitmapReuse = false;
 static bool benchmarkSuppressMasterPreview = false;
 #else
 static constexpr bool framePacingEnabled = true;
-// Enable after the paired Android replay has verified this presentation path.
-static constexpr bool horizontalBitmapReuse = false;
+   #if defined(APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW) && APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW
+    static constexpr bool horizontalBitmapReuse = true;
+   #else
+    static constexpr bool horizontalBitmapReuse = false;
+   #endif
 static constexpr bool benchmarkSuppressMasterPreview = false;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
@@ -678,6 +681,9 @@ private:
         if (!horizontalBitmapReuse || viewport == nullptr || !viewport->isShowing()
             || !root.isParentOf(viewport) || !std::isfinite(scale) || scale <= 0.0f)
             return {};
+        const auto* content = viewport->getViewedComponent();
+        if (content == nullptr)
+            return {};
 
         const auto body = viewport->getLocalBounds().withWidth(viewport->getViewWidth())
             .withHeight(viewport->getViewHeight()).withTrimmedTop(timelineHeaderHeight);
@@ -686,8 +692,13 @@ private:
         if (area.isEmpty() || static_cast<int64_t>(area.getWidth()) * area.getHeight() > 4'000'000)
             return {};
 
-        const auto physicalX = std::llround(static_cast<double>(viewport->getViewPositionX()) * scale);
-        return { area, static_cast<int>(physicalX % area.getWidth()) };
+        // Match the software blit's device-pixel origin. Rounding the scroll
+        // distance alone introduces one-pixel mismatches at fractional DPI.
+        const auto contentX = root.getLocalPoint(content, Point<int>{}).x;
+        const auto origin = static_cast<int64_t>(std::floor(static_cast<double>(contentX) * scale + 0.5));
+        const int width = area.getWidth();
+        const int offset = static_cast<int>(-origin % width);
+        return { area, offset < 0 ? offset + width : offset };
     }
 
     void timerCallback() override
