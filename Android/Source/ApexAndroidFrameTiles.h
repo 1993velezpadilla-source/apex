@@ -58,6 +58,13 @@ static constexpr bool benchmarkSuppressMasterPreview = false;
 static constexpr bool reduceTimelineMotion = false;
 #endif
 
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+// Shared across the benchmark's input and paint instrumentation. The epoch
+// resets samples at every measured gesture, not at APK startup.
+static bool measuring = false;
+static uint32_t measurementEpoch = 0;
+#endif
+
 struct Damage
 {
     void add(Rectangle<int> area)
@@ -87,6 +94,27 @@ struct Damage
         int64_t unionPixels = 0;
         for (const auto& rect : accumulated)
             unionPixels += static_cast<int64_t>(rect.getWidth()) * rect.getHeight();
+        if (measuring)
+        {
+            if (lastMeasuredEpoch != measurementEpoch)
+            {
+                lastMeasuredEpoch = measurementEpoch;
+                measuredFramesLogged = 0;
+            }
+            // The old first-24-frames trace was exhausted during startup,
+            // before pan/REC. Log native requests DURING real gestures.
+            if (measuredFramesLogged++ < 12)
+                __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                    "MEASURED_DAMAGE requests=%llu full90=%llu sumPixels=%lld "
+                    "unionPixels=%lld surfacePixels=%lld canvasDirty=%d,%d,%d,%d",
+                    static_cast<unsigned long long>(requests),
+                    static_cast<unsigned long long>(fullSurfaceRequests),
+                    static_cast<long long>(requestedPixels),
+                    static_cast<long long>(unionPixels),
+                    static_cast<long long>(lastSurfacePixels),
+                    canvasDirty.getX(), canvasDirty.getY(),
+                    canvasDirty.getWidth(), canvasDirty.getHeight());
+        }
         // Only sample a bounded number of frames; log the ORIGINAL damage
         // requests before the Android tile raster expands or merges them.
         // This distinguishes full-window JUCE invalidation from tile rebase.
@@ -106,6 +134,8 @@ struct Damage
         requestedPixels = largestRequestPixels = 0;
     }
     uint64_t requests = 0, fullSurfaceRequests = 0, damageFramesLogged = 0;
+    uint32_t lastMeasuredEpoch = 0;
+    int measuredFramesLogged = 0;
     int64_t requestedPixels = 0, largestRequestPixels = 0, lastSurfacePixels = 0;
    #endif
 
@@ -505,7 +535,6 @@ struct FrameSample
 };
 static std::array<FrameSample, 2048> recordedFrames {};
 static std::size_t frameCount = 0;
-static bool measuring = false;
 static bool useTiles = false;
 
 static jlong threadCpuNs()
@@ -550,7 +579,24 @@ public:
         ++sample.count;
     }
 
-    static void reset() { components.clear(); }
+    static void recordRepaint(const Component& source, Rectangle<int> area, bool entire)
+    {
+        if (!measuring || area.isEmpty())
+            return;
+        auto& count = repaints[&typeid(source)];
+        ++count.calls;
+        if (entire)
+            ++count.fullCalls;
+        const auto pixels = static_cast<int64_t>(area.getWidth()) * area.getHeight();
+        count.requestedPixels += pixels;
+        count.largestPixels = jmax(count.largestPixels, pixels);
+    }
+
+    static void reset()
+    {
+        components.clear();
+        repaints.clear();
+    }
 
     static void logTimelineChild(const Component& parent, const Component& child,
                                  Graphics& graphics, Rectangle<int> parentClip)
@@ -608,12 +654,32 @@ public:
                                 "PEER_PAINT_WAIT %s calls=%zu cpu_ms=%.3f wall_ms=%.3f wait_ms=%.3f",
                                 type->name(), sample.count, cpuMs, wallMs, wallMs - cpuMs);
         }
+        // Track where the invalidations originated, including the large
+        // viewport requests that a paint-only profile cannot identify.
+        using RepaintEntry = std::pair<const std::type_info*, RepaintSample>;
+        std::vector<RepaintEntry> origins(repaints.begin(), repaints.end());
+        std::sort(origins.begin(), origins.end(), [](const RepaintEntry& a, const RepaintEntry& b)
+        {
+            return a.second.requestedPixels > b.second.requestedPixels;
+        });
+        for (std::size_t i = 0; i < jmin(origins.size(), std::size_t{ 12 }); ++i)
+        {
+            const auto& [origin, item] = origins[i];
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "REPAINT_ORIGIN %s calls=%zu fullCalls=%zu requestedPixels=%lld maxPixels=%lld",
+                origin->name(), item.calls, item.fullCalls,
+                static_cast<long long>(item.requestedPixels),
+                static_cast<long long>(item.largestPixels));
+        }
     }
 
 private:
     struct Sample { jlong selfCpuNs = 0, selfWallNs = 0; std::size_t count = 0; };
+    struct RepaintSample { std::size_t calls = 0, fullCalls = 0;
+                           int64_t requestedPixels = 0, largestPixels = 0; };
     static inline thread_local ComponentPaintProbe* current = nullptr;
     static inline std::map<const std::type_info*, Sample> components;
+    static inline std::map<const std::type_info*, RepaintSample> repaints;
 
     const std::type_info* type;
     ComponentPaintProbe* parent = nullptr;
@@ -702,6 +768,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
         bitmapSubmitSamples = 0;
         tileUploadSamples = 0;
         frameCount = 0;
+        ++measurementEpoch;
         ComponentPaintProbe::reset();
         return nullptr;
     }
