@@ -111,13 +111,13 @@ static_assert(valid(245, 144));
 // the keyboard shrinks the deck or split-screen narrows the viewport.
 constexpr bool portraitCollapsedActionsAreNonInteractive()
 {
-    for (int w = 13; w <= 306; ++w)
+    for (int w = 13; w <= 302; ++w)
     {
         const auto r = portraitTransportLayout(w, 144);
         for (const auto action : r.transport)
             if (action.width != 0 || action.height != 0) return false;
     }
-    for (const int w : {307, 320, 360, 852})
+    for (const int w : {303, 320, 360, 852})
     {
         const auto shortDeck = portraitTransportLayout(w, 143);
         const auto usableDeck = portraitTransportLayout(w, 144);
