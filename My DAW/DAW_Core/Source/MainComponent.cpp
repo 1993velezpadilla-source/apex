@@ -9860,12 +9860,18 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         // bar 15 (~28 seconds), then Android used to clamp horizontal pan
         // during REC until Stop finalized the audio clip. Start the
         // disposable emulator take at 29s and pan past the old 30s edge.
+        // Keep the *initial viewport* half a second behind the take start:
+        // at 29.0s the 1.5s warm-up can put all newly grown recording
+        // columns to the left of the viewport after a pan, making a visible-
+        // waveform assertion nondeterministic despite uninterrupted audio.
+        // Starting at 28.5s still crosses the old limit during the gesture
+        // while keeping newly recorded columns in the visible viewport.
         // Do NOT seek or change any real user session outside benchmark mode.
         const auto sr = juce::jmax(1.0, arrangement_->getEngineSampleRate());
         appCore_.getTransport().setPosition(
             static_cast<DAW::SamplePosition>(sr * 29.0));
         timelineViewport_->setViewPosition(
-            juce::roundToInt(29.0 * arrangement_->getPixelsPerSecond()), 0);
+            juce::roundToInt(28.5 * arrangement_->getPixelsPerSecond()), 0);
         syncTimelineViewportPosition();
     }
     repaint();
