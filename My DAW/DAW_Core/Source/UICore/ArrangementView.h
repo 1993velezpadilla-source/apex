@@ -447,6 +447,11 @@ trackManager_.addListener(this);
     bool isApplyingZoom() const noexcept { return core_ != nullptr && core_->isApplyingZoom(); }
     std::function<void(bool heightChanged)> onZoomLayout;
     std::function<void()> onZoomPresented;
+    // Mobile message-thread transport sample: the audio callback advances
+    // position with setPositionFromAudioThread(), which deliberately sends
+    // NO positionChanged notification. Use this lightweight callback to
+    // extend the virtual viewport ahead of a long in-progress recording.
+    std::function<void()> onTransportTick;
 
     void setViewportScrollOffsets(int scrollX, int scrollY)
     {
@@ -1354,6 +1359,13 @@ void trackPropertyChanged(Track* track) override
         if (!juce::isApexAndroidFramePacingEnabled() || !isShowing())
        #endif
             updateTimelinePresentation();
+
+       #if JUCE_ANDROID
+        // This 60Hz message-thread timer runs even when a frame-paced
+        // Android View defers paints. No GUI work in the audio callback.
+        if (onTransportTick && (transport_.isPlaying() || transport_.isRecording()))
+            onTransportTick();
+       #endif
 
         if (automationSyncDirty_)
         {
