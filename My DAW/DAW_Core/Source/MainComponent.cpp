@@ -9921,6 +9921,7 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("rebuilds", static_cast<juce::int64>(TimelinePaintMetrics::arrangementRendererRebuilds.load()));
     state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
+    state->setProperty("waveformBatchedPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformBatchedPaints.load()));
     state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
     state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
     state->setProperty("masterPreviewUpdateCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewUpdateCalls.load()));

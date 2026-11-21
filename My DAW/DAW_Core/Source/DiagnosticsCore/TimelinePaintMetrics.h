@@ -214,6 +214,7 @@ struct TimelinePaintMetrics
     static inline SampleRing viewportZoomDurationNs;
     static inline std::atomic<uint64_t> waveformPeaksWalked{0};
     static inline std::atomic<uint64_t> waveformCachedDraws{0};
+    static inline std::atomic<uint64_t> waveformBatchedPaints{0};
 
     // ── Counter group: automation ───────────────────────────────────────
     static inline std::atomic<uint64_t> automationTimerTicks{0};
@@ -366,6 +367,7 @@ struct TimelinePaintMetrics
         arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
         waveformCachedDraws   = 0;
+        waveformBatchedPaints = 0;
         automationTimerTicks  = 0;
         automationTimerSkipped = 0;
         automationTimerInvalidated = 0;

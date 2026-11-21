@@ -199,12 +199,19 @@ namespace ArrangementEditor
         if (m_model->locked)
             drawLockIcon(g);
 
-        // Layer 8: Clip name  (always at very top, never on waveform)
-        if (ArrangementClipLodPolicy::drawClipName(getWidth(), getHeight()))
+        // Horizontal scrolling routinely paints a thin stripe from the
+        // MIDDLE of a long clip. Do not construct fonts, paths and badge
+        // strings for decorations at its edges when they cannot be visible.
+        // Header/background and waveform remain fully painted in the stripe.
+        const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
+        const bool headerVisible = dirty.getY() < kNameH && !dirty.isEmpty();
+
+        // Layer 8: Clip name (at the left edge of the clip)
+        if (headerVisible && ArrangementClipLodPolicy::drawClipName(getWidth(), getHeight()))
             drawClipName(g);
 
-        // Layer 9: Pitch/rate badges  (below name bar)
-        if (ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
+        // Layer 9: Pitch/rate badges (at the right edge of the clip)
+        if (headerVisible && ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
             drawPitchRateBadges(g);
 
         // Layer 9b: TimePitch cache/render status
@@ -221,10 +228,13 @@ namespace ArrangementEditor
 
         // Layer 11b: Interactive handles (fade corners, edge resize, volume btn)
         drawClipHandles(g);
-        // M / S / V share the same canonical engine clip properties.
-        drawMuteButton(g);
-        drawSoloButton(g);
-        drawVolumeButton(g);
+        // M / S / V sit entirely inside the header, not in the body stripe.
+        if (headerVisible)
+        {
+            drawMuteButton(g);
+            drawSoloButton(g);
+            drawVolumeButton(g);
+        }
         // Drag status is now painted in the pinned ruler by ArrangementViewCore.
         // Never cover waveform pixels with the opaque trim/fade information.
 
@@ -1097,6 +1107,17 @@ namespace ArrangementEditor
         const int startPx = dirty.getX() - full.getX();
         const int endPx = dirty.getRight() - full.getX();
 
+        // JUCE explicitly recommends fillRectList() for many same-colour
+        // rectangles. The old path called Graphics::fillRect once PER
+        // waveform column, triggering repeated graphics-context dispatch,
+        // clipping and state machinery during every horizontal pan.
+        // Keep the exact floating-point geometry and envelope; never hide
+        // the waveform while moving. Small 1..11px damage strips avoid
+        // allocating a list when direct rectangles are cheaper.
+        const bool batchColumns = endPx - startPx >= 12;
+        juce::RectangleList<float> waveformColumns;
+        if (batchColumns)
+            waveformColumns.ensureStorageAllocated(endPx - startPx);
         TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformDrawCalls);
         float prevTop = 0.f, prevBot = 0.f;
         bool  havePrev = false;
@@ -1176,15 +1197,21 @@ namespace ArrangementEditor
             }
 
             const float x = (float)(full.getX() + px);
-            g.fillRect(x, top, 1.0f, bot - top);
+            if (batchColumns)
+                waveformColumns.addWithoutMerging({ x, top, 1.0f, bot - top });
+            else
+                g.fillRect(x, top, 1.0f, bot - top);
 
             // Red clipping markers are NOT a source-waveform decoration.
             // ArrangementViewCore now paints only playback-observed output
             // over-0 dBFS markers, so a limiter/gain change clears them on
             // the next listen pass rather than producing false positives.
         }
-
-
+        if (batchColumns && !waveformColumns.isEmpty())
+        {
+            g.fillRectList(waveformColumns);
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformBatchedPaints);
+        }
     }
 
     void ClipRenderCore::drawFades(juce::Graphics& g)
@@ -1261,7 +1288,15 @@ namespace ArrangementEditor
             return;
 
         // Header is already drawn in drawBackground() with the clip colour.
-        // Just draw the name text on top of the header.
+        // Cull BEFORE constructing the string or measuring font glyphs.
+        // Use the measured width of the currently cached name, NOT an
+        // arbitrary 300px cap: very long artist/clip labels must remain
+        // visible when the viewport intersects their actual painted text.
+        // updateClipData invalidates the measurement on every rename.
+        const int labelExtent = measuredClipNameWidth > 0
+            ? juce::jmin(textW, measuredClipNameWidth + 4) : textW;
+        if (!g.clipRegionIntersects({ textX, 1, labelExtent, kNameH - 2 }))
+            return;
         TimelinePaintMetrics::ScopedTimer nameTimer(TimelinePaintMetrics::clipNameDurationNs);
         const juce::String name(m_model->clipName.empty() ? "(unnamed)" : m_model->clipName);
         int labelWidth = textW;
@@ -1293,9 +1328,12 @@ namespace ArrangementEditor
         if (!ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
             return;
 
-        // Badges live inside the name bar (top kNameH pixels), right-aligned.
-        // Order right-to-left: stretch badge, then pitch badge.
-        // This keeps them completely above the waveform area.
+        // Badges live inside the name bar at the right edge. The broad
+        // 300px guard covers even multiple long pitch/stretch labels; do
+        // not set up typefaces for an offscreen edge of a long clip.
+        const auto rightEdge = juce::jmax(0, getWidth() - 300);
+        if (!g.clipRegionIntersects({ rightEdge, 0, getWidth() - rightEdge, kNameH }))
+            return;
 
         const auto& tp   = m_model->timePitch;
         const int   mode = static_cast<int>(tp.mode);
@@ -1470,8 +1508,9 @@ namespace ArrangementEditor
 
         const juce::Colour handleCol = juce::Colours::white;
 
-        // Fade-in wedge (top-left). Draw the wedge plus a dark outline for
-        // contrast against any waveform colour. No anchor dot.
+        // Fade-in wedge (top-left). On a long clip, do not construct paths
+        // for handles outside the visible damage strip.
+        if (g.clipRegionIntersects(fadeInHandleRect().expanded(2)))
         {
             auto r = fadeInHandleRect().toFloat();
             const float a = highlight(Zone::FadeIn);
@@ -1486,7 +1525,8 @@ namespace ArrangementEditor
             g.fillPath(p);
         }
 
-        // Fade-out wedge (top-right) â€” mirror of the fade-in handle.
+        // Fade-out wedge (top-right) — mirror of the fade-in handle.
+        if (g.clipRegionIntersects(fadeOutHandleRect().expanded(2)))
         {
             auto r = fadeOutHandleRect().toFloat();
             const float a = highlight(Zone::FadeOut);
@@ -1505,11 +1545,13 @@ namespace ArrangementEditor
         // user can find the trim edge, and brighten it on hover/active.
         const float leftAlpha  = highlight(Zone::ResizeLeft);
         const float rightAlpha = highlight(Zone::ResizeRight);
+        if (g.clipRegionIntersects(leftEdgeRect()))
         {
             auto r = leftEdgeRect().toFloat();
             g.setColour(handleCol.withAlpha(leftAlpha * 0.5f + 0.12f));
             g.fillRect(r.withWidth(juce::jmin(3.0f, r.getWidth())));
         }
+        if (g.clipRegionIntersects(rightEdgeRect()))
         {
             auto r = rightEdgeRect().toFloat();
             g.setColour(handleCol.withAlpha(rightAlpha * 0.5f + 0.12f));
