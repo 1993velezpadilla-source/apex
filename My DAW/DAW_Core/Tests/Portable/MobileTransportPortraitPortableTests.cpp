@@ -888,8 +888,33 @@ bool compactStandardWidthHeightGrid()
 constexpr bool compactWideInsetRecoverySweep();
 constexpr bool compactNarrowTransportIsNonInteractive();
 
+// Single-row keyboard collapse at recovered 268..294 widths was not covered
+// by the two-row (94+) grid. Check every intermediate height: Transport must
+// remain 44-high and all optional top-row controls must stay non-interactive.
+bool compactRecoveredSingleRowGrid()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h = 44; h < 94; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (action.width < 44 || action.height < 44
+                    || !inside(action, w, h)) return false;
+            const PortraitTransportBounds optional[] = {
+                r.fx, r.browser, r.mixer, r.sends,
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            for (const auto target : optional)
+                if (target.width != 0 || target.height != 0) return false;
+        }
+    return true;
+}
+
 int main()
 {
+    assert(compactRecoveredSingleRowGrid());
     assert(compactNarrowTransportIsNonInteractive());
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
     // evaluation budget; retain the same checks in optimized/NDEBUG builds.
