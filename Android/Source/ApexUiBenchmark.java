@@ -47,7 +47,7 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
 
     private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion,
                                                  boolean framePaced, boolean suppressMasterPreview,
-                                                 boolean reuseHorizontalBitmaps);
+                                                 boolean reuseHorizontalBitmaps, boolean preciseArrangerDamage);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -73,7 +73,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer),
             "frame-paced".equals(renderer),
             activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false),
-            activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false));
+            activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false),
+            activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -249,6 +250,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
                 activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false));
             result.put("horizontal_bitmap_reuse",
                 activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false));
+            result.put("precise_arranger_damage",
+                activity.getIntent().getBooleanExtra("apex_precise_arranger_damage", false));
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);

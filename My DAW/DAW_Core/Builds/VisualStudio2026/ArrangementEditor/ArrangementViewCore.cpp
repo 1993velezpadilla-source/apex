@@ -31,7 +31,11 @@
 #include <limits>
 
 #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
-namespace juce { void setApexTimelineViewport(Viewport& viewport, int headerHeight); }
+namespace juce
+{
+    void setApexTimelineViewport(Viewport& viewport, int headerHeight);
+    bool isApexAndroidArrangerDamageClippingEnabled() noexcept;
+}
 #endif
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 namespace juce { void noteApexTimelineMotion(Component& viewport); }
@@ -221,6 +225,23 @@ namespace ArrangementEditor
                 return;
             }
 
+            const int headerHeight = juce::jmin(visible.getHeight(), view.arrangementContentTop());
+            const auto header = visible.withHeight(headerHeight);
+            const auto body = visible.withTrimmedTop(headerHeight);
+            juce::RectangleList<int> pixels;
+            bool splitHeader = juce::isApexAndroidArrangerDamageClippingEnabled();
+            if (splitHeader)
+            {
+                juce::Graphics::ScopedSaveState bodyClip(graphics);
+                if (graphics.reduceClipRegion(body))
+                    splitHeader = software->getApexDeviceClip(scale, pixels);
+            }
+            if (splitHeader != paintsHeaderSeparately)
+            {
+                invalidateAll();
+                paintsHeaderSeparately = splitHeader;
+            }
+
             const auto deviceView = toPixels(visible, scale);
             // The horizontal backing store is a ring, not a periodically
             // shifted bitmap. Every X movement advances the logical frame and
@@ -312,7 +333,7 @@ namespace ArrangementEditor
                     ringX, static_cast<int64_t>(nextFrame.getX()) - frame.getX(), size.x);
             }
 
-            if (visible != previousView)
+            if (visible.getY() != previousView.getY() || (!splitHeader && visible != previousView))
             {
                 // Toolbar and ruler are pinned to screen space, not to the
                 // timeline's world coordinates. Always invalidate both old
@@ -325,14 +346,28 @@ namespace ArrangementEditor
             frame = nextFrame;
             previousView = visible;
 
-            const auto dirty = graphics.getClipBounds().getIntersection(visible);
-            if (dirty.isEmpty())
-                return;
-            const auto pixels = toPixels(dirty, scale).expanded(1).getIntersection(frame);
-            juce::RectangleList<int> missing(pixels);
+            if (splitHeader)
+            {
+                // Paint only the requested device pixels. Gaps between a
+                // playhead and a waveform update already have valid pixels.
+                // Keep a one-device-pixel margin for rounding in the two
+                // independently translated blits across the ring seam.
+                juce::RectangleList<int> padded;
+                for (const auto& area : pixels)
+                    padded.add(area.expanded(1).getIntersection(frame));
+                pixels = std::move(padded);
+            }
+            else
+            {
+                const auto dirty = graphics.getClipBounds().getIntersection(visible);
+                if (dirty.isEmpty())
+                    return;
+                pixels.add(toPixels(dirty, scale).expanded(1).getIntersection(frame));
+            }
+            auto missing = pixels;
             missing.subtract(valid);
             if (missing.getNumRectangles() > 32)
-                missing = juce::RectangleList<int>(pixels);
+                missing = pixels;
 
             const int seamX = frame.getX()
                 + ArrangementHorizontalRingCore::seamOffset(ringX, size.x);
@@ -389,13 +424,17 @@ namespace ArrangementEditor
                 return software->blitOpaqueImage(image, toUser);
             };
             bool copied = true;
+            if (!pixels.isEmpty())
             {
                 juce::Graphics::ScopedSaveState viewportClip(graphics);
-                graphics.reduceClipRegion(visible);
-                if (pixels.getX() < seamX)
-                    copied = blitHalf(0);
-                if (copied && pixels.getRight() > seamX)
-                    copied = blitHalf(size.x);
+                if (graphics.reduceClipRegion(splitHeader ? body : visible))
+                {
+                    const auto pixelBounds = pixels.getBounds();
+                    if (pixelBounds.getX() < seamX)
+                        copied = blitHalf(0);
+                    if (copied && pixelBounds.getRight() > seamX)
+                        copied = blitHalf(size.x);
+                }
             }
             if (!copied)
             {
@@ -404,17 +443,36 @@ namespace ArrangementEditor
                 return;
             }
 
+            const bool collectMetrics = TimelinePaintMetrics::active.load(std::memory_order_relaxed);
+            uint64_t headerPixels = 0;
+            if (splitHeader)
+            {
+                // The toolbar and ruler are pinned to the screen. Draw them
+                // once, even when the world-coordinate ring crosses a seam.
+                juce::Graphics::ScopedSaveState headerClip(graphics);
+                if (graphics.reduceClipRegion(header))
+                {
+                    if (collectMetrics)
+                    {
+                        juce::RectangleList<int> headerDamage;
+                        if (software->getApexDeviceClip(scale, headerDamage))
+                            headerPixels = countPixels(headerDamage);
+                    }
+                    const juce::ScopedValueSetter<bool> backgroundOnly(
+                        view.m_paintingViewportBackground, separateForeground);
+                    view.paintEntireComponent(graphics, true);
+                }
+            }
+
             if (separateForeground)
                 view.paintTimelineForeground(graphics);
 
-            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+            if (collectMetrics)
             {
-                uint64_t drawn = 0;
-                for (const auto& area : missing)
-                    drawn += static_cast<uint64_t>(area.getWidth()) * area.getHeight();
-                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerRasterPixels, drawn);
+                const auto drawn = countPixels(missing);
+                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerRasterPixels, headerPixels + drawn);
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerReusePixels,
-                    static_cast<uint64_t>(pixels.getWidth()) * pixels.getHeight() - drawn);
+                    countPixels(pixels) - drawn);
             }
         }
 
@@ -444,6 +502,14 @@ namespace ArrangementEditor
         }
 
     private:
+        static uint64_t countPixels(const juce::RectangleList<int>& region)
+        {
+            uint64_t pixels = 0;
+            for (const auto& area : region)
+                pixels += static_cast<uint64_t>(area.getWidth()) * area.getHeight();
+            return pixels;
+        }
+
         static juce::Rectangle<int> toPixels(juce::Rectangle<int> bounds, float scale)
         {
             return (bounds.toDouble() * static_cast<double>(scale)).getSmallestIntegerContainer();
@@ -453,6 +519,7 @@ namespace ArrangementEditor
         double pixelsPerSecond;
         int laneHeight;
         bool paintsForegroundSeparately = false;
+        bool paintsHeaderSeparately = false;
         float pixelScale = 0.0f;
         juce::Image image;
         juce::Rectangle<int> frame;

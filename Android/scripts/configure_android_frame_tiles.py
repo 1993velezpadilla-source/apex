@@ -125,6 +125,19 @@ void setApexTimelineViewport (Viewport& viewport, int headerHeight)
 ComponentPeer* Component::createNewPeer""")
 
 
+def add_arranger_damage_query(peer: str) -> str:
+    if "bool isApexAndroidArrangerDamageClippingEnabled()" in peer:
+        return peer
+    return replace(peer, "void setApexTimelineViewport (Viewport& viewport, int headerHeight)\n{", """\
+bool isApexAndroidArrangerDamageClippingEnabled() noexcept
+{
+    return apexAndroidFrame::preciseArrangerDamage;
+}
+
+void setApexTimelineViewport (Viewport& viewport, int headerHeight)
+{""")
+
+
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -238,12 +251,63 @@ private:
     path.write_text(contents, encoding="utf-8")
 
 
+def add_device_clip_query(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "bool getApexDeviceClip (" in contents:
+        return
+    contents = replace(contents, "    // Copy a fully opaque memory-backed image", """\
+    // Return the actual raster damage in local device pixels. A user-space
+    // bounding box would fill the gaps between independent dirty regions.
+    bool getApexDeviceClip (float localScale, RectangleList<int>& result) const
+    {
+        using RectangleClip = RenderingHelpers::SoftwareRendererSavedState::RectangleListRegionType;
+        const auto* rectangularClip = dynamic_cast<const RectangleClip*> (stack->clip.get());
+        const auto toDevice = stack->transform.getTransformWith (AffineTransform::scale (1.0f / localScale));
+        if (rectangularClip == nullptr
+            || ! RenderingHelpers::SoftwareRendererSavedState::isOnlyTranslationAllowingError (toDevice, 0.002f))
+            return false;
+
+        // Match blitOpaqueImage's device-pixel snapping, including negative
+        // origins at fractional Android densities.
+        const auto snap = [] (float position) { return (int) std::floor (position + 0.5f); };
+        const Point<int> origin { snap (toDevice.getTranslationX()), snap (toDevice.getTranslationY()) };
+        result = rectangularClip->clip;
+        result.offsetAll (-origin);
+        return true;
+    }
+
+    // Copy a fully opaque memory-backed image""")
+    path.write_text(contents, encoding="utf-8")
+
+
+def query_scaled_clip_coverage(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "APEX exact coverage of scaled dirty rectangles" in contents:
+        return
+    contents = replace(contents, "            return getClipBounds().intersects (r);", """\
+            // APEX exact coverage of scaled dirty rectangles. At Android's
+            // display scale, a bounding-box query also hits all the gaps in
+            // the dirty region between the arranger and stationary controls.
+            if (! transform.isRotated)
+            {
+                const auto device = r.toDouble().transformedBy (transform.complexTransform)
+                    .getIntersection (clip->getClipBounds().toDouble());
+                return ! device.isEmpty() && clip->clipRegionIntersects (device.getSmallestIntegerContainer());
+            }
+
+            return getClipBounds().intersects (r);""")
+    path.write_text(contents, encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
     graphics = root / "modules/juce_graphics"
     bound_wide_software_clips(graphics / "native/juce_RenderingHelpers.h")
-    add_opaque_image_blit(graphics / "contexts/juce_LowLevelGraphicsSoftwareRenderer.h")
+    query_scaled_clip_coverage(graphics / "native/juce_RenderingHelpers.h")
+    software_renderer = graphics / "contexts/juce_LowLevelGraphicsSoftwareRenderer.h"
+    add_opaque_image_blit(software_renderer)
+    add_device_clip_query(software_renderer)
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"
@@ -256,7 +320,8 @@ def configure(root: Path) -> None:
             raise ValueError("Incomplete APEX Android renderer")
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
             peer_text = add_timeline_motion(peer_text)
-        peer.write_text(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text)), encoding="utf-8")
+        peer.write_text(add_arranger_damage_query(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text))),
+                        encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -324,8 +389,8 @@ def configure(root: Path) -> None:
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
-    peer.write_text(add_horizontal_bitmap_reuse(add_frame_pacing(add_timeline_motion(peer_text))),
-                    encoding="utf-8")
+    peer_text = add_horizontal_bitmap_reuse(add_frame_pacing(add_timeline_motion(peer_text)))
+    peer.write_text(add_arranger_damage_query(peer_text), encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

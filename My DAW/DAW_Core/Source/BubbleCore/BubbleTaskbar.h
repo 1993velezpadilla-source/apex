@@ -111,48 +111,57 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        auto& t  = Theme::getInstance();
-        int   mc = getMinimizedCount();
-        auto  bub = bubbleRect();
+        const auto bub = bubbleRect();
+        const bool orbDirty = g.clipRegionIntersects(bub.expanded(10.f).getSmallestIntegerContainer());
+        if (!orbDirty && !panelOpen_)
+            return;
 
-        // ── Bubble orb ──────────────────────────────────────────────────
-        g.setColour(juce::Colours::black.withAlpha(0.45f));
-        g.fillEllipse(bub.translated(0.f, 5.f).expanded(2.f));
-        juce::ColourGradient bubbleGrad(t.colors.surface.brighter(0.08f), bub.getCentreX(), bub.getY(),
-                                        t.colors.surface.darker(0.12f), bub.getCentreX(), bub.getBottom(), false);
-        g.setGradientFill(bubbleGrad);
-        g.fillEllipse(bub);
-        g.setColour(t.colors.border.withAlpha(0.9f));
-        g.drawEllipse(bub, 1.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.08f));
-        g.drawEllipse(bub.reduced(1.0f), 1.0f);
-
-        if (inMergeZone_)
+        auto& t = Theme::getInstance();
+        const int mc = getMinimizedCount();
+        if (orbDirty)
         {
-            g.setColour(t.colors.accent.withAlpha(0.4f));
-            g.drawEllipse(bub.expanded(6.f), 2.5f);
-            g.setColour(t.colors.accent.withAlpha(0.1f));
-            g.fillEllipse(bub.expanded(6.f));
+            // ── Bubble orb ──────────────────────────────────────────────────
+            g.setColour(juce::Colours::black.withAlpha(0.45f));
+            g.fillEllipse(bub.translated(0.f, 5.f).expanded(2.f));
+            juce::ColourGradient bubbleGrad(t.colors.surface.brighter(0.08f), bub.getCentreX(), bub.getY(),
+                                            t.colors.surface.darker(0.12f), bub.getCentreX(), bub.getBottom(), false);
+            g.setGradientFill(bubbleGrad);
+            g.fillEllipse(bub);
+            g.setColour(t.colors.border.withAlpha(0.9f));
+            g.drawEllipse(bub, 1.0f);
+            g.setColour(juce::Colours::white.withAlpha(0.08f));
+            g.drawEllipse(bub.reduced(1.0f), 1.0f);
+
+            if (inMergeZone_)
+            {
+                g.setColour(t.colors.accent.withAlpha(0.4f));
+                g.drawEllipse(bub.expanded(6.f), 2.5f);
+                g.setColour(t.colors.accent.withAlpha(0.1f));
+                g.fillEllipse(bub.expanded(6.f));
+            }
+
+            drawWindowsIcon(g, bub.reduced(14.f), mc > 0 ? t.colors.accent : t.colors.textSecondary.withAlpha(0.8f));
+
+            if (mc > 0)
+            {
+                auto badge = juce::Rectangle<float>(bub.getRight() - 16.f, bub.getY() - 4.f, 20.f, 20.f);
+                g.setColour(t.colors.transportRecord);
+                g.fillEllipse(badge);
+                g.setColour(juce::Colours::black.withAlpha(0.5f));
+                g.drawEllipse(badge, 1.f);
+                g.setColour(juce::Colours::white);
+                g.setFont(t.fonts.small);
+                g.drawText(juce::String(mc), badge, juce::Justification::centred);
+            }
         }
 
-        drawWindowsIcon(g, bub.reduced(14.f), mc > 0 ? t.colors.accent : t.colors.textSecondary.withAlpha(0.8f));
-
-        if (mc > 0)
-        {
-            auto badge = juce::Rectangle<float>(bub.getRight() - 16.f, bub.getY() - 4.f, 20.f, 20.f);
-            g.setColour(t.colors.transportRecord);
-            g.fillEllipse(badge);
-            g.setColour(juce::Colours::black.withAlpha(0.5f));
-            g.drawEllipse(badge, 1.f);
-            g.setColour(juce::Colours::white);
-            g.setFont(t.fonts.small);
-            g.drawText(juce::String(mc), badge, juce::Justification::centred);
-        }
-
-        if (!(panelOpen_ && mc > 0)) return;
+        if (!panelOpen_ || mc == 0)
+            return;
 
         // ── Panel popup ─────────────────────────────────────────────────
         auto panel = panelRect();
+        if (!g.clipRegionIntersects(panel.expanded(12.f).getSmallestIntegerContainer()))
+            return;
         g.setColour(juce::Colours::black.withAlpha(0.55f));
         g.fillRoundedRectangle(panel.translated(0.f, 8.f).expanded(2.f), 14.f);
         juce::ColourGradient panelGrad(t.colors.surface.withAlpha(0.97f), panel.getCentreX(), panel.getY(),

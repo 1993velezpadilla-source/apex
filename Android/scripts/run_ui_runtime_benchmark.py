@@ -25,7 +25,8 @@ def adb(*args: str, binary: bool = False):
 
 def validate_result(result: dict, scene: str, renderer: str,
                     suppress_master_preview: bool = False,
-                    reuse_horizontal_bitmaps: bool = False) -> None:
+                    reuse_horizontal_bitmaps: bool = False,
+                    precise_arranger_damage: bool = False) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
@@ -40,6 +41,8 @@ def validate_result(result: dict, scene: str, renderer: str,
         raise ValueError("Java master preview diagnostic switch mismatch")
     if bool(result.get("horizontal_bitmap_reuse")) != reuse_horizontal_bitmaps:
         raise ValueError("Java horizontal bitmap reuse switch mismatch")
+    if bool(result.get("precise_arranger_damage")) != precise_arranger_damage:
+        raise ValueError("Java arranger damage clipping switch mismatch")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -205,9 +208,11 @@ def screenshot(path: Path) -> None:
 
 def run_case(output: Path, renderer: str, scene: str, repeat: int,
              suppress_master_preview: bool = False,
-             reuse_horizontal_bitmaps: bool = False) -> dict:
+             reuse_horizontal_bitmaps: bool = False,
+             precise_arranger_damage: bool = False) -> dict:
     # Only a disposable CI emulator may disable the master waveform.
-    variant = "horizontal-reuse" if reuse_horizontal_bitmaps else renderer
+    variant = "precise-damage" if precise_arranger_damage else (
+        "horizontal-reuse" if reuse_horizontal_bitmaps else renderer)
     name = f"{scene}-{variant}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
@@ -218,7 +223,9 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
         "--ez", "apex_master_preview_suppressed",
         "true" if suppress_master_preview else "false",
         "--ez", "apex_horizontal_bitmap_reuse",
-        "true" if reuse_horizontal_bitmaps else "false")
+        "true" if reuse_horizontal_bitmaps else "false",
+        "--ez", "apex_precise_arranger_damage",
+        "true" if precise_arranger_damage else "false")
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -286,12 +293,14 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int,
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
-    validate_result(result, scene, renderer, suppress_master_preview, reuse_horizontal_bitmaps)
+    validate_result(result, scene, renderer, suppress_master_preview,
+                    reuse_horizontal_bitmaps, precise_arranger_damage)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
         raise RuntimeError(f"{name}: production screen did not change")
     result["repeat"] = repeat
+    result["variant"] = variant
     result["master_preview_suppressed"] = suppress_master_preview
     return result
 
@@ -319,30 +328,32 @@ def main() -> int:
     failures = []
     try:
         for scene in ("playback", "recording", "empty", "clip", "deep"):
-            # Both paths retain the same JUCE cache and frame pacing. Only
-            # compositor bitmap reuse changes, with both orders tested.
-            orders = (("frame-paced", "horizontal-reuse"), ("horizontal-reuse", "frame-paced"))
+            # Both variants use the 9.6 compositor. Compare painting the
+            # pinned header and exact body damage in both replay orders.
+            orders = (("horizontal-reuse", "precise-damage"), ("precise-damage", "horizontal-reuse"))
             if scene == "deep":
                 orders += (("int-array",),)
             for repeat, order in enumerate(orders, 1):
                 for variant in order:
-                    reuse_horizontal = variant == "horizontal-reuse"
+                    reuse_horizontal = variant in ("horizontal-reuse", "precise-damage")
                     renderer = "frame-paced" if reuse_horizontal else variant
                     name = f"{scene}-{variant}-{repeat}"
                     try:
                         result = run_case(args.output, renderer, scene, repeat,
-                                          reuse_horizontal_bitmaps=reuse_horizontal)
+                                          reuse_horizontal_bitmaps=reuse_horizontal,
+                                          precise_arranger_damage=variant == "precise-damage")
                         results.append(result)
                         print(f"Runtime gesture/surface checks passed: {name}", flush=True)
-                        if (scene in ("playback", "recording") and variant == "frame-paced"
+                        if (scene in ("playback", "recording") and variant == "horizontal-reuse"
                                 and repeat == 2):
                             # Paired A/B playback/REC, preserving the imported
                             # clip and live-take waveforms. Only master is
                             # suppressed in this benchmark-only control.
-                            control_name = f"{scene}-{renderer}-master-off-{repeat}"
+                            control_name = f"{scene}-{variant}-master-off-{repeat}"
                             try:
                                 control = run_case(args.output, renderer, scene, repeat,
-                                                   suppress_master_preview=True)
+                                                   suppress_master_preview=True,
+                                                   reuse_horizontal_bitmaps=True)
                                 results.append(control)
                                 print(f"[MASTER-A/B] diagnostic control passed: {control_name}",
                                       flush=True)
@@ -379,8 +390,7 @@ def main() -> int:
             if scroll_events < 0 or clip_checks < 0:
                 raise RuntimeError("Non-monotonic native viewport/clip-scan counters")
             scans_per_scroll = clip_checks / scroll_events if scroll_events else 0.0
-            variant = "horizontal-reuse" if result.get("horizontal_bitmap_reuse") else result["renderer_requested"]
-            print(f"{result['scene']} {variant} "
+            print(f"{result['scene']} {result['variant']} "
                   f"pass {result['repeat']} "
                   f"master={'off' if result.get('master_preview_suppressed') else 'on'} "
                   f"{phase['phase']} "
@@ -398,26 +408,26 @@ def main() -> int:
                   f"cache pixels shifted={copied:,} rebases={rebased}")
     for scene in ("empty", "clip", "playback", "recording", "deep"):
         for repeat in (1, 2):
-            paired = {r["horizontal_bitmap_reuse"]: r for r in results
+            paired = {r["precise_arranger_damage"]: r for r in results
                       if r["scene"] == scene and r["repeat"] == repeat
-                      and r["renderer_requested"] == "frame-paced"
+                      and r["horizontal_bitmap_reuse"]
                       and not r["master_preview_suppressed"]}
             if len(paired) < 2:
                 continue
-            for phase_index in (0, 4, 5):
-                baseline, reuse = (paired[enabled]["phases"][phase_index] for enabled in (False, True))
-                print(f"[BITMAP-A/B] {scene} pass={repeat} {reuse['phase']} "
-                      f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{reuse['ui_interval_p95_ms']:.1f}ms "
-                      f"worst={baseline['ui_interval_worst_ms']:.1f}/{reuse['ui_interval_worst_ms']:.1f}ms "
-                      f"window p95={baseline['windowTotalMs']['p95']:.1f}/{reuse['windowTotalMs']['p95']:.1f}ms "
-                      f"bitmap pixels updated={baseline.get('peerMeanUpdatedTilePixels', 0):,}/"
-                      f"{reuse.get('peerMeanUpdatedTilePixels', 0):,}")
+            for phase_index in (0, 3, 4, 5):
+                baseline, precise = (paired[enabled]["phases"][phase_index] for enabled in (False, True))
+                print(f"[DAMAGE-A/B] {scene} pass={repeat} {precise['phase']} "
+                      f"callback p95={baseline['ui_interval_p95_ms']:.1f}/{precise['ui_interval_p95_ms']:.1f}ms "
+                      f"worst={baseline['ui_interval_worst_ms']:.1f}/{precise['ui_interval_worst_ms']:.1f}ms "
+                      f"window p95={baseline['windowTotalMs']['p95']:.1f}/{precise['windowTotalMs']['p95']:.1f}ms "
+                      f"raster CPU p95={baseline['peerRasterCpuMs']['p95']:.1f}/{precise['peerRasterCpuMs']['p95']:.1f}ms "
+                      f"GPU p95={baseline['windowGpuMs']['p95']:.1f}/{precise['windowGpuMs']['p95']:.1f}ms")
     # A/B is diagnostic, not a pass/fail 60fps certification. Use the same
     # renderer/transport and report the master work separately from rendering.
     for scene in ("playback", "recording"):
         paired = [x for x in results if x["scene"] == scene
-                  and x["renderer_requested"] == "frame-paced"
-                  and x["repeat"] == 2 and not x.get("horizontal_bitmap_reuse")]
+                  and x["variant"] == "horizontal-reuse"
+                  and x["repeat"] == 2]
         enabled = next((x for x in paired if not x.get("master_preview_suppressed")), None)
         disabled = next((x for x in paired if x.get("master_preview_suppressed")), None)
         if enabled is not None and disabled is not None:
@@ -441,8 +451,7 @@ def main() -> int:
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly
     # so GREEN functional checks cannot be mistaken for a physical-phone fix.
     target_60hz_ms = 1000.0 / 60.0
-    slow = [(result["scene"], "horizontal-reuse" if result["horizontal_bitmap_reuse"]
-             else result["renderer_requested"], result["repeat"],
+    slow = [(result["scene"], result["variant"], result["repeat"],
              phase["phase"], phase["ui_interval_p95_ms"])
             for result in results for phase in result["phases"]
             if phase["ui_interval_p95_ms"] > target_60hz_ms]

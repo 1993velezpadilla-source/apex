@@ -51,10 +51,12 @@ static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
 static bool reduceTimelineMotion = false;
 static bool framePacingEnabled = true;
 static bool horizontalBitmapReuse = false;
+static bool preciseArrangerDamage = false;
 // Only the disposable Android UI benchmark may suppress the master preview.
 static bool benchmarkSuppressMasterPreview = false;
 #else
 static constexpr bool framePacingEnabled = true;
+static constexpr bool preciseArrangerDamage = true;
    #if defined(APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW) && APEX_ANDROID_HORIZONTAL_REUSE_PREVIEW
     static constexpr bool horizontalBitmapReuse = true;
    #else
@@ -952,13 +954,14 @@ static constexpr bool useTiles = true;
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
     JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
-    jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps)
+    jboolean suppressMasterPreview, jboolean reuseHorizontalBitmaps, jboolean preciseDamage)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
     juce::apexAndroidFrame::framePacingEnabled = framePaced == JNI_TRUE;
     juce::apexAndroidFrame::benchmarkSuppressMasterPreview = suppressMasterPreview == JNI_TRUE;
     juce::apexAndroidFrame::horizontalBitmapReuse = reuseHorizontalBitmaps == JNI_TRUE;
+    juce::apexAndroidFrame::preciseArrangerDamage = preciseDamage == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
