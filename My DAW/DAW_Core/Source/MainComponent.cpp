@@ -2973,6 +2973,15 @@ MainComponent::MainComponent()
         syncTimelineViewportPosition();
         syncPlaylistTimeline();
     };
+   #if JUCE_ANDROID
+    arrangement_->onTransportTick = [this]
+    {
+        // The RT transport does NOT fire positionChanged() as recording
+        // progresses. Keep scroll room ahead of the playhead from the
+        // existing message-thread UI timer, not the audio callback.
+        positionChanged(appCore_.getTransport().getPosition());
+    };
+   #endif
     timelineViewport_ = std::move(timelineViewport);
     timelineViewport_->getVerticalScrollBar().addListener(this);
     timelineViewport_->getHorizontalScrollBar().addListener(this);
