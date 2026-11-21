@@ -1946,6 +1946,14 @@ namespace ArrangementEditor
     void ArrangementViewCore::recordMasterOutputPreview(
         double seconds, float leftPeak, float rightPeak, bool playing)
     {
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        // A/B diagnostic only: never hide master output in normal playback/REC.
+        if (juce::isApexAndroidMasterPreviewBenchSuppressed())
+            return;
+       #endif
+        TimelinePaintMetrics::ScopedTimer updateTimer(
+            TimelinePaintMetrics::masterPreviewUpdateDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewUpdateCalls);
         if (!playing || !std::isfinite(seconds) || seconds < 0.0)
         {
             m_masterPreviewWasPlaying = false;
@@ -1991,6 +1999,7 @@ namespace ArrangementEditor
             if (dirty.isEmpty())
                 return;
             repaint(dirty);
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewRepaintCalls);
             TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewDirtyPixels,
                 static_cast<uint64_t>(dirty.getWidth()) * dirty.getHeight());
         };
@@ -2074,6 +2083,13 @@ namespace ArrangementEditor
 
     void ArrangementViewCore::drawReadOnlyMasterPreview(juce::Graphics& g)
     {
+       #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (juce::isApexAndroidMasterPreviewBenchSuppressed())
+            return;
+       #endif
+        TimelinePaintMetrics::ScopedTimer paintTimer(
+            TimelinePaintMetrics::masterPreviewPaintDurationNs);
+        TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewPaintCalls);
         if (m_masterPreviewBins.empty() || m_engineTrackManager == nullptr
             || !m_engineTrackManager->hasMasterTrack())
             return;
@@ -2112,6 +2128,7 @@ namespace ArrangementEditor
             const float x = static_cast<float>(previewBinX(it->timeBin, pps));
             if (x >= dirty.getRight())
                 break;
+            TimelinePaintMetrics::inc(TimelinePaintMetrics::masterPreviewBinsDrawn);
             const float left = juce::jmin(1.0f, it->left);
             const float right = juce::jmin(1.0f, it->right);
             g.fillRect(x, centre - left * half, 1.5f, left * half);

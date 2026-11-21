@@ -9923,6 +9923,14 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
     state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
     state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
+    state->setProperty("masterPreviewUpdateCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewUpdateCalls.load()));
+    state->setProperty("masterPreviewPaintCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewPaintCalls.load()));
+    state->setProperty("masterPreviewRepaintCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewRepaintCalls.load()));
+    state->setProperty("masterPreviewBinsDrawn", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewBinsDrawn.load()));
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    state->setProperty("masterPreviewSuppressedForBenchmark",
+                       juce::isApexAndroidMasterPreviewBenchSuppressed());
+   #endif
     state->setProperty("scrollClipChecks", static_cast<juce::int64>(TimelinePaintMetrics::arrangementScrollClipIterations.load()));
     state->setProperty("arrangerReusePixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerReusePixels.load()));
     state->setProperty("arrangerRasterPixels", static_cast<juce::int64>(TimelinePaintMetrics::arrangerRasterPixels.load()));
@@ -9968,6 +9976,8 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     addTiming("arrangerPaintMs", TimelinePaintMetrics::paintDurationNs);
     addTiming("arrangerOverlayMs", TimelinePaintMetrics::paintChildrenDurationNs);
     addTiming("waveformMs", TimelinePaintMetrics::waveformDurationNs);
+    addTiming("masterPreviewUpdateMs", TimelinePaintMetrics::masterPreviewUpdateDurationNs);
+    addTiming("masterPreviewPaintMs", TimelinePaintMetrics::masterPreviewPaintDurationNs);
     addTiming("clipNameMs", TimelinePaintMetrics::clipNameDurationNs);
     return juce::var(state);
 }

@@ -23,7 +23,8 @@ def adb(*args: str, binary: bool = False):
     return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
 
 
-def validate_result(result: dict, scene: str, renderer: str) -> None:
+def validate_result(result: dict, scene: str, renderer: str,
+                    suppress_master_preview: bool = False) -> None:
     if result.get("error"):
         raise ValueError("Native benchmark error: " + str(result["error"]))
     phases = result.get("phases", [])
@@ -34,6 +35,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
     if not result.get("hardware_canvas"):
         raise ValueError("Activity did not use the production accelerated Android Canvas")
     gpu = renderer == "gpu"
+    if bool(result.get("master_preview_suppressed")) != suppress_master_preview:
+        raise ValueError("Java master preview diagnostic switch mismatch")
     for phase in phases:
         if phase.get("ui_callback_samples", 0) < 2:
             raise ValueError("Insufficient UI callback timing samples")
@@ -49,6 +52,8 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
         if phase["peerReducedTimelineFrames"] != 0:
             raise ValueError("The comparison requires native physical density")
         before, after = phase["before"], phase["after"]
+        if bool(after.get("masterPreviewSuppressedForBenchmark")) != suppress_master_preview:
+            raise ValueError("Native master preview diagnostic switch mismatch")
         if gpu and phase["phase"] != "idle" and after.get("gpuFrames", 0) <= before.get("gpuFrames", 0):
             raise ValueError(f"OpenGL renderer did not advance during {phase['phase']}")
         if scene in ("playback", "recording"):
@@ -123,7 +128,12 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
             if phase["before"][key] != phase["after"][key]:
                 raise ValueError(f"{phase['phase']} unexpectedly changed {key}")
     before, after = phases[0]["before"], phases[0]["after"]
-    if scene in ("playback", "recording") and after["masterPreviewDirtyPixels"] <= before["masterPreviewDirtyPixels"]:
+    if suppress_master_preview:
+        if after["masterPreviewDirtyPixels"] != before["masterPreviewDirtyPixels"]:
+            raise ValueError("Master preview still invalidated during disabled A/B run")
+        if after["masterPreviewUpdateCalls"] != before["masterPreviewUpdateCalls"]:
+            raise ValueError("Master preview still updated during disabled A/B run")
+    elif scene in ("playback", "recording") and after["masterPreviewDirtyPixels"] <= before["masterPreviewDirtyPixels"]:
         raise ValueError("No visible master preview changes during active horizontal scroll")
     if scene == "recording":
         if (not before.get("recording") or not after.get("recording")
@@ -176,14 +186,18 @@ def screenshot(path: Path) -> None:
     path.write_bytes(data)
 
 
-def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
-    name = f"{scene}-{renderer}-{repeat}"
+def run_case(output: Path, renderer: str, scene: str, repeat: int,
+             suppress_master_preview: bool = False) -> dict:
+    # Only a disposable CI emulator may disable the master waveform.
+    name = f"{scene}-{renderer}{'-master-off' if suppress_master_preview else ''}-{repeat}"
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "pm", "clear", PACKAGE)  # emulator-only guard is mandatory in main()
     adb("shell", "pm", "grant", PACKAGE, "android.permission.RECORD_AUDIO")
     adb("logcat", "-c")
     adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.ApexImmersiveActivity",
-        "--es", "apex_renderer", renderer, "--es", "apex_scene", scene)
+        "--es", "apex_renderer", renderer, "--es", "apex_scene", scene,
+        "--ez", "apex_master_preview_suppressed",
+        "true" if suppress_master_preview else "false")
     deadline = time.monotonic() + 100
     ready = None
     before = False
@@ -251,12 +265,13 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
     (output / f"{name}.json").write_text(json.dumps(result, indent=2))
     screenshot(output / f"{name}-after.png")
     record_focus(output / f"{name}-after-window.txt")
-    validate_result(result, scene, renderer)
+    validate_result(result, scene, renderer, suppress_master_preview)
     first = (output / f"{name}-before.png").read_bytes()
     last = (output / f"{name}-after.png").read_bytes()
     if hashlib.sha256(first).digest() == hashlib.sha256(last).digest():
         raise RuntimeError(f"{name}: production screen did not change")
     result["repeat"] = repeat
+    result["master_preview_suppressed"] = suppress_master_preview
     return result
 
 
@@ -294,6 +309,22 @@ def main() -> int:
                         result = run_case(args.output, renderer, scene, repeat)
                         results.append(result)
                         print(f"Runtime gesture/surface checks passed: {name}", flush=True)
+                        if (scene in ("playback", "recording") and renderer == "frame-paced"
+                                and repeat == 2):
+                            # Paired A/B playback/REC, preserving the imported
+                            # clip and live-take waveforms. Only master is
+                            # suppressed in this benchmark-only control.
+                            control_name = f"{scene}-{renderer}-master-off-{repeat}"
+                            try:
+                                control = run_case(args.output, renderer, scene, repeat,
+                                                   suppress_master_preview=True)
+                                results.append(control)
+                                print(f"[MASTER-A/B] diagnostic control passed: {control_name}",
+                                      flush=True)
+                            except Exception as error:
+                                failures.append({"case": control_name, "error": str(error)})
+                                print(f"Runtime check FAILED: {control_name}: {error}",
+                                      flush=True)
                     except Exception as error:
                         failures.append({"case": name, "error": str(error)})
                         (args.output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
@@ -324,7 +355,9 @@ def main() -> int:
                 raise RuntimeError("Non-monotonic native viewport/clip-scan counters")
             scans_per_scroll = clip_checks / scroll_events if scroll_events else 0.0
             print(f"{result['scene']} {result['renderer_requested']} "
-                  f"pass {result['repeat']} {phase['phase']} "
+                  f"pass {result['repeat']} "
+                  f"master={'off' if result.get('master_preview_suppressed') else 'on'} "
+                  f"{phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
                   f"worst={phase['ui_interval_worst_ms']:.1f} ms, "
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
@@ -334,6 +367,30 @@ def main() -> int:
                   f"checks/event={scans_per_scroll:.2f}, "
                   f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
                   f"cache pixels shifted={copied:,} rebases={rebased}")
+    # A/B is diagnostic, not a pass/fail 60fps certification. Use the same
+    # renderer/transport and report the master work separately from rendering.
+    for scene in ("playback", "recording"):
+        paired = [x for x in results if x["scene"] == scene
+                  and x["renderer_requested"] == "frame-paced"
+                  and x["repeat"] == 2]
+        enabled = next((x for x in paired if not x.get("master_preview_suppressed")), None)
+        disabled = next((x for x in paired if x.get("master_preview_suppressed")), None)
+        if enabled is not None and disabled is not None:
+            for axis in ("pan", "reverse", "vertical-pan", "idle"):
+                on = next(p for p in enabled["phases"] if p["phase"] == axis)
+                off = next(p for p in disabled["phases"] if p["phase"] == axis)
+                on_ms = on["ui_interval_p95_ms"]
+                off_ms = off["ui_interval_p95_ms"]
+                on_repaints = (on["after"]["masterPreviewRepaintCalls"]
+                               - on["before"]["masterPreviewRepaintCalls"])
+                off_repaints = (off["after"]["masterPreviewRepaintCalls"]
+                                - off["before"]["masterPreviewRepaintCalls"])
+                print(f"[MASTER-A/B] {scene} {axis}: on p95={on_ms:.1f}ms "
+                      f"off p95={off_ms:.1f}ms delta={on_ms-off_ms:+.1f}ms "
+                      f"master repaint requests on={on_repaints} off={off_repaints} "
+                      f"master update p95={on['after']['masterPreviewUpdateMs']['p95']:.3f}ms "
+                      f"master draw p95={on['after']['masterPreviewPaintMs']['p95']:.3f}ms",
+                      flush=True)
     # This job validates gesture correctness, NOT 60fps presentation.
     # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
     # not SurfaceFlinger-presented frame intervals. Report misses explicitly

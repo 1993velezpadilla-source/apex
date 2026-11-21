@@ -204,6 +204,10 @@ struct TimelinePaintMetrics
     static inline std::atomic<uint64_t> waveformRefreshes{0};
     static inline std::atomic<uint64_t> liveRecordingWaveformPaints{0};
     static inline std::atomic<uint64_t> masterPreviewDirtyPixels{0};
+    static inline std::atomic<uint64_t> masterPreviewUpdateCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewPaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewRepaintCalls{0};
+    static inline std::atomic<uint64_t> masterPreviewBinsDrawn{0};
     static inline std::atomic<uint64_t> arrangementRendererRebuilds{0};
     static inline std::atomic<uint64_t> arrangementZoomUpdates{0};
 
@@ -226,6 +230,8 @@ struct TimelinePaintMetrics
     // ── Sample rings for timing/area distributions ──────────────────────
     static inline SampleRing paintDurationNs;               // ArrangementViewCore::paint() duration
     static inline SampleRing paintChildrenDurationNs;       // paintOverChildren() duration
+    static inline SampleRing masterPreviewUpdateDurationNs; // Master 60Hz tick and clipping scan
+    static inline SampleRing masterPreviewPaintDurationNs;  // Master stereo columns drawn
     static inline SampleRing waveformDurationNs;            // Clip waveform draw duration
     static inline SampleRing clipNameDurationNs;
     static inline SampleRing frameIntervalNs;               // ArrangementView 60Hz timer interval (message thread)
@@ -352,6 +358,10 @@ struct TimelinePaintMetrics
         waveformRefreshes     = 0;
         liveRecordingWaveformPaints = 0;
         masterPreviewDirtyPixels = 0;
+        masterPreviewUpdateCalls = 0;
+        masterPreviewPaintCalls = 0;
+        masterPreviewRepaintCalls = 0;
+        masterPreviewBinsDrawn = 0;
         arrangementRendererRebuilds = 0;
         arrangementZoomUpdates = 0;
         waveformPeaksWalked   = 0;
@@ -368,6 +378,8 @@ struct TimelinePaintMetrics
         paintDurationNs.reset();
         paintChildrenDurationNs.reset();
         waveformDurationNs.reset();
+        masterPreviewUpdateDurationNs.reset();
+        masterPreviewPaintDurationNs.reset();
         viewportZoomDurationNs.reset();
         clipNameDurationNs.reset();
         frameIntervalNs.reset();

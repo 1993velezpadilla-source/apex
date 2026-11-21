@@ -49,8 +49,11 @@ static_assert (PixelARGB::indexR == 0 && PixelARGB::indexG == 1
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 static bool reduceTimelineMotion = false;
 static bool framePacingEnabled = true;
+// Only the disposable Android UI benchmark may suppress the master preview.
+static bool benchmarkSuppressMasterPreview = false;
 #else
 static constexpr bool framePacingEnabled = true;
+static constexpr bool benchmarkSuppressMasterPreview = false;
 // The matched emulator replay showed longer frame delays with this layer.
 static constexpr bool reduceTimelineMotion = false;
 #endif
@@ -636,11 +639,13 @@ static constexpr bool useTiles = true;
 #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 extern "C" JNIEXPORT void JNICALL
 Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeUseFrameTiles(
-    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced)
+    JNIEnv*, jclass, jboolean enabled, jboolean reduceMotion, jboolean framePaced,
+    jboolean suppressMasterPreview)
 {
     juce::apexAndroidFrame::useTiles = enabled == JNI_TRUE;
     juce::apexAndroidFrame::reduceTimelineMotion = reduceMotion == JNI_TRUE;
     juce::apexAndroidFrame::framePacingEnabled = framePaced == JNI_TRUE;
+    juce::apexAndroidFrame::benchmarkSuppressMasterPreview = suppressMasterPreview == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

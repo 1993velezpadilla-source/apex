@@ -44,7 +44,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private long phaseStart = 0, lastFrame = 0, downTime = 0;
     private boolean stopped = false, touching = false, collectingMetrics = false;
 
-    private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion, boolean framePaced);
+    private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion,
+                                                 boolean framePaced, boolean suppressMasterPreview);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -67,7 +68,9 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             fail(new IllegalStateException("No real visible timeline body"));
             return;
         }
-        nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer), "frame-paced".equals(renderer));
+        nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer),
+            "frame-paced".equals(renderer),
+            activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -235,6 +238,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             result.put("renderer_requested", renderer);
             result.put("hardware_canvas", decor.isHardwareAccelerated());
             result.put("scene", activity.getIntent().getStringExtra("apex_scene"));
+            result.put("master_preview_suppressed",
+                activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false));
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);

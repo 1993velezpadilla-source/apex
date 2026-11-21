@@ -90,6 +90,12 @@ bool isApexAndroidFramePacingEnabled() noexcept
     return apexAndroidFrame::framePacingEnabled;
 }
 
+// The production build always keeps the Master waveform visible.
+bool isApexAndroidMasterPreviewBenchSuppressed() noexcept
+{
+    return apexAndroidFrame::benchmarkSuppressMasterPreview;
+}
+
 void noteApexTimelineMotion (Component& viewport)
 {""")
 

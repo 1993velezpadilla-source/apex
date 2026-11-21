@@ -64,7 +64,10 @@ namespace DAW
 }
 
 #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
-namespace juce { bool isApexAndroidFramePacingEnabled() noexcept; }
+namespace juce {
+    bool isApexAndroidFramePacingEnabled() noexcept;
+    bool isApexAndroidMasterPreviewBenchSuppressed() noexcept;
+}
 #endif
 
 namespace ArrangementEditor
