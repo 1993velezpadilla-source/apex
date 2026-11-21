@@ -127,6 +127,19 @@ def configure_component_paint_probe(gui: Path) -> None:
         if (child.isVisible())"""), encoding="utf-8")
 
 
+    # Attribute native repaint requests to the original JUCE component, not
+    # only the component that eventually paints. This is benchmark-only and
+    # reveals full-viewport invalidations caused by moving the viewed content.
+    path = gui / "components/juce_Component.cpp"
+    contents = path.read_text(encoding="utf-8")
+    if "ComponentPaintProbe::recordRepaint" not in contents:
+        signature = "void Component::internalRepaintUnchecked (Rectangle<int> area, bool isEntireComponent)\\n{"
+        path.write_text(replace(contents, signature, signature + """
+   #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    apexAndroidFrame::ComponentPaintProbe::recordRepaint (*this, area, isEntireComponent);
+   #endif"""), encoding="utf-8")
+
+
 def bound_wide_software_clips(path: Path) -> None:
     contents = path.read_text(encoding="utf-8")
     if "maxExactFloatSpan" in contents:
