@@ -3152,14 +3152,23 @@ int main()
         }
     }
     // Corrupt transport state after project restore must not extend the
-    // Arrangement or introduce NaN into viewport geometry.
+    // Arrangement or introduce NaN into viewport geometry. The virtual phone
+    // timeline now reserves a 600-second runway even for a short/empty
+    // project; the previous 120-second expectation was stale after fixing
+    // the 30-second recording-scroll clamp. Long clip/loop extents remain
+    // authoritative even if the playhead value was restored incorrectly.
     for (double invalid : { -1.0, 86401.0,
                             std::numeric_limits<double>::infinity(),
                             -std::numeric_limits<double>::infinity(),
                             std::numeric_limits<double>::quiet_NaN() })
+    {
         if (DAW::mobile::timelinePhonePlaybackExtentSeconds(120.0, invalid)
-            != 120.0)
+            != DAW::mobile::kTimelinePhoneRunwaySeconds)
             return 378;
+        if (DAW::mobile::timelinePhonePlaybackExtentSeconds(1200.0, invalid)
+            != 1200.0)
+            return 379;
+    }
 
 
     // Floating phone Mixer: after rotation or inset changes, clamp a
