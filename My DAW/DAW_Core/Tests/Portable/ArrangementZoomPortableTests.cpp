@@ -193,5 +193,17 @@ int main()
     assert(!guard.contains(viewport.withX(1551)));
     assert(!guard.contains({ 1200, 241, 400, 600 }));
 
+    // Reproduce the Windows regression: a detached 1400px arranger was only
+    // 1400px wide, so the old guard ended at the visible right edge and all
+    // 100 small horizontal scroll steps rescanned every clip. Keep a bounded
+    // preparation runway even before a live REC extends the content width.
+    const juce::Rectangle<int> shortContentViewport { 0, 0, 1400, 1500 };
+    const auto shortContentGuard = LOD::visibilityGuard(shortContentViewport, 1400, 80);
+    assert(shortContentGuard.contains(shortContentViewport));
+    assert(shortContentGuard.contains(shortContentViewport.withX(8)));
+    assert(shortContentGuard.contains(shortContentViewport.withX(600)));
+    assert(shortContentGuard.contains(shortContentViewport.withX(700)));
+    assert(!shortContentGuard.contains(shortContentViewport.withX(701)));
+
     std::cout << "TimelineZoomController: anchor, limit, pinch, grid and clip guard regressions passed\n";
 }
