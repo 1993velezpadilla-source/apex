@@ -199,7 +199,33 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
         if result is not None:
             break
         time.sleep(0.5)
-    (output / f"{name}-logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
+    full_log = adb("logcat", "-d", "-v", "threadtime")
+    (output / f"{name}-logcat.txt").write_text(full_log)
+    # 9.5 proved frame-time wait dominates CPU raster (~38ms off-CPU
+    # versus ~9ms CPU). Make the native per-component profiler VISIBLE in
+    # the Actions log; retaining it only in a zipped logcat left the
+    # adversarial loop without actionable component attribution.
+    # Keep the complete trace in the artifact, summarize one independent
+    # playback and recording run per renderer to avoid log flooding.
+    if scene in ("playback", "recording") and repeat == 1:
+        worst_wait = {}
+        for line in full_log.splitlines():
+            matched = re.search(
+                r"PEER_PAINT_WAIT (\\S+) calls=(\\d+) cpu_ms=([\\d.]+) "
+                r"wall_ms=([\\d.]+) wait_ms=([\\d.]+)", line)
+            if matched:
+                part = matched.group(1)
+                cpu, wall, wait = map(float, matched.groups()[2:])
+                if part not in worst_wait or wait > worst_wait[part][0]:
+                    worst_wait[part] = (wait, cpu, wall)
+        for part, (wait, cpu, wall) in sorted(
+                worst_wait.items(), key=lambda item: item[1][0], reverse=True)[:10]:
+            print(f"[PEER-WAIT] {name} component={part} total_wait_ms={wait:.2f} "
+                  f"total_cpu_ms={cpu:.2f} total_wall_ms={wall:.2f}", flush=True)
+        timeline_clips = [line for line in full_log.splitlines()
+                          if "TIMELINE_CLIP " in line]
+        for line in timeline_clips[:6]:
+            print(f"[TIMELINE-CLIP] {name} {line.split('TIMELINE_CLIP ', 1)[-1]}", flush=True)
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
     result["phases"] = [phases[key] for key in PHASES if key in phases]
