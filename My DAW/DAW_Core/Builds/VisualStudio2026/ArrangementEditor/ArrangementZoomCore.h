@@ -3,6 +3,8 @@
 // Drawing policies shared by the ruler and clip renderers.
 // ===========================================================================
 #pragma once
+#include <algorithm>
+#include <limits>
 #include "TimelineZoomController.h"
 
 namespace ArrangementEditor
@@ -128,19 +130,44 @@ namespace ArrangementEditor
                 .withX(0).withWidth(juce::jmax(contentWidth, safeRight));
         }
 
-        // The viewport can travel between the closest hidden clips without
-        // rescanning the clip list. Use the entire vertical guard so a small
-        // diagonal pan cannot expose a clip in a neighbouring lane.
+        // The cached guard is a region of VIEWPORT ORIGINS for which the
+        // renderer visibility computed at the previous origin remains valid.
+        // A hidden clip can become eligible as soon as it touches the expanded
+        // prefetch region, not only after it touches the visible viewport.
+        // In particular, trimming at clip.getX() while forgetting horizontal
+        // prefetch delayed clip activation by half a screen of scrolling.
+        //
+        // Prefer a VERTICAL separation whenever one exists: clips on other
+        // tracks must never force horizontal re-scans during a horizontal pan.
+        // The chosen separating axis is sufficient even for diagonal pans.
         static void excludeHiddenClip(juce::Rectangle<int>& guard,
                                       const juce::Rectangle<int>& viewport,
-                                      const juce::Rectangle<int>& clip) noexcept
+                                      const juce::Rectangle<int>& clip,
+                                      int trackHeightPx) noexcept
         {
-            if (!guard.intersects(clip))
+            const auto region = renderRegion(viewport, trackHeightPx);
+            if (region.intersects(clip))
                 return;
-            if (clip.getRight() <= viewport.getX())
-                guard = guard.withLeft(clip.getRight());
-            else if (clip.getX() >= viewport.getRight())
-                guard = guard.withRight(clip.getX());
+
+            const int marginX = juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2);
+            const int marginY = juce::jmax(kViewportOverscanPx, trackHeightPx);
+            // Keep the margins well within the JUCE integer coordinate domain.
+            const auto safeEdge = [](int edge, int margin) noexcept -> int
+            {
+                return static_cast<int>(std::clamp(
+                    static_cast<long long>(edge) + margin,
+                    static_cast<long long>(std::numeric_limits<int>::min() / 2),
+                    static_cast<long long>(std::numeric_limits<int>::max() / 2)));
+            };
+
+            if (clip.getBottom() <= region.getY())
+                guard = guard.withTop(juce::jmax(guard.getY(), safeEdge(clip.getBottom(), marginY)));
+            else if (clip.getY() >= region.getBottom())
+                guard = guard.withBottom(juce::jmin(guard.getBottom(), safeEdge(clip.getY(), -marginY)));
+            else if (clip.getRight() <= region.getX())
+                guard = guard.withLeft(juce::jmax(guard.getX(), safeEdge(clip.getRight(), marginX)));
+            else if (clip.getX() >= region.getRight())
+                guard = guard.withRight(juce::jmin(guard.getRight(), safeEdge(clip.getX(), -marginX)));
         }
 
         static bool intersectsViewport(const juce::Rectangle<int>& clipBounds,

@@ -22,8 +22,11 @@ namespace juce
     {
         T x {}, y {}, w {}, h {};
         T getX() const { return x; }
+        T getY() const { return y; }
         T getWidth() const { return w; }
+        T getHeight() const { return h; }
         T getRight() const { return x + w; }
+        T getBottom() const { return y + h; }
 
         Rectangle expanded(int dx, int dy) const
         {
@@ -34,6 +37,8 @@ namespace juce
         Rectangle withWidth(T width) const { return { x, y, width, h }; }
         Rectangle withLeft(T left) const { return { left, y, getRight() - left, h }; }
         Rectangle withRight(T right) const { return { x, y, right - x, h }; }
+        Rectangle withTop(T top) const { return { x, top, w, getBottom() - top }; }
+        Rectangle withBottom(T bottom) const { return { x, y, w, bottom - y }; }
 
         bool intersects(const Rectangle& other) const
         {
@@ -183,15 +188,62 @@ int main()
     auto guard = LOD::visibilityGuard(viewport, 20000, 80);
     assert(guard.contains(viewport.withX(17000)));
     assert(guard.contains(viewport.withX(0)));
-    LOD::excludeHiddenClip(guard, viewport, { 2500, 235, 70, 80 });
-    LOD::excludeHiddenClip(guard, viewport, { 1950, 810, 70, 80 });
-    LOD::excludeHiddenClip(guard, viewport, { 1850, 900, 70, 80 });
-    LOD::excludeHiddenClip(guard, viewport, { 675, 250, 200, 80 });
-    assert(guard.contains(viewport.withX(875)));
-    assert(!guard.contains(viewport.withX(874)));
-    assert(guard.contains(viewport.withX(1550)));
-    assert(!guard.contains(viewport.withX(1551)));
-    assert(!guard.contains({ 1200, 241, 400, 600 }));
+    LOD::excludeHiddenClip(guard, viewport, { 2500, 235, 70, 80 }, 80);
+    LOD::excludeHiddenClip(guard, viewport, { 1950, 810, 70, 80 }, 80);
+    LOD::excludeHiddenClip(guard, viewport, { 1850, 900, 70, 80 }, 80);
+    LOD::excludeHiddenClip(guard, viewport, { 675, 250, 200, 80 }, 80);
+    // The expanded half-viewport render region is authoritative. A hidden
+    // clip starts painting exactly when that region reaches its first pixel.
+    assert(guard.contains(viewport.withX(1075)));
+    assert(!guard.contains(viewport.withX(1074)));
+    assert(guard.contains(viewport.withX(1350)));
+    assert(!guard.contains(viewport.withX(1351)));
+    assert(guard.contains({ 1200, 220, 400, 600 }));
+    assert(!guard.contains({ 1200, 221, 400, 600 }));
+
+    // The old guard failed here: at x=2 the clip is in the prefetch region
+    // but was kept invisible until x=701 (a half-screen late pop-in).
+    const juce::Rectangle<int> nearRightViewport { 0, 0, 1400, 800 };
+    auto nearRightGuard = LOD::visibilityGuard(nearRightViewport, 5000, 80);
+    const juce::Rectangle<int> nearRightClip { 2101, 240, 100, 80 };
+    assert(!LOD::renderRegion(nearRightViewport, 80).intersects(nearRightClip));
+    LOD::excludeHiddenClip(nearRightGuard, nearRightViewport, nearRightClip, 80);
+    assert(nearRightGuard.contains(nearRightViewport.withX(1)));
+    assert(!nearRightGuard.contains(nearRightViewport.withX(2)));
+    assert(LOD::renderRegion(nearRightViewport.withX(2), 80).intersects(nearRightClip));
+
+    // Prefer vertical separation for clips in another track. Those clips
+    // should not create "chunk loading" scans while the user pans left/right.
+    auto otherLaneGuard = LOD::visibilityGuard(nearRightViewport, 50000, 80);
+    const juce::Rectangle<int> otherLaneClip { 2101, 881, 100, 80 };
+    LOD::excludeHiddenClip(otherLaneGuard, nearRightViewport, otherLaneClip, 80);
+    assert(otherLaneGuard.contains(nearRightViewport.withX(30000)));
+    assert(otherLaneGuard.contains({ 0, 1, 1400, 800 }));
+    assert(!otherLaneGuard.contains({ 0, 2, 1400, 800 }));
+
+    // Exhaustive containment contract for representative hidden-clips:
+    // if the viewport fits in the guard, no excluded clip may enter the
+    // expanded paint region. Sweep BOTH directions and diagonal movement.
+    const juce::Rectangle<int> proofViewport { 1000, 200, 400, 600 };
+    for (int clipX = 400; clipX <= 2100; clipX += 85)
+        for (int clipY = -100; clipY <= 1200; clipY += 65)
+        {
+            const juce::Rectangle<int> hidden { clipX, clipY, 40, 40 };
+            if (LOD::renderRegion(proofViewport, 80).intersects(hidden))
+                continue;
+            auto trial = LOD::visibilityGuard(proofViewport, 3000, 80);
+            LOD::excludeHiddenClip(trial, proofViewport, hidden, 80);
+            assert(trial.contains(proofViewport));
+            for (int dx = -250; dx <= 250; dx += 5)
+                for (int dy = -45; dy <= 45; dy += 5)
+                {
+                    const juce::Rectangle<int> moved {
+                        proofViewport.x + dx, proofViewport.y + dy,
+                        proofViewport.w, proofViewport.h };
+                    if (trial.contains(moved))
+                        assert(!LOD::renderRegion(moved, 80).intersects(hidden));
+                }
+        }
 
     // Reproduce the Windows regression: a detached 1400px arranger was only
     // 1400px wide, so the old guard ended at the visible right edge and all

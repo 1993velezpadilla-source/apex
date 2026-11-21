@@ -4769,7 +4769,7 @@ namespace ArrangementEditor
             const bool shouldBeVisible = m_drag.active || renderer->isEditGestureActive()
                                           || region.intersects(nextBounds);
             if (!shouldBeVisible)
-                ArrangementClipLodPolicy::excludeHiddenClip(guard, viewport, nextBounds);
+                ArrangementClipLodPolicy::excludeHiddenClip(guard, viewport, nextBounds, trackHeight);
             if (m_inViewportScroll)
             {
                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollClipIterations);
