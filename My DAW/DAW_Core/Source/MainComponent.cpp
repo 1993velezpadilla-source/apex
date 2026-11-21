@@ -9817,13 +9817,25 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
             {
                 juce::Array<juce::File> files;
                 files.add(file);
-                auto* track = tracks.getNumTracks() > 0 ? tracks.getTrack(0)
-                                                       : tracks.createTrack("UI benchmark");
+                // The REC navigation replay deliberately starts near 29s
+                // to cross the old bar-15/30s scroll limit. Keep a *regular*
+                // WAV clip visible in that region on a separate, unarmed
+                // track so the benchmark can independently assert that both
+                // imported waveforms and the LIVE recording waveform paint
+                // throughout the pan. Previously the reference WAV ended
+                // at 24s, so the generic waveform assertion failed despite
+                // successful live-take drawing.
+                auto* track = mode == TimelineBenchmarkTransport::Recording
+                    && tracks.getNumTracks() > 1 ? tracks.getTrack(1)
+                    : (tracks.getNumTracks() > 0 ? tracks.getTrack(0)
+                                                : tracks.createTrack("UI benchmark"));
+                const DAW::SamplePosition insertAt = mode == TimelineBenchmarkTransport::Recording
+                    ? static_cast<DAW::SamplePosition>(sr * 28.0) : 0;
                 if (track != nullptr)
                     DAW::CommandManager::getInstance().execute(
                         std::make_unique<DAW::ImportAudioFilesCommand>(tracks,
                             appCore_.getClipManager(), appCore_.getAudioFileManager(),
-                            std::move(files), track->getID(), 0, sr));
+                            std::move(files), track->getID(), insertAt, sr));
             }
         }
     }
