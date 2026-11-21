@@ -95,6 +95,17 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
                 raise ValueError(f"{phase['phase']} reused no rasterized arranger pixels")
             if after["arrangerRasterPixels"] <= before["arrangerRasterPixels"]:
                 raise ValueError(f"{phase['phase']} drew no newly exposed arranger pixels")
+            # The Android compositor previously moved a full native-density
+            # cache on every horizontal scroll callback. The retained halo
+            # must avoid that. Even if the viewport crosses a storage edge,
+            # one rebase must serve multiple scroll events.
+            if phase["phase"] in ("pan", "reverse"):
+                moves = after.get("scrollEvents", 0) - before.get("scrollEvents", 0)
+                rebases = after.get("arrangerCacheRebases", 0) - before.get("arrangerCacheRebases", 0)
+                if moves >= 6 and rebases > max(2, moves // 3):
+                    raise ValueError(
+                        f"Excessive Android arranger bitmap rebases during {phase['phase']}: "
+                        f"{rebases} for {moves} viewport changes")
     for phase, direction in zip(phases[6:], (1, -1)):
         if (phase["after"]["laneHeight"] - phase["before"]["laneHeight"]) * direction <= 0:
             raise ValueError(f"{phase['phase']} did not change lane height")
@@ -249,6 +260,8 @@ def main() -> int:
             before, after = phase["before"], phase["after"]
             reused = after["arrangerReusePixels"] - before["arrangerReusePixels"]
             redrawn = after["arrangerRasterPixels"] - before["arrangerRasterPixels"]
+            copied = after.get("arrangerCacheCopyPixels", 0) - before.get("arrangerCacheCopyPixels", 0)
+            rebased = after.get("arrangerCacheRebases", 0) - before.get("arrangerCacheRebases", 0)
             print(f"{result['scene']} {result['renderer_requested']} "
                   f"pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
@@ -256,7 +269,8 @@ def main() -> int:
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
                   f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
                   f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms, "
-                  f"arranger pixels reused={reused:,}/redrawn={redrawn:,}")
+                  f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
+                  f"cache pixels shifted={copied:,} rebases={rebased}")
     if failures:
         raise RuntimeError(f"{len(failures)} runtime cases failed; review retained evidence")
     return 0
