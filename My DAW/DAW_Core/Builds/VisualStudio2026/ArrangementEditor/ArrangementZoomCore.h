@@ -113,8 +113,19 @@ namespace ArrangementEditor
                                                      int contentWidth, int trackHeightPx) noexcept
         {
             const int verticalTravel = juce::jmax(kViewportOverscanPx / 2, trackHeightPx / 2);
+            // This cached guard must also include a horizontal runway when
+            // the content is only as wide as the viewport (detached editors,
+            // just-created recordings, or a viewport near the right edge).
+            // Previously its right edge equalled viewport.getRight(), so
+            // EVERY 8px pan event scanned the full clip-renderer vector.
+            // Actual hidden clips still narrow this interval below through
+            // excludeHiddenClip(), keeping visibility transitions correct.
+            const auto horizontalTravel = juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2);
+            const auto safeRight = static_cast<int>(juce::jmin<int64_t>(
+                std::numeric_limits<int>::max() / 2,
+                static_cast<int64_t>(viewport.getRight()) + horizontalTravel));
             return viewport.expanded(0, verticalTravel)
-                .withX(0).withWidth(juce::jmax(contentWidth, viewport.getRight()));
+                .withX(0).withWidth(juce::jmax(contentWidth, safeRight));
         }
 
         // The viewport can travel between the closest hidden clips without
