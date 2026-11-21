@@ -163,11 +163,11 @@ namespace ArrangementEditor
             if (clip.getBottom() <= region.getY())
                 guard = guard.withTop(juce::jmax(guard.getY(), safeEdge(clip.getBottom(), marginY)));
             else if (clip.getY() >= region.getBottom())
-                guard = guard.withBottom(juce::jmin(guard.getBottom(), safeEdge(clip.getY(), -marginY)));
+                guard = guard.withBottom(std::min(guard.getBottom(), safeEdge(clip.getY(), -marginY)));
             else if (clip.getRight() <= region.getX())
                 guard = guard.withLeft(juce::jmax(guard.getX(), safeEdge(clip.getRight(), marginX)));
             else if (clip.getX() >= region.getRight())
-                guard = guard.withRight(juce::jmin(guard.getRight(), safeEdge(clip.getX(), -marginX)));
+                guard = guard.withRight(std::min(guard.getRight(), safeEdge(clip.getX(), -marginX)));
         }
 
         static bool intersectsViewport(const juce::Rectangle<int>& clipBounds,
