@@ -195,7 +195,7 @@ public:
                                    * 1000000000LL) + uploadCpuEnd.tv_nsec - uploadCpuStart.tv_nsec;
                 ++tileUploadSamples;
                 __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
-                    "TILE_UPLOAD tileSize=256 tiles=%d invalidatedPixels=%lld "
+                    "TILE_UPLOAD tileSize=384 tiles=%d invalidatedPixels=%lld "
                     "wall_ms=%.3f cpu_ms=%.3f wait_ms=%.3f",
                     uploadedTiles, static_cast<long long>(uploadedPixels),
                     wallNs / 1.0e6, cpuNs / 1.0e6, (wallNs - cpuNs) / 1.0e6);
@@ -284,10 +284,10 @@ private:
 
     bool resetFrame(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque)
     {
-        // Smaller mutable GPU textures reduce re-upload during panning:
-        // Android re-uploads a bitmap after any of its pixels change.
-        // Compare this 256px experiment against the 384px baseline.
-        constexpr int tileSize = 256;
+        // The 256px experiment increased raster wall times and worsened
+        // playback Choreographer p95 vs. the 384px baseline. Retain the
+        // original tile size and the upload profiler for follow-up work.
+        constexpr int tileSize = 384;
         const int width = smallerDimension(clip.getWidth());
         const int height = smallerDimension(clip.getHeight());
         if ((int64)width * height > 16'000'000)
