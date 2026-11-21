@@ -270,8 +270,16 @@ namespace ArrangementEditor
                     const auto source = overlap.getPosition() - frame.getPosition();
                     const auto destination = overlap.getPosition() - nextFrame.getPosition();
                     if (source != destination)
+                    {
                         image.moveImageSection(destination.x, destination.y, source.x, source.y,
                                                overlap.getWidth(), overlap.getHeight());
+                        if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                        {
+                            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheRebases);
+                            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheCopyPixels,
+                                static_cast<uint64_t>(overlap.getWidth()) * overlap.getHeight());
+                        }
+                    }
                 }
             }
 
