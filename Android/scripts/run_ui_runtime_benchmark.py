@@ -150,9 +150,20 @@ def validate_focus(window_dump: str) -> None:
 
 def record_focus(path: Path) -> None:
     # The `windows` subcommand omits DisplayContent's mCurrentFocus on API 35.
-    dump = adb("shell", "dumpsys", "window")
-    path.write_text(dump)
-    validate_focus(dump)
+    # Android's activity-focus handoff is asynchronous even after am start -W.
+    # Preserve a hard failure if another app really owns the window, but
+    # tolerate the short transition immediately after the native READY marker.
+    # Never synthesize focus or silently accept an obstructed screenshot.
+    for attempt in range(4):
+        dump = adb("shell", "dumpsys", "window")
+        path.write_text(dump)
+        try:
+            validate_focus(dump)
+            return
+        except ValueError:
+            if attempt == 3:
+                raise
+            time.sleep(0.5)
 
 
 def screenshot(path: Path) -> None:
