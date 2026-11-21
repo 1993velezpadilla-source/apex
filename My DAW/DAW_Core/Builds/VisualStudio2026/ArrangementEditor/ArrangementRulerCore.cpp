@@ -85,14 +85,18 @@ namespace ArrangementEditor
         }
     }
 
-    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX)
+    void ArrangementRulerCore::setScrollOffsetX(int scrollOffsetX, bool boundsMovePending)
     {
         scrollOffsetX = juce::jmax(0, scrollOffsetX);
         if (m_scrollOffsetX == scrollOffsetX)
             return;
 
         m_scrollOffsetX = scrollOffsetX;
-        repaint();
+        // The horizontal viewport pan immediately moves these pinned bounds.
+        // JUCE dirties the old/new areas there; a second full ruler repaint
+        // before setBounds() is redundant. Zoom-only changes still repaint.
+        if (!boundsMovePending)
+            repaint();
     }
 
     void ArrangementRulerCore::setLoopRegion(double startTime, double endTime)

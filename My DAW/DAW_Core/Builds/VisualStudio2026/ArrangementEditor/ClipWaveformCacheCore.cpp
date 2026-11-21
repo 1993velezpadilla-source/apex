@@ -53,21 +53,26 @@ namespace ArrangementEditor
     void ClipWaveformCacheCore::requestPeaks(const std::string& sourcePath, int targetWidth,
                                              int64_t visibleSamplesHint)
     {
+        std::shared_ptr<const WaveformPeakData> published;
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             cachedOverviewSource_.reset();
+            // Retire the old source snapshot without modifying anything a
+            // painting UI frame might still be reading.
+            if (m_sourcePath != sourcePath)
+                m_peaks.reset();
+            published = m_peaks;
         }
-        if (m_sourcePath == sourcePath && m_peaks.valid)
+        if (m_sourcePath == sourcePath && published && published->valid)
         {
             m_targetWidth = targetWidth;
             m_visibleSamplesHint = visibleSamplesHint;
 
-            // Re-generate only when the cache is meaningfully coarser than
-            // this zoom level needs (1.5x hysteresis prevents regen thrash).
-            const int required = computeSamplesPerPeak(m_peaks.totalSamples,
+            // Re-generate only if the stored peak resolution is >1.5x coarse.
+            const int required = computeSamplesPerPeak(published->totalSamples,
                                                        targetWidth, visibleSamplesHint);
-            if ((juce::int64)m_peaks.samplesPerPeak <= (juce::int64)required * 3 / 2)
-                return; // cached resolution is fine for this zoom
+            if ((juce::int64)published->samplesPerPeak <= (juce::int64)required * 3 / 2)
+                return;
 
             m_requestPending = true;
             if (!isThreadRunning())
@@ -75,10 +80,6 @@ namespace ArrangementEditor
             notify();
             return;
         }
-
-        // New source: invalidate immediately so stale audio never paints.
-        if (m_sourcePath != sourcePath)
-            m_peaks.valid = false;
 
         m_sourcePath = sourcePath;
         m_targetWidth = targetWidth;
@@ -96,7 +97,7 @@ namespace ArrangementEditor
             return false;
 
         juce::CriticalSection::ScopedLockType lock(peaksLock_);
-        if (cachedOverviewSource_ == cachedAudio && m_peaks.valid)
+        if (cachedOverviewSource_ == cachedAudio && m_peaks && m_peaks->valid)
             return true;
 
         const auto& rawMin = cachedAudio->getRawMinRef();
@@ -115,7 +116,7 @@ namespace ArrangementEditor
             (double) totalSamples / (double) rawMin.size()));
         fresh.valid = true;
 
-        m_peaks = std::move(fresh);
+        m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         cachedOverviewSource_ = cachedAudio;
         return true;
     }
@@ -165,7 +166,7 @@ namespace ArrangementEditor
         if (!file.existsAsFile())
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -176,7 +177,7 @@ namespace ArrangementEditor
         if (!reader)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -184,7 +185,7 @@ namespace ArrangementEditor
         if (totalSamples <= 0 || m_targetWidth <= 0)
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             return;
         }
 
@@ -250,9 +251,9 @@ namespace ArrangementEditor
         // This ensures paint() never accesses partially-written peak data
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            m_peaks.valid = false;
+            m_peaks.reset();
             fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         }
     }
 
@@ -313,7 +314,7 @@ namespace ArrangementEditor
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
             fresh.valid = true;
-            m_peaks = std::move(fresh);
+            m_peaks = std::make_shared<const WaveformPeakData>(std::move(fresh));
         }
         return true;
     }

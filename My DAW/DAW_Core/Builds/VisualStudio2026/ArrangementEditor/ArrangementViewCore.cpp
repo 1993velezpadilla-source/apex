@@ -2407,9 +2407,10 @@ namespace ArrangementEditor
             return;
 
         const bool verticalMoved = m_viewportScrollY != scrollY;
+        const bool horizontalMoved = m_viewportScrollX != scrollX;
         m_viewportScrollX = scrollX;
         m_viewportScrollY = scrollY;
-        m_ruler.setScrollOffsetX(scrollX);
+        m_ruler.setScrollOffsetX(scrollX, horizontalMoved);
 
        #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
         if (m_touchNavigationArmed)

@@ -19,7 +19,7 @@ namespace ArrangementEditor
         void setTempo(double bpm);
         void setPlayheadPosition(double timeSeconds);
         void setLoopRegion(double startTime, double endTime);
-        void setScrollOffsetX(int scrollOffsetX);
+        void setScrollOffsetX(int scrollOffsetX, bool boundsMovePending = false);
 
         void paint(juce::Graphics& g) override;
         void resized() override {}

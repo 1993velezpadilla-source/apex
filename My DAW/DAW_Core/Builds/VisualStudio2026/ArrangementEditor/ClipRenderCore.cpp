@@ -930,9 +930,12 @@ namespace ArrangementEditor
         if (dirty.isEmpty())
             return;
 
-        // Read the peaks and their readiness under a single lock.
-        juce::CriticalSection::ScopedLockType lock(m_waveformCache->getPeaksLock());
-        const auto& peaks = m_waveformCache->getPeaks();
+        // Immutable ownership survives a background cache refresh; render
+        // only the current visible waveform columns without holding peaksLock_.
+        const auto peaksSnapshot = m_waveformCache->getPeaksSnapshot();
+        if (!peaksSnapshot)
+            return;
+        const auto& peaks = *peaksSnapshot;
         const auto& minimums = peaks.minimums();
         const auto& maximums = peaks.maximums();
         if (!peaks.valid || minimums.empty() || maximums.empty())

@@ -101,11 +101,25 @@ namespace ArrangementEditor
 
         // Get cached peaks (call from UI thread)
         // THREAD-SAFE: Must be called with peaksLock_ held
-        const WaveformPeakData& getPeaks() const { return m_peaks; }
+        const WaveformPeakData& getPeaks() const
+        {
+            // Legacy callers must hold peaksLock_ for this reference.
+            return m_peaks ? *m_peaks : emptyPeaks();
+        }
+
+        // Copy shared ownership under a tiny lock, then render with no peaks
+        // mutex held. Background peak updates atomically replace this pointer,
+        // never mutate peak arrays while the UI is reading them.
+        std::shared_ptr<const WaveformPeakData> getPeaksSnapshot() const
+        {
+            juce::CriticalSection::ScopedLockType lock(peaksLock_);
+            return m_peaks;
+        }
+
         bool isReady() const
         {
             juce::CriticalSection::ScopedLockType lock(peaksLock_);
-            return m_peaks.valid;
+            return m_peaks && m_peaks->valid;
         }
 
         // Lock for thread-safe access to m_peaks during UI paint and background thread completion
@@ -115,12 +129,18 @@ namespace ArrangementEditor
         std::function<void()> onPeaksReady;
 
     private:
+        static const WaveformPeakData& emptyPeaks() noexcept
+        {
+            static const WaveformPeakData empty;
+            return empty;
+        }
+
         void run() override;
 
         std::string      m_sourcePath;
         int              m_targetWidth = 0;
         int64_t          m_visibleSamplesHint = 0;
-        WaveformPeakData m_peaks;
+        std::shared_ptr<const WaveformPeakData> m_peaks;
         DAW::AudioFileManager::CachedAudioHandle cachedOverviewSource_;
         bool             m_requestPending = false;
 
