@@ -79,6 +79,12 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
                 raise ValueError("The requested arranger backend did not become active")
     if phases[0]["before"]["scrollX"] == phases[0]["after"]["scrollX"]:
         raise ValueError("Pan did not move the production Viewport")
+    if scene == "recording":
+        # The old 30-second extent trapped REC pans near bar 15 even while
+        # the audio callback continued to write new samples. The benchmark
+        # now starts an active take at 29s and drags right past 30s.
+        if phases[0]["after"]["scrollX"] / phases[0]["after"]["pps"] <= 30.0:
+            raise ValueError("Live REC scroll still clamps at the historic 30-second edge")
     for phase, direction in zip(phases[1:3], (1, -1)):
         if (phase["after"]["pps"] - phase["before"]["pps"]) * direction <= 0:
             raise ValueError(f"{phase['phase']} did not change production zoom in the expected direction")
