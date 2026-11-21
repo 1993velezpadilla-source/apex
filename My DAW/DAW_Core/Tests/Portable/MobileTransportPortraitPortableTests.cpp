@@ -1,0 +1,2416 @@
+#include "../../Source/UICore/MobileTransportPortrait.h"
+#include <cassert>
+#include <cstdlib>
+#include <cstdio>
+#include <initializer_list>
+#include <limits>
+// Portable CI may compile with NDEBUG: never compile away runtime sweeps.
+// Keep the test executable meaningful in both Debug and Release builds.
+#undef assert
+#define assert(condition) do { if (!(condition)) { \
+    std::fprintf(stderr, "MobileTransportPortrait assertion failed at %s:%d: %s\n", \
+                 __FILE__, __LINE__, #condition); std::abort(); \
+} } while (false)
+using DAW::mobile::PortraitTransportBounds;
+using DAW::mobile::portraitTransportLayout;
+
+constexpr bool inside(PortraitTransportBounds r, int w, int h)
+{
+    return r.x >= 0 && r.y >= 0 && r.width >= 0 && r.height >= 0
+        && static_cast<long long>(r.x) + r.width <= w
+        && static_cast<long long>(r.y) + r.height <= h;
+}
+constexpr bool separated(PortraitTransportBounds a, PortraitTransportBounds b)
+{
+    return static_cast<long long>(a.x) + a.width <= b.x
+        || static_cast<long long>(b.x) + b.width <= a.x
+        || static_cast<long long>(a.y) + a.height <= b.y
+        || static_cast<long long>(b.y) + b.height <= a.y;
+}
+constexpr bool valid(int w, int h)
+{
+    const auto r = portraitTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (!inside(r.transport[i], w, h)) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(r.transport[j], r.transport[i])) return false;
+    }
+    const PortraitTransportBounds bottom[5] = {
+        r.click, r.fx, r.browser, r.mixer, r.sends
+    };
+    for (int i = 0; i < 5; ++i)
+    {
+        if (!inside(bottom[i], w, h)) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(bottom[j], bottom[i])) return false;
+        // The bottom shortcuts must not cover any of the six transport actions.
+        // Prior tests only compared controls within their own row.
+        if (bottom[i].width > 0 && bottom[i].height > 0)
+            for (int j = 0; j < 6; ++j)
+                if (r.transport[j].width > 0 && r.transport[j].height > 0
+                    && !separated(bottom[i], r.transport[j])) return false;
+    }
+    return true;
+}
+// Portrait readouts must be bounded and non-overlapping at split-screen widths.
+constexpr bool portraitReadoutsSafe(int w, int h)
+{
+    const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+    const PortraitTransportBounds items[] = {r.key, r.tempo, r.clock, r.automation};
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!inside(items[i], w, h)) return false;
+        if (items[i].width <= 0 || items[i].height <= 0) continue;
+        for (int j = 0; j < i; ++j)
+            if (items[j].width > 0 && items[j].height > 0
+                && !separated(items[i], items[j])) return false;
+    }
+    return true;
+}
+// Android keyboard/inset resize can cross the 144-unit readout threshold.
+// Hidden readouts must have no tappable geometry; restoring height must
+// restore the clock without placing a hit target outside the viewport.
+constexpr bool readoutHeightBoundary(int w)
+{
+    const auto hidden = DAW::mobile::portraitReadoutLayout(w, 143);
+    const auto visible = DAW::mobile::portraitReadoutLayout(w, 144);
+    const PortraitTransportBounds before[] = {
+        hidden.key, hidden.tempo, hidden.clock, hidden.automation
+    };
+    for (const auto r : before)
+        if (r.width != 0 || r.height != 0) return false;
+    return portraitReadoutsSafe(w, 144)
+        && visible.clock.width >= 44
+        && inside(visible.clock, w, 144);
+}
+static_assert(readoutHeightBoundary(56));
+static_assert(readoutHeightBoundary(189));
+static_assert(readoutHeightBoundary(360));
+
+static_assert(portraitReadoutsSafe(189, 144));
+static_assert(portraitReadoutsSafe(320, 144));
+static_assert(portraitReadoutsSafe(360, 144));
+static_assert(portraitReadoutsSafe(852, 180));
+static_assert(DAW::mobile::portraitReadoutLayout(189, 144).automation.width == 0);
+static_assert(DAW::mobile::portraitReadoutLayout(360, 144).clock.width >= 82);
+// The clock must survive narrow portrait split-screen resizing; optional
+// tonal/tempo readouts yield space before the essential time display.
+static_assert(DAW::mobile::portraitReadoutLayout(100, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(160, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(189, 144).clock.width >= 44);
+static_assert(DAW::mobile::portraitReadoutLayout(56, 144).clock.width >= 44);
+
+static_assert(valid(320, 144));
+static_assert(valid(360, 112));
+static_assert(valid(360, 144));
+static_assert(valid(393, 144));
+static_assert(valid(245, 144));
+// The legacy three-row portrait geometry can be selected during OS resize.
+// Its action row must not leave six 1..43-unit tappable targets behind when
+// the keyboard shrinks the deck or split-screen narrows the viewport.
+constexpr bool portraitCollapsedActionsAreNonInteractive()
+{
+    for (int w = 13; w <= 302; ++w)
+    {
+        const auto r = portraitTransportLayout(w, 144);
+        for (const auto action : r.transport)
+            if (action.width != 0 || action.height != 0) return false;
+    }
+    for (const int w : {303, 320, 360, 852})
+    {
+        const auto shortDeck = portraitTransportLayout(w, 143);
+        const auto usableDeck = portraitTransportLayout(w, 144);
+        for (int i = 0; i < 6; ++i)
+        {
+            if (shortDeck.transport[i].width != 0
+                || shortDeck.transport[i].height != 0) return false;
+            if (usableDeck.transport[i].width < 44
+                || usableDeck.transport[i].height < 44) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitCollapsedActionsAreNonInteractive());
+// Portrait split-screen/keyboard collapse must not leave tiny tappable
+// FX, Browser, floating Mixer or Bubblegum Sends targets behind.
+constexpr bool portraitShortcutsRespectTouchMinimum()
+{
+    for (const int w : {13, 100, 188, 189, 245, 320, 360})
+        for (const int h : {25, 112, 143, 144, 180})
+        {
+            const auto r = portraitTransportLayout(w, h);
+            const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            for (const auto item : shortcuts)
+                if ((item.width == 0 && item.height == 0)
+                    || (item.width >= 44 && item.height >= 44))
+                    continue;
+                else return false;
+        }
+    return true;
+}
+static_assert(portraitShortcutsRespectTouchMinimum());
+static_assert(valid(852, 300));
+static_assert(valid(13, 25));
+static_assert(valid(1, 1));
+static_assert(valid(0, 0));
+// Invalid OS dimensions must produce an empty, non-interactive layout.
+// The normal bounds validator intentionally requires nonnegative viewports.
+constexpr bool emptyLayout(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds controls[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.click, r.fx, r.browser, r.mixer, r.sends,
+        r.clock, r.tempo, r.key, r.automation
+    };
+    for (const auto control : controls)
+        if (control.x || control.y || control.width || control.height)
+            return false;
+    return true;
+}
+static_assert(emptyLayout(portraitTransportLayout(-1, 144)));
+static_assert(emptyLayout(portraitTransportLayout(360, -1)));
+static_assert(emptyLayout(portraitTransportLayout(std::numeric_limits<int>::min(), 144)));
+static_assert(emptyLayout(portraitTransportLayout(360, std::numeric_limits<int>::min())));
+static_assert(valid(std::numeric_limits<int>::max(),
+                    std::numeric_limits<int>::max()));
+
+constexpr auto phone = portraitTransportLayout(360, 144);
+static_assert(phone.transport[0].width >= 44 && phone.transport[5].width >= 44);
+static_assert(phone.fx.width == 44 && phone.browser.width == 44);
+static_assert(phone.mixer.width >= 44 && phone.sends.width >= 44);
+static_assert(phone.click.width == 132);
+// At the 144-unit portrait deck, all primary actions must have >=44
+// logical-unit vertical hit areas, without overlapping the top readouts.
+static_assert(phone.transport[0].height >= 44 && phone.transport[5].height >= 44);
+static_assert(phone.fx.height >= 44 && phone.browser.height >= 44);
+static_assert(phone.mixer.height >= 44 && phone.sends.height >= 44);
+static_assert(phone.click.height >= 44);
+static_assert(phone.transport[0].y >= 6 + (144 - 4 * 6) / 3);
+static_assert(phone.sends.y + phone.sends.height <= 144);
+static_assert(portraitTransportLayout(320, 144).transport[0].width >= 44);
+// A shorter deck cannot provide the same 44-unit height in three rows.
+static_assert(portraitTransportLayout(360, 112).transport[0].height < 44);
+
+
+constexpr bool validCompact(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (!inside(r.transport[i], w, h)) return false;
+        for (int j = 0; j < i; ++j)
+            if (!separated(r.transport[j], r.transport[i])) return false;
+    }
+    const PortraitTransportBounds top[] = {
+        r.clock, r.tempo, r.key, r.automation, r.click,
+        r.fx, r.browser, r.mixer, r.sends
+    };
+    for (int i = 0; i < 9; ++i)
+    {
+        if (!inside(top[i], w, h)) return false;
+        if (top[i].width == 0 || top[i].height == 0) continue;
+        for (int j = 0; j < i; ++j)
+            if (top[j].width && top[j].height
+                && !separated(top[j], top[i])) return false;
+        for (int j = 0; j < 6; ++j)
+            if (!separated(top[i], r.transport[j])) return false;
+    }
+    return true;
+}
+static_assert(validCompact(360, 96));
+static_assert(validCompact(320, 112));
+static_assert(validCompact(480, 96));
+static_assert(validCompact(245, 96));
+static_assert(validCompact(20, 8));
+// Extreme keyboard/IME inset: no 44-unit row can fit at 0..43.
+// All hit targets must disappear, then recover at exactly 44 units.
+constexpr bool compactSubTouchHeightIsNonInteractive()
+{
+    for (const int w : {20, 189, 268, 320, 852})
+        for (int h = 0; h < 44; ++h)
+            if (!emptyLayout(DAW::mobile::compactPhoneTransportLayout(w, h)))
+                return false;
+    for (const int w : {268, 320, 852})
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(w, 44);
+        if (!validCompact(w, 44)) return false;
+        for (const auto action : r.transport)
+            if (action.width < 44 || action.height < 44
+                || !inside(action, w, 44)) return false;
+    }
+    return true;
+}
+static_assert(compactSubTouchHeightIsNonInteractive());
+
+static_assert(validCompact(0, 0));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(-1, 96)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, -1)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(std::numeric_limits<int>::min(), 96)));
+static_assert(emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, std::numeric_limits<int>::min())));
+static_assert(validCompact(std::numeric_limits<int>::max(),
+                           std::numeric_limits<int>::max()));
+constexpr auto compact360 = DAW::mobile::compactPhoneTransportLayout(360, 96);
+static_assert(compact360.transport[0].width >= 44
+              && compact360.transport[5].width >= 44);
+static_assert(compact360.transport[0].height >= 44
+              && compact360.transport[5].height >= 44);
+static_assert(compact360.fx.width >= 44 && compact360.browser.width >= 44);
+static_assert(compact360.mixer.width >= 44 && compact360.sends.width >= 44);
+static_assert(compact360.mixer.height >= 44 && compact360.sends.height >= 44);
+static_assert(DAW::mobile::compactPhoneTransportLayout(320, 112).transport[0].height >= 44);
+static_assert(DAW::mobile::compactPhoneTransportLayout(480, 96).sends.width >= 44);
+// Landscape and rotation regression: all compact controls remain inside the
+// viewport even when the OS supplies a taller-than-usual transport deck.
+static_assert(validCompact(393, 144));
+static_assert(validCompact(852, 180));
+static_assert(validCompact(1024, 256));
+static_assert(validCompact(189, 94));
+static_assert(validCompact(188, 94));
+static_assert(validCompact(320, 94));
+static_assert(validCompact(360, 94));
+// At the 189-unit compact breakpoint the four shortcuts must not shrink
+// below the intended 44-unit hit width. Just below it they must remain
+// bounded rather than overlapping the clock/readouts.
+constexpr auto compactAtThreshold = DAW::mobile::compactPhoneTransportLayout(189, 94);
+constexpr auto compactBelowThreshold = DAW::mobile::compactPhoneTransportLayout(188, 94);
+static_assert(compactAtThreshold.fx.width == 44
+              && compactAtThreshold.browser.width == 44
+              && compactAtThreshold.mixer.width == 44
+              && compactAtThreshold.sends.width == 44);
+static_assert(compactBelowThreshold.fx.width < 44
+              && compactBelowThreshold.sends.width < 44);
+// Hidden phone shortcuts must be truly non-interactive on both axes.
+// Width-only assertions would miss a zero-width JUCE target retaining
+// stale height after split-screen resize or keyboard inset changes.
+constexpr bool compactShortcutsDisappearBelowThreshold()
+{
+    // Check both independent failure axes: width below 189 and deck height
+    // below 94. A wide landscape deck with a keyboard inset must also hide
+    // all four shortcuts, while the exact 189x94 boundary restores them.
+    for (const int w : {20, 188, 189, 320, 852})
+        for (const int h : {93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds shortcuts[] = {r.fx, r.browser, r.mixer, r.sends};
+            const bool shouldBeVisible = w >= 189 && h >= 94;
+            for (const auto item : shortcuts)
+                if (shouldBeVisible
+                    ? (item.width < 44 || item.height < 44)
+                    : (item.width != 0 || item.height != 0))
+                    return false;
+        }
+    return true;
+}
+static_assert(compactShortcutsDisappearBelowThreshold());
+// Below 268 units the six-action row is intentionally hidden; only the
+// 268+ boundary may expose 44-unit transport targets.
+static_assert(compactAtThreshold.transport[0].height == 0
+              && compactBelowThreshold.transport[0].height == 0);
+// Landscape rotation must preserve the six transport hit targets and
+// phone-only floating Mixer / Sends shortcuts at accessible dimensions.
+constexpr auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
+static_assert(rotated.transport[0].width >= 44
+              && rotated.transport[5].width >= 44
+              && rotated.transport[0].height >= 44);
+static_assert(rotated.mixer.width >= 44 && rotated.mixer.height >= 44);
+static_assert(rotated.sends.width >= 44 && rotated.sends.height >= 44);
+
+// Realistic phone rotation must preserve semantic order as well as bounds.
+// A non-overlapping but permuted transport would still be a broken UI.
+constexpr bool orderedActions(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    for (int i = 0; i < 6; ++i)
+    {
+        if (r.transport[i].width < 44 || r.transport[i].height < 44)
+            return false;
+        if (i && r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
+            return false;
+    }
+    return r.fx.width >= 44 && r.browser.width >= 44
+        && r.mixer.width >= 44 && r.sends.width >= 44
+        && r.fx.x < r.browser.x && r.browser.x < r.mixer.x
+        && r.mixer.x < r.sends.x
+        && r.fx.y == r.sends.y
+        && r.transport[0].y >= r.sends.y + r.sends.height;
+}
+static_assert(orderedActions(320, 112));
+static_assert(orderedActions(360, 96));
+static_assert(orderedActions(852, 180));
+
+// Compact readouts must never cover phone-only Mixer/Sends shortcuts.
+// Optional readouts are suppressed when the viewport is too narrow; if
+// visible, each must keep its minimum intended width and original order.
+constexpr bool orderedReadouts(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    const PortraitTransportBounds readouts[] = {
+        r.clock, r.tempo, r.key, r.automation, r.click
+    };
+    const int minimums[] = { 54, 54, 54, 44, 44 };
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto a = readouts[i];
+        if (a.width == 0 && a.height == 0) continue;
+        if (a.width < minimums[i] || a.height <= 0) return false;
+        if (!inside(a, w, h)) return false;
+        if (!separated(a, r.fx) || !separated(a, r.browser)
+            || !separated(a, r.mixer) || !separated(a, r.sends))
+            return false;
+        for (int j = 0; j < i; ++j)
+            if (readouts[j].width && readouts[j].x >= a.x)
+                return false;
+    }
+    return true;
+}
+static_assert(orderedReadouts(189, 94));
+static_assert(orderedReadouts(320, 112));
+static_assert(orderedReadouts(360, 96));
+static_assert(orderedReadouts(852, 180));
+static_assert(orderedReadouts(1024, 256));
+
+// Portrait deck regression: rotating to a wide viewport must preserve the
+// six action targets and both phone-only floating Mixer / Sends shortcuts.
+// A bounds-only check would miss controls shrinking below touch size.
+constexpr bool portraitTouchTargets(int w, int h)
+{
+    const auto r = portraitTransportLayout(w, h);
+    if (!valid(w, h)) return false;
+    for (const auto action : r.transport)
+        if (action.width < 44 || action.height < 44) return false;
+    return r.fx.width >= 44 && r.fx.height >= 44
+        && r.browser.width >= 44 && r.browser.height >= 44
+        && r.mixer.width >= 44 && r.mixer.height >= 44
+        && r.sends.width >= 44 && r.sends.height >= 44
+        && r.mixer.x < r.sends.x;
+}
+static_assert(portraitTouchTargets(320, 144));
+static_assert(portraitTouchTargets(360, 144));
+static_assert(portraitTouchTargets(393, 144));
+static_assert(portraitTouchTargets(852, 180));
+// A 112-unit deck has three rows and cannot provide 44-unit-high targets.
+static_assert(!portraitTouchTargets(360, 112));
+
+// Rotation and Android split-screen resize boundaries: validate every pixel
+// around the portrait layout's 12/24-unit empty-layout guards, and the
+// minimum practical 320px phone width. Coarse 7x9 sweeps skip these edges.
+constexpr bool portraitActionsOrdered(int w, int h)
+{
+    const auto r = portraitTransportLayout(w, h);
+    for (int i = 1; i < 6; ++i)
+        if (r.transport[i - 1].x + r.transport[i - 1].width > r.transport[i].x)
+            return false;
+    // Collapsed shortcuts have zero bounds; compare ordering only while
+    // all four shortcuts are visible. Never require x-order for hidden taps.
+    const bool shortcutsVisible = r.fx.width > 0 && r.browser.width > 0
+        && r.mixer.width > 0 && r.sends.width > 0;
+    const bool shortcutsHidden = r.fx.width == 0 && r.browser.width == 0
+        && r.mixer.width == 0 && r.sends.width == 0;
+    const bool ordered = r.fx.x < r.browser.x
+        && r.browser.x < r.mixer.x && r.mixer.x < r.sends.x;
+    return (r.click.width == 0 || r.click.height == 0 || r.click.y == r.sends.y)
+        && ((shortcutsVisible && ordered) || shortcutsHidden);
+}
+static_assert(portraitActionsOrdered(320, 144));
+static_assert(portraitActionsOrdered(393, 144));
+static_assert(portraitActionsOrdered(852, 180));
+
+
+// Adversarial tap dispatch: the centre of every visible target must hit
+// exactly that target, never a neighbouring transport or shortcut. This
+// catches accidental touch interception despite otherwise valid bounds.
+constexpr bool contains(PortraitTransportBounds r, int x, int y)
+{
+    return r.width > 0 && r.height > 0
+        && x >= r.x && y >= r.y
+        && static_cast<long long>(x) < static_cast<long long>(r.x) + r.width
+        && static_cast<long long>(y) < static_cast<long long>(r.y) + r.height;
+}
+constexpr bool uniqueHitCentres(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click
+    };
+    for (int i = 0; i < 11; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int cx = a.x + a.width / 2;
+        const int cy = a.y + a.height / 2;
+        if (!contains(a, cx, cy)) return false;
+        for (int j = 0; j < 11; ++j)
+            if (i != j && contains(targets[j], cx, cy)) return false;
+    }
+    return true;
+}
+// Probe actual adjacent controls at every corner and edge, not only centres.
+// This catches one-pixel overlaps that centre-only dispatch checks can miss.
+constexpr bool exclusiveHitEdges(DAW::mobile::PortraitTransportLayout r)
+{
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click
+    };
+    for (int i = 0; i < 11; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+        const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 11; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+static_assert(exclusiveHitEdges(portraitTransportLayout(320, 144)));
+static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(320, 112)));
+static_assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(852, 180)));
+
+// Readouts can also receive touches. Verify exclusive ownership across ALL
+// compact controls, including clock/tempo/key/automation, during resize.
+// Previous edge checks only covered transport actions and shortcuts.
+constexpr bool exclusiveCompactAllTargets(int w, int h)
+{
+    const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+    const PortraitTransportBounds targets[] = {
+        r.transport[0], r.transport[1], r.transport[2],
+        r.transport[3], r.transport[4], r.transport[5],
+        r.fx, r.browser, r.mixer, r.sends, r.click,
+        r.clock, r.tempo, r.key, r.automation
+    };
+    for (int i = 0; i < 15; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+        const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 15; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+static_assert(exclusiveCompactAllTargets(189, 94));
+static_assert(exclusiveCompactAllTargets(320, 112));
+static_assert(exclusiveCompactAllTargets(852, 180));
+
+// Half-open touch bounds: a tap on the right/bottom border belongs to the
+// neighbouring target (or none), never both. Include zero-sized and large
+// coordinates to catch off-by-one and overflow regressions in hit testing.
+constexpr bool hitEdgeSemantics()
+{
+    constexpr PortraitTransportBounds a{ 10, 20, 44, 44 };
+    constexpr PortraitTransportBounds right{ 54, 20, 44, 44 };
+    constexpr PortraitTransportBounds below{ 10, 64, 44, 44 };
+    constexpr PortraitTransportBounds empty{ 10, 20, 0, 44 };
+    constexpr PortraitTransportBounds far{ std::numeric_limits<int>::max() - 44,
+                                            10, 44, 44 };
+    return contains(a, 10, 20) && contains(a, 53, 63)
+        && !contains(a, 9, 20) && !contains(a, 10, 19)
+        && !contains(a, 54, 20) && !contains(a, 10, 64)
+        && contains(right, 54, 20) && contains(below, 10, 64)
+        && !contains(empty, 10, 20)
+        && contains(far, std::numeric_limits<int>::max() - 1, 20)
+        && !contains(far, std::numeric_limits<int>::max(), 20);
+}
+static_assert(hitEdgeSemantics());
+
+static_assert(uniqueHitCentres(portraitTransportLayout(320, 144)));
+static_assert(uniqueHitCentres(portraitTransportLayout(852, 180)));
+static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(320, 112)));
+static_assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(852, 180)));
+
+// Probe all portrait readout hit edges, not only their bounding boxes. A
+// readout that overlaps its neighbour by one pixel can steal a touch even
+// when its centre and the transport row remain valid.
+constexpr bool exclusivePortraitReadoutEdges(int w, int h)
+{
+    const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+    const PortraitTransportBounds targets[] = {r.key, r.tempo, r.clock, r.automation};
+    if (!portraitReadoutsSafe(w, h)) return false;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto a = targets[i];
+        if (a.width <= 0 || a.height <= 0) continue;
+        const int xs[] = {a.x, a.x + a.width / 2, a.x + a.width - 1};
+        const int ys[] = {a.y, a.y + a.height / 2, a.y + a.height - 1};
+        for (const int x : xs)
+            for (const int y : ys)
+            {
+                if (!contains(a, x, y)) return false;
+                for (int j = 0; j < 4; ++j)
+                    if (i != j && contains(targets[j], x, y)) return false;
+            }
+    }
+    return true;
+}
+constexpr bool portraitReadoutResizeSweep()
+{
+    for (const int h : {143, 144, 145, 180})
+        for (int w = 13; w <= 400; ++w)
+            if (!exclusivePortraitReadoutEdges(w, h)) return false;
+    return true;
+}
+static_assert(portraitReadoutResizeSweep());
+
+// Automation is inset by 2 horizontal and 4 vertical units after allocation.
+// The raw 44-unit row at h=144 is therefore NOT a 44-unit automation target.
+// Below the 168-unit threshold, hide Automation instead of exposing a
+// subminimum touch target; TransportBar consumes this exact rectangle.
+constexpr bool automationInsetHeightBoundary()
+{
+    for (const int w : {320, 360, 393, 852})
+    {
+        const auto shortRow = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto touchRow = DAW::mobile::portraitReadoutLayout(w, 168);
+        if (!portraitReadoutsSafe(w, 167) || !portraitReadoutsSafe(w, 168))
+            return false;
+        if (shortRow.automation.width != 0 || shortRow.automation.height != 0)
+            return false;
+        if (touchRow.automation.width < 44 || touchRow.automation.height != 44)
+            return false;
+        if (!inside(touchRow.automation, w, 168)) return false;
+    }
+    return true;
+}
+static_assert(automationInsetHeightBoundary());
+
+// Boundary contract for OS split-screen and keyboard inset transitions:
+// a 55-unit viewport cannot fit a 44-unit clock plus 12-unit margins,
+// while 56 units can. The 143/144 height boundary must not leave a
+// phantom hit target after the top readout row disappears.
+constexpr bool readoutActivationBoundaries()
+{
+    for (int w = 13; w <= 56; ++w)
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 143);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (before.clock.width != 0 || before.clock.height != 0) return false;
+        if (!portraitReadoutsSafe(w, 144)) return false;
+        if (w < 56 && (after.clock.width != 0 || after.clock.height != 0)) return false;
+        if (w == 56 && (after.clock.width != 44 || after.clock.height <= 0)) return false;
+    }
+    return true;
+}
+static_assert(readoutActivationBoundaries());
+
+// Compact deck activation is independent of the portrait 144-unit threshold.
+// A keyboard/inset collapse below h=8 must remove every touch target; when
+// the deck returns, no old readout or shortcut may intercept another control.
+constexpr bool compactHeightActivation(int w)
+{
+    const auto hidden = DAW::mobile::compactPhoneTransportLayout(w, 7);
+    const auto shortRow = DAW::mobile::compactPhoneTransportLayout(w, 93);
+    const auto shown = DAW::mobile::compactPhoneTransportLayout(w, 94);
+    // h=8 restores the deck, but its row is only 1 unit high. The
+    // four 44-unit shortcuts must wait until rowH reaches 44 at h=94.
+    return emptyLayout(hidden) && validCompact(w, 8)
+        && exclusiveCompactAllTargets(w, 8)
+        && validCompact(w, 93) && validCompact(w, 94)
+        && shortRow.fx.width == 0 && shortRow.browser.width == 0
+        && shortRow.mixer.width == 0 && shortRow.sends.width == 0
+        && shown.fx.width >= 44 && shown.browser.width >= 44
+        && shown.mixer.width >= 44 && shown.sends.width >= 44;
+}
+static_assert(compactHeightActivation(189));
+static_assert(compactHeightActivation(320));
+static_assert(compactHeightActivation(852));
+
+// Exercise a full OS inset/orientation sequence rather than isolated sizes.
+// Compact and portrait geometry are pure functions: returning to the original
+// viewport must reproduce identical hit rectangles, with no stale tap targets.
+constexpr bool sameBounds(PortraitTransportBounds a, PortraitTransportBounds b)
+{
+    return a.x == b.x && a.y == b.y
+        && a.width == b.width && a.height == b.height;
+}
+constexpr bool sameLayout(DAW::mobile::PortraitTransportLayout a,
+                          DAW::mobile::PortraitTransportLayout b)
+{
+    for (int i = 0; i < 6; ++i)
+        if (!sameBounds(a.transport[i], b.transport[i])) return false;
+    const PortraitTransportBounds left[] = {a.fx, a.browser, a.mixer, a.sends,
+        a.click, a.clock, a.tempo, a.key, a.automation};
+    const PortraitTransportBounds right[] = {b.fx, b.browser, b.mixer, b.sends,
+        b.click, b.clock, b.tempo, b.key, b.automation};
+    for (int i = 0; i < 9; ++i)
+        if (!sameBounds(left[i], right[i])) return false;
+    return true;
+}
+constexpr bool orientationRoundTrip()
+{
+    constexpr auto compactStart = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    constexpr auto portraitStart = portraitTransportLayout(360, 144);
+    const int widths[] = {360, 852, 189, 320, 360};
+    const int heights[] = {96, 180, 8, 112, 96};
+    for (int i = 0; i < 5; ++i)
+    {
+        if (!validCompact(widths[i], heights[i])) return false;
+        if (!exclusiveCompactAllTargets(widths[i], heights[i])) return false;
+    }
+    return sameLayout(compactStart, DAW::mobile::compactPhoneTransportLayout(360, 96))
+        && sameLayout(portraitStart, portraitTransportLayout(360, 144))
+        && emptyLayout(DAW::mobile::compactPhoneTransportLayout(360, 7))
+        && validCompact(360, 8);
+}
+static_assert(orientationRoundTrip());
+
+// A split-screen transition can remove the clock while preserving the four
+// phone shortcuts. Returning to portrait must restore the clock, without
+// leaving a phantom readout over Mixer or Bubblegum Sends.
+constexpr bool compactClockResizeRecovery()
+{
+    constexpr auto wide = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    constexpr auto narrow = DAW::mobile::compactPhoneTransportLayout(189, 94);
+    constexpr auto restored = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    return wide.clock.width >= 54 && wide.clock.height > 0
+        && narrow.clock.width == 0 && narrow.clock.height == 0
+        && narrow.mixer.width == 44 && narrow.sends.width == 44
+        && exclusiveCompactAllTargets(189, 94)
+        && exclusiveCompactAllTargets(360, 96)
+        && sameBounds(wide.clock, restored.clock)
+        && sameBounds(wide.mixer, restored.mixer)
+        && sameBounds(wide.sends, restored.sends);
+}
+static_assert(compactClockResizeRecovery());
+
+// The compact transport preserves a 44-unit action row at heights 88..93,
+// while optional shortcuts remain hidden until the two-row 94-unit threshold.
+// Bounds-only tests at h=8 do not prove finger-sized targets.
+constexpr bool compactHeightTouchThreshold()
+{
+    for (const int w : {320, 360, 393, 852})
+    {
+        const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto usableDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (!validCompact(w, 93) || !validCompact(w, 94)) return false;
+        if (shortDeck.transport[0].height != 44
+            || shortDeck.mixer.height >= 44
+            || shortDeck.sends.height >= 44) return false;
+        for (const auto action : usableDeck.transport)
+            if (action.width < 44 || action.height < 44) return false;
+        if (usableDeck.mixer.width < 44 || usableDeck.mixer.height < 44
+            || usableDeck.sends.width < 44 || usableDeck.sends.height < 44)
+            return false;
+        if (!exclusiveCompactAllTargets(w, 94)) return false;
+    }
+    return true;
+}
+static_assert(compactHeightTouchThreshold());
+
+// Compact transport recovers six 44-unit targets at width 268 by
+// reducing decorative spacing. Below 268, six targets cannot fit.
+// At 295 the regular inset-and-gap layout resumes.
+constexpr bool compactActionWidthBoundary()
+{
+    for (const int h : {94, 96, 112, 180})
+    {
+        const auto below = DAW::mobile::compactPhoneTransportLayout(267, h);
+        const auto at = DAW::mobile::compactPhoneTransportLayout(268, h);
+        if (!validCompact(267, h) || !validCompact(268, h)) return false;
+        if (!exclusiveCompactAllTargets(267, h)
+            || !exclusiveCompactAllTargets(268, h)) return false;
+        for (int i = 0; i < 6; ++i)
+            if (below.transport[i].width >= 44
+                || at.transport[i].width != 44
+                || at.transport[i].height < 44) return false;
+        if (at.mixer.width < 44 || at.sends.width < 44) return false;
+    }
+    return true;
+}
+static_assert(compactActionWidthBoundary());
+
+// Compact actions require 268 units wide and 88 units tall; shortcuts
+// separately require 94 units tall during keyboard/inset resizing. A bounds-only
+// pass would miss a control that becomes a tiny but still clickable sliver.
+constexpr bool compactCombinedTouchBoundary()
+{
+    for (const int w : {294, 295, 296, 320})
+        for (const int h : {93, 94, 95, 96})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            const bool expectedActionsTouchable = w >= 268 && h >= 88;
+            for (const auto action : r.transport)
+                if ((action.width >= 44 && action.height >= 44)
+                    != expectedActionsTouchable) return false;
+            // Mixer and Sends have a lower width threshold than the six
+            // transport actions; height remains shared across both rows.
+            if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
+                || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
+                return false;
+        }
+    return true;
+}
+static_assert(compactCombinedTouchBoundary());
+
+// Adversarial keyboard-inset oscillation around the action/shortcut thresholds.
+// Test every intermediate size, not only the endpoints, and verify that
+// returning to a usable deck recreates the exact original hit rectangles.
+constexpr bool compactTouchThresholdRoundTrip()
+{
+    constexpr auto baseline = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    for (int w = 291; w <= 299; ++w)
+        for (int h = 90; h <= 98; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if ((action.width >= 44 && action.height >= 44)
+                    != (w >= 268 && h >= 88)) return false;
+            if ((r.mixer.width >= 44 && r.mixer.height >= 44) != (h >= 94)
+                || (r.sends.width >= 44 && r.sends.height >= 44) != (h >= 94))
+                return false;
+        }
+    return sameLayout(baseline, DAW::mobile::compactPhoneTransportLayout(360, 96));
+}
+static_assert(compactTouchThresholdRoundTrip());
+
+// Exercise rapid orientation/inset transitions with distinct dimensions, not
+// only repeat calculations at one viewport. A stale shortcut rectangle after
+// rotation would be outside bounds or overlap another touch target.
+constexpr bool rotatingPhoneShortcutIsolation()
+{
+    constexpr int widths[] = {360, 852, 189, 320, 393, 188, 360};
+    constexpr int heights[] = {96, 180, 94, 112, 144, 93, 96};
+    const auto baseline = DAW::mobile::compactPhoneTransportLayout(360, 96);
+    for (int i = 0; i < 7; ++i)
+    {
+        const auto layout = DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i]);
+        if (!validCompact(widths[i], heights[i])
+            || !exclusiveCompactAllTargets(widths[i], heights[i])
+            || !uniqueHitCentres(layout)
+            || !inside(layout.mixer, widths[i], heights[i])
+            || !inside(layout.sends, widths[i], heights[i])) return false;
+        if (widths[i] >= 189
+            && (layout.mixer.width < 44 || layout.sends.width < 44)) return false;
+        if (heights[i] >= 94
+            && (layout.mixer.height < 44 || layout.sends.height < 44)) return false;
+    }
+    return sameLayout(baseline, DAW::mobile::compactPhoneTransportLayout(360, 96));
+}
+static_assert(rotatingPhoneShortcutIsolation());
+
+
+// Height/inset adversarial sweep for the optional Automation readout.
+// Its visible rectangle is inset by two logical units vertically: it must
+// not become an undersized active target at the 167/168 transition.
+constexpr bool automationTouchActivationSweep()
+{
+    for (int w = 56; w <= 600; ++w)
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 168);
+        if (!portraitReadoutsSafe(w, 167) || !portraitReadoutsSafe(w, 168))
+            return false;
+        if (before.automation.width != 0 || before.automation.height != 0)
+            return false;
+        if (after.automation.width > 0)
+        {
+            if (after.automation.width < 44 || after.automation.height < 44
+                || !inside(after.automation, w, 168)
+                || !separated(after.automation, after.clock)
+                || !separated(after.automation, after.tempo)
+                || !separated(after.automation, after.key))
+                return false;
+        }
+        if (!sameBounds(before.clock, DAW::mobile::portraitReadoutLayout(w, 167).clock))
+            return false;
+    }
+    return true;
+}
+static_assert(automationTouchActivationSweep());
+
+// Adversarial inset sweep through every recovered-width / usable-height pair.
+// The earlier regression sampled only three heights, missing intermediate
+// keyboard and fullscreen inset sizes. This remains geometry-only coverage.
+constexpr bool compactRecoveredWidthHeightGrid()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(panel, w, h)
+                    || panel.width < 44 || panel.height < 44)
+                    return false;
+        }
+    return true;
+}
+// Full-size compact phone decks also cross width transitions after the
+// recovered 268..294 band. Check every intermediate width and inset height
+// in Release too, not only selected compile-time sample widths.
+// Geometry only: no claim about OS touch delivery or device fullscreen.
+bool compactStandardWidthHeightGrid()
+{
+    for (int w = 295; w <= 430; ++w)
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(panel, w, h)
+                    || panel.width < 44 || panel.height < 44)
+                    return false;
+        }
+    return true;
+}
+
+// Exhaustive 1,350-case grid runs at runtime to avoid GCC constexpr limits.
+
+constexpr bool compactWideInsetRecoverySweep();
+constexpr bool compactNarrowTransportIsNonInteractive();
+
+// Single-row keyboard collapse at recovered 268..294 widths was not covered
+// by the two-row (94+) grid. Check every intermediate height: Transport must
+// remain 44-high and all optional top-row controls must stay non-interactive.
+bool compactRecoveredSingleRowGrid()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h = 44; h < 94; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (action.width < 44 || action.height < 44
+                    || !inside(action, w, h)) return false;
+            const PortraitTransportBounds optional[] = {
+                r.fx, r.browser, r.mixer, r.sends,
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            for (const auto target : optional)
+                if (target.width != 0 || target.height != 0) return false;
+        }
+    return true;
+}
+
+int main()
+{
+    assert(compactRecoveredSingleRowGrid());
+    assert(compactNarrowTransportIsNonInteractive());
+    // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
+    // evaluation budget; retain the same checks in optimized/NDEBUG builds.
+    assert(compactWideInsetRecoverySweep());
+    // Deep keyboard-inset recovery: when only one 44-unit row fits,
+    // Transport must stay tappable and all optional top-row targets hidden.
+    // Runtime sweep avoids GCC constexpr evaluation-budget regressions.
+    for (int w = 268; w <= 430; ++w)
+        for (int h = 44; h <= 87; ++h)
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            for (const auto action : deck.transport)
+                assert(inside(action, w, h) && action.width >= 44
+                       && action.height >= 44);
+            for (const auto optional : {deck.fx, deck.browser, deck.mixer,
+                                        deck.sends, deck.clock, deck.tempo,
+                                        deck.key, deck.automation, deck.click})
+                assert(optional.width == 0 && optional.height == 0);
+        }
+    // Keep the full geometry sweep active even when NDEBUG removes assert().
+    if (!compactRecoveredWidthHeightGrid()) return 1;
+    if (!compactStandardWidthHeightGrid()) return 2;
+
+    // Adversarial rotation-height band beyond the 93/94 threshold: the
+    // compact deck can grow while Android changes its usable window height.
+    // Verify semantic shortcut order and exclusive hit ownership at every
+    // width/height, not just the short 88..100 band tested below.
+    for (int w = 189; w <= 320; ++w)
+        for (int h = 101; h <= 180; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(r.fx.x < r.browser.x && r.browser.x < r.mixer.x
+                   && r.mixer.x < r.sends.x);
+            assert(r.fx.width >= 44 && r.browser.width >= 44
+                   && r.mixer.width >= 44 && r.sends.width >= 44);
+            assert(r.mixer.height >= 44 && r.sends.height >= 44);
+            assert(sameLayout(r, DAW::mobile::compactPhoneTransportLayout(w, h)));
+        }
+    // Runtime pixel-by-pixel inset sweep: include the 188/189 shortcut
+    // breakpoint and 93/94 touch-height boundary, rather than only samples.
+    // Keep this at runtime to avoid an excessive constexpr compiler budget.
+    for (int w = 180; w <= 330; ++w)
+        for (int h = 88; h <= 100; ++h)
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(uniqueHitCentres(deck));
+            assert(inside(deck.mixer, w, h) && inside(deck.sends, w, h));
+            if (w >= 189 && h >= 94)
+                assert(deck.mixer.width >= 44 && deck.sends.width >= 44);
+            // Both dimensions must fit the shortcut row. At w < 189,
+            // the panel shortcuts are deliberately hidden even when tall.
+            if (w >= 189 && h >= 94)
+                assert(deck.mixer.height >= 44 && deck.sends.height >= 44);
+            else
+                assert(deck.mixer.width == 0 && deck.sends.width == 0);
+            const auto restored = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(sameBounds(deck.mixer, restored.mixer));
+            assert(sameBounds(deck.sends, restored.sends));
+        }
+    // Runtime adversarial sweep across the entire portrait resize band.
+    // Cross-component hit isolation matters: readouts and action buttons are
+    // positioned by separate helpers, so independent bounds tests can pass
+    // even if one intercepts a tap intended for the other.
+    for (int w = 56; w <= 600; ++w)
+        for (int h = 144; h <= 180; ++h)
+        {
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto deck = portraitTransportLayout(w, h);
+            const PortraitTransportBounds readouts[] = {
+                top.key, top.tempo, top.clock, top.automation
+            };
+            const PortraitTransportBounds shortcuts[] = {
+                deck.click, deck.fx, deck.browser, deck.mixer, deck.sends
+            };
+            assert(portraitReadoutsSafe(w, h));
+            assert(valid(w, h));
+            for (const auto readout : readouts)
+            {
+                if (readout.width == 0 || readout.height == 0) continue;
+                assert(readout.width >= 44 && readout.height >= 44);
+                for (const auto action : deck.transport)
+                    assert(separated(readout, action));
+                for (const auto shortcut : shortcuts)
+                    assert(separated(readout, shortcut));
+            }
+        }
+    // Portrait readout height transition under keyboard/inset resize: the
+    // clock must never leave a ghost hit target at 143, and must recover at
+    // 144 without colliding with optional key/tempo/automation readouts.
+    for (int w = 56; w <= 400; ++w)
+    {
+        const auto hidden = DAW::mobile::portraitReadoutLayout(w, 143);
+        assert(emptyLayout(hidden));
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
+        for (int h : { 144, 145, 180 })
+        {
+            const auto visible = DAW::mobile::portraitReadoutLayout(w, h);
+            assert(portraitReadoutsSafe(w, h));
+            assert(visible.clock.width >= 44);
+            assert(inside(visible.clock, w, h));
+        }
+        const auto recovered = DAW::mobile::portraitReadoutLayout(w, 144);
+        assert(recovered.clock.x == before.clock.x
+               && recovered.clock.y == before.clock.y
+               && recovered.clock.width == before.clock.width
+               && recovered.clock.height == before.clock.height);
+    }
+    // Adversarial split-screen width sweep: a narrow phone deck must never
+    // leave a ghost clock hit region over the floating Mixer/Sends shortcuts.
+    // Check every width across the 189-unit shortcut breakpoint, not just
+    // its two endpoints; also exercise minimum-height keyboard insets.
+    for (int w = 20; w <= 320; ++w)
+        for (const int h : { 8, 94, 96, 112 })
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(inside(r.clock, w, h));
+            assert(inside(r.mixer, w, h));
+            assert(inside(r.sends, w, h));
+            assert(r.clock.width == 0 || r.clock.width >= 54);
+            if (w >= 189 && h >= 94)
+                assert(r.mixer.width >= 44 && r.sends.width >= 44);
+            else
+                assert(r.mixer.width == 0 && r.sends.width == 0);
+        }
+    // Keyboard/inset and rotation resizing: sweep the complete 0..200 height
+    // transition rather than checking only the 143/144 boundary. A hidden
+    // readout must have no hit region; visible targets must remain exclusive.
+    for (const int w : { 56, 100, 189, 320, 360 })
+        for (int h = 0; h <= 200; ++h)
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.key, r.tempo, r.clock, r.automation
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto a = targets[i];
+                assert(inside(a, w, h));
+                if (h < 144)
+                    assert(a.width == 0 && a.height == 0);
+                if (a.width == 0 || a.height == 0) continue;
+                assert(a.width >= 44);
+                for (int j = 0; j < i; ++j)
+                    assert(separated(a, targets[j]));
+            }
+            if (h >= 144)
+                assert(r.clock.width >= 44);
+        }
+    // Finger-size regression across every practical phone width, not only
+    // sampled devices. Rotation must not silently shrink Mixer/Sends or
+    // the six transport targets below 44 logical units.
+    for (int w = 320; w <= 600; ++w)
+    {
+        for (const int h : { 144, 180, 256 })
+            assert(portraitTouchTargets(w, h));
+        for (const int h : { 96, 112, 180 })
+            assert(orderedActions(w, h));
+    }
+    // Readout hit regions were absent from the portrait-only bounds sweep.
+    // A clipped clock/tempo/key/automation control can steal taps after resize.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 25, 48, 96, 112, 144, 180 })
+        {
+            const auto layout = portraitTransportLayout(w, h);
+            for (const auto readout : { layout.clock, layout.tempo,
+                                        layout.key, layout.automation })
+                assert(inside(readout, w, h));
+        }
+    // Tap ownership at portrait readout edges, including one-pixel resizes.
+    // Bounds-only tests do not catch an adjacent readout stealing a border tap.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 144, 180, 256 })
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.key, r.tempo, r.clock, r.automation
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto a = targets[i];
+                if (a.width <= 0 || a.height <= 0) continue;
+                const int xs[] = { a.x, a.x + a.width / 2, a.x + a.width - 1 };
+                const int ys[] = { a.y, a.y + a.height / 2, a.y + a.height - 1 };
+                for (const int x : xs)
+                    for (const int y : ys)
+                    {
+                        assert(contains(a, x, y));
+                        for (int j = 0; j < 4; ++j)
+                            if (i != j)
+                                assert(!contains(targets[j], x, y));
+                    }
+            }
+        }
+    // The portrait readout row uses independent geometry from the action row.
+    // Sweep every split-screen width, including the 189-unit boundary, so
+    // clipped readouts cannot overlap transport/shortcuts or escape viewport.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 144, 180, 256 })
+        {
+            assert(portraitReadoutsSafe(w, h));
+            if (w >= 56)
+                assert(DAW::mobile::portraitReadoutLayout(w, h).clock.width >= 44);
+            // A visible readout must never be a tiny accidental tap target.
+            const auto touchReadouts = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto item : { touchReadouts.key, touchReadouts.tempo,
+                                     touchReadouts.clock, touchReadouts.automation })
+                assert(item.width == 0 || item.width >= 44);
+            const auto readouts = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto actions = portraitTransportLayout(w, h);
+            for (const auto readout : { readouts.key, readouts.tempo,
+                                        readouts.clock, readouts.automation })
+            {
+                if (readout.width <= 0 || readout.height <= 0) continue;
+                for (const auto action : actions.transport)
+                    if (action.width > 0 && action.height > 0)
+                        assert(separated(readout, action));
+                for (const auto shortcut : { actions.fx, actions.browser,
+                                             actions.mixer, actions.sends,
+                                             actions.click })
+                    if (shortcut.width > 0 && shortcut.height > 0)
+                        assert(separated(readout, shortcut));
+            }
+        }
+    // Inset/rotation height sweep: visible portrait readouts must retain
+    // 44-unit touch height, not merely fit within the viewport. This catches
+    // regressions at every intermediate height between 144 and 180.
+    for (int h = 144; h <= 180; ++h)
+        for (int w = 56; w <= 600; ++w)
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto target : {r.key, r.tempo, r.clock, r.automation})
+            {
+                assert(inside(target, w, h));
+                if (target.width == 0 || target.height == 0) continue;
+                assert(target.width >= 44 && target.height >= 44);
+            }
+            assert(exclusivePortraitReadoutEdges(w, h));
+        }
+    // Portrait deck: exercise every width across the minimum-size guard and
+    // phone split-screen range. Compact geometry has a separate exhaustive
+    // sweep; this closes the equivalent portrait hit-dispatch coverage gap.
+    for (int w = 13; w <= 600; ++w)
+        for (const int h : { 25, 48, 96, 112, 144, 180 })
+        {
+            assert(valid(w, h));
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
+            assert(uniqueHitCentres(portraitTransportLayout(w, h)));
+        }
+    // Pixel-by-pixel compact transport sweep across phone split-screen widths.
+    // Check every shortcut/readout hit region, not only representative sizes:
+    // a one-unit resize must not create a dead or overlapping touch target.
+    for (int w = 20; w <= 600; ++w)
+        for (const int h : { 8, 24, 48, 94, 96, 112, 180 })
+        {
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+        }
+
+    for (int w = 10; w <= 32; ++w)
+        for (int h = 22; h <= 36; ++h)
+            assert(valid(w, h));
+    for (int w = 308; w <= 332; ++w)
+        for (int h = 132; h <= 152; ++h)
+        {
+            assert(valid(w, h));
+            assert(portraitActionsOrdered(w, h));
+            // Pixel-by-pixel resize must not create edge-only touch overlaps.
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
+        }
+    // Exhaustively cross the 189-unit compact shortcut threshold during
+    // narrow split-screen resizing; the coarse sweep can skip this boundary.
+    // Probe the minimum compact-deck height and the 189-unit shortcut
+    // threshold, including the zero-layout guard immediately below h=8.
+    for (int w = 18; w <= 24; ++w)
+        for (int h = 6; h <= 12; ++h)
+            assert(validCompact(w, h));
+    for (int w = 180; w <= 200; ++w)
+        for (int h = 90; h <= 100; ++h)
+        {
+            assert(validCompact(w, h));
+            // Shortcut widths change at 189 logical units. Probe actual
+            // tap ownership at every size, not just non-overlapping bounds.
+            assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            assert(orderedReadouts(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+        }
+    // Adversarial rotation/split-screen sequences: check every intermediate
+    // viewport, not only the portrait and landscape endpoints. The layout
+    // is pure geometry and must be deterministic when returning to portrait.
+    constexpr int widths[] = { 360, 393, 852, 393, 320, 852, 360 };
+    constexpr int heights[] = { 144, 144, 180, 96, 112, 180, 144 };
+    const auto initialPortrait = portraitTransportLayout(widths[0], heights[0]);
+    const auto initialCompact = DAW::mobile::compactPhoneTransportLayout(widths[0], heights[0]);
+    for (int i = 0; i < 7; ++i)
+    {
+        assert(valid(widths[i], heights[i]));
+        assert(validCompact(widths[i], heights[i]));
+        assert(orderedReadouts(widths[i], heights[i]));
+        if (heights[i] >= 144)
+            assert(portraitTouchTargets(widths[i], heights[i]));
+        if (widths[i] >= 320 && heights[i] >= 96)
+            assert(orderedActions(widths[i], heights[i]));
+    }
+    // Every intermediate orientation must retain uniquely dispatchable targets.
+    for (int i = 0; i < 7; ++i)
+    {
+        assert(uniqueHitCentres(portraitTransportLayout(widths[i], heights[i])));
+        assert(exclusiveHitEdges(portraitTransportLayout(widths[i], heights[i])));
+        assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i])));
+        assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(widths[i], heights[i])));
+    }
+    const auto returnedPortrait = portraitTransportLayout(widths[6], heights[6]);
+    const auto returnedCompact = DAW::mobile::compactPhoneTransportLayout(widths[6], heights[6]);
+    // A rotation round-trip must restore the complete hit geometry, not
+    // merely x/width: stale y/height can silently redirect taps after resize.
+    const auto sameRect = [](PortraitTransportBounds a, PortraitTransportBounds b) {
+        return a.x == b.x && a.y == b.y
+            && a.width == b.width && a.height == b.height;
+    };
+    for (int i = 0; i < 6; ++i)
+    {
+        assert(sameRect(initialPortrait.transport[i], returnedPortrait.transport[i]));
+        assert(sameRect(initialCompact.transport[i], returnedCompact.transport[i]));
+    }
+    assert(sameRect(initialPortrait.fx, returnedPortrait.fx));
+    assert(sameRect(initialPortrait.browser, returnedPortrait.browser));
+    assert(sameRect(initialPortrait.mixer, returnedPortrait.mixer));
+    assert(sameRect(initialPortrait.sends, returnedPortrait.sends));
+    assert(sameRect(initialPortrait.click, returnedPortrait.click));
+    assert(sameRect(initialCompact.fx, returnedCompact.fx));
+    assert(sameRect(initialCompact.browser, returnedCompact.browser));
+    assert(sameRect(initialCompact.mixer, returnedCompact.mixer));
+    assert(sameRect(initialCompact.sends, returnedCompact.sends));
+    assert(sameRect(initialCompact.click, returnedCompact.click));
+    // Readout geometry is also stateful at the UI boundary: a stale clock,
+    // tempo, key or automation hit region after rotation can steal touches.
+    // Verify the full geometry on both layouts, not just action shortcuts.
+    assert(sameRect(initialPortrait.clock, returnedPortrait.clock));
+    assert(sameRect(initialPortrait.tempo, returnedPortrait.tempo));
+    assert(sameRect(initialPortrait.key, returnedPortrait.key));
+    assert(sameRect(initialPortrait.automation, returnedPortrait.automation));
+    assert(sameRect(initialCompact.clock, returnedCompact.clock));
+    assert(sameRect(initialCompact.tempo, returnedCompact.tempo));
+    assert(sameRect(initialCompact.key, returnedCompact.key));
+    assert(sameRect(initialCompact.automation, returnedCompact.automation));
+    for (int w = 0; w < 900; w += 7)
+        for (int h = 0; h < 500; h += 9)
+        {
+            assert(valid(w, h));
+            assert(validCompact(w, h));
+            assert(orderedReadouts(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            assert(uniqueHitCentres(portraitTransportLayout(w, h)));
+            assert(uniqueHitCentres(DAW::mobile::compactPhoneTransportLayout(w, h)));
+            // Broad resize sweep also checks edge/corner ownership. Centre-only
+            // tests miss narrow overlaps introduced at nonstandard viewport sizes.
+            assert(exclusiveHitEdges(portraitTransportLayout(w, h)));
+            assert(exclusiveHitEdges(DAW::mobile::compactPhoneTransportLayout(w, h)));
+        }
+}
+
+
+// Automation visibility must be recalculated on every portrait/compact
+// transition. TransportBar uses these bounds to set JUCE visibility.
+constexpr bool automationRotationVisibilityContract()
+{
+    const auto narrow = DAW::mobile::portraitReadoutLayout(360, 144);
+    const auto compactWide = DAW::mobile::compactPhoneTransportLayout(852, 180);
+    const auto compactNarrow = DAW::mobile::compactPhoneTransportLayout(320, 96);
+    const auto restored = DAW::mobile::portraitReadoutLayout(852, 180);
+    return narrow.automation.width == 0
+        && compactWide.automation.width >= 44
+        && compactWide.automation.height >= 44
+        && compactNarrow.automation.width == 0
+        && restored.automation.width >= 44
+        && restored.automation.height >= 44;
+}
+static_assert(automationRotationVisibilityContract());
+
+
+// Clock is the essential compact readout: keyboard inset changes and
+// portrait/landscape round-trips must not sacrifice its touch target to
+// optional Tempo/Key/Automation, or let it intercept Mixer/Sends taps.
+constexpr bool compactClockInsetRotationContract()
+{
+    for (int w : {320, 360, 393, 600, 852, 1024})
+    {
+        for (int h : {93, 94, 96, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            // Below 94 units the production layout deliberately hides
+            // compact readouts instead of exposing a sub-44-unit target.
+            if (h < 94)
+            {
+                if (r.clock.width != 0 || r.clock.height != 0) return false;
+            }
+            else if (r.clock.width < 54 || r.clock.height < 44)
+                return false;
+            if (!inside(r.clock, w, h) || !separated(r.clock, r.mixer)
+                || !separated(r.clock, r.sends))
+                return false;
+        }
+        // Crossing the minimum touch height hides and restores Clock.
+        // A hidden rectangle is intentionally zero-sized; its position
+        // need not match the visible 44-unit rectangle at h=94.
+        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto expanded = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        if (before.clock.width != 0 || before.clock.height != 0
+            || expanded.clock.width < 54 || expanded.clock.height != 44
+            || !inside(expanded.clock, w, 94)
+            || !sameBounds(before.clock, restored.clock))
+            return false;
+    }
+    return true;
+}
+static_assert(compactClockInsetRotationContract());
+
+
+// Compact Automation must not remain tappable with a 43-unit row when the
+// keyboard or OS insets reduce deck height; it returns at the 44-unit edge.
+// Use widths that actually fit clock, tempo, key AND Automation; at 480
+// the optional Automation is correctly omitted even at full deck height.
+constexpr bool compactAutomationHeightBoundary()
+{
+    for (int w : {600, 852, 1024})
+    {
+        const auto shortDeck = DAW::mobile::compactPhoneTransportLayout(w, 93);
+        const auto touchDeck = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (shortDeck.automation.width != 0 || shortDeck.automation.height != 0)
+            return false;
+        if (touchDeck.automation.width < 44 || touchDeck.automation.height < 44)
+            return false;
+        if (!validCompact(w, 93) || !validCompact(w, 94))
+            return false;
+    }
+    return true;
+}
+static_assert(compactAutomationHeightBoundary());
+
+// Automation readout becomes a real 44-unit hit target only when the
+// portrait readout row reaches 48 units (168-unit deck). At 167 units
+// it must stay hidden rather than exposing a too-short touch target.
+constexpr auto automationBelowHeight = DAW::mobile::portraitReadoutLayout(852, 167);
+constexpr auto automationAtHeight = DAW::mobile::portraitReadoutLayout(852, 168);
+static_assert(automationBelowHeight.automation.width == 0
+              && automationBelowHeight.automation.height == 0);
+static_assert(automationAtHeight.automation.width >= 44
+              && automationAtHeight.automation.height >= 44);
+static_assert(inside(automationAtHeight.automation, 852, 168));
+static_assert(portraitReadoutsSafe(852, 167)
+              && portraitReadoutsSafe(852, 168));
+
+// Phone portrait regression: the six primary transport actions and the
+// floating Mixer/Bubblegum Sends shortcuts must remain finger-sized at
+// common narrow phone widths, including the 320-unit split-screen case.
+constexpr bool phonePortraitPrimaryTapMinimums()
+{
+    for (int w : {320, 360, 375, 390, 393, 430})
+    {
+        const auto r = DAW::mobile::portraitTransportLayout(w, 144);
+        for (const auto button : r.transport)
+            if (button.width < 44 || button.height < 44 || !inside(button, w, 144))
+                return false;
+        for (const auto shortcut : {r.fx, r.browser, r.mixer, r.sends})
+            if (shortcut.width < 44 || shortcut.height < 44 || !inside(shortcut, w, 144))
+                return false;
+    }
+    return true;
+}
+static_assert(phonePortraitPrimaryTapMinimums());
+
+// At the minimum portrait deck height the readout row used to be 40 high,
+// exposing undersized Key/Tempo/Clock taps while transport actions were 44.
+// Test the entire transition through the natural 44-unit row height.
+constexpr bool portraitReadoutHeightFloorAtThreshold()
+{
+    for (int h = 144; h <= 156; ++h)
+    {
+        const auto readouts = DAW::mobile::portraitReadoutLayout(393, h);
+        const auto actions = DAW::mobile::portraitTransportLayout(393, h);
+        for (const auto readout : {readouts.key, readouts.tempo, readouts.clock})
+        {
+            if (readout.width <= 0) continue;
+            if (readout.height < 44 || !inside(readout, 393, h)) return false;
+            for (const auto action : actions.transport)
+                if (!separated(readout, action)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutHeightFloorAtThreshold());
+
+
+// Regression: at the smallest supported portrait deck, top readout hit areas
+// must not intercept the six transport actions or phone-only shortcuts.
+// The readout and transport layouts are consumed by different UI components;
+// testing them together catches cross-component overlap after resize.
+constexpr bool portraitCrossRowHitIsolation(int w, int h)
+{
+    const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+    const auto deck = portraitTransportLayout(w, h);
+    const PortraitTransportBounds readouts[] = {
+        top.key, top.tempo, top.clock, top.automation
+    };
+    const PortraitTransportBounds actions[] = {
+        deck.transport[0], deck.transport[1], deck.transport[2],
+        deck.transport[3], deck.transport[4], deck.transport[5],
+        deck.click, deck.fx, deck.browser, deck.mixer, deck.sends
+    };
+    for (const auto readout : readouts)
+    {
+        if (!inside(readout, w, h)) return false;
+        if (readout.width == 0 || readout.height == 0) continue;
+        if (readout.width < 44 || readout.height < 44) return false;
+        for (const auto action : actions)
+            if (action.width > 0 && action.height > 0
+                && !separated(readout, action)) return false;
+    }
+    return true;
+}
+static_assert(portraitCrossRowHitIsolation(320, 144));
+static_assert(portraitCrossRowHitIsolation(360, 144));
+static_assert(portraitCrossRowHitIsolation(393, 144));
+static_assert(portraitCrossRowHitIsolation(430, 156));
+static_assert(portraitCrossRowHitIsolation(852, 180));
+
+
+// The clock is the only mandatory top readout during narrow multi-window
+// resize. Optional Key/Tempo must never consume its minimum 44-unit target.
+// Verify the readout and the independently laid-out transport deck together
+// across the optional-readout width thresholds and keyboard-inset heights.
+constexpr bool portraitClockResizePriorityContract()
+{
+    for (int w : {56, 57, 64, 95, 100, 101, 112, 143, 188,
+                  189, 200, 240, 280, 320, 393, 430, 852})
+        for (int h : {144, 155, 156, 167, 168, 180})
+        {
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            const auto deck = DAW::mobile::portraitTransportLayout(w, h);
+            if (top.clock.width < 44 || top.clock.height < 44
+                || !inside(top.clock, w, h))
+                return false;
+            for (const auto optional : {top.key, top.tempo, top.automation})
+                if (!separated(top.clock, optional))
+                    return false;
+            for (const auto action : deck.transport)
+                if (!separated(top.clock, action))
+                    return false;
+            for (const auto shortcut : {deck.click, deck.fx, deck.browser,
+                                        deck.mixer, deck.sends})
+                if (!separated(top.clock, shortcut))
+                    return false;
+        }
+    return true;
+}
+static_assert(portraitClockResizePriorityContract());
+
+
+// Regression: repeated OS inset changes must not change the ownership of
+// Mixer/Sends shortcuts or leave stale hit bounds after returning to portrait.
+// Both layouts are pure; check complete rectangles and cross-target isolation.
+constexpr bool phoneShortcutInsetRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto first = DAW::mobile::portraitTransportLayout(w, 144);
+        for (int h : {96, 112, 144, 168, 180})
+        {
+            const auto intermediate = DAW::mobile::portraitTransportLayout(w, h);
+            if (!inside(intermediate.mixer, w, h)
+                || !inside(intermediate.sends, w, h)
+                || !separated(intermediate.mixer, intermediate.sends))
+                return false;
+            if (!exclusiveHitEdges(intermediate))
+                return false;
+        }
+        const auto restored = DAW::mobile::portraitTransportLayout(w, 144);
+        if (!sameBounds(first.mixer, restored.mixer)
+            || !sameBounds(first.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(phoneShortcutInsetRoundTrip());
+
+// Compact phone deck: the 188/189-unit threshold is where Mixer and
+// Bubblegum Sends shortcuts become 44-unit targets. Repeated keyboard/inset
+// resizing must not create overlap or retain stale coordinates.
+constexpr bool compactShortcutThresholdRoundTrip()
+{
+    for (int w : {188, 189, 190, 320, 393})
+    {
+        const auto first = DAW::mobile::compactPhoneTransportLayout(w, 144);
+        for (int h : {96, 112, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!inside(r.mixer, w, h) || !inside(r.sends, w, h)
+                || !separated(r.mixer, r.sends))
+                return false;
+            if (w >= 189 && (r.mixer.width < 44 || r.sends.width < 44
+                             || r.mixer.height < 44 || r.sends.height < 44))
+                return false;
+            if (w == 188 && (r.mixer.width >= 44 || r.sends.width >= 44))
+                return false;
+        }
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 144);
+        if (!sameBounds(first.mixer, restored.mixer)
+            || !sameBounds(first.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(compactShortcutThresholdRoundTrip());
+
+
+// Boundary regression: at the minimum 94-unit compact deck height, the
+// phone-only Mixer/Sends targets must remain 44 high as the width crosses
+// the 188/189-unit shortcut threshold. No shortcut may steal a transport tap.
+constexpr bool compactShortcutMinimumHeightBoundary()
+{
+    for (int w : {188, 189, 190, 320, 393, 852})
+    {
+        for (int h : {93, 94, 95})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto shortcut : {r.mixer, r.sends})
+            {
+                if (!inside(shortcut, w, h)) return false;
+                if (w >= 189 && h >= 94
+                    && (shortcut.width < 44 || shortcut.height < 44))
+                    return false;
+                if (w == 188 && shortcut.width >= 44) return false;
+                for (const auto action : r.transport)
+                    if (!separated(shortcut, action)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(compactShortcutMinimumHeightBoundary());
+
+
+// Portrait readout visibility boundary: when a keyboard/inset resize reduces
+// the deck below 144 units, every top hit target must disappear. Returning
+// to 144 must restore the exact rectangles, without stale invisible taps.
+constexpr bool portraitReadoutVisibilityRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
+        for (int h : {0, 24, 93, 112, 143})
+        {
+            const auto hidden = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto target : {hidden.key, hidden.tempo,
+                                      hidden.clock, hidden.automation})
+                if (target.width != 0 || target.height != 0)
+                    return false;
+        }
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 144);
+        for (int i = 0; i < 4; ++i)
+        {
+            const PortraitTransportBounds first[] = {
+                before.key, before.tempo, before.clock, before.automation
+            };
+            const PortraitTransportBounds last[] = {
+                restored.key, restored.tempo, restored.clock, restored.automation
+            };
+            if (!sameBounds(first[i], last[i]))
+                return false;
+        }
+        if (before.clock.width < 44 || before.clock.height < 44
+            || !inside(before.clock, w, 144))
+            return false;
+    }
+    return true;
+}
+static_assert(portraitReadoutVisibilityRoundTrip());
+
+
+// Adversarial rotation/keyboard boundary: the compact shortcut row must keep
+// the intended FX -> Browser -> floating Mixer -> Bubblegum Sends order.
+// This catches accidental swapping of the two phone-only panel entry points
+// when the deck crosses the 188/189-unit minimum-touch-width threshold.
+constexpr bool compactPanelShortcutOrderAcrossRotation()
+{
+    for (int w : {188, 189, 190, 320, 393, 600, 852})
+    {
+        for (int h : {93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!inside(panels[i], w, h)) return false;
+                if (i > 0 && panels[i - 1].x + panels[i - 1].width > panels[i].x)
+                    return false;
+                if (i > 0 && !separated(panels[i - 1], panels[i]))
+                    return false;
+                if (w >= 189 && h >= 94
+                    && (panels[i].width < 44 || panels[i].height < 44))
+                    return false;
+                for (const auto action : r.transport)
+                    if (!separated(panels[i], action)) return false;
+            }
+        }
+        const auto before = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        const auto rotated = DAW::mobile::compactPhoneTransportLayout(852, 180);
+        const auto restored = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        if (!inside(rotated.mixer, 852, 180) || !inside(rotated.sends, 852, 180)
+            || !sameBounds(before.fx, restored.fx)
+            || !sameBounds(before.browser, restored.browser)
+            || !sameBounds(before.mixer, restored.mixer)
+            || !sameBounds(before.sends, restored.sends))
+            return false;
+    }
+    return true;
+}
+static_assert(compactPanelShortcutOrderAcrossRotation());
+
+
+// Adversarial split-screen widths: compact transport and panel shortcuts
+// must never escape the viewport or acquire negative dimensions, even when
+// the host temporarily provides less than a finger-sized deck.
+constexpr bool compactTinyViewportBounds()
+{
+    for (int w : {20, 21, 24, 32, 44, 64, 96, 128, 160, 187, 188})
+    {
+        for (int h : {8, 9, 12, 24, 48, 64, 93})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto target : {r.fx, r.browser, r.mixer, r.sends,
+                                      r.clock, r.tempo, r.key, r.automation,
+                                      r.click})
+                if (!inside(target, w, h)) return false;
+            for (const auto target : r.transport)
+                if (!inside(target, w, h)) return false;
+            if (!separated(r.mixer, r.sends)) return false;
+        }
+    }
+    return true;
+}
+static_assert(compactTinyViewportBounds());
+
+
+// Regression: switching between compact and portrait decks at the 143/144
+// height boundary must not leave a tappable compact Mixer/Sends rectangle
+// over the portrait transport or its readouts after an OS inset change.
+// Exercise both independent layout functions, not only one mode in isolation.
+constexpr bool phoneDeckModeSwitchIsolation()
+{
+    for (int w : {189, 190, 245, 320, 360, 393, 852})
+    {
+        const auto compact = DAW::mobile::compactPhoneTransportLayout(w, 143);
+        const auto portrait = DAW::mobile::portraitTransportLayout(w, 144);
+        const auto readouts = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (!validCompact(w, 143) || !valid(w, 144)) return false;
+        if (!inside(compact.mixer, w, 143)
+            || !inside(compact.sends, w, 143)) return false;
+        for (const auto panel : {portrait.mixer, portrait.sends})
+        {
+            if (!inside(panel, w, 144)) return false;
+            // At narrow split-screen widths the five bottom controls cannot
+            // all retain 44-unit targets; require that only at phone widths.
+            if (w >= 320 && (panel.width < 44 || panel.height < 44)) return false;
+            for (const auto readout : {readouts.key, readouts.tempo,
+                                       readouts.clock, readouts.automation})
+                if (readout.width > 0 && readout.height > 0
+                    && !separated(panel, readout)) return false;
+        }
+        const auto again = DAW::mobile::compactPhoneTransportLayout(w, 143);
+        if (!sameBounds(compact.mixer, again.mixer)
+            || !sameBounds(compact.sends, again.sends)) return false;
+    }
+    return true;
+}
+static_assert(phoneDeckModeSwitchIsolation());
+
+
+// Rotation/inset regression: preserve every phone-deck hit rectangle, not
+// just Mixer/Sends, after switching between narrow portrait and wide landscape.
+// Pure geometry cannot validate Android rotation events or actual touch dispatch.
+constexpr bool fullPhoneDeckRotationRoundTrip()
+{
+    for (int w : {189, 245, 320, 360, 393, 430})
+    {
+        for (int h : {94, 96, 112, 143})
+        {
+            const auto before = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const auto landscape = DAW::mobile::compactPhoneTransportLayout(852, 180);
+            const auto after = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !validCompact(852, 180))
+                return false;
+            for (int i = 0; i < 6; ++i)
+                if (!sameBounds(before.transport[i], after.transport[i]))
+                    return false;
+            const PortraitTransportBounds first[] = {
+                before.clock, before.tempo, before.key, before.automation,
+                before.click, before.fx, before.browser, before.mixer, before.sends
+            };
+            const PortraitTransportBounds last[] = {
+                after.clock, after.tempo, after.key, after.automation,
+                after.click, after.fx, after.browser, after.mixer, after.sends
+            };
+            for (int i = 0; i < 9; ++i)
+                if (!sameBounds(first[i], last[i]))
+                    return false;
+            if (!inside(landscape.mixer, 852, 180)
+                || !inside(landscape.sends, 852, 180))
+                return false;
+        }
+    }
+    return true;
+}
+static_assert(fullPhoneDeckRotationRoundTrip());
+
+
+// Adversarial fullscreen/inset boundary: portrait top readouts must not
+// intercept transport actions or the floating Mixer / Bubblegum Sends.
+// At the 144-unit threshold both rows can touch edges but never overlap.
+// This is geometry-only; native safe-area and touch dispatch remain unverified.
+constexpr bool portraitReadoutActionRowIsolation()
+{
+    for (int w : {189, 245, 320, 360, 393, 430, 600, 852})
+    {
+        for (int h : {144, 145, 146, 147, 180, 240, 320})
+        {
+            const auto deck = DAW::mobile::portraitTransportLayout(w, h);
+            const auto top = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto readout : {top.key, top.tempo, top.clock, top.automation})
+            {
+                if (!inside(readout, w, h)) return false;
+                if (readout.width == 0 || readout.height == 0) continue;
+                for (const auto action : deck.transport)
+                    if (!separated(readout, action)) return false;
+                for (const auto shortcut : {deck.fx, deck.browser, deck.mixer,
+                                            deck.sends, deck.click})
+                    if (!separated(readout, shortcut)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutActionRowIsolation());
+
+
+// Phone split-screen regression: the clock is the essential portrait readout.
+// Optional Key/Tempo/Automation must never consume its minimum touch width.
+// Exercise the exact 56-unit threshold and recovery after landscape sizing.
+constexpr bool portraitClockPriorityAcrossInsets()
+{
+    for (int w : {13, 20, 44, 55, 56, 57, 64, 96, 128, 160,
+                  188, 189, 245, 320, 393, 430, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 144);
+        const auto landscape = DAW::mobile::portraitReadoutLayout(852, 180);
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 144);
+        if (!inside(before.clock, w, 144)
+            || !sameBounds(before.clock, restored.clock)
+            || !inside(landscape.clock, 852, 180))
+            return false;
+        if (w >= 56 && (before.clock.width < 44 || before.clock.height < 44))
+            return false;
+        for (const auto optional : {before.key, before.tempo, before.automation})
+        {
+            if (!inside(optional, w, 144)) return false;
+            if (!separated(optional, before.clock)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitClockPriorityAcrossInsets());
+
+
+// Compact landscape/keyboard deck: optional readouts must not steal taps
+// from the four panel shortcuts or the six transport buttons. This covers
+// the readout reappearance threshold as the usable width grows.
+constexpr bool compactReadoutPanelIsolation()
+{
+    for (int w : {189, 190, 243, 244, 245, 320, 393, 430, 600, 852})
+    {
+        for (int h : {94, 95, 112, 143, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds readouts[] = {
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!inside(readouts[i], w, h)) return false;
+                if (readouts[i].width == 0 || readouts[i].height == 0) continue;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(readouts[i], readouts[j])) return false;
+                for (const auto panel : panels)
+                    if (!separated(readouts[i], panel)) return false;
+                for (const auto action : r.transport)
+                    if (!separated(readouts[i], action)) return false;
+            }
+            // Four 44-unit shortcuts leave only 53 units at w=245;
+            // the clock first fits its 54-unit minimum at w=246.
+            if (w >= 246 && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+        }
+    }
+    return true;
+}
+static_assert(compactReadoutPanelIsolation());
+
+
+// Regression: the portrait Automation readout is hidden until its inset
+// rectangle can retain 44 logical units of height. Keyboard/safe-area
+// resizing across 167/168 must not leave a 43-unit tappable sliver.
+constexpr bool portraitAutomationMinimumHeightTransition()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const auto before = DAW::mobile::portraitReadoutLayout(w, 167);
+        const auto after = DAW::mobile::portraitReadoutLayout(w, 168);
+        const auto restored = DAW::mobile::portraitReadoutLayout(w, 167);
+        if (before.automation.width != 0 || before.automation.height != 0)
+            return false;
+        if (!sameBounds(before.automation, restored.automation))
+            return false;
+        if (!inside(after.automation, w, 168)
+            || after.automation.width < 44 || after.automation.height < 44)
+            return false;
+        for (const auto readout : {after.key, after.tempo, after.clock})
+            if (!separated(after.automation, readout))
+                return false;
+    }
+    return true;
+}
+static_assert(portraitAutomationMinimumHeightTransition());
+
+
+// Adversarial inset sweep: Automation must be either fully hidden or have
+// a finger-sized hit rectangle, even when the available width changes by
+// one logical unit. Also guard Clock priority and readout separation.
+// Pure geometry only; does not prove native touch dispatch.
+constexpr bool portraitReadoutInsetSweep()
+{
+    for (int w = 13; w <= 900; ++w)
+    {
+        for (int h : {144, 155, 167, 168, 169, 240})
+        {
+            const auto r = DAW::mobile::portraitReadoutLayout(w, h);
+            for (const auto b : {r.key, r.tempo, r.clock, r.automation})
+                if (!inside(b, w, h)) return false;
+            if (w >= 56 && (r.clock.width < 44 || r.clock.height < 44))
+                return false;
+            if ((r.automation.width == 0) != (r.automation.height == 0))
+                return false;
+            if (r.automation.width > 0
+                && (r.automation.width < 44 || r.automation.height < 44))
+                return false;
+            for (const auto b : {r.key, r.tempo, r.clock})
+                if (!separated(b, r.automation)) return false;
+        }
+    }
+    return true;
+}
+static_assert(portraitReadoutInsetSweep());
+
+
+// Phone portrait bottom-row regression: every floating panel shortcut must
+// remain disjoint from its neighbours and from the transport action row
+// when keyboard/safe-area insets change the available deck height.
+// Geometry-only: does not validate native touch delivery.
+constexpr bool portraitPanelRowInsetIsolation()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        for (int h : {144, 145, 167, 168, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            const PortraitTransportBounds bottom[] = {
+                r.click, r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!inside(bottom[i], w, h)) return false;
+                if (bottom[i].width < 44 || bottom[i].height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(bottom[i], bottom[j])) return false;
+                for (const auto action : r.transport)
+                    if (!separated(bottom[i], action)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitPanelRowInsetIsolation());
+
+
+// Portrait action-row sweep: a six-button transport must retain finger-sized
+// targets across common phone widths, stay within the visible deck and never
+// intercept floating Mixer or Bubblegum Sends after safe-area resizing.
+// This tests geometry only, not OS touch dispatch or actual device insets.
+constexpr bool portraitTransportActionInsetSweep()
+{
+    for (int w = 320; w <= 900; ++w)
+    {
+        for (int h : {144, 145, 167, 168, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto action = r.transport[i];
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(action, r.transport[j])) return false;
+                for (const auto panel : {r.mixer, r.sends, r.fx, r.browser, r.click})
+                    if (!separated(action, panel)) return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(portraitTransportActionInsetSweep());
+
+
+// Width-edge regression: the compact clock must become tappable exactly
+// when the four phone panel shortcuts leave 54 units for it (w=246).
+// No readout may steal Mixer/Sends or transport taps on inset changes.
+constexpr bool compactClockThresholdEdgeSweep()
+{
+    for (int w = 240; w <= 252; ++w)
+        for (int h : {94, 95, 112, 143, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!inside(r.clock, w, h)) return false;
+            if (w < 246 && r.clock.width != 0) return false;
+            if (w >= 246 && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+            {
+                if (!inside(panel, w, h) || panel.width < 44
+                    || panel.height < 44 || !separated(panel, r.clock))
+                    return false;
+                for (const auto action : r.transport)
+                    if (!separated(panel, action)) return false;
+            }
+            for (const auto action : r.transport)
+                if (!separated(r.clock, action)) return false;
+        }
+    return true;
+}
+static_assert(compactClockThresholdEdgeSweep());
+
+
+// Compact phone action-row regression: a keyboard/inset height change must
+// not produce sub-44-unit transport targets once the two-row deck has room.
+// This is portable geometry only, not a device touch-dispatch assertion.
+constexpr bool compactTransportHeightEdgeSweep()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+        for (int h = 94; h <= 143; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto action = r.transport[i];
+                if (!inside(action, w, h)
+                    || action.width < 44 || action.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(action, r.transport[j])) return false;
+                for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                    if (!separated(action, panel)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactTransportHeightEdgeSweep());
+
+
+// Rotation round-trip: recomputing phone portrait geometry after a landscape
+// viewport must restore every hit target, not retain stale panel coordinates.
+// Pure layout regression; native orientation events still need device testing.
+constexpr bool portraitRotationRoundTrip()
+{
+    for (int w : {320, 360, 393, 430, 600, 852})
+    {
+        const int h = 180;
+        const auto before = DAW::mobile::portraitTransportLayout(w, h);
+        const auto landscape = DAW::mobile::portraitTransportLayout(h, w);
+        const auto restored = DAW::mobile::portraitTransportLayout(w, h);
+        const PortraitTransportBounds first[] = {
+            before.transport[0], before.transport[1], before.transport[2],
+            before.transport[3], before.transport[4], before.transport[5],
+            before.click, before.fx, before.browser, before.mixer, before.sends
+        };
+        const PortraitTransportBounds last[] = {
+            restored.transport[0], restored.transport[1], restored.transport[2],
+            restored.transport[3], restored.transport[4], restored.transport[5],
+            restored.click, restored.fx, restored.browser, restored.mixer, restored.sends
+        };
+        for (int i = 0; i < 11; ++i)
+            if (!sameBounds(first[i], last[i])
+                || !inside(last[i], w, h)) return false;
+        for (const auto b : landscape.transport)
+            if (!inside(b, h, w)) return false;
+        for (const auto b : {landscape.click, landscape.fx,
+                             landscape.browser, landscape.mixer, landscape.sends})
+            if (!inside(b, h, w)) return false;
+    }
+    return true;
+}
+static_assert(portraitRotationRoundTrip());
+
+
+// Compact phone rotation regression: every optional readout must recover
+// exactly after portrait -> landscape -> portrait. This tests pure geometry,
+// not native orientation callbacks or device fullscreen behavior.
+constexpr bool compactRotationReadoutRoundTrip()
+{
+    for (int w : {240, 245, 246, 320, 360, 393, 430, 600})
+        for (int h : {94, 112, 143, 168})
+        {
+            const auto before = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const auto landscape = DAW::mobile::compactPhoneTransportLayout(h, w);
+            const auto after = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds first[] = {
+                before.clock, before.tempo, before.key, before.automation,
+                before.click, before.fx, before.browser, before.mixer,
+                before.sends
+            };
+            const PortraitTransportBounds last[] = {
+                after.clock, after.tempo, after.key, after.automation,
+                after.click, after.fx, after.browser, after.mixer,
+                after.sends
+            };
+            for (int i = 0; i < 9; ++i)
+                if (!sameBounds(first[i], last[i])
+                    || !inside(last[i], w, h)) return false;
+            for (const auto action : after.transport)
+                if (!inside(action, w, h)) return false;
+            for (const auto action : landscape.transport)
+                if (!inside(action, h, w)) return false;
+            for (const auto panel : {landscape.fx, landscape.browser,
+                                     landscape.mixer, landscape.sends})
+                if (!inside(panel, h, w)) return false;
+        }
+    return true;
+}
+static_assert(compactRotationReadoutRoundTrip());
+
+
+// Split-screen width regression: a reserved Click slot must never become
+// a sub-44-unit active touch target. Other bottom-row buttons retain their
+// positions even when Click is hidden. Pure geometry, not device dispatch.
+constexpr bool portraitNarrowClickTouchGate()
+{
+    for (int w = 189; w <= 320; ++w)
+        for (int h : {144, 180, 240})
+        {
+            const auto r = DAW::mobile::portraitTransportLayout(w, h);
+            const int usable = w - 12;
+            const int bottomGap = usable / 5 < 3 ? usable / 5 : 3;
+            const int controlsW = usable - 4 * bottomGap;
+            const int minActionW = controlsW / 4 < 44 ? controlsW / 4 : 44;
+            const int extra = controlsW - 4 * minActionW;
+            const int reservedClickW = extra < 132 ? extra : 132;
+            const bool visible = reservedClickW >= 44;
+            if (visible != (r.click.width > 0)) return false;
+            if (visible && (r.click.width < 44 || r.click.height < 44))
+                return false;
+            if (!visible && (r.click.width != 0 || r.click.height != 0))
+                return false;
+            // Hidden shortcuts deliberately have zero geometry; their reserved
+            // slots are not exposed as hit targets until both axes fit 44.
+            if (r.fx.width > 0)
+            {
+                if (r.fx.x != 6 + reservedClickW + bottomGap)
+                    return false;
+            }
+            else if (r.fx.x != 0 || r.fx.y != 0 || r.fx.height != 0)
+                return false;
+            for (const auto b : {r.fx, r.browser, r.mixer, r.sends})
+                if (!inside(b, w, h)) return false;
+        }
+    return true;
+}
+static_assert(portraitNarrowClickTouchGate());
+
+
+// Narrow compact deck regression: between the 189-unit shortcut activation
+// threshold and the 246-unit clock threshold, the four panel entry points
+// must retain 44-unit hit widths while the optional clock stays hidden.
+// This tests geometry, not OS touch dispatch.
+constexpr bool compactPanelClockThresholdSweep()
+{
+    for (int w = 189; w < 246; ++w)
+        for (int h : {94, 95, 112, 143, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (r.clock.width != 0 || r.clock.height != 0) return false;
+            const PortraitTransportBounds panels[] = {
+                r.fx, r.browser, r.mixer, r.sends
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                if (!inside(panels[i], w, h)
+                    || panels[i].width < 44 || panels[i].height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(panels[i], panels[j])) return false;
+                for (const auto action : r.transport)
+                    if (!separated(panels[i], action)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactPanelClockThresholdSweep());
+
+
+// Extremely narrow compact decks cannot fit four 44-unit shortcuts.
+// No partially tappable FX/Browser/Mixer/Sends rectangles may survive
+// across the 188 -> 189 logical-unit boundary or short deck heights.
+constexpr bool compactPanelMinimumTouchGate()
+{
+    for (int w = 20; w <= 200; ++w)
+        for (int h : {8, 80, 93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const bool visible = w >= 189 && h >= 94;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+            {
+                if (!inside(panel, w, h)) return false;
+                if (visible && (panel.width < 44 || panel.height < 44))
+                    return false;
+                if (!visible && (panel.width != 0 || panel.height != 0))
+                    return false;
+            }
+        }
+    return true;
+}
+static_assert(compactPanelMinimumTouchGate());
+
+
+// A collapsing keyboard/safe-area inset must not leave a tiny but clickable
+// Clock/Tempo/Key/Automation/Click. At h=94 the top row is 44 units again.
+// This intentionally does not claim to solve undersized transport at h<94.
+constexpr bool compactReadoutHeightTouchGate()
+{
+    for (const int w : {20, 188, 189, 245, 246, 320, 360, 852})
+        for (int h = 8; h <= 100; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h)) return false;
+            for (const auto readout : {r.clock, r.tempo, r.key,
+                                       r.automation, r.click})
+            {
+                if (!inside(readout, w, h)) return false;
+                if (h < 94 && (readout.width != 0 || readout.height != 0))
+                    return false;
+                if (readout.width > 0
+                    && (readout.width < 44 || readout.height < 44))
+                    return false;
+            }
+            if (h >= 94 && w >= 246
+                && (r.clock.width < 54 || r.clock.height < 44))
+                return false;
+        }
+    return true;
+}
+static_assert(compactReadoutHeightTouchGate());
+
+// Six compact transport actions must retain 44-unit hit widths once the
+// viewport can fit six actions, including reduced gaps at narrow widths.
+// This is a pure geometry boundary test, not a native touch-dispatch test.
+constexpr bool compactSixActionTouchBoundary()
+{
+    for (int w = 268; w <= 340; ++w)
+        for (int h : {94, 112, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (int i = 0; i < 6; ++i)
+            {
+                const auto b = r.transport[i];
+                if (!inside(b, w, h) || b.width < 44 || b.height < 44)
+                    return false;
+                for (int j = 0; j < i; ++j)
+                    if (!separated(b, r.transport[j])) return false;
+                for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                    if (!separated(b, panel)) return false;
+            }
+        }
+    return true;
+}
+static_assert(compactSixActionTouchBoundary());
+
+// Narrow-deck regression: preserve six separated 44-unit actions across
+// every intermediate width where removing decorative gaps makes them fit.
+constexpr bool compactRecoveredActionWidths()
+{
+    for (int w = 268; w < 295; ++w)
+        for (int h : {94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto b : r.transport)
+                if (!inside(b, w, h) || b.width < 44 || b.height < 44)
+                    return false;
+        }
+    return true;
+}
+static_assert(compactRecoveredActionWidths());
+
+
+
+
+
+// Adversarial center-point hit test: a tap at the center of any visible
+// compact phone target must not also land inside another visible target.
+// Geometry-only: native JUCE event routing still requires device testing.
+constexpr bool compactCenterHitExclusivity()
+{
+    for (int w : {189, 245, 246, 267, 268, 294, 295, 320, 393, 430, 852})
+        for (int h : {94, 95, 112, 143, 144, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            const PortraitTransportBounds targets[] = {
+                r.transport[0], r.transport[1], r.transport[2],
+                r.transport[3], r.transport[4], r.transport[5],
+                r.fx, r.browser, r.mixer, r.sends,
+                r.clock, r.tempo, r.key, r.automation, r.click
+            };
+            for (int i = 0; i < 15; ++i)
+            {
+                const auto a = targets[i];
+                if (a.width <= 0 || a.height <= 0) continue;
+                const int cx = a.x + a.width / 2;
+                const int cy = a.y + a.height / 2;
+                if (cx < 0 || cy < 0 || cx >= w || cy >= h) return false;
+                for (int j = 0; j < 15; ++j)
+                {
+                    if (j == i) continue;
+                    const auto b = targets[j];
+                    if (b.width > 0 && b.height > 0
+                        && cx >= b.x && cx < b.x + b.width
+                        && cy >= b.y && cy < b.y + b.height)
+                        return false;
+                }
+            }
+        }
+    return true;
+}
+static_assert(compactCenterHitExclusivity());
+
+
+// A six-button 44-unit row is impossible below 268 logical units.
+// Until paged navigation exists, no undersized Transport tap may survive.
+constexpr bool compactNarrowTransportIsNonInteractive()
+{
+    for (int w = 20; w < 268; ++w)
+        for (const int h : {44, 87, 88, 93, 94, 112, 180})
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto action : r.transport)
+                if (action.x || action.y || action.width || action.height)
+                    return false;
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+        }
+    for (const int h : {44, 88, 94, 112})
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(268, h);
+        for (const auto action : r.transport)
+            if (!inside(action, 268, h) || action.width < 44 || action.height < 44)
+                return false;
+    }
+    return true;
+}
+// Runtime test avoids compiler constexpr evaluation limits.
+
+// Regression for the six-action compact Transport boundary after split-screen
+// resize. 268 is the first width that can fit six 44-unit targets; at 267
+// a single-row layout cannot satisfy that requirement without navigation.
+constexpr bool compactTransportWidthBoundary()
+{
+    for (int w = 268; w <= 294; ++w)
+    {
+        const auto r = DAW::mobile::compactPhoneTransportLayout(w, 94);
+        for (int i = 0; i < 6; ++i)
+        {
+            if (r.transport[i].width < 44 || r.transport[i].height < 44)
+                return false;
+            if (!inside(r.transport[i], w, 94))
+                return false;
+            if (i && !separated(r.transport[i - 1], r.transport[i]))
+                return false;
+        }
+    }
+    const auto narrow = DAW::mobile::compactPhoneTransportLayout(267, 94);
+    return narrow.transport[0].width < 44;
+}
+static_assert(compactTransportWidthBoundary());
+
+constexpr bool compactInsetTransportTouchBoundary()
+{
+    for (int h = 88; h <= 94; ++h)
+        for (int w = 268; w <= 294; ++w)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            for (const auto& action : r.transport)
+                if (action.width < 44 || action.height < 44
+                    || action.x < 0 || action.y < 0
+                    || action.x + action.width > w
+                    || action.y + action.height > h)
+                    return false;
+            if (h < 94 && (r.fx.width != 0 || r.browser.width != 0
+                            || r.mixer.width != 0 || r.sends.width != 0))
+                return false;
+        }
+    return true;
+}
+static_assert(compactInsetTransportTouchBoundary());
+
+// Rotation and keyboard-inset regression above the 295-unit gap/inset
+// transition. Keep all six actions tappable at 88..93 units high without
+// accidentally resurrecting hidden top-row controls; at 94 recover panels.
+constexpr bool compactWideInsetRotationRecovery()
+{
+    for (const int w : {295, 296, 320, 393, 430, 852})
+        for (int h = 88; h <= 94; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h) || action.width < 44
+                    || action.height < 44) return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (h < 94 ? (panel.width != 0 || panel.height != 0)
+                           : (panel.width < 44 || panel.height < 44))
+                    return false;
+        }
+    return true;
+}
+static_assert(compactWideInsetRotationRecovery());
+
+// Combined narrow-width and reduced-height rotation/inset boundary.  The
+// previous checks verified target sizes but did not test cross-row overlap
+// throughout this 27 x 7 transition.  Native touch routing is still untested.
+constexpr bool compactInsetAllTargetsExclusive()
+{
+    for (int w = 268; w <= 294; ++w)
+        for (int h = 88; h <= 94; ++h)
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+    return true;
+}
+static_assert(compactInsetAllTargetsExclusive());
+
+
+// Exhaustive post-inset recovery: the 295-unit decorative-inset transition
+// must not introduce overlapping targets or shrink any visible action below
+// 44 logical units while the top row reappears after keyboard dismissal.
+// Geometry only; does not claim native touch or orientation validation.
+constexpr bool compactWideInsetRecoverySweep()
+{
+    for (int w = 295; w <= 340; ++w)
+        for (int h = 88; h <= 110; ++h)
+        {
+            const auto r = DAW::mobile::compactPhoneTransportLayout(w, h);
+            if (!validCompact(w, h) || !exclusiveCompactAllTargets(w, h))
+                return false;
+            for (const auto action : r.transport)
+                if (!inside(action, w, h) || action.width < 44
+                    || action.height < 44)
+                    return false;
+            for (const auto panel : {r.fx, r.browser, r.mixer, r.sends})
+                if (h < 94 ? (panel.width != 0 || panel.height != 0)
+                           : (!inside(panel, w, h) || panel.width < 44
+                              || panel.height < 44))
+                    return false;
+        }
+    return true;
+}
+// Exercised by main() rather than a compiler-budget-limited static_assert.

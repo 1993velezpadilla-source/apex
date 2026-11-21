@@ -1179,13 +1179,20 @@ namespace ArrangementEditor
             const auto delta = centreScreen - m_lastTwoFingerPos;
             const bool zoomingX = TouchNavigationMath::pinchReady(m_lastPinchSepX, sepX);
             const bool zoomingY = TouchNavigationMath::pinchReady(m_lastPinchSepY, sepY);
-            if (delta.getDistanceFromOrigin() >= 1.0f || zoomingX || zoomingY)
-                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
             const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
             const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-            viewport->setViewPosition(
-                TouchNavigationMath::panPosition(viewport->getViewPositionX(), delta.x, maxX),
-                TouchNavigationMath::panPosition(viewport->getViewPositionY(), delta.y, maxY));
+            const int beforeX = viewport->getViewPositionX();
+            const int beforeY = viewport->getViewPositionY();
+            const int nextX = TouchNavigationMath::panPosition(beforeX, delta.x, maxX);
+            const int nextY = TouchNavigationMath::panPosition(beforeY, delta.y, maxY);
+            // At an edge, a saturated pinch may change finger separation but
+            // neither viewport position nor zoom. Avoid redundant viewport
+            // layout and low-detail waveform paint in that case.
+            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            {
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                viewport->setViewPosition(nextX, nextY);
+            }
 
             // Horizontal spread = time zoom. Keep the musical time under the
             // two-finger midpoint fixed rather than zooming toward song start.
@@ -1193,36 +1200,47 @@ namespace ArrangementEditor
             if (zoomingX)
             {
                 const double oldPps = m_zoom.getPixelsPerSecond();
-                const double newPps = juce::jlimit(2.0, 4000.0,
-                    oldPps * TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX));
-                const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
-                const double focusViewportX = focusX - viewport->getViewPositionX();
-                m_zoom.setPixelsPerSecond(newPps);
-                viewport->setViewPosition(
-                    TouchNavigationMath::zoomPosition(focusX, focusViewportX,
-                        newPps / juce::jmax(1.0, oldPps),
-                        juce::jmax(0, getWidth() - viewport->getViewWidth())),
-                    viewport->getViewPositionY());
+                const double newPps = TouchNavigationMath::pinchZoomTarget(
+                    oldPps, TouchNavigationMath::pinchRatio(m_lastPinchSepX, sepX),
+                    2.0, 4000.0);
+                if (TouchNavigationMath::pinchZoomChanges(oldPps, newPps))
+                {
+                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                    const double focusX = (double) getLocalPoint(nullptr, centreScreen.toInt()).x;
+                    const double focusViewportX = focusX - viewport->getViewPositionX();
+                    m_zoom.setPixelsPerSecond(newPps);
+                    viewport->setViewPosition(
+                        TouchNavigationMath::zoomPosition(focusX, focusViewportX,
+                            newPps / juce::jmax(1.0, oldPps),
+                            juce::jmax(0, getWidth() - viewport->getViewWidth()),
+                            viewport->getViewPositionX()),
+                        viewport->getViewPositionY());
+                    repaint();
+                }
                 m_lastPinchSepX = sepX;
-                repaint();
             }
 
             // Vertical spread = lane zoom; preserve the lane beneath fingers.
             if (zoomingY)
             {
                 const double oldH = m_zoom.getTrackHeightPx();
-                const double newH = juce::jlimit(24.0, 180.0,
-                    oldH * TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY));
-                const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
-                const double focusViewportY = focusY - viewport->getViewPositionY();
-                const double contentTop = (double) arrangementContentTop();
-                m_zoom.setTrackHeightPx(newH);
-                const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
-                viewport->setViewPosition(viewport->getViewPositionX(),
-                    juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
-                        juce::roundToInt(newFocusY - focusViewportY)));
+                const double newH = TouchNavigationMath::pinchZoomTarget(
+                    oldH, TouchNavigationMath::pinchRatio(m_lastPinchSepY, sepY),
+                    24.0, 180.0);
+                if (TouchNavigationMath::pinchZoomChanges(oldH, newH))
+                {
+                    ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                    const double focusY = (double) getLocalPoint(nullptr, centreScreen.toInt()).y;
+                    const double focusViewportY = focusY - viewport->getViewPositionY();
+                    const double contentTop = (double) arrangementContentTop();
+                    m_zoom.setTrackHeightPx(newH);
+                    const double newFocusY = contentTop + (focusY - contentTop) * (newH / oldH);
+                    viewport->setViewPosition(viewport->getViewPositionX(),
+                        juce::jlimit(0, juce::jmax(0, getHeight() - viewport->getViewHeight()),
+                            juce::roundToInt(newFocusY - focusViewportY)));
+                    repaint();
+                }
                 m_lastPinchSepY = sepY;
-                repaint();
             }
 
             m_lastTwoFingerPos = centreScreen;
@@ -1393,14 +1411,22 @@ namespace ArrangementEditor
                 return true;
             }
 
-            ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
-            viewport->setViewPosition(
-                TouchNavigationMath::panPosition(m_gestureStartViewX,
-                    pos.x - m_touchPanDownScreenPos.x,
-                    juce::jmax(0, getWidth() - viewport->getViewWidth())),
-                TouchNavigationMath::panPosition(m_gestureStartViewY,
-                    pos.y - m_touchPanDownScreenPos.y,
-                    juce::jmax(0, getHeight() - viewport->getViewHeight())));
+            // A one-finger drag pinned at an edge (or moving < 1 pixel)
+            // must not trigger low-detail waveform painting or redundant
+            // Viewport notifications. A free axis still scrolls normally.
+            const int beforeX = viewport->getViewPositionX();
+            const int beforeY = viewport->getViewPositionY();
+            const int nextX = TouchNavigationMath::panPosition(m_gestureStartViewX,
+                pos.x - m_touchPanDownScreenPos.x,
+                juce::jmax(0, getWidth() - viewport->getViewWidth()));
+            const int nextY = TouchNavigationMath::panPosition(m_gestureStartViewY,
+                pos.y - m_touchPanDownScreenPos.y,
+                juce::jmax(0, getHeight() - viewport->getViewHeight()));
+            if (TouchNavigationMath::touchPanChangesViewport(beforeX, beforeY, nextX, nextY))
+            {
+                ClipRenderCore::s_lightweightPaint.store(true, std::memory_order_relaxed);
+                viewport->setViewPosition(nextX, nextY);
+            }
 
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
             const auto dtMs  = nowMs - m_lastTouchPanTimeMs;
@@ -1425,24 +1451,35 @@ namespace ArrangementEditor
 
         if (std::abs(m_touchPanVelocityX) < 0.35 && std::abs(m_touchPanVelocityY) < 0.35)
         {
-            // Gesture (and its momentum) finished: restore full detail and
-            // re-lay-out the clips once, not every frame.
+            // End of touch momentum: the zoom callback has already rebuilt
+            // clip geometry, and viewport scrolling updates renderer visibility.
+            // Rebuilding every clip here adds a full-project hitch to a pure
+            // pan. Keep the automation layout refresh for pinch/track zoom.
             const bool wasLightweight = ClipRenderCore::s_lightweightPaint.exchange(
                 false, std::memory_order_relaxed);
             if (wasLightweight)
             {
-                rebuildClipRenderers();
                 updateAutomationLayout();
-                repaint();
+                repaint(getViewportVisibleBounds());
             }
             return false;
         }
 
         const int maxX = juce::jmax(0, getWidth()  - viewport->getViewWidth());
         const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-        viewport->setViewPosition(
-            juce::jlimit(0, maxX, viewport->getViewPositionX() - juce::roundToInt(m_touchPanVelocityX)),
-            juce::jlimit(0, maxY, viewport->getViewPositionY() - juce::roundToInt(m_touchPanVelocityY)));
+        const int beforeX = viewport->getViewPositionX();
+        const int beforeY = viewport->getViewPositionY();
+        const int nextX = TouchNavigationMath::panPosition(beforeX, m_touchPanVelocityX, maxX);
+        const int nextY = TouchNavigationMath::panPosition(beforeY, m_touchPanVelocityY, maxY);
+        viewport->setViewPosition(nextX, nextY);
+
+        // An axis pinned at the start/end (or too slow to move one pixel)
+        // must not keep a 60 Hz inertia timer alive for hundreds of frames.
+        // Stop only the blocked axis so diagonal flings still glide freely.
+        m_touchPanVelocityX = TouchNavigationMath::inertiaVelocityAfterMove(
+            m_touchPanVelocityX, beforeX, viewport->getViewPositionX());
+        m_touchPanVelocityY = TouchNavigationMath::inertiaVelocityAfterMove(
+            m_touchPanVelocityY, beforeY, viewport->getViewPositionY());
         return true;
     }
 
@@ -1461,7 +1498,12 @@ namespace ArrangementEditor
         m_skipSlop = false;
         m_touchPanVelocityX = 0.0;
         m_touchPanVelocityY = 0.0;
-        ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+        const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+            false, std::memory_order_relaxed);
+        // A new clip press interrupts inertia. Restore detailed waveforms in
+        // the visible viewport without rebuilding every clip in the project.
+        if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+            repaint(getViewportVisibleBounds());
     }
 
     void ArrangementViewCore::finishUnselectedClipTouchPan() noexcept
@@ -1505,7 +1547,13 @@ namespace ArrangementEditor
             m_touchPanVelocityX = m_touchPanVelocityY = 0.0;
             if (m_inertiaTimer)
                 m_inertiaTimer->stopTimer();
-            ClipRenderCore::s_lightweightPaint.store(false, std::memory_order_relaxed);
+            const bool hadLightweight = ClipRenderCore::s_lightweightPaint.exchange(
+                false, std::memory_order_relaxed);
+            // No fling follows this release. Restore waveform detail now;
+            // otherwise the last low-detail frame can remain on screen until
+            // an unrelated redraw. Pure pan does not require a clip rebuild.
+            if (TouchNavigationMath::touchPanNeedsDetailRepaint(hadLightweight, false))
+                repaint(getViewportVisibleBounds());
         }
     }
 
@@ -3621,14 +3669,20 @@ namespace ArrangementEditor
                 const double oldPps = m_zoom.getPixelsPerSecond();
                 const double anchorTime = m_zoom.xToTime((double)e.x);
                 const int mouseXInViewport = e.x - viewport->getViewPositionX();
-                const double zoomFactor = std::pow(1.2, (double)wheel.deltaY * 2.0);
-                const double newPps = juce::jlimit(10.0, 4000.0, oldPps * zoomFactor);
+                const double newPps = TouchNavigationMath::wheelZoomTarget(
+                    oldPps, (double)wheel.deltaY, 10.0, 4000.0);
+                // At the zoom limit (or with malformed input), do not shift
+                // the anchor or schedule viewport work for an unchanged zoom.
+                if (newPps == oldPps)
+                    return;
 
                 m_zoom.setPixelsPerSecond(newPps);
 
                 const int maxX = juce::jmax(0, getWidth() - viewport->getViewWidth());
-                const int anchoredViewX = juce::roundToInt(anchorTime * newPps) - mouseXInViewport;
-                viewport->setViewPosition(juce::jlimit(0, maxX, anchoredViewX), viewport->getViewPositionY());
+                const int anchoredViewX = TouchNavigationMath::zoomPosition(
+                    (double)e.x, (double)mouseXInViewport, newPps / oldPps,
+                    maxX, viewport->getViewPositionX());
+                viewport->setViewPosition(anchoredViewX, viewport->getViewPositionY());
                 return;
             }
 
@@ -3638,16 +3692,22 @@ namespace ArrangementEditor
                 const double oldH = (double)m_zoom.getTrackHeightPx();
                 const double anchorTrackY = (double)(e.y);  // content-local Y
                 const int mouseYInViewport = e.y - viewport->getViewPositionY();
-                const double zoomFactor = std::pow(1.2, (double)wheel.deltaY * 2.0);
-                const double newH = juce::jlimit(24.0, 240.0, oldH * zoomFactor);
+                const double newH = TouchNavigationMath::wheelZoomTarget(
+                    oldH, (double)wheel.deltaY, 24.0, 180.0);
+                // A saturated wheel gesture must not move the viewport anchor
+                // or rebuild the renderers when the effective height is fixed.
+                if (newH == oldH)
+                    return;
 
                 m_zoom.setTrackHeightPx(newH);
 
                 // Keep the track under the cursor visually stable
                 const double scale = newH / juce::jmax(1.0, oldH);
                 const int maxY = juce::jmax(0, getHeight() - viewport->getViewHeight());
-                const int anchoredViewY = juce::roundToInt(anchorTrackY * scale) - mouseYInViewport;
-                viewport->setViewPosition(viewport->getViewPositionX(), juce::jlimit(0, maxY, anchoredViewY));
+                const int anchoredViewY = TouchNavigationMath::zoomPosition(
+                    anchorTrackY, (double)mouseYInViewport, scale,
+                    maxY, viewport->getViewPositionY());
+                viewport->setViewPosition(viewport->getViewPositionX(), anchoredViewY);
                 return;
             }
 

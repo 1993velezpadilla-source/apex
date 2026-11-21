@@ -69,8 +69,22 @@ public:
         };
     }
 
+    // Phone-only compact touch header. Keep all desktop/iPad menus, window
+    // controls, and branding unchanged. The full DAW remains the content.
+    void setPhoneMode(bool phone)
+    {
+        if (phoneMode_ == phone) return;
+        phoneMode_ = phone;
+        resized();
+    }
+
     void paint(juce::Graphics& g) override
     {
+        if (phoneMode_)
+        {
+            paintPhoneHeader(g);
+            return;
+        }
         auto& t = Theme::getInstance();
         auto& a = t.apex;
         g.fillAll(a.color.deepestB);
@@ -230,6 +244,25 @@ public:
     {
         menuRects_.resize(menus_.size());
         updateWindowControlRects();
+        if (phoneMode_)
+        {
+            for (auto& rect : menuRects_)
+                rect = {};
+            // 90 logical units preserve APEX branding. At 320dp, the five
+            // 44+ touch targets remain on screen without horizontal scrolling.
+            // Clip operations continue through the existing context menu.
+            const bool showClipMenu = getWidth() >= 435;
+            const int menuCount = showClipMenu ? 6 : 5;
+            const int firstX = juce::jmin(90, juce::jmax(0, getWidth() / 4));
+            const int gap = 2;
+            const int available = juce::jmax(0, getWidth() - firstX - 5);
+            const int cellW = juce::jmax(0, (available - gap * (menuCount - 1)) / menuCount);
+            const int indices[6] = { 0, 1, 2, 3, 5, 4 };
+            for (int i = 0; i < menuCount; ++i)
+                menuRects_[(size_t)indices[i]] = {
+                    firstX + i * (cellW + gap), 0, cellW, getHeight()
+                };
+        }
         brandSigil_.clear();  // geometry depends on height; rebuild on next paint
         repaint();
     }
@@ -346,6 +379,49 @@ public:
     }
 
 private:
+    void paintPhoneHeader(juce::Graphics& g)
+    {
+        const auto& a = Theme::getInstance().apex;
+        const auto bounds = getLocalBounds().toFloat();
+        // No desktop menus across the screen, minimize/maximize or close.
+        // This header is 50dp on phones and uses the existing File/Edit/etc.
+        // popup logic, so project actions remain functional.
+        juce::ColourGradient background(
+            a.color.deepestB, 0.0f, 0.0f,
+            a.color.violet.darker(0.70f), (float)getWidth(), (float)getHeight(), false);
+        background.addColour(0.57, a.color.deepestA);
+        g.setGradientFill(background);
+        g.fillRect(bounds);
+
+        g.setColour(a.color.cyan.withAlpha(0.32f));
+        g.fillRect(0, 0, juce::jmin(3, getWidth()), getHeight());
+        g.setColour(a.color.magenta);
+        g.setFont(juce::Font(20.0f, juce::Font::bold));
+        g.drawText("APEX", juce::Rectangle<int>(9, 1, 78, juce::jmax(0, getHeight()-2)),
+                   juce::Justification::centredLeft);
+
+        for (int i = 0; i < (int)menus_.size(); ++i)
+        {
+            const auto rect = menuRects_[(size_t)i];
+            if (rect.isEmpty()) continue;
+            const auto chip = rect.reduced(1, 4).toFloat();
+            const bool active = openMenu_ == i || hoveredMenu_ == i;
+            g.setColour(active ? a.color.violet.withAlpha(0.60f)
+                               : a.color.panelB.withAlpha(0.67f));
+            g.fillRoundedRectangle(chip, 8.0f);
+            g.setColour(active ? a.color.magenta : a.color.borderSoftA);
+            g.drawRoundedRectangle(chip, 8.0f, 1.0f);
+            g.setColour(a.color.textPrimary);
+            g.setFont(juce::Font(juce::jmin(14.0f, rect.getWidth() / 3.6f)));
+            g.drawText(menus_[(size_t)i].title,
+                       rect.reduced(1, 2), juce::Justification::centred, true);
+        }
+
+        g.setColour(a.color.magenta.withAlpha(0.85f));
+        g.fillRect(0, juce::jmax(0, getHeight()-2), getWidth(), 2);
+    }
+
+    bool phoneMode_ = false;
     std::vector<Menu> menus_;
     std::vector<juce::Rectangle<int>> menuRects_;
     int hoveredMenu_   = -1;
@@ -359,6 +435,15 @@ private:
     // ── Window-control geometry (right edge, Win11 order: min, max, close) ──
     void updateWindowControlRects()
     {
+        if (phoneMode_)
+        {
+            minBtnBounds_ = {};
+            maxBtnBounds_ = {};
+            closeBtnBounds_ = {};
+            undoBtnBounds_ = {};
+            redoBtnBounds_ = {};
+            return;
+        }
         constexpr float winBtnW = 40.f;
         closeBtnBounds_ = { (float)getWidth() - winBtnW, 0.f, winBtnW, (float)getHeight() };
         maxBtnBounds_   = { closeBtnBounds_.getX() - winBtnW, 0.f, winBtnW, (float)getHeight() };
