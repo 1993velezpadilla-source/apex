@@ -9922,6 +9922,15 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     state->setProperty("waveformRefreshes", static_cast<juce::int64>(TimelinePaintMetrics::waveformRefreshes.load()));
     state->setProperty("waveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformDrawCalls.load()));
     state->setProperty("waveformBatchedPaints", static_cast<juce::int64>(TimelinePaintMetrics::waveformBatchedPaints.load()));
+    state->setProperty("waveformPeaksWalked", static_cast<juce::int64>(TimelinePaintMetrics::waveformPeaksWalked.load()));
+    // A paint() entry alone does not prove that source peaks were ready or visible.
+    // Export the actual visible audio-cache readiness for the Android runtime gauntlet.
+    if (arrangement_ != nullptr)
+    {
+        const auto ready = arrangement_->getCore()->getVisibleWaveformReadinessForDiagnostics();
+        state->setProperty("visibleAudioWaveforms", ready.visibleAudioRenderers);
+        state->setProperty("readyAudioWaveforms", ready.ready);
+    }
     state->setProperty("liveWaveformPaints", static_cast<juce::int64>(TimelinePaintMetrics::liveRecordingWaveformPaints.load()));
     state->setProperty("masterPreviewDirtyPixels", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewDirtyPixels.load()));
     state->setProperty("masterPreviewUpdateCalls", static_cast<juce::int64>(TimelinePaintMetrics::masterPreviewUpdateCalls.load()));
