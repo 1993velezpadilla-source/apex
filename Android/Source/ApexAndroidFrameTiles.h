@@ -59,11 +59,52 @@ struct Damage
 {
     void add(Rectangle<int> area)
     {
-        if (!area.isEmpty())
-            pending.add(area.expanded(1));
+        if (area.isEmpty())
+            return;
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        ++requests;
+        const auto pixels = static_cast<int64_t>(area.getWidth()) * area.getHeight();
+        requestedPixels += pixels;
+        largestRequestPixels = jmax(largestRequestPixels, pixels);
+        if (lastSurfacePixels > 0 && pixels * 100 >= lastSurfacePixels * 90)
+            ++fullSurfaceRequests;
+       #endif
+        pending.add(area.expanded(1));
         if (pending.getNumRectangles() > 64)
             pending = RectangleList<int>(pending.getBounds());
     }
+
+   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+    void logAndReset(Rectangle<int> surface, Rectangle<int> canvasDirty,
+                     const RectangleList<int>& accumulated)
+    {
+        lastSurfacePixels = static_cast<int64_t>(surface.getWidth()) * surface.getHeight();
+        if (requests == 0)
+            return;
+        int64_t unionPixels = 0;
+        for (const auto& rect : accumulated)
+            unionPixels += static_cast<int64_t>(rect.getWidth()) * rect.getHeight();
+        // Only sample a bounded number of frames; log the ORIGINAL damage
+        // requests before the Android tile raster expands or merges them.
+        // This distinguishes full-window JUCE invalidation from tile rebase.
+        if (damageFramesLogged++ < 24)
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "DAMAGE_ORIGIN requests=%llu full90=%llu sumPixels=%lld "
+                "maxPixels=%lld unionPixels=%lld surfacePixels=%lld canvasDirty=%d,%d,%d,%d",
+                static_cast<unsigned long long>(requests),
+                static_cast<unsigned long long>(fullSurfaceRequests),
+                static_cast<long long>(requestedPixels),
+                static_cast<long long>(largestRequestPixels),
+                static_cast<long long>(unionPixels),
+                static_cast<long long>(lastSurfacePixels),
+                canvasDirty.getX(), canvasDirty.getY(),
+                canvasDirty.getWidth(), canvasDirty.getHeight());
+        requests = fullSurfaceRequests = 0;
+        requestedPixels = largestRequestPixels = 0;
+    }
+    uint64_t requests = 0, fullSurfaceRequests = 0, damageFramesLogged = 0;
+    int64_t requestedPixels = 0, largestRequestPixels = 0, lastSurfacePixels = 0;
+   #endif
 
     RectangleList<int> pending;
     bool hardwareCanvas = false;
@@ -315,6 +356,9 @@ public:
                 .getSmallestIntegerContainer().getIntersection(clip);
 
         auto redraw = std::exchange(damage->pending, {});
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        damage->logAndReset(surface, clip, redraw);
+       #endif
         if (initialOrResized)
             redraw.add(surface);
         if (motionArea != drawnMotionArea)
