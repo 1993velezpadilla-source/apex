@@ -393,19 +393,26 @@ public:
             return;
         parent = current;
         current = this;
-        started = threadCpuNs();
+        startedCpu = threadCpuNs();
+        startedWall = std::chrono::steady_clock::now();
     }
 
     ~ComponentPaintProbe()
     {
         if (type == nullptr)
             return;
-        const auto duration = threadCpuNs() - started;
+        const auto durationWall = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - startedWall).count();
+        const auto durationCpu = threadCpuNs() - startedCpu;
         current = parent;
         if (parent != nullptr)
-            parent->childTime += duration;
+        {
+            parent->childWallTime += durationWall;
+            parent->childCpuTime += durationCpu;
+        }
         auto& sample = components[type];
-        sample.selfNs += duration - childTime;
+        sample.selfCpuNs += durationCpu - childCpuTime;
+        sample.selfWallNs += durationWall - childWallTime;
         ++sample.count;
     }
 
@@ -447,27 +454,37 @@ public:
     {
         using Entry = std::pair<const std::type_info*, Sample>;
         std::vector<Entry> sorted(components.begin(), components.end());
+        // Rank by WAIT (wall minus thread CPU), not CPU alone: the 9.5
+        // emulator profiler recorded ~8 ms CPU but ~38 ms off-CPU per
+        // horizontal frame. Pinpoint which JUCE Component or inherited
+        // painting phase blocks the Android message/render thread.
         std::sort(sorted.begin(), sorted.end(), [](const Entry& left, const Entry& right)
         {
-            return left.second.selfNs > right.second.selfNs;
+            const auto leftWait = left.second.selfWallNs - left.second.selfCpuNs;
+            const auto rightWait = right.second.selfWallNs - right.second.selfCpuNs;
+            return leftWait > rightWait;
         });
         __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PROFILE frames=%zu", frames);
         for (std::size_t i = 0; i < jmin(sorted.size(), std::size_t{ 12 }); ++i)
         {
             const auto& [type, sample] = sorted[i];
-            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH", "PEER_PAINT %s calls=%zu self_ms=%.3f",
-                                type->name(), sample.count, (double)sample.selfNs / 1'000'000.0);
+            const auto cpuMs = (double)sample.selfCpuNs / 1'000'000.0;
+            const auto wallMs = (double)sample.selfWallNs / 1'000'000.0;
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                                "PEER_PAINT_WAIT %s calls=%zu cpu_ms=%.3f wall_ms=%.3f wait_ms=%.3f",
+                                type->name(), sample.count, cpuMs, wallMs, wallMs - cpuMs);
         }
     }
 
 private:
-    struct Sample { jlong selfNs = 0; std::size_t count = 0; };
+    struct Sample { jlong selfCpuNs = 0, selfWallNs = 0; std::size_t count = 0; };
     static inline thread_local ComponentPaintProbe* current = nullptr;
     static inline std::map<const std::type_info*, Sample> components;
 
     const std::type_info* type;
     ComponentPaintProbe* parent = nullptr;
-    jlong started = 0, childTime = 0;
+    std::chrono::steady_clock::time_point startedWall {};
+    jlong startedCpu = 0, childCpuTime = 0, childWallTime = 0;
 };
 
 class FrameProbe
