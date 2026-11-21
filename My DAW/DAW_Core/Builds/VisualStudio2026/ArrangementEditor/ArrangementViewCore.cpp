@@ -3,6 +3,7 @@
 // ===========================================================================
 #include "ArrangementViewCore.h"
 #include "TouchNavigationMath.h"
+#include "ArrangementHorizontalRingCore.h"
 #include "../../../Source/UICore/BeatMakingFeaturePolicy.h"
 #include "../../../Source/UICore/TrackPlaylistInlineLayoutCore.h"
 #include "../../../Source/AutomationCore/AutomationGroupedCurveCore.h"
@@ -218,15 +219,14 @@ namespace ArrangementEditor
             }
 
             const auto deviceView = toPixels(visible, scale);
-            // Keep the same backing image while a finger pans horizontally.
-            // 9.4 translated a full native-density bitmap on EVERY touch frame,
-            // copying a viewport's worth of RGBA pixels even if only a narrow
-            // strip entered the screen. This bounded horizontal halo avoids
-            // moving those bytes until the viewport reaches the halo edge.
+            // The horizontal backing store is a ring, not a periodically
+            // shifted bitmap. Every X movement advances the logical frame and
+            // the image storage offset by the same amount, so retained pixels
+            // NEVER move in RAM when a swipe crosses a halo boundary.
             //
-            // Painting and blitting are STILL clipped to the real viewport:
-            // the extra allocation is storage, not extra clip/waveform raster.
-            // No audio cache, take data or background recording is changed.
+            // Y retains its existing contiguous copy path (smooth on phone).
+            // Painting/blitting remain clipped to the real viewport. Clips,
+            // live REC waveforms, gain and fades are never hidden.
             const auto viewSize = toPixels(visible.withZeroOrigin(), scale).getBottomRight()
                 + juce::Point<int>(5, 5);
             if (static_cast<int64_t>(viewSize.x) * viewSize.y > maxImagePixels)
@@ -243,14 +243,12 @@ namespace ArrangementEditor
             const auto size = viewSize + juce::Point<int>(haloX * 2, 0);
             const bool reset = !image.isValid()
                 || image.getBounds().getBottomRight() != size || scale != pixelScale;
-            // Rebase only when the actual visible screen exits retained
-            // storage, never at arbitrary bars/clip boundaries.
-            const bool fitsHorizontal = !reset && frame.getX() + 2 <= deviceView.getX()
-                && frame.getRight() - 2 >= deviceView.getRight();
-            const int frameX = fitsHorizontal ? frame.getX()
-                                               : deviceView.getX() - 2 - haloX;
+            // The physical X address of a content column is:
+            // (contentX - frameX + ringX) modulo imageWidth. Advancing both
+            // frameX and ringX by delta leaves that address invariant.
             const juce::Rectangle<int> nextFrame(
-                frameX, deviceView.getY() - 2, size.x, size.y);
+                deviceView.getX() - 2 - haloX, deviceView.getY() - 2,
+                size.x, size.y);
 
             if (reset)
             {
@@ -258,29 +256,36 @@ namespace ArrangementEditor
                                     false, juce::SoftwareImageType());
                 valid.clear();
                 pixelScale = scale;
+                ringX = 0;
             }
             else if (nextFrame != frame)
             {
-                // Copy old cached pixels only on a real halo rebase or
-                // vertical movement. Most horizontal frames stay in place.
                 valid.clipTo(nextFrame);
-                const auto overlap = valid.getBounds();
-                if (!overlap.isEmpty())
+                // Keep the existing vertical scroll behaviour: only Y requires
+                // shifting image rows. X never copies backing pixels, even
+                // when a fast fling crosses multiple virtual image widths.
+                if (nextFrame.getY() != frame.getY())
                 {
-                    const auto source = overlap.getPosition() - frame.getPosition();
-                    const auto destination = overlap.getPosition() - nextFrame.getPosition();
-                    if (source != destination)
+                    const auto overlap = valid.getBounds();
+                    if (!overlap.isEmpty())
                     {
-                        image.moveImageSection(destination.x, destination.y, source.x, source.y,
-                                               overlap.getWidth(), overlap.getHeight());
-                        if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                        const int sourceY = overlap.getY() - frame.getY();
+                        const int destinationY = overlap.getY() - nextFrame.getY();
+                        if (sourceY != destinationY)
                         {
-                            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheRebases);
-                            TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheCopyPixels,
-                                static_cast<uint64_t>(overlap.getWidth()) * overlap.getHeight());
+                            image.moveImageSection(0, destinationY, 0, sourceY,
+                                                   size.x, overlap.getHeight());
+                            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                            {
+                                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheRebases);
+                                TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheCopyPixels,
+                                    static_cast<uint64_t>(size.x) * overlap.getHeight());
+                            }
                         }
                     }
                 }
+                ringX = ArrangementHorizontalRingCore::advance(
+                    ringX, static_cast<int64_t>(nextFrame.getX()) - frame.getX(), size.x);
             }
 
             if (visible != previousView)
@@ -305,26 +310,70 @@ namespace ArrangementEditor
             if (missing.getNumRectangles() > 32)
                 missing = juce::RectangleList<int>(pixels);
 
+            const int seamX = frame.getX()
+                + ArrangementHorizontalRingCore::seamOffset(ringX, size.x);
             if (!missing.isEmpty())
             {
-                auto local = missing;
-                local.offsetAll(-frame.getPosition());
-                juce::Graphics raster(image);
-                raster.reduceClipRegion(local);
-                raster.addTransform(juce::AffineTransform::scale(scale)
-                    .translated(static_cast<float>(-frame.getX()), static_cast<float>(-frame.getY())));
+                // A world-space dirty rectangle may cross the ring seam.
+                // Split it into at most two image-space clips, with separate
+                // transforms; no texture copy or whole-frame regeneration.
+                juce::RectangleList<int> firstHalf, secondHalf;
+                const auto beforeSeam = juce::Rectangle<int>::leftTopRightBottom(
+                    frame.getX(), frame.getY(), seamX, frame.getBottom());
+                const auto afterSeam = juce::Rectangle<int>::leftTopRightBottom(
+                    seamX, frame.getY(), frame.getRight(), frame.getBottom());
+                for (const auto& area : missing)
                 {
-                    const juce::ScopedValueSetter<bool> backgroundOnly(view.m_paintingViewportBackground,
-                                                                      separateForeground);
-                    view.paintEntireComponent(raster, true);
+                    const auto first = area.getIntersection(beforeSeam);
+                    if (!first.isEmpty())
+                        firstHalf.add(first.withPosition(
+                            first.getX() - frame.getX() + ringX,
+                            first.getY() - frame.getY()));
+                    const auto second = area.getIntersection(afterSeam);
+                    if (!second.isEmpty())
+                        secondHalf.add(second.withPosition(
+                            second.getX() - frame.getX() + ringX - size.x,
+                            second.getY() - frame.getY()));
                 }
+                const auto rasterHalf = [&] (const juce::RectangleList<int>& local, int shiftX)
+                {
+                    if (local.isEmpty())
+                        return;
+                    juce::Graphics raster(image);
+                    raster.reduceClipRegion(local);
+                    raster.addTransform(juce::AffineTransform::scale(scale)
+                        .translated(static_cast<float>(-frame.getX() + ringX + shiftX),
+                                    static_cast<float>(-frame.getY())));
+                    const juce::ScopedValueSetter<bool> backgroundOnly(
+                        view.m_paintingViewportBackground, separateForeground);
+                    view.paintEntireComponent(raster, true);
+                };
+                rasterHalf(firstHalf, 0);
+                rasterHalf(secondHalf, -size.x);
                 valid.add(missing);
                 valid.consolidate();
             }
 
-            const auto toUser = juce::AffineTransform::scale(1.0f / scale)
-                .translated(frame.getX() / scale, frame.getY() / scale);
-            if (!software->blitOpaqueImage(image, toUser))
+            // Each half maps one contiguous physical image into its original
+            // world-space columns. Both are clipped to the viewport; their
+            // destination spans meet at the seam without overlap or gaps.
+            const auto blitHalf = [&] (int shiftX) -> bool
+            {
+                const auto toUser = juce::AffineTransform::scale(1.0f / scale)
+                    .translated(static_cast<float>(frame.getX() - ringX + shiftX) / scale,
+                                static_cast<float>(frame.getY()) / scale);
+                return software->blitOpaqueImage(image, toUser);
+            };
+            bool copied = true;
+            {
+                juce::Graphics::ScopedSaveState viewportClip(graphics);
+                graphics.reduceClipRegion(visible);
+                if (pixels.getX() < seamX)
+                    copied = blitHalf(0);
+                if (copied && pixels.getRight() > seamX)
+                    copied = blitHalf(size.x);
+            }
+            if (!copied)
             {
                 invalidateAll();
                 view.paintEntireComponent(graphics, false);
@@ -383,6 +432,7 @@ namespace ArrangementEditor
         float pixelScale = 0.0f;
         juce::Image image;
         juce::Rectangle<int> frame;
+        int ringX = 0;
         juce::Rectangle<int> previousView;
         juce::RectangleList<int> valid;
     };
