@@ -118,6 +118,7 @@ struct Damage
 // Controlled by the existing native benchmark phase boundary below.
 static bool bitmapSubmitProfiling = false;
 static int bitmapSubmitSamples = 0;
+static int tileUploadSamples = 0;
 #endif
 
 class BitmapTiles
@@ -158,9 +159,48 @@ public:
                     backing.clear(area);
             raster(backing, redraw, clip.getPosition(), pixelDivisor);
             const Image::BitmapData source(backing, Image::BitmapData::readOnly);
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            // A hardware Canvas ignores the dirty invalidation bounds on
+            // modern Android. Measure the bitmap-upload costs directly.
+            const bool sampleUploads = bitmapSubmitProfiling && tileUploadSamples < 12;
+            const auto uploadWallStart = sampleUploads ? std::chrono::steady_clock::now()
+                : std::chrono::steady_clock::time_point{};
+            timespec uploadCpuStart {};
+            if (sampleUploads) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &uploadCpuStart);
+            int uploadedTiles = 0;
+            int64_t uploadedPixels = 0;
+           #endif
             for (auto& tile : tiles)
-                if (redraw.intersectsRectangle(tile.bounds) && !upload(env, tile, source, redraw))
-                    return false;
+                if (redraw.intersectsRectangle(tile.bounds))
+                {
+                    if (!upload(env, tile, source, redraw))
+                        return false;
+                   #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+                    if (sampleUploads)
+                    {
+                        ++uploadedTiles;
+                        uploadedPixels += static_cast<int64_t>(tile.bounds.getWidth())
+                                          * tile.bounds.getHeight();
+                    }
+                   #endif
+                }
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (sampleUploads)
+            {
+                timespec uploadCpuEnd {};
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &uploadCpuEnd);
+                const auto wallNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - uploadWallStart).count();
+                const auto cpuNs = (static_cast<int64_t>(uploadCpuEnd.tv_sec - uploadCpuStart.tv_sec)
+                                   * 1000000000LL) + uploadCpuEnd.tv_nsec - uploadCpuStart.tv_nsec;
+                ++tileUploadSamples;
+                __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                    "TILE_UPLOAD tileSize=256 tiles=%d invalidatedPixels=%lld "
+                    "wall_ms=%.3f cpu_ms=%.3f wait_ms=%.3f",
+                    uploadedTiles, static_cast<long long>(uploadedPixels),
+                    wallNs / 1.0e6, cpuNs / 1.0e6, (wallNs - cpuNs) / 1.0e6);
+            }
+           #endif
         }
 
         return true;
@@ -244,7 +284,10 @@ private:
 
     bool resetFrame(JNIEnv* env, Rectangle<int> clip, float scale, bool opaque)
     {
-        constexpr int tileSize = 384;
+        // Smaller mutable GPU textures reduce re-upload during panning:
+        // Android re-uploads a bitmap after any of its pixels change.
+        // Compare this 256px experiment against the 384px baseline.
+        constexpr int tileSize = 256;
         const int width = smallerDimension(clip.getWidth());
         const int height = smallerDimension(clip.getHeight());
         if ((int64)width * height > 16'000'000)
@@ -657,6 +700,7 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
     if (measuring)
     {
         bitmapSubmitSamples = 0;
+        tileUploadSamples = 0;
         frameCount = 0;
         ComponentPaintProbe::reset();
         return nullptr;
