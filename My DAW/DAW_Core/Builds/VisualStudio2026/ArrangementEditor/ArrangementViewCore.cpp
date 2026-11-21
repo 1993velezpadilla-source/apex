@@ -30,6 +30,9 @@
 #include <functional>
 #include <limits>
 
+#if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+namespace juce { void setApexTimelineViewport(Viewport& viewport, int headerHeight); }
+#endif
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
 namespace juce { void noteApexTimelineMotion(Component& viewport); }
 #endif
@@ -2487,6 +2490,11 @@ namespace ArrangementEditor
     {
         if (m_applyingZoom)
             return;
+        auto* viewport = findParentComponentOfClass<juce::Viewport>();
+       #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+        if (viewport != nullptr)
+            juce::setApexTimelineViewport(*viewport, arrangementContentTop());
+       #endif
         m_zoom.observeScroll({ (double)scrollX, (double)scrollY });
         scrollX = juce::jmax(0, scrollX);
         scrollY = juce::jmax(0, scrollY);
@@ -2501,9 +2509,8 @@ namespace ArrangementEditor
         m_ruler.setScrollOffsetX(scrollX, horizontalMoved);
 
        #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
-        if (m_touchNavigationArmed)
-            if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
-                juce::noteApexTimelineMotion(*viewport);
+        if (m_touchNavigationArmed && viewport != nullptr)
+            juce::noteApexTimelineMotion(*viewport);
        #endif
 
         TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangementScrollEvents);
@@ -2518,7 +2525,7 @@ namespace ArrangementEditor
 
         // Moving the viewed JUCE component already invalidates the viewport.
         // A detached arranger can still receive an explicit offset in tests.
-        if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        if (viewport != nullptr)
             if (viewport->getViewPosition() == juce::Point<int>(scrollX, scrollY))
                 return;
         const auto visibleRepaint = getViewportVisibleBounds().getIntersection(getLocalBounds());

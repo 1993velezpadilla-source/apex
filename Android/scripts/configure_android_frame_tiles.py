@@ -103,6 +103,28 @@ void noteApexTimelineMotion (Component& viewport)
 {""")
 
 
+def add_horizontal_bitmap_reuse(peer: str) -> str:
+    if "void setApexTimelineViewport (Viewport& viewport" in peer:
+        return peer
+    peer = replace(peer, "probe.presentedTiles (t.apexFrameTiles.drawsMotionLayer());",
+                         "probe.presentedTiles (t.apexFrameTiles);")
+    peer = replace(peer, "    void noteApexTimelineMotion (Component& viewport)", """\
+    void setApexTimelineViewport (Viewport& viewport, int headerHeight)
+    {
+        apexFrameTiles.setTimelineViewport (viewport, headerHeight);
+    }
+
+    void noteApexTimelineMotion (Component& viewport)""")
+    return replace(peer, "ComponentPeer* Component::createNewPeer", """\
+void setApexTimelineViewport (Viewport& viewport, int headerHeight)
+{
+    if (auto* peer = dynamic_cast<AndroidComponentPeer*> (viewport.getPeer()))
+        peer->setApexTimelineViewport (viewport, headerHeight);
+}
+
+ComponentPeer* Component::createNewPeer""")
+
+
 def configure_component_paint_probe(gui: Path) -> None:
     for path, signature, component in (
         (gui / "components/juce_Component.cpp", "void Component::paintWithinParentContext (Graphics& g)", "*this"),
@@ -234,7 +256,7 @@ def configure(root: Path) -> None:
             raise ValueError("Incomplete APEX Android renderer")
         if "void noteApexTimelineMotion (Component& viewport)" not in peer_text:
             peer_text = add_timeline_motion(peer_text)
-        peer.write_text(add_frame_pacing(peer_text), encoding="utf-8")
+        peer.write_text(add_horizontal_bitmap_reuse(add_frame_pacing(peer_text)), encoding="utf-8")
         header.write_bytes(source.read_bytes())
         return
 
@@ -302,7 +324,8 @@ def configure(root: Path) -> None:
                 damage->add (area);
             localView.callVoidMethod (AndroidView.invalidate,""")
     header.write_bytes(source.read_bytes())
-    peer.write_text(add_frame_pacing(add_timeline_motion(peer_text)), encoding="utf-8")
+    peer.write_text(add_horizontal_bitmap_reuse(add_frame_pacing(add_timeline_motion(peer_text))),
+                    encoding="utf-8")
     module.write_text(module_text, encoding="utf-8")
 
 

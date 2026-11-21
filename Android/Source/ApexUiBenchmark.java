@@ -1,5 +1,6 @@
 package __APEX_PACKAGE__;
 
+import android.os.Build;
 import android.os.Debug;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -45,7 +46,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private boolean stopped = false, touching = false, collectingMetrics = false;
 
     private static native void nativeUseFrameTiles(boolean enabled, boolean reduceMotion,
-                                                 boolean framePaced, boolean suppressMasterPreview);
+                                                 boolean framePaced, boolean suppressMasterPreview,
+                                                 boolean reuseHorizontalBitmaps);
     private static native long[] nativeWindowDrawSamples(boolean finish);
 
     public ApexUiBenchmark(ApexImmersiveActivity owner, int x, int y, int w, int h) {
@@ -70,7 +72,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         }
         nativeUseFrameTiles(!"int-array".equals(renderer), "tiles".equals(renderer),
             "frame-paced".equals(renderer),
-            activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false));
+            activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false),
+            activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false));
         if (decor.isHardwareAccelerated()) {
             metricsThread.start();
             activity.getWindow().addOnFrameMetricsAvailableListener(frameListener,
@@ -96,7 +99,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     private void recordWindowFrame(Window window, FrameMetrics metrics, int dropped) {
         synchronized (windowFrames) {
             windowFrames.add(new long[] { metrics.getMetric(FrameMetrics.VSYNC_TIMESTAMP),
-                metrics.getMetric(FrameMetrics.DRAW_DURATION), metrics.getMetric(FrameMetrics.TOTAL_DURATION) });
+                metrics.getMetric(FrameMetrics.DRAW_DURATION), metrics.getMetric(FrameMetrics.TOTAL_DURATION),
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? metrics.getMetric(FrameMetrics.GPU_DURATION) : -1 });
             droppedWindowFrames += dropped;
         }
     }
@@ -220,16 +224,19 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             synchronized (windowFrames) {
                 final long[] draw = new long[windowFrames.size()];
                 final long[] total = new long[windowFrames.size()];
+                final long[] gpu = new long[windowFrames.size()];
                 for (int i = 0; i < phaseStarts.length; ++i) {
-                    int count = 0;
+                    int count = 0, gpuCount = 0;
                     for (long[] frame : windowFrames) {
                         if (frame[0] < phaseStarts[i] || frame[0] > phaseEnds[i]) continue;
                         draw[count] = frame[1];
                         total[count++] = frame[2];
+                        if (frame[3] >= 0) gpu[gpuCount++] = frame[3];
                     }
                     JSONObject entry = phases.getJSONObject(i);
                     entry.put("windowDrawMs", summarize(draw, count));
                     entry.put("windowTotalMs", summarize(total, count));
+                    entry.put("windowGpuMs", summarize(gpu, gpuCount));
                     // Log one phase per record to stay below logcat's entry limit.
                     Log.i(TAG, "PHASE " + entry);
                 }
@@ -240,6 +247,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             result.put("scene", activity.getIntent().getStringExtra("apex_scene"));
             result.put("master_preview_suppressed",
                 activity.getIntent().getBooleanExtra("apex_master_preview_suppressed", false));
+            result.put("horizontal_bitmap_reuse",
+                activity.getIntent().getBooleanExtra("apex_horizontal_bitmap_reuse", false));
             result.put("metric", "UI Choreographer callback intervals; not presented FPS");
             result.put("events", eventCount);
             result.put("droppedWindowFrames", droppedWindowFrames);
@@ -248,8 +257,8 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
     }
 
     private void addPeerTimings(JSONObject entry, long[] samples) throws Exception {
-        if (samples.length % 6 != 0) throw new IllegalArgumentException("Invalid APEX peer sample stride");
-        final int count = samples.length / 6;
+        if (samples.length % 8 != 0) throw new IllegalArgumentException("Invalid APEX peer sample stride");
+        final int count = samples.length / 8;
         final long[] wall = new long[count];
         final long[] cpu = new long[count];
         final long[] raster = new long[count];
@@ -257,10 +266,10 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         final long[] rasterWait = new long[count];
         final long[] transfer = new long[count];
         int tiledFrames = 0;
-        int reducedTimelineFrames = 0;
-        long paintedPixels = 0;
+        int reducedTimelineFrames = 0, scrollTileFrames = 0;
+        long paintedPixels = 0, updatedTilePixels = 0, reusedTilePixels = 0;
         for (int i = 0; i < count; ++i) {
-            final int start = i * 6;
+            final int start = i * 8;
             wall[i] = samples[start];
             cpu[i] = samples[start + 1];
             raster[i] = samples[start + 2];
@@ -268,8 +277,11 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
             rasterWait[i] = Math.max(0, raster[i] - rasterCpu[i]);
             transfer[i] = Math.max(0, wall[i] - raster[i]);
             paintedPixels += samples[start + 3];
+            updatedTilePixels += samples[start + 6];
+            reusedTilePixels += samples[start + 7];
             if (samples[start + 4] != 0) ++tiledFrames;
             if (samples[start + 4] == 2) ++reducedTimelineFrames;
+            if (samples[start + 4] == 3) ++scrollTileFrames;
         }
         entry.put("peerWallMs", summarize(wall, count));
         entry.put("peerCpuMs", summarize(cpu, count));
@@ -280,7 +292,12 @@ public final class ApexUiBenchmark implements Choreographer.FrameCallback {
         entry.put("peerTransferMs", summarize(transfer, count));
         entry.put("peerTiledFrames", tiledFrames);
         entry.put("peerReducedTimelineFrames", reducedTimelineFrames);
-        if (count != 0) entry.put("peerMeanPixels", paintedPixels / count);
+        entry.put("peerScrollTileFrames", scrollTileFrames);
+        if (count != 0) {
+            entry.put("peerMeanPixels", paintedPixels / count);
+            entry.put("peerMeanUpdatedTilePixels", updatedTilePixels / count);
+            entry.put("peerMeanReusedTilePixels", reusedTilePixels / count);
+        }
     }
 
     private JSONObject summarize(long[] values, int count) throws Exception {
