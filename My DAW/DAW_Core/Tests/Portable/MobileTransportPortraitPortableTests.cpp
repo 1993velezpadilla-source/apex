@@ -965,6 +965,25 @@ int main()
     assert(compactActivationSweep());
     assert(compactRecoveredSingleRowGrid());
     assert(compactNarrowTransportIsNonInteractive());
+    // Simulate repeated split-screen width and keyboard-height transitions.
+    // A hidden six-action row must recover at 268, then disappear at 267;
+    // phone Mixer/Sends remain independent and must never become tiny taps.
+    for (const int h : {44, 87, 93, 94, 112})
+        for (const int w : {267, 268, 267, 295, 188, 189, 320, 267})
+        {
+            const auto deck = DAW::mobile::compactPhoneTransportLayout(w, h);
+            assert(validCompact(w, h));
+            assert(exclusiveCompactAllTargets(w, h));
+            for (const auto action : deck.transport)
+                assert(w < 268
+                    ? (action.width == 0 && action.height == 0)
+                    : (inside(action, w, h) && action.width >= 44
+                       && action.height >= 44));
+            for (const auto panel : {deck.mixer, deck.sends})
+                assert((panel.width == 0 && panel.height == 0)
+                    || (inside(panel, w, h) && panel.width >= 44
+                        && panel.height >= 44));
+        }
     // The 1,058-case recovery sweep runs at runtime to avoid GCC's constexpr
     // evaluation budget; retain the same checks in optimized/NDEBUG builds.
     assert(compactWideInsetRecoverySweep());
