@@ -211,8 +211,8 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
         worst_wait = {}
         for line in full_log.splitlines():
             matched = re.search(
-                r"PEER_PAINT_WAIT (\\S+) calls=(\\d+) cpu_ms=([\\d.]+) "
-                r"wall_ms=([\\d.]+) wait_ms=([\\d.]+)", line)
+                r"PEER_PAINT_WAIT (\S+) calls=(\d+) cpu_ms=([\d.]+) "
+                r"wall_ms=([\d.]+) wait_ms=([\d.]+)", line)
             if matched:
                 part = matched.group(1)
                 cpu, wall, wait = map(float, matched.groups()[2:])
