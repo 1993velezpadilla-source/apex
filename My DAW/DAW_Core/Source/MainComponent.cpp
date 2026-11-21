@@ -9438,15 +9438,17 @@ void MainComponent::updateTimelineViewportContentBounds()
 
 void MainComponent::positionChanged(DAW::SamplePosition newPosition)
 {
-    // Grow the timeline scroll extent when the playhead approaches or passes
-    // the current content end (ruler scrubbing, transport commands, looping).
-    // Guarded by the cached length so the viewport bounds are not rebuilt on
-    // every transport tick during playback.
+    // The phone starts with a ten-minute virtual timeline instead of the
+    // old 30-second "page". Grow once with two minutes of warning so a long
+    // live recording never encounters the end of the scrollable Viewport.
+    // Do this on the message thread, not in the audio callback.
     if (!arrangement_)
         return;
     const double sampleRate = arrangement_->getEngineSampleRate();
     const double playheadSeconds = (double) newPosition / sampleRate;
-    if (playheadSeconds + 2.0 > lastTimelineContentLengthSeconds_)
+    const double warning = usesPhoneMixerPresentation()
+        ? DAW::mobile::kTimelinePhoneGrowthWarningSeconds : 2.0;
+    if (playheadSeconds + warning > lastTimelineContentLengthSeconds_)
         updateTimelineViewportContentBounds();
 }
 
@@ -9851,6 +9853,8 @@ juce::var MainComponent::timelineNavigationBenchmarkState(bool finishPhase)
     auto* state = new juce::DynamicObject();
     state->setProperty("scrollX", timelineViewport_ ? timelineViewport_->getViewPositionX() : -1);
     state->setProperty("scrollY", timelineViewport_ ? timelineViewport_->getViewPositionY() : -1);
+    state->setProperty("timelineContentSeconds", lastTimelineContentLengthSeconds_);
+    state->setProperty("timelineContentWidth", arrangement_ ? arrangement_->getWidth() : 0);
     state->setProperty("pps", arrangement_ ? arrangement_->getPixelsPerSecond() : 0.0);
     state->setProperty("laneHeight", arrangement_ ? arrangement_->getCore()->getZoom().getTrackHeightPx() : 0);
     state->setProperty("tracksWindowBuffered",
