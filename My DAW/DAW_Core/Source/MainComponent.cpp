@@ -9843,6 +9843,18 @@ bool MainComponent::prepareTimelineNavigationBenchmark(bool withClip, bool deepZ
         appCore_.getRecordingEngine().setProjectDirectory(dir);
         track->setInputSource(0, true);
         track->setArmed(true);
+
+        // Regression for a real user report: at 120 BPM the ruler reaches
+        // bar 15 (~28 seconds), then Android used to clamp horizontal pan
+        // during REC until Stop finalized the audio clip. Start the
+        // disposable emulator take at 29s and pan past the old 30s edge.
+        // Do NOT seek or change any real user session outside benchmark mode.
+        const auto sr = juce::jmax(1.0, arrangement_->getEngineSampleRate());
+        appCore_.getTransport().setPosition(
+            static_cast<DAW::SamplePosition>(sr * 29.0));
+        timelineViewport_->setViewPosition(
+            juce::roundToInt(29.0 * arrangement_->getPixelsPerSecond()), 0);
+        syncTimelineViewportPosition();
     }
     repaint();
     return !withClip || !appCore_.getClipManager().getAllClips().isEmpty();
