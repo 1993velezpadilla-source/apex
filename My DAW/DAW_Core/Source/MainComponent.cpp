@@ -9455,6 +9455,10 @@ void MainComponent::positionChanged(DAW::SamplePosition newPosition)
         return;
     const double sampleRate = arrangement_->getEngineSampleRate();
     const double playheadSeconds = (double) newPosition / sampleRate;
+    // Do not repeat an expensive viewport resize at 60 Hz if the transport
+    // reports an invalid/out-of-range position during route or project restore.
+    if (!std::isfinite(playheadSeconds) || playheadSeconds < 0.0 || playheadSeconds > 86400.0)
+        return;
     const double warning = usesPhoneMixerPresentation()
         ? DAW::mobile::kTimelinePhoneGrowthWarningSeconds : 2.0;
     if (playheadSeconds + warning > lastTimelineContentLengthSeconds_)
