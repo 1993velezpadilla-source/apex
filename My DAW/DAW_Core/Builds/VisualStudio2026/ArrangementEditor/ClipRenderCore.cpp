@@ -195,16 +195,15 @@ namespace ArrangementEditor
         if (m_model->muted)
             drawMuteOverlay(g);
 
-        // Layer 7: Lock icon
-        if (m_model->locked)
-            drawLockIcon(g);
-
-        // Horizontal scrolling routinely paints a thin stripe from the
-        // MIDDLE of a long clip. Do not construct fonts, paths and badge
-        // strings for decorations at its edges when they cannot be visible.
-        // Header/background and waveform remain fully painted in the stripe.
+        // A horizontal pan usually paints a narrow clip-local stripe.
+        // The four outer edges still paint normally, but no offscreen
+        // decoration should allocate a font/path for a central stripe.
         const auto dirty = g.getClipBounds().getIntersection(getLocalBounds());
         const bool headerVisible = dirty.getY() < kNameH && !dirty.isEmpty();
+
+        // Layer 7: Lock icon occupies (4,4)-(20,20) even below the header.
+        if (m_model->locked && dirty.intersects({ 4, 4, 16, 16 }))
+            drawLockIcon(g);
 
         // Layer 8: Clip name (at the left edge of the clip)
         if (headerVisible && ArrangementClipLodPolicy::drawClipName(getWidth(), getHeight()))
@@ -214,8 +213,13 @@ namespace ArrangementEditor
         if (headerVisible && ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
             drawPitchRateBadges(g);
 
-        // Layer 9b: TimePitch cache/render status
-        if (ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight()))
+        // Layer 9b: status badges live near the clip's bottom-left.
+        // The offline HQ "Rendering..." banner alone spans the full width,
+        // so keep its visual during a center-of-clip horizontal pan.
+        const bool fullWidthStatus = m_renderingStretch
+            && static_cast<int>(m_model->timePitch.mode) == 6;
+        if (ArrangementClipLodPolicy::drawSecondaryDetails(getWidth(), getHeight())
+            && (dirty.getX() < 240 || fullWidthStatus))
             drawTimePitchStatus(g);
 
         // Layer 10: Selection highlight
@@ -228,8 +232,10 @@ namespace ArrangementEditor
 
         // Layer 11b: Interactive handles (fade corners, edge resize, volume btn)
         drawClipHandles(g);
-        // M / S / V sit entirely inside the header, not in the body stripe.
-        if (headerVisible)
+        // M / S / V occupy x=2..48 at the LEFT edge. The header
+        // remains visible on every horizontal pan, but those buttons do
+        // not need to be rebuilt when we repaint a distant clip column.
+        if (headerVisible && dirty.intersects({ 0, 0, juce::jmin(getWidth(), 50), kNameH }))
         {
             drawMuteButton(g);
             drawSoloButton(g);
