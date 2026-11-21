@@ -294,6 +294,16 @@ def main() -> int:
             redrawn = after["arrangerRasterPixels"] - before["arrangerRasterPixels"]
             copied = after.get("arrangerCacheCopyPixels", 0) - before.get("arrangerCacheCopyPixels", 0)
             rebased = after.get("arrangerCacheRebases", 0) - before.get("arrangerCacheRebases", 0)
+            # Attribution of the reported "Minecraft chunk-load" horizontal
+            # stalls: the native arranger counts actual full-clip-loop
+            # iterations, not just renderer rebuilds or painted waveforms.
+            # Log counts relative to real viewport movement so a retained
+            # bitmap cannot mask expensive visibility work on the UI thread.
+            scroll_events = after.get("scrollEvents", 0) - before.get("scrollEvents", 0)
+            clip_checks = after.get("scrollClipChecks", 0) - before.get("scrollClipChecks", 0)
+            if scroll_events < 0 or clip_checks < 0:
+                raise RuntimeError("Non-monotonic native viewport/clip-scan counters")
+            scans_per_scroll = clip_checks / scroll_events if scroll_events else 0.0
             print(f"{result['scene']} {result['renderer_requested']} "
                   f"pass {result['repeat']} {phase['phase']} "
                   f"p95={phase['ui_interval_p95_ms']:.1f} ms, "
@@ -301,8 +311,33 @@ def main() -> int:
                   f"peer draw p95={phase['peerWallMs']['p95']:.2f} ms, "
                   f"peer transfer p95={phase['peerTransferMs']['p95']:.2f} ms, "
                   f"window draw p95={phase['windowDrawMs']['p95']:.2f} ms, "
+                  f"scroll events={scroll_events} clip iterations={clip_checks} "
+                  f"checks/event={scans_per_scroll:.2f}, "
                   f"arranger pixels reused={reused:,}/redrawn={redrawn:,} "
                   f"cache pixels shifted={copied:,} rebases={rebased}")
+    # This job validates gesture correctness, NOT 60fps presentation.
+    # The x86_64 SwiftShader emulator reports Choreographer callback spacing,
+    # not SurfaceFlinger-presented frame intervals. Report misses explicitly
+    # so GREEN functional checks cannot be mistaken for a physical-phone fix.
+    target_60hz_ms = 1000.0 / 60.0
+    slow = [(result["scene"], result["renderer_requested"], result["repeat"],
+             phase["phase"], phase["ui_interval_p95_ms"])
+            for result in results for phase in result["phases"]
+            if phase["ui_interval_p95_ms"] > target_60hz_ms]
+    if slow:
+        print(f"[PERFORMANCE-NOT-PROVEN] {len(slow)} of "
+              f"{sum(len(x['phases']) for x in results)} emulator phases "
+              f"exceeded a 60Hz callback interval at p95; "
+              "functional checks alone do not certify smooth scrolling",
+              flush=True)
+        for scene, renderer, repeat, phase, value in sorted(
+                slow, key=lambda entry: entry[4], reverse=True)[:12]:
+            print(f"[SLOW-UI-CALLBACK] {scene} {renderer} pass={repeat} "
+                  f"phase={phase} p95={value:.1f}ms", flush=True)
+    else:
+        print("[PERFORMANCE-NOT-PROVEN] 60Hz callback intervals met in the "
+              "emulator; actual Pixel Fold frame presentation still untested",
+              flush=True)
     if failures:
         raise RuntimeError(f"{len(failures)} runtime cases failed; review retained evidence")
     return 0
