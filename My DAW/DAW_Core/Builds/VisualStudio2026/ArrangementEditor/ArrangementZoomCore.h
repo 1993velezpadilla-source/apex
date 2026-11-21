@@ -121,9 +121,9 @@ namespace ArrangementEditor
             // Actual hidden clips still narrow this interval below through
             // excludeHiddenClip(), keeping visibility transitions correct.
             const auto horizontalTravel = juce::jmax(kViewportOverscanPx, viewport.getWidth() / 2);
-            const auto safeRight = static_cast<int>(juce::jmin<int64_t>(
+            const auto safeRight = static_cast<int>(std::min<long long>(
                 std::numeric_limits<int>::max() / 2,
-                static_cast<int64_t>(viewport.getRight()) + horizontalTravel));
+                static_cast<long long>(viewport.getRight()) + horizontalTravel));
             return viewport.expanded(0, verticalTravel)
                 .withX(0).withWidth(juce::jmax(contentWidth, safeRight));
         }
