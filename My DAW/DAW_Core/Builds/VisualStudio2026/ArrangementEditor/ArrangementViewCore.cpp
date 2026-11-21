@@ -261,9 +261,10 @@ namespace ArrangementEditor
             else if (nextFrame != frame)
             {
                 valid.clipTo(nextFrame);
-                // Keep the existing vertical scroll behaviour: only Y requires
-                // shifting image rows. X never copies backing pixels, even
-                // when a fast fling crosses multiple virtual image widths.
+                // Preserve the original efficient vertical move: copy ONLY
+                // the cached valid columns, not the full ring allocation.
+                // The physical X span can be split at the circular seam.
+                // Horizontal-only navigation still copies ZERO bitmap bytes.
                 if (nextFrame.getY() != frame.getY())
                 {
                     const auto overlap = valid.getBounds();
@@ -273,13 +274,33 @@ namespace ArrangementEditor
                         const int destinationY = overlap.getY() - nextFrame.getY();
                         if (sourceY != destinationY)
                         {
-                            image.moveImageSection(0, destinationY, 0, sourceY,
-                                                   size.x, overlap.getHeight());
-                            if (TimelinePaintMetrics::active.load(std::memory_order_relaxed))
+                            const int seam = frame.getX()
+                                + ArrangementHorizontalRingCore::seamOffset(ringX, size.x);
+                            const auto first = overlap.getIntersection(
+                                juce::Rectangle<int>::leftTopRightBottom(
+                                    frame.getX(), overlap.getY(), seam, overlap.getBottom()));
+                            const auto second = overlap.getIntersection(
+                                juce::Rectangle<int>::leftTopRightBottom(
+                                    seam, overlap.getY(), frame.getRight(), overlap.getBottom()));
+                            uint64_t copiedPixels = 0;
+                            const auto copyColumns = [&] (const juce::Rectangle<int>& part, int wrapShift)
+                            {
+                                if (part.isEmpty())
+                                    return;
+                                const int imageX = part.getX() - frame.getX() + ringX + wrapShift;
+                                image.moveImageSection(imageX, destinationY, imageX, sourceY,
+                                                       part.getWidth(), part.getHeight());
+                                copiedPixels += static_cast<uint64_t>(part.getWidth())
+                                               * part.getHeight();
+                            };
+                            copyColumns(first, 0);
+                            copyColumns(second, -size.x);
+                            if (copiedPixels > 0
+                                && TimelinePaintMetrics::active.load(std::memory_order_relaxed))
                             {
                                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheRebases);
                                 TimelinePaintMetrics::inc(TimelinePaintMetrics::arrangerCacheCopyPixels,
-                                    static_cast<uint64_t>(size.x) * overlap.getHeight());
+                                    copiedPixels);
                             }
                         }
                     }
