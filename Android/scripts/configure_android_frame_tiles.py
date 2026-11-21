@@ -75,7 +75,9 @@ def add_frame_pacing(peer: str) -> str:
                        #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
                         ++damage->scheduledPresentations;
                        #endif
-                        localView.callVoidMethod (AndroidView.invalidateAll);
+                        localView.callVoidMethod (AndroidView.invalidate,
+                                                  area.getX(), area.getY(),
+                                                  area.getRight(), area.getBottom());
                     }
                    #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
                     else
@@ -85,9 +87,6 @@ def add_frame_pacing(peer: str) -> str:
                 }
             }
             localView.callVoidMethod (AndroidView.invalidate,""")
-    peer = replace(peer, '    METHOD   (clear,                            "clear",                         "()V") \\\n',
-                         '    METHOD   (clear,                            "clear",                         "()V") \\\n'
-                         '    METHOD   (invalidateAll,                    "invalidate",                    "()V") \\\n')
     return replace(peer, "void noteApexTimelineMotion (Component& viewport)\n{", """\
 bool isApexAndroidFramePacingEnabled() noexcept
 {
