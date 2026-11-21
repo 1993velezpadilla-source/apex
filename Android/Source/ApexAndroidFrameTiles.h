@@ -111,6 +111,12 @@ struct Damage
     bool viewInvalidated = false;
 };
 
+#if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+// Controlled by the existing native benchmark phase boundary below.
+static bool bitmapSubmitProfiling = false;
+static int bitmapSubmitSamples = 0;
+#endif
+
 class BitmapTiles
 {
 public:
@@ -171,6 +177,18 @@ public:
         }
 
         const auto origin = pixelDivisor == 1 ? frameBounds.getPosition() : Point<int>{};
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        // Native Canvas may supply a full-screen dirty rect despite small
+        // JUCE damage. Measure JNI bitmap submission independently of raster
+        // and component painting; production drawing is unchanged.
+        const bool sampleDraw = bitmapSubmitProfiling && bitmapSubmitSamples < 12;
+        const auto wallStart = sampleDraw ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
+        timespec cpuStart {};
+        if (sampleDraw) clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuStart);
+        int submittedTiles = 0;
+        int64_t submittedPixels = 0;
+       #endif
         for (const auto& tile : tiles)
         {
             const auto surfaceTile = tile.bounds * pixelDivisor + frameBounds.getPosition();
@@ -180,9 +198,35 @@ public:
             const auto position = origin + tile.bounds.getPosition();
             env->CallVoidMethod(canvas, TileCanvas.drawBitmap, tile.bitmap.get(),
                                 (jfloat)position.x, (jfloat)position.y, filteredPaint.get());
+           #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+            if (sampleDraw)
+            {
+                ++submittedTiles;
+                submittedPixels += static_cast<int64_t>(tile.bounds.getWidth())
+                                   * tile.bounds.getHeight() * pixelDivisor * pixelDivisor;
+            }
+           #endif
         }
         if (pixelDivisor != 1)
             env->CallVoidMethod(canvas, TileCanvas.restoreToCount, saveCount);
+       #if defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK
+        if (sampleDraw)
+        {
+            timespec cpuEnd {};
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuEnd);
+            const auto wallNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - wallStart).count();
+            const auto cpuNs = (static_cast<int64_t>(cpuEnd.tv_sec - cpuStart.tv_sec) * 1000000000LL)
+                               + cpuEnd.tv_nsec - cpuStart.tv_nsec;
+            ++bitmapSubmitSamples;
+            __android_log_print(ANDROID_LOG_INFO, "APEX_UI_BENCH",
+                "BITMAP_SUBMIT divisor=%d tiles=%d submittedPixels=%lld "
+                "dirty=%d,%d,%d,%d wall_ms=%.3f cpu_ms=%.3f wait_ms=%.3f",
+                pixelDivisor, submittedTiles, static_cast<long long>(submittedPixels),
+                clip.getX(), clip.getY(), clip.getWidth(), clip.getHeight(),
+                wallNs / 1.0e6, cpuNs / 1.0e6, (wallNs - cpuNs) / 1.0e6);
+        }
+       #endif
     }
 
 private:
@@ -604,8 +648,10 @@ Java_com_xziel_apex_mobileportrait_ApexUiBenchmark_nativeWindowDrawSamples(JNIEn
 {
     using namespace juce::apexAndroidFrame;
     measuring = finish != JNI_TRUE;
+    bitmapSubmitProfiling = measuring;
     if (measuring)
     {
+        bitmapSubmitSamples = 0;
         frameCount = 0;
         ComponentPaintProbe::reset();
         return nullptr;
