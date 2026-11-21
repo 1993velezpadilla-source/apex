@@ -133,6 +133,27 @@ jobs:
           test -f "My DAW/DAW_Core/Builds/AndroidFull/gradlew"
           python3 Android/scripts/pin_full_exporter_ndk.py
           grep -q 'ndkVersion "26.3.11579264"' "My DAW/DAW_Core/Builds/AndroidFull/app/build.gradle"
+          # Generated exporter ONLY. Maven Central has rate-limited GitHub CI
+          # with persistent HTTP 429, so use Google's hosted Central mirror.
+          # Preserve Google's Android repository and other original entries.
+          python3 - <<'PY'
+          from pathlib import Path
+          base = Path("My DAW/DAW_Core/Builds/AndroidFull")
+          mirror = 'maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }'
+          total = 0
+          for rel in ("settings.gradle", "build.gradle", "app/build.gradle"):
+              target = base / rel
+              if not target.is_file():
+                  continue
+              before = target.read_text(encoding="utf-8")
+              found = before.count("mavenCentral()")
+              if found:
+                  target.write_text(before.replace("mavenCentral()", mirror), encoding="utf-8")
+                  total += found
+                  print(f"[APEX-ANDROID] Google-hosted Maven mirror: {target} ({found} entries)")
+          if total == 0:
+              raise SystemExit("Expected generated Gradle mavenCentral() repository not found")
+          PY
           python3 Android/scripts/configure_android_frame_tiles.py
           # Patch ONLY the GENERATED Java activity/manifest (JUCE 8.0.12).
           # Android 15/16 WindowInsetsController hides the real status/nav
@@ -167,13 +188,12 @@ jobs:
           # Gradle dependency servers intermittently failed to resolve the
           # Android Gradle Plugin transitive dependencies on run 41152629694.
           # Retry NETWORK resolution only; never ignore real C++ errors.
-          # Central can rate-limit shared GitHub runner IPs (HTTP 429). The
-          # earlier 10/20 s retries all failed before the emulator could boot.
+          # Google's hosted mirror avoids repeated direct Maven Central 429s.
           # Retry ONLY known transient network failures with bounded backoff.
           # Keep each attempt's log separate so old 429s cannot mask a new
           # deterministic C++ or Gradle error.
-          for attempt in 1 2 3 4 5; do
-            echo "[APEX-ANDROID] Gradle build attempt $attempt/5" |
+          for attempt in 1 2; do
+            echo "[APEX-ANDROID] Gradle build attempt $attempt/2" |
               tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
             attempt_log="$(mktemp)"
             # Only one Gradle worker during dependency warmup to avoid a
@@ -189,13 +209,8 @@ jobs:
               exit 1
             fi
             rm -f "$attempt_log"
-            if [ "$attempt" -eq 5 ]; then exit 1; fi
-            case "$attempt" in
-              1) delay=30 ;;
-              2) delay=60 ;;
-              3) delay=120 ;;
-              4) delay=180 ;;
-            esac
+            if [ "$attempt" -eq 2 ]; then exit 1; fi
+            delay=30
             echo "[APEX-ANDROID] Transient repository/network failure; backoff ${delay}s" |
               tee -a "$RUNNER_TEMP/apex-android-full-compile.log"
             sleep "$delay"
