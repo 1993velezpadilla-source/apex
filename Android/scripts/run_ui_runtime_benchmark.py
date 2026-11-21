@@ -226,6 +226,10 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
                           if "TIMELINE_CLIP " in line]
         for line in timeline_clips[:6]:
             print(f"[TIMELINE-CLIP] {name} {line.split('TIMELINE_CLIP ', 1)[-1]}", flush=True)
+        damage_origins = [line.split("DAMAGE_ORIGIN ", 1)[-1]
+                          for line in full_log.splitlines() if "DAMAGE_ORIGIN " in line]
+        for line in damage_origins[:24]:
+            print(f"[DAMAGE-ORIGIN] {name} {line}", flush=True)
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
     result["phases"] = [phases[key] for key in PHASES if key in phases]
