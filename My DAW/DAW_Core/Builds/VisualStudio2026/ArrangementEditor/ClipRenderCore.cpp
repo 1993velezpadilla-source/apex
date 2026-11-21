@@ -202,7 +202,7 @@ namespace ArrangementEditor
         const bool headerVisible = dirty.getY() < kNameH && !dirty.isEmpty();
 
         // Layer 7: Lock icon occupies (4,4)-(20,20) even below the header.
-        if (m_model->locked && dirty.intersects({ 4, 4, 16, 16 }))
+        if (m_model->locked && dirty.intersects(juce::Rectangle<int>(4, 4, 16, 16)))
             drawLockIcon(g);
 
         // Layer 8: Clip name (at the left edge of the clip)
@@ -235,7 +235,7 @@ namespace ArrangementEditor
         // M / S / V occupy x=2..48 at the LEFT edge. The header
         // remains visible on every horizontal pan, but those buttons do
         // not need to be rebuilt when we repaint a distant clip column.
-        if (headerVisible && dirty.intersects({ 0, 0, juce::jmin(getWidth(), 50), kNameH }))
+        if (headerVisible && dirty.intersects(juce::Rectangle<int>(0, 0, juce::jmin(getWidth(), 50), kNameH)))
         {
             drawMuteButton(g);
             drawSoloButton(g);
