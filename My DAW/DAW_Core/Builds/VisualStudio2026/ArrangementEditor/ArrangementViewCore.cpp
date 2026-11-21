@@ -218,43 +218,72 @@ namespace ArrangementEditor
             }
 
             const auto deviceView = toPixels(visible, scale);
-            const auto frameOrigin = deviceView.getPosition() - juce::Point<int>(2, 2);
-            // A fixed size survives different fractional origins at 2.625x etc.
-            const auto size = toPixels(visible.withZeroOrigin(), scale).getBottomRight()
+            // Keep the same backing image while a finger pans horizontally.
+            // 9.4 translated a full native-density bitmap on EVERY touch frame,
+            // copying a viewport's worth of RGBA pixels even if only a narrow
+            // strip entered the screen. This bounded horizontal halo avoids
+            // moving those bytes until the viewport reaches the halo edge.
+            //
+            // Painting and blitting are STILL clipped to the real viewport:
+            // the extra allocation is storage, not extra clip/waveform raster.
+            // No audio cache, take data or background recording is changed.
+            const auto viewSize = toPixels(visible.withZeroOrigin(), scale).getBottomRight()
                 + juce::Point<int>(5, 5);
-            if (static_cast<int64_t>(size.x) * size.y > maxImagePixels)
+            if (static_cast<int64_t>(viewSize.x) * viewSize.y > maxImagePixels)
             {
                 releaseResources();
                 view.paintEntireComponent(graphics, false);
                 return;
             }
 
-            const juce::Rectangle<int> nextFrame(frameOrigin.x, frameOrigin.y, size.x, size.y);
-            if (!image.isValid() || image.getBounds().getBottomRight() != size || scale != pixelScale)
+            const auto spareColumns = juce::jmax<int64_t>(
+                0, maxImagePixels / juce::jmax(1, viewSize.y) - viewSize.x);
+            const int haloX = static_cast<int>(juce::jmin<int64_t>(
+                viewSize.x / 3, spareColumns / 2));
+            const auto size = viewSize + juce::Point<int>(haloX * 2, 0);
+            const bool reset = !image.isValid()
+                || image.getBounds().getBottomRight() != size || scale != pixelScale;
+            // Rebase only when the actual visible screen exits retained
+            // storage, never at arbitrary bars/clip boundaries.
+            const bool fitsHorizontal = !reset && frame.getX() + 2 <= deviceView.getX()
+                && frame.getRight() - 2 >= deviceView.getRight();
+            const int frameX = fitsHorizontal ? frame.getX()
+                                               : deviceView.getX() - 2 - haloX;
+            const juce::Rectangle<int> nextFrame(
+                frameX, deviceView.getY() - 2, size.x, size.y);
+
+            if (reset)
             {
-                image = juce::Image(juce::Image::ARGB, size.x, size.y, false, juce::SoftwareImageType());
+                image = juce::Image(juce::Image::ARGB, size.x, size.y,
+                                    false, juce::SoftwareImageType());
                 valid.clear();
                 pixelScale = scale;
             }
             else if (nextFrame != frame)
             {
-                // The toolbar/ruler are pinned in view space. Discard their
-                // old and new positions before preserving world-space pixels.
-                const int header = view.arrangementContentTop();
-                valid.subtract(toPixels(previousView.withHeight(header), scale).expanded(2));
-                valid.subtract(toPixels(visible.withHeight(header), scale).expanded(2));
-                // Pixels immediately outside the old view may have been clipped
-                // by the arranger's own culling. Paint them as they enter.
-                valid.clipTo(toPixels(previousView, scale).reduced(2));
+                // Copy old cached pixels only on a real halo rebase or
+                // vertical movement. Most horizontal frames stay in place.
                 valid.clipTo(nextFrame);
                 const auto overlap = valid.getBounds();
                 if (!overlap.isEmpty())
                 {
                     const auto source = overlap.getPosition() - frame.getPosition();
                     const auto destination = overlap.getPosition() - nextFrame.getPosition();
-                    image.moveImageSection(destination.x, destination.y, source.x, source.y,
-                                           overlap.getWidth(), overlap.getHeight());
+                    if (source != destination)
+                        image.moveImageSection(destination.x, destination.y, source.x, source.y,
+                                               overlap.getWidth(), overlap.getHeight());
                 }
+            }
+
+            if (visible != previousView)
+            {
+                // Toolbar and ruler are pinned to screen space, not to the
+                // timeline's world coordinates. Always invalidate both old
+                // and new header positions even when the backing bitmap
+                // stays fixed across a pan. Otherwise labels ghost.
+                const int header = view.arrangementContentTop();
+                valid.subtract(toPixels(previousView.withHeight(header), scale).expanded(2));
+                valid.subtract(toPixels(visible.withHeight(header), scale).expanded(2));
             }
             frame = nextFrame;
             previousView = visible;
