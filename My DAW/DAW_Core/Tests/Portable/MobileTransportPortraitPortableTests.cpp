@@ -947,6 +947,21 @@ constexpr bool compactActivationSweep()
 
 int main()
 {
+    // Split-screen readout resize: every visible clock/key/tempo/automation
+    // target must remain bounded, exclusive and finger-sized. This tests
+    // the portrait readout row independently of the compact Transport deck.
+    for (int w = 13; w <= 500; ++w)
+        for (int h = 144; h <= 180; ++h)
+        {
+            const auto row = DAW::mobile::portraitReadoutLayout(w, h);
+            assert(portraitReadoutsSafe(w, h));
+            assert(exclusivePortraitReadoutEdges(w, h));
+            for (const auto target : {row.key, row.tempo, row.clock,
+                                      row.automation})
+                assert((target.width == 0 && target.height == 0)
+                       || (inside(target, w, h) && target.width >= 44
+                           && target.height >= 44));
+        }
     assert(compactActivationSweep());
     assert(compactRecoveredSingleRowGrid());
     assert(compactNarrowTransportIsNonInteractive());
