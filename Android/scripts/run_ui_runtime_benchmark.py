@@ -65,6 +65,14 @@ def validate_result(result: dict, scene: str, renderer: str) -> None:
                 raise ValueError("Reference case unexpectedly disabled row caching")
             if state.get("trackHeaderHeight") != state["laneHeight"]:
                 raise ValueError("Track headers and arranger lanes are different heights")
+            # Verify the REAL JNI-backed MainComponent reserved enough
+            # horizontal runway to scroll past the historic 30-second edge.
+            # Old 9.x APKs passed short pan tests while REC became trapped
+            # near bar 15 at 120 BPM because the content stopped at 30s.
+            if state.get("timelineContentSeconds", 0) < 600.0:
+                raise ValueError("Android arranger still uses a short/chunked 30-second timeline")
+            if state.get("timelineContentWidth", 0) < state["pps"] * 600.0 - 1.0:
+                raise ValueError("Android arranged content width does not cover the reserved runway")
             if (state.get("clips", 0) > 0) != (scene != "empty"):
                 raise ValueError("Requested clip/empty scene was not actually loaded")
             if state.get("backend") != ("OpenGL" if gpu else "software"):
