@@ -1215,7 +1215,15 @@ namespace ArrangementEditor
         }
         if (batchColumns && !waveformColumns.isEmpty())
         {
-            g.fillRectList(waveformColumns);
+            bool rendered = false;
+           #if JUCE_ANDROID && defined(JUCE_APEX_OPAQUE_IMAGE_BLIT)
+            // The benchmark toggles the Android arranger paint changes together.
+            if (juce::isApexAndroidArrangerDamageClippingEnabled())
+                if (auto* software = dynamic_cast<juce::LowLevelGraphicsSoftwareRenderer*>(&g.getInternalContext()))
+                    rendered = software->fillApexWaveformColumns(waveformColumns);
+           #endif
+            if (!rendered)
+                g.fillRectList(waveformColumns);
             TimelinePaintMetrics::inc(TimelinePaintMetrics::waveformBatchedPaints);
         }
     }

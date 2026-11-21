@@ -34,7 +34,6 @@
 namespace juce
 {
     void setApexTimelineViewport(Viewport& viewport, int headerHeight);
-    bool isApexAndroidArrangerDamageClippingEnabled() noexcept;
 }
 #endif
 #if JUCE_ANDROID && defined(APEX_ANDROID_UI_BENCHMARK) && APEX_ANDROID_UI_BENCHMARK

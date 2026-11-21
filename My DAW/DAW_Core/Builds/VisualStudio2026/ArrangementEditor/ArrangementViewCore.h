@@ -67,6 +67,7 @@ namespace DAW
 namespace juce {
     bool isApexAndroidFramePacingEnabled() noexcept;
     bool isApexAndroidMasterPreviewBenchSuppressed() noexcept;
+    bool isApexAndroidArrangerDamageClippingEnabled() noexcept;
 }
 #endif
 

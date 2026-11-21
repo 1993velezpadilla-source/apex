@@ -328,8 +328,8 @@ def main() -> int:
     failures = []
     try:
         for scene in ("playback", "recording", "empty", "clip", "deep"):
-            # Both variants use the 9.6 compositor. Compare painting the
-            # pinned header and exact body damage in both replay orders.
+            # Both variants use the 9.6 compositor. Compare the Android
+            # header, body-damage and waveform paint changes in both orders.
             orders = (("horizontal-reuse", "precise-damage"), ("precise-damage", "horizontal-reuse"))
             if scene == "deep":
                 orders += (("int-array",),)

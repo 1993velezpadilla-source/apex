@@ -299,6 +299,28 @@ def query_scaled_clip_coverage(path: Path) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
+def add_waveform_column_fill(path: Path) -> None:
+    contents = path.read_text(encoding="utf-8")
+    if "bool fillApexWaveformColumns (" in contents:
+        return
+    contents = replace(contents, "    // Return the actual raster damage in local device pixels.", """\
+    // Keep solid waveform columns on the software rectangle renderer. The
+    // generic float list constructs a combined EdgeTable at every DPI scale.
+    bool fillApexWaveformColumns (const RectangleList<float>& columns)
+    {
+        if (stack->transform.isRotated || ! stack->fillType.isColour())
+            return false;
+
+        for (const auto& column : columns)
+            stack->fillRect (column);
+
+        return true;
+    }
+
+    // Return the actual raster damage in local device pixels.""")
+    path.write_text(contents, encoding="utf-8")
+
+
 def configure(root: Path) -> None:
     gui = root / "modules/juce_gui_basics"
     configure_component_paint_probe(gui)
@@ -308,6 +330,7 @@ def configure(root: Path) -> None:
     software_renderer = graphics / "contexts/juce_LowLevelGraphicsSoftwareRenderer.h"
     add_opaque_image_blit(software_renderer)
     add_device_clip_query(software_renderer)
+    add_waveform_column_fill(software_renderer)
     module = gui / "juce_gui_basics.cpp"
     peer = gui / "native/juce_Windowing_android.cpp"
     source = Path(__file__).resolve().parents[1] / "Source/ApexAndroidFrameTiles.h"
