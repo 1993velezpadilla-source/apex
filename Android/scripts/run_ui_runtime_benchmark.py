@@ -230,6 +230,10 @@ def run_case(output: Path, renderer: str, scene: str, repeat: int) -> dict:
                           for line in full_log.splitlines() if "DAMAGE_ORIGIN " in line]
         for line in damage_origins[:24]:
             print(f"[DAMAGE-ORIGIN] {name} {line}", flush=True)
+        bitmap_submits = [line.split("BITMAP_SUBMIT ", 1)[-1]
+                          for line in full_log.splitlines() if "BITMAP_SUBMIT " in line]
+        for line in bitmap_submits[:12]:
+            print(f"[BITMAP-SUBMIT] {name} {line}", flush=True)
     if result is None:
         raise RuntimeError(f"{name}: no native runtime result within 100 seconds")
     result["phases"] = [phases[key] for key in PHASES if key in phases]
