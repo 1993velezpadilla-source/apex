@@ -74,12 +74,14 @@ constexpr PortraitTransportLayout portraitTransportLayout(int viewportW, int vie
 
     const int actionGap = usableW / 7 < gap ? usableW / 7 : gap;
     const int actionW = (usableW - 5 * actionGap) / 6;
-    for (int i = 0; i < 6; ++i)
-    {
-        const int inset = actionW > 2 ? 1 : 0;
-        out.transport[i] = { margin + i * (actionW + actionGap) + inset,
-                             actionsY, actionW - 2 * inset, rowH };
-    }
+    // Split-screen / IME collapse can leave the legacy three-row deck
+    // shorter or narrower than a finger-sized action. Do not keep six
+    // undersized interactive rectangles alive while the viewport resizes.
+    const int actionInset = actionW > 2 ? 1 : 0;
+    if (rowH >= 44 && actionW - 2 * actionInset >= 44)
+        for (int i = 0; i < 6; ++i)
+            out.transport[i] = { margin + i * (actionW + actionGap) + actionInset,
+                                 actionsY, actionW - 2 * actionInset, rowH };
 
     const int bottomGap = usableW / 5 < gap ? usableW / 5 : gap;
     const int controlsW = usableW - 4 * bottomGap;
