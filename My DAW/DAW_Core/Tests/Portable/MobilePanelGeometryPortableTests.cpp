@@ -3576,3 +3576,37 @@ constexpr bool mixerToolbarWidthTransitionsStaySafe = []() constexpr {
     return true;
 }();
 static_assert(mixerToolbarWidthTransitionsStaySafe);
+
+
+// Mixer toolbar rotation invariant: taller title chrome must center the same
+// actions without shifting their x positions or creating overlapping targets.
+// This is geometry-only; the existing 32-unit target height remains a known
+// accessibility limitation until the production chrome is redesigned.
+constexpr bool mixerToolbarVerticalResizeKeepsActionsStable = []() constexpr {
+    for (int width : { 45, 46, 93, 94, 141, 142, 143, 393 })
+    {
+        const auto baseline = DAW::mobile::phoneMixerToolbarLayout(width, 32);
+        for (int height : { 33, 44, 64, 95, 128 })
+        {
+            const auto resized = DAW::mobile::phoneMixerToolbarLayout(width, height);
+            if (resized.count != baseline.count)
+                return false;
+            for (int i = 0; i < resized.count; ++i)
+            {
+                const auto a = resized.buttons[i];
+                const auto b = baseline.buttons[i];
+                if (a.action != b.action || a.bounds.x != b.bounds.x
+                    || a.bounds.width != b.bounds.width
+                    || a.bounds.height != b.bounds.height
+                    || a.bounds.y != (height - 32) / 2
+                    || !inside(a.bounds, width, height))
+                    return false;
+                if (i > 0 && a.bounds.x - (resized.buttons[i - 1].bounds.x
+                                           + resized.buttons[i - 1].bounds.width) < 4)
+                    return false;
+            }
+        }
+    }
+    return true;
+}();
+static_assert(mixerToolbarVerticalResizeKeepsActionsStable);
